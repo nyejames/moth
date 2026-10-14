@@ -10,6 +10,7 @@
 
 use super::{FoldedMothTemplate, MothTemplateCompilationRequest, compile_moth_template_source};
 use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
+use crate::compiler_frontend::compiler_messages::render::dev_server::render_compiler_messages_html;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileFrontendPrepareOutput, HeaderParseOptions, SourcePreparationDelta,
@@ -37,6 +38,7 @@ use crate::compiler_frontend::{
 };
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use moth_lexical::numeric::parse::NumberLiteralErrorReason;
+use std::fs;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -163,11 +165,14 @@ fn whole_interpolation_above_the_i32_default_is_diagnosed_not_folded() {
     // An untyped whole literal materialises at the exact I32 default, so the direct service must
     // diagnose the out-of-range value instead of returning a folded template with a pending width.
     let style_directives = StyleDirectiveRegistry::built_ins();
+    let directory = tempfile::tempdir().expect("the direct template directory should exist");
+    let source_path = directory.path().join("wide.mtf");
+    fs::write(&source_path, "[:[3_000_000_000]]").expect("the direct template should be written");
 
     let messages = compile_moth_template_source(
         MothTemplateCompilationRequest {
-            source_path: Path::new("/templates/wide.mtf"),
-            source_code: Some(String::from("[:[3_000_000_000]]")),
+            source_path: &source_path,
+            source_code: Some("[:[3_000_000_000]]".to_owned()),
             style_directives: &style_directives,
             file_value_resolution: None,
         },
@@ -175,6 +180,9 @@ fn whole_interpolation_above_the_i32_default_is_diagnosed_not_folded() {
     )
     .err()
     .expect("an out-of-range untyped interpolation must not fold");
+    drop(style_directives);
+    fs::write(&source_path, "mutated direct template\n")
+        .expect("the diagnosed direct source should be replaced");
 
     assert!(
         messages.diagnostics().any(|diagnostic| matches!(
@@ -186,6 +194,9 @@ fn whole_interpolation_above_the_i32_default_is_diagnosed_not_folded() {
         )),
         "the I32 default must diagnose the out-of-range interpolation literal",
     );
+    let rendered = render_compiler_messages_html(&messages, directory.path());
+    assert!(rendered.contains(r#"<span class="source-line">[:[3_000_000_000]]</span>"#));
+    assert!(!rendered.contains("mutated direct template"));
 }
 
 #[test]
@@ -305,6 +316,7 @@ fn bundle_request_folds_resource_site_root_and_nested_content_structurally() {
         &mut string_table,
     )
     .expect("a bundle-bearing template should fold against the resolved bundle");
+    drop(style_directives);
 
     let expected_resource_origin = StableResourceOriginId::module_owned(
         module_origin,
@@ -322,6 +334,32 @@ fn bundle_request_folds_resource_site_root_and_nested_content_structurally() {
     assert!(
         pieces.contains(&OwnedFoldedStringPiece::SiteRoot),
         "bare site root must stay a structural piece: {pieces:?}"
+    );
+    let resource_index = pieces
+        .iter()
+        .position(|piece| {
+            piece == &OwnedFoldedStringPiece::Resource(expected_resource_origin.clone())
+        })
+        .expect("the returned content retains its resource");
+    let site_root_index = pieces
+        .iter()
+        .position(|piece| piece == &OwnedFoldedStringPiece::SiteRoot)
+        .expect("the returned content retains its site-root use");
+    assert!(resource_index < site_root_index);
+    let text = pieces
+        .iter()
+        .filter_map(|piece| match piece {
+            OwnedFoldedStringPiece::Text(text) => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<String>();
+    assert!(
+        text.find("<h1 id=\"intro\">Intro</h1>")
+            .expect("the returned text retains the template heading")
+            < text
+                .find("Nested intro body.")
+                .expect("the returned text retains nested content"),
+        "owned nested content keeps authored output order"
     );
     assert!(
         pieces.iter().any(|piece| matches!(

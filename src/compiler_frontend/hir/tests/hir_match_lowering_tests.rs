@@ -6,15 +6,18 @@
 //!      control flow or missing pattern coverage silently.
 
 use crate::compiler_frontend::ast::ast_nodes::{MatchExhaustiveness, NodeKind};
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::call_argument::{CallAccessMode, CallArgument};
+use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::statements::match_patterns::{
-    MatchArm, MatchPattern, RelationalPatternOp,
+    MatchArm, MatchPattern, PatternValue, RelationalPatternOp,
 };
 use crate::compiler_frontend::compiler_errors::ErrorType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::expressions::{
     HirExpressionKind, HirVariantCarrier, OPTION_SOME_VARIANT_INDEX, ValueKind,
 };
@@ -45,8 +48,41 @@ fn i32_value(value: i64) -> FixedScalarValue {
 }
 
 /// One exact `I32` literal expression for pattern and body fixtures.
-fn int_expr(value: i64, span: Option<SourceSpan>) -> Expression {
-    Expression::fixed_scalar(i32_value(value), span, ValueMode::ImmutableOwned)
+fn int_expr(
+    builder: &mut AstExpressionBuilder,
+    constants: &mut ConstValueStore,
+    value: i64,
+    span: Option<SourceSpan>,
+) -> ExprId {
+    builder
+        .fixed_scalar(constants, i32_value(value), span, ValueMode::ImmutableOwned)
+        .expect("I32 literal expression should construct")
+        .id()
+}
+
+/// One exact fixed-scalar literal pattern value for match arm fixtures.
+fn fixed_scalar_pattern(
+    builder: &mut AstExpressionBuilder,
+    constants: &mut ConstValueStore,
+    value: FixedScalarValue,
+    span: Option<SourceSpan>,
+) -> PatternValue {
+    let id = builder
+        .fixed_scalar(constants, value, span, ValueMode::ImmutableOwned)
+        .expect("fixed scalar pattern literal should construct")
+        .id();
+    PatternValue::from_expression(builder.view(id).expect("fixed scalar pattern view"))
+        .expect("fixed scalar literal should be a valid pattern value")
+}
+
+/// One exact `I32` literal pattern value for match arm fixtures.
+fn int_pattern(
+    builder: &mut AstExpressionBuilder,
+    constants: &mut ConstValueStore,
+    value: i64,
+    span: Option<SourceSpan>,
+) -> PatternValue {
+    fixed_scalar_pattern(builder, constants, i32_value(value), span)
 }
 
 #[test]
@@ -57,6 +93,8 @@ fn non_unit_function_with_terminal_match_default_does_not_report_fallthrough() {
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let chooser = super::symbol("choose_match", &mut path_fork, &mut string_table);
     let x = super::symbol("x", &mut path_fork, &mut string_table);
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
 
     let chooser_fn = function_node(
         chooser,
@@ -72,17 +110,29 @@ fn non_unit_function_with_terminal_match_default_does_not_report_fallthrough() {
         vec![node(
             NodeKind::Match {
                 scrutinee: reference_expr_with_type_id(
+                    &mut builder,
                     x,
                     builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     None,
                     ValueMode::ImmutableReference,
                 ),
                 arms: vec![MatchArm {
-                    pattern: MatchPattern::Literal(int_expr(1, None)),
+                    pattern: MatchPattern::Literal(int_pattern(
+                        &mut builder,
+                        &mut constants,
+                        1,
+                        None,
+                    )),
                     guard: None,
-                    body: vec![node(NodeKind::Return(vec![int_expr(1, None)]), None)],
+                    body: vec![node(
+                        NodeKind::Return(vec![int_expr(&mut builder, &mut constants, 1, None)]),
+                        None,
+                    )],
                 }],
-                default: Some(vec![node(NodeKind::Return(vec![int_expr(2, None)]), None)]),
+                default: Some(vec![node(
+                    NodeKind::Return(vec![int_expr(&mut builder, &mut constants, 2, None)]),
+                    None,
+                )]),
                 exhaustiveness: MatchExhaustiveness::HasDefault,
             },
             None,
@@ -100,9 +150,20 @@ fn non_unit_function_with_terminal_match_default_does_not_report_fallthrough() {
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![start_fn, chooser_fn], entry_path);
-    let (module, _type_environment) = lower_ast(ast, &mut string_table, &mut path_fork)
-        .expect("all-terminal match arms should not trigger fallthrough");
+    let ast = build_ast_with_registered_types(
+        vec![start_fn, chooser_fn],
+        entry_path,
+        builder,
+        constants,
+        TypeEnvironment::new(),
+    );
+    let (module, _type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
+    )
+    .expect("all-terminal match arms should not trigger fallthrough");
 
     let chooser_block = &module.blocks[module.functions[1].entry.0 as usize];
     assert!(matches!(
@@ -123,6 +184,9 @@ fn non_unit_function_with_exhaustive_choice_match_returns_on_all_arms() {
     let status_local = super::symbol("status", &mut path_fork, &mut string_table);
     let ready_name = string_table.intern("Ready");
     let busy_name = string_table.intern("Busy");
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let mut type_environment = TypeEnvironment::new();
 
     let choice_variants = vec![
         ChoiceVariant {
@@ -137,7 +201,7 @@ fn non_unit_function_with_exhaustive_choice_match_returns_on_all_arms() {
         },
     ];
 
-    let status_type_id = choice_type_id(status_path, &choice_variants);
+    let status_type_id = choice_type_id(&mut type_environment, status_path, &choice_variants);
 
     let label_fn = function_node(
         label_fn_name,
@@ -153,6 +217,7 @@ fn non_unit_function_with_exhaustive_choice_match_returns_on_all_arms() {
         vec![node(
             NodeKind::Match {
                 scrutinee: reference_expr_with_type_id(
+                    &mut builder,
                     status_local,
                     status_type_id,
                     None,
@@ -167,7 +232,10 @@ fn non_unit_function_with_exhaustive_choice_match_returns_on_all_arms() {
                             span: None,
                         },
                         guard: None,
-                        body: vec![node(NodeKind::Return(vec![int_expr(1, None)]), None)],
+                        body: vec![node(
+                            NodeKind::Return(vec![int_expr(&mut builder, &mut constants, 1, None)]),
+                            None,
+                        )],
                     },
                     MatchArm {
                         pattern: MatchPattern::ChoiceVariant {
@@ -177,7 +245,10 @@ fn non_unit_function_with_exhaustive_choice_match_returns_on_all_arms() {
                             span: None,
                         },
                         guard: None,
-                        body: vec![node(NodeKind::Return(vec![int_expr(2, None)]), None)],
+                        body: vec![node(
+                            NodeKind::Return(vec![int_expr(&mut builder, &mut constants, 2, None)]),
+                            None,
+                        )],
                     },
                 ],
                 default: None,
@@ -205,9 +276,17 @@ fn non_unit_function_with_exhaustive_choice_match_returns_on_all_arms() {
             nominal_path: status_path,
             variants: choice_variants,
         }],
+        builder,
+        constants,
+        type_environment,
     );
-    let (module, _type_environment) = lower_ast(ast, &mut string_table, &mut path_fork)
-        .expect("exhaustive choice match with all-returning arms should lower");
+    let (module, _type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
+    )
+    .expect("exhaustive choice match with all-returning arms should lower");
 
     let label_entry = &module.blocks[module.functions[1].entry.0 as usize];
     let arms = match &label_entry.terminator {
@@ -230,10 +309,13 @@ fn lowers_match_with_literal_arms_and_explicit_default_wildcard() {
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let x = super::symbol("x", &mut path_fork, &mut string_table);
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
 
     let match_node = node(
         NodeKind::Match {
             scrutinee: reference_expr_with_type_id(
+                &mut builder,
                 x,
                 builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 None,
@@ -241,18 +323,44 @@ fn lowers_match_with_literal_arms_and_explicit_default_wildcard() {
             ),
             arms: vec![
                 MatchArm {
-                    pattern: MatchPattern::Literal(int_expr(1, None)),
+                    pattern: MatchPattern::Literal(int_pattern(
+                        &mut builder,
+                        &mut constants,
+                        1,
+                        None,
+                    )),
                     guard: None,
-                    body: vec![node(NodeKind::ExpressionStatement(int_expr(9, None)), None)],
+                    body: vec![node(
+                        NodeKind::ExpressionStatement(int_expr(
+                            &mut builder,
+                            &mut constants,
+                            9,
+                            None,
+                        )),
+                        None,
+                    )],
                 },
                 MatchArm {
-                    pattern: MatchPattern::Literal(int_expr(2, None)),
+                    pattern: MatchPattern::Literal(int_pattern(
+                        &mut builder,
+                        &mut constants,
+                        2,
+                        None,
+                    )),
                     guard: None,
-                    body: vec![node(NodeKind::ExpressionStatement(int_expr(8, None)), None)],
+                    body: vec![node(
+                        NodeKind::ExpressionStatement(int_expr(
+                            &mut builder,
+                            &mut constants,
+                            8,
+                            None,
+                        )),
+                        None,
+                    )],
                 },
             ],
             default: Some(vec![node(
-                NodeKind::ExpressionStatement(int_expr(0, None)),
+                NodeKind::ExpressionStatement(int_expr(&mut builder, &mut constants, 0, None)),
                 None,
             )]),
             exhaustiveness: MatchExhaustiveness::HasDefault,
@@ -275,9 +383,20 @@ fn lowers_match_with_literal_arms_and_explicit_default_wildcard() {
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
-    let (module, _type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
+    let ast = build_ast_with_registered_types(
+        vec![start_fn],
+        entry_path,
+        builder,
+        constants,
+        TypeEnvironment::new(),
+    );
+    let (module, _type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
+    )
+    .expect("HIR lowering should succeed");
 
     let start = &module.functions[module
         .start_function
@@ -307,10 +426,13 @@ fn lowers_and_validates_fixed_scalar_match_pattern() {
     let pattern_value = FixedScalarValue::unsigned(FixedScalar::U8, 200).expect("200 fits in U8");
     let relational_pattern_value =
         FixedScalarValue::unsigned(FixedScalar::U8, 100).expect("100 fits in U8");
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
 
     let match_node = node(
         NodeKind::Match {
             scrutinee: reference_expr_with_type_id(
+                &mut builder,
                 value_name,
                 u8_type,
                 None,
@@ -318,10 +440,11 @@ fn lowers_and_validates_fixed_scalar_match_pattern() {
             ),
             arms: vec![
                 MatchArm {
-                    pattern: MatchPattern::Literal(Expression::fixed_scalar(
+                    pattern: MatchPattern::Literal(fixed_scalar_pattern(
+                        &mut builder,
+                        &mut constants,
                         pattern_value,
                         None,
-                        ValueMode::ImmutableOwned,
                     )),
                     guard: None,
                     body: vec![node(NodeKind::Return(vec![]), None)],
@@ -329,10 +452,11 @@ fn lowers_and_validates_fixed_scalar_match_pattern() {
                 MatchArm {
                     pattern: MatchPattern::Relational {
                         op: RelationalPatternOp::LessThan,
-                        value: Expression::fixed_scalar(
+                        value: fixed_scalar_pattern(
+                            &mut builder,
+                            &mut constants,
                             relational_pattern_value,
                             None,
-                            ValueMode::ImmutableOwned,
                         ),
                         span: None,
                     },
@@ -354,9 +478,20 @@ fn lowers_and_validates_fixed_scalar_match_pattern() {
         vec![match_node],
         None,
     );
-    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
-    let (module, type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
+    let ast = build_ast_with_registered_types(
+        vec![start_fn],
+        entry_path,
+        builder,
+        constants,
+        TypeEnvironment::new(),
+    );
+    let (module, type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
+    )
+    .expect("HIR lowering should succeed");
 
     let start = &module.functions[module
         .start_function
@@ -394,8 +529,13 @@ fn lowers_and_validates_fixed_scalar_match_pattern() {
         HirExpressionKind::FixedScalar(lowered) if lowered == &relational_pattern_value
     ));
     assert_eq!(relational_value.value_kind, ValueKind::Const);
-    validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect("HIR validation should accept a fixed scalar literal pattern");
+    validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("HIR validation should accept a fixed scalar literal pattern");
 }
 
 #[test]
@@ -409,10 +549,13 @@ fn lowers_and_validates_fixed_scalar_option_literal_pattern() {
     let mut type_environment = TypeEnvironment::new();
     let option_u8_type = type_environment.intern_option(u8_type);
     let pattern_value = FixedScalarValue::unsigned(FixedScalar::U8, 200).expect("200 fits in U8");
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
 
     let match_node = node(
         NodeKind::Match {
             scrutinee: reference_expr_with_type_id(
+                &mut builder,
                 maybe_name,
                 option_u8_type,
                 None,
@@ -420,7 +563,7 @@ fn lowers_and_validates_fixed_scalar_option_literal_pattern() {
             ),
             arms: vec![MatchArm {
                 pattern: MatchPattern::OptionValue {
-                    value: Expression::fixed_scalar(pattern_value, None, ValueMode::ImmutableOwned),
+                    value: fixed_scalar_pattern(&mut builder, &mut constants, pattern_value, None),
                     span: None,
                 },
                 guard: None,
@@ -440,15 +583,26 @@ fn lowers_and_validates_fixed_scalar_option_literal_pattern() {
         vec![match_node],
         None,
     );
-    let mut ast = build_ast_with_registered_types(vec![start_fn], entry_path);
+    let mut ast = build_ast_with_registered_types(
+        vec![start_fn],
+        entry_path,
+        builder,
+        constants,
+        type_environment,
+    );
     assert_eq!(
         ast.type_environment.intern_option(u8_type),
         option_u8_type,
         "the AST fixture should use the registered U8? type"
     );
 
-    let (module, type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
+    let (module, type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
+    )
+    .expect("HIR lowering should succeed");
     let start = &module.functions[module
         .start_function
         .expect("normal test module should have start")
@@ -468,8 +622,13 @@ fn lowers_and_validates_fixed_scalar_option_literal_pattern() {
         HirExpressionKind::FixedScalar(lowered) if lowered == &pattern_value
     ));
     assert_eq!(value.value_kind, ValueKind::Const);
-    validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect("HIR validation should accept a fixed scalar optional literal pattern");
+    validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("HIR validation should accept a fixed scalar optional literal pattern");
 }
 
 #[test]
@@ -479,22 +638,33 @@ fn lowers_match_with_guarded_arm_into_hir_guard_expression() {
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let x = super::symbol("x", &mut path_fork, &mut string_table);
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
 
     let match_node = node(
         NodeKind::Match {
             scrutinee: reference_expr_with_type_id(
+                &mut builder,
                 x,
                 builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 None,
                 ValueMode::ImmutableReference,
             ),
             arms: vec![MatchArm {
-                pattern: MatchPattern::Literal(int_expr(1, None)),
-                guard: Some(Expression::bool(true, None, ValueMode::ImmutableOwned)),
-                body: vec![node(NodeKind::ExpressionStatement(int_expr(9, None)), None)],
+                pattern: MatchPattern::Literal(int_pattern(&mut builder, &mut constants, 1, None)),
+                guard: Some(
+                    builder
+                        .bool(&mut constants, true, None, ValueMode::ImmutableOwned)
+                        .expect("guard bool fits expression store")
+                        .id(),
+                ),
+                body: vec![node(
+                    NodeKind::ExpressionStatement(int_expr(&mut builder, &mut constants, 9, None)),
+                    None,
+                )],
             }],
             default: Some(vec![node(
-                NodeKind::ExpressionStatement(int_expr(8, None)),
+                NodeKind::ExpressionStatement(int_expr(&mut builder, &mut constants, 8, None)),
                 None,
             )]),
             exhaustiveness: MatchExhaustiveness::HasDefault,
@@ -517,9 +687,20 @@ fn lowers_match_with_guarded_arm_into_hir_guard_expression() {
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
-    let (module, _type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
+    let ast = build_ast_with_registered_types(
+        vec![start_fn],
+        entry_path,
+        builder,
+        constants,
+        TypeEnvironment::new(),
+    );
+    let (module, _type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
+    )
+    .expect("HIR lowering should succeed");
     let start = &module.functions[module
         .start_function
         .expect("normal test module should have start")
@@ -548,14 +729,29 @@ fn match_guard_rejects_lowering_when_guard_emits_prelude_statements() {
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let x = super::symbol("x", &mut path_fork, &mut string_table);
-    let guarded_arm = MatchArm {
-        pattern: MatchPattern::Literal(int_expr(1, None)),
-        guard: Some(Expression::host_function_call(
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let true_arg = builder
+        .bool(&mut constants, true, None, ValueMode::ImmutableOwned)
+        .expect("guard argument fits expression store")
+        .id();
+    let io_line = builder
+        .host_function_call_with_typed_arguments(
             crate::compiler_frontend::external_packages::ExternalFunctionId::IoLine,
-            vec![Expression::bool(true, None, ValueMode::ImmutableOwned)],
+            vec![CallArgument::positional(
+                builder.own(true_arg),
+                CallAccessMode::Shared,
+                None,
+            )],
             vec![builtin_type_ids::NONE],
+            false,
             None,
-        )),
+        )
+        .expect("guard host call fits expression store")
+        .id();
+    let guarded_arm = MatchArm {
+        pattern: MatchPattern::Literal(int_pattern(&mut builder, &mut constants, 1, None)),
+        guard: Some(io_line),
         body: vec![],
     };
 
@@ -573,6 +769,7 @@ fn match_guard_rejects_lowering_when_guard_emits_prelude_statements() {
         vec![node(
             NodeKind::Match {
                 scrutinee: reference_expr_with_type_id(
+                    &mut builder,
                     x,
                     builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     None,
@@ -587,9 +784,20 @@ fn match_guard_rejects_lowering_when_guard_emits_prelude_statements() {
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
-    let err = lower_ast(ast, &mut string_table, &mut path_fork)
-        .expect_err("guard expressions with preludes should fail HIR lowering");
+    let ast = build_ast_with_registered_types(
+        vec![start_fn],
+        entry_path,
+        builder,
+        constants,
+        TypeEnvironment::new(),
+    );
+    let err = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
+    )
+    .expect_err("guard expressions with preludes should fail HIR lowering");
 
     let error = err
         .infrastructure_error()
@@ -611,6 +819,15 @@ fn match_rejects_non_literal_pattern_expressions() {
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let x = super::symbol("x", &mut path_fork, &mut string_table);
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let constants = ConstValueStore::default();
+    let non_literal_pattern = reference_expr_with_type_id(
+        &mut builder,
+        x,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        None,
+        ValueMode::ImmutableReference,
+    );
 
     let start_fn = function_node(
         start_name,
@@ -626,18 +843,21 @@ fn match_rejects_non_literal_pattern_expressions() {
         vec![node(
             NodeKind::Match {
                 scrutinee: reference_expr_with_type_id(
+                    &mut builder,
                     x,
                     builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     None,
                     ValueMode::ImmutableReference,
                 ),
                 arms: vec![MatchArm {
-                    pattern: MatchPattern::Literal(reference_expr_with_type_id(
-                        x,
-                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
-                        None,
-                        ValueMode::ImmutableReference,
-                    )),
+                    pattern: MatchPattern::Literal(
+                        PatternValue::from_expression(
+                            builder
+                                .view(non_literal_pattern)
+                                .expect("reference pattern view"),
+                        )
+                        .expect("reference pattern should be a valid pattern value"),
+                    ),
                     guard: None,
                     body: vec![],
                 }],
@@ -649,9 +869,20 @@ fn match_rejects_non_literal_pattern_expressions() {
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
-    let err = lower_ast(ast, &mut string_table, &mut path_fork)
-        .expect_err("non-literal match pattern should fail HIR lowering");
+    let ast = build_ast_with_registered_types(
+        vec![start_fn],
+        entry_path,
+        builder,
+        constants,
+        TypeEnvironment::new(),
+    );
+    let err = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
+    )
+    .expect_err("non-literal match pattern should fail HIR lowering");
     let error = err
         .infrastructure_error()
         .expect("HIR lowering failure should be wrapped for rendering");
@@ -682,9 +913,20 @@ fn break_outside_loop_reports_hir_transformation_error() {
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
-    let err = lower_ast(ast, &mut string_table, &mut path_fork)
-        .expect_err("break outside loop should fail");
+    let ast = build_ast_with_registered_types(
+        vec![start_fn],
+        entry_path,
+        AstExpressionBuilder::new().unwrap(),
+        ConstValueStore::default(),
+        TypeEnvironment::new(),
+    );
+    let err = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
+    )
+    .expect_err("break outside loop should fail");
     let error = err
         .infrastructure_error()
         .expect("HIR lowering failure should be wrapped for rendering");
@@ -709,9 +951,20 @@ fn continue_outside_loop_reports_hir_transformation_error() {
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
-    let err = lower_ast(ast, &mut string_table, &mut path_fork)
-        .expect_err("continue outside loop should fail");
+    let ast = build_ast_with_registered_types(
+        vec![start_fn],
+        entry_path,
+        AstExpressionBuilder::new().unwrap(),
+        ConstValueStore::default(),
+        TypeEnvironment::new(),
+    );
+    let err = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
+    )
+    .expect_err("continue outside loop should fail");
     let error = err
         .infrastructure_error()
         .expect("HIR lowering failure should be wrapped for rendering");
@@ -738,9 +991,20 @@ fn top_level_return_reports_hir_transformation_error() {
 
     let top_level_return = node(NodeKind::Return(vec![]), None);
 
-    let ast = build_ast_with_registered_types(vec![start_fn, top_level_return], entry_path);
-    let err = lower_ast(ast, &mut string_table, &mut path_fork)
-        .expect_err("top-level return should fail");
+    let ast = build_ast_with_registered_types(
+        vec![start_fn, top_level_return],
+        entry_path,
+        AstExpressionBuilder::new().unwrap(),
+        ConstValueStore::default(),
+        TypeEnvironment::new(),
+    );
+    let err = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
+    )
+    .expect_err("top-level return should fail");
 
     let error = err
         .infrastructure_error()
@@ -766,9 +1030,20 @@ fn unit_implicit_return_lowers_to_return_terminator() {
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
-    let (module, _type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("unit fallthrough should succeed");
+    let ast = build_ast_with_registered_types(
+        vec![start_fn],
+        entry_path,
+        AstExpressionBuilder::new().unwrap(),
+        ConstValueStore::default(),
+        TypeEnvironment::new(),
+    );
+    let (module, _type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
+    )
+    .expect("unit fallthrough should succeed");
     let start = &module.functions[module
         .start_function
         .expect("normal test module should have start")
@@ -787,6 +1062,9 @@ fn side_table_maps_statement_and_terminator_spans() {
 
     let decl_span = SourceSpan::new(SourceId::from_index(1), LocalSpan::source_start());
     let ret_span = SourceSpan::new(SourceId::from_index(2), LocalSpan::source_start());
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let one = int_expr(&mut builder, &mut constants, 1, Some(decl_span));
 
     let start_fn = function_node(
         start_name,
@@ -796,7 +1074,7 @@ fn side_table_maps_statement_and_terminator_spans() {
         },
         vec![
             node(
-                NodeKind::VariableDeclaration(make_test_variable(x, int_expr(1, Some(decl_span)))),
+                NodeKind::VariableDeclaration(make_test_variable(x, one, &builder)),
                 Some(decl_span),
             ),
             node(NodeKind::Return(vec![]), Some(ret_span)),
@@ -804,9 +1082,20 @@ fn side_table_maps_statement_and_terminator_spans() {
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
-    let (module, _type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
+    let ast = build_ast_with_registered_types(
+        vec![start_fn],
+        entry_path,
+        builder,
+        constants,
+        TypeEnvironment::new(),
+    );
+    let (module, _type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
+    )
+    .expect("HIR lowering should succeed");
 
     let decl_mappings = module.side_table.hir_locations_for_ast(decl_span);
     assert!(!decl_mappings.is_empty());
@@ -822,10 +1111,15 @@ fn lowers_relational_pattern_to_hir_relational() {
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let x = super::symbol("x", &mut path_fork, &mut string_table);
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let nine = int_expr(&mut builder, &mut constants, 9, None);
+    let eight = int_expr(&mut builder, &mut constants, 8, None);
 
     let match_node = node(
         NodeKind::Match {
             scrutinee: reference_expr_with_type_id(
+                &mut builder,
                 x,
                 builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 None,
@@ -834,16 +1128,13 @@ fn lowers_relational_pattern_to_hir_relational() {
             arms: vec![MatchArm {
                 pattern: MatchPattern::Relational {
                     op: RelationalPatternOp::LessThan,
-                    value: int_expr(10, None),
+                    value: int_pattern(&mut builder, &mut constants, 10, None),
                     span: None,
                 },
                 guard: None,
-                body: vec![node(NodeKind::ExpressionStatement(int_expr(9, None)), None)],
+                body: vec![node(NodeKind::ExpressionStatement(nine), None)],
             }],
-            default: Some(vec![node(
-                NodeKind::ExpressionStatement(int_expr(8, None)),
-                None,
-            )]),
+            default: Some(vec![node(NodeKind::ExpressionStatement(eight), None)]),
             exhaustiveness: MatchExhaustiveness::HasDefault,
         },
         None,
@@ -864,9 +1155,20 @@ fn lowers_relational_pattern_to_hir_relational() {
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
-    let (module, _type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
+    let ast = build_ast_with_registered_types(
+        vec![start_fn],
+        entry_path,
+        builder,
+        constants,
+        TypeEnvironment::new(),
+    );
+    let (module, _type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
+    )
+    .expect("HIR lowering should succeed");
 
     let start = &module.functions[module
         .start_function
@@ -911,10 +1213,19 @@ fn lowers_guarded_relational_pattern_preserving_guard_separation() {
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let x = super::symbol("x", &mut path_fork, &mut string_table);
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let guard = builder
+        .bool(&mut constants, true, None, ValueMode::ImmutableOwned)
+        .expect("guard literal fits expression store")
+        .id();
+    let nine = int_expr(&mut builder, &mut constants, 9, None);
+    let eight = int_expr(&mut builder, &mut constants, 8, None);
 
     let match_node = node(
         NodeKind::Match {
             scrutinee: reference_expr_with_type_id(
+                &mut builder,
                 x,
                 builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 None,
@@ -923,16 +1234,13 @@ fn lowers_guarded_relational_pattern_preserving_guard_separation() {
             arms: vec![MatchArm {
                 pattern: MatchPattern::Relational {
                     op: RelationalPatternOp::LessThan,
-                    value: int_expr(10, None),
+                    value: int_pattern(&mut builder, &mut constants, 10, None),
                     span: None,
                 },
-                guard: Some(Expression::bool(true, None, ValueMode::ImmutableOwned)),
-                body: vec![node(NodeKind::ExpressionStatement(int_expr(9, None)), None)],
+                guard: Some(guard),
+                body: vec![node(NodeKind::ExpressionStatement(nine), None)],
             }],
-            default: Some(vec![node(
-                NodeKind::ExpressionStatement(int_expr(8, None)),
-                None,
-            )]),
+            default: Some(vec![node(NodeKind::ExpressionStatement(eight), None)]),
             exhaustiveness: MatchExhaustiveness::HasDefault,
         },
         None,
@@ -953,9 +1261,20 @@ fn lowers_guarded_relational_pattern_preserving_guard_separation() {
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
-    let (module, _type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
+    let ast = build_ast_with_registered_types(
+        vec![start_fn],
+        entry_path,
+        builder,
+        constants,
+        TypeEnvironment::new(),
+    );
+    let (module, _type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
+    )
+    .expect("HIR lowering should succeed");
 
     let start = &module.functions[module
         .start_function
@@ -1008,11 +1327,17 @@ fn lowers_choice_match_arms_to_hir_choice_variant_patterns() {
         },
     ];
 
-    let status_type_id = choice_type_id(status_path, &choice_variants);
+    let mut type_environment = TypeEnvironment::new();
+    let status_type_id = choice_type_id(&mut type_environment, status_path, &choice_variants);
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let one = int_expr(&mut builder, &mut constants, 1, None);
+    let two = int_expr(&mut builder, &mut constants, 2, None);
 
     let match_node = node(
         NodeKind::Match {
             scrutinee: reference_expr_with_type_id(
+                &mut builder,
                 status_local,
                 status_type_id,
                 None,
@@ -1027,7 +1352,7 @@ fn lowers_choice_match_arms_to_hir_choice_variant_patterns() {
                         span: None,
                     },
                     guard: None,
-                    body: vec![node(NodeKind::ExpressionStatement(int_expr(1, None)), None)],
+                    body: vec![node(NodeKind::ExpressionStatement(one), None)],
                 },
                 MatchArm {
                     pattern: MatchPattern::ChoiceVariant {
@@ -1037,7 +1362,7 @@ fn lowers_choice_match_arms_to_hir_choice_variant_patterns() {
                         span: None,
                     },
                     guard: None,
-                    body: vec![node(NodeKind::ExpressionStatement(int_expr(2, None)), None)],
+                    body: vec![node(NodeKind::ExpressionStatement(two), None)],
                 },
             ],
             default: None,
@@ -1068,9 +1393,17 @@ fn lowers_choice_match_arms_to_hir_choice_variant_patterns() {
             nominal_path: status_path,
             variants: choice_variants,
         }],
+        builder,
+        constants,
+        type_environment,
     );
-    let (module, _type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
+    let (module, _type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
+    )
+    .expect("HIR lowering should succeed");
 
     let start = &module.functions[module
         .start_function
@@ -1125,6 +1458,8 @@ fn lowers_option_present_capture_to_payload_assignment() {
     let maybe_name = super::symbol("maybe", &mut path_fork, &mut string_table);
     let capture_name = string_table.intern("value");
     let capture_path = super::symbol("value", &mut path_fork, &mut string_table);
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let mut type_environment = TypeEnvironment::new();
     let option_i32_type_id =
         type_environment.intern_option(builtin_type_ids::fixed_scalar(FixedScalar::I32));
@@ -1132,6 +1467,7 @@ fn lowers_option_present_capture_to_payload_assignment() {
     let match_node = node(
         NodeKind::Match {
             scrutinee: reference_expr_with_type_id(
+                &mut builder,
                 maybe_name,
                 option_i32_type_id,
                 None,
@@ -1148,6 +1484,7 @@ fn lowers_option_present_capture_to_payload_assignment() {
                 guard: None,
                 body: vec![node(
                     NodeKind::ExpressionStatement(reference_expr_with_type_id(
+                        &mut builder,
                         capture_path,
                         builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         None,
@@ -1157,7 +1494,7 @@ fn lowers_option_present_capture_to_payload_assignment() {
                 )],
             }],
             default: Some(vec![node(
-                NodeKind::ExpressionStatement(int_expr(0, None)),
+                NodeKind::ExpressionStatement(int_expr(&mut builder, &mut constants, 0, None)),
                 None,
             )]),
             exhaustiveness: MatchExhaustiveness::HasDefault,
@@ -1180,7 +1517,13 @@ fn lowers_option_present_capture_to_payload_assignment() {
         None,
     );
 
-    let mut ast = build_ast_with_registered_types(vec![start_fn], entry_path);
+    let mut ast = build_ast_with_registered_types(
+        vec![start_fn],
+        entry_path,
+        builder,
+        constants,
+        type_environment,
+    );
     let registered_option_type_id = ast
         .type_environment
         .intern_option(builtin_type_ids::fixed_scalar(FixedScalar::I32));
@@ -1189,8 +1532,13 @@ fn lowers_option_present_capture_to_payload_assignment() {
         "test AST should use the same canonical option TypeId as HIR lowering"
     );
 
-    let (module, _type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
+    let (module, _type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
+    )
+    .expect("HIR lowering should succeed");
     let start = &module.functions[module
         .start_function
         .expect("normal test module should have start")

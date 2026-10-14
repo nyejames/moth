@@ -89,6 +89,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 - [module_metadata.rs](src/compiler_frontend/module_metadata.rs): named HIR-lowering result, resolved documentation metadata, structural resource handoff and non-HIR metadata validation.
 - [external_packages](src/compiler_frontend/external_packages/): virtual package registry, external IDs. kw: @core, @web, opaque.
 - [builtins](src/compiler_frontend/builtins/): compiler-owned types/ops/casts/runtime error metadata.
+    - [member_rules.rs](src/compiler_frontend/builtins/member_rules.rs): shared allocation-free collection/map argument, success-slot and fallibility rules for AST construction and HIR validation.
 - [style_directives](src/compiler_frontend/style_directives/): frontend+builder template directive registry.
 - [datatypes](src/compiler_frontend/datatypes/): DataType parse spelling + TypeEnvironment/TypeId semantic identity.
     - [number.rs](src/compiler_frontend/datatypes/number.rs): immutable `NumberValue` Dec coefficients, exact receiving materialisation, arbitrary-precision arithmetic and integer/rescale conversion. Shared scale and allocation-free decimal text facts live in `moth-lexical`.
@@ -103,7 +104,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 - [keywords.rs](src/compiler_frontend/keywords.rs): compiler `TokenTag` mapping over the shared `moth-lexical` source-word inventory.
 - [arena](src/compiler_frontend/arena/): AST/HIR allocation arenas and capacity budgeting.
 - [instrumentation](src/compiler_frontend/instrumentation/): compile-time counters and frontend stats.
-- [const_eval](src/compiler_frontend/ast/const_eval/): AST-stage const expression folding (RPN stack evaluator).
+- [const_eval](src/compiler_frontend/ast/const_eval/): AST-stage conservative constant folding over the phase-owned `ExprId` expression DAG, leaving the original root in place when a fold is refused.
 
 ## AST stage
 
@@ -117,8 +118,8 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
     - [emission](src/compiler_frontend/ast/module_ast/emission/): function/start/body emission.
     - [finalization](src/compiler_frontend/ast/module_ast/finalization/): normalize constants/templates, const facts, type validation.
         - [expression census](src/compiler_frontend/ast/module_ast/finalization/expression_census.rs): counter-feature-only published AST occurrence, payload and predecessor-layout observations.
-    - [scope_context](src/compiler_frontend/ast/module_ast/scope_context/): visibility/local declarations/diagnostic sinks.
-        - [lookup.rs](src/compiler_frontend/ast/module_ast/scope_context/lookup.rs): visible declaration lookup and shared reserved-receiver resolution for expressions, statements and place roots.
+    - [scope_context](src/compiler_frontend/ast/module_ast/scope_context/): visibility, local declarations and diagnostic sinks, including checked parameter-frame publication and shared loop/capture binding validation.
+        - [lookup.rs](src/compiler_frontend/ast/module_ast/scope_context/lookup.rs): visible declaration lookup, shared new-binding collision checks for bound external symbols and namespaces and reserved-receiver resolution for expressions, statements and place roots.
 - [type_resolution](src/compiler_frontend/ast/type_resolution/): parsed type syntax → TypeId.
     - [context.rs](src/compiler_frontend/ast/type_resolution/context.rs): state.
     - [resolve_type.rs](src/compiler_frontend/ast/type_resolution/resolve_type.rs): orchestration + diagnostic TypeId bridge.
@@ -134,6 +135,13 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
     - [generic_nominal_inference.rs](src/compiler_frontend/ast/expressions/generic_nominal_inference.rs): shared constructor bindings, immediate receiving context and final concrete argument inference.
     - [function_calls.rs](src/compiler_frontend/ast/expressions/function_calls.rs): resolves external success types and records the neutral raw-float validation fact from signature/lowering metadata; [external_call_float_selection_tests.rs](src/compiler_frontend/ast/expressions/tests/external_call_float_selection_tests.rs) covers raw and self-validating boundary policy.
     - [parse_expression_places.rs](src/compiler_frontend/ast/expressions/parse_expression_places.rs): named and reserved receiver roots for mutable calls and explicit copies, with postfix and access rules delegated to field access.
+    - [expression_store.rs](src/compiler_frontend/ast/expressions/expression_store.rs): phase-owned semantic expression rows addressed by compact `ExprId`, with token-checked construction handles, fixed edges inline and variable payloads in typed side owners.
+    - [expression_store_view.rs](src/compiler_frontend/ast/expressions/expression_store_view.rs): borrowed argument, constructor-field and expression views over store rows.
+    - [expression_store_snapshot.rs](src/compiler_frontend/ast/expressions/expression_store_snapshot.rs): owned completed-input snapshots, requested only after a rewrite discovers changed edges.
+    - [expression_scratch.rs](src/compiler_frontend/ast/expressions/expression_scratch.rs): producer-local candidate DAGs, where nothing borrowed from a candidate survives promotion.
+    - [expression_scratch_operations.rs](src/compiler_frontend/ast/expressions/expression_scratch_operations.rs): completed-operation edge visiting and mapping, installation into the builder and side-buffer capacity checks.
+    - [expression_rewrite.rs](src/compiler_frontend/ast/expressions/expression_rewrite.rs): immutable rewrites that reuse unchanged rows and promote scratch only for changed roots.
+    - [expression_freeze.rs](src/compiler_frontend/ast/expressions/expression_freeze.rs): consuming last-reader remapping from surviving completed roots into exact typed owners.
 - [field_access](src/compiler_frontend/ast/field_access/): fields, receiver calls, collection/map builtins.
 - [statements](src/compiler_frontend/ast/statements/): bodies, declarations, returns, loops, matches, catch, value production.
     - [fallible_handling/catch_handler.rs](src/compiler_frontend/ast/statements/fallible_handling/catch_handler.rs): shared `catch:` and `catch |err|:` handler parsing with `then` value-production bodies.
@@ -153,6 +161,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
         - [expression_sites.rs](src/compiler_frontend/ast/templates/tir/expression_sites.rs): exact-view and nested expression-payload traversal.
         - [expression_overlays.rs](src/compiler_frontend/ast/templates/tir/expression_overlays.rs): structural/effective expression-overlay collection and precedence.
         - [expression_constness.rs](src/compiler_frontend/ast/templates/tir/expression_constness.rs): shared expression constness and narrow structural queries.
+        - [public_const_rebuild.rs](src/compiler_frontend/ast/templates/tir/public_const_rebuild.rs): rebuilds imported const-template projections into the importing module's TIR at reference time, so composition and slot routing still see a template.
         - [preparation.rs](src/compiler_frontend/ast/templates/tir/preparation.rs): exact-view semantic preparation for foldable values, runtime values and slot-insert helpers.
         - [fold/](src/compiler_frontend/ast/templates/tir/fold/), [formatter_view.rs](src/compiler_frontend/ast/templates/tir/formatter_view.rs), [render_unit.rs](src/compiler_frontend/ast/templates/tir/render_unit.rs): TIR-native fold reducer, control-flow/wrapper owners, output estimates, format and render-unit preparation.
         - [slot_layout.rs](src/compiler_frontend/ast/templates/tir/slot_layout.rs), [slot_plan.rs](src/compiler_frontend/ast/templates/tir/slot_plan.rs), [slot_composition/](src/compiler_frontend/ast/templates/tir/slot_composition/), [wrapper_sets.rs](src/compiler_frontend/ast/templates/tir/wrapper_sets.rs): slot layout, routing and wrapper reuse.
@@ -161,6 +170,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
     - [receiver_method_instantiation.rs](src/compiler_frontend/ast/generic_functions/receiver_method_instantiation.rs): shared generic receiver-call and cast-evidence instance inference, bound validation and materialisation requests.
     - [materialisation.rs](src/compiler_frontend/ast/generic_functions/materialisation.rs): declaring-module capture parent, owning only the lane map. Lanes: [stable_types.rs](src/compiler_frontend/ast/generic_functions/materialisation/stable_types.rs) donor-independent capture contracts, [visibility.rs](src/compiler_frontend/ast/generic_functions/materialisation/visibility.rs) stable visibility/namespace capture, [preparation_freeze.rs](src/compiler_frontend/ast/generic_functions/materialisation/preparation_freeze.rs) preparation capture and publication freeze, including exact-origin concrete evidence-method summaries, [artefact_emit.rs](src/compiler_frontend/ast/generic_functions/materialisation/artefact_emit.rs) frozen artefact reconstruction and summary installation before consumer projection, [sidecar_build.rs](src/compiler_frontend/ast/generic_functions/materialisation/sidecar_build.rs) generated sidecar environment build and bounded evidence closure.
 - [const_values](src/compiler_frontend/ast/const_values/): module-local folded-value store, its borrowed row/value views, and the advisory const fact resolver.
+    - [binding.rs](src/compiler_frontend/ast/const_values/binding.rs): binds authored constant initializers, including template-valued ones, to their content in the constant store.
 - [generic_bounds.rs](src/compiler_frontend/ast/generic_bounds.rs): static bound evidence checks.
 
 ## HIR + analysis
@@ -170,16 +180,22 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
     - [expression_store.rs](src/compiler_frontend/hir/expression_store.rs): module-owned dense expression rows, typed payload ranges, checked compact capacities and construction-to-frozen ownership.
     - [hir_expression](src/compiler_frontend/hir/hir_expression/), [hir_statement](src/compiler_frontend/hir/hir_statement/): lowering implementation owners.
         - [hir_expression/calls.rs](src/compiler_frontend/hir/hir_expression/calls.rs), [hir_expression/fallible/external.rs](src/compiler_frontend/hir/hir_expression/fallible/external.rs) and [hir_expression/numeric.rs](src/compiler_frontend/hir/hir_expression/numeric.rs): consume the AST external-float validation fact and preserve exact success types through direct calls, fallible extraction and finite guards.
+        - [hir_expression/fallible/continuation.rs](src/compiler_frontend/hir/hir_expression/fallible/continuation.rs): native `Invoke` success/error continuations for propagation and recovery without value carriers.
         - [hir_expression/templates](src/compiler_frontend/hir/hir_expression/templates/): lowers owned runtime-template render trees and runtime slot applications through the shared accumulator path.
+        - [runtime/operation_lowering.rs](src/compiler_frontend/hir/hir_expression/runtime/operation_lowering.rs): lowers resolved numeric, logical, comparison and range operations into HIR, with child views bound to the AST owner.
     - [validation](src/compiler_frontend/hir/validation/): executable-HIR internal invariant checks only; non-HIR module metadata is validated by [module_metadata.rs](src/compiler_frontend/module_metadata.rs).
+        - [channels.rs](src/compiler_frontend/hir/validation/channels.rs): call and `Invoke` argument, success-slot and error-channel compatibility.
+        - [dominance.rs](src/compiler_frontend/hir/validation/dominance.rs): definite local definitions across CFG edges, including mutually exclusive `Invoke` destinations and loop backedges.
     - [reachability.rs](src/compiler_frontend/hir/reachability.rs): function/block/external/map/runtime-cast feature facts.
     - [failure_facts.rs](src/compiler_frontend/hir/failure_facts.rs): immutable per-function failure facts projected once from typed AST bodies.
-    - [private_failure_lane.rs](src/compiler_frontend/hir/private_failure_lane.rs): internal failure lane for inferred-failure private functions over the existing fallible carrier.
+    - [private_failure_lane.rs](src/compiler_frontend/hir/private_failure_lane.rs): native success/error edges for inferred-failure private functions, preserving success slots and producer identities while routing catches and pruning unreachable handlers.
     - [hir_expression/fallible/catch.rs](src/compiler_frontend/hir/hir_expression/fallible/catch.rs): expression-local catch CFG lowering into one shared handler.
     - [hir_statement/entry_start.rs](src/compiler_frontend/hir/hir_statement/entry_start.rs): entry `start()` runtime fragment accumulator lowering.
+    - [tests/native_channel_validation_tests.rs](src/compiler_frontend/hir/tests/native_channel_validation_tests.rs): native result-channel and edge-local definition validation tests.
 - [borrow_checker](src/compiler_frontend/analysis/borrow_checker/): HIR side-table access and advisory optional-transfer facts. kw — exclusivity, optional transfer, aliases.
     - [engine.rs](src/compiler_frontend/analysis/borrow_checker/engine.rs): fixed-point flow.
     - [transfer.rs](src/compiler_frontend/analysis/borrow_checker/transfer.rs), [transfer/](src/compiler_frontend/analysis/borrow_checker/transfer/): access policy.
+        - [transfer/tests/invoke_edge_tests.rs](src/compiler_frontend/analysis/borrow_checker/transfer/tests/invoke_edge_tests.rs): selected-edge initialisation and retirement of previous `Invoke` outcomes.
     - [state.rs](src/compiler_frontend/analysis/borrow_checker/state.rs): lattice.
     - [diagnostics.rs](src/compiler_frontend/analysis/borrow_checker/diagnostics.rs).
     - [return_alias.rs](src/compiler_frontend/analysis/borrow_checker/return_alias.rs): return-provenance classification and callee-summary projection, split from the retained metadata in [metadata.rs](src/compiler_frontend/analysis/borrow_checker/metadata.rs).

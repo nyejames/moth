@@ -249,7 +249,7 @@ impl<'a> PublicInterfaceDraftBuilder<'a> {
             projection_context: &type_projection_context,
             string_table,
             path_fork,
-            folded_value_context: &folded_value_projection_context,
+            folded_value_context: &folded_value_context,
         };
         let receiver_method_signatures = project_receiver_method_signatures(
             &callable_seeds,
@@ -306,7 +306,7 @@ impl<'a> PublicInterfaceDraftBuilder<'a> {
             type_environment,
             string_table,
             path_fork,
-            folded_value_context: &folded_value_projection_context,
+            folded_value_context: &folded_value_context,
         };
         let mut state = DeclarationRecordProjectionState {
             receiver_seeds_by_receiver: &mut receiver_seeds_by_receiver,
@@ -399,7 +399,7 @@ struct DeclarationTypeProjectionContext<'a> {
     type_environment: &'a TypeEnvironment,
     string_table: &'a StringTable,
     path_fork: &'a PathInternerFork,
-    folded_value_context: &'a FoldedValueProjectionContext<'a>,
+    folded_value_context: &'a FoldedValueJoinContext<'a>,
 }
 
 /// Mutable per-binding join state consumed while projecting declaration records.
@@ -475,7 +475,13 @@ fn project_declaration_records<'a>(
                         "function", binding,
                     ));
                 };
-                let default_provenance = project_defaults_provenance(&signature.parameters);
+                let default_provenance = project_defaults_provenance(
+                    signature
+                        .parameters
+                        .iter()
+                        .map(|parameter| parameter.default),
+                    type_context.folded_value_context.const_values,
+                )?;
                 let semantics = project_free_function_semantics(
                     function_origin.clone(),
                     *generic_parameter_list_id,
@@ -506,7 +512,10 @@ fn project_declaration_records<'a>(
                             "struct", binding,
                         ));
                     };
-                    let field_default_provenance = project_defaults_provenance(fields);
+                    let field_default_provenance = project_defaults_provenance(
+                        fields.iter().map(|field| field.value.default()),
+                        type_context.folded_value_context.const_values,
+                    )?;
                     let (generic_parameters, projected_fields) = project_struct_parts(
                         type_origin.clone(),
                         *type_id,

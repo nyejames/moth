@@ -5,8 +5,10 @@
 
 use crate::compiler_frontend::analysis::borrow_checker::BorrowDropSiteKind;
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::{DataType, builtin_type_ids};
 use crate::compiler_frontend::hir::expression_store::HirProjection;
 use crate::compiler_frontend::hir::statements::{
@@ -15,25 +17,33 @@ use crate::compiler_frontend::hir::statements::{
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    assignment_target, function_node, make_test_variable, node, symbol, test_if_branch_metadata,
-    test_source_location,
+    assignment_target, function_node, make_test_variable, node, reference_expr_with_datatype,
+    symbol, test_if_branch_metadata, test_source_location,
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::run_borrow_checker;
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
 use crate::compiler_frontend::tests::hir_fixture_support::{entry_and_start, lower_hir};
-use crate::compiler_frontend::tests::type_id_fixture_support::{
-    build_ast_with_registered_types, runtime_expr, runtime_operand_item,
-};
+use crate::compiler_frontend::tests::type_id_fixture_support::build_ast_with_registered_types;
 
 use crate::compiler_frontend::value_mode::ValueMode;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
-fn i32_expression(value: i64, span: Option<SourceSpan>, mode: ValueMode) -> Expression {
-    Expression::fixed_scalar(
-        FixedScalarValue::signed(FixedScalar::I32, value).expect("I32 literal in range"),
-        span,
-        mode,
-    )
+fn i32_expression(
+    builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    value: i64,
+    span: Option<SourceSpan>,
+    mode: ValueMode,
+) -> ExprId {
+    builder
+        .fixed_scalar(
+            const_values,
+            FixedScalarValue::signed(FixedScalar::I32, value).expect("I32 literal in range"),
+            span,
+            mode,
+        )
+        .expect("fixture scalar fits store")
+        .id()
 }
 
 #[test]
@@ -42,6 +52,9 @@ fn emits_advisory_return_drop_sites() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let type_environment = TypeEnvironment::new();
 
     let value = symbol("value", &mut path_fork, &mut string_table);
     let start_fn = function_node(
@@ -53,7 +66,14 @@ fn emits_advisory_return_drop_sites() {
         vec![node(
             NodeKind::VariableDeclaration(make_test_variable(
                 value,
-                i32_expression(1, test_source_location(1), ValueMode::MutableOwned),
+                i32_expression(
+                    &mut builder,
+                    &mut const_values,
+                    1,
+                    test_source_location(1),
+                    ValueMode::MutableOwned,
+                ),
+                &builder,
             )),
             test_source_location(1),
         )],
@@ -61,9 +81,16 @@ fn emits_advisory_return_drop_sites() {
     );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(vec![start_fn], entry_path),
+        build_ast_with_registered_types(
+            vec![start_fn],
+            entry_path,
+            builder,
+            const_values,
+            type_environment,
+        ),
         &mut string_table,
         &mut path_fork,
+        &external_package_registry,
     );
     let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("borrow checking should succeed");
@@ -95,8 +122,12 @@ fn emits_advisory_break_and_region_exit_drop_sites() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let type_environment = TypeEnvironment::new();
 
     let x = symbol("x", &mut path_fork, &mut string_table);
+    let flag = symbol("flag", &mut path_fork, &mut string_table);
     let start_fn = function_node(
         start_name,
         FunctionSignature {
@@ -107,31 +138,54 @@ fn emits_advisory_break_and_region_exit_drop_sites() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    i32_expression(1, test_source_location(1), ValueMode::MutableOwned),
+                    i32_expression(
+                        &mut builder,
+                        &mut const_values,
+                        1,
+                        test_source_location(1),
+                        ValueMode::MutableOwned,
+                    ),
+                    &builder,
+                )),
+                test_source_location(1),
+            ),
+            node(
+                NodeKind::VariableDeclaration(make_test_variable(
+                    flag,
+                    builder
+                        .bool(
+                            &mut const_values,
+                            true,
+                            test_source_location(1),
+                            ValueMode::ImmutableOwned,
+                        )
+                        .expect("fixture flag fits store")
+                        .id(),
+                    &builder,
                 )),
                 test_source_location(1),
             ),
             node(
                 NodeKind::If(
-                    runtime_expr(
-                        vec![runtime_operand_item(Expression::bool(
-                            true,
-                            test_source_location(2),
-                            ValueMode::ImmutableOwned,
-                        ))],
+                    reference_expr_with_datatype(
+                        &mut builder,
+                        flag,
+                        DataType::Bool,
                         builtin_type_ids::BOOL,
                         test_source_location(2),
-                        ValueMode::ImmutableOwned,
                     ),
                     vec![node(
                         NodeKind::Assignment {
                             target: assignment_target(
+                                &mut builder,
                                 x,
                                 DataType::FixedScalar(FixedScalar::I32),
                                 builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                 test_source_location(3),
                             ),
                             value: i32_expression(
+                                &mut builder,
+                                &mut const_values,
                                 2,
                                 test_source_location(3),
                                 ValueMode::ImmutableOwned,
@@ -142,12 +196,15 @@ fn emits_advisory_break_and_region_exit_drop_sites() {
                     Some(vec![node(
                         NodeKind::Assignment {
                             target: assignment_target(
+                                &mut builder,
                                 x,
                                 DataType::FixedScalar(FixedScalar::I32),
                                 builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                 test_source_location(4),
                             ),
                             value: i32_expression(
+                                &mut builder,
+                                &mut const_values,
                                 3,
                                 test_source_location(4),
                                 ValueMode::ImmutableOwned,
@@ -161,7 +218,15 @@ fn emits_advisory_break_and_region_exit_drop_sites() {
             ),
             node(
                 NodeKind::WhileLoop(
-                    Expression::bool(true, test_source_location(5), ValueMode::ImmutableOwned),
+                    builder
+                        .bool(
+                            &mut const_values,
+                            true,
+                            test_source_location(5),
+                            ValueMode::ImmutableOwned,
+                        )
+                        .expect("fixture loop condition fits store")
+                        .id(),
                     vec![node(NodeKind::Break, test_source_location(6))],
                 ),
                 test_source_location(5),
@@ -171,9 +236,16 @@ fn emits_advisory_break_and_region_exit_drop_sites() {
     );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(vec![start_fn], entry_path),
+        build_ast_with_registered_types(
+            vec![start_fn],
+            entry_path,
+            builder,
+            const_values,
+            type_environment,
+        ),
         &mut string_table,
         &mut path_fork,
+        &external_package_registry,
     );
     let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("borrow checking should succeed");
@@ -213,8 +285,8 @@ fn catch_outward_handler_failure_drops_abandoned_argument_and_handler_local() {
                       then handler_local\n\
                   ;\n;\n";
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(ast, &mut string_table, &mut path_fork, &registry);
     let report = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
         .expect("the outward handler edge must preserve normal cleanup");
     let argument = hir
@@ -224,9 +296,12 @@ fn catch_outward_handler_failure_drops_abandoned_argument_and_handler_local() {
         .find_map(|statement| match statement.kind {
             HirStatementKind::Call {
                 ref args,
-                result: Some(HirLocalDestination::Define(local)),
+                ref results,
                 ..
-            } if args.len() == 0 => Some(local),
+            } if args.len() == 0 => match results.as_slice() {
+                [HirLocalDestination::Define(local)] => Some(*local),
+                _ => None,
+            },
             _ => None,
         })
         .expect("the earlier argument must materialise a temporary");
@@ -246,7 +321,11 @@ fn catch_outward_handler_failure_drops_abandoned_argument_and_handler_local() {
         .iter()
         .find(|block| block.locals.iter().any(|local| local.id == handler_local))
         .expect("the handler must have a lexical region");
-    let HirTerminator::FallibleBranch { error_block, .. } = handler.terminator else {
+    let HirTerminator::Invoke {
+        failure: error_block,
+        ..
+    } = handler.terminator
+    else {
         panic!("the failing handler operation must branch");
     };
     assert!(matches!(
@@ -275,7 +354,7 @@ fn catch_outward_handler_failure_drops_abandoned_argument_and_handler_local() {
 fn failed_field_compound_writeback_keeps_borrow_obligations_on_error_edge() {
     use crate::compiler_frontend::analysis::borrow_checker::LocalMode;
     use crate::compiler_frontend::hir::expressions::HirExpressionKind;
-    use crate::compiler_frontend::hir::terminators::HirTerminator;
+    use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
     use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
     use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
 
@@ -287,31 +366,22 @@ fn failed_field_compound_writeback_keeps_borrow_obligations_on_error_edge() {
                   risky |amount U8| -> U8, Error!:\n    wide U32 = amount + 200\n    return cast wide\n;\n\
                   bump |box ~Bucket, extra U8| -> I8, Error!:\n    box.level += risky(extra) catch then extra\n    return box.level\n;\n";
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(ast, &mut string_table, &mut path_fork, &registry);
     let report = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
         .expect("the failed write-back must still borrow-check");
     // Locate the write-back: the narrowing cast whose success continuation
     // stores into the struct field.
     let mut writeback = None;
     for block in &hir.blocks {
-        let cast = block
-            .statements
-            .iter()
-            .find_map(|statement| match &statement.kind {
-                HirStatementKind::CastOp {
-                    source,
-                    result: Some(HirLocalDestination::Define(carrier)),
+        let HirTerminator::Invoke {
+            operation:
+                HirFallibleOperation::CastOp {
+                    source: cast_source,
                     ..
-                } => Some((statement.id, source, *carrier)),
-                _ => None,
-            });
-        let Some((cast_id, cast_source, carrier)) = cast else {
-            continue;
-        };
-        let HirTerminator::FallibleBranch {
-            success_block,
-            error_block,
+                },
+            success: success_block,
+            failure: error_block,
             ..
         } = &block.terminator
         else {
@@ -338,9 +408,7 @@ fn failed_field_compound_writeback_keeps_borrow_obligations_on_error_edge() {
         if let Some(receiver) = field_store {
             writeback = Some((
                 block.id,
-                cast_id,
                 cast_source,
-                carrier,
                 receiver,
                 *success_block,
                 *error_block,
@@ -348,10 +416,8 @@ fn failed_field_compound_writeback_keeps_borrow_obligations_on_error_edge() {
             break;
         }
     }
-    let (writeback_block, cast_id, cast_source, carrier, receiver, success_block, error_block) =
-        writeback.expect(
-            "the compound field write-back must lower to a cast with a field store on success",
-        );
+    let (writeback_block, cast_source, receiver, success_block, error_block) = writeback
+        .expect("the compound field write-back must lower to a cast with a field store on success");
     let error = &hir.blocks[error_block.0 as usize];
     assert!(
         matches!(error.terminator, HirTerminator::ReturnError(_)),
@@ -392,10 +458,6 @@ fn failed_field_compound_writeback_keeps_borrow_obligations_on_error_edge() {
         site.locals.contains(&promoted),
         "the abandoned promoted sum cannot leak on the failure edge"
     );
-    assert!(
-        site.locals.contains(&carrier),
-        "the abandoned narrowing carrier cannot leak on the failure edge"
-    );
     let terminator_fact = report
         .analysis
         .terminator_fact(writeback_block)
@@ -404,14 +466,6 @@ fn failed_field_compound_writeback_keeps_borrow_obligations_on_error_edge() {
         terminator_fact.mutable_roots.is_empty(),
         "no mutable borrow may stay live into the failure edge"
     );
-    let cast_fact = report
-        .analysis
-        .statement_fact(cast_id)
-        .expect("the write-back cast must record a borrow fact");
-    assert!(
-        cast_fact.mutable_roots.is_empty(),
-        "the failing cast must not hold the receiver mutably"
-    );
     let snapshots = &report.analysis.block_entry_states;
     let error_entry = snapshots
         .get(&error_block)
@@ -419,15 +473,20 @@ fn failed_field_compound_writeback_keeps_borrow_obligations_on_error_edge() {
     let success_entry = snapshots
         .get(&success_block)
         .expect("the success edge must have an entry snapshot");
-    assert_eq!(
-        error_entry, success_entry,
-        "the failure edge must carry the exact pre-write state"
-    );
     let receiver_snapshot = error_entry
         .locals
         .iter()
         .find(|snapshot| snapshot.local == receiver)
         .expect("the receiver must be visible on the failure edge");
+    let success_receiver_snapshot = success_entry
+        .locals
+        .iter()
+        .find(|snapshot| snapshot.local == receiver)
+        .expect("the receiver must be visible on the success edge");
+    assert_eq!(
+        receiver_snapshot, success_receiver_snapshot,
+        "the failure edge must preserve the same pre-write receiver state"
+    );
     assert!(
         receiver_snapshot.mode.contains(LocalMode::SLOT),
         "the unwritten receiver must keep its initialized slot"

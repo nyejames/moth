@@ -537,6 +537,7 @@ fn run_semantic_stages(
         module_resources,
         materialisation_context: materialisation_context_builder,
         deferred_generic_requests,
+        assertion_validation_generic_requests,
     } = module_ast_build;
 
     let module_resources = module_resources.ok_or_else(|| {
@@ -601,6 +602,7 @@ fn run_semantic_stages(
         .collect::<FxHashMap<_, _>>();
     let private_function_origin_seeds = materialisation_context_builder
         .install_concrete_executable_contracts(
+            &module_ast.const_values,
             &active_module_origin,
             &public_origins_by_path,
             &public_source_nominal_type_origins,
@@ -611,8 +613,14 @@ fn run_semantic_stages(
         .map(|(path, origin)| PrivateFunctionOriginSeed { path, origin })
         .collect::<Vec<_>>();
 
+    // Inert assertion witnesses need exact concrete summaries, not executable demand. Install
+    // their stable targets beside active contracts so HIR can own those validation edges after
+    // AST release. Active occurrences win shared-instance diagnostic sites; convergence drops
+    // validation-only sidecars through the final executable reachability barrier.
     let generated_requests = install_generated_request_contracts(
-        &deferred_generic_requests,
+        deferred_generic_requests
+            .iter()
+            .chain(assertion_validation_generic_requests.iter()),
         materialisation_context_builder.context(),
         materialisation_context_builder
             .context()
@@ -647,6 +655,15 @@ fn run_semantic_stages(
         materialisation_context_builder.generic_function_templates_mut(),
     )?;
     materialisation_context_builder.finalize_generic_template_identity_index()?;
+    // Detach syntax, defaults and module constants while AST value owners are still live.
+    // Same-module generated requests and publication consume this single stable capture.
+    let mut materialisation_context_builder = materialisation_context_builder.detach(
+        &module_ast.const_values,
+        &public_interface_draft.declarations,
+        &public_interface_draft.reusable_evidence,
+        &module_resources.borrow(),
+        &compiler.path_fork,
+    )?;
 
     let function_origin_lookup = HirFunctionOriginLookup::from_public_and_private_seeds(
         public_interface_build.function_origin_seeds,
@@ -778,11 +795,7 @@ fn run_semantic_stages(
         }
     )?;
     let materialisation_context = materialisation_context_builder
-        .freeze(
-            &public_interface,
-            &module_resources.borrow(),
-            &compiler.path_fork,
-        )?
+        .freeze(&public_interface)?
         .map(Arc::new);
     let resource_table = Rc::try_unwrap(module_resources)
         .map(|cell| cell.into_inner())
@@ -927,7 +940,10 @@ fn sort_headers(
 
 // The timing context is a cfg-gated parameter that disappears from
 // no-timer builds; bundling it would add a context struct for one field.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "AST construction keeps module context, mutable frontend and warnings, owned sorted headers and resolved references, entry path, root role, arena estimate, module origin and the timers-only context separate"
+)]
 fn build_ast_with_registered_types(
     context: &ModuleCompilationContext<'_>,
     compiler: &mut CompilerFrontend<'_>,

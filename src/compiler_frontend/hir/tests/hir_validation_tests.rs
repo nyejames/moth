@@ -3,14 +3,16 @@
 //! WHAT: exercises the post-lowering HIR validator against valid and intentionally broken modules.
 //! WHY: validator coverage needs focused tests that isolate invariants from the rest of lowering.
 
-use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, NodeKind};
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, DeclarationValue, NodeKind};
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::definitions::{FieldDefinition, StructTypeDefinition};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_parameters::TypeParameterId;
@@ -22,6 +24,7 @@ use crate::compiler_frontend::datatypes::number::NumberValue;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
 use crate::compiler_frontend::hir::expressions::{
     HirExpression, HirExpressionKind, HirVariantCarrier, HirVariantField, ValueKind,
@@ -49,13 +52,16 @@ use crate::compiler_frontend::hir::statements::{
 };
 use crate::compiler_frontend::hir::structs::{HirField, HirStruct};
 use crate::compiler_frontend::hir::terminators::{
-    HirAssertionMessageEvaluation, HirJumpArgument, HirTerminator,
+    HirAssertionMessageEvaluation, HirFallibleOperation, HirJumpArgument, HirTerminator,
 };
+use crate::compiler_frontend::hir::validation::validate_expression_twice_for_tests;
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::tests::ast_fixture_support::param_with_type_id;
-use crate::compiler_frontend::tests::type_id_fixture_support::no_value_expr;
+use crate::compiler_frontend::tests::ast_fixture_support::{
+    make_test_variable, param_with_type_id,
+};
+use crate::compiler_tests::test_support::run_stack_budgeted_child;
 use moth_lexical::numeric::decimal::NumberScale;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use moth_lexical::numeric::grammar::NumericLiteralSign;
@@ -67,15 +73,6 @@ fn node(kind: NodeKind, span: Option<SourceSpan>) -> AstNode {
         kind,
         span,
         scope: crate::compiler_frontend::symbols::path_interner::PathId::ROOT,
-    }
-}
-
-fn make_test_variable(name: PathId, value: Expression) -> Declaration {
-    Declaration {
-        id: name,
-        value,
-        binding_span: None,
-        config_qualifier: None,
     }
 }
 
@@ -97,7 +94,7 @@ fn generic_parameter_type_id(
     type_environment.intern_generic_parameter(GenericParameterId(0), parameter_name)
 }
 
-fn minimal_lowered_hir_module() -> (StringTable, HirModule, TypeEnvironment) {
+pub(super) fn minimal_lowered_hir_module() -> (StringTable, HirModule, TypeEnvironment) {
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (entry_path, start_name) =
@@ -113,9 +110,20 @@ fn minimal_lowered_hir_module() -> (StringTable, HirModule, TypeEnvironment) {
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
-    let (module, type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("lowering should succeed");
+    let ast = build_ast_with_registered_types(
+        vec![start_fn],
+        entry_path,
+        AstExpressionBuilder::new().unwrap(),
+        ConstValueStore::default(),
+        TypeEnvironment::new(),
+    );
+    let (module, type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("lowering should succeed");
 
     (string_table, module, type_environment)
 }
@@ -232,8 +240,13 @@ fn validation_error_for_injected_local_type(
         span: None,
     });
 
-    validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject unresolved generic parameter inside TypeId")
+    validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject unresolved generic parameter inside TypeId")
 }
 
 fn inject_collection_expression_statement(
@@ -404,8 +417,13 @@ fn validator_accepts_field_projection_owned_by_current_nominal_type() {
         .expect("the direct field projection should fit");
     append_place_load_for_validation(&mut module, place, int_type, Some(span));
 
-    validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect("a field owned by the current nominal type should pass HIR validation");
+    validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("a field owned by the current nominal type should pass HIR validation");
 }
 
 #[test]
@@ -464,8 +482,13 @@ fn validator_rejects_field_projection_owned_by_another_nominal_type() {
         .expect("the foreign field projection should fit in malformed test HIR");
     append_place_load_for_validation(&mut module, place, int_type, Some(span));
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("a same-typed field from another nominal type must be rejected");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("a same-typed field from another nominal type must be rejected");
 
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert_eq!(error.source_span, Some(span));
@@ -551,8 +574,13 @@ fn validator_rejects_field_projection_owned_by_another_generic_instance() {
         .expect("the foreign instance field projection should fit");
     append_place_load_for_validation(&mut module, place, int_type, Some(span));
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("a field from Box<String> must not be accepted on Box<I32>");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("a field from Box<String> must not be accepted on Box<I32>");
 
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert_eq!(error.source_span, Some(span));
@@ -626,8 +654,13 @@ fn validator_resolves_field_and_index_projections_from_each_reached_type() {
         .expect("the reached Inner field projection should fit");
     append_place_load_for_validation(&mut module, place, int_type, None);
 
-    validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect("field and index projections should advance the base type at every step");
+    validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("field and index projections should advance the base type at every step");
 }
 
 #[test]
@@ -720,8 +753,13 @@ fn validator_rejects_foreign_field_after_index_projection() {
         .expect("the foreign field projection should fit");
     append_place_load_for_validation(&mut module, place, int_type, Some(span));
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("an indexed Element place cannot use a field owned by Foreign");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("an indexed Element place cannot use a field owned by Foreign");
 
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert_eq!(error.source_span, Some(span));
@@ -741,8 +779,13 @@ fn validator_rejects_place_classification_for_non_load_values() {
     );
     append_entry_statement(&mut module, entry, HirStatementKind::Expr(literal));
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("a literal cannot carry Place value provenance");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("a literal cannot carry Place value provenance");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("ValueKind::Place is only valid"));
 }
@@ -751,11 +794,11 @@ fn validator_rejects_place_classification_for_non_load_values() {
 fn validator_accepts_rvalue_load_and_checks_load_copy_place_types() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let entry = module.functions[module.start_function.unwrap().0 as usize].entry;
-    add_local(
+    add_entry_parameter(
         &mut module,
-        entry,
         LocalId(9000),
         builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        false,
     );
     let region = module.blocks[entry.0 as usize].region;
     let load = append_hir_expression(
@@ -767,8 +810,13 @@ fn validator_accepts_rvalue_load_and_checks_load_copy_place_types() {
     );
     append_entry_statement(&mut module, entry, HirStatementKind::Expr(load));
 
-    validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect("an internal Load result can be classified as an RValue");
+    validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("an internal Load result can be classified as an RValue");
 
     for (kind, expected_message) in [
         (
@@ -798,8 +846,13 @@ fn validator_accepts_rvalue_load_and_checks_load_copy_place_types() {
         );
         append_entry_statement(&mut module, entry, HirStatementKind::Expr(expression));
 
-        let error = validate_module_for_tests(&module, &string_table, &type_environment)
-            .expect_err("Load and Copy rows must retain their resolved place type");
+        let error = validate_module_for_tests(
+            &module,
+            &string_table,
+            &type_environment,
+            &ExternalPackageRegistry::new(),
+        )
+        .expect_err("Load and Copy rows must retain their resolved place type");
         assert_eq!(error.error_type, ErrorType::HirTransformation);
         assert!(error.msg.contains(expected_message));
     }
@@ -841,6 +894,10 @@ fn validate_numeric_op_for_test_with_types(
             region: entry_region,
             span: None,
         });
+        let function = module
+            .start_function
+            .expect("test module should have start");
+        module.functions[function.0 as usize].params.push(local_id);
 
         let value_id = append_hir_expression(
             &mut module,
@@ -874,7 +931,12 @@ fn validate_numeric_op_for_test_with_types(
     module.side_table.map_statement(span, &statement);
     module.blocks[entry_block_index].statements.push(statement);
 
-    validate_module_for_tests(&module, &string_table, &type_environment)
+    validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
 }
 
 fn validate_number_numeric_op_for_test(
@@ -903,7 +965,7 @@ fn validate_number_numeric_op_for_test(
     )
 }
 
-fn builtin_error_type_id(type_environment: &mut TypeEnvironment) -> TypeId {
+pub(super) fn builtin_error_type_id(type_environment: &mut TypeEnvironment) -> TypeId {
     let error_identity = CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error);
     if let Some(error_type_id) = type_environment.type_id_for_canonical_identity(&error_identity) {
         return error_type_id;
@@ -929,55 +991,74 @@ fn validate_cast_op_for_test(
     result_error_override: Option<TypeId>,
 ) -> Result<(), CompilerError> {
     let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
-    let span = None;
-    let entry_block_index = start_entry_block_index(&module);
-    let entry_region = module.blocks[entry_block_index].region;
-    let source_local_id = LocalId(9001);
-    let result_local_id = LocalId(9000);
     let builtin_error_type = builtin_error_type_id(&mut type_environment);
-    let result_error_type = result_error_override.unwrap_or(builtin_error_type);
-    let result_type =
-        type_environment.intern_fallible_carrier(result_success_type, result_error_type);
-
-    module.blocks[entry_block_index].locals.extend([
-        HirLocal {
-            id: result_local_id,
-            ty: result_type,
-            mutable: false,
-            region: entry_region,
-            span: None,
-        },
-        HirLocal {
-            id: source_local_id,
-            ty: source_type,
-            mutable: false,
-            region: entry_region,
-            span: None,
-        },
-    ]);
-
-    let source = append_hir_expression(
+    install_cast_invoke_for_test(
         &mut module,
-        HirExpressionKind::Load(HirPlace::local(source_local_id)),
+        policy,
+        source_type,
+        result_success_type,
+        result_error_override.unwrap_or(builtin_error_type),
+    );
+    validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+}
+
+fn install_cast_invoke_for_test(
+    module: &mut HirModule,
+    policy: BuiltinCastPolicyId,
+    source_type: TypeId,
+    success_type: TypeId,
+    error_type: TypeId,
+) {
+    let entry_block_index = start_entry_block_index(module);
+    let entry_region = module.blocks[entry_block_index].region;
+    let source_local = LocalId(9001);
+    let success_local = LocalId(9000);
+    let error_local = LocalId(9002);
+    add_entry_parameter(module, source_local, source_type, false);
+    let source = append_hir_expression(
+        module,
+        HirExpressionKind::Load(HirPlace::local(source_local)),
         source_type,
         entry_region,
         ValueKind::RValue,
     );
-    module.side_table.map_value(span, source, span);
-    let statement = HirStatement {
+    module.side_table.map_value(None, source, None);
+    let success = append_failure_block(
+        module,
+        entry_region,
+        vec![HirLocal {
+            id: success_local,
+            ty: success_type,
+            mutable: false,
+            region: entry_region,
+            span: None,
+        }],
+    );
+    let failure = append_failure_block(
+        module,
+        entry_region,
+        vec![HirLocal {
+            id: error_local,
+            ty: error_type,
+            mutable: false,
+            region: entry_region,
+            span: None,
+        }],
+    );
+    module.blocks[entry_block_index].terminator = HirTerminator::Invoke {
         id: HirNodeId(9000),
-        kind: HirStatementKind::CastOp {
-            policy,
-            source,
-            result: Some(HirLocalDestination::Define(result_local_id)),
-        },
-        span,
+        span: None,
+        operation: HirFallibleOperation::CastOp { policy, source },
+        success,
+        success_results: vec![success_local],
+        failure,
+        error_result: error_local,
     };
-
-    module.side_table.map_statement(span, &statement);
-    module.blocks[entry_block_index].statements.push(statement);
-
-    validate_module_for_tests(&module, &string_table, &type_environment)
 }
 
 fn numeric_scalar_type_for_test(
@@ -998,53 +1079,22 @@ fn validate_number_cast_op_for_test(
     let source_type = numeric_scalar_type_for_test(&mut type_environment, source_scalar);
     let target_type = numeric_scalar_type_for_test(&mut type_environment, target_scalar);
     let error_type = builtin_error_type_id(&mut type_environment);
-    let result_type = type_environment.intern_fallible_carrier(target_type, error_type);
-    let span = None;
-    let entry_block_index = start_entry_block_index(&module);
-    let entry_region = module.blocks[entry_block_index].region;
-    let source_local = LocalId(9001);
-    let result_local = LocalId(9000);
-    module.blocks[entry_block_index].locals.extend([
-        HirLocal {
-            id: result_local,
-            ty: result_type,
-            mutable: false,
-            region: entry_region,
-            span,
-        },
-        HirLocal {
-            id: source_local,
-            ty: source_type,
-            mutable: false,
-            region: entry_region,
-            span,
-        },
-    ]);
-    let source = append_hir_expression(
+    install_cast_invoke_for_test(
         &mut module,
-        HirExpressionKind::Load(HirPlace::local(source_local)),
-        source_type,
-        entry_region,
-        ValueKind::RValue,
-    );
-    module.side_table.map_value(span, source, span);
-    let statement = HirStatement {
-        id: HirNodeId(9000),
-        kind: HirStatementKind::CastOp {
-            policy: BuiltinCastPolicyId::NumericConversion {
-                source: source_scalar,
-                target: target_scalar,
-            },
-            source,
-            result: Some(HirLocalDestination::Define(result_local)),
+        BuiltinCastPolicyId::NumericConversion {
+            source: source_scalar,
+            target: target_scalar,
         },
-        span,
-    };
-
-    module.side_table.map_statement(span, &statement);
-    module.blocks[entry_block_index].statements.push(statement);
-
-    validate_module_for_tests(&module, &string_table, &type_environment)
+        source_type,
+        target_type,
+        error_type,
+    );
+    validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
 }
 
 fn fixed_type(scalar: FixedScalar) -> TypeId {
@@ -1062,22 +1112,8 @@ fn validate_comparison_for_test(
     let entry_region = module.blocks[entry_block_index].region;
     let left_local = LocalId(9000);
     let right_local = LocalId(9001);
-    module.blocks[entry_block_index].locals.extend([
-        HirLocal {
-            id: left_local,
-            ty: left_type,
-            mutable: false,
-            region: entry_region,
-            span: None,
-        },
-        HirLocal {
-            id: right_local,
-            ty: right_type,
-            mutable: false,
-            region: entry_region,
-            span: None,
-        },
-    ]);
+    add_entry_parameter(&mut module, left_local, left_type, false);
+    add_entry_parameter(&mut module, right_local, right_type, false);
 
     let left = append_hir_expression(
         &mut module,
@@ -1112,7 +1148,12 @@ fn validate_comparison_for_test(
     module.side_table.map_statement(span, &statement);
     module.blocks[entry_block_index].statements.push(statement);
 
-    validate_module_for_tests(&module, &string_table, &type_environment)
+    validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
 }
 
 fn validate_number_comparison_for_test(
@@ -1128,22 +1169,8 @@ fn validate_number_comparison_for_test(
     let entry_region = module.blocks[entry_block_index].region;
     let number_local = LocalId(9000);
     let integer_local = LocalId(9001);
-    module.blocks[entry_block_index].locals.extend([
-        HirLocal {
-            id: number_local,
-            ty: number_type,
-            mutable: false,
-            region: entry_region,
-            span: None,
-        },
-        HirLocal {
-            id: integer_local,
-            ty: integer_type,
-            mutable: false,
-            region: entry_region,
-            span: None,
-        },
-    ]);
+    add_entry_parameter(&mut module, number_local, number_type, false);
+    add_entry_parameter(&mut module, integer_local, integer_type, false);
 
     let number = append_hir_expression(
         &mut module,
@@ -1201,7 +1228,12 @@ fn validate_number_comparison_for_test(
     module.side_table.map_statement(span, &statement);
     module.blocks[entry_block_index].statements.push(statement);
 
-    validate_module_for_tests(&module, &string_table, &type_environment)
+    validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
 }
 
 #[test]
@@ -1554,33 +1586,33 @@ fn validator_rejects_numeric_conversion_cast_source_policy_mismatch() {
 }
 
 #[test]
-fn validator_rejects_numeric_conversion_cast_carrier_success_type_mismatch() {
+fn validator_rejects_numeric_conversion_cast_success_slot_type_mismatch() {
     let error = validate_cast_op_for_test(
         BuiltinCastPolicyId::NumericConversion {
             source: NumericScalar::Fixed(FixedScalar::I32),
-            target: NumericScalar::Fixed(FixedScalar::I32),
+            target: NumericScalar::Fixed(FixedScalar::U8),
         },
         builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        fixed_type(FixedScalar::U8),
+        fixed_type(FixedScalar::I32),
         None,
     )
-    .expect_err("validator should reject a CastOp carrier with the wrong success type");
+    .expect_err("validator should reject a CastOp success slot with the wrong type");
 
     assert_eq!(error.error_type, ErrorType::HirTransformation);
 }
 
 #[test]
-fn validator_rejects_numeric_conversion_cast_carrier_error_type_mismatch() {
+fn validator_rejects_numeric_conversion_cast_error_slot_type_mismatch() {
     let error = validate_cast_op_for_test(
         BuiltinCastPolicyId::NumericConversion {
             source: NumericScalar::Fixed(FixedScalar::I32),
-            target: NumericScalar::Fixed(FixedScalar::I32),
+            target: NumericScalar::Fixed(FixedScalar::U8),
         },
         builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        builtin_type_ids::fixed_scalar(FixedScalar::U8),
         Some(builtin_type_ids::STRING),
     )
-    .expect_err("validator should reject a CastOp carrier with a non-builtin error slot");
+    .expect_err("validator should reject a CastOp with a non-builtin error slot");
 
     assert_eq!(error.error_type, ErrorType::HirTransformation);
 }
@@ -1635,16 +1667,31 @@ fn valid_module_passes_explicit_validation() {
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
-    let (module, type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("lowering should succeed");
-    validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect("validator should accept a valid lowered module");
+    let ast = build_ast_with_registered_types(
+        vec![start_fn],
+        entry_path,
+        AstExpressionBuilder::new().unwrap(),
+        ConstValueStore::default(),
+        TypeEnvironment::new(),
+    );
+    let (module, type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("lowering should succeed");
+    validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("validator should accept a valid lowered module");
 }
 
 #[test]
 fn validator_rejects_assertion_message_evaluation_fact_mismatch() {
-    let _path_fork = super::PathInternerFork::empty();
     let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
     let entry_block_index = start_entry_block_index(&module);
     let entry_region = module.blocks[entry_block_index].region;
@@ -1674,8 +1721,13 @@ fn validator_rejects_assertion_message_evaluation_fact_mismatch() {
         message_evaluation: HirAssertionMessageEvaluation::Folded,
     };
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject a stale assertion message evaluation fact");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject a stale assertion message evaluation fact");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(
         error.msg.contains("evaluation fact"),
@@ -1686,7 +1738,6 @@ fn validator_rejects_assertion_message_evaluation_fact_mismatch() {
 
 #[test]
 fn validator_rejects_numeric_op_operand_shape_mismatch() {
-    let _path_fork = super::PathInternerFork::empty();
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let span = None;
     let entry_block_index = start_entry_block_index(&module);
@@ -1722,8 +1773,13 @@ fn validator_rejects_numeric_op_operand_shape_mismatch() {
     module.side_table.map_statement(span, &statement);
     module.blocks[entry_block_index].statements.push(statement);
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject mismatched NumericOp arity");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject mismatched NumericOp arity");
 
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(
@@ -1735,7 +1791,6 @@ fn validator_rejects_numeric_op_operand_shape_mismatch() {
 
 #[test]
 fn validator_rejects_numeric_op_operand_domain_mismatch() {
-    let _path_fork = super::PathInternerFork::empty();
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let span = None;
     let entry_block_index = start_entry_block_index(&module);
@@ -1774,15 +1829,19 @@ fn validator_rejects_numeric_op_operand_domain_mismatch() {
     module.side_table.map_statement(span, &statement);
     module.blocks[entry_block_index].statements.push(statement);
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject NumericOp operands outside the domain type");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject NumericOp operands outside the domain type");
 
     assert_eq!(error.error_type, ErrorType::HirTransformation);
 }
 
 #[test]
 fn validator_rejects_integer_divide_on_float_domain() {
-    let _path_fork = super::PathInternerFork::empty();
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let span = None;
     let entry_block_index = start_entry_block_index(&module);
@@ -1819,8 +1878,13 @@ fn validator_rejects_integer_divide_on_float_domain() {
     module.side_table.map_statement(span, &statement);
     module.blocks[entry_block_index].statements.push(statement);
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject IntegerDivide on an F64 domain");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject IntegerDivide on an F64 domain");
 
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("operator does not match the domain"));
@@ -1862,7 +1926,6 @@ fn append_expression_for_validation(
 
 #[test]
 fn validator_accepts_internal_string_append_with_scalar_chunk() {
-    let _path_fork = super::PathInternerFork::empty();
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let span = None;
     let string_type = type_environment.builtins().string;
@@ -1882,13 +1945,17 @@ fn validator_accepts_internal_string_append_with_scalar_chunk() {
     let entry_block_index = start_entry_block_index(&module);
     module.blocks[entry_block_index].statements.push(statement);
 
-    validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect("valid StringAppend should pass HIR validation");
+    validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("valid StringAppend should pass HIR validation");
 }
 
 #[test]
 fn validator_rejects_string_append_with_non_string_result() {
-    let _path_fork = super::PathInternerFork::empty();
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let span = None;
     let string_type = type_environment.builtins().string;
@@ -1908,8 +1975,13 @@ fn validator_rejects_string_append_with_non_string_result() {
     let entry_block_index = start_entry_block_index(&module);
     module.blocks[entry_block_index].statements.push(statement);
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("StringAppend with a non-String result should fail validation");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("StringAppend with a non-String result should fail validation");
     assert!(
         error
             .msg
@@ -1919,7 +1991,6 @@ fn validator_rejects_string_append_with_non_string_result() {
 
 #[test]
 fn validator_rejects_string_append_with_non_string_accumulator() {
-    let _path_fork = super::PathInternerFork::empty();
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let span = None;
     let expression = append_expression_for_validation(
@@ -1938,8 +2009,13 @@ fn validator_rejects_string_append_with_non_string_accumulator() {
     let entry_block_index = start_entry_block_index(&module);
     module.blocks[entry_block_index].statements.push(statement);
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("StringAppend with a non-String accumulator should fail validation");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("StringAppend with a non-String accumulator should fail validation");
     assert!(
         error
             .msg
@@ -1949,7 +2025,6 @@ fn validator_rejects_string_append_with_non_string_accumulator() {
 
 #[test]
 fn validator_rejects_plain_numeric_unary_op() {
-    let _path_fork = super::PathInternerFork::empty();
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let span = None;
     let entry_block_index = start_entry_block_index(&module);
@@ -1978,8 +2053,13 @@ fn validator_rejects_plain_numeric_unary_op() {
     module.side_table.map_statement(span, &statement);
     module.blocks[entry_block_index].statements.push(statement);
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject plain numeric UnaryOp");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject plain numeric UnaryOp");
 
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(
@@ -2013,7 +2093,6 @@ fn inject_float_statement_with_source(
     source: HirValueId,
     result_type: TypeId,
 ) {
-    let _path_fork = super::PathInternerFork::empty();
     let entry_block_index = start_entry_block_index(module);
     let entry_region = module.blocks[entry_block_index].region;
     let result_local = LocalId(9000);
@@ -2077,7 +2156,6 @@ fn fixed_float_source(
 
 #[test]
 fn validator_accepts_format_float_trap() {
-    let _path_fork = super::PathInternerFork::empty();
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let span = None;
     let string_type = type_environment.builtins().string;
@@ -2094,13 +2172,17 @@ fn validator_accepts_format_float_trap() {
         string_type,
     );
 
-    validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect("validator should accept FormatFloat with Trap and String result local");
+    validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("validator should accept FormatFloat with Trap and String result local");
 }
 
 #[test]
 fn validator_accepts_validate_float_trap() {
-    let _path_fork = super::PathInternerFork::empty();
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let span = None;
     let float_type = builtin_type_ids::fixed_scalar(FixedScalar::F64);
@@ -2117,13 +2199,17 @@ fn validator_accepts_validate_float_trap() {
         float_type,
     );
 
-    validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect("validator should accept ValidateFloat with Trap and F64 result local");
+    validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("validator should accept ValidateFloat with Trap and F64 result local");
 }
 
 #[test]
 fn validator_accepts_validate_float_with_exact_fixed_f64_type() {
-    let _path_fork = super::PathInternerFork::empty();
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let span = None;
     let f64_type = fixed_type(FixedScalar::F64);
@@ -2141,13 +2227,17 @@ fn validator_accepts_validate_float_with_exact_fixed_f64_type() {
         f64_type,
     );
 
-    validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect("validator should accept ValidateFloat with an exact fixed F64 source and result");
+    validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("validator should accept ValidateFloat with an exact fixed F64 source and result");
 }
 
 #[test]
 fn validator_rejects_validate_float_result_type_mismatch() {
-    let _path_fork = super::PathInternerFork::empty();
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let span = None;
     let f64_type = fixed_type(FixedScalar::F64);
@@ -2166,15 +2256,19 @@ fn validator_rejects_validate_float_result_type_mismatch() {
         fixed_type(FixedScalar::F32),
     );
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject a result local that erodes the validated type");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject a result local that erodes the validated type");
 
     assert_eq!(error.error_type, ErrorType::HirTransformation);
 }
 
 #[test]
 fn validator_rejects_validate_float_with_non_float_source() {
-    let _path_fork = super::PathInternerFork::empty();
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let span = None;
     let i32_type = fixed_type(FixedScalar::I32);
@@ -2202,15 +2296,19 @@ fn validator_rejects_validate_float_with_non_float_source() {
         i32_type,
     );
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject a non-float ValidateFloat source");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject a non-float ValidateFloat source");
 
     assert_eq!(error.error_type, ErrorType::HirTransformation);
 }
 
 #[test]
 fn validator_rejects_format_float_trap_with_non_string_result() {
-    let _path_fork = super::PathInternerFork::empty();
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let span = None;
     let float_type = builtin_type_ids::fixed_scalar(FixedScalar::F64);
@@ -2227,8 +2325,13 @@ fn validator_rejects_format_float_trap_with_non_string_result() {
         float_type,
     );
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject FormatFloat Trap with non-String result local");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject FormatFloat Trap with non-String result local");
 
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(
@@ -2239,91 +2342,7 @@ fn validator_rejects_format_float_trap_with_non_string_result() {
 }
 
 #[test]
-fn validator_accepts_format_float_return_error_with_carrier() {
-    let _path_fork = super::PathInternerFork::empty();
-    let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
-    let span = None;
-    let string_type = type_environment.builtins().string;
-    let error_type = builtin_error_type_id(&mut type_environment);
-    let carrier_type = type_environment.intern_fallible_carrier(string_type, error_type);
-
-    inject_float_statement(
-        &mut module,
-        &span,
-        HirStatementKind::FormatFloat {
-            source: HirValueId(0),
-            failure_mode: NumericFailureMode::ReturnError,
-            result: HirLocalDestination::Define(LocalId(0)),
-        },
-        builtin_type_ids::fixed_scalar(FixedScalar::F64),
-        carrier_type,
-    );
-
-    validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect("validator should accept FormatFloat with ReturnError and carrier result local");
-}
-
-#[test]
-fn validator_rejects_format_float_return_error_without_carrier() {
-    let _path_fork = super::PathInternerFork::empty();
-    let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
-    let span = None;
-    let string_type = type_environment.builtins().string;
-
-    inject_float_statement(
-        &mut module,
-        &span,
-        HirStatementKind::FormatFloat {
-            source: HirValueId(0),
-            failure_mode: NumericFailureMode::ReturnError,
-            result: HirLocalDestination::Define(LocalId(0)),
-        },
-        builtin_type_ids::fixed_scalar(FixedScalar::F64),
-        string_type,
-    );
-
-    let error = validate_module_for_tests(&module, &string_table, &type_environment).expect_err(
-        "validator should reject FormatFloat with ReturnError and non-carrier result local",
-    );
-
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains(
-        "FormatFloat ReturnError result local must have an internal fallible carrier type"
-    ));
-}
-
-#[test]
-fn validator_rejects_validate_float_return_error_without_carrier() {
-    let _path_fork = super::PathInternerFork::empty();
-    let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
-    let span = None;
-    let float_type = builtin_type_ids::fixed_scalar(FixedScalar::F64);
-
-    inject_float_statement(
-        &mut module,
-        &span,
-        HirStatementKind::ValidateFloat {
-            source: HirValueId(0),
-            failure_mode: NumericFailureMode::ReturnError,
-            result: HirLocalDestination::Define(LocalId(0)),
-        },
-        float_type,
-        float_type,
-    );
-
-    let error = validate_module_for_tests(&module, &string_table, &type_environment).expect_err(
-        "validator should reject ValidateFloat with ReturnError and non-carrier result local",
-    );
-
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(error.msg.contains(
-        "ValidateFloat ReturnError result local must have an internal fallible carrier type"
-    ));
-}
-
-#[test]
 fn validator_rejects_discharged_mode_on_float_and_range_step_statements() {
-    let _path_fork = super::PathInternerFork::empty();
     let dummy_source = || HirValueId(0);
     // (statement kind under test, expected rejection): the `inject_float_statement`
     // fixture reads the failure mode off the passed kind, so each case reuses it;
@@ -2357,8 +2376,13 @@ fn validator_rejects_discharged_mode_on_float_and_range_step_statements() {
         };
         inject_float_statement(&mut module, &span, kind, float_type, success_type);
 
-        let error = validate_module_for_tests(&module, &string_table, &type_environment)
-            .expect_err("validator should reject Infallible on float statements");
+        let error = validate_module_for_tests(
+            &module,
+            &string_table,
+            &type_environment,
+            &ExternalPackageRegistry::new(),
+        )
+        .expect_err("validator should reject Infallible on float statements");
         assert_eq!(error.error_type, ErrorType::HirTransformation);
         assert!(
             error.msg.contains(expected_message),
@@ -2391,8 +2415,13 @@ fn validator_rejects_discharged_mode_on_float_and_range_step_statements() {
     module.side_table.map_statement(span, &statement);
     module.blocks[entry_block_index].statements.push(statement);
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject Infallible on RangeStepFailure");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject Infallible on RangeStepFailure");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(
         error
@@ -2420,9 +2449,20 @@ fn validator_rejects_invalid_jump_target() {
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
-    let (mut module, type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("lowering should succeed");
+    let ast = build_ast_with_registered_types(
+        vec![start_fn],
+        entry_path,
+        AstExpressionBuilder::new().unwrap(),
+        ConstValueStore::default(),
+        TypeEnvironment::new(),
+    );
+    let (mut module, type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("lowering should succeed");
     let entry_block = module.functions[module
         .start_function
         .expect("normal test module should have start")
@@ -2433,8 +2473,13 @@ fn validator_rejects_invalid_jump_target() {
         args: vec![],
     };
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject invalid jump target");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject invalid jump target");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("Unknown HIR block id"));
 }
@@ -2443,11 +2488,11 @@ fn validator_rejects_invalid_jump_target() {
 fn validator_accepts_typed_jump_definition_from_local_source() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let entry = module.functions[module.start_function.unwrap().0 as usize].entry;
-    add_local(
+    add_entry_parameter(
         &mut module,
-        entry,
         LocalId(9000),
         builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        false,
     );
     add_local(
         &mut module,
@@ -2463,8 +2508,13 @@ fn validator_accepts_typed_jump_definition_from_local_source() {
         }],
     );
 
-    validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect("edge should define its target local from a same-typed source");
+    validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("edge should define its target local from a same-typed source");
 }
 
 #[test]
@@ -2485,8 +2535,13 @@ fn validator_rejects_jump_with_unknown_source_or_destination_local() {
         }],
     );
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("edge source must name a registered local");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("edge source must name a registered local");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("Unknown HIR local id"));
 
@@ -2506,8 +2561,13 @@ fn validator_rejects_jump_with_unknown_source_or_destination_local() {
         }],
     );
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("edge destination must name a registered local");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("edge destination must name a registered local");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("Unknown HIR local id"));
 }
@@ -2536,8 +2596,13 @@ fn validator_rejects_mismatched_and_duplicate_jump_destinations() {
         }],
     );
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("edge source and destination types must match");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("edge source and destination types must match");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("have different types"));
 
@@ -2565,8 +2630,13 @@ fn validator_rejects_mismatched_and_duplicate_jump_destinations() {
         ],
     );
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("one edge cannot define its target local more than once");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("one edge cannot define its target local more than once");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("defines destination"));
 }
@@ -2597,8 +2667,13 @@ fn validator_requires_jump_destinations_to_belong_to_the_target_block() {
         }],
     };
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("edge destination must be declared in the target block");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("edge destination must be declared in the target block");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("not a local owned by target block"));
 }
@@ -2648,8 +2723,13 @@ fn validator_requires_all_incoming_edges_to_agree_on_destination_set_and_arity()
         }],
     };
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("an If edge with no transfers must agree with its Jump predecessor");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("an If edge with no transfers must agree with its Jump predecessor");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(
         error
@@ -2725,8 +2805,13 @@ fn validator_requires_all_incoming_edges_to_agree_on_destination_set_and_arity()
         }],
     };
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("equal-arity predecessors must define the same destination locals");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("equal-arity predecessors must define the same destination locals");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(
         error
@@ -2744,17 +2829,17 @@ fn validator_accepts_reordered_incoming_jump_destination_pairs() {
     let second_source = LocalId(9001);
     let first_destination = LocalId(9002);
     let second_destination = LocalId(9003);
-    add_local(
+    add_entry_parameter(
         &mut module,
-        entry,
         first_source,
         builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        false,
     );
-    add_local(
+    add_entry_parameter(
         &mut module,
-        entry,
         second_source,
         builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        false,
     );
     let target = append_failure_block(
         &mut module,
@@ -2817,8 +2902,13 @@ fn validator_accepts_reordered_incoming_jump_destination_pairs() {
         ],
     };
 
-    validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect("explicit source/destination pairs may be reordered across predecessors");
+    validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("explicit source/destination pairs may be reordered across predecessors");
 }
 
 #[test]
@@ -2846,9 +2936,20 @@ fn validator_rejects_jump_sources_owned_by_another_function() {
         vec![node(NodeKind::Return(vec![]), None)],
         None,
     );
-    let ast = build_ast_with_registered_types(vec![helper, start], entry_path);
-    let (mut module, type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("lowering should succeed");
+    let ast = build_ast_with_registered_types(
+        vec![helper, start],
+        entry_path,
+        AstExpressionBuilder::new().unwrap(),
+        ConstValueStore::default(),
+        TypeEnvironment::new(),
+    );
+    let (mut module, type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("lowering should succeed");
     let start_entry = module.functions[module.start_function.unwrap().0 as usize].entry;
     let helper_entry = module
         .functions
@@ -2876,8 +2977,13 @@ fn validator_rejects_jump_sources_owned_by_another_function() {
         }],
     };
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("edge source must belong to the current function");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("edge source must belong to the current function");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("belongs to function"));
 }
@@ -2902,8 +3008,13 @@ fn validator_requires_parameters_to_be_defined_in_the_entry_block() {
     };
     module.functions[start_index].params.push(LocalId(9000));
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("function parameters must be defined in the function entry block");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("function parameters must be defined in the function entry block");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("not defined in its entry block"));
 }
@@ -2935,8 +3046,13 @@ fn validator_rejects_parameter_definition_destinations_but_accepts_updates() {
         },
     );
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("ordinary Write cannot redefine a function ABI parameter");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("ordinary Write cannot redefine a function ABI parameter");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("ABI parameter local"));
 
@@ -2953,8 +3069,13 @@ fn validator_rejects_parameter_definition_destinations_but_accepts_updates() {
         },
     );
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("dedicated operation cannot define over a function ABI parameter");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("dedicated operation cannot define over a function ABI parameter");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("ABI parameter local"));
 
@@ -2971,8 +3092,13 @@ fn validator_rejects_parameter_definition_destinations_but_accepts_updates() {
         },
     );
 
-    validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect("a dedicated operation may update a parameter result local");
+    validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("a dedicated operation may update a parameter result local");
 
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let parameter = LocalId(9000);
@@ -2990,8 +3116,13 @@ fn validator_rejects_parameter_definition_destinations_but_accepts_updates() {
         }],
     );
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("a CFG edge cannot define a function ABI parameter");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("a CFG edge cannot define a function ABI parameter");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("ABI parameter local"));
 
@@ -3020,8 +3151,13 @@ fn validator_rejects_parameter_definition_destinations_but_accepts_updates() {
         },
     );
 
-    validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect("ordinary place assignment may update an ABI parameter");
+    validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("ordinary place assignment may update an ABI parameter");
 }
 
 #[test]
@@ -3047,9 +3183,20 @@ fn validator_rejects_non_literal_match_pattern() {
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
-    let (mut module, type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("lowering should succeed");
+    let ast = build_ast_with_registered_types(
+        vec![start_fn],
+        entry_path,
+        AstExpressionBuilder::new().unwrap(),
+        ConstValueStore::default(),
+        TypeEnvironment::new(),
+    );
+    let (mut module, type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("lowering should succeed");
     let start = &module.functions[module
         .start_function
         .expect("normal test module should have start")
@@ -3094,8 +3241,13 @@ fn validator_rejects_non_literal_match_pattern() {
         }],
     };
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject non-literal match pattern");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject non-literal match pattern");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("Match literal pattern"));
 }
@@ -3132,8 +3284,13 @@ fn validator_rechecks_shared_expression_in_match_pattern_context() {
         span: None,
     };
     module.blocks[entry_block_index].statements.push(statement);
-    validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect("the shared literal should validate as an ordinary expression");
+    validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("the shared literal should validate as an ordinary expression");
 
     let scrutinee = append_hir_expression(
         &mut module,
@@ -3158,8 +3315,13 @@ fn validator_rechecks_shared_expression_in_match_pattern_context() {
         .side_table
         .map_terminator_span(entry_block_id, match_span);
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("the shared literal must be checked against its match subject type");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("the shared literal must be checked against its match subject type");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(
         error
@@ -3230,8 +3392,13 @@ fn validator_rejects_fixed_match_literal_type_different_from_scrutinee() {
         HirPattern::Literal,
     );
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject a pattern with a different type from its scrutinee");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject a pattern with a different type from its scrutinee");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("direct scrutinee type"));
 }
@@ -3250,8 +3417,13 @@ fn validator_rejects_fixed_match_relational_type_different_from_scrutinee() {
         },
     );
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject a relational pattern with the wrong scalar type");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject a relational pattern with the wrong scalar type");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("direct scrutinee type"));
 }
@@ -3269,8 +3441,13 @@ fn validator_rejects_option_labelled_fixed_scalar_match_pattern() {
         |value| HirPattern::OptionValue { value },
     );
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject a fixed payload labelled with the option type");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject a fixed payload labelled with the option type");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("direct scrutinee type"));
 }
@@ -3287,6 +3464,17 @@ fn validator_rejects_missing_side_table_mappings() {
         LocalSpan::source_start(),
     ));
 
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let value = expressions
+        .fixed_scalar(
+            &mut const_values,
+            i32_value(1),
+            authored_span,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture literal must be valid")
+        .id();
     let start_fn = function_node(
         start_name,
         FunctionSignature {
@@ -3295,14 +3483,7 @@ fn validator_rejects_missing_side_table_mappings() {
         },
         vec![
             node(
-                NodeKind::VariableDeclaration(make_test_variable(
-                    x,
-                    Expression::fixed_scalar(
-                        i32_value(1),
-                        authored_span,
-                        ValueMode::ImmutableOwned,
-                    ),
-                )),
+                NodeKind::VariableDeclaration(make_test_variable(x, value, &expressions)),
                 authored_span,
             ),
             node(NodeKind::Return(vec![]), authored_span),
@@ -3310,13 +3491,29 @@ fn validator_rejects_missing_side_table_mappings() {
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
-    let (mut module, type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("lowering should succeed");
+    let ast = build_ast_with_registered_types(
+        vec![start_fn],
+        entry_path,
+        expressions,
+        const_values,
+        TypeEnvironment::new(),
+    );
+    let (mut module, type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("lowering should succeed");
     module.side_table.clear();
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject missing side-table mappings");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject missing side-table mappings");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("side-table mapping"));
 }
@@ -3338,9 +3535,20 @@ fn validator_rejects_unresolved_generic_parameter_types() {
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
-    let (mut module, mut type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("lowering should succeed");
+    let ast = build_ast_with_registered_types(
+        vec![start_fn],
+        entry_path,
+        AstExpressionBuilder::new().unwrap(),
+        ConstValueStore::default(),
+        TypeEnvironment::new(),
+    );
+    let (mut module, mut type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("lowering should succeed");
     let parameter_name = string_table.intern("T");
     let generic_type_id =
         type_environment.intern_generic_parameter(GenericParameterId(0), parameter_name);
@@ -3359,15 +3567,19 @@ fn validator_rejects_unresolved_generic_parameter_types() {
         span: None,
     });
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject unresolved generic parameter TypeIds");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject unresolved generic parameter TypeIds");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("Unresolved generic parameter"));
 }
 
 #[test]
 fn validator_rejects_collection_containing_generic_parameter() {
-    let _path_fork = super::PathInternerFork::empty();
     let error = validation_error_for_injected_local_type(|string_table, type_environment| {
         let generic_type_id = generic_parameter_type_id(string_table, type_environment);
         type_environment.intern_constructed(
@@ -3383,8 +3595,7 @@ fn validator_rejects_collection_containing_generic_parameter() {
 }
 
 #[test]
-fn validator_rejects_option_and_result_containing_generic_parameter() {
-    let _path_fork = super::PathInternerFork::empty();
+fn validator_rejects_option_containing_generic_parameter() {
     let option_error =
         validation_error_for_injected_local_type(|string_table, type_environment| {
             let generic_type_id = generic_parameter_type_id(string_table, type_environment);
@@ -3395,25 +3606,10 @@ fn validator_rejects_option_and_result_containing_generic_parameter() {
         });
     assert_eq!(option_error.error_type, ErrorType::HirTransformation);
     assert!(option_error.msg.contains("Unresolved generic parameter"));
-
-    let result_error =
-        validation_error_for_injected_local_type(|string_table, type_environment| {
-            let generic_type_id = generic_parameter_type_id(string_table, type_environment);
-            type_environment.intern_constructed(
-                TypeConstructor::Builtin(BuiltinTypeConstructor::FallibleCarrier),
-                Box::new([
-                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
-                    generic_type_id,
-                ]),
-            )
-        });
-    assert_eq!(result_error.error_type, ErrorType::HirTransformation);
-    assert!(result_error.msg.contains("Unresolved generic parameter"));
 }
 
 #[test]
 fn validator_rejects_generic_nominal_instance_containing_generic_parameter() {
-    let _path_fork = super::PathInternerFork::empty();
     let error = validation_error_for_injected_local_type(|string_table, type_environment| {
         let generic_type_id = generic_parameter_type_id(string_table, type_environment);
         let box_path = PathId::ROOT;
@@ -3434,7 +3630,6 @@ fn validator_rejects_generic_nominal_instance_containing_generic_parameter() {
 
 #[test]
 fn validator_rejects_function_type_containing_generic_parameter() {
-    let _path_fork = super::PathInternerFork::empty();
     let error = validation_error_for_injected_local_type(|string_table, type_environment| {
         let generic_type_id = generic_parameter_type_id(string_table, type_environment);
         type_environment.intern_function(FunctionTypeKey {
@@ -3465,9 +3660,20 @@ fn validator_rejects_struct_field_type_containing_generic_parameter() {
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
-    let (mut module, mut type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("lowering should succeed");
+    let ast = build_ast_with_registered_types(
+        vec![start_fn],
+        entry_path,
+        AstExpressionBuilder::new().unwrap(),
+        ConstValueStore::default(),
+        TypeEnvironment::new(),
+    );
+    let (mut module, mut type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("lowering should succeed");
     let generic_type_id = generic_parameter_type_id(&mut string_table, &mut type_environment);
     let collection_type_id = type_environment.intern_constructed(
         TypeConstructor::Builtin(BuiltinTypeConstructor::Collection {
@@ -3485,15 +3691,19 @@ fn validator_rejects_struct_field_type_containing_generic_parameter() {
         }],
     });
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject unresolved generic parameter in HIR field types");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject unresolved generic parameter in HIR field types");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("Unresolved generic parameter"));
 }
 
 #[test]
 fn validator_rejects_function_return_type_containing_generic_parameter() {
-    let _path_fork = super::PathInternerFork::empty();
     let (mut string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
     let generic_type_id = generic_parameter_type_id(&mut string_table, &mut type_environment);
 
@@ -3501,10 +3711,36 @@ fn validator_rejects_function_return_type_containing_generic_parameter() {
         .start_function
         .expect("normal test module should have start")
         .0 as usize;
-    module.functions[start_index].return_type = generic_type_id;
+    module.functions[start_index].returns = vec![generic_type_id].into_boxed_slice();
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject unresolved generic parameter in return types");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject unresolved generic parameter in return types");
+    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert!(error.msg.contains("Unresolved generic parameter"));
+}
+
+#[test]
+fn validator_rejects_function_error_type_containing_generic_parameter() {
+    let (mut string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
+    let generic_type_id = generic_parameter_type_id(&mut string_table, &mut type_environment);
+    let start_index = module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize;
+    module.functions[start_index].error_return = Some(generic_type_id);
+
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject unresolved generic parameter in error types");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("Unresolved generic parameter"));
 }
@@ -3532,9 +3768,20 @@ fn validator_rejects_function_parameter_type_containing_generic_parameter() {
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
-    let (mut module, mut type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("lowering should succeed");
+    let ast = build_ast_with_registered_types(
+        vec![start_fn],
+        entry_path,
+        AstExpressionBuilder::new().unwrap(),
+        ConstValueStore::default(),
+        TypeEnvironment::new(),
+    );
+    let (mut module, mut type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("lowering should succeed");
     let generic_type_id = generic_parameter_type_id(&mut string_table, &mut type_environment);
 
     let entry_block = &mut module.blocks[module.functions[module
@@ -3545,15 +3792,19 @@ fn validator_rejects_function_parameter_type_containing_generic_parameter() {
         .0 as usize];
     entry_block.locals[0].ty = generic_type_id;
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject unresolved generic parameter in parameter locals");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject unresolved generic parameter in parameter locals");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("Unresolved generic parameter"));
 }
 
 #[test]
 fn validator_rejects_choice_payload_type_containing_generic_parameter() {
-    let _path_fork = super::PathInternerFork::empty();
     let (mut string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
     let generic_type_id = generic_parameter_type_id(&mut string_table, &mut type_environment);
     let field_name = string_table.intern("value");
@@ -3570,15 +3821,19 @@ fn validator_rejects_choice_payload_type_containing_generic_parameter() {
         }],
     });
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject unresolved generic parameter in choice payloads");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject unresolved generic parameter in choice payloads");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("Unresolved generic parameter"));
 }
 
 #[test]
 fn validator_rejects_expression_type_containing_generic_parameter() {
-    let _path_fork = super::PathInternerFork::empty();
     let (mut string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
     let generic_type_id = generic_parameter_type_id(&mut string_table, &mut type_environment);
 
@@ -3603,15 +3858,19 @@ fn validator_rejects_expression_type_containing_generic_parameter() {
     module.side_table.map_value(span, value_id, span);
     module.blocks[entry_block_index].statements.push(statement);
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject unresolved generic parameter in expression types");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject unresolved generic parameter in expression types");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("Unresolved generic parameter"));
 }
 
 #[test]
 fn validator_rejects_anonymous_const_record_marker_on_local() {
-    let _path_fork = super::PathInternerFork::empty();
     let error = validation_error_for_injected_local_type(|_, type_environment| {
         type_environment.anonymous_const_record_type()
     });
@@ -3627,7 +3886,6 @@ fn validator_rejects_anonymous_const_record_marker_on_local() {
 
 #[test]
 fn validator_rejects_anonymous_const_record_marker_on_expression() {
-    let _path_fork = super::PathInternerFork::empty();
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let marker = type_environment.anonymous_const_record_type();
     let entry_block_index = start_entry_block_index(&module);
@@ -3651,8 +3909,13 @@ fn validator_rejects_anonymous_const_record_marker_on_expression() {
     module.side_table.map_value(span, value_id, span);
     module.blocks[entry_block_index].statements.push(statement);
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject the compile-time marker on an expression");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject the compile-time marker on an expression");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(
         error
@@ -3663,16 +3926,20 @@ fn validator_rejects_anonymous_const_record_marker_on_expression() {
 
 #[test]
 fn validator_rejects_anonymous_const_record_marker_on_function_return() {
-    let _path_fork = super::PathInternerFork::empty();
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let marker = type_environment.anonymous_const_record_type();
     let start_function = module
         .start_function
         .expect("normal test module should have start");
-    module.functions[start_function.0 as usize].return_type = marker;
+    module.functions[start_function.0 as usize].returns = vec![marker].into_boxed_slice();
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject the compile-time marker on a function return");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject the compile-time marker on a function return");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(
         error
@@ -3683,7 +3950,6 @@ fn validator_rejects_anonymous_const_record_marker_on_function_return() {
 
 #[test]
 fn classify_hir_type_rejects_anonymous_const_record_marker() {
-    let _path_fork = super::PathInternerFork::empty();
     let type_environment = TypeEnvironment::new();
     let error = classify_hir_type(
         type_environment.anonymous_const_record_type(),
@@ -3714,9 +3980,20 @@ fn validator_rejects_placeholder_terminator() {
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
-    let (mut module, type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("lowering should succeed");
+    let ast = build_ast_with_registered_types(
+        vec![start_fn],
+        entry_path,
+        AstExpressionBuilder::new().unwrap(),
+        ConstValueStore::default(),
+        TypeEnvironment::new(),
+    );
+    let (mut module, type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("lowering should succeed");
     let entry = module.functions[module
         .start_function
         .expect("normal test module should have start")
@@ -3724,8 +4001,13 @@ fn validator_rejects_placeholder_terminator() {
         .entry;
     module.blocks[entry.0 as usize].terminator = HirTerminator::Uninitialized;
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject placeholder terminators");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject placeholder terminators");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("placeholder terminator"));
 }
@@ -3747,16 +4029,99 @@ fn validator_rejects_region_cycle() {
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
-    let (mut module, type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("lowering should succeed");
+    let ast = build_ast_with_registered_types(
+        vec![start_fn],
+        entry_path,
+        AstExpressionBuilder::new().unwrap(),
+        ConstValueStore::default(),
+        TypeEnvironment::new(),
+    );
+    let (mut module, type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("lowering should succeed");
     let region_id = module.regions[0].id();
     module.regions[0] = HirRegion::lexical(region_id, Some(region_id));
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject cyclic region parents");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject cyclic region parents");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("cycle"));
+}
+
+#[test]
+fn validator_accepts_deep_runtime_not_chain_on_small_stack() {
+    const STACK_BUDGET_CHILD_ENV: &str = "MOTH_HIR_VALIDATION_STACK_BUDGET_CHILD";
+    if std::env::var_os(STACK_BUDGET_CHILD_ENV).is_none() {
+        run_stack_budgeted_child(
+            module_path!(),
+            "validator_accepts_deep_runtime_not_chain_on_small_stack",
+            STACK_BUDGET_CHILD_ENV,
+            "deep Not validation must fit a 1 MiB stack",
+        );
+        return;
+    }
+
+    std::thread::Builder::new()
+        .stack_size(1024 * 1024)
+        .spawn(|| {
+            let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+            let entry =
+                add_entry_parameter(&mut module, LocalId(9000), builtin_type_ids::BOOL, false);
+            let region = module.blocks[entry.0 as usize].region;
+            let mut value = append_hir_expression(
+                &mut module,
+                HirExpressionKind::Load(HirPlace::local(LocalId(9000))),
+                builtin_type_ids::BOOL,
+                region,
+                ValueKind::Place,
+            );
+            for _ in 0..2048 {
+                value = append_hir_expression(
+                    &mut module,
+                    HirExpressionKind::UnaryOp {
+                        op: HirUnaryOp::Not,
+                        operand: value,
+                    },
+                    builtin_type_ids::BOOL,
+                    region,
+                    ValueKind::RValue,
+                );
+            }
+
+            // Both branches revisit the same chain after its active path has unwound.
+            let comparison = append_hir_expression(
+                &mut module,
+                HirExpressionKind::BinOp {
+                    op: HirBinOp::Eq,
+                    left: value,
+                    right: value,
+                },
+                builtin_type_ids::BOOL,
+                region,
+                ValueKind::RValue,
+            );
+            append_entry_statement(&mut module, entry, HirStatementKind::Expr(comparison));
+
+            validate_module_for_tests(
+                &module,
+                &string_table,
+                &type_environment,
+                &ExternalPackageRegistry::new(),
+            )
+            .expect("a deep runtime Not chain with shared uses should validate");
+        })
+        .expect("the bounded-stack validation thread should spawn")
+        .join()
+        .expect("deep Not validation should finish on a 1 MiB stack");
 }
 
 #[test]
@@ -3768,11 +4133,11 @@ fn validator_rejects_cycle_in_expression_id_graph() {
         .expect("test expression store should fit its dense ID domain");
     let cycle_id = append_hir_expression(
         &mut module,
-        HirExpressionKind::TupleGet {
-            tuple: HirValueId(next_expression_id),
-            index: 0,
+        HirExpressionKind::UnaryOp {
+            op: HirUnaryOp::Not,
+            operand: HirValueId(next_expression_id),
         },
-        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        builtin_type_ids::BOOL,
         entry_region,
         ValueKind::RValue,
     );
@@ -3785,8 +4150,61 @@ fn validator_rejects_cycle_in_expression_id_graph() {
     module.side_table.map_statement(None, &statement);
     module.blocks[entry_block_index].statements.push(statement);
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject cyclic expression IDs");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject cyclic expression IDs");
+
+    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert!(error.msg.contains("HIR expression graph contains a cycle"));
+}
+
+#[test]
+fn validator_rejects_cycle_after_consecutive_not_rows() {
+    let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
+    let entry_block_index = start_entry_block_index(&module);
+    let entry = module.blocks[entry_block_index].id;
+    let entry_region = module.blocks[entry_block_index].region;
+    let next_expression_id = u32::try_from(module.expressions.measurements().rows.len)
+        .expect("test expression store should fit its dense ID domain");
+    let second_expression_id = next_expression_id
+        .checked_add(1)
+        .expect("the second test expression ID should fit");
+    let mut expression_id = append_hir_expression(
+        &mut module,
+        HirExpressionKind::UnaryOp {
+            op: HirUnaryOp::Not,
+            operand: HirValueId(second_expression_id),
+        },
+        builtin_type_ids::BOOL,
+        entry_region,
+        ValueKind::RValue,
+    );
+    // The root enters a second Not row, then a third, before revisiting the second.
+    for _ in 0..2 {
+        expression_id = append_hir_expression(
+            &mut module,
+            HirExpressionKind::UnaryOp {
+                op: HirUnaryOp::Not,
+                operand: expression_id,
+            },
+            builtin_type_ids::BOOL,
+            entry_region,
+            ValueKind::RValue,
+        );
+    }
+    append_entry_statement(&mut module, entry, HirStatementKind::Expr(expression_id));
+
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject a cycle after entering multiple Not rows");
 
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("HIR expression graph contains a cycle"));
@@ -3799,11 +4217,11 @@ fn validator_rejects_dangling_expression_child_id() {
     let entry_region = module.blocks[entry_block_index].region;
     let expression_id = append_hir_expression(
         &mut module,
-        HirExpressionKind::TupleGet {
-            tuple: HirValueId(u32::MAX),
-            index: 0,
+        HirExpressionKind::UnaryOp {
+            op: HirUnaryOp::Not,
+            operand: HirValueId(u32::MAX),
         },
-        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        builtin_type_ids::BOOL,
         entry_region,
         ValueKind::RValue,
     );
@@ -3816,11 +4234,54 @@ fn validator_rejects_dangling_expression_child_id() {
     module.side_table.map_statement(None, &statement);
     module.blocks[entry_block_index].statements.push(statement);
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject a child ID outside the dense expression store");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject a child ID outside the dense expression store");
 
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("Invalid expression id"));
+}
+
+#[test]
+fn validator_clears_consecutive_not_rows_after_dangling_child_error() {
+    let (_, mut module, type_environment) = minimal_lowered_hir_module();
+    let entry_block_index = start_entry_block_index(&module);
+    let entry_region = module.blocks[entry_block_index].region;
+    let mut expression_id = HirValueId(u32::MAX);
+    for _ in 0..3 {
+        expression_id = append_hir_expression(
+            &mut module,
+            HirExpressionKind::UnaryOp {
+                op: HirUnaryOp::Not,
+                operand: expression_id,
+            },
+            builtin_type_ids::BOOL,
+            entry_region,
+            ValueKind::RValue,
+        );
+    }
+
+    let [first_result, second_result] = validate_expression_twice_for_tests(
+        &module,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+        expression_id,
+    )
+    .expect("test module definition IDs should validate");
+    let first_error = first_result
+        .expect_err("validator should reject the dangling child after entering three Not rows");
+    let second_error = second_result
+        .expect_err("retry should reach the dangling child after clearing every entered Not row");
+
+    assert_eq!(first_error.error_type, ErrorType::HirTransformation);
+    assert!(first_error.msg.contains("Invalid expression id"));
+    assert_eq!(second_error.error_type, ErrorType::HirTransformation);
+    assert!(second_error.msg.contains("Invalid expression id"));
+    assert_eq!(second_error.msg, first_error.msg);
 }
 
 #[test]
@@ -3852,8 +4313,13 @@ fn validator_rejects_dangling_index_expression_id() {
     module.side_table.map_statement(None, &statement);
     module.blocks[entry_block_index].statements.push(statement);
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject an index edge outside the dense expression store");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject an index edge outside the dense expression store");
 
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("Invalid expression id"));
@@ -3876,14 +4342,30 @@ fn validator_rejects_missing_region_parent() {
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
-    let (mut module, type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("lowering should succeed");
+    let ast = build_ast_with_registered_types(
+        vec![start_fn],
+        entry_path,
+        AstExpressionBuilder::new().unwrap(),
+        ConstValueStore::default(),
+        TypeEnvironment::new(),
+    );
+    let (mut module, type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("lowering should succeed");
     let region_id = module.regions[0].id();
     module.regions[0] = HirRegion::lexical(region_id, Some(RegionId(9999)));
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject missing region parents");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject missing region parents");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(error.msg.contains("missing parent"));
 }
@@ -3915,9 +4397,20 @@ fn validator_rejects_cross_function_cfg_edges() {
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![helper, start], entry_path);
-    let (mut module, type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("lowering should succeed");
+    let ast = build_ast_with_registered_types(
+        vec![helper, start],
+        entry_path,
+        AstExpressionBuilder::new().unwrap(),
+        ConstValueStore::default(),
+        TypeEnvironment::new(),
+    );
+    let (mut module, type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("lowering should succeed");
     let start_entry = module.functions[module
         .start_function
         .expect("normal test module should have start")
@@ -3935,8 +4428,13 @@ fn validator_rejects_cross_function_cfg_edges() {
         args: vec![],
     };
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject cross-function CFG edges");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject cross-function CFG edges");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(
         error.msg.contains("multiple functions") || error.msg.contains("crosses function boundary")
@@ -3953,6 +4451,11 @@ fn lowering_errors_preserve_string_table_context() {
 
     let call_span = None;
 
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let call = expressions
+        .function_call_with_typed_arguments(missing_function, Vec::new(), Vec::new(), call_span)
+        .expect("fixture call must have valid expression edges")
+        .id();
     let start_fn = function_node(
         start_name,
         FunctionSignature {
@@ -3960,24 +4463,23 @@ fn lowering_errors_preserve_string_table_context() {
             returns: vec![],
         },
         vec![
-            node(
-                NodeKind::ExpressionStatement(Expression::function_call(
-                    missing_function,
-                    Vec::new(),
-                    Vec::new(),
-                    call_span,
-                )),
-                call_span,
-            ),
+            node(NodeKind::ExpressionStatement(call), call_span),
             node(NodeKind::Return(vec![]), None),
         ],
         None,
     );
 
     let messages = lower_ast(
-        build_ast_with_registered_types(vec![start_fn], entry_path),
+        build_ast_with_registered_types(
+            vec![start_fn],
+            entry_path,
+            expressions,
+            ConstValueStore::default(),
+            TypeEnvironment::new(),
+        ),
         &mut string_table,
         &mut path_fork,
+        &ExternalPackageRegistry::new(),
     )
     .expect_err("unknown function call should fail HIR lowering");
 
@@ -4006,9 +4508,20 @@ fn hir_variant_construct_option_invalid_index_rejected() {
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
-    let (mut module, type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("lowering should succeed");
+    let ast = build_ast_with_registered_types(
+        vec![start_fn],
+        entry_path,
+        AstExpressionBuilder::new().unwrap(),
+        ConstValueStore::default(),
+        TypeEnvironment::new(),
+    );
+    let (mut module, type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("lowering should succeed");
     let entry_block_index = module.functions[module
         .start_function
         .expect("normal test module should have start")
@@ -4054,83 +4567,13 @@ fn hir_variant_construct_option_invalid_index_rejected() {
     module.side_table.map_value(span, expr_id, span);
     module.blocks[entry_block_index].statements.push(statement);
 
-    let error = validate_module_for_tests(&module, &string_table, &type_env)
-        .expect_err("validator should reject out-of-range Option variant index");
-    assert_eq!(error.error_type, ErrorType::HirTransformation);
-    assert!(
-        error.msg.contains("out of range"),
-        "expected 'out of range' in error, got: {}",
-        error.msg
-    );
-}
-
-#[test]
-fn hir_variant_construct_result_invalid_index_rejected() {
-    let mut path_fork = super::PathInternerFork::empty();
-    let mut string_table = StringTable::new();
-    let (entry_path, start_name) =
-        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
-
-    let start_fn = function_node(
-        start_name,
-        FunctionSignature {
-            parameters: vec![],
-            returns: vec![],
-        },
-        vec![node(NodeKind::Return(vec![]), None)],
-        None,
-    );
-
-    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
-    let (mut module, type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("lowering should succeed");
-    let entry_block_index = module.functions[module
-        .start_function
-        .expect("normal test module should have start")
-        .0 as usize]
-        .entry
-        .0 as usize;
-    let region = module.blocks[entry_block_index].region;
-
-    let mut type_env = type_environment.clone();
-    let int_ty = builtin_type_ids::fixed_scalar(FixedScalar::I32);
-    let result_ty = type_env.intern_constructed(
-        crate::compiler_frontend::datatypes::ids::TypeConstructor::Builtin(
-            crate::compiler_frontend::datatypes::ids::BuiltinTypeConstructor::FallibleCarrier,
-        ),
-        Box::new([int_ty, int_ty]),
-    );
-
-    let stmt_id = HirNodeId(9000);
-    let span = None;
-    let fields = module
-        .expressions
-        .append_variant_fields(&[], span)
-        .expect("empty result fields should fit the expression store");
-    let expr_id = append_hir_expression(
-        &mut module,
-        HirExpressionKind::VariantConstruct {
-            carrier: HirVariantCarrier::Fallible,
-            variant_index: 99,
-            fields,
-        },
-        result_ty,
-        region,
-        ValueKind::Const,
-    );
-
-    let statement = HirStatement {
-        id: stmt_id,
-        kind: HirStatementKind::Expr(expr_id),
-        span,
-    };
-
-    module.side_table.map_statement(span, &statement);
-    module.side_table.map_value(span, expr_id, span);
-    module.blocks[entry_block_index].statements.push(statement);
-
-    let error = validate_module_for_tests(&module, &string_table, &type_env)
-        .expect_err("validator should reject out-of-range Result variant index");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_env,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject out-of-range Option variant index");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(
         error.msg.contains("out of range"),
@@ -4158,7 +4601,10 @@ fn hir_variant_construct_choice_wrong_field_name_rejected() {
                     id: path_fork
                         .try_intern_portable_path("message", &mut string_table)
                         .expect("test path fits"),
-                    value: no_value_expr(builtin_type_ids::STRING, None, ValueMode::ImmutableOwned),
+                    type_id: builtin_type_ids::STRING,
+                    diagnostic_type: DataType::Inferred,
+                    value_mode: ValueMode::ImmutableOwned,
+                    value: DeclarationValue::Absent,
                     binding_span: None,
                     config_qualifier: None,
                 }],
@@ -4196,9 +4642,17 @@ fn hir_variant_construct_choice_wrong_field_name_rejected() {
                 .expect("test path fits"),
             variants: choice_variants,
         }],
+        AstExpressionBuilder::new().unwrap(),
+        ConstValueStore::default(),
+        TypeEnvironment::new(),
     );
-    let (mut module, type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("lowering should succeed");
+    let (mut module, type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("lowering should succeed");
     let entry_block_index = module.functions[module
         .start_function
         .expect("normal test module should have start")
@@ -4253,8 +4707,13 @@ fn hir_variant_construct_choice_wrong_field_name_rejected() {
     module.side_table.map_value(span, value_id, span);
     module.blocks[entry_block_index].statements.push(statement);
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject wrong field name in choice VariantConstruct");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject wrong field name in choice VariantConstruct");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(
         error.msg.contains("field name"),
@@ -4282,7 +4741,10 @@ fn hir_variant_construct_choice_wrong_field_type_rejected() {
                     id: path_fork
                         .try_intern_portable_path("message", &mut string_table)
                         .expect("test path fits"),
-                    value: no_value_expr(builtin_type_ids::STRING, None, ValueMode::ImmutableOwned),
+                    type_id: builtin_type_ids::STRING,
+                    diagnostic_type: DataType::Inferred,
+                    value_mode: ValueMode::ImmutableOwned,
+                    value: DeclarationValue::Absent,
                     binding_span: None,
                     config_qualifier: None,
                 }],
@@ -4320,9 +4782,17 @@ fn hir_variant_construct_choice_wrong_field_type_rejected() {
                 .expect("test path fits"),
             variants: choice_variants,
         }],
+        AstExpressionBuilder::new().unwrap(),
+        ConstValueStore::default(),
+        TypeEnvironment::new(),
     );
-    let (mut module, type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("lowering should succeed");
+    let (mut module, type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("lowering should succeed");
     let entry_block_index = module.functions[module
         .start_function
         .expect("normal test module should have start")
@@ -4378,8 +4848,13 @@ fn hir_variant_construct_choice_wrong_field_type_rejected() {
     module.side_table.map_value(span, value_id, span);
     module.blocks[entry_block_index].statements.push(statement);
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject wrong field type in choice VariantConstruct");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject wrong field type in choice VariantConstruct");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(
         error.msg.contains("field type mismatch"),
@@ -4390,13 +4865,17 @@ fn hir_variant_construct_choice_wrong_field_type_rejected() {
 
 #[test]
 fn validator_rejects_collection_expression_with_non_collection_type() {
-    let _path_fork = super::PathInternerFork::empty();
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let int_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     inject_collection_expression_statement(&mut module, int_type, None);
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject Collection expression with non-collection type");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject Collection expression with non-collection type");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     assert!(
         error.msg.contains("not a collection type"),
@@ -4407,31 +4886,38 @@ fn validator_rejects_collection_expression_with_non_collection_type() {
 
 #[test]
 fn validator_accepts_collection_expression_with_growable_collection_type() {
-    let _path_fork = super::PathInternerFork::empty();
     let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
     let int_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let growable_collection = type_environment.intern_collection(int_type, None);
     inject_collection_expression_statement(&mut module, growable_collection, None);
 
-    validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect("validator should accept Collection expression with growable collection type");
+    validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("validator should accept Collection expression with growable collection type");
 }
 
 #[test]
 fn validator_accepts_collection_expression_with_fixed_collection_type() {
-    let _path_fork = super::PathInternerFork::empty();
     let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
     let int_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let fixed_collection = type_environment.intern_collection(int_type, Some(64));
     inject_collection_expression_statement(&mut module, fixed_collection, None);
 
-    validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect("validator should accept Collection expression with fixed collection type");
+    validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("validator should accept Collection expression with fixed collection type");
 }
 
 #[test]
 fn validator_rejects_number_literal_scale_that_mismatches_hir_type() {
-    let _path_fork = super::PathInternerFork::empty();
     let (string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
     let value_scale = NumberScale::new(2).expect("test scale is valid");
     let value = NumberValue::from_normalized("1.25", NumericLiteralSign::Positive, value_scale)
@@ -4458,8 +4944,13 @@ fn validator_rejects_number_literal_scale_that_mismatches_hir_type() {
     module.side_table.map_statement(span, &statement);
     module.blocks[entry_block_index].statements.push(statement);
 
-    validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect("matching Dec value and TypeId scales should pass validation");
+    validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("matching Dec value and TypeId scales should pass validation");
 
     let expression = match module.blocks[entry_block_index]
         .statements
@@ -4482,8 +4973,13 @@ fn validator_rejects_number_literal_scale_that_mismatches_hir_type() {
         .side_table
         .map_value(span, mismatched_expression, span);
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("validator should reject Dec value/type scale disagreement");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject Dec value/type scale disagreement");
 
     assert_eq!(error.error_type, ErrorType::HirTransformation);
 }
@@ -4495,16 +4991,31 @@ fn validator_owns_pending_catch_handler_edges_and_rejects_dangling_or_cross_func
     let source = "double |value I32| -> I32:\nreturn value + 2147483647\n;\n\
                   recover |value I32| -> I32:\nreturn double(value) catch then 0\n;\n";
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let (mut module, type_environment) = lower_ast(ast, &mut string_table, &mut path_fork)
-        .expect("the direct inferred-failure catch must lower");
+    let (mut module, type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("the direct inferred-failure catch must lower");
     assert_eq!(module.catch_protected_calls.len(), 1);
-    validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect("the pending handler edge must belong to its caller before installation");
+    validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("the pending handler edge must belong to its caller before installation");
     let record = module.catch_protected_calls[0];
 
     module.catch_protected_calls[0].statement = HirNodeId(u32::MAX);
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("a dangling pending edge cannot validate");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("a dangling pending edge cannot validate");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
     module.catch_protected_calls[0] = record;
 
@@ -4514,7 +5025,12 @@ fn validator_owns_pending_catch_handler_edges_and_rejects_dangling_or_cross_func
         .find(|function| function.id != record.owner)
         .expect("the fixture must have a distinct callee");
     module.catch_protected_calls[0].handler.block = foreign_function.entry;
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("a pending handler cannot enter another function's CFG");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("a pending handler cannot enter another function's CFG");
     assert_eq!(error.error_type, ErrorType::HirTransformation);
 }

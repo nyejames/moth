@@ -221,7 +221,7 @@ Boracle may use `BTreeMap` and `BTreeSet` freely. Dense vectors are also suitabl
 
 A HIR statement is not always one borrow-analysis event.
 
-A call can evaluate several arguments from left to right, read index expressions, request mutable access and write a result. Two events in one statement may conflict even though they share one HIR statement ID.
+A call can evaluate several arguments from left to right, read index expressions, request mutable access and write ordered results. Two events in one operation may conflict even when they share one HIR node identity.
 
 `BorrowProblem` therefore uses semantic program points or an equivalently explicit ordered event stream.
 
@@ -233,7 +233,7 @@ One acceptable conceptual shape is:
         -> argument 0 place read
         -> argument 1 place read
         -> call access commit
-        -> result origin write
+        -> ordered result origin writes
         -> block terminator
 ]
 
@@ -244,6 +244,7 @@ The exact Rust representation may differ. These invariants do not:
 - every loan issue, use, kill and conflict can name one point
 - every point can map back to its owning HIR/source location
 - jump transfers carry explicit source and destination places. The builder records real source reads and destination write accesses, while the jump event captures every incoming value before defining any successor binding. Destination order cannot change another incoming value
+- `Invoke` projects into distinct outcome edges. Each edge retires both destination sets before defining only its selected results. Argument values are captured first, and separate result positions never establish distinct allocation origins without provenance evidence
 - unreachable blocks do not create live loans or future uses
 
 ## Typed identities

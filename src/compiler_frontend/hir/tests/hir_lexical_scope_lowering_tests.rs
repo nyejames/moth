@@ -4,10 +4,13 @@
 //! WHY: static Bool specialization removes runtime control flow but must retain authored scope.
 
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::hir::blocks::HirLocal;
 use crate::compiler_frontend::hir::module::HirModule;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
     function_node, make_test_variable, node,
@@ -23,15 +26,21 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 ///
 /// WHY: these fixtures pin the exact `I32` width explicitly at the scalar carrier.
 fn i32_literal(
+    builder: &mut AstExpressionBuilder,
+    constants: &mut ConstValueStore,
     value: i64,
-    span: Option<crate::compiler_frontend::source::SourceSpan>,
+    span: Option<SourceSpan>,
     value_mode: ValueMode,
-) -> Expression {
-    Expression::fixed_scalar(
-        FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32"),
-        span,
-        value_mode,
-    )
+) -> ExprId {
+    builder
+        .fixed_scalar(
+            constants,
+            FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32"),
+            span,
+            value_mode,
+        )
+        .expect("test literal fits expression store")
+        .id()
 }
 
 fn local_by_name<'a>(
@@ -61,24 +70,34 @@ fn compiler_generated_scope_lowers_through_child_region_and_rejoins_parent() {
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let inner = super::symbol("inner", &mut path_fork, &mut string_table);
     let after = super::symbol("after", &mut path_fork, &mut string_table);
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
 
+    let inner_value = i32_literal(
+        &mut builder,
+        &mut constants,
+        1,
+        None,
+        ValueMode::ImmutableOwned,
+    );
     let lexical_scope = node(
         NodeKind::LexicalScope {
             body: vec![node(
-                NodeKind::VariableDeclaration(make_test_variable(
-                    inner,
-                    i32_literal(1, None, ValueMode::ImmutableOwned),
-                )),
+                NodeKind::VariableDeclaration(make_test_variable(inner, inner_value, &builder)),
                 None,
             )],
         },
         None,
     );
+    let after_value = i32_literal(
+        &mut builder,
+        &mut constants,
+        2,
+        None,
+        ValueMode::ImmutableOwned,
+    );
     let after_declaration = node(
-        NodeKind::VariableDeclaration(make_test_variable(
-            after,
-            i32_literal(2, None, ValueMode::ImmutableOwned),
-        )),
+        NodeKind::VariableDeclaration(make_test_variable(after, after_value, &builder)),
         None,
     );
 
@@ -92,9 +111,20 @@ fn compiler_generated_scope_lowers_through_child_region_and_rejoins_parent() {
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![start_function], entry_path);
-    let (module, _type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
+    let ast = build_ast_with_registered_types(
+        vec![start_function],
+        entry_path,
+        builder,
+        constants,
+        TypeEnvironment::new(),
+    );
+    let (module, _type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
+    )
+    .expect("HIR lowering should succeed");
     let _inner_local = local_by_name(&module, &path_fork, &string_table, "inner");
     let _after_local = local_by_name(&module, &path_fork, &string_table, "after");
     let start_function = &module.functions[module

@@ -102,7 +102,7 @@ fn find_same_file_method<'a>(
         let Some(receiver_parameter) = entry.signature.parameters.first() else {
             continue;
         };
-        let receiver_type_id = receiver_parameter.value.type_id;
+        let receiver_type_id = receiver_parameter.type_id;
         if receiver_type_matches_target(receiver_type_id, target, type_environment) {
             return Some(ImplementationMethod {
                 entry,
@@ -197,7 +197,7 @@ fn validate_parameters(
         .zip(method_parameters.iter())
         .enumerate()
     {
-        if required.value_mode != actual.value.value_mode {
+        if required.value_mode != actual.value_mode {
             return Err(invalid_conformance(
                 context.target_name,
                 Some(context.trait_name),
@@ -212,7 +212,7 @@ fn validate_parameters(
 
         let expected_type =
             replace_trait_this(required.type_id, trait_this_type, method.receiver_type_id);
-        if expected_type != actual.value.type_id {
+        if expected_type != actual.type_id {
             return Err(invalid_conformance(
                 context.target_name,
                 Some(context.trait_name),
@@ -220,7 +220,7 @@ fn validate_parameters(
                     requirement_name: requirement.name,
                     parameter_index: index + 1,
                     expected_type,
-                    found_type: actual.value.type_id,
+                    found_type: actual.type_id,
                 },
                 context.conformance_span,
                 requirement_and_method_labels(requirement, method.entry, context.string_table),

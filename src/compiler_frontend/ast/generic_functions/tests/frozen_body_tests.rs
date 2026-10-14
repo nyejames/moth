@@ -8,31 +8,33 @@
 //! `@assets/logo.svg` syntax through Stage 0 resolution. These tests own the freeze-to-sidecar
 //! seam from that resolved AST representation while keeping donor source identity explicit.
 
-use super::super::{GenericFunctionBody, GenericFunctionTemplate, MaterialisedDonorContext};
+use super::super::{
+    GenericFunctionBody, GenericFunctionInstantiationRequest, GenericFunctionTemplate,
+    MaterialisedDonorContext,
+};
 use super::ModuleMaterialisationInput;
 use super::artefact_emit::{ModuleMaterialisationContext, check_materialisation_row_identity};
 use super::frozen_file_references::StableResolvedFileReferenceOutcome;
 use super::frozen_syntax::{SharedDonorIdentity, StableBodySyntax};
-use super::preparation_freeze::ModuleMaterialisationPreparation;
+use super::preparation_freeze::{ModuleMaterialisationCapture, ModuleMaterialisationPreparation};
 use super::stable_types::GeneratedFoldedValueMaterialiser;
-use crate::compiler_frontend::ast::AstBuildContext;
+use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
+use crate::compiler_frontend::ast::AstBuildResult;
 use crate::compiler_frontend::ast::Stage0ResolutionFacts;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
-use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
-use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
-use crate::compiler_frontend::ast::generic_bounds::generated_evidence_pair_is_selected;
-use crate::compiler_frontend::ast::module_ast::build_context::AstPhaseContext;
-#[cfg(feature = "timers")]
-use crate::compiler_frontend::ast::module_ast::build_context::AstTimingMetricFamily;
-use crate::compiler_frontend::ast::module_ast::environment::AstModuleEnvironment;
+use crate::compiler_frontend::ast::const_values::store::{
+    ConstStringPiece, ConstStringValue, ConstValueId, ConstValuePayload, ConstValueStore,
+};
+use crate::compiler_frontend::ast::expressions::expression_store::ExpressionOperationView;
+use crate::compiler_frontend::ast::generic_bounds::{
+    evidence_for_type, generated_evidence_pair_is_selected,
+};
 use crate::compiler_frontend::ast::module_ast::environment::builder::import_projection::values::materialize_owned_folded_string;
 use crate::compiler_frontend::ast::module_ast::scope_context::{
     FrozenResolvedFileReference, FrozenResolvedFileReferenceOutcome,
     Stage0ResolvedFileReferenceOutcome,
 };
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
-use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
@@ -42,19 +44,29 @@ use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, render_payload,
 };
-use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::ids::GenericParameterListId;
 use crate::compiler_frontend::datatypes::{builtin_type_ids, environment::TypeEnvironment};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
-    OwnedFoldedString, OwnedFoldedStringPiece, PublicFoldedValue,
+    OwnedFoldedString, OwnedFoldedStringPiece, PublicConstTemplatePiece, PublicFoldedValue,
 };
+use crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget;
+use crate::compiler_frontend::headers::parse_file_headers::{
+    HeaderParseOptions, bind_module_headers, prepare_file_from_tokens, prepare_header_syntax,
+};
+use crate::compiler_frontend::hir::expressions::HirExpressionKind;
+use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
+use crate::compiler_frontend::hir::hir_builder::lower_module;
+use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::module_compilation::generated::install_generated_request_contracts;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::paths::file_references::{
     PreparedFileReferenceClass, ResolvedFileReference, ResolvedFileReferenceOutcome,
     ResolvedFileReferenceTable, ResolvedFileReferenceTarget,
 };
 use crate::compiler_frontend::paths::module_resources::{ModuleResourceTable, ResourceId};
+use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
+use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
 use crate::compiler_frontend::paths::path_syntax::{PathSyntaxId, PathSyntaxTable};
 use crate::compiler_frontend::paths::resource_identity::{
     PortableResourcePath, StableResourceOriginId,
@@ -62,21 +74,27 @@ use crate::compiler_frontend::paths::resource_identity::{
 use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, GeneratedFunctionIdentity, ModulePrivateExecutableCategory,
-    ModulePrivateExecutableIdentity, ModuleRootRole, StableModuleOriginIdentity,
-    StablePackageIdentity,
+    ModulePrivateExecutableIdentity, ModuleRootRole, OriginFunctionId, OriginTypeCategory,
+    OriginTypeId, StableModuleOriginIdentity, StablePackageIdentity,
 };
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, FrozenIdentityHandle, LocalSpan, SourceDatabase, SourceId, SourceSpan,
 };
+use crate::compiler_frontend::source_packages::root_file::PreparedSourcePackageRoots;
+use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::{
     PathId, PathInternerBuilder, PathInternerFork,
 };
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_build_result;
+use crate::compiler_frontend::tests::parse_support::{
+    parse_single_file_ast_build_result, tokenize_source_for_test,
+};
 use crate::compiler_frontend::tokenizer::tokens::{
     SourceTokens, TestSourceTokensBuilder, TokenIndex, TokenRange, TokenTag, TokenViewError,
+    TokenizerEntryMode,
 };
 use crate::compiler_frontend::traits::ids::TraitId;
+use crate::compiler_frontend::{AstBuildRequest, CompilerFrontend, FrontendBuildProfile};
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use moth_lexical::numeric::grammar::{NumericExponentSign, NumericLiteralKind, NumericLiteralSign};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -398,13 +416,13 @@ fn frozen_content_value_captures_and_reinterns_resource_pieces() {
     };
     let module_resources = Rc::new(RefCell::new(ModuleResourceTable::new()));
 
-    let expression_kind = materialize_owned_folded_string(value, &mut generated_table, |origin| {
+    let string_value = materialize_owned_folded_string(value, &mut generated_table, |origin| {
         Ok(module_resources
             .borrow_mut()
             .intern_origin(origin.clone(), None))
     })
     .expect("frozen content value should lower to a structural string");
-    let ExpressionKind::StructuralString { pieces } = expression_kind else {
+    let ConstStringValue::Pieces(pieces) = string_value else {
         panic!("resource-bearing content should remain a structural string");
     };
     let [
@@ -921,21 +939,20 @@ fn source_body_captures_share_donor_strings_after_construction_owners_drop() {
 
 #[test]
 fn preparation_clones_share_one_frozen_donor_allocation() {
-    let source = "draw type T |name T| -> String:\n    return \"ok\"\n;\n";
-    let (build_result, _path_fork, _string_table) =
-        parse_single_file_ast_build_result(source).expect("generic source should build");
-    let preparation = build_result
-        .materialisation_context
-        .expect("module builds retain their materialisation context")
-        .finish_preparation()
-        .expect("generic template identity index should build");
-    // Clone before the first cache fill: a non-shared cache would freeze once per clone here.
-    let cloned = preparation.clone();
+    let fixture = resource_body_materialisation_fixture();
+    let cloned = fixture.preparation.clone();
+    let donor_strings = fixture.preparation.stable_context.artefacts[0]
+        .body
+        .source_string_table
+        .as_ref()
+        .expect("detachment retains donor strings");
+    let cloned_strings = cloned.stable_context.artefacts[0]
+        .body
+        .source_string_table
+        .as_ref()
+        .expect("a detached clone retains donor strings");
     assert!(
-        Arc::ptr_eq(
-            preparation.donor_identity().strings(),
-            cloned.donor_identity().strings(),
-        ),
+        Arc::ptr_eq(donor_strings, cloned_strings),
         "every clone of one declaring preparation must share one frozen donor allocation",
     );
 }
@@ -1613,203 +1630,227 @@ fn generated_materialisation_rejects_an_incompatible_string_prefix() {
     );
 }
 
-/// Inspect the preparing environment's sharing contract without materialising a full body.
-fn preparing_sidecar_environment(
-    preparation: &ModuleMaterialisationPreparation,
-    string_table: &mut StringTable,
-    path_fork: &mut PathInternerFork,
-) -> AstModuleEnvironment {
-    let module_resources = Rc::new(RefCell::new(ModuleResourceTable::new()));
-    let build_context = AstBuildContext {
-        external_package_registry: Arc::clone(&preparation.external_package_registry),
-        style_directives: &preparation.style_directives,
-        string_table,
-        path_fork,
-        entry_dir: preparation.entry_dir,
-        root_role: ModuleRootRole::Support,
-        build_profile: preparation.build_profile,
-        file_value_resolution: None,
-        config_resolution: None,
-        build_config_values: Arc::new(Default::default()),
-        template_const_loop_iteration_limit: preparation.template_const_loop_iteration_limit,
-        capacity_estimate: preparation.capacity_estimate,
-        #[cfg(feature = "timers")]
-        timing_context: None,
-        #[cfg(feature = "timers")]
-        timing_metric_family: AstTimingMetricFamily::Generated,
-    };
-    let (phase_context, string_table_ref, path_fork_ref) =
-        AstPhaseContext::from_build_context(build_context, Arc::new(Default::default()));
-    preparation
-        .build_environment(
-            &phase_context,
-            Rc::clone(&module_resources),
-            string_table_ref,
-            path_fork_ref,
+#[test]
+fn detachment_releases_recursive_lookup_owners_before_ast_lowering() {
+    let source = concat!(
+        "suffix #String = \"retained\"\n",
+        "draw type T |name T, fallback String = [:donor-default[$slot]]| -> String:\n",
+        "    return suffix\n",
+        ";\n",
+    );
+    let (mut build_result, donor_paths, donor_strings) =
+        parse_single_file_ast_build_result(source).expect("generic source should build");
+    let mut builder = build_result
+        .materialisation_context
+        .take()
+        .expect("module builds retain their materialisation capture");
+    let template = builder
+        .generic_function_templates_mut()
+        .values_mut()
+        .next()
+        .expect("the source retains draw");
+    let identity = generated_identity("draw");
+    template.declaration_identity = Some(identity.declaration().clone());
+
+    let signatures = Rc::downgrade(&builder.context().resolved_function_signatures_by_path);
+    let fields = Rc::downgrade(&builder.context().resolved_struct_fields_by_path);
+    assert!(signatures.upgrade().is_some());
+    assert!(fields.upgrade().is_some());
+
+    let prepared = builder
+        .detach(
+            &build_result.ast.const_values,
+            &[],
+            &[],
+            &ModuleResourceTable::new(),
+            &donor_paths,
         )
-        .expect("the preparing sidecar environment should build")
-}
-
-#[test]
-fn preparing_sidecars_share_completed_tables_and_keep_request_mutations_local() {
-    let fixture = resource_body_materialisation_fixture();
-    let mut strings = fixture
-        .preparation
-        .string_table
-        .clone_preserving_inherited_prefix();
-    let mut path_fork = fixture.owner_path_fork.fork_source().fork_for_module();
-    let mut first =
-        preparing_sidecar_environment(&fixture.preparation, &mut strings, &mut path_fork);
-    let second = preparing_sidecar_environment(&fixture.preparation, &mut strings, &mut path_fork);
-
-    // Sidecar emission never writes these completed tables, so both sidecars must keep the one
-    // environment-finished owner the preparation retained. A per-sidecar deep copy would mint a
-    // fresh owner and fail this pointer identity.
-    assert!(Rc::ptr_eq(
-        &first.lookups.resolved_struct_fields_by_path,
-        &second.lookups.resolved_struct_fields_by_path,
-    ));
-    assert!(Rc::ptr_eq(
-        &first.lookups.resolved_function_signatures_by_path,
-        &second.lookups.resolved_function_signatures_by_path,
-    ));
-    assert!(Rc::ptr_eq(
-        &first.lookups.resolved_type_aliases_by_path,
-        &second.lookups.resolved_type_aliases_by_path,
-    ));
-    assert!(Rc::ptr_eq(
-        &first.lookups.choice_variant_shells_by_path,
-        &second.lookups.choice_variant_shells_by_path,
-    ));
-    assert!(Rc::ptr_eq(
-        &first.lookups.declaration_semantics,
-        &second.lookups.declaration_semantics,
-    ));
-    assert!(Rc::ptr_eq(
-        &first.lookups.generic_declarations_by_path,
-        &second.lookups.generic_declarations_by_path,
-    ));
-    assert!(Rc::ptr_eq(
-        &first.lookups.nominal_type_ids_by_path,
-        &second.lookups.nominal_type_ids_by_path,
-    ));
-    assert!(Rc::ptr_eq(
-        &first.lookups.source_nominal_paths,
-        &second.lookups.source_nominal_paths,
-    ));
-    assert!(Rc::ptr_eq(
-        &first.lookups.receiver_methods,
-        &second.lookups.receiver_methods,
-    ));
-    assert!(Rc::ptr_eq(
-        &first.lookups.trait_environment,
-        &second.lookups.trait_environment,
-    ));
-
-    let function_path = *first
-        .lookups
-        .generic_function_templates_by_path
-        .keys()
-        .next()
-        .expect("the fixture declares draw");
-    let original_evidence = first
-        .lookups
-        .trait_evidence_environment
-        .builtins()
-        .next()
-        .expect("the fixture installs builtin evidence")
-        .clone();
-    let mut local_evidence = original_evidence.clone();
-    local_evidence.source_file = function_path;
-
-    let local_lookups = Rc::make_mut(&mut first.lookups);
-    local_lookups
-        .generic_function_templates_by_path
-        .get_mut(&function_path)
-        .expect("draw is retained")
-        .body_tokens = None;
-    Rc::make_mut(&mut local_lookups.trait_evidence_environment).insert_builtin(local_evidence);
-
-    assert!(
-        second.lookups.generic_function_templates_by_path[&function_path]
-            .body_tokens
-            .is_some()
-    );
-    assert!(
-        fixture
-            .preparation
-            .template_for_identity(fixture.identity.declaration())
-            .is_some()
-    );
-    let local_evidence_id = first
-        .lookups
-        .trait_evidence_environment
-        .builtin_for(original_evidence.target_type_id, original_evidence.trait_id)
-        .expect("the local evidence remains selectable");
-    assert_eq!(
-        first
-            .lookups
-            .trait_evidence_environment
-            .get(local_evidence_id)
-            .expect("selected evidence resolves")
-            .source_file,
-        function_path,
-    );
-    for retained in [
-        second.lookups.trait_evidence_environment.as_ref(),
-        &fixture.preparation.trait_evidence_environment,
-    ] {
-        let evidence_id = retained
-            .builtin_for(original_evidence.target_type_id, original_evidence.trait_id)
-            .expect("retained evidence remains selectable");
-        assert_eq!(
-            retained
-                .get(evidence_id)
-                .expect("selected evidence resolves")
-                .source_file,
-            original_evidence.source_file,
-        );
-    }
-}
-
-#[test]
-fn shared_preparing_tables_survive_the_preparation_and_sibling_drop() {
-    let fixture = resource_body_materialisation_fixture();
-    let function_path = fixture
-        .preparation
-        .generic_function_templates_by_path
-        .values()
-        .next()
-        .expect("the fixture declares draw")
-        .function_path;
-    let mut strings = fixture
-        .preparation
-        .string_table
-        .clone_preserving_inherited_prefix();
-    let mut path_fork = fixture.owner_path_fork.fork_source().fork_for_module();
-    let environment =
-        preparing_sidecar_environment(&fixture.preparation, &mut strings, &mut path_fork);
-    let sibling = preparing_sidecar_environment(&fixture.preparation, &mut strings, &mut path_fork);
-
-    drop(fixture);
-    drop(sibling);
-
-    let signature = &environment.lookups.resolved_function_signatures_by_path[&function_path];
-    let parameter = signature
-        .signature
-        .parameters
-        .first()
-        .expect("draw retains its name parameter");
-    let Some(TypeDefinition::GenericParameter(generic_parameter)) =
-        environment.type_environment.get(parameter.value.type_id)
-    else {
-        panic!("the retained parameter must resolve in the inherited type domain");
+        .expect("completed generic inputs should detach");
+    let mut retained = prepared.context().clone();
+    let public_interface = PublicSemanticInterface {
+        module_origin: identity.declaration().module_origin().clone(),
+        export_bindings: Vec::new(),
+        export_diagnostic_provenance: Vec::new(),
+        binding_exports: Vec::new(),
+        declarations: Vec::new(),
+        reusable_evidence: Vec::new(),
+        concrete_call_summaries: Vec::new(),
     };
-    assert_eq!(strings.resolve(generic_parameter.name), "T");
+    let frozen = prepared
+        .freeze(&public_interface)
+        .expect("detached inputs should freeze without their lookup owners")
+        .expect("draw retains a frozen provider");
+
+    // The executable AST is still available to lower. Retaining its generic preparation must
+    // not keep the capture's signature and field-default expression owners alive.
+    assert!(!build_result.ast.nodes.is_empty());
+    assert!(signatures.upgrade().is_none());
+    assert!(fields.upgrade().is_none());
+    let (declaring_context, template_index) = retained
+        .declaring_context_for_identity(identity.declaration())
+        .expect("stable generic syntax survives capture release");
+    let artefact = &declaring_context.artefacts[template_index];
+    assert_eq!(artefact.signature.parameters.len(), 2);
+    let Some(PublicFoldedValue::ConstTemplate { template, folded }) =
+        artefact.signature.parameters[1].folded_default.as_ref()
+    else {
+        panic!("the source default must retain its canonical template value");
+    };
+    assert!(matches!(
+        template.pieces.first(),
+        Some(PublicConstTemplatePiece::Text(OwnedFoldedString::Text(text))) if text == "donor-default"
+    ));
     assert_eq!(
-        signature.signature.returns[0].type_id,
-        Some(builtin_type_ids::STRING),
+        folded,
+        &Some(OwnedFoldedString::Text("donor-default".to_owned()))
     );
+    let expected_template = template.clone();
+    assert!(!artefact.body.token_range.is_empty());
+    let donor_function = artefact.function_path;
+
+    // Release the executable/validation store before either supported later-instance route.
+    drop(build_result);
+    let (requester_build, mut paths, mut strings) =
+        parse_single_file_ast_build_result("requester_padding #String = \"not-the-donor\"\n")
+            .expect("the independent requester should build");
+    let requester = prepare_closure_fixture(requester_build, &paths);
+    let donor_name = donor_paths
+        .component(donor_function)
+        .expect("draw has a donor-local name");
+    for index in 0..donor_paths.len() {
+        paths
+            .try_intern_portable_path(&format!("requester/padding-{index}"), &mut strings)
+            .expect("requester padding paths fit");
+    }
+    assert_ne!(strings.try_resolve(donor_name), Some("draw"));
+    let rebased = |context: &ModuleMaterialisationContext,
+                   paths: &mut PathInternerFork,
+                   strings: &mut StringTable| {
+        context
+            .rebased_for_requester_with(
+                &donor_paths.snapshot_table(),
+                &donor_strings,
+                paths,
+                strings,
+            )
+            .expect("retained syntax should rebase into the requester domain")
+    };
+    let frozen = rebased(&frozen, &mut paths, &mut strings);
+    retained.stable_context = Arc::new(rebased(&retained.stable_context, &mut paths, &mut strings));
+    assert_ne!(
+        retained.stable_context.artefacts[0].function_path,
+        donor_function,
+    );
+    drop(donor_paths);
+    drop(donor_strings);
+
+    let string_identity = GeneratedFunctionIdentity::new(
+        identity.declaration().clone(),
+        Box::new([CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String)]),
+        Box::new([]),
+    );
+    for (use_frozen_provider, identity, expected_type) in [
+        (
+            false,
+            &identity,
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        ),
+        (
+            true,
+            &identity,
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        ),
+        (false, &string_identity, builtin_type_ids::STRING),
+        (true, &string_identity, builtin_type_ids::STRING),
+    ] {
+        let mut sibling_strings = strings.clone_preserving_inherited_prefix();
+        let mut sibling_paths = paths.fork_source().fork_for_module();
+        let materialised = if use_frozen_provider {
+            frozen
+                .materialise_ast_at(
+                    0,
+                    ModuleMaterialisationInput {
+                        identity,
+                        requester_context: &requester,
+                        requester_call_span: None,
+                        external_package_registry: &requester.external_package_registry,
+                        string_table: &mut sibling_strings,
+                        path_fork: &mut sibling_paths,
+                        style_directives: &requester.style_directives,
+                        build_profile: requester.build_profile,
+                        template_const_loop_iteration_limit: requester
+                            .template_const_loop_iteration_limit,
+                        #[cfg(feature = "timers")]
+                        timing_context: None,
+                    },
+                )
+                .expect("the frozen provider should instantiate after store release")
+        } else {
+            materialise_closure_request(
+                &retained,
+                &requester,
+                identity,
+                &mut sibling_strings,
+                &mut sibling_paths,
+            )
+        };
+        let signature = materialised
+            .build_result
+            .ast
+            .nodes
+            .iter()
+            .find_map(|node| match &node.kind {
+                NodeKind::Function(path, signature, _) if *path == materialised.instance_path => {
+                    Some(signature)
+                }
+                _ => None,
+            })
+            .expect("each route should emit draw");
+        assert_eq!(signature.parameters[0].type_id, expected_type,);
+        assert_eq!(signature.parameters[1].type_id, builtin_type_ids::STRING);
+        assert_eq!(
+            sibling_paths
+                .component(signature.parameters[1].id)
+                .map(|name| sibling_strings.resolve(name)),
+            Some("fallback"),
+        );
+        assert!(matches!(
+            materialised.build_result.ast.const_values.payload(
+                signature.parameters[1].default.expect("fallback retains its default"),
+            ),
+            Some(ConstValuePayload::Template {
+                template,
+                folded: Some(ConstStringValue::Text(text)),
+            }) if template == &expected_template && sibling_strings.resolve(*text) == "donor-default"
+        ));
+        let lowered = lower_module(
+            materialised.build_result.ast,
+            &mut sibling_strings,
+            &mut sibling_paths,
+            HirFunctionOriginLookup::default(),
+            materialised.build_result.module_resources,
+            Default::default(),
+            &requester.external_package_registry,
+        )
+        .expect("the later concrete body should lower without the declaring store");
+        assert!(lowered.hir_module.blocks.iter().any(|block| {
+            let HirTerminator::Return(values) = &block.terminator else {
+                return false;
+            };
+            lowered
+                .hir_module
+                .expressions
+                .values(*values)
+                .iter()
+                .any(|value| {
+                    matches!(
+                        &lowered.hir_module.expressions.expression(*value).kind,
+                        HirExpressionKind::StringLiteral(text) if text == "retained"
+                    )
+                })
+        }));
+    }
+    assert!(requester.stable_context.artefacts.is_empty());
 }
 
 #[test]
@@ -1870,7 +1911,7 @@ fn published_siblings_materialise_independently_and_leave_the_retained_context_f
             .iter()
             .find_map(|node| match &node.kind {
                 NodeKind::Function(path, signature, _) if path == &materialised.instance_path => {
-                    Some(signature.parameters[0].value.type_id)
+                    Some(signature.parameters[0].type_id)
                 }
                 _ => None,
             })
@@ -1882,20 +1923,15 @@ fn published_siblings_materialise_independently_and_leave_the_retained_context_f
     );
     assert_eq!(parameter_type(&string_sibling), builtin_type_ids::STRING);
 
-    // The retained context and the preparation's own templates must stay frozen: sibling
-    // materialisations may never install generated bodies into the declaring owner.
-    assert!(
-        fixture
-            .preparation
-            .generic_function_templates_by_path
-            .values()
-            .all(|template| {
-                !matches!(
-                    template.body_tokens,
-                    Some(GenericFunctionBody::Materialised { .. })
-                )
-            }),
-        "sibling materialisation must leave the declaring preparation's templates frozen"
+    // Sibling requests consume the same owned stable body, never replacing its retained syntax.
+    let (declaring_context, template_index) = fixture
+        .preparation
+        .declaring_context_for_identity(fixture.identity.declaration())
+        .expect("the detached preparation retains draw");
+    let retained = &declaring_context.artefacts[template_index];
+    assert_eq!(
+        retained.body.token_range, fixture.context.artefacts[0].body.token_range,
+        "sibling materialisation must leave the declaring stable body unchanged",
     );
 }
 
@@ -1931,9 +1967,14 @@ struct ResourceDefaultMaterialisationFixture {
     resource_origin: StableResourceOriginId,
 }
 
-fn resource_default_materialisation_fixture() -> ResourceDefaultMaterialisationFixture {
-    let source =
-        "draw type T |name T, suffix String = \"fallback\"| -> String:\n    return \"ok\"\n;\n";
+fn resource_default_materialisation_fixture(
+    const_template_default: bool,
+) -> ResourceDefaultMaterialisationFixture {
+    let source = if const_template_default {
+        "draw type T |name T, suffix String = [:donor-prefix[$slot]]| -> String:\n    return suffix\n;\n"
+    } else {
+        "draw type T |name T, suffix String = \"fallback\"| -> String:\n    return \"ok\"\n;\n"
+    };
     let (mut build_result, path_fork, string_table) =
         parse_single_file_ast_build_result(source).expect("generic source should build");
 
@@ -1984,18 +2025,61 @@ fn resource_default_materialisation_fixture() -> ResourceDefaultMaterialisationF
                 == Some("suffix")
         })
         .expect("the generic should retain its suffix parameter");
-    // A resolved resource file value reaches the AST as a structural resource piece. Keep its
-    // declaring-table handle here so freezing must project the stable origin before materialising.
-    parameter.value.kind = ExpressionKind::StructuralString {
-        pieces: vec![ConstStringPiece::Resource(declaring_resource)],
-    };
+    // The resolved AST seam owns the resource handle; the authored template still owns its
+    // structure and text. Detach must project both before the donor constant store is dropped.
+    let mut pieces = Vec::new();
+    if const_template_default {
+        let text = string_table
+            .iter()
+            .find_map(|(id, text)| (text == "donor-prefix").then_some(id))
+            .expect("the authored template owns its prefix text");
+        pieces.push(ConstStringPiece::Text(text));
+    }
+    pieces.push(ConstStringPiece::Resource(declaring_resource));
+    let folded = ConstStringValue::Pieces(pieces);
+    let resource_default = if const_template_default {
+        let original = parameter
+            .default
+            .expect("the authored wrapper has a default");
+        let Some(ConstValuePayload::Template { template, .. }) =
+            build_result.ast.const_values.payload(original)
+        else {
+            panic!("the source must supply an actual const-template default");
+        };
+        let mut template = template.clone();
+        template.pieces.insert(
+            1,
+            PublicConstTemplatePiece::Text(OwnedFoldedString::Pieces(vec![
+                OwnedFoldedStringPiece::Resource(resource_origin.clone()),
+            ])),
+        );
+        let metadata = build_result
+            .ast
+            .const_values
+            .metadata(original)
+            .expect("the source default retains its metadata")
+            .clone();
+        build_result.ast.const_values.insert_value(
+            metadata,
+            ConstValuePayload::Template {
+                template,
+                folded: Some(folded),
+            },
+        )
+    } else {
+        build_result.ast.const_values.insert_resolved(
+            builtin_type_ids::STRING,
+            ConstValuePayload::String(folded),
+            parameter.binding_span,
+        )
+    }
+    .expect("resource default should enter the declaring constant store");
+    parameter.default = Some(resource_default);
 
-    let mut preparation = build_result
+    let mut builder = build_result
         .materialisation_context
-        .expect("module builds retain their materialisation context")
-        .finish_preparation()
-        .expect("generic template identity index should build");
-    preparation.module_origin = Some(module_origin.clone());
+        .expect("module builds retain their materialisation capture");
+    builder.context.module_origin = Some(module_origin.clone());
     let public_interface = PublicSemanticInterface {
         module_origin,
         export_bindings: Vec::new(),
@@ -2005,9 +2089,18 @@ fn resource_default_materialisation_fixture() -> ResourceDefaultMaterialisationF
         reusable_evidence: Vec::new(),
         concrete_call_summaries: Vec::new(),
     };
-    let context = preparation
-        .clone()
-        .freeze(&public_interface, &declaring_resources, &path_fork)
+    let prepared = builder
+        .detach(
+            &build_result.ast.const_values,
+            &[],
+            &[],
+            &declaring_resources,
+            &path_fork,
+        )
+        .expect("generic resource default should detach");
+    let preparation = prepared.context().clone();
+    let context = prepared
+        .freeze(&public_interface)
         .expect("generic resource default should freeze")
         .expect("the retained generic should produce a materialisation context");
     let identity = GeneratedFunctionIdentity::new(
@@ -2232,12 +2325,10 @@ fn resource_body_materialisation_fixture() -> ResourceBodyMaterialisationFixture
         SourceDatabase::empty().into(),
     )));
 
-    let mut preparation = build_result
+    let mut builder = build_result
         .materialisation_context
-        .expect("module builds retain their materialisation context")
-        .finish_preparation()
-        .expect("generic template identity index should build");
-    preparation.module_origin = Some(module_origin.clone());
+        .expect("module builds retain their materialisation capture");
+    builder.context.module_origin = Some(module_origin.clone());
     let public_interface = PublicSemanticInterface {
         module_origin,
         export_bindings: Vec::new(),
@@ -2247,9 +2338,18 @@ fn resource_body_materialisation_fixture() -> ResourceBodyMaterialisationFixture
         reusable_evidence: Vec::new(),
         concrete_call_summaries: Vec::new(),
     };
-    let context = preparation
-        .clone()
-        .freeze(&public_interface, &ModuleResourceTable::new(), &path_fork)
+    let prepared = builder
+        .detach(
+            &build_result.ast.const_values,
+            &[],
+            &[],
+            &ModuleResourceTable::new(),
+            &path_fork,
+        )
+        .expect("generic resource body should detach");
+    let preparation = prepared.context().clone();
+    let context = prepared
+        .freeze(&public_interface)
         .expect("generic resource body should freeze")
         .expect("the retained generic should produce a materialisation context");
     let identity = GeneratedFunctionIdentity::new(
@@ -2292,12 +2392,23 @@ fn generated_body_resource_handle(materialised: &super::MaterialisedGenericAst) 
     let [value] = values.as_slice() else {
         panic!("generated function should return one value, got {values:?}");
     };
-    structural_resource_handle(value)
+    let expression = materialised
+        .build_result
+        .ast
+        .expressions
+        .view(*value)
+        .expect("generated return belongs to its AST");
+    let ExpressionOperationView::Constant(value_id) = expression.operation() else {
+        panic!("expected constant resource return");
+    };
+    structural_resource_handle(&materialised.build_result.ast.const_values, value_id)
 }
 
-fn structural_resource_handle(expression: &Expression) -> ResourceId {
-    let ExpressionKind::StructuralString { pieces } = &expression.kind else {
-        panic!("expected a structural string, got {:?}", expression.kind);
+fn structural_resource_handle(constants: &ConstValueStore, value_id: ConstValueId) -> ResourceId {
+    let Some(ConstValuePayload::String(ConstStringValue::Pieces(pieces))) =
+        constants.payload(value_id)
+    else {
+        panic!("expected a structural string constant");
     };
     let [ConstStringPiece::Resource(resource)] = pieces.as_slice() else {
         panic!("expected one resource piece, got {pieces:?}");
@@ -2307,7 +2418,7 @@ fn structural_resource_handle(expression: &Expression) -> ResourceId {
 
 #[test]
 fn frozen_resource_parameter_default_materialises_into_a_sidecar_local_table() {
-    let fixture = resource_default_materialisation_fixture();
+    let fixture = resource_default_materialisation_fixture(false);
     let artefact = fixture
         .context
         .artefacts
@@ -2374,13 +2485,18 @@ fn frozen_resource_parameter_default_materialises_into_a_sidecar_local_table() {
         .parameters
         .iter()
         .find(|parameter| {
-            matches!(
-                parameter.value.kind,
-                ExpressionKind::StructuralString { .. }
-            )
+            parameter.default.is_some_and(|value_id| {
+                matches!(
+                    materialised.build_result.ast.const_values.payload(value_id),
+                    Some(ConstValuePayload::String(ConstStringValue::Pieces(_)))
+                )
+            })
         })
         .expect("the generated signature should retain its suffix resource parameter");
-    let sidecar_resource = structural_resource_handle(&generated_parameter.value);
+    let sidecar_resource = structural_resource_handle(
+        &materialised.build_result.ast.const_values,
+        generated_parameter.default.expect("fixture default"),
+    );
 
     assert_eq!(
         fixture
@@ -2412,6 +2528,139 @@ fn frozen_resource_parameter_default_materialises_into_a_sidecar_local_table() {
         sidecar_origin.first_authored_span.is_some(),
         "resource provenance should retain an authored source span",
     );
+}
+
+#[test]
+fn const_template_parameter_default_survives_detach_freeze_and_sidecar_local_rebasing() {
+    let ResourceDefaultMaterialisationFixture {
+        preparation,
+        owner_path_fork: donor_paths,
+        context,
+        identity,
+        declaring_resources,
+        declaring_resource,
+        resource_origin,
+    } = resource_default_materialisation_fixture(true);
+    let donor_parameter = &context.artefacts[0].signature.parameters[1];
+    let Some(PublicFoldedValue::ConstTemplate {
+        template: expected_template,
+        folded: Some(OwnedFoldedString::Pieces(expected_pieces)),
+    }) = donor_parameter.folded_default.as_ref()
+    else {
+        panic!("detachment must preserve the source template and its structural folded default");
+    };
+    assert_eq!(
+        expected_pieces,
+        &[
+            OwnedFoldedStringPiece::Text("donor-prefix".to_owned()),
+            OwnedFoldedStringPiece::Resource(resource_origin.clone()),
+        ],
+    );
+    let expected_template = expected_template.clone();
+    let expected_span = donor_parameter.span;
+    let donor_text = preparation
+        .string_table
+        .iter()
+        .find_map(|(id, text)| (text == "donor-prefix").then_some(id))
+        .expect("the authored template text has a donor string handle");
+    let (requester_build, mut paths, mut strings) =
+        parse_single_file_ast_build_result("requester_text #String = \"foreign-prefix\"\n")
+            .expect("the independent requester should build");
+    let requester = prepare_closure_fixture(requester_build, &paths);
+    for index in 0..preparation.string_table.len() {
+        strings.intern(&format!("requester-string-{index}"));
+    }
+    assert_ne!(strings.try_resolve(donor_text), Some("donor-prefix"));
+    let context = context
+        .rebased_for_requester_with(
+            &donor_paths.snapshot_table(),
+            &preparation.string_table,
+            &mut paths,
+            &mut strings,
+        )
+        .expect("the frozen template should rebase into an unrelated requester domain");
+    drop(preparation);
+    drop(donor_paths);
+    drop(declaring_resources);
+
+    let materialised = context
+        .materialise_ast_at(
+            0,
+            ModuleMaterialisationInput {
+                identity: &identity,
+                requester_context: &requester,
+                requester_call_span: None,
+                external_package_registry: &requester.external_package_registry,
+                string_table: &mut strings,
+                path_fork: &mut paths,
+                style_directives: &requester.style_directives,
+                build_profile: requester.build_profile,
+                template_const_loop_iteration_limit: requester.template_const_loop_iteration_limit,
+                #[cfg(feature = "timers")]
+                timing_context: None,
+            },
+        )
+        .expect("the frozen template default should materialise after all donor owners drop");
+    let signature = materialised
+        .build_result
+        .ast
+        .nodes
+        .iter()
+        .find_map(|node| match &node.kind {
+            NodeKind::Function(path, signature, _) if *path == materialised.instance_path => {
+                Some(signature)
+            }
+            _ => None,
+        })
+        .expect("draw must emit its concrete signature");
+    let parameter = &signature.parameters[1];
+    assert_eq!(parameter.type_id, builtin_type_ids::STRING);
+    assert_eq!(
+        paths.component(parameter.id).map(|id| strings.resolve(id)),
+        Some("suffix")
+    );
+    let default = parameter
+        .default
+        .expect("the sidecar signature retains the actual default");
+    let constants = &materialised.build_result.ast.const_values;
+    let Some(ConstValuePayload::Template {
+        template,
+        folded: Some(ConstStringValue::Pieces(pieces)),
+    }) = constants.payload(default)
+    else {
+        panic!(
+            "the generated default must retain template structure and structural string content"
+        );
+    };
+    assert_eq!(template, &expected_template);
+    assert_eq!(
+        constants
+            .metadata(default)
+            .expect("the default retains metadata")
+            .span,
+        expected_span
+    );
+    let [
+        ConstStringPiece::Text(text),
+        ConstStringPiece::Resource(resource),
+    ] = pieces.as_slice()
+    else {
+        panic!("the sidecar must retain ordered text and resource pieces");
+    };
+    assert_eq!(strings.resolve(*text), "donor-prefix");
+    assert_ne!(*text, donor_text);
+    assert_ne!(*resource, declaring_resource);
+    let resources = materialised
+        .build_result
+        .module_resources
+        .as_ref()
+        .expect("the generated default owns a local resource table")
+        .borrow();
+    let origin = resources
+        .try_origin(*resource)
+        .expect("the generated resource must resolve locally");
+    assert_eq!(origin.origin, resource_origin);
+    assert_eq!(origin.first_authored_span, expected_span);
 }
 
 #[test]
@@ -2714,7 +2963,7 @@ fn repeated_frozen_resource_body_materialisations_preserve_stable_origin() {
 
 #[test]
 fn repeated_frozen_resource_default_projection_reuses_one_sidecar_handle() {
-    let fixture = resource_default_materialisation_fixture();
+    let fixture = resource_default_materialisation_fixture(false);
     let folded_default = fixture
         .context
         .artefacts
@@ -2732,22 +2981,22 @@ fn repeated_frozen_resource_default_projection_reuses_one_sidecar_handle() {
     let mut type_environment = TypeEnvironment::new();
     let string_type_id = type_environment.builtins().string;
     let external_registry = ExternalPackageRegistry::new();
-    let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let module_resources = Rc::new(RefCell::new(ModuleResourceTable::new()));
     let mut path_fork = fixture.owner_path_fork.fork_source().fork_for_module();
     let mut materialiser = GeneratedFoldedValueMaterialiser {
         type_environment: &mut type_environment,
         external_registry: &external_registry,
         nominal_source: &fixture.preparation,
-        template_ir_store,
         module_resources: Rc::clone(&module_resources),
         path_fork: &mut path_fork,
     };
     let mut string_table = StringTable::new();
+    let mut const_values = ConstValueStore::default();
     let first = super::materialize_public_folded_value(
         &mut materialiser,
         folded_default,
         string_type_id,
+        &mut const_values,
         &mut string_table,
         None,
     )
@@ -2756,12 +3005,13 @@ fn repeated_frozen_resource_default_projection_reuses_one_sidecar_handle() {
         &mut materialiser,
         folded_default,
         string_type_id,
+        &mut const_values,
         &mut string_table,
         None,
     )
     .expect("the repeated frozen default projection should succeed");
-    let first_resource = structural_resource_handle(&first);
-    let second_resource = structural_resource_handle(&second);
+    let first_resource = structural_resource_handle(&const_values, first);
+    let second_resource = structural_resource_handle(&const_values, second);
 
     assert_eq!(
         first_resource, second_resource,
@@ -2788,7 +3038,7 @@ fn repeated_frozen_resource_default_projection_reuses_one_sidecar_handle() {
 ///      rather than minting a distinct origin for each call.
 #[test]
 fn repeated_frozen_resource_default_materialisations_preserve_stable_origin_across_sidecars() {
-    let fixture = resource_default_materialisation_fixture();
+    let fixture = resource_default_materialisation_fixture(false);
     let folded_default = fixture
         .context
         .artefacts
@@ -2862,13 +3112,18 @@ fn repeated_frozen_resource_default_materialisations_preserve_stable_origin_acro
             .parameters
             .iter()
             .find(|parameter| {
-                matches!(
-                    parameter.value.kind,
-                    ExpressionKind::StructuralString { .. }
-                )
+                parameter.default.is_some_and(|value_id| {
+                    matches!(
+                        materialised.build_result.ast.const_values.payload(value_id),
+                        Some(ConstValuePayload::String(ConstStringValue::Pieces(_)))
+                    )
+                })
             })
             .expect("the generated signature should retain its suffix resource parameter");
-        structural_resource_handle(&generated_parameter.value)
+        structural_resource_handle(
+            &materialised.build_result.ast.const_values,
+            generated_parameter.default.expect("fixture default"),
+        )
     };
     let first_resource = generated_resource(&first_materialised);
     let second_resource = generated_resource(&second_materialised);
@@ -2945,7 +3200,7 @@ fn requester_template_identity_index_is_exact_and_rejects_duplicate_bodies() {
         retained_template(imported_path, identity.clone(), false),
     );
 
-    let index = ModuleMaterialisationPreparation::generic_template_identity_index(&templates)
+    let index = ModuleMaterialisationCapture::generic_template_identity_index(&templates)
         .expect("bodyless imported templates must not conflict with retained bodies");
     assert_eq!(index.get(&identity), Some(&body_path));
 
@@ -2957,7 +3212,7 @@ fn requester_template_identity_index_is_exact_and_rejects_duplicate_bodies() {
         retained_template(duplicate_path, identity, true),
     );
     assert!(
-        ModuleMaterialisationPreparation::generic_template_identity_index(&templates).is_err(),
+        ModuleMaterialisationCapture::generic_template_identity_index(&templates).is_err(),
         "two retained bodies must not publish one declaration identity"
     );
 }
@@ -3320,4 +3575,953 @@ fn materialised_body_declaration_cursor_translates_colliding_symbol_payloads() {
         "donor token-at",
         "token-at reads must resolve through the donor origin rather than raw requester IDs",
     );
+}
+
+/// Exercise the same captured declaring inputs across independently reconstructed sidecars.
+pub(super) fn prepare_closure_fixture(
+    mut build_result: AstBuildResult,
+    path_fork: &PathInternerFork,
+) -> ModuleMaterialisationPreparation {
+    let mut builder = build_result
+        .materialisation_context
+        .take()
+        .expect("the module retains its declaring capture");
+    let origin = generated_identity("fixture")
+        .declaration()
+        .module_origin()
+        .clone();
+    builder
+        .install_concrete_executable_contracts(
+            &build_result.ast.const_values,
+            &origin,
+            &FxHashMap::default(),
+            &FxHashMap::default(),
+            &ModuleResourceTable::new(),
+            path_fork,
+        )
+        .expect("private callable and nominal identities should install");
+    let signatures = Rc::downgrade(&builder.context().resolved_function_signatures_by_path);
+    let fields = Rc::downgrade(&builder.context().resolved_struct_fields_by_path);
+    let preparation = builder
+        .finish_preparation(
+            &build_result.ast.const_values,
+            &ModuleResourceTable::new(),
+            path_fork,
+        )
+        .expect("the declaring closure should detach");
+    drop(build_result);
+    assert!(signatures.upgrade().is_none());
+    assert!(fields.upgrade().is_none());
+    preparation
+}
+
+pub(super) fn closure_request(
+    preparation: &ModuleMaterialisationPreparation,
+    name: &str,
+) -> GeneratedFunctionIdentity {
+    let declaration = preparation
+        .stable_context
+        .artefacts
+        .iter()
+        .find(|artefact| artefact.declaration_identity.defining_name() == name)
+        .expect("the declaring context retains the requested template");
+    GeneratedFunctionIdentity::new(
+        declaration.declaration_identity.clone(),
+        Box::new([CanonicalTypeIdentity::Builtin(
+            CanonicalBuiltinType::FixedScalar(FixedScalar::I32),
+        )]),
+        Box::new([]),
+    )
+}
+
+pub(super) fn materialise_closure_request(
+    declaring: &ModuleMaterialisationPreparation,
+    requester: &ModuleMaterialisationPreparation,
+    identity: &GeneratedFunctionIdentity,
+    strings: &mut StringTable,
+    paths: &mut PathInternerFork,
+) -> super::MaterialisedGenericAst {
+    declaring
+        .materialise_ast(
+            identity,
+            requester,
+            None,
+            strings,
+            paths,
+            #[cfg(feature = "timers")]
+            None,
+        )
+        .expect("the stable declaring closure should reconstruct a sidecar")
+}
+
+#[test]
+fn callable_only_nominal_signature_retains_private_blueprint() {
+    let (build_result, path_fork, mut strings) = parse_single_file_ast_build_result(concat!(
+        "Packet = |text String|\n",
+        "make || -> Packet:\n    return Packet(text = \"retained\")\n;\n",
+        "draw type T |value T| -> String:\n    return make().text\n;\n",
+    ))
+    .expect("private callable nominal source should build");
+    let preparation = prepare_closure_fixture(build_result, &path_fork);
+    let identity = closure_request(&preparation, "draw");
+    let (declaring_context, template_index) = preparation
+        .declaring_context_for_identity(identity.declaration())
+        .expect("draw is retained");
+    let artefact = &declaring_context.artefacts[template_index];
+    assert!(
+        artefact
+            .visibility
+            .source_names
+            .iter()
+            .chain(artefact.visibility.type_alias_names.iter())
+            .all(|binding| binding.visible_name != "Packet"),
+        "a callable-only Packet blueprint must not add a source-visible nominal name",
+    );
+    assert!(
+        artefact
+            .visibility
+            .source_names
+            .iter()
+            .any(|binding| binding.visible_name == "make"),
+        "the generic body must retain its selected helper name",
+    );
+    assert!(
+        !artefact.nominal_blueprints.is_empty(),
+        "make's result contract must retain the otherwise unnamed Packet blueprint"
+    );
+    let mut generated_paths = path_fork.fork_source().fork_for_module();
+    let materialised = materialise_closure_request(
+        &preparation,
+        &preparation,
+        &identity,
+        &mut strings,
+        &mut generated_paths,
+    );
+    assert!(materialised.build_result.ast.nodes.iter().any(|node|
+        matches!(&node.kind, NodeKind::Function(path, _, _) if *path == materialised.instance_path)
+    ), "draw must materialise against the private helper's retained nominal result");
+    lower_closure_request(
+        materialised,
+        &preparation,
+        &mut strings,
+        &mut generated_paths,
+    );
+}
+
+fn assert_nested_closure_materialises(
+    build_result: AstBuildResult,
+    path_fork: PathInternerFork,
+    mut strings: StringTable,
+    distinct_sources: bool,
+) {
+    let preparation = prepare_closure_fixture(build_result, &path_fork);
+    let outer_identity = closure_request(&preparation, "outer");
+    let inner_identity = closure_request(&preparation, "inner");
+    let (outer_context, outer_index) = preparation
+        .declaring_context_for_identity(outer_identity.declaration())
+        .expect("outer");
+    let outer = &outer_context.artefacts[outer_index];
+    let (inner_context, inner_index) = preparation
+        .declaring_context_for_identity(inner_identity.declaration())
+        .expect("inner");
+    let inner = &inner_context.artefacts[inner_index];
+    assert_eq!(outer.source_file != inner.source_file, distinct_sources);
+    assert!(
+        outer.local_declarations.is_empty(),
+        "the outer body must not itself select the helper-only constant"
+    );
+    assert!(
+        !inner.local_declarations.is_empty(),
+        "the inner body owns its independent constant visibility"
+    );
+
+    let mut generated_paths = path_fork.fork_source().fork_for_module();
+    let mut outer = materialise_closure_request(
+        &preparation,
+        &preparation,
+        &outer_identity,
+        &mut strings,
+        &mut generated_paths,
+    );
+    assert_eq!(outer.build_result.deferred_generic_requests.len(), 1);
+    let resources = outer
+        .build_result
+        .module_resources
+        .as_ref()
+        .expect("the sidecar owns resources")
+        .borrow();
+    let nested = outer
+        .build_result
+        .materialisation_context
+        .take()
+        .expect("the outer sidecar retains its nested request capture")
+        .finish_preparation(
+            &outer.build_result.ast.const_values,
+            &resources,
+            &generated_paths,
+        )
+        .expect("nested templates keep their original declaring closure at detach");
+    drop(resources);
+    drop(outer);
+    drop(preparation);
+
+    let inner = materialise_closure_request(
+        &nested,
+        &nested,
+        &inner_identity,
+        &mut strings,
+        &mut generated_paths,
+    );
+    assert!(inner.build_result.deferred_generic_requests.is_empty());
+    let signature = inner
+        .build_result
+        .ast
+        .nodes
+        .iter()
+        .find_map(|node| match &node.kind {
+            NodeKind::Function(path, signature, _) if *path == inner.instance_path => {
+                Some(signature)
+            }
+            _ => None,
+        })
+        .expect("the nested concrete helper emits its signature");
+    assert!(matches!(
+        inner.build_result.ast.const_values.payload(
+            signature.parameters[1].default.expect("the nested helper keeps its omitted default"),
+        ),
+        Some(ConstValuePayload::Template {
+            template,
+            folded: Some(ConstStringValue::Text(text)),
+        }) if strings.resolve(*text) == "inner-only" && template.pieces.iter().any(|piece| matches!(
+            piece,
+            PublicConstTemplatePiece::Text(OwnedFoldedString::Text(text)) if text == "inner-only"
+        ))
+    ));
+    let lowered = lower_module(
+        inner.build_result.ast,
+        &mut strings,
+        &mut generated_paths,
+        HirFunctionOriginLookup::default(),
+        inner.build_result.module_resources,
+        Default::default(),
+        &nested.external_package_registry,
+    )
+    .expect("the inner return must lower its retained helper-only constant");
+    assert!(
+        lowered.hir_module.blocks.iter().any(|block| {
+            let HirTerminator::Return(values) = &block.terminator else {
+                return false;
+            };
+            lowered
+                .hir_module
+                .expressions
+                .values(*values)
+                .iter()
+                .any(
+                    |value| match &lowered.hir_module.expressions.expression(*value).kind {
+                        HirExpressionKind::StringLiteral(text) => text == "inner-only",
+                        HirExpressionKind::StructuralString { pieces } => {
+                            let mut text = String::new();
+                            for piece in lowered.hir_module.expressions.string_pieces(*pieces) {
+                                let ConstStringPiece::Text(id) = piece else {
+                                    return false;
+                                };
+                                text.push_str(strings.resolve(*id));
+                            }
+                            text == "inner-only"
+                        }
+                        _ => false,
+                    },
+                )
+        }),
+        "inner must return the exact helper-only constant after its original capture is released"
+    );
+}
+
+/// Unused folded text must not survive detach merely because its source owner is retained.
+#[test]
+fn detached_generic_retains_only_installed_string_constants_after_store_release() {
+    let mut source = String::new();
+    for index in 0..64 {
+        let text = format!("{index:04}{}", "x".repeat(4092));
+        source.push_str(&format!(
+            "fixture_constant_{index:04} #String = \"{text}\"\n"
+        ));
+    }
+    // The required constant's value is inlined from its sibling, not a retained path edge.
+    source.push_str(concat!(
+        "required #String = fixture_constant_0000\n",
+        "probe type T |value T| -> String:\n    return required\n;\n",
+    ));
+    let (build_result, paths, mut strings) =
+        parse_single_file_ast_build_result(&source).expect("string constants should build");
+    let preparation = prepare_closure_fixture(build_result, &paths);
+    drop(source);
+    let identity = closure_request(&preparation, "probe");
+    let closure = &preparation.stable_context.semantic_closure;
+    assert_eq!(closure.constants.len(), 1);
+    let retained = &closure.constants[0];
+    assert_eq!(
+        paths
+            .component(retained.local_path)
+            .map(|id| strings.resolve(id)),
+        Some("required"),
+    );
+    let PublicFoldedValue::String(OwnedFoldedString::Text(text)) = &retained.value else {
+        panic!("the required constant should retain its completed text");
+    };
+    let expected = format!("0000{}", "x".repeat(4092));
+    assert_eq!(text, &expected);
+    assert_eq!(
+        preparation.stable_context.artefacts[0]
+            .local_declarations
+            .as_ref(),
+        &[retained.local_path],
+    );
+
+    // prepare_closure_fixture consumed and dropped the original AST and constant store.
+    let mut generated_paths = paths.fork_source().fork_for_module();
+    let materialised = materialise_closure_request(
+        &preparation,
+        &preparation,
+        &identity,
+        &mut strings,
+        &mut generated_paths,
+    );
+    let lowered = lower_module(
+        materialised.build_result.ast,
+        &mut strings,
+        &mut generated_paths,
+        HirFunctionOriginLookup::default(),
+        materialised.build_result.module_resources,
+        Default::default(),
+        &preparation.external_package_registry,
+    )
+    .expect("the concrete body should lower after declaring store release");
+    assert!(
+        lowered.hir_module.blocks.iter().any(|block| {
+            let HirTerminator::Return(values) = &block.terminator else {
+                return false;
+            };
+            lowered
+                .hir_module
+                .expressions
+                .values(*values)
+                .iter()
+                .any(
+                    |value| match &lowered.hir_module.expressions.expression(*value).kind {
+                        HirExpressionKind::StringLiteral(text) => text == &expected,
+                        HirExpressionKind::StructuralString { pieces } => {
+                            let mut text = String::new();
+                            for piece in lowered.hir_module.expressions.string_pieces(*pieces) {
+                                let ConstStringPiece::Text(id) = piece else {
+                                    return false;
+                                };
+                                text.push_str(strings.resolve(*id));
+                            }
+                            text == expected
+                        }
+                        _ => false,
+                    },
+                )
+        }),
+        "the released-store instance must return the required text"
+    );
+}
+
+#[test]
+fn no_generic_preparation_retains_no_local_folded_payload() {
+    let text = "x".repeat(4096);
+    let source = format!(
+        "unused #String = \"{text}\"\n\
+         TextAlias as String\n\
+         echo |value String = unused| -> String:\n    return value\n;\n",
+    );
+    let (build_result, paths, _) =
+        parse_single_file_ast_build_result(&source).expect("non-generic source should build");
+    let preparation = prepare_closure_fixture(build_result, &paths);
+    assert!(preparation.stable_context.artefacts.is_empty());
+    assert!(
+        preparation
+            .stable_context
+            .semantic_closure
+            .constants
+            .is_empty()
+    );
+    assert!(
+        preparation
+            .stable_context
+            .semantic_closure
+            .aliases
+            .is_empty()
+    );
+    assert!(
+        !preparation.callable_contracts.is_empty(),
+        "skipping the dropped closure must preserve concrete requester contracts",
+    );
+}
+
+#[test]
+fn nested_template_retains_helper_only_constant_after_declaring_capture_release() {
+    let (build_result, paths, strings) = parse_single_file_ast_build_result(concat!(
+        "hidden #String = \"inner-only\"\n",
+        "inner type T |value T, suffix String = [:[hidden][$slot]]| -> String:\n    return hidden\n;\n",
+        "outer type T |value T| -> String:\n    return inner(value)\n;\n",
+    ))
+    .expect("nested generic source should build");
+    assert_nested_closure_materialises(build_result, paths, strings, false);
+}
+
+/// Build real per-file binding rows rather than relabelling a single-file token fixture.
+fn parse_closure_files(files: &[(&str, &str)]) -> (AstBuildResult, PathInternerFork, StringTable) {
+    let directory = tempfile::tempdir().expect("the fixture directory should create");
+    let mut canonical_files = Vec::new();
+    for (name, source) in files {
+        let path = directory.path().join(name);
+        std::fs::write(&path, source).expect("the fixture source should write");
+        canonical_files.push(std::fs::canonicalize(path).expect("the source should canonicalise"));
+    }
+    let root = std::fs::canonicalize(directory.path()).expect("the root should canonicalise");
+    let resolver = ProjectPathResolver::new_with_module_roots(
+        root.clone(),
+        root,
+        PreparedSourcePackageRoots::default(),
+        &crate::builder_surface::SourceFileKindRegistry::default(),
+        ModuleRootTable::empty(),
+    )
+    .expect("the fixture resolver should build");
+    let entry = &canonical_files[0];
+    let mut strings = StringTable::new();
+    let sources = Arc::new(
+        SourceDatabase::build(&canonical_files, entry, Some(&resolver), &mut strings)
+            .expect("the real source snapshots should register"),
+    );
+    let styles = StyleDirectiveRegistry::built_ins();
+    let registry = Arc::new(ExternalPackageRegistry::new());
+    let mut frontend = CompilerFrontend::new(
+        Default::default(),
+        strings,
+        sources.fork_path_interner(),
+        &styles,
+        &registry,
+        Some(&resolver),
+        &sources,
+    );
+    let options = HeaderParseOptions {
+        entry_file_id: sources.get_by_canonical_path(entry).map(|source| source.id),
+        entry_file_role: None,
+        active_root_role: ModuleRootRole::Normal,
+    };
+    let mut outputs = Vec::new();
+    let mut const_offset = 0;
+    let mut runtime_offset = 0;
+    for ((_, source), path) in files.iter().zip(&canonical_files) {
+        let mut spans = ExtendedSpanBuilder::new();
+        let (owner, syntax) = tokenize_source_for_test(
+            &mut frontend,
+            source,
+            path,
+            TokenizerEntryMode::SourceFile,
+            &mut spans,
+        )
+        .expect("the real source should tokenize");
+        let logical_path = sources
+            .get_by_canonical_path(path)
+            .expect("registered source")
+            .logical_path;
+        let output = prepare_file_from_tokens(
+            owner,
+            logical_path,
+            syntax,
+            path,
+            &options,
+            &mut frontend.string_table,
+            const_offset,
+            runtime_offset,
+            &mut spans,
+            &mut frontend.path_fork,
+        )
+        .expect("the source declarations should prepare");
+        const_offset += output.const_template_count;
+        runtime_offset += output.runtime_fragment_count;
+        outputs.push(output);
+    }
+    let syntax = prepare_header_syntax(
+        &mut outputs,
+        &mut frontend.string_table,
+        &mut |source, diagnostic| diagnostic.capture_preparation_span(source),
+        &mut frontend.path_fork,
+    )
+    .expect("the module declarations should prepare");
+    let bound = bind_module_headers(
+        syntax,
+        &registry,
+        &ExternalImportResolutionTable::default(),
+        &Default::default(),
+        Some(&resolver),
+        &sources,
+        &mut frontend.string_table,
+        &mut frontend.path_fork,
+    )
+    .expect("the distinct file dependency bindings should resolve");
+    let sorted = frontend
+        .sort_headers(bound, &ResolvedFileReferenceTable::default())
+        .expect("the module declarations should sort");
+    let build_result = frontend
+        .headers_to_ast(
+            AstBuildRequest {
+                sorted,
+                entry_file_path: entry,
+                root_role: ModuleRootRole::Normal,
+                build_profile: FrontendBuildProfile::Dev,
+                capacity_estimate: Default::default(),
+                resolved_file_references: ResolvedFileReferenceTable::default(),
+                module_origin: None,
+                build_config_values: Arc::new(Default::default()),
+            },
+            #[cfg(feature = "timers")]
+            None,
+        )
+        .expect("the distinct-source generic module should build");
+    (build_result, frontend.path_fork, frontend.string_table)
+}
+
+#[test]
+fn nested_template_retains_distinct_source_dependency_visibility() {
+    let (build_result, paths, strings) = parse_closure_files(&[
+        ("@page.moth", "@outer outer\n"),
+        (
+            "outer.moth",
+            "@inner inner\nouter type T |value T| -> String:\n    return inner(value)\n;\n",
+        ),
+        (
+            "inner.moth",
+            "@secret hidden\ninner type T |value T, suffix String = [:[hidden][$slot]]| -> String:\n    return hidden\n;\n",
+        ),
+        ("secret.moth", "hidden #String = \"inner-only\"\n"),
+    ]);
+    assert_nested_closure_materialises(build_result, paths, strings, true);
+}
+
+fn lower_closure_request(
+    materialised: super::MaterialisedGenericAst,
+    preparation: &ModuleMaterialisationPreparation,
+    strings: &mut StringTable,
+    paths: &mut PathInternerFork,
+) {
+    let lowered = lower_module(
+        materialised.build_result.ast,
+        strings,
+        paths,
+        HirFunctionOriginLookup::default(),
+        materialised.build_result.module_resources,
+        Default::default(),
+        &preparation.external_package_registry,
+    )
+    .expect("callable-only nominal shells must survive generated HIR lowering");
+    assert!(!lowered.hir_module.functions.is_empty());
+}
+
+#[test]
+fn callable_only_choice_signature_retains_private_hir_shell() {
+    let (build_result, path_fork, mut strings) = parse_single_file_ast_build_result(concat!(
+        "Signal ::\n    Ready,\n    Waiting,\n;\n",
+        "make || -> Signal:\n    return Signal::Ready\n;\n",
+        "draw type T |value T| -> Bool:\n    return make() is make()\n;\n",
+    ))
+    .expect("private callable choice source should build");
+    let preparation = prepare_closure_fixture(build_result, &path_fork);
+    let identity = closure_request(&preparation, "draw");
+    let (declaring_context, template_index) = preparation
+        .declaring_context_for_identity(identity.declaration())
+        .expect("draw");
+    let artefact = &declaring_context.artefacts[template_index];
+    assert!(
+        artefact
+            .visibility
+            .source_names
+            .iter()
+            .chain(artefact.visibility.type_alias_names.iter())
+            .all(|binding| binding.visible_name != "Signal"),
+        "a callable-only Signal shell must not add a source-visible nominal name",
+    );
+    assert!(
+        artefact
+            .visibility
+            .source_names
+            .iter()
+            .any(|binding| binding.visible_name == "make"),
+        "the generic body must retain its selected helper name",
+    );
+    let mut paths = path_fork.fork_source().fork_for_module();
+    let materialised = materialise_closure_request(
+        &preparation,
+        &preparation,
+        &identity,
+        &mut strings,
+        &mut paths,
+    );
+    assert!(
+        !materialised.build_result.ast.choice_definitions.is_empty(),
+        "the helper's choice result needs a HIR-facing nominal shell"
+    );
+    lower_closure_request(materialised, &preparation, &mut strings, &mut paths);
+}
+
+#[test]
+fn repeated_bounded_forwarding_preserves_bodyless_receiver_parameter_owner() {
+    let (mut build_result, mut path_fork, mut strings) = parse_closure_files(&[
+        (
+            "@page.moth",
+            concat!(
+                "@label DISPLAY_TEXT, Label\n@box Box\n",
+                "LabelBox as Box of Label\n",
+                "inner type InnerValue is DISPLAY_TEXT |value InnerValue| -> String:\n",
+                "    return value.display()\n;\n",
+                "middle type MiddleValue is DISPLAY_TEXT |value MiddleValue| -> String:\n",
+                "    return inner(value)\n;\n",
+                "outer type OuterValue is DISPLAY_TEXT |value OuterValue| -> String:\n",
+                "    return middle(value)\n;\n",
+                "result = outer(Box(Label(\"ok\")))\n",
+            ),
+        ),
+        (
+            "label.moth",
+            concat!(
+                "DISPLAY_TEXT must:\n    display |This| -> String\n;\n",
+                "Label = |text String|\n",
+                "display |this Label| -> String:\n    return this.text\n;\n",
+                "Label must DISPLAY_TEXT\n",
+            ),
+        ),
+        (
+            "box.moth",
+            concat!(
+                "@label DISPLAY_TEXT\n",
+                "Box type T is DISPLAY_TEXT = |value T|\n",
+                "display type T is DISPLAY_TEXT |this Box of T| -> String:\n",
+                "    return this.value.display()\n;\n",
+                "Box must DISPLAY_TEXT\n",
+            ),
+        ),
+    ]);
+    let mut builder = build_result
+        .materialisation_context
+        .take()
+        .expect("declaring capture");
+    let origin = generated_identity("fixture")
+        .declaration()
+        .module_origin()
+        .clone();
+    let box_path = *builder
+        .context()
+        .nominal_type_ids_by_path
+        .keys()
+        .find(|path| {
+            path_fork
+                .component(**path)
+                .is_some_and(|id| strings.resolve(id) == "Box")
+        })
+        .expect("Box has its declaring nominal path");
+    let method_path = *builder
+        .context()
+        .generic_function_templates_by_path
+        .iter()
+        .find_map(|(path, template)| {
+            (template.generic_parameter_owner.is_some()
+                || template
+                    .signature
+                    .parameters
+                    .first()
+                    .is_some_and(|parameter| {
+                        path_fork
+                            .component(parameter.id)
+                            .is_some_and(|id| strings.resolve(id) == "this")
+                    }))
+            .then_some(path)
+        })
+        .expect("Box retains its aligned generic display method");
+    let box_origin =
+        OriginTypeId::new(origin.clone(), "Box".to_owned(), OriginTypeCategory::Struct);
+    let method_origin =
+        OriginFunctionId::new_receiver(origin.clone(), "display".to_owned(), box_origin.clone());
+    builder
+        .install_concrete_executable_contracts(
+            &build_result.ast.const_values,
+            &origin,
+            &FxHashMap::from_iter([(method_path, method_origin.clone())]),
+            &FxHashMap::from_iter([(box_path, box_origin)]),
+            &ModuleResourceTable::new(),
+            &path_fork,
+        )
+        .expect("public receiver ownership should install on the nominal's shared parameters");
+    let alias_type = builder
+        .context()
+        .resolved_type_aliases_by_path
+        .iter()
+        .find_map(|(path, alias)| {
+            path_fork
+                .component(*path)
+                .is_some_and(|id| strings.resolve(id) == "LabelBox")
+                .then_some(alias.target_type_id)
+        })
+        .expect("the instantiated Box of Label alias should resolve");
+    let target_identity = builder
+        .context()
+        .stable_type_identity(alias_type)
+        .expect("Box of Label should have one canonical concrete identity");
+    let trait_definition = builder
+        .context()
+        .trait_environment
+        .definitions()
+        .find(|definition| {
+            path_fork
+                .component(definition.canonical_path)
+                .is_some_and(|id| strings.resolve(id) == "DISPLAY_TEXT")
+        })
+        .expect("the source trait is resolved");
+    let trait_id = builder
+        .context()
+        .trait_environment
+        .id_for_path(&trait_definition.canonical_path)
+        .expect("the trait path has its dense identity");
+    let selected_evidence = evidence_for_type(
+        alias_type,
+        trait_id,
+        &builder.context().type_environment,
+        &builder.context().trait_environment,
+        &builder.context().trait_evidence_environment,
+    )
+    .expect("the concrete Box of Label selects its real conformance evidence");
+    let outer = builder
+        .context()
+        .generic_function_templates_by_path
+        .values()
+        .find(|template| {
+            template
+                .declaration_identity
+                .as_ref()
+                .is_some_and(|identity| identity.defining_name() == "outer")
+        })
+        .expect("the declaring capture retains outer");
+    let active_span = build_result
+        .deferred_generic_requests
+        .first()
+        .and_then(|request| request.call_span)
+        .expect("the real outer call retains its authored source span");
+    let validation_span = outer
+        .declaration_span
+        .expect("outer retains its distinct declaration source span");
+    assert_ne!(active_span, validation_span);
+    let mut outer_request = GenericFunctionInstantiationRequest::generated(
+        outer
+            .declaration_identity
+            .as_ref()
+            .expect("outer's stable declaration"),
+        outer.function_path,
+        Box::new([alias_type]),
+        &mut path_fork,
+        &mut strings,
+        Some(active_span),
+    )
+    .expect("the concrete outer request should issue");
+    outer_request.evidence = Box::new([selected_evidence]);
+    let mut validation_request = outer_request.clone();
+    validation_request.call_span = Some(validation_span);
+    let mut issued = install_generated_request_contracts(
+        [&outer_request, &validation_request],
+        builder.context(),
+        builder.context().generic_function_templates(),
+        &builder.context().external_package_registry,
+        &path_fork,
+        &mut build_result.ast,
+    )
+    .expect("the real request owner should canonicalise the selected evidence");
+    assert_eq!(
+        issued.len(),
+        1,
+        "identical active and validation requests share one contract"
+    );
+    assert_eq!(issued[0].call_span, Some(active_span));
+    let mut identity = issued.remove(0).identity;
+    assert_eq!(identity.type_arguments(), &[target_identity]);
+    assert_eq!(identity.evidence().len(), 1);
+
+    // Both concrete arguments satisfy the real bound, but their canonical identities and
+    // selected evidence differ. A colliding local path must not select the first one's body.
+    let label_type = *builder
+        .context()
+        .nominal_type_ids_by_path
+        .iter()
+        .find_map(|(path, type_id)| {
+            path_fork
+                .component(*path)
+                .is_some_and(|id| strings.resolve(id) == "Label")
+                .then_some(type_id)
+        })
+        .expect("the real Label nominal owns a requester-local type");
+    let label_evidence = evidence_for_type(
+        label_type,
+        trait_id,
+        &builder.context().type_environment,
+        &builder.context().trait_environment,
+        &builder.context().trait_evidence_environment,
+    )
+    .expect("Label independently satisfies the same DISPLAY_TEXT bound");
+    let mut colliding_request = outer_request.clone();
+    colliding_request.key.type_arguments = Box::new([label_type]);
+    colliding_request.evidence = Box::new([label_evidence]);
+    let collision = install_generated_request_contracts(
+        [&colliding_request],
+        builder.context(),
+        builder.context().generic_function_templates(),
+        &builder.context().external_package_registry,
+        &path_fork,
+        &mut build_result.ast,
+    );
+    let Err(collision) = collision else {
+        panic!("different canonical instances cannot share one local target path");
+    };
+    assert_eq!(collision.error_type, ErrorType::Compiler);
+    assert_eq!(
+        collision.msg,
+        "Generated request path collides with another imported or generated callable",
+    );
+    let contract = &build_result.ast.imported_functions_by_local_path[&outer_request.instance_path];
+    assert!(matches!(
+        &contract.target,
+        SourceFunctionTarget::Generated {
+            identity: installed,
+            local_path,
+        } if installed == &identity && *local_path == outer_request.instance_path
+    ));
+    // An imported generic evidence method supplies its contract, never its executable body.
+    builder
+        .generic_function_templates_mut()
+        .get_mut(&method_path)
+        .expect("Box display is retained")
+        .body_tokens = None;
+    let mut preparation = builder
+        .finish_preparation(
+            &build_result.ast.const_values,
+            &ModuleResourceTable::new(),
+            &path_fork,
+        )
+        .expect("the bodyless receiver contract should detach");
+    assert!(
+        preparation
+            .type_environment
+            .type_id_for_canonical_identity(identity.evidence()[0].target_type_identity(),)
+            .is_some(),
+        "the issued evidence must resolve its actual requester-owned target, not a fabricated pair",
+    );
+    let original = preparation
+        .generic_callable_for_path(&method_path)
+        .expect("bodyless contract");
+    let receiver_owner = original
+        .generic_parameter_owner
+        .clone()
+        .expect("public receiver parameter owner");
+    let receiver_identity = CanonicalTypeIdentity::SourceNominal(
+        receiver_owner
+            .nominal_type_origin()
+            .cloned()
+            .expect("receiver parameters belong to the nominal"),
+    );
+    let parameter_identity = original.generic_parameters[0]
+        .exported_identity
+        .clone()
+        .expect("the fixture must exercise a public nominal parameter identity");
+    let mut paths = path_fork.fork_source().fork_for_module();
+    for name in ["outer", "middle", "inner"] {
+        assert_eq!(
+            identity.declaration().defining_name(),
+            name,
+            "nested requests must come from the actual forwarding body"
+        );
+        let mut materialised = preparation
+            .materialise_ast(
+                &identity,
+                &preparation,
+                None,
+                &mut strings,
+                &mut paths,
+                #[cfg(feature = "timers")]
+                None,
+            )
+            .unwrap_or_else(|messages| {
+                panic!("{name} bounded forwarding materialisation failed: {messages:?}");
+            });
+        assert_eq!(
+            materialised.build_result.deferred_generic_requests.len(),
+            1,
+            "each forwarding body must retain exactly its next generic call"
+        );
+        let resources = materialised
+            .build_result
+            .module_resources
+            .as_ref()
+            .expect("sidecar resources")
+            .borrow();
+        let next_builder = materialised
+            .build_result
+            .materialisation_context
+            .take()
+            .expect("the next request has a generated capture");
+        let mut issued = install_generated_request_contracts(
+            &materialised.build_result.deferred_generic_requests,
+            next_builder.context(),
+            next_builder.context().generic_function_templates(),
+            &next_builder.context().external_package_registry,
+            &paths,
+            &mut materialised.build_result.ast,
+        )
+        .expect("nested canonical requests must use their actual selected evidence");
+        let next = next_builder
+            .finish_preparation(
+                &materialised.build_result.ast.const_values,
+                &resources,
+                &paths,
+            )
+            .expect(
+                "repeated bodyless receiver reconstruction must reuse the nominal parameter owner",
+            );
+        drop(resources);
+        let contract = next
+            .generic_callable_for_path(&method_path)
+            .expect("bodyless receiver survives");
+        assert!(
+            contract.receiver.is_some(),
+            "bodyless evidence methods must remain receiver methods"
+        );
+        assert_eq!(
+            contract.generic_parameter_owner.as_ref(),
+            Some(&receiver_owner),
+            "the public receiver must retain its exact parameter-list owner",
+        );
+        assert_eq!(
+            contract
+                .generic_parameter_owner
+                .as_ref()
+                .and_then(|owner| owner.nominal_type_origin())
+                .cloned()
+                .map(CanonicalTypeIdentity::SourceNominal)
+                .as_ref(),
+            Some(&receiver_identity),
+            "the receiver parameter owner must retain the same canonical nominal identity",
+        );
+        assert_eq!(
+            contract.generic_parameters[0].exported_identity.as_ref(),
+            Some(&parameter_identity)
+        );
+        if name == "inner" {
+            assert_eq!(
+                issued[0].identity.declaration(),
+                &GeneratedDeclarationIdentity::Public(method_origin.clone()),
+                "the final bounded dispatch must target the original public Box method"
+            );
+        }
+        preparation = next;
+        identity = issued.remove(0).identity;
+    }
 }

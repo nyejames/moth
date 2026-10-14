@@ -9,13 +9,13 @@ use super::error::ExpressionParseError;
 use super::expression_rpn::ExpressionRpnItem;
 use super::parse_expression_dispatch::{push_expression_operand, push_pending_numeric_binding};
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
-use crate::compiler_frontend::ast::expressions::expression::{
-    ConstRecordState, Expression, ExpressionKind,
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExpressionConstructionFailure, ExpressionOp, ExpressionOperationView,
+    OwnedExpr, PlaceId, PlaceProjection, PlaceProjectionView, PlaceRecord, PlaceView,
 };
-use crate::compiler_frontend::ast::expressions::expression_rpn::{
-    PlaceExpression, PlaceExpressionKind,
-};
+use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
 use crate::compiler_frontend::ast::field_access::{
     ParsedPostfixExpression, PostfixChainAccess, RetainedOperandInput,
     parse_field_access_expression_with_receiver_access, parse_postfix_chain_expression,
@@ -30,9 +30,8 @@ use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
 };
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticToken, InvalidAssignmentTargetReason, InvalidCopyTargetReason,
-    InvalidReceiverCallReason,
+    InvalidReceiverCallReason, ValueReceiverContext,
 };
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -50,11 +49,7 @@ use crate::compiler_frontend::value_mode::ValueMode;
 ///      default value that the language has not selected.
 pub(super) enum ParsedCopyPlace {
     /// A ready place payload with its concrete type.
-    Ready {
-        place: PlaceExpression,
-        diagnostic_type: DataType,
-        type_id: TypeId,
-    },
+    Ready { place: PlaceId, type_id: TypeId },
     /// A pending numeric binding reference whose copy completes at the body root.
     PendingNumeric {
         binding: NumericBindingId,
@@ -65,10 +60,16 @@ pub(super) enum ParsedCopyPlace {
 // WHAT: parses a mutable receiver expression rooted at a name or `this`.
 // WHY: mutable receiver syntax is a distinct place expression that must resolve to a field-access
 //      chain so the backend can pass the receiver by mutable reference.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "mutable receiver parsing keeps the token stream, scope, type interner, expression builder, const store, expression output, catch policy, string table, and path fork as separate borrows"
+)]
 pub(super) fn parse_mutable_receiver_expression(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     expression: &mut Vec<ExpressionRpnItem>,
     allow_boundary_catch: bool,
     string_table: &mut StringTable,
@@ -150,6 +151,8 @@ pub(super) fn parse_mutable_receiver_expression(
                 },
                 context,
                 type_interner,
+                expression_builder,
+                const_values,
                 string_table,
                 path_fork,
             )?;
@@ -175,6 +178,8 @@ pub(super) fn parse_mutable_receiver_expression(
         PostfixChainAccess::mutable_marker(marker_span),
         allow_boundary_catch,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     )?;
@@ -193,6 +198,8 @@ pub(super) fn parse_mutable_receiver_expression(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         expression,
         allow_boundary_catch,
@@ -209,6 +216,8 @@ pub(super) fn parse_copy_place_expression(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<ParsedCopyPlace, ExpressionParseError> {
@@ -221,6 +230,8 @@ pub(super) fn parse_copy_place_expression(
                 token_stream,
                 context,
                 type_interner,
+                expression_builder,
+                const_values,
                 string_table,
                 path_fork,
             )?;
@@ -246,7 +257,11 @@ pub(super) fn parse_copy_place_expression(
             // The authored place expression began at the opening parenthesis; both shapes keep
             // that boundary so diagnostics point at the whole place.
             match &mut parsed_place {
-                ParsedCopyPlace::Ready { place, .. } => place.span = open_span,
+                ParsedCopyPlace::Ready { place, .. } => {
+                    let mut record = expression_builder.place(*place)?.metadata().clone();
+                    record.span = open_span;
+                    *place = expression_builder.append_place(record, open_span)?;
+                }
                 ParsedCopyPlace::PendingNumeric { span, .. } => *span = open_span,
             }
             Ok(parsed_place)
@@ -296,8 +311,11 @@ pub(super) fn parse_copy_place_expression(
                     place_declaration,
                     context,
                     type_interner,
+                    expression_builder,
+                    const_values,
+                    string_table,
                     reference_span,
-                );
+                )?;
                 token_stream.advance();
 
                 let copied_expression = if token_stream.position() < token_stream.length()
@@ -313,6 +331,8 @@ pub(super) fn parse_copy_place_expression(
                         false,
                         context,
                         type_interner,
+                        expression_builder,
+                        const_values,
                         string_table,
                         path_fork,
                     )? {
@@ -321,7 +341,7 @@ pub(super) fn parse_copy_place_expression(
                         ParsedPostfixExpression::RetainedOperand(item) => {
                             return Err(CompilerDiagnostic::invalid_copy_target(
                                 InvalidCopyTargetReason::NonPlace,
-                                item.source_span(),
+                                item.source_span(expression_builder)?,
                             )
                             .into());
                         }
@@ -330,19 +350,20 @@ pub(super) fn parse_copy_place_expression(
                     reference_expression
                 };
 
-                let Some(place) = place_expression_from_expression(&copied_expression) else {
+                let copied_view = expression_builder.view_owned(copied_expression)?;
+                let type_id = copied_view.require_single(ValueReceiverContext::ReceiverBase)?;
+                let copied_span = copied_view.span();
+                let Some(place) =
+                    place_expression_from_expression(expression_builder, copied_expression)?
+                else {
                     return Err(CompilerDiagnostic::invalid_copy_target(
                         InvalidCopyTargetReason::NonPlace,
-                        copied_expression.span,
+                        copied_span,
                     )
                     .into());
                 };
 
-                Ok(ParsedCopyPlace::Ready {
-                    place,
-                    diagnostic_type: copied_expression.diagnostic_type,
-                    type_id: copied_expression.type_id,
-                })
+                Ok(ParsedCopyPlace::Ready { place, type_id })
             }
         }
 
@@ -365,6 +386,8 @@ pub(super) fn parse_copy_place_expression(
                 token_stream,
                 context,
                 type_interner,
+                expression_builder,
+                const_values,
                 string_table,
                 path_fork,
             ) {
@@ -408,86 +431,100 @@ fn resolve_place_root<'a>(
     }
 }
 
-pub(crate) fn place_expression_from_expression(expression: &Expression) -> Option<PlaceExpression> {
-    match &expression.kind {
-        ExpressionKind::Reference(path) => Some(PlaceExpression {
-            kind: PlaceExpressionKind::Local(*path),
-            type_id: expression.type_id,
-            diagnostic_type: expression.diagnostic_type.clone(),
-            value_mode: expression.value_mode.clone(),
-            span: expression.span,
-        }),
-
-        ExpressionKind::FieldAccess { base, field } => {
-            let base_place = place_expression_from_expression(base)?;
-            Some(PlaceExpression {
-                kind: PlaceExpressionKind::Field {
-                    base: Box::new(base_place),
-                    field: *field,
-                },
-                type_id: expression.type_id,
-                diagnostic_type: expression.diagnostic_type.clone(),
-                value_mode: expression.value_mode.clone(),
-                span: expression.span,
-            })
+/// Record a completed place using its resolved root and ordered field projections.
+pub(crate) fn place_expression_from_expression(
+    expressions: &mut AstExpressionBuilder,
+    id: OwnedExpr,
+) -> Result<Option<PlaceId>, ExpressionConstructionFailure> {
+    let expression = expressions.view_owned(id)?;
+    let type_id = expression.value_type_id()?;
+    let span = expression.span();
+    let mut root = expression;
+    let mut projections = Vec::new();
+    let path = loop {
+        match root.operation() {
+            ExpressionOperationView::Reference(path) => break path,
+            ExpressionOperationView::FieldAccess { base, field } => {
+                projections.push(PlaceProjection::Field {
+                    field,
+                    result_type: root.value_type_id()?,
+                });
+                root = base;
+            }
+            _ => return Ok(None),
         }
-
-        _ => None,
-    }
+    };
+    let root_type_id = root.value_type_id()?;
+    let value_mode = root.value_mode();
+    projections.reverse();
+    let projections = expressions.append_place_projections(projections, span)?;
+    let place = expressions.append_place(
+        PlaceRecord {
+            root: path,
+            root_type_id,
+            projections,
+            type_id,
+            value_mode,
+            span,
+        },
+        span,
+    )?;
+    Ok(Some(place))
 }
 
-/// Returns true when the place expression resolves to a mutable root place.
-///
-/// WHAT: a local place is mutable when its value mode says so; a field place is mutable when
-///       the base place it projects from is mutable.
-/// WHY: mutability for field projections is inherited from the root local/receiver, matching the
-///      language rule that `~obj.field.method()` requires `obj` to be mutable.
-pub(crate) fn place_expression_is_mutable(place: &PlaceExpression) -> bool {
-    match &place.kind {
-        PlaceExpressionKind::Local(_) => place.value_mode.is_mutable(),
-
-        PlaceExpressionKind::Field { base, .. } => place_expression_is_mutable(base),
-    }
+pub(crate) fn place_expression_is_mutable(place: PlaceView<'_>) -> bool {
+    place.metadata().value_mode.is_mutable()
 }
 
-/// Walks a place expression to its root local and returns the binding name.
-///
-/// WHAT: follows field-projection bases down to the underlying local, then returns its name.
-/// WHY: immutable field-write diagnostics name the root binding that must be made mutable.
 pub(crate) fn root_binding_name_of_place(
-    place: &PlaceExpression,
+    place: PlaceView<'_>,
     path_fork: &PathInternerFork,
 ) -> Option<StringId> {
-    match &place.kind {
-        PlaceExpressionKind::Local(path) => path_fork.component(*path),
-        PlaceExpressionKind::Field { base, .. } => root_binding_name_of_place(base, path_fork),
-    }
+    path_fork.component(place.metadata().root)
 }
 
-/// Reconstructs an expression payload from a narrow place expression.
+/// Emit the typed read operations used by compound assignment.
 ///
-/// WHAT: compound assignment desugars `target op rhs` by reading the target place as a value.
-/// WHY: places do not carry enough metadata to be evaluated directly, so this builds the equivalent
-///      expression tree (local reference or field access) that the evaluator already understands.
-pub(crate) fn expression_from_place_expression(place: &PlaceExpression) -> Expression {
-    let kind = match &place.kind {
-        PlaceExpressionKind::Local(path) => ExpressionKind::Reference(*path),
-
-        PlaceExpressionKind::Field { base, field } => ExpressionKind::FieldAccess {
-            base: Box::new(expression_from_place_expression(base)),
-            field: *field,
-        },
-    };
-
-    let mut expression = Expression::new(
-        kind,
-        place.span,
-        place.type_id,
-        place.diagnostic_type.clone(),
-        place.value_mode.clone(),
-    );
-    expression.const_record_state = ConstRecordState::RuntimeValue;
-    expression
+/// Place records retain canonical types at every projection boundary, so this does not
+/// re-resolve field meaning or rebuild a recursive compatibility expression.
+pub(crate) fn expression_from_place_expression(
+    expressions: &mut AstExpressionBuilder,
+    id: PlaceId,
+) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+    let place = expressions.place(id)?;
+    let record = place.metadata();
+    let root = record.root;
+    let root_type_id = record.root_type_id;
+    let span = record.span;
+    let value_mode = record.value_mode;
+    let mut fields = Vec::new();
+    for projection in place.projections() {
+        match projection {
+            PlaceProjectionView::Field { field, result_type } => fields.push((field, result_type)),
+            PlaceProjectionView::Index { .. } => {
+                return Err(CompilerError::compiler_error(
+                    "compound read received an unsupported indexed place",
+                )
+                .into());
+            }
+        }
+    }
+    let mut value = expressions.reference_with_type_id(
+        root,
+        root_type_id,
+        span,
+        value_mode,
+        ConstRecordState::RuntimeValue,
+    )?;
+    for (field, type_id) in fields {
+        value = expressions.append_expression(
+            ExpressionOp::FieldAccess { base: value, field },
+            span,
+            type_id,
+            value_mode,
+        )?;
+    }
+    Ok(value)
 }
 
 fn current_span(token_stream: &AstCursor) -> Option<SourceSpan> {

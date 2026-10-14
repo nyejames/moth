@@ -5,10 +5,14 @@
 //! WHY: configuration validation and primitive materialisation are a focused semantic phase,
 //!      separate from the ordinary top-level constant session and its compile-time fold.
 
-use crate::compiler_frontend::ast::ast_nodes::Declaration;
-use crate::compiler_frontend::ast::const_values::store::{ConstStringPiece, ConstStringValue};
+use crate::compiler_frontend::ast::ast_nodes::{Declaration, DeclarationValue};
+use crate::compiler_frontend::ast::const_values::store::{
+    ConstStringPiece, ConstStringValue, ConstValuePayload, ConstValueStore,
+};
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, ExpressionOperationView, OccurrenceFacts, OwnedExpr,
+};
 use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
 use crate::compiler_frontend::ast::templates::template::TemplateConstValueKind;
 use crate::compiler_frontend::ast::templates::template_folding::TemplateEmission;
@@ -22,11 +26,12 @@ use crate::compiler_frontend::build_config::{
     ConfigResolutionRecord, ConfigResolutionServices, ContractValueError, PrimitiveBuildInputType,
     PrimitiveBuildValue, ResolvedBuildConfigValue, build_config_fingerprint,
 };
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidConfigReason};
+use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::datatypes::{DataType, diagnostic_type_spelling};
 use crate::compiler_frontend::declaration_syntax::build_config_contract::{
     build_input_type_from_parsed, parsed_type_span,
 };
@@ -42,10 +47,16 @@ use crate::compiler_frontend::synthetic_interface_provenance::{
 /// input contract and seeds the input's stable provenance. Folded `ConstValue` metadata
 /// carries that provenance into each receiving project field through the ordinary fold, so
 /// this pass records no pre-fold project-field dependency facts.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "config resolution keeps the declaration, scope, services and mutable state separate"
+)]
 pub(super) fn resolve_config_declaration(
     declaration: &mut Declaration,
     scope_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     services: &ConfigResolutionServices,
     string_table: &mut StringTable,
     path_fork: &PathInternerFork,
@@ -74,13 +85,21 @@ pub(super) fn resolve_config_declaration(
                 parsed_type_span(&qualifier.type_annotation),
             ));
         };
+        // Pass the initializer as a bare `ExprId`: the view borrow must end before
+        // `normalize_config_default` mutably borrows the owners for the template fold.
+        let initializer = declaration.value.initializer();
         let authored_default = normalize_config_default(
-            declaration_name,
-            &declaration.value,
-            qualifier.default_none,
-            contract,
+            ConfigDefaultMetadata {
+                field_name: declaration_name,
+                default_none: qualifier.default_none,
+                default_span: qualifier.qualifier_span,
+                contract,
+            },
+            initializer,
             scope_context,
             type_interner.environment(),
+            expression_builder,
+            const_values,
             string_table,
         )?;
         let (contract_required, contract_default) = match &authored_default {
@@ -117,8 +136,18 @@ pub(super) fn resolve_config_declaration(
                     string_table,
                 )
             })?;
-            declaration.value =
-                expression_for_build_value(&value, contract, None, type_interner, string_table)?;
+            declaration.value = DeclarationValue::Initializer(
+                expression_for_build_value(
+                    &value,
+                    contract,
+                    None,
+                    type_interner,
+                    expression_builder,
+                    const_values,
+                    string_table,
+                )?
+                .id(),
+            );
             services.record(config_resolution_record(
                 declaration_name,
                 &declaration_text,
@@ -141,8 +170,16 @@ pub(super) fn resolve_config_declaration(
                             qualifier.qualifier_span,
                         ));
                     }
-                    let value_span = declaration.value.span;
-                    declaration.value = option_none_expression(contract, value_span, type_interner);
+                    declaration.value = DeclarationValue::Initializer(
+                        option_none_expression(
+                            contract,
+                            qualifier.qualifier_span,
+                            type_interner,
+                            expression_builder,
+                            const_values,
+                        )?
+                        .id(),
+                    );
                     services.record(config_resolution_record(
                         declaration_name,
                         &declaration_text,
@@ -157,8 +194,17 @@ pub(super) fn resolve_config_declaration(
                     ));
                 }
                 AuthoredConfigDefault::None { span } => {
-                    if matches!(declaration.value.kind, ExpressionKind::NoValue) {
-                        declaration.value = option_none_expression(contract, span, type_interner);
+                    if declaration.value.initializer().is_none() {
+                        declaration.value = DeclarationValue::Initializer(
+                            option_none_expression(
+                                contract,
+                                span,
+                                type_interner,
+                                expression_builder,
+                                const_values,
+                            )?
+                            .id(),
+                        );
                     }
                     services.record(config_resolution_record(
                         declaration_name,
@@ -179,16 +225,30 @@ pub(super) fn resolve_config_declaration(
                     expression_is_optional,
                 } => {
                     if contract.is_optional() && !expression_is_optional {
-                        let inner = std::mem::replace(
-                            &mut declaration.value,
-                            Expression::no_value(
-                                qualifier.qualifier_span,
-                                DataType::Inferred,
-                                crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
-                            ),
-                        );
-                        declaration.value =
-                            expression_for_optional_default(inner, contract, type_interner);
+                        // The config owner has already validated this default as a primitive.
+                        // Materialise its optional contract directly, retaining dependency provenance
+                        // without moving the initializer through a fabricated temporary expression.
+                        let authored_expression =
+                            declaration.value.initializer_mut().ok_or_else(|| {
+                                CompilerError::compiler_error(
+                                    "a validated config value default has no initializer",
+                                )
+                            })?;
+                        let authored_expression = *authored_expression;
+                        let expression = expression_for_build_value(
+                            &value,
+                            contract,
+                            span,
+                            type_interner,
+                            expression_builder,
+                            const_values,
+                            string_table,
+                        )?;
+                        let expression = expression_builder.preserve_authored_metadata(
+                            expression,
+                            expression_builder.own(authored_expression),
+                        )?;
+                        declaration.value = DeclarationValue::Initializer(expression.id());
                     }
                     services.record(config_resolution_record(
                         declaration_name,
@@ -205,18 +265,34 @@ pub(super) fn resolve_config_declaration(
                 }
             }
         }
-        declaration.value.synthetic_interface_provenance =
-            declaration.value.synthetic_interface_provenance.union(
-                &SyntheticInterfaceProvenance::single(SyntheticInterfaceMemberIdentity::new(
+        let expression_id = declaration.value.initializer().ok_or_else(|| {
+            CompilerError::compiler_error("a resolved config declaration has no initializer")
+        })?;
+        let expression = expression_builder.view(expression_id)?;
+        declaration.type_id = expression.value_type_id()?;
+        declaration.diagnostic_type =
+            diagnostic_type_spelling(declaration.type_id, type_interner.environment());
+        declaration.value_mode = expression.value_mode();
+        let provenance = expression
+            .occurrence_facts()
+            .map_or_else(SyntheticInterfaceProvenance::empty, |facts| {
+                facts.provenance.clone()
+            })
+            .union(&SyntheticInterfaceProvenance::single(
+                SyntheticInterfaceMemberIdentity::new(
                     SyntheticInterfaceClass::ProjectContext,
                     "source-config",
                     input_name.as_str(),
-                )),
-            );
-        services.record_input_provenance(
-            input_name,
-            declaration.value.synthetic_interface_provenance.clone(),
-        );
+                ),
+            ));
+        let mut input = expression.to_completed_input(expression_builder)?;
+        input.occurrence = Some(OccurrenceFacts {
+            provenance: provenance.clone(),
+            diagnostic_spelling: None,
+        });
+        declaration.value =
+            DeclarationValue::Initializer(expression_builder.commit_replacement(input)?.id());
+        services.record_input_provenance(input_name, provenance);
         return Ok(());
     }
 
@@ -239,17 +315,33 @@ enum AuthoredConfigDefault {
     },
 }
 
-fn normalize_config_default(
+/// Declaration-owned identity and contract for validating an authored config default.
+struct ConfigDefaultMetadata {
     field_name: StringId,
-    expression: &Expression,
     default_none: bool,
+    default_span: Option<SourceSpan>,
     contract: BuildInputType,
+}
+
+fn normalize_config_default(
+    metadata: ConfigDefaultMetadata,
+    expression: Option<ExprId>,
     scope_context: &ScopeContext,
     type_environment: &TypeEnvironment,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
 ) -> Result<AuthoredConfigDefault, ExpressionParseError> {
-    let span = expression.span;
-    if matches!(expression.kind, ExpressionKind::NoValue) {
+    // Snapshot every owned expression fact the read-only checks need, then drop the view
+    // before `primitive_value_from_expression_id` mutably borrows the owners for the fold.
+    let ConfigDefaultMetadata {
+        field_name,
+        default_none,
+        default_span,
+        contract,
+    } = metadata;
+    let Some(expression_id) = expression else {
+        let span = default_span;
         if !default_none {
             return Ok(AuthoredConfigDefault::Missing);
         }
@@ -264,9 +356,25 @@ fn normalize_config_default(
             ));
         }
         return Ok(AuthoredConfigDefault::None { span });
-    }
+    };
+    let (span, value_type_id, snapshot_const) = {
+        let snapshot = expression_builder.view(expression_id)?;
+        let span = snapshot.span();
+        let value_type_id = snapshot.value_type_id()?;
+        let snapshot_const = match snapshot.operation() {
+            ExpressionOperationView::Constant(id) => Some(id),
+            _ => None,
+        };
+        (span, value_type_id, snapshot_const)
+    };
+    let is_option_none = snapshot_const.is_some_and(|id| {
+        matches!(
+            const_values.payload(id),
+            Some(ConstValuePayload::OptionNone)
+        )
+    });
 
-    if matches!(expression.kind, ExpressionKind::OptionNone) {
+    if is_option_none {
         if !contract.is_optional() {
             return Err(config_input_type_mismatch(
                 Some(field_name),
@@ -280,7 +388,13 @@ fn normalize_config_default(
         return Ok(AuthoredConfigDefault::None { span });
     }
 
-    let Some(value) = primitive_value_from_expression(expression, scope_context, string_table)?
+    let Some(value) = primitive_value_from_expression_id(
+        expression_id,
+        scope_context,
+        expression_builder,
+        const_values,
+        string_table,
+    )?
     else {
         return Err(config_input_type_mismatch(
             Some(field_name),
@@ -304,9 +418,7 @@ fn normalize_config_default(
     Ok(AuthoredConfigDefault::Value {
         value,
         span,
-        expression_is_optional: type_environment
-            .option_inner_type(expression.type_id)
-            .is_some(),
+        expression_is_optional: type_environment.option_inner_type(value_type_id).is_some(),
     })
 }
 
@@ -439,50 +551,56 @@ fn option_none_expression(
     contract: BuildInputType,
     span: Option<SourceSpan>,
     type_interner: &mut AstTypeInterner<'_>,
-) -> Expression {
-    let inner_type_id = primitive_type_id(contract.primitive());
-    let inner_diagnostic = diagnostic_type_spelling(inner_type_id, type_interner.environment());
-    Expression::option_none_with_type_id(
-        inner_type_id,
-        inner_diagnostic,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+) -> Result<OwnedExpr, ExpressionParseError> {
+    Ok(expression_builder.option_none_with_type_id(
+        const_values,
+        primitive_type_id(contract.primitive()),
         type_interner.environment_mut_for_derived_types(),
         span,
-    )
+    )?)
 }
 
-/// Materialize one resolved source `#Config` value as an ordinary constant expression.
-///
-/// Source config values enter the existing declaration/constant-folding path through this helper;
-/// no Config-specific AST or HIR value is created.
+/// Materialise a config value in the receiving phase's constant and expression owners.
 pub(crate) fn expression_for_resolved_build_config_value(
     resolved: &ResolvedBuildConfigValue,
     span: Option<SourceSpan>,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
-) -> Result<Expression, ExpressionParseError> {
-    let mut expression = match resolved.value() {
+) -> Result<OwnedExpr, ExpressionParseError> {
+    let expression = match resolved.value() {
         Some(value) => expression_for_build_value(
             value,
             resolved.value_type(),
             span,
             type_interner,
+            expression_builder,
+            const_values,
             string_table,
         )?,
-        None => {
-            debug_assert!(
-                resolved.value_type().is_optional(),
-                "only optional source config contracts can resolve to absence"
-            );
-            option_none_expression(resolved.value_type(), span, type_interner)
-        }
+        None => option_none_expression(
+            resolved.value_type(),
+            span,
+            type_interner,
+            expression_builder,
+            const_values,
+        )?,
     };
-    expression.synthetic_interface_provenance =
-        SyntheticInterfaceProvenance::single(SyntheticInterfaceMemberIdentity::new(
+    let mut input = expression_builder
+        .view_owned(expression)?
+        .to_completed_input(expression_builder)?;
+    input.occurrence = Some(OccurrenceFacts {
+        provenance: SyntheticInterfaceProvenance::single(SyntheticInterfaceMemberIdentity::new(
             SyntheticInterfaceClass::ProjectContext,
             "source-config",
             resolved.name().as_str(),
-        ));
-    Ok(expression)
+        )),
+        diagnostic_spelling: None,
+    });
+    Ok(expression_builder.commit_replacement(input)?)
 }
 
 fn expression_for_build_value(
@@ -490,94 +608,151 @@ fn expression_for_build_value(
     contract: BuildInputType,
     span: Option<SourceSpan>,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
-) -> Result<Expression, ExpressionParseError> {
-    let inner = match value {
-        PrimitiveBuildValue::String(text) => Expression::string_slice(
-            string_table.intern(text),
-            span,
-            crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
-        ),
-        PrimitiveBuildValue::Fixed(value) => Expression::fixed_scalar(
-            *value,
-            span,
-            crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
-        ),
-        PrimitiveBuildValue::Bool(value) => Expression::bool(
-            *value,
-            span,
-            crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
-        ),
-        PrimitiveBuildValue::Char(value) => Expression::char(
-            *value,
-            span,
-            crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
-        ),
+) -> Result<OwnedExpr, ExpressionParseError> {
+    let payload = match value {
+        PrimitiveBuildValue::String(text) => {
+            ConstValuePayload::String(ConstStringValue::Text(string_table.intern(text)))
+        }
+        PrimitiveBuildValue::Fixed(value) => ConstValuePayload::FixedScalar(*value),
+        PrimitiveBuildValue::Bool(value) => ConstValuePayload::Bool(*value),
+        PrimitiveBuildValue::Char(value) => ConstValuePayload::Char(*value),
     };
-    Ok(if contract.is_optional() {
-        expression_for_optional_default(inner, contract, type_interner)
+    let inner_type = primitive_type_id(contract.primitive());
+    let inner = const_values.insert_resolved(inner_type, payload, span)?;
+    let (value, type_id) = if contract.is_optional() {
+        let type_id = type_interner
+            .environment_mut_for_derived_types()
+            .intern_option(inner_type);
+        (
+            const_values.insert_resolved(type_id, ConstValuePayload::OptionSome(inner), span)?,
+            type_id,
+        )
     } else {
-        inner
-    })
-}
-
-fn expression_for_optional_default(
-    inner: Expression,
-    contract: BuildInputType,
-    type_interner: &mut AstTypeInterner<'_>,
-) -> Expression {
-    let inner_type_id = primitive_type_id(contract.primitive());
-    let option_type_id = type_interner
-        .environment_mut_for_derived_types()
-        .intern_option(inner_type_id);
-    let inner_diagnostic = diagnostic_type_spelling(inner_type_id, type_interner.environment());
-    let span = inner.span;
-    Expression::new(
-        ExpressionKind::Coerced {
-            value: Box::new(inner),
-            to_type: option_type_id,
-        },
+        (inner, inner_type)
+    };
+    Ok(expression_builder.constant(
+        value,
+        type_id,
         span,
-        option_type_id,
-        DataType::Option(Box::new(inner_diagnostic)),
         crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
-    )
+    )?)
 }
 
-fn primitive_value_from_expression(
-    expression: &Expression,
+fn primitive_value_from_expression_id(
+    expression: ExprId,
     scope_context: &ScopeContext,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
 ) -> Result<Option<PrimitiveBuildValue>, ExpressionParseError> {
-    match &expression.kind {
-        ExpressionKind::StringSlice(value) => Ok(Some(PrimitiveBuildValue::String(
-            string_table.resolve(*value).to_owned(),
-        ))),
-        ExpressionKind::StructuralString { pieces } => {
-            Ok(primitive_value_from_string_pieces(pieces, string_table)
-                .map(PrimitiveBuildValue::String))
-        }
-        // Every fixed scalar keeps its exact value. The contract check decides whether its type
-        // is an admitted build-input primitive, so `Byte` is rejected there rather than here.
-        ExpressionKind::FixedScalar(value) => Ok(Some(PrimitiveBuildValue::Fixed(*value))),
-        ExpressionKind::Bool(value) => Ok(Some(PrimitiveBuildValue::Bool(*value))),
-        ExpressionKind::Char(value) => Ok(Some(PrimitiveBuildValue::Char(*value))),
-        ExpressionKind::Coerced { value, .. } => {
-            primitive_value_from_expression(value, scope_context, string_table)
-        }
-        ExpressionKind::Template(template) => {
-            primitive_value_from_template(template, scope_context, string_table)
-        }
-        _ => Ok(None),
+    // Copy the operation's owned child identity first: the view borrows the builder and
+    // must end before the recursive call reborrows it mutably. Only `Constant` keeps a
+    // direct borrow; `Coerce`/`Template` snapshot to owned IDs/values.
+    enum PrimitiveStep {
+        Constant(crate::compiler_frontend::ast::const_values::store::ConstValueId),
+        Coerce(ExprId),
+        Template(crate::compiler_frontend::ast::templates::template::Template),
+        Other,
     }
+    let step = {
+        let view = expression_builder.view(expression)?;
+        match view.operation() {
+            ExpressionOperationView::Constant(id) => PrimitiveStep::Constant(id),
+            ExpressionOperationView::Coerce { value, .. } => PrimitiveStep::Coerce(value.id()),
+            ExpressionOperationView::Template(template) => {
+                PrimitiveStep::Template(template.clone())
+            }
+            _ => PrimitiveStep::Other,
+        }
+    };
+    match step {
+        PrimitiveStep::Constant(id) => primitive_value_from_payload(id, const_values, string_table),
+        PrimitiveStep::Coerce(inner) => primitive_value_from_expression_id(
+            inner,
+            scope_context,
+            expression_builder,
+            const_values,
+            string_table,
+        ),
+        PrimitiveStep::Template(template) => primitive_value_from_template(
+            &template,
+            scope_context,
+            expression_builder,
+            const_values,
+            string_table,
+        ),
+        PrimitiveStep::Other => Ok(None),
+    }
+}
+fn primitive_value_from_payload(
+    id: crate::compiler_frontend::ast::const_values::store::ConstValueId,
+    const_values: &ConstValueStore,
+    string_table: &StringTable,
+) -> Result<Option<PrimitiveBuildValue>, ExpressionParseError> {
+    Ok(
+        match const_values.payload(id).ok_or_else(|| {
+            CompilerError::compiler_error("config constant ID is outside its owner")
+        })? {
+            ConstValuePayload::String(ConstStringValue::Text(value)) => Some(
+                PrimitiveBuildValue::String(string_table.resolve(*value).to_owned()),
+            ),
+            ConstValuePayload::String(ConstStringValue::Pieces(pieces)) => {
+                primitive_value_from_string_pieces(pieces, string_table)
+                    .map(PrimitiveBuildValue::String)
+            }
+            ConstValuePayload::FixedScalar(value) => Some(PrimitiveBuildValue::Fixed(*value)),
+            ConstValuePayload::Bool(value) => Some(PrimitiveBuildValue::Bool(*value)),
+            ConstValuePayload::Char(value) => Some(PrimitiveBuildValue::Char(*value)),
+            ConstValuePayload::OptionSome(value) => {
+                return primitive_value_from_payload(*value, const_values, string_table);
+            }
+            _ => None,
+        },
+    )
 }
 
 fn primitive_value_from_template(
     template: &crate::compiler_frontend::ast::templates::template::Template,
     scope_context: &ScopeContext,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
 ) -> Result<Option<PrimitiveBuildValue>, ExpressionParseError> {
     let reference = template.tir_reference;
+    // preparation borrows the owners shared; the fold needs `&mut` scratch borrows. The
+    // `template` view borrow ends here (only the `Copy` TIR reference survives), and the
+    // preparation's shared borrows must also end before the fold reborrows mutably.
+    let preparation = {
+        let store = scope_context.template_ir_store.borrow();
+        let view = TirView::with_minimum_phase(
+            &store,
+            reference.root,
+            reference.phase,
+            TemplateTirPhase::Composed,
+            reference.context,
+        )
+        .map_err(ExpressionParseError::from)?;
+        prepare_tir_view(
+            &view,
+            expression_builder,
+            const_values,
+            TemplatePreparationMode::Value,
+        )
+        .map_err(ExpressionParseError::from)?
+    };
+    if !matches!(preparation.outcome, TemplatePreparationOutcome::Foldable)
+        || !matches!(
+            preparation.facts.final_value_kind,
+            TemplateConstValueKind::RenderableString
+        )
+    {
+        return Ok(None);
+    }
+    let mut fold_context =
+        scope_context.new_tir_fold_context(string_table, expression_builder, const_values);
     let store = scope_context.template_ir_store.borrow();
     let view = TirView::with_minimum_phase(
         &store,
@@ -587,18 +762,6 @@ fn primitive_value_from_template(
         reference.context,
     )
     .map_err(ExpressionParseError::from)?;
-    let preparation = prepare_tir_view(&view, TemplatePreparationMode::Value)
-        .map_err(ExpressionParseError::from)?;
-    if !matches!(preparation.outcome, TemplatePreparationOutcome::Foldable)
-        || !matches!(
-            preparation.facts.final_value_kind,
-            TemplateConstValueKind::RenderableString
-        )
-    {
-        return Ok(None);
-    }
-
-    let mut fold_context = scope_context.new_tir_fold_context(string_table);
     let fold_result = fold_prepared_template(&preparation, view, &mut fold_context)
         .map_err(ExpressionParseError::from)?;
     match fold_result.emission {

@@ -119,7 +119,7 @@ fn path_is_visible_type(
         .get_by_path(path)
         .is_some_and(|declaration| {
             matches!(
-                declaration.value.diagnostic_type,
+                declaration.diagnostic_type,
                 DataType::Struct { .. } | DataType::Choices { .. }
             )
         })
@@ -169,31 +169,6 @@ pub(crate) fn collect_type_parameter_ids_from_type(
 
         DataType::Option(inner) => collect_type_parameter_ids_from_type(inner, used_parameters),
 
-        DataType::FallibleCarrier { success, error } => {
-            collect_type_parameter_ids_from_type(success, used_parameters);
-            collect_type_parameter_ids_from_type(error, used_parameters);
-        }
-
-        DataType::Returns(values) => {
-            for value in values {
-                collect_type_parameter_ids_from_type(value, used_parameters);
-            }
-        }
-
-        // Function-like shapes — parameters and returns.
-        DataType::Function(_, signature) => {
-            for parameter in &signature.parameters {
-                collect_type_parameter_ids_from_type(
-                    &parameter.value.diagnostic_type,
-                    used_parameters,
-                );
-            }
-
-            for return_slot in &signature.returns {
-                collect_type_parameter_ids_from_type(return_slot.data_type(), used_parameters);
-            }
-        }
-
         // Record-like shapes — fields and variants.
         DataType::Struct { .. } | DataType::Choices { .. } => {}
 
@@ -210,7 +185,7 @@ pub(crate) fn collect_type_parameter_ids_from_declarations(
     used_parameters: &mut FxHashSet<TypeParameterId>,
 ) {
     for declaration in declarations {
-        collect_type_parameter_ids_from_type(&declaration.value.diagnostic_type, used_parameters);
+        collect_type_parameter_ids_from_type(&declaration.diagnostic_type, used_parameters);
     }
 }
 

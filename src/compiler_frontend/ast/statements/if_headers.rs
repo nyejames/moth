@@ -6,9 +6,10 @@
 //! WHY: value receivers reuse these structural facts rather than scanning `is`
 //! again. This file does not own choice-predicate value matching.
 
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::expressions::parse_expression::create_expression_with_trailing_newline_policy;
 use crate::compiler_frontend::ast::expressions::parse_expression_input::{
     ExpressionParseInput, ExpressionParseResources,
@@ -28,6 +29,7 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidControlFlowStatementReason, InvalidMatchPatternReason,
+    ValueReceiverContext,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
@@ -138,6 +140,8 @@ pub(crate) fn parse_if_header(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> IfHeaderResult<ParsedIfHeader> {
@@ -150,6 +154,8 @@ pub(crate) fn parse_if_header(
             token_stream,
             context,
             type_interner,
+            expression_builder,
+            const_values,
             string_table,
             path_fork,
         );
@@ -160,6 +166,8 @@ pub(crate) fn parse_if_header(
             token_stream,
             context,
             type_interner,
+            expression_builder,
+            const_values,
             string_table,
             path_fork,
         );
@@ -178,6 +186,8 @@ pub(crate) fn parse_if_header(
         token_stream,
         &condition_context,
         type_interner,
+        expression_builder,
+        const_values,
         &ValueMode::ImmutableOwned,
         string_table,
         path_fork,
@@ -189,7 +199,10 @@ pub(crate) fn parse_if_header(
                     scrutinee: StatementExpression::Built(condition),
                 });
             }
-            ensure_if_statement_condition(&condition, type_interner.environment())?;
+            ensure_if_statement_condition(
+                expression_builder.view(condition)?,
+                type_interner.environment(),
+            )?;
             StatementExpression::Built(condition)
         }
         Err(error) => {
@@ -232,14 +245,20 @@ fn header_is_match_style(token_stream: &AstCursor) -> bool {
 ///       deferral, keeping the ordinary trailing policy of `create_expression`.
 /// WHY: a condition or scrutinee that still references a pending numeric origin must retain its
 ///      whole fragment for body-root completion instead of leaking a non-owning deferral.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "header expression parsing keeps the token stream, condition scope, mutable interner/builder/constant/string/path state, and value mode as separate borrows"
+)]
 fn create_header_expression(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     value_mode: &ValueMode,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> IfHeaderResult<Expression> {
+) -> IfHeaderResult<ExprId> {
     let mut expected_type = ExpectedType::Infer;
     let mut cast_target_context = CastTargetContext::None;
     let input = ExpressionParseInput::ordinary(
@@ -247,6 +266,8 @@ fn create_header_expression(
             token_stream,
             scope_context: context,
             type_interner,
+            expression_builder,
+            const_values,
             expected_type: &mut expected_type,
             cast_target_context: &mut cast_target_context,
             value_mode,
@@ -256,7 +277,7 @@ fn create_header_expression(
         false,
     )
     .with_numeric_deferral_owner();
-    create_expression_with_trailing_newline_policy(input)
+    create_expression_with_trailing_newline_policy(input).map(|expression| expression.id())
 }
 
 /// Retain one `if` header fragment whose numeric origins complete at the body root.
@@ -450,6 +471,8 @@ fn parse_match_style_if_header(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> IfHeaderResult<ParsedIfHeader> {
@@ -458,6 +481,8 @@ fn parse_match_style_if_header(
         token_stream,
         &condition_context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     )?;
@@ -470,6 +495,8 @@ fn parse_option_present_capture_if_header(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> IfHeaderResult<ParsedIfHeader> {
@@ -478,20 +505,29 @@ fn parse_option_present_capture_if_header(
         token_stream,
         &condition_context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     )?;
     token_stream.advance(); // consume `is`
 
     let subject_span = match &scrutinee {
-        StatementExpression::Built(expression) => expression.span,
+        StatementExpression::Built(expression) => expression_builder.view(*expression)?.span(),
         StatementExpression::Retained(fragment) => fragment.span,
     };
     let subject = match &scrutinee {
-        StatementExpression::Built(expression) => MatchSubject::Known(expression.type_id),
-        StatementExpression::Retained(fragment) => {
-            retained_match_subject(context, type_interner.environment(), &fragment.items)
-        }
+        StatementExpression::Built(expression) => MatchSubject::Known(
+            expression_builder
+                .view(*expression)?
+                .require_single(ValueReceiverContext::MatchScrutinee)?,
+        ),
+        StatementExpression::Retained(fragment) => retained_match_subject(
+            context,
+            type_interner.environment(),
+            &fragment.items,
+            expression_builder,
+        ),
     };
     let is_option = match subject {
         MatchSubject::Known(type_id) => type_interner
@@ -516,6 +552,8 @@ fn parse_option_present_capture_if_header(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     )?;

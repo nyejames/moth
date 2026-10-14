@@ -6,8 +6,10 @@
 //!      prevents silent changes to literal type inference.
 
 use super::*;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarationTable};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -244,6 +246,8 @@ fn parse_numeric_token(
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let expected_type = ExpectedType::Infer;
     let value_mode = ValueMode::ImmutableOwned;
 
@@ -260,6 +264,8 @@ fn parse_numeric_token(
             &mut token_stream,
             &context,
             &mut type_interner,
+            &mut expression_builder,
+            &mut const_values,
             &mut literal_state,
             &mut string_table,
             &mut path_fork,

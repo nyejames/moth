@@ -49,26 +49,6 @@ fn generic_type_references_nominal_path(data_type: &DataType, declaration_path: 
 
         DataType::Option(inner) => generic_type_references_nominal_path(inner, declaration_path),
 
-        DataType::FallibleCarrier { success, error } => {
-            generic_type_references_nominal_path(success, declaration_path)
-                || generic_type_references_nominal_path(error, declaration_path)
-        }
-
-        DataType::Returns(values) => values
-            .iter()
-            .any(|value| generic_type_references_nominal_path(value, declaration_path)),
-
-        DataType::Function(_, signature) => {
-            signature.parameters.iter().any(|parameter| {
-                generic_type_references_nominal_path(
-                    &parameter.value.diagnostic_type,
-                    declaration_path,
-                )
-            }) || signature.returns.iter().any(|return_slot| {
-                generic_type_references_nominal_path(return_slot.data_type(), declaration_path)
-            })
-        }
-
         DataType::Struct {
             nominal_path,
             generic_instance_key: Some(key),
@@ -91,7 +71,7 @@ fn generic_type_references_nominal_path(data_type: &DataType, declaration_path: 
         }
 
         DataType::Parameters(fields) => fields.iter().any(|field| {
-            generic_type_references_nominal_path(&field.value.diagnostic_type, declaration_path)
+            generic_type_references_nominal_path(&field.diagnostic_type, declaration_path)
         }),
 
         _ => false,
@@ -122,10 +102,6 @@ fn type_identity_key_references_nominal_path(
             type_identity_key_references_nominal_path(key, declaration_path)
                 || type_identity_key_references_nominal_path(value, declaration_path)
         }
-        TypeIdentityKey::FallibleCarrier { success, error } => {
-            type_identity_key_references_nominal_path(success, declaration_path)
-                || type_identity_key_references_nominal_path(error, declaration_path)
-        }
         TypeIdentityKey::GenericInstance(instance) => {
             generic_instance_key_references_nominal_path(instance, declaration_path)
         }
@@ -151,20 +127,9 @@ fn collect_runtime_struct_dependencies(data_type: &DataType, dependencies: &mut 
 
         DataType::Option(inner) => collect_runtime_struct_dependencies(inner, dependencies),
 
-        DataType::FallibleCarrier { success, error } => {
-            collect_runtime_struct_dependencies(success, dependencies);
-            collect_runtime_struct_dependencies(error, dependencies);
-        }
-
         DataType::GenericInstance { arguments, .. } => {
             for argument in arguments {
                 collect_runtime_struct_dependencies(argument, dependencies);
-            }
-        }
-
-        DataType::Returns(values) => {
-            for value in values {
-                collect_runtime_struct_dependencies(value, dependencies);
             }
         }
 
@@ -197,7 +162,7 @@ pub(crate) fn validate_no_recursive_runtime_structs(
             let cycle_span = struct_fields_by_path
                 .get(current)
                 .and_then(|fields| fields.first())
-                .and_then(|field| field.value.span);
+                .and_then(|field| field.binding_span);
 
             return Err(CompilerDiagnostic::invalid_declaration(
                 InvalidDeclarationReason::RecursiveRuntimeStruct { cycle },
@@ -211,10 +176,7 @@ pub(crate) fn validate_no_recursive_runtime_structs(
         if let Some(fields) = struct_fields_by_path.get(current) {
             for field in fields {
                 let mut dependencies = FxHashSet::default();
-                collect_runtime_struct_dependencies(
-                    &field.value.diagnostic_type,
-                    &mut dependencies,
-                );
+                collect_runtime_struct_dependencies(&field.diagnostic_type, &mut dependencies);
 
                 for dependency in dependencies {
                     if struct_fields_by_path.contains_key(&dependency) {

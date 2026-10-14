@@ -8,7 +8,7 @@
 //!      Type syntax materialises literals at `Bits64` as the widest lossless carrier;
 //!      this boundary owns the final range check against the exact `I32` capacity domain.
 
-use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
+use crate::compiler_frontend::ast::const_values::store::{ConstValuePayload, ConstValueStore};
 use crate::compiler_frontend::ast::module_ast::scope_context::{ScopeContext, ScopeDeclarationRef};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidCollectionTypeReason,
@@ -54,6 +54,7 @@ pub(crate) fn fold_collection_capacity(
     capacity: &ParsedCollectionCapacity,
     scope_context: Option<&ScopeContext>,
     type_environment: &mut TypeEnvironment,
+    const_values: &ConstValueStore,
 ) -> CollectionCapacityResult<usize> {
     let span = match capacity {
         ParsedCollectionCapacity::Literal { span, .. }
@@ -104,7 +105,7 @@ pub(crate) fn fold_collection_capacity(
 
             // Capacity syntax needs authored `#` provenance plus an already folded exact `I32`
             // payload. Template const classification cannot strengthen either part of that proof.
-            if type_environment.fixed_scalar(declaration.value.type_id) != Some(FixedScalar::I32) {
+            if type_environment.fixed_scalar(declaration.type_id) != Some(FixedScalar::I32) {
                 return Err(CompilerDiagnostic::invalid_collection_type(
                     InvalidCollectionTypeReason::CapacityNotInt,
                     span,
@@ -112,7 +113,10 @@ pub(crate) fn fold_collection_capacity(
                 .into());
             }
 
-            let ExpressionKind::FixedScalar(value) = &declaration.value.kind else {
+            let Some(ConstValuePayload::FixedScalar(value)) = const_values
+                .value_for_path(&declaration.id)
+                .and_then(|id| const_values.payload(id))
+            else {
                 return Err(CompilerDiagnostic::invalid_collection_type(
                     InvalidCollectionTypeReason::CapacityNotInt,
                     span,

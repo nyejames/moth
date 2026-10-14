@@ -45,7 +45,9 @@ use crate::compiler_frontend::ast::templates::tir::{
 };
 
 use crate::builder_surface::SourceFileKind;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
@@ -136,11 +138,17 @@ impl Template {
     /// 3. Composition — child wrapper application, head-chain resolution
     /// 4. Formatting — style-directed body formatting
     /// 5. Validation — directive-owned warnings and slot insertion checks
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the caller owns the interner, so stream, scope, builders and tables stay separate borrows"
+    )]
     pub(crate) fn new_with_type_interner(
         token_stream: &mut AstCursor<'_>,
         source_path: PathId,
         context: &ScopeContext,
         type_interner: &mut AstTypeInterner<'_>,
+        expression_builder: &mut AstExpressionBuilder,
+        const_values: &mut ConstValueStore,
         direct_child_wrappers: Vec<TemplateWrapperReference>,
         string_table: &mut StringTable,
         path_fork: &mut PathInternerFork,
@@ -152,6 +160,8 @@ impl Template {
             source_path,
             context,
             type_interner,
+            expression_builder,
+            const_values,
             direct_child_wrappers,
             NestedTemplateParseOptions::runtime_capable().with_default_style(default_style),
             TemplatePathTables {
@@ -168,11 +178,17 @@ impl Template {
     /// Const-required callers need the structured control-flow template so AST
     /// folding can select branches and produce source diagnostics before the
     /// template reaches runtime lowering.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the caller owns the interner, so stream, scope, builders and tables stay separate borrows"
+    )]
     pub(crate) fn new_const_required_with_type_interner(
         token_stream: &mut AstCursor<'_>,
         source_path: PathId,
         context: &ScopeContext,
         type_interner: &mut AstTypeInterner<'_>,
+        expression_builder: &mut AstExpressionBuilder,
+        const_values: &mut ConstValueStore,
         direct_child_wrappers: Vec<TemplateWrapperReference>,
         string_table: &mut StringTable,
         path_fork: &mut PathInternerFork,
@@ -184,6 +200,8 @@ impl Template {
             source_path,
             context,
             type_interner,
+            expression_builder,
+            const_values,
             direct_child_wrappers,
             NestedTemplateParseOptions::const_required().with_default_style(default_style),
             TemplatePathTables {
@@ -194,10 +212,16 @@ impl Template {
     }
 
     #[cfg(test)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the interner is built here, so stream, scope, builders and tables stay separate"
+    )]
     pub(crate) fn new(
         token_stream: &mut AstCursor<'_>,
         source_path: PathId,
         context: &ScopeContext,
+        expression_builder: &mut AstExpressionBuilder,
+        const_values: &mut ConstValueStore,
         templates_inherited: Vec<TemplateWrapperReference>,
         string_table: &mut StringTable,
         path_fork: &mut PathInternerFork,
@@ -211,6 +235,8 @@ impl Template {
             source_path,
             context,
             &mut type_interner,
+            expression_builder,
+            const_values,
             templates_inherited,
             string_table,
             path_fork,
@@ -218,10 +244,16 @@ impl Template {
     }
 
     #[cfg(test)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the interner is built here, so stream, scope, builders and tables stay separate"
+    )]
     pub(crate) fn new_const_required(
         token_stream: &mut AstCursor<'_>,
         source_path: PathId,
         context: &ScopeContext,
+        expression_builder: &mut AstExpressionBuilder,
+        const_values: &mut ConstValueStore,
         templates_inherited: Vec<TemplateWrapperReference>,
         string_table: &mut StringTable,
         path_fork: &mut PathInternerFork,
@@ -235,6 +267,8 @@ impl Template {
             source_path,
             context,
             &mut type_interner,
+            expression_builder,
+            const_values,
             templates_inherited,
             string_table,
             path_fork,
@@ -245,12 +279,17 @@ impl Template {
     ///
     /// This crate boundary mirrors the independent source, scope, type, wrapper, table and
     /// provenance inputs used by the retained-header caller.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "Moth-content construction keeps cursor, source path and scope, mutable type/expression/constant/string/path owners, child wrappers and outer provenance span separate"
+    )]
     pub(crate) fn new_moth_content_constant_with_type_interner(
         token_stream: &mut AstCursor<'_>,
         source_path: PathId,
         context: &ScopeContext,
         type_interner: &mut AstTypeInterner<'_>,
+        expression_builder: &mut AstExpressionBuilder,
+        const_values: &mut ConstValueStore,
         direct_child_wrappers: Vec<TemplateWrapperReference>,
         string_table: &mut StringTable,
         path_fork: &mut PathInternerFork,
@@ -261,6 +300,8 @@ impl Template {
             source_path,
             context,
             type_interner,
+            expression_builder,
+            const_values,
             NestedTemplateConstruction {
                 direct_child_wrappers,
                 parse_options: NestedTemplateParseOptions::const_required(),
@@ -275,11 +316,17 @@ impl Template {
 
     /// Internal constructor that supports doc comment context propagation.
     /// Called recursively for nested templates in the body parser.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "recursive parsing keeps stream, scope, interner, builders, options and tables separate"
+    )]
     pub(crate) fn new_nested_template(
         token_stream: &mut AstCursor<'_>,
         source_path: PathId,
         context: &ScopeContext,
         type_interner: &mut AstTypeInterner<'_>,
+        expression_builder: &mut AstExpressionBuilder,
+        const_values: &mut ConstValueStore,
         direct_child_wrappers: Vec<TemplateWrapperReference>,
         parse_options: NestedTemplateParseOptions,
         tables: TemplatePathTables<'_>,
@@ -289,6 +336,8 @@ impl Template {
             source_path,
             context,
             type_interner,
+            expression_builder,
+            const_values,
             NestedTemplateConstruction {
                 direct_child_wrappers,
                 parse_options,
@@ -303,6 +352,8 @@ impl Template {
         source_path: PathId,
         context: &ScopeContext,
         type_interner: &mut AstTypeInterner<'_>,
+        expression_builder: &mut AstExpressionBuilder,
+        const_values: &mut ConstValueStore,
         construction: NestedTemplateConstruction<'_>,
     ) -> PreparedTemplateConstructionResult {
         let NestedTemplateConstruction {
@@ -355,6 +406,8 @@ impl Template {
                 TemplateHeadParseRequest {
                     context,
                     type_interner,
+                    expression_builder,
+                    const_values,
                     build_state: &mut build_state,
                     construction_context: &mut construction_context,
                     control_flow_validation,
@@ -383,6 +436,8 @@ impl Template {
                 context,
                 end_policy,
                 type_interner,
+                expression_builder,
+                const_values,
                 body_mode: parsed_head.body_mode,
                 direct_child_wrappers: &direct_child_wrappers,
                 control_flow_validation,
@@ -406,6 +461,8 @@ impl Template {
                 ControlFlowRenderUnitRequest {
                     style: &style,
                     context,
+                    expression_builder,
+                    const_values,
                     string_table,
                 },
             )?;
@@ -435,6 +492,8 @@ impl Template {
             has_control_flow,
             &style,
             context,
+            expression_builder,
+            const_values,
             string_table,
         )?;
 
@@ -469,6 +528,8 @@ impl Template {
 
             let composed_root = compose_tir_head_chain_from_root(
                 &mut context.template_ir_store.borrow_mut(),
+                expression_builder,
+                const_values,
                 original_root,
                 string_table,
                 matches!(
@@ -534,7 +595,13 @@ impl Template {
                 tir_reference.context,
             )
             .map_err(TemplateError::from)?;
-            prepare_tir_view_with_source_scope(&view, preparation_mode, context)?
+            prepare_tir_view_with_source_scope(
+                &view,
+                expression_builder,
+                const_values,
+                preparation_mode,
+                context,
+            )?
         };
 
         build_state.refresh_kind_from_preparation(&template_preparation.facts);

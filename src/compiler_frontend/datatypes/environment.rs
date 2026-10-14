@@ -116,11 +116,10 @@ pub struct TypeEnvironment {
 
     // Direct index from generic parameter ID to its declaration-site trait bounds.
     //
-    // INVARIANT: this map and `GenericParameter.trait_bounds` inside each list in
-    // `generic_parameter_lists` are updated together by `register_generic_parameter_list`
-    // and `update_generic_parameter_bounds`. Callers that hold a `GenericParameterList`
-    // may still inspect `GenericParameter.trait_bounds` directly; this index exists so
-    // that `trait_bounds_for_generic_parameter` does not scan every list.
+    // Parameter-owning lists update this index together with their descriptor bounds.
+    // Callable contracts may reuse nominal parameter identities with declaration-specific
+    // bounds; those lists do not alter this index. Callable validation reads its own list,
+    // while `trait_bounds_for_generic_parameter` reads the parameter owner's bounds.
     trait_bounds_by_generic_parameter_id: FxHashMap<GenericParameterId, Vec<TraitId>>,
 
     // Path -> NominalTypeId lookup.
@@ -535,6 +534,46 @@ impl TypeEnvironment {
             list_id: id,
             canonical_by_local,
         }
+    }
+
+    /// Registers declaration-specific bounds over already-owned generic parameter identities.
+    ///
+    /// Public receiver methods share exported nominal TypeIds, not their callable contracts.
+    /// Keep each method's names and bounds in a separate list without allocating parameters or
+    /// changing the parameter owner's bounds used by generic-type queries.
+    pub(crate) fn register_generic_parameter_contract(
+        &mut self,
+        parameter_owner: GenericParameterListId,
+        parameters: impl ExactSizeIterator<Item = (TypeParameterId, StringId)>,
+        resolved_bounds_by_local: &FxHashMap<TypeParameterId, Vec<TraitId>>,
+    ) -> Option<RegisteredGenericParameterList> {
+        let owner = self.generic_parameters(parameter_owner)?;
+        if owner.parameters.len() != parameters.len() {
+            return None;
+        }
+        let mut canonical_parameters = Vec::with_capacity(parameters.len());
+        let mut canonical_by_local = FxHashMap::default();
+        for ((local_id, name), parameter) in parameters.zip(&owner.parameters) {
+            let id = parameter.id;
+            canonical_by_local.insert(local_id, id);
+            canonical_parameters.push(GenericParameter {
+                id,
+                name,
+                trait_bounds: resolved_bounds_by_local
+                    .get(&local_id)
+                    .cloned()
+                    .unwrap_or_default(),
+            });
+        }
+        let list_id = GenericParameterListId(self.next_generic_parameter_list_id);
+        self.next_generic_parameter_list_id += 1;
+        self.generic_parameter_lists.push(GenericParameterList {
+            parameters: canonical_parameters,
+        });
+        Some(RegisteredGenericParameterList {
+            list_id,
+            canonical_by_local,
+        })
     }
 
     /// Updates canonical bounds after trait definitions become available.
@@ -1249,6 +1288,19 @@ impl TypeEnvironment {
         })
     }
 
+    /// Enumerate registered nominal lookup spellings, including inherited aliases.
+    ///
+    /// Detached generic preparation preserves these bindings as canonical inputs rather than
+    /// retaining a live requester environment for generated publication.
+    pub(crate) fn nominal_path_bindings(&self) -> impl Iterator<Item = (PathId, TypeId)> + '_ {
+        std::iter::successors(Some(self), |environment| environment.base.as_deref())
+            .flat_map(|environment| environment.nominal_by_path.iter())
+            .filter_map(|(path, nominal_id)| {
+                self.type_id_for_nominal_id(*nominal_id)
+                    .map(|type_id| (*path, type_id))
+            })
+    }
+
     /// Register an additional consumer-local lookup spelling for an existing nominal type.
     ///
     /// Imported declarations use a collision-free internal canonical path while source generic
@@ -1614,31 +1666,6 @@ impl TypeEnvironment {
         }
     }
 
-    /// Interns a tuple type with the given field types.
-    ///
-    /// WHAT: creates a canonical `TypeId` for a tuple/multi-return type.
-    /// WHY: HIR needs to represent multi-return values as a single `TypeId` for
-    ///      `HirExpression.ty`, `HirLocal.ty`, and `HirFunction.return_type`.
-    pub fn intern_tuple(&mut self, fields: Vec<TypeId>) -> TypeId {
-        self.intern_constructed(
-            TypeConstructor::Builtin(BuiltinTypeConstructor::Tuple),
-            fields.into_boxed_slice(),
-        )
-    }
-
-    /// Returns the field types of a tuple, if the type is a tuple.
-    pub fn tuple_field_ids(&self, id: TypeId) -> Option<&[TypeId]> {
-        match self.get(id) {
-            Some(TypeDefinition::Constructed(constructed)) => match &constructed.constructor {
-                TypeConstructor::Builtin(BuiltinTypeConstructor::Tuple) => {
-                    Some(constructed.arguments.as_ref())
-                }
-                _ => None,
-            },
-            _ => None,
-        }
-    }
-
     /// Returns true if values of this type can be compared with runtime equality.
     ///
     /// WHAT: scalar equality and choice payload equality are frontend semantic facts.
@@ -1963,14 +1990,6 @@ impl TypeEnvironment {
                         self.type_id_to_type_identity_key(*inner_id)?,
                     )))
                 }
-                TypeConstructor::Builtin(BuiltinTypeConstructor::FallibleCarrier) => {
-                    let success_id = constructed.arguments.first()?;
-                    let error_id = constructed.arguments.get(1)?;
-                    Some(TypeIdentityKey::FallibleCarrier {
-                        success: Box::new(self.type_id_to_type_identity_key(*success_id)?),
-                        error: Box::new(self.type_id_to_type_identity_key(*error_id)?),
-                    })
-                }
                 TypeConstructor::Builtin(BuiltinTypeConstructor::OrderedMap) => {
                     let key_id = constructed.arguments.first()?;
                     let value_id = constructed.arguments.get(1)?;
@@ -1979,7 +1998,6 @@ impl TypeEnvironment {
                         value: Box::new(self.type_id_to_type_identity_key(*value_id)?),
                     })
                 }
-                TypeConstructor::Builtin(BuiltinTypeConstructor::Tuple) => None,
             },
             TypeDefinition::GenericInstance(instance) => {
                 let base_path = *self.nominal_path_by_id(instance.base)?;

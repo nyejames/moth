@@ -189,7 +189,7 @@ pub struct JsModule {
     /// Complete JS source code.
     pub source: String,
     pub function_name_by_id: HashMap<FunctionId, String>,
-    /// Whether the emitted start returns the existing fallible carrier.
+    /// Whether the emitted start returns a fallible JavaScript ABI envelope.
     /// False when this bundle does not emit a start function.
     pub start_is_fallible: bool,
     /// Set of external function IDs referenced while lowering emitted JS functions.

@@ -9,7 +9,10 @@
 //! without cloning descriptor graphs per binding or use.
 
 use crate::compiler_frontend::ast::ScopeContext;
-use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::expressions::expression_rpn::{
+    ExpressionRpnItem, single_operand,
+};
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::field_access::retained_operand_result_shape;
 use crate::compiler_frontend::ast::numeric_construction::{
     ConstructionResult, NumericClassId, NumericConstructionState, NumericFamily, NumericPin,
@@ -1581,13 +1584,20 @@ pub(crate) fn directed_recipe_shape(
     scope_context: &ScopeContext,
     environment: &TypeEnvironment,
     items: &[ExpressionRpnItem],
+    expression_builder: &AstExpressionBuilder,
 ) -> ConstructionResult<Option<KnownShapeId>> {
     if let Some(shape) = retained_known_shape(items) {
         return Ok(Some(shape));
     }
-    match items {
-        [item] => retained_operand_result_shape(item, scope_context, environment, false),
-        _ => Ok(None),
+    match single_operand(items) {
+        Some(item) => retained_operand_result_shape(
+            item,
+            scope_context,
+            environment,
+            false,
+            expression_builder,
+        ),
+        None => Ok(None),
     }
 }
 
@@ -1608,18 +1618,17 @@ pub(crate) fn fragment_shape(
     scope_context: &ScopeContext,
     environment: &mut TypeEnvironment,
     items: &[ExpressionRpnItem],
+    expression_builder: &AstExpressionBuilder,
 ) -> ConstructionResult<KnownShapeId> {
     if let Some(shape) = retained_known_shape(items) {
         return Ok(shape);
     }
 
-    if let [
-        ExpressionRpnItem::PendingNumericCast {
-            target_type_id,
-            requires_optional_wrap_after_cast,
-            ..
-        },
-    ] = items
+    if let Some(ExpressionRpnItem::PendingNumericCast {
+        target_type_id,
+        requires_optional_wrap_after_cast,
+        ..
+    }) = single_operand(items)
     {
         let type_id = if *requires_optional_wrap_after_cast {
             environment.intern_option(*target_type_id)
@@ -1636,9 +1645,15 @@ pub(crate) fn fragment_shape(
 
     // The retained owner derives a single operand's known result. It reads the numeric state
     // itself, so it runs before any mutable borrow below.
-    let operand_shape = match items {
-        [item] => retained_operand_result_shape(item, scope_context, environment, false)?,
-        _ => None,
+    let operand_shape = match single_operand(items) {
+        Some(item) => retained_operand_result_shape(
+            item,
+            scope_context,
+            environment,
+            false,
+            expression_builder,
+        )?,
+        None => None,
     };
     if let Some(shape) = operand_shape {
         return Ok(shape);

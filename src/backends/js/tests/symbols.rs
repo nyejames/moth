@@ -97,18 +97,14 @@ fn exposes_function_name_map_for_runtime_fragments() {
     let mut expressions = HirExpressionStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (type_environment, types) = build_type_environment();
+    let (type_environment, _) = build_type_environment();
 
     let block0 = HirBlock {
         id: BlockId(0),
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let block1 = HirBlock {
@@ -116,11 +112,7 @@ fn exposes_function_name_map_for_runtime_fragments() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let mut module = HirModule::new();
@@ -133,13 +125,15 @@ fn exposes_function_name_map_for_runtime_fragments() {
             id: FunctionId(0),
             entry: BlockId(0),
             params: vec![],
-            return_type: types.unit,
+            returns: vec![].into_boxed_slice(),
+            error_return: None,
         },
         HirFunction {
             id: FunctionId(1),
             entry: BlockId(1),
             params: vec![],
-            return_type: types.unit,
+            returns: vec![].into_boxed_slice(),
+            error_return: None,
         },
     ];
     module.regions = vec![HirRegion::lexical(RegionId(0), None)];

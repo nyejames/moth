@@ -483,7 +483,16 @@ fn reject_authored_config_start_body(
                     rejections.push(config_diagnostic(
                         key,
                         InvalidConfigReason::PlainBindingUnsupported,
-                        declaration.value.span,
+                        declaration
+                            .value
+                            .initializer()
+                            .and_then(|value| {
+                                ast.expressions
+                                    .view(value)
+                                    .ok()
+                                    .and_then(|value| value.span())
+                            })
+                            .or(declaration.binding_span),
                     ));
                 }
                 NodeKind::PushStartRuntimeFragment(_) => rejections.push(config_diagnostic(

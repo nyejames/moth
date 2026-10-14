@@ -1,11 +1,15 @@
-"""Regenerate the body-local numeric scaling fixtures from one pattern per series."""
+"""Regenerate the body-local numeric and grouped-not scaling fixtures."""
 
 from pathlib import Path
 
 
 SIZES = (32, 128, 512)
 # Per-query alias cost hides under constant overhead below a few thousand bindings.
-SHAPE_SIZES = {"alias-receiver-chain": (256, 1024, 4096)}
+SHAPE_SIZES = {
+    "alias-receiver-chain": (256, 1024, 4096),
+    # Runtime HIR needs deeper chains to clear the scaling measurement floor.
+    "grouped-not-runtime": (128, 512, 2048),
+}
 ROOT = Path(__file__).resolve().parent
 
 
@@ -37,6 +41,9 @@ def fixture(shape, size):
         for _ in range(size):
             expression = f"({expression} + 1)"
         lines += ["grouped || -> U64:", f"    value = {expression}", "    return value", ";"]
+    elif shape == "grouped-not-runtime":
+        expression = "not (" * size + "value" + ")" * size
+        lines += ["grouped |value Bool| -> Bool:", f"    return {expression}", ";"]
     elif shape == "independent-regions":
         lines += ["regions ||:"]
         lines += [f"    origin_{i} = 1 + 2\n    received_{i} U64 = origin_{i}" for i in range(size)]
@@ -67,6 +74,18 @@ def fixture(shape, size):
 
 
 if __name__ == "__main__":
-    for shape in ("copy-chain", "origin-fanout", "alias-receiver-chain", "grouped-arithmetic", "independent-regions", "aggregate-forwarding", "safety-pruning", "mutable-cycles", "narrow-chains", "generic-failure-chain"):
+    for shape in (
+        "copy-chain",
+        "origin-fanout",
+        "alias-receiver-chain",
+        "grouped-arithmetic",
+        "grouped-not-runtime",
+        "independent-regions",
+        "aggregate-forwarding",
+        "safety-pruning",
+        "mutable-cycles",
+        "narrow-chains",
+        "generic-failure-chain",
+    ):
         for size in SHAPE_SIZES.get(shape, SIZES):
             (ROOT / f"{shape}-{size}.moth").write_text(fixture(shape, size))

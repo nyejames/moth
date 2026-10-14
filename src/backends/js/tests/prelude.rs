@@ -151,17 +151,6 @@ fn runtime_prelude_contains_error_helpers() {
     );
 }
 
-/// Verifies that the result helper group is present in the emitted prelude. [prelude-presence]
-#[test]
-fn runtime_prelude_contains_result_helpers() {
-    let source = lower_minimal_module("main");
-
-    assert!(
-        source.contains("function __moth_result_propagate("),
-        "prelude must contain __moth_result_propagate"
-    );
-}
-
 /// Verifies that the string helper group is present in the emitted prelude. [prelude-presence]
 #[test]
 fn runtime_prelude_contains_string_helpers() {

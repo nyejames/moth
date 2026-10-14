@@ -68,11 +68,6 @@ pub(crate) fn synthesize_export_wrappers(
                 ))
             })?;
 
-        if target_signature.results.len() > 1 {
-            return Err(lir_transformation_error(format!(
-                "Wasm export wrapper synthesis does not yet support multi-value returns for {target_lir_id:?}"
-            )));
-        }
         let target_hir_function = context
             .hir_module
             .functions
@@ -153,19 +148,21 @@ pub(crate) fn synthesize_export_wrappers(
             args[index] = canonical_value;
         }
 
-        let result_local = target_signature.results.first().copied().map(|result_abi| {
+        let mut result_locals = Vec::with_capacity(target_signature.results.len());
+        for (index, result_abi) in target_signature.results.iter().enumerate() {
             let local_id = WasmLirLocalId(next_local_id);
+            next_local_id += 1;
             locals.push(WasmLirLocal {
                 id: local_id,
-                name: Some("result".to_owned()),
-                ty: result_abi,
+                name: Some(format!("result{index}")),
+                ty: *result_abi,
                 role: WasmLocalRole::Temp,
             });
-            local_id
-        });
+            result_locals.push(local_id);
+        }
 
         statements.push(WasmLirStmt::Call {
-            dst: result_local,
+            results: result_locals.clone(),
             callee: WasmCalleeRef::Function(target_lir_id),
             args,
         });
@@ -182,7 +179,7 @@ pub(crate) fn synthesize_export_wrappers(
                 id: WasmLirBlockId(0),
                 statements,
                 terminator: WasmLirTerminator::Return {
-                    value: result_local,
+                    values: result_locals,
                 },
             }],
             linkage: WasmFunctionLinkage::ExportedWrapper,

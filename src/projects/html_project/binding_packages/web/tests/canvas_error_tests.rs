@@ -86,8 +86,13 @@ assertError(
 "#
     );
 
+    let temporary_directory =
+        tempfile::tempdir().expect("should create temporary directory for canvas asset script");
+    let script_path = temporary_directory.path().join("canvas_error_check.mjs");
+    std::fs::write(&script_path, &script).expect("should write canvas asset script");
+
     let output = Command::new("node")
-        .args(["--input-type=module", "--eval", &script])
+        .arg(&script_path)
         .output()
         .expect("Node must be available to execute the canvas asset");
     assert!(

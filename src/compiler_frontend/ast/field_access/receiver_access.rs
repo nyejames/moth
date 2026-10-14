@@ -11,6 +11,8 @@
 
 use super::ReceiverAccessMode;
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::place_access::{
     ReceiverSourceState, classify_receiver_source_state,
 };
@@ -65,12 +67,13 @@ type ReceiverAccessResult = Result<(), CompilerDiagnostic>;
 
 pub(super) fn validate_receiver_access(
     receiver_node: &AstNode,
+    expression_builder: &AstExpressionBuilder,
     path_fork: &PathInternerFork,
     access_mode: ReceiverAccessMode,
     method_boundary_span: Option<SourceSpan>,
     authored_marker_span: Option<SourceSpan>,
     access_requirement: ReceiverAccessRequirement,
-) -> ReceiverAccessResult {
+) -> Result<(), ExpressionParseError> {
     // A call that does not require mutable access rejects an authored `~` at the marker, since
     // the marker is the source the author must remove.
     if !access_requirement.requires_mutable {
@@ -79,14 +82,16 @@ pub(super) fn validate_receiver_access(
                 &access_requirement.diagnostic,
                 authored_marker_span,
                 method_boundary_span,
-            );
+            )
+            .map_err(Into::into);
         }
         return Ok(());
     }
 
-    let source_state = classify_receiver_source_state(receiver_node, path_fork);
+    let source_state =
+        classify_receiver_source_state(receiver_node, expression_builder, path_fork)?;
 
-    match (access_mode, source_state) {
+    let result = match (access_mode, source_state) {
         // An existing mutable place needs the explicit `~` marker. The method boundary is the
         // call site the author must prefix; the authored marker is absent here. The binding name
         // lets the renderer show a concrete `~name.method(...)` example when it is known.
@@ -135,7 +140,8 @@ pub(super) fn validate_receiver_access(
                 method_boundary_span,
             )
         }
-    }
+    };
+    result.map_err(Into::into)
 }
 
 /// Apply the receiver-access policy to a retained receiver that is an existing place.

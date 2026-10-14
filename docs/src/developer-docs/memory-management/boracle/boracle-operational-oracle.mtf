@@ -129,22 +129,26 @@ accesses precede all paired destination-write accesses, and the terminator captu
 every source before installing any destination. Input validation checks the access
 sequence against the explicit argument pairs.
 
-A call result is the one reversed case. The builder emits the granular argument events, then the
-`CallEffect`, and only then the confirming binding write for the result place. A paired binding write
-that targets the result place of a `CallEffect` already executed at this call confirms the generation
-that effect installed and never replaces it. Its Define/Update tag and generation-evidence bit
-remain independent. Without that rule the trailing write would allocate a
-second generation and discard the one every provenance capability was issued against.
+Call results use the reverse confirmation order. The builder emits the granular argument events,
+then `CallEffect` with ordered result destinations, then each confirming binding write. Each write
+confirms the generation that the effect installed at that result place without replacing it.
+Its Define/Update tag and generation-evidence bit remain independent. This prevents a trailing
+write from discarding the generation that issued the result's provenance capabilities.
+
+Before any result destination transition, the oracle captures every `AliasParams` argument target.
+Result slots that share a normalised origin reuse one event-defined generation within that call
+effect. Distinct origins get separate generations, while write-through destinations retain their
+existing target under the transition table.
 
 That confirmation is bound to the generation the effect installed. Any other event that retires or
 replaces the result place first is malformed and the oracle rejects it, so a pending entry can never
 outlive the generation it was registered against.
 
-The oracle does not fork executions for provenance alternatives, and it no longer needs to. A result
-place takes the value-producing row whatever its provenance names, so its role never depends on the
-arguments. `AliasParams` therefore issues one shared provenance capability per index, matching the
-reference loop at `loans.rs:487-515`, and no index count is unsupported. An empty index list is
-malformed input rejected during problem validation.
+The oracle does not fork executions for provenance alternatives. A result place takes the
+value-producing row whatever its provenance names, so its role never depends on the arguments.
+`AliasParams` issues one shared provenance capability per index against the captured argument
+targets, even when a destination transition replaces an argument place. Every index count works.
+Problem validation rejects an empty index list as malformed input.
 
 ### Destination role transitions
 
@@ -373,9 +377,9 @@ Per-event runtime meaning, complete for all 16 `EventKind` variants:
 
     [td:
         [: `CallEffect(effect)`]
-        [: completes the call's argument capabilities, then binds the optional result. The
+        [: completes the call's argument capabilities, then binds the ordered results. The
         completion advances every still-open argument interval to this event and records each
-        closing `call_effect_index`, even when `effect.result` is `None`. See the Calls section]
+        closing `call_effect_index`, even when `effect.results` is empty. See the Calls section]
     ]
 
     [td:
@@ -394,7 +398,7 @@ Per-event runtime meaning, complete for all 16 `EventKind` variants:
     ]
 ]
 
-Terminator events carry one of the nine terminator kinds:
+Terminator events carry these control-flow kinds:
 
 [table:
     [th:
@@ -416,11 +420,6 @@ Terminator events carry one of the nine terminator kinds:
 
     [td:
         [: `Return`]
-        [: the execution ends normally]
-    ]
-
-    [td:
-        [: `ReturnSuccess`]
         [: the execution ends normally]
     ]
 
@@ -450,7 +449,10 @@ Terminator events carry one of the nine terminator kinds:
     ]
 ]
 
-Recoverable success and error arms become distinct executions because they are distinct terminators or distinct branch targets. The oracle never merges them.
+The builder projects HIR `Invoke` into distinct outcome edge blocks, even when both HIR successors
+name the same block. Each outcome retires both destination sets before defining only its selected
+results. Operation inputs that overlap destinations are captured before retirement. The oracle
+executes one selected outcome and never merges success and failure.
 
 The projection element for `EventKind::Projection` comes from the `origin` row's `OriginKind::Projection { projection, .. }`. If the origin row has any other kind the problem is malformed and the oracle returns `CompilerError`. Expression projection reads the projected source and defines its produced value in a separate compiler temporary. An operation's projection result instead writes its explicit destination. Neither path defines or mutates source storage merely to prepare value provenance.
 
@@ -645,16 +647,18 @@ Two rules keep the exercise records of sibling arguments and repeated invocation
 
     [td:
         [: `Fresh`]
-        [: the result follows the transition table with a fresh event-defined generation. An
-        `Unavailable` result therefore installs a `Slot` holding that generation, and the trailing
-        confirming definition preserves it]
+        [: the result follows the transition table with an event-defined generation shared by
+        result slots with the same normalised origin. An `Unavailable` result installs a `Slot`
+        holding that generation, and the trailing confirming definition preserves it.
+        A write-through destination retains its existing target]
     ]
 
     [td:
         [: `AliasParams(indexes)`]
-        [: the result follows the transition table with its own fresh generation, exactly as the
-        `Fresh` arm does, and issues one shared provenance capability per index. Every index count is
-        supported. An empty list is malformed input rejected during validation]
+        [: the result follows the same generation-sharing and destination rules as `Fresh`.
+        Before any destination transition, the oracle captures the source argument targets,
+        then issues one shared provenance capability per index against those captured targets.
+        Every index count works. Validation rejects an empty list as malformed input]
     ]
 
     [td:

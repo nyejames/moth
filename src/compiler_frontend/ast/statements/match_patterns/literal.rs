@@ -5,10 +5,13 @@
 //! WHY: separating literal parsing from relational and choice parsing keeps each
 //! submodule focused on one pattern category.
 
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, ExpressionView,
+};
 use crate::compiler_frontend::ast::numeric_construction::{
     DeferredArmPattern, DeferredExpressionSuffix, DeferredNumericExpression, RetainedPattern,
     deferred_numeric_expression,
@@ -33,7 +36,7 @@ use moth_lexical::numeric::parse::literal_kind_initialises;
 
 use super::diagnostics::reject_deferred_pattern_lead_token;
 use super::relational::{parse_pending_relational_pattern, parse_relational_pattern};
-use super::types::{MatchPattern, MatchSubject, RelationalPatternOp};
+use super::types::{MatchPattern, MatchSubject, PatternValue, RelationalPatternOp};
 /// Result for the literal pattern family. Authored mismatches remain diagnostics while malformed
 /// retained payloads stay on the infrastructure lane.
 type LiteralPatternResult<T> = Result<T, ExpressionParseError>;
@@ -49,7 +52,9 @@ fn materialize_numeric_literal(
     token: &NumericLiteralToken,
     span: Option<SourceSpan>,
     string_table: &StringTable,
-) -> LiteralPatternResult<Expression> {
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+) -> LiteralPatternResult<ExprId> {
     let scalar = if token.kind == NumericLiteralKind::WholeNumber {
         FixedScalar::I32
     } else {
@@ -64,11 +69,9 @@ fn materialize_numeric_literal(
             ))
         })?;
 
-    Ok(Expression::fixed_scalar(
-        value,
-        span,
-        ValueMode::ImmutableOwned,
-    ))
+    Ok(expression_builder
+        .fixed_scalar(const_values, value, span, ValueMode::ImmutableOwned)?
+        .id())
 }
 
 /// Parse one literal or relational pattern against the match subject.
@@ -82,6 +85,8 @@ pub fn parse_non_choice_pattern(
     subject: MatchSubject,
     string_table: &mut StringTable,
     type_environment: &TypeEnvironment,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
 ) -> LiteralPatternResult<DeferredArmPattern> {
     match subject {
         MatchSubject::Known(subject_type_id) => {
@@ -94,6 +99,8 @@ pub fn parse_non_choice_pattern(
                     subject_type_id,
                     string_table,
                     type_environment,
+                    expression_builder,
+                    const_values,
                 )?,
 
                 _ => {
@@ -102,13 +109,22 @@ pub fn parse_non_choice_pattern(
                         subject_type_id,
                         string_table,
                         type_environment,
+                        expression_builder,
+                        const_values,
                     )?;
-                    MatchPattern::Literal(literal)
+                    MatchPattern::Literal(PatternValue::from_expression(
+                        expression_builder.view(literal)?,
+                    )?)
                 }
             };
             Ok(DeferredArmPattern::Ready(pattern))
         }
-        MatchSubject::Pending => parse_pending_non_choice_pattern(token_stream, string_table),
+        MatchSubject::Pending => parse_pending_non_choice_pattern(
+            token_stream,
+            string_table,
+            expression_builder,
+            const_values,
+        ),
         MatchSubject::PendingChoice(_) | MatchSubject::PendingOption { .. } => {
             Err(CompilerError::compiler_error(
                 "a pending choice or option subject reached the non-choice pattern parser",
@@ -128,6 +144,8 @@ pub fn parse_non_choice_pattern(
 fn parse_pending_non_choice_pattern(
     token_stream: &mut AstCursor,
     string_table: &mut StringTable,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
 ) -> LiteralPatternResult<DeferredArmPattern> {
     if let Some(diagnostic) = reject_deferred_pattern_lead_token(token_stream) {
         return Err(diagnostic.into());
@@ -152,7 +170,7 @@ fn parse_pending_non_choice_pattern(
         }
 
         TokenTag::BOOL_LITERAL | TokenTag::CHAR_LITERAL | TokenTag::STRING_SLICE_LITERAL => {
-            typed_literal_expression(token_stream, string_table)?
+            typed_literal_expression(token_stream, string_table, expression_builder, const_values)?
         }
 
         TokenTag::NONE_LITERAL => {
@@ -176,7 +194,9 @@ fn parse_pending_non_choice_pattern(
         }
     };
 
-    Ok(DeferredArmPattern::Ready(MatchPattern::Literal(pattern)))
+    Ok(DeferredArmPattern::Ready(MatchPattern::Literal(
+        PatternValue::from_expression(expression_builder.view(pattern)?)?,
+    )))
 }
 
 /// Parse one authored numeric literal spelling (with an optional leading `-`) into a retained
@@ -265,11 +285,12 @@ pub(crate) fn ensure_pattern_compatible_with_subject(
         | MatchPattern::OptionPresentCapture { .. }
         | MatchPattern::ChoiceVariant { .. } => return Ok(()),
     };
+    let value_type = value.type_id;
 
-    if !is_type_compatible(subject_value_type_id, value.type_id, type_environment) {
+    if !is_type_compatible(subject_value_type_id, value_type, type_environment) {
         return Err(CompilerDiagnostic::type_mismatch(
             subject_value_type_id,
-            value.type_id,
+            value_type,
             TypeMismatchContext::MatchPattern,
             value.span,
         )
@@ -286,6 +307,10 @@ fn malformed_literal_payload(token_stream: &AstCursor) -> CompilerError {
     ))
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "literal materialisation keeps the cursor, sign, span, type and mutable state separate"
+)]
 fn materialize_current_numeric_literal(
     token_stream: &AstCursor,
     sign_override: Option<NumericLiteralSign>,
@@ -293,7 +318,9 @@ fn materialize_current_numeric_literal(
     string_table: &mut StringTable,
     subject_type_id: TypeId,
     type_environment: &TypeEnvironment,
-) -> LiteralPatternResult<Expression> {
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+) -> LiteralPatternResult<ExprId> {
     if let Some(mut token) = token_stream.current_numeric_literal_in(string_table)? {
         let sign = sign_override.unwrap_or(token.sign);
         token.sign = sign;
@@ -307,12 +334,15 @@ fn materialize_current_numeric_literal(
                         span,
                     ))
                 })?;
-            return Ok(Expression::number(
-                value,
-                subject_type_id,
-                span,
-                ValueMode::ImmutableOwned,
-            ));
+            return Ok(expression_builder
+                .number(
+                    const_values,
+                    value,
+                    subject_type_id,
+                    span,
+                    ValueMode::ImmutableOwned,
+                )?
+                .id());
         }
 
         if let Some(scalar) = type_environment.fixed_scalar(subject_type_id)
@@ -327,14 +357,18 @@ fn materialize_current_numeric_literal(
                     ))
                 })?;
 
-            return Ok(Expression::fixed_scalar(
-                value,
-                span,
-                ValueMode::ImmutableOwned,
-            ));
+            return Ok(expression_builder
+                .fixed_scalar(const_values, value, span, ValueMode::ImmutableOwned)?
+                .id());
         }
 
-        return materialize_numeric_literal(&token, span, string_table);
+        return materialize_numeric_literal(
+            &token,
+            span,
+            string_table,
+            expression_builder,
+            const_values,
+        );
     }
 
     Err(malformed_literal_payload(token_stream).into())
@@ -371,28 +405,30 @@ fn current_string_literal(
 fn typed_literal_expression(
     token_stream: &mut AstCursor,
     string_table: &mut StringTable,
-) -> LiteralPatternResult<Expression> {
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+) -> LiteralPatternResult<ExprId> {
     let span = Some(token_stream.current_span());
     let expression = match token_stream.current_tag() {
         TokenTag::BOOL_LITERAL => {
             let value = current_bool_literal(token_stream)
                 .ok_or_else(|| malformed_literal_payload(token_stream))?;
-            Expression::bool(value, span, ValueMode::ImmutableOwned)
+            expression_builder.bool(const_values, value, span, ValueMode::ImmutableOwned)?
         }
         TokenTag::CHAR_LITERAL => {
             let value = current_char_literal(token_stream)
                 .ok_or_else(|| malformed_literal_payload(token_stream))?;
-            Expression::char(value, span, ValueMode::ImmutableOwned)
+            expression_builder.char(const_values, value, span, ValueMode::ImmutableOwned)?
         }
         TokenTag::STRING_SLICE_LITERAL => {
             let value = current_string_literal(token_stream, string_table)?
                 .ok_or_else(|| malformed_literal_payload(token_stream))?;
-            Expression::string_slice(value, span, ValueMode::ImmutableOwned)
+            expression_builder.string_slice(const_values, value, span, ValueMode::ImmutableOwned)?
         }
         _ => unreachable!("caller checked the bool/char/string literal lead token"),
     };
     token_stream.advance();
-    Ok(expression)
+    Ok(expression.id())
 }
 
 /// Build the completed arm pattern from a retained draft whose value has resolved at the subject.
@@ -402,13 +438,14 @@ fn typed_literal_expression(
 ///      produce the same `MatchPattern` shape, so the construction lives with the pattern module.
 pub(crate) fn finish_retained_pattern(
     relational: Option<RelationalPatternOp>,
-    value: Expression,
-) -> MatchPattern {
+    value: ExpressionView<'_>,
+) -> LiteralPatternResult<MatchPattern> {
+    let value = PatternValue::from_expression(value)?;
     let span = value.span;
-    match relational {
+    Ok(match relational {
         Some(op) => MatchPattern::Relational { op, value, span },
         None => MatchPattern::Literal(value),
-    }
+    })
 }
 
 /// Parse one literal pattern and verify it is compatible with the scrutinee type.
@@ -422,7 +459,9 @@ pub(super) fn parse_literal_pattern(
     subject_type_id: TypeId,
     string_table: &mut StringTable,
     type_environment: &TypeEnvironment,
-) -> LiteralPatternResult<Expression> {
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+) -> LiteralPatternResult<ExprId> {
     if let Some(diagnostic) = reject_deferred_pattern_lead_token(token_stream) {
         return Err(diagnostic.into());
     }
@@ -439,6 +478,8 @@ pub(super) fn parse_literal_pattern(
                 string_table,
                 subject_type_id,
                 type_environment,
+                expression_builder,
+                const_values,
             )?;
             token_stream.advance();
             expression
@@ -447,7 +488,7 @@ pub(super) fn parse_literal_pattern(
         // Bool, char, and string literals share the exact-typed construction with the
         // pending-subject path.
         TokenTag::BOOL_LITERAL | TokenTag::CHAR_LITERAL | TokenTag::STRING_SLICE_LITERAL => {
-            typed_literal_expression(token_stream, string_table)?
+            typed_literal_expression(token_stream, string_table, expression_builder, const_values)?
         }
 
         // Negative numeric literal — consume the leading `-` then materialize via the helper.
@@ -470,6 +511,8 @@ pub(super) fn parse_literal_pattern(
                 string_table,
                 subject_type_id,
                 type_environment,
+                expression_builder,
+                const_values,
             )?;
             token_stream.advance();
             expression
@@ -499,12 +542,17 @@ pub(super) fn parse_literal_pattern(
     //  Type-check the literal pattern
     // -------------------------------
     //
-    if !is_type_compatible(subject_type_id, pattern.type_id, type_environment) {
+    let pattern_view = expression_builder.view(pattern)?;
+    if !is_type_compatible(
+        subject_type_id,
+        pattern_view.value_type_id()?,
+        type_environment,
+    ) {
         return Err(CompilerDiagnostic::type_mismatch(
             subject_type_id,
-            pattern.type_id,
+            pattern_view.value_type_id()?,
             TypeMismatchContext::MatchPattern,
-            pattern.span,
+            pattern_view.span(),
         )
         .into());
     }

@@ -375,7 +375,7 @@ impl ModuleNamespaceSet {
     /// indexed facts.
     #[allow(
         clippy::too_many_arguments,
-        reason = "namespace resolution keeps the retained provider path, declaring file, source index, boundary, package prefix, and mutable string/path forks as separate borrows"
+        reason = "namespace resolution keeps the shared set, retained provider path, declaring file, source-tree lookup, boundary, package prefix, mutable string table and shared path fork as separate inputs"
     )]
     pub(crate) fn resolve_dependency(
         &self,

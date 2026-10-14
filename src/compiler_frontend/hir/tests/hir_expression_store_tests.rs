@@ -4,7 +4,9 @@
 //! WHY: every durable expression edge and variable payload must stay in one module-owned store.
 
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
-use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, HirCapacityResource};
+use crate::compiler_frontend::compiler_messages::{
+    CapacityResource, DiagnosticPayload, HirCapacityResource,
+};
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::expression_rewrite::rewrite_expression_bottom_up;
 use crate::compiler_frontend::hir::expression_store::{
@@ -58,7 +60,8 @@ fn assert_capacity_diagnostic<T>(
     assert_eq!(diagnostic.primary_span, Some(span));
     assert!(matches!(
         diagnostic.payload,
-        DiagnosticPayload::CompilerCapacityExceeded { resource: actual } if actual == resource
+        DiagnosticPayload::CompilerCapacityExceeded { resource: actual }
+            if actual == CapacityResource::from(resource)
     ));
 }
 
@@ -835,13 +838,11 @@ fn expression_rewrites_reuse_unchanged_rows_and_allocate_changed_parents() {
         .expect("replacement row should fit");
     let old_elements = store
         .append_values(&[changed_child, unchanged_child], None)
-        .expect("tuple children should fit");
+        .expect("collection children should fit");
     let ast_span = test_span(7, 3);
     let source_span = test_span(8, 21);
     assert_ne!(ast_span, source_span);
-    let mut parent_row = row(HirExpressionKind::TupleConstruct {
-        elements: old_elements,
-    });
+    let mut parent_row = row(HirExpressionKind::Collection(old_elements));
     parent_row.span = Some(source_span);
     let old_parent = store
         .append_expression(parent_row)
@@ -862,14 +863,13 @@ fn expression_rewrites_reuse_unchanged_rows_and_allocate_changed_parents() {
         .expect("changed rewrite should succeed");
     assert_ne!(old_parent, rewritten_parent);
 
-    let HirExpressionKind::TupleConstruct { elements } = &store.expression(old_parent).kind else {
+    let HirExpressionKind::Collection(elements) = &store.expression(old_parent).kind else {
         panic!("original parent should remain unchanged");
     };
     assert_eq!(store.values(*elements), &[changed_child, unchanged_child]);
     assert_eq!(store.expression(old_parent).span, Some(source_span));
 
-    let HirExpressionKind::TupleConstruct { elements } = &store.expression(rewritten_parent).kind
-    else {
+    let HirExpressionKind::Collection(elements) = &store.expression(rewritten_parent).kind else {
         panic!("rewritten parent should keep its typed child range");
     };
     assert_eq!(store.values(*elements), &[replacement, unchanged_child]);
@@ -897,7 +897,7 @@ fn metadata_replacements_reuse_unchanged_roots_and_isolate_changed_rows() {
     let elements = store.append_values(&[child], None).unwrap();
     let original_span = nonempty_test_span();
     let replacement_span = test_span(2, 17);
-    let mut original_row = row(HirExpressionKind::TupleConstruct { elements });
+    let mut original_row = row(HirExpressionKind::Collection(elements));
     original_row.span = Some(original_span);
     original_row.value_kind = ValueKind::Const;
     let original = store.append_expression(original_row).unwrap();
@@ -916,7 +916,7 @@ fn metadata_replacements_reuse_unchanged_roots_and_isolate_changed_rows() {
     for value in [original, replacement] {
         let expression = store.expression(value);
         assert_eq!(expression.value_kind, ValueKind::Const);
-        let HirExpressionKind::TupleConstruct { elements: actual } = expression.kind else {
+        let HirExpressionKind::Collection(actual) = expression.kind else {
             panic!("metadata replacement must preserve the operation");
         };
         assert_eq!(actual, elements);

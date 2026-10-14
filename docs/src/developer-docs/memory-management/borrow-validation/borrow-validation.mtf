@@ -66,6 +66,11 @@ keyed to their HIR owner and those positions. Distinct positions are not proof o
 storage: preliminary provenance may alias parameters or other results. Success values are usable
 only on their successful CFG edge, and the error value only on its error edge.
 
+`Invoke` evaluates its operation inputs once before choosing a successor. Borrow transfer retires
+both success and error destination sets, then defines only the selected edge's locals. Re-entry
+through a loop cannot reuse a value from the other outcome. Ordered results retain conservative
+allocation-root unions where a per-slot alias fact isn't available.
+
 ## Semantic places and access liveness
 
 Every analysed place is normalised to a semantic place with explicit projections and an overlap relation. The overlap facts state which places may designate the same storage. A solver may report overlap conservatively when it cannot prove disjointness, but downstream consumers don't depend on a particular root-set representation.

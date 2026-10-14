@@ -1638,6 +1638,100 @@ points = [
 ]
 
 [[workload]]
+id = "grouped_not_runtime_128"
+entry = "benchmarks/numeric-scaling/grouped-not-runtime-128.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/numeric-scaling/grouped-not-runtime-128.moth"]
+fingerprint_excludes = []
+
+[[case]]
+id = "grouped_not_runtime_128_check"
+workload = "grouped_not_runtime_128"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "grouped_not_runtime_128_frontend"
+workload = "grouped_not_runtime_128"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[workload]]
+id = "grouped_not_runtime_512"
+entry = "benchmarks/numeric-scaling/grouped-not-runtime-512.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/numeric-scaling/grouped-not-runtime-512.moth"]
+fingerprint_excludes = []
+
+[[case]]
+id = "grouped_not_runtime_512_check"
+workload = "grouped_not_runtime_512"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "grouped_not_runtime_512_frontend"
+workload = "grouped_not_runtime_512"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[workload]]
+id = "grouped_not_runtime_2048"
+entry = "benchmarks/numeric-scaling/grouped-not-runtime-2048.moth"
+fingerprint_mode = "full_tree"
+fingerprint_roots = ["benchmarks/numeric-scaling/grouped-not-runtime-2048.moth"]
+fingerprint_excludes = []
+
+[[case]]
+id = "grouped_not_runtime_2048_check"
+workload = "grouped_not_runtime_2048"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "cli"
+command = "check"
+args = []
+
+[[case]]
+id = "grouped_not_runtime_2048_frontend"
+workload = "grouped_not_runtime_2048"
+group = "stress"
+quick = false
+expectation = "clean"
+[case.runner]
+kind = "frontend"
+profile = "dev"
+
+[[scaling]]
+id = "grouped_not_runtime"
+metric = "frontend.hir"
+max_exponent = 1.25
+points = [
+    { case = "grouped_not_runtime_128_frontend", size = 128 },
+    { case = "grouped_not_runtime_512_frontend", size = 512 },
+    { case = "grouped_not_runtime_2048_frontend", size = 2048 },
+]
+
+[[workload]]
 id = "numeric_independent_regions_32"
 entry = "benchmarks/numeric-scaling/independent-regions-32.moth"
 fingerprint_mode = "full_tree"

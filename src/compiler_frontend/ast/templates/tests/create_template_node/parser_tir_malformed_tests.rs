@@ -10,7 +10,9 @@
 //! expected malformed-surface behavior without relying on internal TIR IDs.
 
 use super::*;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticPayload, DiagnosticToken, InvalidTemplateStructureReason,
 };
@@ -20,6 +22,8 @@ use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use std::sync::Arc;
 
 fn parse_template_diagnostic(source: &str) -> CompilerDiagnostic {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
@@ -44,6 +48,8 @@ fn parse_template_diagnostic(source: &str) -> CompilerDiagnostic {
             &mut token_stream,
             source_path,
             &context,
+            &mut expression_builder,
+            &mut const_values,
             vec![],
             &mut string_table,
             &mut path_fork,
@@ -55,6 +61,8 @@ fn parse_template_diagnostic(source: &str) -> CompilerDiagnostic {
 fn parse_template_diagnostic_with_replaced_body_token(
     source: &str,
 ) -> (CompilerDiagnostic, ExtendedSpanBuilder) {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
@@ -92,6 +100,8 @@ fn parse_template_diagnostic_with_replaced_body_token(
             &mut token_stream,
             source_path,
             &context,
+            &mut expression_builder,
+            &mut const_values,
             vec![],
             &mut string_table,
             &mut path_fork,

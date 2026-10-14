@@ -32,9 +32,11 @@ pub(crate) use instances::{
     GenericRequestRange, GenericRequestSlot, GenericRequestTicket, IfGenericRequestRanges,
 };
 pub(crate) use materialisation::{
-    MaterialisedGenericAst, ModuleMaterialisationContext, ModuleMaterialisationEnvironmentInput,
-    ModuleMaterialisationInput, ModuleMaterialisationPreparation,
-    ModuleMaterialisationPreparationBuilder, bootstrap_call_summary_from_signature,
+    MaterialisedGenericAst, ModuleMaterialisationCapture, ModuleMaterialisationContext,
+    ModuleMaterialisationEnvironmentInput, ModuleMaterialisationInput,
+    ModuleMaterialisationPreparation, ModuleMaterialisationPreparationBuilder,
+    ModuleMaterialisationPreparedBuilder, StableFunctionTarget,
+    bootstrap_call_summary_from_signature,
 };
 pub(crate) use receiver_method_instantiation::{
     GenericReceiverMethodInstantiationInput, GenericReceiverMethodReceiver,

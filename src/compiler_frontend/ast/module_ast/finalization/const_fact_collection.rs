@@ -18,14 +18,13 @@ use crate::compiler_frontend::ast::const_values::resolver::{
     ConstResolutionError, ConstValueEnvironment, ConstValueResolver,
 };
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
-use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
-use crate::compiler_frontend::ast::expressions::eval_expression::pending_expression_item_bug;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, ExpressionOperationView,
+};
 use crate::compiler_frontend::ast::expressions::expression_types::FallibleHandling;
-use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::instrumentation::{
     AstCounter, add_ast_counter, increment_ast_counter,
 };
@@ -40,6 +39,7 @@ pub(super) struct ConstFactCollector<'a> {
     resolver: ConstValueResolver<'a>,
     facts: AstConstFacts,
     module_explicit_env: ConstValueEnvironment,
+    expression_pending: Vec<ExprId>,
 }
 
 impl<'a> ConstFactCollector<'a> {
@@ -51,13 +51,22 @@ impl<'a> ConstFactCollector<'a> {
     ///      classification rather than reconstructed template structure.
     pub(super) fn new(
         string_table: &'a mut StringTable,
-        const_values: &'a ConstValueStore,
+        const_values: &'a mut ConstValueStore,
+        expression_builder: &'a mut AstExpressionBuilder,
         template_ir_store: Rc<RefCell<TemplateIrStore>>,
+        type_environment: &'a TypeEnvironment,
     ) -> Self {
         Self {
-            resolver: ConstValueResolver::new(string_table, const_values, template_ir_store),
+            resolver: ConstValueResolver::new(
+                string_table,
+                const_values,
+                expression_builder,
+                template_ir_store,
+                type_environment,
+            ),
             facts: AstConstFacts::default(),
             module_explicit_env: ConstValueEnvironment::default(),
+            expression_pending: Vec::new(),
         }
     }
 
@@ -82,11 +91,10 @@ impl<'a> ConstFactCollector<'a> {
     ///       body-local facts.
     pub(super) fn collect(
         mut self,
-        const_values: &ConstValueStore,
         ast_nodes: &[AstNode],
         start_function_path: Option<&PathId>,
     ) -> Result<AstConstFacts, TemplateNormalizationError> {
-        self.collect_explicit_top_level_facts(const_values);
+        self.collect_explicit_top_level_facts();
         self.collect_private_and_body_local_facts(ast_nodes, start_function_path)?;
         Ok(self.facts)
     }
@@ -96,15 +104,13 @@ impl<'a> ConstFactCollector<'a> {
     // ------------------------------
 
     /// Register explicit module constants as facts and as the environment's module base.
-    fn collect_explicit_top_level_facts(&mut self, const_values: &ConstValueStore) {
+    fn collect_explicit_top_level_facts(&mut self) {
         let mut module_base = FxHashMap::default();
 
-        for row in const_values.iter_module_constant_views() {
+        for row in self.resolver.const_values().iter_module_constant_views() {
             let (path, value_id, metadata) = (row.path, row.id, row.metadata);
 
-            // The base records the store id, not an expression. Body-local advisory resolution
-            // still consumes `Expression` operands, so one is built at the reference that needs
-            // it rather than for all of a module's constants up front.
+            // Lexical environments refer to the sole constant content owner.
             module_base.insert(*path, value_id);
 
             self.facts.declarations.insert(
@@ -167,7 +173,9 @@ impl<'a> ConstFactCollector<'a> {
         for node in nodes {
             match &node.kind {
                 NodeKind::VariableDeclaration(declaration) => {
-                    self.walk_expression_for_body_local(&declaration.value, env)?;
+                    if let Some(initializer) = declaration.value.initializer() {
+                        self.walk_expression_for_body_local(&initializer, env)?;
+                    }
                     self.try_add_private_top_level_fact(declaration, env)?;
                 }
 
@@ -182,9 +190,8 @@ impl<'a> ConstFactCollector<'a> {
 
     /// Attempt to resolve a start-body declaration as a private top-level const fact.
     ///
-    /// WHAT: on success, captures the resolved span, moves the expression once
-    ///       into the lexical environment, and records only metadata in the fact
-    ///       table.
+    /// WHAT: records occurrence metadata and retains the resolved constant ID in
+    ///       the lexical environment without reconstructing an expression.
     fn try_add_private_top_level_fact(
         &mut self,
         declaration: &Declaration,
@@ -195,8 +202,14 @@ impl<'a> ConstFactCollector<'a> {
             .resolve_private_top_level_declaration(declaration, env)
         {
             Ok(resolved) => {
-                let span = resolved.expression.span;
-                env.insert(declaration.id, resolved.expression);
+                let span = declaration.value.initializer().and_then(|id| {
+                    self.resolver
+                        .builder()
+                        .view(id)
+                        .ok()
+                        .and_then(|view| view.span())
+                });
+                env.insert(declaration.id, resolved.value);
                 self.facts.declarations.insert(
                     declaration.id,
                     AstConstDeclarationFact {
@@ -255,7 +268,9 @@ impl<'a> ConstFactCollector<'a> {
     ) -> Result<(), TemplateNormalizationError> {
         match &node.kind {
             NodeKind::VariableDeclaration(declaration) => {
-                self.walk_expression_for_body_local(&declaration.value, env)?;
+                if let Some(initializer) = declaration.value.initializer() {
+                    self.walk_expression_for_body_local(&initializer, env)?;
+                }
                 self.try_add_body_local_fact(declaration, env)?;
             }
 
@@ -290,7 +305,6 @@ impl<'a> ConstFactCollector<'a> {
                 self.walk_expression_for_body_local(scrutinee, env)?;
 
                 for arm in arms {
-                    self.walk_match_pattern_for_body_local(&arm.pattern, env)?;
                     if let Some(guard) = &arm.guard {
                         self.walk_expression_for_body_local(guard, env)?;
                     }
@@ -357,7 +371,9 @@ impl<'a> ConstFactCollector<'a> {
 
             NodeKind::StructDefinition(_, fields) => {
                 for field in fields {
-                    self.walk_expression_for_body_local(&field.value, env)?;
+                    if let Some(initializer) = field.value.initializer() {
+                        self.walk_expression_for_body_local(&initializer, env)?;
+                    }
                 }
             }
 
@@ -371,9 +387,8 @@ impl<'a> ConstFactCollector<'a> {
 
     /// Attempt to resolve a body-local declaration as a const fact.
     ///
-    /// WHAT: on success, captures the resolved span, moves the expression once
-    ///       into the lexical environment, and records only metadata in the fact
-    ///       table.
+    /// WHAT: records occurrence metadata and retains the resolved constant ID in
+    ///       the lexical environment without reconstructing an expression.
     fn try_add_body_local_fact(
         &mut self,
         declaration: &Declaration,
@@ -384,8 +399,14 @@ impl<'a> ConstFactCollector<'a> {
             .resolve_body_local_declaration(declaration, env)
         {
             Ok(resolved) => {
-                let span = resolved.expression.span;
-                env.insert(declaration.id, resolved.expression);
+                let span = declaration.value.initializer().and_then(|id| {
+                    self.resolver
+                        .builder()
+                        .view(id)
+                        .ok()
+                        .and_then(|view| view.span())
+                });
+                env.insert(declaration.id, resolved.value);
                 self.facts.declarations.insert(
                     declaration.id,
                     AstConstDeclarationFact {
@@ -410,23 +431,10 @@ impl<'a> ConstFactCollector<'a> {
         Ok(())
     }
 
-    /// Walk call arguments for body-local const facts.
-    fn walk_call_arguments_for_body_local(
-        &mut self,
-        arguments: &[CallArgument],
-        env: &mut ConstValueEnvironment,
-    ) -> Result<(), TemplateNormalizationError> {
-        for argument in arguments {
-            self.walk_expression_for_body_local(&argument.value, env)?;
-        }
-
-        Ok(())
-    }
-
     /// Walk a list of expressions for body-local const facts.
     fn walk_expressions_for_body_local(
         &mut self,
-        expressions: &[Expression],
+        expressions: &[ExprId],
         env: &mut ConstValueEnvironment,
     ) -> Result<(), TemplateNormalizationError> {
         for expression in expressions {
@@ -436,188 +444,82 @@ impl<'a> ConstFactCollector<'a> {
         Ok(())
     }
 
-    /// Walk a match pattern for body-local const facts.
-    ///
-    /// WHAT: only literal, option-value, and relational patterns contain
-    ///       nested expressions that need walking.
-    fn walk_match_pattern_for_body_local(
-        &mut self,
-        pattern: &MatchPattern,
-        env: &mut ConstValueEnvironment,
-    ) -> Result<(), TemplateNormalizationError> {
-        match pattern {
-            MatchPattern::Literal(expression) => {
-                self.walk_expression_for_body_local(expression, env)?;
-            }
-
-            MatchPattern::OptionValue { value, .. } | MatchPattern::Relational { value, .. } => {
-                self.walk_expression_for_body_local(value, env)?;
-            }
-
-            MatchPattern::OptionNone { .. }
-            | MatchPattern::ChoiceVariant { .. }
-            | MatchPattern::OptionPresentCapture { .. } => {}
-        }
-
-        Ok(())
-    }
-
-    /// Walk an expression tree for body-local const facts.
-    ///
-    /// WHAT: recursively descends through nested AST nodes, function literals,
-    ///       and fallible handling structures.
-    /// WHY: expressions may contain compiler-generated lexical scopes or call arguments that
-    ///      reference or declare const-foldable values.
+    /// Visits ID-backed operations, isolating environments at value-body scopes.
     fn walk_expression_for_body_local(
         &mut self,
-        expression: &Expression,
+        expression: &ExprId,
         env: &mut ConstValueEnvironment,
     ) -> Result<(), TemplateNormalizationError> {
-        match &expression.kind {
-            ExpressionKind::Runtime(rpn) => {
-                for item in &rpn.items {
-                    match item {
-                        ExpressionRpnItem::Operand(expression) => {
-                            self.walk_expression_for_body_local(expression, env)?;
-                        }
-                        ExpressionRpnItem::Operator { .. } => {}
-                        // Pending syntax never survives evaluation; its presence here is a broken
-                        // compiler invariant, not a skipped non-const fact.
-                        ExpressionRpnItem::PendingNumericLiteral { .. }
-                        | ExpressionRpnItem::PendingGroup { .. }
-                        | ExpressionRpnItem::PendingNumericBinding { .. }
-                        | ExpressionRpnItem::PendingNumericCast { .. }
-                        | ExpressionRpnItem::PendingNumericCall { .. }
-                        | ExpressionRpnItem::PendingNumericExpression { .. } => {
-                            return Err(pending_expression_item_bug("const fact collection").into());
-                        }
-                    }
+        // Nested lexical walks consume their own suffix without disturbing the parent work.
+        let pending_base = self.expression_pending.len();
+        let root = self.resolver.builder().view(*expression)?;
+        match root.operation() {
+            ExpressionOperationView::Constant(_) | ExpressionOperationView::Reference(_) => {
+                return Ok(());
+            }
+            ExpressionOperationView::Copy(_) => {
+                root.visit_child_ids(&mut |id| self.expression_pending.push(id))?;
+                if self.expression_pending.len() == pending_base {
+                    return Ok(());
                 }
+                self.expression_pending[pending_base..].reverse();
             }
-
-            // AST places currently contain only Local/Field structure; revisit this leaf if an
-            // expression-bearing place form is added.
-            ExpressionKind::Copy(_) => {}
-
-            ExpressionKind::FieldAccess { base, .. } => {
-                self.walk_expression_for_body_local(base, env)?;
-            }
-
-            ExpressionKind::MethodCall { receiver, args, .. }
-            | ExpressionKind::CollectionBuiltinCall { receiver, args, .. }
-            | ExpressionKind::MapBuiltinCall { receiver, args, .. } => {
-                self.walk_expression_for_body_local(receiver, env)?;
-                self.walk_call_arguments_for_body_local(args, env)?;
-            }
-
-            ExpressionKind::FunctionCall { args, .. }
-            | ExpressionKind::HostFunctionCall { args, .. } => {
-                self.walk_call_arguments_for_body_local(args, env)?;
-            }
-
-            ExpressionKind::HandledFallibleFunctionCall { args, .. }
-            | ExpressionKind::HandledFallibleHostFunctionCall { args, .. } => {
-                self.walk_call_arguments_for_body_local(args, env)?;
-            }
-
-            ExpressionKind::HandledFallibleExpression { value, .. } => {
-                self.walk_expression_for_body_local(value, env)?;
-            }
-
-            ExpressionKind::Cast(cast) => {
-                self.walk_expression_for_body_local(&cast.source, env)?;
-            }
-
-            #[cfg(test)]
-            ExpressionKind::FallibleCarrierConstruct { value, .. } => {
-                self.walk_expression_for_body_local(value, env)?;
-            }
-
-            ExpressionKind::OptionPropagation { value } | ExpressionKind::Coerced { value, .. } => {
-                self.walk_expression_for_body_local(value, env)?;
-            }
-
-            ExpressionKind::Collection(items) => {
-                self.walk_expressions_for_body_local(items, env)?;
-            }
-
-            ExpressionKind::MapLiteral(entries) => {
-                for entry in entries {
-                    self.walk_expression_for_body_local(&entry.key, env)?;
-                    self.walk_expression_for_body_local(&entry.value, env)?;
-                }
-            }
-
-            ExpressionKind::StructDefinition(fields)
-            | ExpressionKind::StructInstance(fields)
-            | ExpressionKind::AnonymousConstRecord { fields } => {
-                for field in fields {
-                    self.walk_expression_for_body_local(&field.value, env)?;
-                }
-            }
-
-            ExpressionKind::ChoiceConstruct { fields, .. } => {
-                for field in fields {
-                    self.walk_expression_for_body_local(&field.value, env)?;
-                }
-            }
-
-            ExpressionKind::Range(start, end) => {
-                self.walk_expression_for_body_local(start, env)?;
-                self.walk_expression_for_body_local(end, env)?;
-            }
-
-            ExpressionKind::ValueBlock { block } => match block.as_ref() {
-                ValueBlock::If(value_if) => {
-                    self.walk_expression_for_body_local(&value_if.condition, env)?;
-
-                    let mut then_env = Self::scope_environment(env);
-                    self.walk_body_local(&value_if.then_body, &mut then_env)?;
-
-                    let mut else_env = Self::scope_environment(env);
-                    self.walk_body_local(&value_if.else_body, &mut else_env)?;
-                }
-                ValueBlock::LexicalScope(value_lexical_scope) => {
-                    let mut nested_env = Self::scope_environment(env);
-                    self.walk_body_local(&value_lexical_scope.body, &mut nested_env)?;
-                }
-                ValueBlock::Match(value_match) => {
-                    self.walk_expression_for_body_local(&value_match.scrutinee, env)?;
-
-                    for arm in &value_match.arms {
-                        if let Some(guard) = &arm.guard {
-                            self.walk_expression_for_body_local(guard, env)?;
-                        }
-                        let mut arm_env = Self::scope_environment(env);
-                        self.walk_body_local(&arm.body, &mut arm_env)?;
-                    }
-
-                    if let Some(default_body) = &value_match.default {
-                        let mut default_env = Self::scope_environment(env);
-                        self.walk_body_local(default_body, &mut default_env)?;
-                    }
-                }
-                ValueBlock::Catch(value_catch) => {
-                    self.walk_expression_for_body_local(&value_catch.handled_value, env)?;
-                    self.walk_fallible_handling_for_body_local(&value_catch.handler, env)?;
-                }
-            },
-
-            ExpressionKind::NoValue
-            | ExpressionKind::OptionNone
-            | ExpressionKind::FixedScalar(_)
-            | ExpressionKind::Number(_)
-            | ExpressionKind::StringSlice(_)
-            | ExpressionKind::StructuralString { .. }
-            | ExpressionKind::Bool(_)
-            | ExpressionKind::Char(_)
-            | ExpressionKind::Reference(_)
-            | ExpressionKind::Function(_)
-            | ExpressionKind::Template(_)
-            | ExpressionKind::RuntimeTemplateHandoff(_)
-            | ExpressionKind::RuntimeSlotApplicationHandoff(_) => {}
+            _ => self.expression_pending.push(*expression),
         }
-
+        while self.expression_pending.len() > pending_base {
+            let expression = self
+                .expression_pending
+                .pop()
+                .expect("active scratch suffix is non-empty");
+            let view = self.resolver.builder().view(expression)?;
+            let block = match view.operation() {
+                ExpressionOperationView::Constant(_) | ExpressionOperationView::Reference(_) => {
+                    continue;
+                }
+                ExpressionOperationView::ValueBlock(block) => Some(block.clone()),
+                _ => None,
+            };
+            if block.is_none() {
+                let pending = &mut self.expression_pending;
+                let start = pending.len();
+                view.visit_child_ids(&mut |id| pending.push(id))?;
+                pending[start..].reverse();
+                continue;
+            }
+            if let Some(block) = block {
+                match &block {
+                    ValueBlock::If(value_if) => {
+                        self.walk_expression_for_body_local(&value_if.condition, env)?;
+                        let mut then_env = Self::scope_environment(env);
+                        self.walk_body_local(&value_if.then_body, &mut then_env)?;
+                        let mut else_env = Self::scope_environment(env);
+                        self.walk_body_local(&value_if.else_body, &mut else_env)?;
+                    }
+                    ValueBlock::LexicalScope(scope) => {
+                        let mut nested_env = Self::scope_environment(env);
+                        self.walk_body_local(&scope.body, &mut nested_env)?;
+                    }
+                    ValueBlock::Match(value_match) => {
+                        self.walk_expression_for_body_local(&value_match.scrutinee, env)?;
+                        for arm in &value_match.arms {
+                            if let Some(guard) = &arm.guard {
+                                self.walk_expression_for_body_local(guard, env)?;
+                            }
+                            let mut arm_env = Self::scope_environment(env);
+                            self.walk_body_local(&arm.body, &mut arm_env)?;
+                        }
+                        if let Some(default) = &value_match.default {
+                            let mut default_env = Self::scope_environment(env);
+                            self.walk_body_local(default, &mut default_env)?;
+                        }
+                    }
+                    ValueBlock::Catch(value_catch) => {
+                        self.walk_expression_for_body_local(&value_catch.handled_value, env)?;
+                        self.walk_fallible_handling_for_body_local(&value_catch.handler, env)?;
+                    }
+                }
+            }
+        }
         Ok(())
     }
 
@@ -648,3 +550,7 @@ fn template_classification_error(
         _ => Ok(()),
     }
 }
+
+#[cfg(test)]
+#[path = "tests/const_fact_stack_tests.rs"]
+mod stack_tests;

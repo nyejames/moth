@@ -21,9 +21,10 @@ slot_destination ~= 6
 return source_a
 ;"#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let (mut module, type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("fixture source should lower");
     let registry = default_external_package_registry(&mut string_table);
+    let (mut module, type_environment) =
+        lower_ast(ast, &mut string_table, &mut path_fork, &registry)
+            .expect("fixture source should lower");
     let function = module
         .functions
         .iter()
@@ -103,7 +104,7 @@ return source_a
             },
         ],
     };
-    validate_hir_module(&module, &type_environment)
+    validate_hir_module(&module, &type_environment, &registry)
         .expect("ordinary locals and explicit self-edge definitions should form valid HIR");
 
     let checker = BorrowChecker::new(&module, &registry, &path_fork, &string_table);

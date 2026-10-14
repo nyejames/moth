@@ -15,6 +15,9 @@ use crate::compiler_frontend::ast::expressions::call_validation::{
     expectations_from_constructor_fields,
 };
 use crate::compiler_frontend::ast::expressions::constructor_views::ConstructorField;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, OwnedExpr,
+};
 use crate::compiler_frontend::ast::generic_bounds::{
     GenericBoundEvidenceContext, validate_nominal_generic_bound_evidence,
 };
@@ -22,6 +25,7 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, GenericInferenceSubject, InvalidGenericInstantiationReason,
+    ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, TypeDefinition,
@@ -30,9 +34,6 @@ use crate::compiler_frontend::datatypes::environment::{
     GenericParameter as EnvironmentGenericParameter, TypeEnvironment,
 };
 use crate::compiler_frontend::datatypes::generic_bindings::{BindingConflict, GenericTypeBindings};
-use crate::compiler_frontend::datatypes::generic_identity_bridge::{
-    GenericInstantiationKey, TypeIdentityKey,
-};
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -121,8 +122,9 @@ impl GenericNominalConstructorSeed {
 pub(crate) struct GenericNominalConstructorInput<'a> {
     pub context: GenericNominalConstructorContext<'a>,
     pub constructor_fields: Option<&'a [ConstructorField]>,
-    pub raw_args: Option<&'a [CallArgument]>,
+    pub raw_args: Option<&'a [CallArgument<OwnedExpr>]>,
     pub path_fork: &'a PathInternerFork,
+    pub expression_builder: &'a AstExpressionBuilder,
 }
 
 /// Collect contextual generic bindings before constructor argument parsing.
@@ -158,8 +160,6 @@ pub(crate) fn seed_generic_nominal_constructor(
 pub(crate) struct GenericNominalInference {
     /// The interned generic instance TypeId produced by successful inference.
     pub instance_type_id: TypeId,
-    /// HIR/diagnostic bridge key derived from the canonical inferred TypeId arguments.
-    pub instance_key: Option<GenericInstantiationKey>,
     /// Canonical parameter bindings the instance arguments were read from. The declared payload is
     /// substituted through `replacement_map()`, so the instance keeps no second parameter map.
     pub bindings: GenericTypeBindings,
@@ -216,9 +216,9 @@ pub(crate) fn infer_generic_nominal_constructor(
         return Err(diagnostic.into());
     }
     // ------------------------
-    //  Build instance key
+    //  Intern the canonical instance
     // ------------------------
-    let (instance_type_id, instance_key) = {
+    let instance_type_id = {
         let nominal_id = type_interner
             .environment()
             .nominal_id_for_path(input.context.nominal_path);
@@ -229,24 +229,7 @@ pub(crate) fn infer_generic_nominal_constructor(
             ))
         })?;
 
-        let argument_keys = concrete_arguments
-            .iter()
-            .map(|argument| {
-                type_interner
-                    .environment()
-                    .type_id_to_type_identity_key(*argument)
-            })
-            .collect::<Option<Vec<TypeIdentityKey>>>();
-
-        let instance_key = argument_keys.map(|arguments| GenericInstantiationKey {
-            base_path: input.context.nominal_path.to_owned(),
-            arguments,
-        });
-
-        let argument_ids = concrete_arguments.into_boxed_slice();
-        let instance_type_id = type_interner.intern_generic_instance(nominal_id, argument_ids);
-
-        (instance_type_id, instance_key)
+        type_interner.intern_generic_instance(nominal_id, concrete_arguments.into_boxed_slice())
     };
 
     let evidence_context = GenericBoundEvidenceContext {
@@ -283,7 +266,6 @@ pub(crate) fn infer_generic_nominal_constructor(
     }
     Ok(GenericNominalInference {
         instance_type_id,
-        instance_key,
         bindings,
     })
 }
@@ -479,10 +461,14 @@ fn collect_constructor_argument_bindings(
         let Some(argument) = slot else {
             continue;
         };
+        let argument_type_id = input
+            .expression_builder
+            .view_owned(argument.value)?
+            .require_single(ValueReceiverContext::ConstructorArgument)?;
 
         // Skip if either side lacks a resolved type_id (e.g. unresolved constant).
         if type_environment.get(field.type_id).is_none()
-            || type_environment.get(argument.value.type_id).is_none()
+            || type_environment.get(argument_type_id).is_none()
         {
             continue;
         }
@@ -490,7 +476,7 @@ fn collect_constructor_argument_bindings(
         collect_nominal_binding_evidence(
             &mut evidence_context,
             field.type_id,
-            argument.value.type_id,
+            argument_type_id,
             argument.span,
         )?;
     }

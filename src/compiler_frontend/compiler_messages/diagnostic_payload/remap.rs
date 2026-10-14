@@ -48,6 +48,7 @@ impl DiagnosticPayload {
             | DiagnosticPayload::UnexpectedTrailingComma
             | DiagnosticPayload::UnescapedImplicitTemplateClose { .. }
             | DiagnosticPayload::TypeMismatch { .. }
+            | DiagnosticPayload::InvalidValueReceiver { .. }
             | DiagnosticPayload::UnreachableMatchArm => {}
 
             DiagnosticPayload::ExpectedToken { expected, found } => {

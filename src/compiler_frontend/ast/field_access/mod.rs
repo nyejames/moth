@@ -13,6 +13,10 @@ mod receiver_access;
 mod receiver_calls;
 mod retained_postfix;
 
+#[cfg(test)]
+#[path = "tests/postfix_owner_tests.rs"]
+mod postfix_owner_tests;
+
 pub(crate) use builtin_call_args::concrete_shape_type;
 pub(crate) use field_member::project_explicit_const_record_field;
 pub use parse_chain::parse_field_access;
@@ -26,8 +30,9 @@ pub(crate) use receiver_calls::{
 pub(crate) use retained_postfix::{
     GenericSuccessSlots, RetainedMemberTarget, RetainedOperandContinuation, RetainedOperandInput,
     RetainedOperandResult, RetainedPostfixStep, RetainedTerminalCall,
-    complete_retained_operand_continuation, retain_operand_call_propagation,
-    retain_operand_handling_suffix, retain_pending_operand_member_access, retained_member_target,
+    complete_retained_operand_continuation, grouped_evaluation_expected,
+    retain_operand_call_propagation, retain_operand_handling_suffix,
+    retain_pending_operand_member_access, retained_member_target,
     retained_operand_numeric_origin_shape, retained_operand_result, retained_operand_result_shape,
     retained_terminal_call,
 };

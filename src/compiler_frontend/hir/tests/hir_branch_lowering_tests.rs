@@ -6,15 +6,17 @@
 //!      and variable liveness across arms.
 
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
-use crate::compiler_frontend::ast::expressions::expression::{
-    Expression, ExpressionKind, Operator,
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, SuccessShape,
 };
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::statements::value_production::{
     ProducedValues,
     types::{ValueBlock, ValueIfBlock},
 };
-use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
@@ -42,15 +44,17 @@ use crate::compiler_frontend::tests::type_id_fixture_support::{
 ///
 /// WHY: these fixtures pin the exact `I32` width explicitly at the scalar carrier.
 fn i32_literal(
+    builder: &mut AstExpressionBuilder,
+    constants: &mut ConstValueStore,
     value: i64,
     span: Option<crate::compiler_frontend::source::SourceSpan>,
     value_mode: ValueMode,
-) -> Expression {
-    Expression::fixed_scalar(
-        FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32"),
-        span,
-        value_mode,
-    )
+) -> ExprId {
+    let value = FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32");
+    builder
+        .fixed_scalar(constants, value, span, value_mode)
+        .expect("fixture scalar")
+        .id()
 }
 
 fn blocks_with_user_function_call(module: &HirModule, function_id: FunctionId) -> Vec<BlockId> {
@@ -105,33 +109,46 @@ fn lowers_if_to_then_else_merge_blocks() {
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let x = super::symbol("x", &mut path_fork, &mut string_table);
     let y = super::symbol("y", &mut path_fork, &mut string_table);
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
 
+    let flag = super::symbol("flag", &mut path_fork, &mut string_table);
+    let flag_value = builder
+        .bool(&mut constants, true, None, ValueMode::ImmutableOwned)
+        .expect("fixture bool")
+        .id();
+    let flag_decl = node(
+        NodeKind::VariableDeclaration(make_test_variable(flag, flag_value, &builder)),
+        None,
+    );
+    let condition = reference_expr_with_type_id(
+        &mut builder,
+        flag,
+        builtin_type_ids::BOOL,
+        None,
+        ValueMode::ImmutableReference,
+    );
+    let x_value = i32_literal(
+        &mut builder,
+        &mut constants,
+        1,
+        None,
+        ValueMode::ImmutableOwned,
+    );
+    let x_decl = make_test_variable(x, x_value, &builder);
+    let y_value = i32_literal(
+        &mut builder,
+        &mut constants,
+        2,
+        None,
+        ValueMode::ImmutableOwned,
+    );
+    let y_decl = make_test_variable(y, y_value, &builder);
     let if_node = node(
         NodeKind::If(
-            runtime_expr(
-                vec![runtime_operand_item(Expression::bool(
-                    true,
-                    None,
-                    ValueMode::ImmutableOwned,
-                ))],
-                builtin_type_ids::BOOL,
-                None,
-                ValueMode::ImmutableOwned,
-            ),
-            vec![node(
-                NodeKind::VariableDeclaration(make_test_variable(
-                    x,
-                    i32_literal(1, None, ValueMode::ImmutableOwned),
-                )),
-                None,
-            )],
-            Some(vec![node(
-                NodeKind::VariableDeclaration(make_test_variable(
-                    y,
-                    i32_literal(2, None, ValueMode::ImmutableOwned),
-                )),
-                None,
-            )]),
+            condition,
+            vec![node(NodeKind::VariableDeclaration(x_decl), None)],
+            Some(vec![node(NodeKind::VariableDeclaration(y_decl), None)]),
             test_if_branch_metadata(true),
         ),
         None,
@@ -143,13 +160,24 @@ fn lowers_if_to_then_else_merge_blocks() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![if_node],
+        vec![flag_decl, if_node],
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
-    let (module, _type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
+    let ast = build_ast_with_registered_types(
+        vec![start_fn],
+        entry_path,
+        builder,
+        constants,
+        TypeEnvironment::new(),
+    );
+    let (module, _type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
+    )
+    .expect("HIR lowering should succeed");
 
     let start = super::start_function(&module);
     let entry_block = &module.blocks[start.entry.0 as usize];
@@ -180,6 +208,12 @@ fn rejects_statically_decided_statement_if_at_hir_boundary() {
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let location = None;
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let condition = builder
+        .bool(&mut constants, true, location, ValueMode::ImmutableOwned)
+        .expect("fixture bool")
+        .id();
 
     let start_fn = function_node(
         start_name,
@@ -188,20 +222,26 @@ fn rejects_statically_decided_statement_if_at_hir_boundary() {
             returns: vec![],
         },
         vec![node(
-            NodeKind::If(
-                Expression::bool(true, location, ValueMode::ImmutableOwned),
-                vec![],
-                None,
-                test_if_branch_metadata(false),
-            ),
+            NodeKind::If(condition, vec![], None, test_if_branch_metadata(false)),
             location,
         )],
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
-    lower_ast(ast, &mut string_table, &mut path_fork)
-        .expect_err("Stage 4 must specialise statically decided statement `if` before HIR");
+    let ast = build_ast_with_registered_types(
+        vec![start_fn],
+        entry_path,
+        builder,
+        constants,
+        TypeEnvironment::new(),
+    );
+    lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
+    )
+    .expect_err("Stage 4 must specialise statically decided statement `if` before HIR");
 }
 
 #[test]
@@ -212,6 +252,12 @@ fn short_circuit_and_keeps_rhs_call_off_always_run_path() {
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let rhs_name = super::symbol("rhs_and", &mut path_fork, &mut string_table);
     let location = None;
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let rhs_result = builder
+        .bool(&mut constants, true, location, ValueMode::ImmutableOwned)
+        .expect("fixture bool")
+        .id();
 
     let rhs_fn = function_node(
         rhs_name,
@@ -219,26 +265,32 @@ fn short_circuit_and_keeps_rhs_call_off_always_run_path() {
             parameters: vec![],
             returns: fresh_success_returns(vec![builtin_type_ids::BOOL]),
         },
-        vec![node(
-            NodeKind::Return(vec![Expression::bool(
-                true,
-                location,
-                ValueMode::ImmutableOwned,
-            )]),
-            location,
-        )],
+        vec![node(NodeKind::Return(vec![rhs_result]), location)],
         location,
     );
 
+    let lhs_value = builder
+        .bool(&mut constants, false, location, ValueMode::ImmutableOwned)
+        .expect("fixture bool")
+        .id();
+    let rhs_call = runtime_function_call_item(
+        &mut builder,
+        rhs_name,
+        vec![builtin_type_ids::BOOL],
+        location,
+    );
     let condition = runtime_expr(
+        &mut builder,
+        &mut constants,
         vec![
-            runtime_operand_item(Expression::bool(false, location, ValueMode::ImmutableOwned)),
-            runtime_function_call_item(rhs_name, vec![builtin_type_ids::BOOL], location),
+            runtime_operand_item(lhs_value),
+            rhs_call,
             runtime_operator_item(Operator::And, location),
         ],
         builtin_type_ids::BOOL,
         location,
         ValueMode::MutableOwned,
+        &TypeEnvironment::new(),
     );
 
     let start_fn = function_node(
@@ -252,6 +304,8 @@ fn short_circuit_and_keeps_rhs_call_off_always_run_path() {
                 condition,
                 vec![node(
                     NodeKind::ExpressionStatement(i32_literal(
+                        &mut builder,
+                        &mut constants,
                         1,
                         location,
                         ValueMode::ImmutableOwned,
@@ -267,9 +321,16 @@ fn short_circuit_and_keeps_rhs_call_off_always_run_path() {
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast_with_registered_types(vec![rhs_fn, start_fn], entry_path),
+        build_ast_with_registered_types(
+            vec![rhs_fn, start_fn],
+            entry_path,
+            builder,
+            constants,
+            TypeEnvironment::new(),
+        ),
         &mut string_table,
         &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
     )
     .expect("short-circuit and lowering should succeed");
     let rhs_function_id = module
@@ -349,6 +410,12 @@ fn short_circuit_or_keeps_rhs_call_off_true_short_path() {
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let rhs_name = super::symbol("rhs_or", &mut path_fork, &mut string_table);
     let location = None;
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let rhs_result = builder
+        .bool(&mut constants, false, location, ValueMode::ImmutableOwned)
+        .expect("fixture bool")
+        .id();
 
     let rhs_fn = function_node(
         rhs_name,
@@ -356,26 +423,32 @@ fn short_circuit_or_keeps_rhs_call_off_true_short_path() {
             parameters: vec![],
             returns: fresh_success_returns(vec![builtin_type_ids::BOOL]),
         },
-        vec![node(
-            NodeKind::Return(vec![Expression::bool(
-                false,
-                location,
-                ValueMode::ImmutableOwned,
-            )]),
-            location,
-        )],
+        vec![node(NodeKind::Return(vec![rhs_result]), location)],
         location,
     );
 
+    let lhs_value = builder
+        .bool(&mut constants, true, location, ValueMode::ImmutableOwned)
+        .expect("fixture bool")
+        .id();
+    let rhs_call = runtime_function_call_item(
+        &mut builder,
+        rhs_name,
+        vec![builtin_type_ids::BOOL],
+        location,
+    );
     let condition = runtime_expr(
+        &mut builder,
+        &mut constants,
         vec![
-            runtime_operand_item(Expression::bool(true, location, ValueMode::ImmutableOwned)),
-            runtime_function_call_item(rhs_name, vec![builtin_type_ids::BOOL], location),
+            runtime_operand_item(lhs_value),
+            rhs_call,
             runtime_operator_item(Operator::Or, location),
         ],
         builtin_type_ids::BOOL,
         location,
         ValueMode::MutableOwned,
+        &TypeEnvironment::new(),
     );
 
     let start_fn = function_node(
@@ -389,6 +462,8 @@ fn short_circuit_or_keeps_rhs_call_off_true_short_path() {
                 condition,
                 vec![node(
                     NodeKind::ExpressionStatement(i32_literal(
+                        &mut builder,
+                        &mut constants,
                         1,
                         location,
                         ValueMode::ImmutableOwned,
@@ -404,9 +479,16 @@ fn short_circuit_or_keeps_rhs_call_off_true_short_path() {
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast_with_registered_types(vec![rhs_fn, start_fn], entry_path),
+        build_ast_with_registered_types(
+            vec![rhs_fn, start_fn],
+            entry_path,
+            builder,
+            constants,
+            TypeEnvironment::new(),
+        ),
         &mut string_table,
         &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
     )
     .expect("short-circuit or lowering should succeed");
     let rhs_function_id = module
@@ -479,27 +561,47 @@ fn short_circuit_place_rhs_materializes_value_load_before_edge_transfer() {
     let lhs_name = super::symbol("lhs", &mut path_fork, &mut string_table);
     let rhs_name = super::symbol("rhs", &mut path_fork, &mut string_table);
     let location = None;
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
 
+    let lhs_ref = reference_expr_with_type_id(
+        &mut builder,
+        lhs_name,
+        builtin_type_ids::BOOL,
+        location,
+        ValueMode::ImmutableReference,
+    );
+    let rhs_ref = reference_expr_with_type_id(
+        &mut builder,
+        rhs_name,
+        builtin_type_ids::BOOL,
+        location,
+        ValueMode::ImmutableReference,
+    );
     let condition = runtime_expr(
+        &mut builder,
+        &mut constants,
         vec![
-            runtime_operand_item(reference_expr_with_type_id(
-                lhs_name,
-                builtin_type_ids::BOOL,
-                location,
-                ValueMode::ImmutableReference,
-            )),
-            runtime_operand_item(reference_expr_with_type_id(
-                rhs_name,
-                builtin_type_ids::BOOL,
-                location,
-                ValueMode::ImmutableReference,
-            )),
+            runtime_operand_item(lhs_ref),
+            runtime_operand_item(rhs_ref),
             runtime_operator_item(Operator::And, location),
         ],
         builtin_type_ids::BOOL,
         location,
         ValueMode::MutableOwned,
+        &TypeEnvironment::new(),
     );
+
+    let lhs_init = builder
+        .bool(&mut constants, false, location, ValueMode::ImmutableOwned)
+        .expect("fixture bool")
+        .id();
+    let rhs_init = builder
+        .bool(&mut constants, true, location, ValueMode::MutableOwned)
+        .expect("fixture bool")
+        .id();
+    let lhs_decl = make_test_variable(lhs_name, lhs_init, &builder);
+    let rhs_decl = make_test_variable(rhs_name, rhs_init, &builder);
 
     let start_fn = function_node(
         start_name,
@@ -508,25 +610,15 @@ fn short_circuit_place_rhs_materializes_value_load_before_edge_transfer() {
             returns: vec![],
         },
         vec![
-            node(
-                NodeKind::VariableDeclaration(make_test_variable(
-                    lhs_name,
-                    Expression::bool(false, location, ValueMode::ImmutableOwned),
-                )),
-                location,
-            ),
-            node(
-                NodeKind::VariableDeclaration(make_test_variable(
-                    rhs_name,
-                    Expression::bool(true, location, ValueMode::MutableOwned),
-                )),
-                location,
-            ),
+            node(NodeKind::VariableDeclaration(lhs_decl), location),
+            node(NodeKind::VariableDeclaration(rhs_decl), location),
             node(
                 NodeKind::If(
                     condition,
                     vec![node(
                         NodeKind::ExpressionStatement(i32_literal(
+                            &mut builder,
+                            &mut constants,
                             1,
                             location,
                             ValueMode::ImmutableOwned,
@@ -543,9 +635,16 @@ fn short_circuit_place_rhs_materializes_value_load_before_edge_transfer() {
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast_with_registered_types(vec![start_fn], entry_path),
+        build_ast_with_registered_types(
+            vec![start_fn],
+            entry_path,
+            builder,
+            constants,
+            TypeEnvironment::new(),
+        ),
         &mut string_table,
         &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
     )
     .expect("short-circuit place rhs lowering should succeed");
     let start_function = super::start_function(&module);
@@ -599,46 +698,59 @@ fn value_if_then_place_materializes_value_load_before_result_definition() {
     let right_name = super::symbol("right", &mut path_fork, &mut string_table);
     let result_name = super::symbol("result", &mut path_fork, &mut string_table);
     let location = None;
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
 
+    let then_value = reference_expr_with_type_id(
+        &mut builder,
+        left_name,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        location,
+        ValueMode::ImmutableReference,
+    );
     let then_body = vec![node(
         NodeKind::ThenValue(ProducedValues {
-            expressions: vec![reference_expr_with_type_id(
-                left_name,
-                builtin_type_ids::fixed_scalar(FixedScalar::I32),
-                location,
-                ValueMode::ImmutableReference,
-            )],
+            expressions: vec![then_value],
             span: location,
         }),
         location,
     )];
 
+    let else_value = reference_expr_with_type_id(
+        &mut builder,
+        right_name,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        location,
+        ValueMode::ImmutableReference,
+    );
     let else_body = vec![node(
         NodeKind::ThenValue(ProducedValues {
-            expressions: vec![reference_expr_with_type_id(
-                right_name,
-                builtin_type_ids::fixed_scalar(FixedScalar::I32),
-                location,
-                ValueMode::ImmutableReference,
-            )],
+            expressions: vec![else_value],
             span: location,
         }),
         location,
     )];
 
-    let value_if_expression = Expression::new(
-        ExpressionKind::ValueBlock {
-            block: Box::new(ValueBlock::If(ValueIfBlock {
-                condition: runtime_expr(
-                    vec![runtime_operand_item(Expression::bool(
-                        true,
-                        location,
-                        ValueMode::ImmutableOwned,
-                    ))],
-                    builtin_type_ids::BOOL,
-                    location,
-                    ValueMode::ImmutableOwned,
-                ),
+    let flag = super::symbol("flag", &mut path_fork, &mut string_table);
+    let flag_value = builder
+        .bool(&mut constants, true, location, ValueMode::ImmutableOwned)
+        .expect("fixture bool")
+        .id();
+    let flag_decl = node(
+        NodeKind::VariableDeclaration(make_test_variable(flag, flag_value, &builder)),
+        location,
+    );
+    let condition = reference_expr_with_type_id(
+        &mut builder,
+        flag,
+        builtin_type_ids::BOOL,
+        location,
+        ValueMode::ImmutableReference,
+    );
+    let value_if_expression = builder
+        .value_block(
+            ValueBlock::If(ValueIfBlock {
+                condition,
                 then_body,
                 else_body,
                 then_scope: entry_path,
@@ -646,13 +758,13 @@ fn value_if_then_place_materializes_value_load_before_result_definition() {
                 span: location,
                 generic_request_ranges: Default::default(),
                 result_type_ids: vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
-            })),
-        },
-        location,
-        builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        DataType::Inferred,
-        ValueMode::ImmutableOwned,
-    );
+            }),
+            location,
+            SuccessShape::One(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture value-if block")
+        .id();
 
     let start_fn = function_node(
         start_name,
@@ -661,22 +773,41 @@ fn value_if_then_place_materializes_value_load_before_result_definition() {
             returns: vec![],
         },
         vec![
+            flag_decl,
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     left_name,
-                    i32_literal(1, location, ValueMode::ImmutableOwned),
+                    i32_literal(
+                        &mut builder,
+                        &mut constants,
+                        1,
+                        location,
+                        ValueMode::ImmutableOwned,
+                    ),
+                    &builder,
                 )),
                 location,
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     right_name,
-                    i32_literal(2, location, ValueMode::ImmutableOwned),
+                    i32_literal(
+                        &mut builder,
+                        &mut constants,
+                        2,
+                        location,
+                        ValueMode::ImmutableOwned,
+                    ),
+                    &builder,
                 )),
                 location,
             ),
             node(
-                NodeKind::VariableDeclaration(make_test_variable(result_name, value_if_expression)),
+                NodeKind::VariableDeclaration(make_test_variable(
+                    result_name,
+                    value_if_expression,
+                    &builder,
+                )),
                 location,
             ),
         ],
@@ -684,9 +815,16 @@ fn value_if_then_place_materializes_value_load_before_result_definition() {
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast_with_registered_types(vec![start_fn], entry_path),
+        build_ast_with_registered_types(
+            vec![start_fn],
+            entry_path,
+            builder,
+            constants,
+            TypeEnvironment::new(),
+        ),
         &mut string_table,
         &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
     )
     .expect("value-if place production should lower successfully");
     let start_function = super::start_function(&module);
@@ -720,10 +858,18 @@ fn value_if_then_place_materializes_value_load_before_result_definition() {
     let left_local = authored_local("left");
     let right_local = authored_local("right");
 
-    assert_eq!(
+    assert_ne!(
         then_result_local, else_result_local,
-        "both branches should write the shared hidden result local"
+        "branches define their own result temporaries"
     );
+    let then_args = super::assert_block_has_jump_args(&module, then_block, 1);
+    let else_args = super::assert_block_has_jump_args(&module, else_block, 1);
+    assert_eq!(
+        then_args[0].destination, else_args[0].destination,
+        "both branches transfer to the same merge slot"
+    );
+    assert_eq!(then_args[0].source, then_result_local);
+    assert_eq!(else_args[0].source, else_result_local);
     assert_eq!(
         then_merge, else_merge,
         "both branches should rejoin at the shared value-if merge block"
@@ -748,34 +894,48 @@ fn assertion_failure_uses_message_value_block_tail() {
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let condition_name = super::symbol("condition", &mut path_fork, &mut string_table);
     let location = None;
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
 
-    let message_value = Expression::new(
-        ExpressionKind::ValueBlock {
-            block: Box::new(ValueBlock::If(ValueIfBlock {
-                condition: reference_expr_with_type_id(
-                    condition_name,
-                    builtin_type_ids::BOOL,
-                    location,
-                    ValueMode::ImmutableReference,
-                ),
+    let condition = reference_expr_with_type_id(
+        &mut builder,
+        condition_name,
+        builtin_type_ids::BOOL,
+        location,
+        ValueMode::ImmutableReference,
+    );
+    let then_string = builder
+        .string_slice(
+            &mut constants,
+            string_table.intern("then"),
+            location,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture string slice")
+        .id();
+    let else_string = builder
+        .string_slice(
+            &mut constants,
+            string_table.intern("else"),
+            location,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture string slice")
+        .id();
+    let message_value = builder
+        .value_block(
+            ValueBlock::If(ValueIfBlock {
+                condition,
                 then_body: vec![node(
                     NodeKind::ThenValue(ProducedValues {
-                        expressions: vec![Expression::string_slice(
-                            string_table.intern("then"),
-                            location,
-                            ValueMode::ImmutableOwned,
-                        )],
+                        expressions: vec![then_string],
                         span: location,
                     }),
                     location,
                 )],
                 else_body: vec![node(
                     NodeKind::ThenValue(ProducedValues {
-                        expressions: vec![Expression::string_slice(
-                            string_table.intern("else"),
-                            location,
-                            ValueMode::ImmutableOwned,
-                        )],
+                        expressions: vec![else_string],
                         span: location,
                     }),
                     location,
@@ -785,17 +945,20 @@ fn assertion_failure_uses_message_value_block_tail() {
                 span: location,
                 generic_request_ranges: Default::default(),
                 result_type_ids: vec![builtin_type_ids::STRING],
-            })),
-        },
-        location,
-        builtin_type_ids::STRING,
-        DataType::StringSlice,
-        ValueMode::ImmutableOwned,
-    );
+            }),
+            location,
+            SuccessShape::One(builtin_type_ids::STRING),
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture value-block message")
+        .id();
     let mut option_type_environment =
         crate::compiler_frontend::datatypes::environment::TypeEnvironment::new();
     let option_string = option_type_environment.intern_option(builtin_type_ids::STRING);
-    let message = Expression::coerced(message_value, option_string);
+    let message = builder
+        .coerced(builder.own(message_value), option_string)
+        .expect("fixture coercion")
+        .id();
 
     let start_fn = function_node(
         start_name,
@@ -811,26 +974,38 @@ fn assertion_failure_uses_message_value_block_tail() {
         vec![node(
             NodeKind::Assert {
                 condition: reference_expr_with_type_id(
+                    &mut builder,
                     condition_name,
                     builtin_type_ids::BOOL,
                     location,
                     ValueMode::ImmutableReference,
                 ),
-                message: Box::new(message),
+                message,
             },
             location,
         )],
         location,
     );
 
-    let mut ast = build_ast_with_registered_types(vec![start_fn], entry_path);
+    let mut ast = build_ast_with_registered_types(
+        vec![start_fn],
+        entry_path,
+        builder,
+        constants,
+        TypeEnvironment::new(),
+    );
     assert_eq!(
         ast.type_environment.intern_option(builtin_type_ids::STRING),
         option_string,
         "the fixture environment must register the same canonical String? type"
     );
-    let (module, _type_environment) = lower_ast(ast, &mut string_table, &mut path_fork)
-        .expect("assertion with a value-block message should lower");
+    let (module, _type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
+    )
+    .expect("assertion with a value-block message should lower");
 
     let assertion_block = module
         .blocks
@@ -875,6 +1050,18 @@ fn statically_true_assertion_elides_runtime_message_call_and_failure_edge() {
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let message_name = super::symbol("runtime_message", &mut path_fork, &mut string_table);
     let location = None;
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+
+    let message_string = builder
+        .string_slice(
+            &mut constants,
+            string_table.intern("message"),
+            location,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture string slice")
+        .id();
 
     let message_fn = function_node(
         message_name,
@@ -882,29 +1069,36 @@ fn statically_true_assertion_elides_runtime_message_call_and_failure_edge() {
             parameters: vec![],
             returns: fresh_success_returns(vec![builtin_type_ids::STRING]),
         },
-        vec![node(
-            NodeKind::Return(vec![Expression::string_slice(
-                string_table.intern("message"),
-                location,
-                ValueMode::ImmutableOwned,
-            )]),
-            location,
-        )],
+        vec![node(NodeKind::Return(vec![message_string]), location)],
+        location,
+    );
+    let message_call = runtime_function_call_item(
+        &mut builder,
+        message_name,
+        vec![builtin_type_ids::STRING],
         location,
     );
     let message = runtime_expr(
-        vec![runtime_function_call_item(
-            message_name,
-            vec![builtin_type_ids::STRING],
-            location,
-        )],
+        &mut builder,
+        &mut constants,
+        vec![message_call],
         builtin_type_ids::STRING,
         location,
         ValueMode::MutableOwned,
+        &TypeEnvironment::new(),
     );
     let mut option_type_environment =
         crate::compiler_frontend::datatypes::environment::TypeEnvironment::new();
     let option_string = option_type_environment.intern_option(builtin_type_ids::STRING);
+
+    let assert_condition = builder
+        .bool(&mut constants, true, location, ValueMode::ImmutableOwned)
+        .expect("fixture bool")
+        .id();
+    let assert_message = builder
+        .coerced(builder.own(message), option_string)
+        .expect("fixture coercion")
+        .id();
 
     let start_fn = function_node(
         start_name,
@@ -914,8 +1108,8 @@ fn statically_true_assertion_elides_runtime_message_call_and_failure_edge() {
         },
         vec![node(
             NodeKind::Assert {
-                condition: Expression::bool(true, location, ValueMode::ImmutableOwned),
-                message: Box::new(Expression::coerced(message, option_string)),
+                condition: assert_condition,
+                message: assert_message,
             },
             location,
         )],
@@ -923,9 +1117,16 @@ fn statically_true_assertion_elides_runtime_message_call_and_failure_edge() {
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast_with_registered_types(vec![message_fn, start_fn], entry_path),
+        build_ast_with_registered_types(
+            vec![message_fn, start_fn],
+            entry_path,
+            builder,
+            constants,
+            TypeEnvironment::new(),
+        ),
         &mut string_table,
         &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
     )
     .expect("statically true assertion should elide its runtime message");
     let message_function_id = module
@@ -958,34 +1159,48 @@ fn statically_false_assertion_keeps_cfg_producing_message_before_terminal_failur
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let condition_name = super::symbol("message_condition", &mut path_fork, &mut string_table);
     let location = None;
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
 
-    let message_value = Expression::new(
-        ExpressionKind::ValueBlock {
-            block: Box::new(ValueBlock::If(ValueIfBlock {
-                condition: reference_expr_with_type_id(
-                    condition_name,
-                    builtin_type_ids::BOOL,
-                    location,
-                    ValueMode::ImmutableReference,
-                ),
+    let condition = reference_expr_with_type_id(
+        &mut builder,
+        condition_name,
+        builtin_type_ids::BOOL,
+        location,
+        ValueMode::ImmutableReference,
+    );
+    let then_string = builder
+        .string_slice(
+            &mut constants,
+            string_table.intern("then"),
+            location,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture string slice")
+        .id();
+    let else_string = builder
+        .string_slice(
+            &mut constants,
+            string_table.intern("else"),
+            location,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture string slice")
+        .id();
+    let message_value = builder
+        .value_block(
+            ValueBlock::If(ValueIfBlock {
+                condition,
                 then_body: vec![node(
                     NodeKind::ThenValue(ProducedValues {
-                        expressions: vec![Expression::string_slice(
-                            string_table.intern("then"),
-                            location,
-                            ValueMode::ImmutableOwned,
-                        )],
+                        expressions: vec![then_string],
                         span: location,
                     }),
                     location,
                 )],
                 else_body: vec![node(
                     NodeKind::ThenValue(ProducedValues {
-                        expressions: vec![Expression::string_slice(
-                            string_table.intern("else"),
-                            location,
-                            ValueMode::ImmutableOwned,
-                        )],
+                        expressions: vec![else_string],
                         span: location,
                     }),
                     location,
@@ -995,17 +1210,25 @@ fn statically_false_assertion_keeps_cfg_producing_message_before_terminal_failur
                 span: location,
                 generic_request_ranges: Default::default(),
                 result_type_ids: vec![builtin_type_ids::STRING],
-            })),
-        },
-        location,
-        builtin_type_ids::STRING,
-        DataType::StringSlice,
-        ValueMode::ImmutableOwned,
-    );
+            }),
+            location,
+            SuccessShape::One(builtin_type_ids::STRING),
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture value-block message")
+        .id();
     let mut option_type_environment =
         crate::compiler_frontend::datatypes::environment::TypeEnvironment::new();
     let option_string = option_type_environment.intern_option(builtin_type_ids::STRING);
-    let message = Expression::coerced(message_value, option_string);
+    let message = builder
+        .coerced(builder.own(message_value), option_string)
+        .expect("fixture coercion")
+        .id();
+
+    let assert_condition = builder
+        .bool(&mut constants, false, location, ValueMode::ImmutableOwned)
+        .expect("fixture bool")
+        .id();
 
     let start_fn = function_node(
         start_name,
@@ -1020,22 +1243,33 @@ fn statically_false_assertion_keeps_cfg_producing_message_before_terminal_failur
         },
         vec![node(
             NodeKind::Assert {
-                condition: Expression::bool(false, location, ValueMode::ImmutableOwned),
-                message: Box::new(message),
+                condition: assert_condition,
+                message,
             },
             location,
         )],
         location,
     );
 
-    let mut ast = build_ast_with_registered_types(vec![start_fn], entry_path);
+    let mut ast = build_ast_with_registered_types(
+        vec![start_fn],
+        entry_path,
+        builder,
+        constants,
+        TypeEnvironment::new(),
+    );
     assert_eq!(
         ast.type_environment.intern_option(builtin_type_ids::STRING),
         option_string,
         "the fixture environment must register the same canonical String? type"
     );
-    let (module, _type_environment) = lower_ast(ast, &mut string_table, &mut path_fork)
-        .expect("statically false assertion with a value-block message should lower");
+    let (module, _type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
+    )
+    .expect("statically false assertion with a value-block message should lower");
 
     assert_no_placeholder_terminators(&module);
     assert_eq!(
@@ -1063,6 +1297,25 @@ fn non_unit_function_with_terminal_if_does_not_report_fallthrough() {
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let chooser = super::symbol("chooser", &mut path_fork, &mut string_table);
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+
+    let flag = super::symbol("flag", &mut path_fork, &mut string_table);
+    let flag_value = builder
+        .bool(&mut constants, true, None, ValueMode::ImmutableOwned)
+        .expect("fixture bool")
+        .id();
+    let flag_decl = node(
+        NodeKind::VariableDeclaration(make_test_variable(flag, flag_value, &builder)),
+        None,
+    );
+    let condition = reference_expr_with_type_id(
+        &mut builder,
+        flag,
+        builtin_type_ids::BOOL,
+        None,
+        ValueMode::ImmutableReference,
+    );
 
     let chooser_fn = function_node(
         chooser,
@@ -1070,30 +1323,36 @@ fn non_unit_function_with_terminal_if_does_not_report_fallthrough() {
             parameters: vec![],
             returns: fresh_success_returns(vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)]),
         },
-        vec![node(
-            NodeKind::If(
-                runtime_expr(
-                    vec![runtime_operand_item(Expression::bool(
-                        true,
+        vec![
+            flag_decl,
+            node(
+                NodeKind::If(
+                    condition,
+                    vec![node(
+                        NodeKind::Return(vec![i32_literal(
+                            &mut builder,
+                            &mut constants,
+                            1,
+                            None,
+                            ValueMode::ImmutableOwned,
+                        )]),
                         None,
-                        ValueMode::ImmutableOwned,
-                    ))],
-                    builtin_type_ids::BOOL,
-                    None,
-                    ValueMode::ImmutableOwned,
+                    )],
+                    Some(vec![node(
+                        NodeKind::Return(vec![i32_literal(
+                            &mut builder,
+                            &mut constants,
+                            2,
+                            None,
+                            ValueMode::ImmutableOwned,
+                        )]),
+                        None,
+                    )]),
+                    test_if_branch_metadata(true),
                 ),
-                vec![node(
-                    NodeKind::Return(vec![i32_literal(1, None, ValueMode::ImmutableOwned)]),
-                    None,
-                )],
-                Some(vec![node(
-                    NodeKind::Return(vec![i32_literal(2, None, ValueMode::ImmutableOwned)]),
-                    None,
-                )]),
-                test_if_branch_metadata(true),
+                None,
             ),
-            None,
-        )],
+        ],
         None,
     );
 
@@ -1107,9 +1366,20 @@ fn non_unit_function_with_terminal_if_does_not_report_fallthrough() {
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![start_fn, chooser_fn], entry_path);
-    let (module, _type_environment) = lower_ast(ast, &mut string_table, &mut path_fork)
-        .expect("all-terminal if should not trigger fallthrough");
+    let ast = build_ast_with_registered_types(
+        vec![start_fn, chooser_fn],
+        entry_path,
+        builder,
+        constants,
+        TypeEnvironment::new(),
+    );
+    let (module, _type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
+    )
+    .expect("all-terminal if should not trigger fallthrough");
 
     let chooser_block = &module.blocks[module.functions[1].entry.0 as usize];
     assert!(matches!(chooser_block.terminator, HirTerminator::If { .. }));

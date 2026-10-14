@@ -11,18 +11,17 @@
 //! without an explicit `ExpectedType`.
 
 use super::error::ExpressionParseError;
-use super::expression::Expression;
 use super::expression_rpn::ExpressionRpnItem;
+use super::expression_store::AstExpressionBuilder;
 use super::parse_expression_dispatch::push_expression_operand;
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic,
 };
-use crate::compiler_frontend::datatypes::DataType;
-use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::numeric_text::parse::{materialize_fixed_scalar, materialize_number};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -67,10 +66,16 @@ pub(super) struct LiteralParseState<'a> {
 /// destination-aware materialisation in `evaluate_expression`. The
 /// `next_number_negative` fallback keeps parser-owned unary negation and hand-built test streams
 /// on the same boundary-width policy as tokenizer-signed literals.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "literal parsing keeps the token stream, scope, type interner, expression builder, const store, literal state, string table, and path fork as separate borrows"
+)]
 pub(super) fn parse_literal_expression(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     state: &mut LiteralParseState<'_>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
@@ -118,7 +123,13 @@ pub(super) fn parse_literal_expression(
                                 span,
                             )
                         })?;
-                    Expression::number(value, type_id, span, state.value_mode.to_owned())
+                    expression_builder.number(
+                        const_values,
+                        value,
+                        type_id,
+                        span,
+                        *state.value_mode,
+                    )?
                 } else if token.kind == NumericLiteralKind::WholeNumber {
                     let value = materialize_fixed_scalar(
                         &token,
@@ -131,7 +142,7 @@ pub(super) fn parse_literal_expression(
                         CompilerDiagnostic::invalid_number_literal(token.source_text, reason, span)
                     })?;
 
-                    Expression::fixed_scalar(value, span, state.value_mode.to_owned())
+                    expression_builder.fixed_scalar(const_values, value, span, *state.value_mode)?
                 } else {
                     // The sign was already folded above, so materialising the signed
                     // token rounds once at the default precision; negation is exact.
@@ -146,7 +157,7 @@ pub(super) fn parse_literal_expression(
                         CompilerDiagnostic::invalid_number_literal(token.source_text, reason, span)
                     })?;
 
-                    Expression::fixed_scalar(value, span, state.value_mode.to_owned())
+                    expression_builder.fixed_scalar(const_values, value, span, *state.value_mode)?
                 };
 
                 token_stream.advance();
@@ -154,6 +165,8 @@ pub(super) fn parse_literal_expression(
                     token_stream,
                     context,
                     type_interner,
+                    expression_builder,
+                    const_values,
                     string_table,
                     state.expression,
                     state.allow_boundary_catch,
@@ -173,7 +186,7 @@ pub(super) fn parse_literal_expression(
                 .push(ExpressionRpnItem::PendingNumericLiteral {
                     token,
                     span,
-                    value_mode: state.value_mode.to_owned(),
+                    value_mode: *state.value_mode,
                 });
             Ok(())
         }
@@ -185,12 +198,15 @@ pub(super) fn parse_literal_expression(
                     CompilerError::compiler_error("string literal token had no payload")
                 })?;
             let span = Some(token_stream.current_span());
-            let string_expr = Expression::string_slice(string, span, state.value_mode.to_owned());
+            let string_expr =
+                expression_builder.string_slice(const_values, string, span, *state.value_mode)?;
             token_stream.advance();
             push_expression_operand(
                 token_stream,
                 context,
                 type_interner,
+                expression_builder,
+                const_values,
                 string_table,
                 state.expression,
                 state.allow_boundary_catch,
@@ -208,12 +224,15 @@ pub(super) fn parse_literal_expression(
                     CompilerError::compiler_error("boolean literal token had no payload")
                 })?;
             let span = Some(token_stream.current_span());
-            let bool_expr = Expression::bool(value, span, state.value_mode.to_owned());
+            let bool_expr =
+                expression_builder.bool(const_values, value, span, *state.value_mode)?;
             token_stream.advance();
             push_expression_operand(
                 token_stream,
                 context,
                 type_interner,
+                expression_builder,
+                const_values,
                 string_table,
                 state.expression,
                 state.allow_boundary_catch,
@@ -231,12 +250,15 @@ pub(super) fn parse_literal_expression(
                     CompilerError::compiler_error("char literal token had no payload")
                 })?;
             let span = Some(token_stream.current_span());
-            let char_expr = Expression::char(value, span, state.value_mode.to_owned());
+            let char_expr =
+                expression_builder.char(const_values, value, span, *state.value_mode)?;
             token_stream.advance();
             push_expression_operand(
                 token_stream,
                 context,
                 type_interner,
+                expression_builder,
+                const_values,
                 string_table,
                 state.expression,
                 state.allow_boundary_catch,
@@ -248,28 +270,11 @@ pub(super) fn parse_literal_expression(
 
         TokenTag::NONE_LITERAL => {
             let span = Some(token_stream.current_span());
-            let (inner_type_id, inner_diagnostic_type) =
-                if let ExpectedType::Known(expected_type_id) = state.expected_type {
-                    let type_environment = type_interner.environment();
-                    let Some(inner_type_id) = type_environment.option_inner_type(*expected_type_id)
-                    else {
-                        return Err(CompilerDiagnostic::compile_time_evaluation_error(
-                        CompileTimeEvaluationErrorReason::NoneLiteralRequiresOptionalTypeContext,
-                        None,
-                        span,
-                    )
-                    .into());
-                    };
-
-                    (
-                        inner_type_id,
-                        diagnostic_type_spelling(inner_type_id, type_environment),
-                    )
-                } else if none_literal_has_option_equality_context(token_stream) {
-                    // Comparisons like `value is none` and `none is value` infer the
-                    // option shape from the opposite operand during evaluation.
-                    (type_interner.builtins().none, DataType::Inferred)
-                } else {
+            let none_value_mode = *state.value_mode;
+            let inner_type_id = if let ExpectedType::Known(expected_type_id) = state.expected_type {
+                let type_environment = type_interner.environment();
+                let Some(inner_type_id) = type_environment.option_inner_type(*expected_type_id)
+                else {
                     return Err(CompilerDiagnostic::compile_time_evaluation_error(
                         CompileTimeEvaluationErrorReason::NoneLiteralRequiresOptionalTypeContext,
                         None,
@@ -277,19 +282,37 @@ pub(super) fn parse_literal_expression(
                     )
                     .into());
                 };
+                inner_type_id
+            } else if none_literal_has_option_equality_context(token_stream) {
+                // Comparisons like `value is none` and `none is value` infer the
+                // option shape from the opposite operand during evaluation.
+                type_interner.builtins().none
+            } else {
+                return Err(CompilerDiagnostic::compile_time_evaluation_error(
+                    CompileTimeEvaluationErrorReason::NoneLiteralRequiresOptionalTypeContext,
+                    None,
+                    span,
+                )
+                .into());
+            };
 
-            let mut none_expr = Expression::option_none_with_type_id(
+            let none_expr = expression_builder.option_none_with_type_id(
+                const_values,
                 inner_type_id,
-                inner_diagnostic_type,
                 type_interner.environment_mut_for_derived_types(),
                 span,
-            );
-            none_expr.value_mode = state.value_mode.to_owned();
+            )?;
+            let mut completed = expression_builder
+                .view_owned(none_expr)?
+                .to_completed_input(expression_builder)?;
+            completed.value_mode = none_value_mode;
             token_stream.advance();
             push_expression_operand(
                 token_stream,
                 context,
                 type_interner,
+                expression_builder,
+                const_values,
                 string_table,
                 state.expression,
                 state.allow_boundary_catch,

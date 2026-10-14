@@ -225,7 +225,7 @@ pub(crate) enum FrontendCounter {
     // Owning-pass traffic, never observer traversal. Clone counters cover the
     // named sites only, not every expression clone or recursively copied bytes.
     #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
-    CensusAstValidationExpressionReads,
+    CensusAstValidationExpressionExpansions,
     #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
     CensusHirLowerExpressionEntries,
     #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
@@ -241,13 +241,9 @@ pub(crate) enum FrontendCounter {
     #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
     CensusCastFoldAttempts,
     #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
-    CensusFoldReducedRpnItems,
-    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
     CensusDefaultApplicationClones,
     #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
     CensusParameterDefaultViewClones,
-    #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
-    CensusConstructorDefaultViewClones,
     #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
     CensusConstructorFieldViewsCreated,
     #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
@@ -449,7 +445,7 @@ mod detailed {
     static ALREADY_GLOBAL_PREPARED_OUTPUT_REMAP_SKIP_COUNT: AtomicUsize = AtomicUsize::new(0);
     static PREPARED_FILE_INVARIANT_VALIDATION_COUNT: AtomicUsize = AtomicUsize::new(0);
     static FILE_PREPARE_NON_IDENTITY_PAYLOAD_REMAPS: AtomicUsize = AtomicUsize::new(0);
-    static CENSUS_AST_VALIDATION_EXPRESSION_READS: AtomicUsize = AtomicUsize::new(0);
+    static CENSUS_AST_VALIDATION_EXPRESSION_EXPANSIONS: AtomicUsize = AtomicUsize::new(0);
     static CENSUS_HIR_LOWER_EXPRESSION_ENTRIES: AtomicUsize = AtomicUsize::new(0);
     static CENSUS_FOLD_COMPILE_TIME_EXPRESSION_ENTRIES: AtomicUsize = AtomicUsize::new(0);
     static CENSUS_CONSTANT_FOLD_ENTRIES: AtomicUsize = AtomicUsize::new(0);
@@ -457,10 +453,8 @@ mod detailed {
     static CENSUS_FOLD_OUTCOME_RUNTIME: AtomicUsize = AtomicUsize::new(0);
     static CENSUS_FOLD_OUTCOME_TEXT_UNAVAILABLE: AtomicUsize = AtomicUsize::new(0);
     static CENSUS_CAST_FOLD_ATTEMPTS: AtomicUsize = AtomicUsize::new(0);
-    static CENSUS_FOLD_REDUCED_RPN_ITEMS: AtomicUsize = AtomicUsize::new(0);
     static CENSUS_DEFAULT_APPLICATION_CLONES: AtomicUsize = AtomicUsize::new(0);
     static CENSUS_PARAMETER_DEFAULT_VIEW_CLONES: AtomicUsize = AtomicUsize::new(0);
-    static CENSUS_CONSTRUCTOR_DEFAULT_VIEW_CLONES: AtomicUsize = AtomicUsize::new(0);
     static CENSUS_CONSTRUCTOR_FIELD_VIEWS_CREATED: AtomicUsize = AtomicUsize::new(0);
     static CENSUS_CALL_KNOWN_TYPE_COMPATIBILITY_ATTEMPTS: AtomicUsize = AtomicUsize::new(0);
     static CENSUS_GENERIC_CALL_AND_MATERIALISATION_SIGNATURE_SUBSTITUTIONS: AtomicUsize =
@@ -741,7 +735,7 @@ mod detailed {
             FrontendCounter::ExternalFunctionDefinitionCloneCount,
             FrontendCounter::ExternalSymbolPathCloneCount,
             FrontendCounter::ExternalAbiParameterCloneCount,
-            FrontendCounter::CensusAstValidationExpressionReads,
+            FrontendCounter::CensusAstValidationExpressionExpansions,
             FrontendCounter::CensusHirLowerExpressionEntries,
             FrontendCounter::CensusFoldCompileTimeExpressionEntries,
             FrontendCounter::CensusConstantFoldEntries,
@@ -749,10 +743,8 @@ mod detailed {
             FrontendCounter::CensusFoldOutcomeRuntime,
             FrontendCounter::CensusFoldOutcomeTextUnavailable,
             FrontendCounter::CensusCastFoldAttempts,
-            FrontendCounter::CensusFoldReducedRpnItems,
             FrontendCounter::CensusDefaultApplicationClones,
             FrontendCounter::CensusParameterDefaultViewClones,
-            FrontendCounter::CensusConstructorDefaultViewClones,
             FrontendCounter::CensusConstructorFieldViewsCreated,
             FrontendCounter::CensusCallKnownTypeCompatibilityAttempts,
             FrontendCounter::CensusGenericCallAndMaterialisationSignatureSubstitutions,
@@ -1125,8 +1117,8 @@ mod detailed {
             FrontendCounter::ExternalSymbolPathCloneCount => &EXTERNAL_SYMBOL_PATH_CLONE_COUNT,
 
             FrontendCounter::ExternalAbiParameterCloneCount => &EXTERNAL_ABI_PARAMETER_CLONE_COUNT,
-            FrontendCounter::CensusAstValidationExpressionReads => {
-                &CENSUS_AST_VALIDATION_EXPRESSION_READS
+            FrontendCounter::CensusAstValidationExpressionExpansions => {
+                &CENSUS_AST_VALIDATION_EXPRESSION_EXPANSIONS
             }
             FrontendCounter::CensusHirLowerExpressionEntries => {
                 &CENSUS_HIR_LOWER_EXPRESSION_ENTRIES
@@ -1141,13 +1133,9 @@ mod detailed {
                 &CENSUS_FOLD_OUTCOME_TEXT_UNAVAILABLE
             }
             FrontendCounter::CensusCastFoldAttempts => &CENSUS_CAST_FOLD_ATTEMPTS,
-            FrontendCounter::CensusFoldReducedRpnItems => &CENSUS_FOLD_REDUCED_RPN_ITEMS,
             FrontendCounter::CensusDefaultApplicationClones => &CENSUS_DEFAULT_APPLICATION_CLONES,
             FrontendCounter::CensusParameterDefaultViewClones => {
                 &CENSUS_PARAMETER_DEFAULT_VIEW_CLONES
-            }
-            FrontendCounter::CensusConstructorDefaultViewClones => {
-                &CENSUS_CONSTRUCTOR_DEFAULT_VIEW_CLONES
             }
             FrontendCounter::CensusConstructorFieldViewsCreated => {
                 &CENSUS_CONSTRUCTOR_FIELD_VIEWS_CREATED
@@ -1548,8 +1536,8 @@ mod detailed {
             FrontendCounter::ExternalSymbolPathCloneCount => "external_symbol_path_clone_count",
 
             FrontendCounter::ExternalAbiParameterCloneCount => "external_abi_parameter_clone_count",
-            FrontendCounter::CensusAstValidationExpressionReads => {
-                "frontend_census_ast_validation_expression_reads"
+            FrontendCounter::CensusAstValidationExpressionExpansions => {
+                "frontend_census_ast_validation_expression_expansions"
             }
             FrontendCounter::CensusHirLowerExpressionEntries => {
                 "frontend_census_hir_lower_expression_entries"
@@ -1564,15 +1552,11 @@ mod detailed {
                 "frontend_census_fold_outcome_text_unavailable"
             }
             FrontendCounter::CensusCastFoldAttempts => "frontend_census_cast_fold_attempts",
-            FrontendCounter::CensusFoldReducedRpnItems => "frontend_census_fold_reduced_rpn_items",
             FrontendCounter::CensusDefaultApplicationClones => {
                 "frontend_census_default_application_clones"
             }
             FrontendCounter::CensusParameterDefaultViewClones => {
                 "frontend_census_parameter_default_view_clones"
-            }
-            FrontendCounter::CensusConstructorDefaultViewClones => {
-                "frontend_census_constructor_default_view_clones"
             }
             FrontendCounter::CensusConstructorFieldViewsCreated => {
                 "frontend_census_constructor_field_views_created"

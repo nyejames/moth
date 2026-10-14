@@ -149,21 +149,18 @@ fn distinct_constructed_types_get_distinct_ids() {
 }
 
 #[test]
-fn result_interning_is_deterministic() {
+fn function_result_slots_intern_deterministically() {
     let mut env = TypeEnvironment::new();
     let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
-    let error_type = env.builtins().string;
-
-    let result_a = env.intern_constructed(
-        TypeConstructor::Builtin(BuiltinTypeConstructor::FallibleCarrier),
-        Box::new([int, error_type]),
-    );
-    let result_b = env.intern_constructed(
-        TypeConstructor::Builtin(BuiltinTypeConstructor::FallibleCarrier),
-        Box::new([int, error_type]),
-    );
-
-    assert_eq!(result_a, result_b);
+    let string = env.builtins().string;
+    let key = FunctionTypeKey {
+        parameters: Box::new([]),
+        returns: Box::new([int, string]),
+        error_return: Some(string),
+    };
+    let first = env.intern_function(key.clone());
+    let second = env.intern_function(key);
+    assert_eq!(first, second);
 }
 
 #[test]
@@ -259,58 +256,59 @@ fn display_renders_option_with_question_mark() {
 }
 
 #[test]
-fn display_renders_internal_result_carrier_as_fallible_signature() {
+fn display_renders_single_success_fallible_function_signature() {
     let mut env = TypeEnvironment::new();
     let table = StringTable::new();
     let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let error_type = env.builtins().string;
 
-    let result = env.intern_constructed(
-        TypeConstructor::Builtin(BuiltinTypeConstructor::FallibleCarrier),
-        Box::new([int, error_type]),
-    );
+    let result = env.intern_function(FunctionTypeKey {
+        parameters: Box::new([]),
+        returns: Box::new([int]),
+        error_return: Some(error_type),
+    });
 
     assert_eq!(
         display_type(result, &env, &table, &empty_path_table()),
-        "I32, String!"
+        "Function( -> I32, String!)"
     );
 }
 
 #[test]
-fn display_renders_multi_success_result_carrier_as_fallible_signature() {
+fn display_renders_multi_success_fallible_function_signature() {
     let mut env = TypeEnvironment::new();
     let table = StringTable::new();
     let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let string = env.builtins().string;
     let error_type = env.builtins().string;
 
-    let success_tuple = env.intern_tuple(vec![int, string]);
-    let result = env.intern_constructed(
-        TypeConstructor::Builtin(BuiltinTypeConstructor::FallibleCarrier),
-        Box::new([success_tuple, error_type]),
-    );
+    let result = env.intern_function(FunctionTypeKey {
+        parameters: Box::new([]),
+        returns: Box::new([int, string]),
+        error_return: Some(error_type),
+    });
 
     assert_eq!(
         display_type(result, &env, &table, &empty_path_table()),
-        "I32, String, String!"
+        "Function( -> I32, String, String!)"
     );
 }
 
 #[test]
-fn display_renders_zero_success_result_carrier_as_error_signature() {
+fn display_renders_error_only_function_signature() {
     let mut env = TypeEnvironment::new();
     let table = StringTable::new();
-    let none = env.builtins().none;
     let error_type = env.builtins().string;
 
-    let result = env.intern_constructed(
-        TypeConstructor::Builtin(BuiltinTypeConstructor::FallibleCarrier),
-        Box::new([none, error_type]),
-    );
+    let result = env.intern_function(FunctionTypeKey {
+        parameters: Box::new([]),
+        returns: Box::new([]),
+        error_return: Some(error_type),
+    });
 
     assert_eq!(
         display_type(result, &env, &table, &empty_path_table()),
-        "String!"
+        "Function( -> String!)"
     );
 }
 
@@ -331,24 +329,6 @@ fn display_renders_function_error_return_slot() {
     assert_eq!(
         display_type(function, &env, &table, &empty_path_table()),
         "Function(I32 -> String, String!)"
-    );
-}
-
-#[test]
-fn display_renders_tuple_fields() {
-    let mut env = TypeEnvironment::new();
-    let table = StringTable::new();
-    let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
-    let string = env.builtins().string;
-
-    let tuple = env.intern_constructed(
-        TypeConstructor::Builtin(BuiltinTypeConstructor::Tuple),
-        Box::new([int, string]),
-    );
-
-    assert_eq!(
-        display_type(tuple, &env, &table, &empty_path_table()),
-        "(I32, String)"
     );
 }
 
@@ -1263,17 +1243,6 @@ fn option_interning_is_deterministic() {
 
     assert_eq!(option_a, option_b);
     assert!(env.is_option(option_a));
-}
-
-#[test]
-fn fallible_carrier_slots_query_works() {
-    let mut env = TypeEnvironment::new();
-    let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
-    let error_type = env.builtins().string;
-
-    let result = env.intern_fallible_carrier(int, error_type);
-
-    assert_eq!(env.fallible_carrier_slots(result), Some((int, error_type)));
 }
 
 #[test]

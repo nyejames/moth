@@ -1,8 +1,7 @@
 //! Numeric proof invariants over real HIR blocks.
 //!
-//! Every test assembles a real HIR statement graph (declared locals, loads and copies between
-//! them, checked operations, fallible cast statements, calls, joins and back edges) and queries
-//! the computed table by statement id, exactly the way the scalar backends consume it.
+//! Tests assemble HIR blocks with ordinary statements and native Invoke continuations, then
+//! query proofs by operation id exactly as the scalar backends do.
 //!
 //! Fixture calls are always bound to locals before being combined: the helpers take `&mut
 //! fixture`, so nested calls in one expression would fight over the borrow.
@@ -18,7 +17,7 @@ use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId, builtin_ty
 use crate::compiler_frontend::datatypes::number::NumberValue;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
-use crate::compiler_frontend::external_packages::CallTarget;
+use crate::compiler_frontend::external_packages::{CallTarget, ExternalPackageRegistry};
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
 use crate::compiler_frontend::hir::expression_store::HirValueRange;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
@@ -36,7 +35,7 @@ use crate::compiler_frontend::hir::statements::{
     HirLocalDestination, HirStatement, HirStatementKind, HirWriteTarget,
 };
 use crate::compiler_frontend::hir::structs::{HirField, HirStruct};
-use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
 use crate::compiler_frontend::hir::validate_hir_module;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerBuilder};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -93,13 +92,6 @@ impl ProofFixture {
 
     fn number(&mut self) -> TypeId {
         self.environment.intern_number(NumberScale::ZERO)
-    }
-
-    /// Interned internal fallible carrier shape for ReturnError and CastOp result locals,
-    /// carrying the builtin `Error` as its error payload exactly like validated HIR carriers.
-    fn carrier(&mut self, success: TypeId) -> TypeId {
-        let error = self.error_type();
-        self.environment.intern_fallible_carrier(success, error)
     }
 
     /// The builtin `Error` type id, registered through the same canonical-identity dance the
@@ -231,14 +223,6 @@ impl ProofFixture {
         )
     }
 
-    fn unwrap_success(&mut self, source: HirValueId, ty: TypeId) -> HirValueId {
-        self.expression(
-            HirExpressionKind::FallibleUnwrapSuccess { result: source },
-            ty,
-            ValueKind::RValue,
-        )
-    }
-
     fn cast_expression(
         &mut self,
         source: HirValueId,
@@ -297,21 +281,27 @@ impl ProofFixture {
         }
     }
 
-    fn cast_op(
+    fn invoke(
         &mut self,
-        policy: BuiltinCastPolicyId,
-        source: HirValueId,
+        operation: HirFallibleOperation,
         result: LocalId,
-    ) -> HirStatement {
-        HirStatement {
-            id: self.statement_id(),
-            kind: HirStatementKind::CastOp {
-                policy,
-                source,
-                result: Some(HirLocalDestination::Define(result)),
+        error: LocalId,
+        success: BlockId,
+        failure: BlockId,
+    ) -> (HirNodeId, HirTerminator) {
+        let id = self.statement_id();
+        (
+            id,
+            HirTerminator::Invoke {
+                id,
+                span: None,
+                operation,
+                success,
+                success_results: vec![result],
+                failure,
+                error_result: error,
             },
-            span: None,
-        }
+        )
     }
 
     fn call(&mut self) -> HirStatement {
@@ -320,21 +310,14 @@ impl ProofFixture {
             kind: HirStatementKind::Call {
                 target: CallTarget::Local(FunctionId(0)),
                 args: HirValueRange::empty(),
-                result: None,
+                results: vec![],
             },
             span: None,
         }
     }
 
     fn return_unit(&mut self) -> HirTerminator {
-        let unit = self.expression(
-            HirExpressionKind::TupleConstruct {
-                elements: HirValueRange::empty(),
-            },
-            self.environment.builtins().none,
-            ValueKind::RValue,
-        );
-        HirTerminator::Return(unit)
+        HirTerminator::Return(HirValueRange::empty())
     }
 
     fn statement_id(&mut self) -> HirNodeId {
@@ -363,7 +346,8 @@ impl ProofFixture {
             id: FunctionId(0),
             entry: BlockId(0),
             params: vec![],
-            return_type: self.environment.builtins().none,
+            returns: Box::new([]),
+            error_return: None,
         });
         self.module
             .function_origins
@@ -546,7 +530,8 @@ fn unsigned_subtraction_below_zero_is_never_proven() {
         vec![write, operation],
         terminator,
     )]);
-    validate_hir_module(&module, &environment).expect("ordinary subtraction fixture is valid HIR");
+    validate_hir_module(&module, &environment, &ExternalPackageRegistry::new())
+        .expect("ordinary subtraction fixture is valid HIR");
 
     let proofs = analyse_numeric_proofs(&module, &environment);
 
@@ -572,7 +557,7 @@ fn division_with_possible_zero_divisor_keeps_its_check() {
     );
     let operation_id = operation.id;
     let terminator = fixture.return_unit();
-    let (module, environment) = fixture.finish(vec![(
+    let (mut module, environment) = fixture.finish(vec![(
         vec![
             declared(x, u32_type),
             declared(y, u32_type),
@@ -581,7 +566,10 @@ fn division_with_possible_zero_divisor_keeps_its_check() {
         vec![operation],
         terminator,
     )]);
-    validate_hir_module(&module, &environment).expect("ordinary division fixture is valid HIR");
+    // Both operands are unknown ABI inputs, not reads of undefined locals.
+    module.functions[0].params = vec![x, y];
+    validate_hir_module(&module, &environment, &ExternalPackageRegistry::new())
+        .expect("ordinary division fixture is valid HIR");
 
     let proofs = analyse_numeric_proofs(&module, &environment);
 
@@ -614,7 +602,7 @@ fn division_with_nonzero_literal_divisor_is_proven() {
         vec![write, operation],
         terminator,
     )]);
-    validate_hir_module(&module, &environment)
+    validate_hir_module(&module, &environment, &ExternalPackageRegistry::new())
         .expect("ordinary literal-divisor fixture is valid HIR");
 
     let proofs = analyse_numeric_proofs(&module, &environment);
@@ -919,85 +907,59 @@ fn power_float_and_number_domains_always_stay_checked() {
 
 #[test]
 fn narrowing_is_proven_only_when_the_source_interval_fits_the_target() {
-    let mut fixture = ProofFixture::new();
-    let u32_type = fixture.fixed(FixedScalar::U32);
-    let u8_type = fixture.fixed(FixedScalar::U8);
-    let (source, carrier, wide_source, wide_carrier) =
-        (LocalId(0), LocalId(1), LocalId(2), LocalId(3));
-    // source = 5 makes the first narrowing exact; a parameter-carried U32 keeps its check.
-    // Both CastOp result locals are real fallible carriers (success U8, builtin Error payload)
-    // because CastOp statements lower fallible builtin casts.
-    let policy = BuiltinCastPolicyId::NumericConversion {
-        source: NumericScalar::Fixed(FixedScalar::U32),
-        target: NumericScalar::Fixed(FixedScalar::U8),
-    };
-    let carrier_type = fixture.carrier(u8_type);
-    let literal = fixture.unsigned_literal(FixedScalar::U32, 5);
-    let write = fixture.define_local(source, literal);
-    let proven_source = fixture.load(source, u32_type);
-    let proven_cast = fixture.cast_op(policy, proven_source, carrier);
-    let unproven_source = fixture.load(wide_source, u32_type);
-    let unproven_cast = fixture.cast_op(policy, unproven_source, wide_carrier);
-    let proven_id = proven_cast.id;
-    let unproven_id = unproven_cast.id;
-    let terminator = fixture.return_unit();
-    let (module, environment) = fixture.finish(vec![(
-        vec![
-            declared(source, u32_type),
-            declared(carrier, carrier_type),
-            declared(wide_source, u32_type),
-            declared(wide_carrier, carrier_type),
-        ],
-        vec![write, proven_cast, unproven_cast],
-        terminator,
-    )]);
-
-    let proofs = analyse_numeric_proofs(&module, &environment);
-
-    assert!(proofs.integer_narrowing_is_safe(proven_id));
-    assert!(!proofs.integer_narrowing_is_safe(unproven_id));
+    assert_narrowing_proofs(FixedScalar::U8);
 }
 
 #[test]
 fn narrowing_skips_non_integer_conversion_policies() {
-    let mut fixture = ProofFixture::new();
-    let f64_type = fixture.fixed(FixedScalar::F64);
-    let i32_type = fixture.fixed(FixedScalar::I32);
-    let number_type = fixture.number();
-    let (float_source, float_carrier, number_source, number_carrier) =
-        (LocalId(0), LocalId(1), LocalId(2), LocalId(3));
-    let float_policy = BuiltinCastPolicyId::NumericConversion {
-        source: NumericScalar::Fixed(FixedScalar::F64),
-        target: NumericScalar::Fixed(FixedScalar::I32),
-    };
-    let number_policy = BuiltinCastPolicyId::NumericConversion {
-        source: NumericScalar::Number(NumberScale::ZERO),
-        target: NumericScalar::Fixed(FixedScalar::I32),
-    };
-    // Both CastOp result locals are real fallible carriers over the builtin Error payload.
-    let carrier_type = fixture.carrier(i32_type);
-    let float_operand = fixture.load(float_source, f64_type);
-    let float_cast = fixture.cast_op(float_policy, float_operand, float_carrier);
-    let number_operand = fixture.load(number_source, number_type);
-    let number_cast = fixture.cast_op(number_policy, number_operand, number_carrier);
-    let float_id = float_cast.id;
-    let number_id = number_cast.id;
-    let terminator = fixture.return_unit();
-    let (module, environment) = fixture.finish(vec![(
-        vec![
-            declared(float_source, f64_type),
-            declared(float_carrier, carrier_type),
-            declared(number_source, number_type),
-            declared(number_carrier, carrier_type),
-        ],
-        vec![float_cast, number_cast],
-        terminator,
-    )]);
-
-    let proofs = analyse_numeric_proofs(&module, &environment);
-
-    assert!(!proofs.integer_narrowing_is_safe(float_id));
-    assert!(!proofs.integer_narrowing_is_safe(number_id));
+    for source_scalar in [
+        NumericScalar::Fixed(FixedScalar::F64),
+        NumericScalar::Number(NumberScale::ZERO),
+    ] {
+        let mut fixture = ProofFixture::new();
+        let source_type = match source_scalar {
+            NumericScalar::Fixed(scalar) => fixture.fixed(scalar),
+            NumericScalar::Number(_) => fixture.number(),
+        };
+        let int = fixture.int();
+        let error_type = fixture.error_type();
+        let source = fixture.load(LocalId(0), source_type);
+        let (id, invoke) = fixture.invoke(
+            HirFallibleOperation::CastOp {
+                policy: BuiltinCastPolicyId::NumericConversion {
+                    source: source_scalar,
+                    target: NumericScalar::Fixed(FixedScalar::I32),
+                },
+                source,
+            },
+            LocalId(1),
+            LocalId(2),
+            BlockId(1),
+            BlockId(2),
+        );
+        let (module, environment) = fixture.finish(vec![
+            (
+                vec![
+                    declared(LocalId(0), source_type),
+                    declared(LocalId(1), int),
+                    declared(LocalId(2), error_type),
+                ],
+                vec![],
+                invoke,
+            ),
+            (
+                vec![],
+                vec![],
+                HirTerminator::Return(HirValueRange::empty()),
+            ),
+            (
+                vec![],
+                vec![],
+                HirTerminator::Return(HirValueRange::empty()),
+            ),
+        ]);
+        assert!(!analyse_numeric_proofs(&module, &environment).integer_narrowing_is_safe(id));
+    }
 }
 
 #[test]
@@ -1146,7 +1108,7 @@ fn an_intermediate_write_to_another_local_drops_the_single_entry_cache() {
         vec![x_write, y_write, operation],
         terminator,
     )]);
-    validate_hir_module(&module, &environment)
+    validate_hir_module(&module, &environment, &ExternalPackageRegistry::new())
         .expect("ordinary cache-displacement fixture is valid HIR");
 
     let proofs = analyse_numeric_proofs(&module, &environment);
@@ -1246,93 +1208,67 @@ fn projection_writes_invalidate_the_cached_interval() {
 }
 
 #[test]
-fn return_error_results_never_propagate_carrier_success_facts() {
+fn invoke_proofs_do_not_propagate_intervals_to_successors() {
     let mut fixture = ProofFixture::new();
     let int = fixture.int();
-    let carrier_type = fixture.carrier(int);
-    let (x, carrier, sum) = (LocalId(0), LocalId(1), LocalId(2));
-    // x = 3; carrier = x + 1 (ReturnError); sum = x + x; — the proven operation records its
-    // fact but its carrier result must leave no narrower success interval behind.
+    let error_type = fixture.error_type();
+    let (source, result, error, sum) = (LocalId(0), LocalId(1), LocalId(2), LocalId(3));
     let literal = fixture.int_literal(3, int);
-    let write = fixture.define_local(x, literal);
-    let left = fixture.load(x, int);
+    let write = fixture.define_local(source, literal);
+    let left = fixture.load(source, int);
     let right = fixture.int_literal(1, int);
-    let operation = fixture.numeric_op(
-        int_op(NumericOperator::Add),
-        binary(left, right),
-        HirLocalDestination::Define(carrier),
-        NumericFailureMode::ReturnError,
+    let (id, invoke) = fixture.invoke(
+        HirFallibleOperation::NumericOp {
+            op: int_op(NumericOperator::Add),
+            operands: binary(left, right),
+        },
+        result,
+        error,
+        BlockId(1),
+        BlockId(2),
     );
-    let follow_left = fixture.load(x, int);
-    let follow_right = fixture.load(x, int);
+    let left = fixture.load(result, int);
+    let right = fixture.load(result, int);
     let follow_up = fixture.numeric_op(
         int_op(NumericOperator::Add),
-        binary(follow_left, follow_right),
-        HirLocalDestination::Define(sum),
-        NumericFailureMode::Trap,
-    );
-    let operation_id = operation.id;
-    let follow_up_id = follow_up.id;
-    let terminator = fixture.return_unit();
-    let (module, environment) = fixture.finish(vec![(
-        vec![
-            declared(x, int),
-            declared(carrier, carrier_type),
-            declared(sum, int),
-        ],
-        vec![write, operation, follow_up],
-        terminator,
-    )]);
-
-    let proofs = analyse_numeric_proofs(&module, &environment);
-
-    assert!(proofs.integer_operation_is_safe(operation_id));
-    assert!(!proofs.integer_operation_is_safe(follow_up_id));
-}
-
-#[test]
-fn unwrapped_success_values_fall_back_to_canonical_bounds() {
-    let mut fixture = ProofFixture::new();
-    let int = fixture.int();
-    let carrier_type = fixture.carrier(int);
-    let (x, carrier, sum) = (LocalId(0), LocalId(1), LocalId(2));
-    // x = 3; carrier = x + 1 (ReturnError); sum = unwrap(carrier) + unwrap(carrier);
-    // unwraps have no interval fact, so complete I32 bounds overflow and keep the check.
-    let literal = fixture.int_literal(3, int);
-    let write = fixture.define_local(x, literal);
-    let left = fixture.load(x, int);
-    let right = fixture.int_literal(1, int);
-    let operation = fixture.numeric_op(
-        int_op(NumericOperator::Add),
         binary(left, right),
-        HirLocalDestination::Define(carrier),
-        NumericFailureMode::ReturnError,
-    );
-    let carrier_load_left = fixture.load(carrier, carrier_type);
-    let unwrap_left = fixture.unwrap_success(carrier_load_left, int);
-    let carrier_load_right = fixture.load(carrier, carrier_type);
-    let unwrap_right = fixture.unwrap_success(carrier_load_right, int);
-    let follow_up = fixture.numeric_op(
-        int_op(NumericOperator::Add),
-        binary(unwrap_left, unwrap_right),
         HirLocalDestination::Define(sum),
         NumericFailureMode::Trap,
     );
     let follow_up_id = follow_up.id;
-    let terminator = fixture.return_unit();
-    let (module, environment) = fixture.finish(vec![(
-        vec![
-            declared(x, int),
-            declared(carrier, carrier_type),
-            declared(sum, int),
-        ],
-        vec![write, operation, follow_up],
-        terminator,
-    )]);
-
+    let (module, environment) = fixture.finish(vec![
+        (
+            vec![
+                declared(source, int),
+                declared(result, int),
+                declared(error, error_type),
+                declared(sum, int),
+            ],
+            vec![write],
+            invoke,
+        ),
+        (
+            vec![],
+            vec![follow_up],
+            HirTerminator::Return(HirValueRange::empty()),
+        ),
+        (
+            vec![],
+            vec![],
+            HirTerminator::Return(HirValueRange::empty()),
+        ),
+    ]);
     let proofs = analyse_numeric_proofs(&module, &environment);
-
+    assert!(proofs.integer_operation_is_safe(id));
     assert!(!proofs.integer_operation_is_safe(follow_up_id));
+    assert!(matches!(
+        &module.blocks[0].terminator,
+        HirTerminator::Invoke {
+            success: BlockId(1),
+            failure: BlockId(2),
+            ..
+        }
+    ));
 }
 
 // ---------------------------------------------------------------------------
@@ -1445,7 +1381,7 @@ fn loop_body_writes_prove_operations_within_the_same_block_walk() {
         vec![write, operation],
         jump(BlockId(0)),
     )]);
-    validate_hir_module(&module, &environment)
+    validate_hir_module(&module, &environment, &ExternalPackageRegistry::new())
         .expect("ordinary same-block loop fixture is valid HIR");
 
     let proofs = analyse_numeric_proofs(&module, &environment);
@@ -1558,74 +1494,104 @@ fn uint_subtraction_below_zero_is_never_proven() {
     assert!(!proofs.integer_operation_is_safe(operation_id));
 }
 
-#[test]
-fn uint_narrowing_is_proven_only_when_the_source_interval_fits() {
-    // A known-small U32 narrows to I32 exactly; an unknown parameter
-    // U32 keeps its CastOp check.
+fn assert_narrowing_proofs(target: FixedScalar) {
     let mut fixture = ProofFixture::new();
     let uint = fixture.uint();
-    let int = fixture.int();
-    let (source, carrier, wide_source, wide_carrier) =
-        (LocalId(0), LocalId(1), LocalId(2), LocalId(3));
+    let target_type = fixture.fixed(target);
+    let error_type = fixture.error_type();
     let policy = BuiltinCastPolicyId::NumericConversion {
         source: NumericScalar::Fixed(FixedScalar::U32),
-        target: NumericScalar::Fixed(FixedScalar::I32),
+        target: NumericScalar::Fixed(target),
     };
-    let carrier_type = fixture.carrier(int);
     let literal = fixture.uint_literal(5, uint);
-    let write = fixture.define_local(source, literal);
-    let proven_source = fixture.load(source, uint);
-    let proven_cast = fixture.cast_op(policy, proven_source, carrier);
-    let unproven_source = fixture.load(wide_source, uint);
-    let unproven_cast = fixture.cast_op(policy, unproven_source, wide_carrier);
-    let proven_id = proven_cast.id;
-    let unproven_id = unproven_cast.id;
-    let terminator = fixture.return_unit();
-    let (module, environment) = fixture.finish(vec![(
-        vec![
-            declared(source, uint),
-            declared(carrier, carrier_type),
-            declared(wide_source, uint),
-            declared(wide_carrier, carrier_type),
-        ],
-        vec![write, proven_cast, unproven_cast],
-        terminator,
-    )]);
-
+    let write = fixture.define_local(LocalId(0), literal);
+    let source = fixture.load(LocalId(0), uint);
+    let (proven_id, proven) = fixture.invoke(
+        HirFallibleOperation::CastOp { policy, source },
+        LocalId(1),
+        LocalId(4),
+        BlockId(1),
+        BlockId(2),
+    );
+    let source = fixture.load(LocalId(2), uint);
+    let (unproven_id, unproven) = fixture.invoke(
+        HirFallibleOperation::CastOp { policy, source },
+        LocalId(3),
+        LocalId(5),
+        BlockId(2),
+        BlockId(2),
+    );
+    let (module, environment) = fixture.finish(vec![
+        (
+            vec![
+                declared(LocalId(0), uint),
+                declared(LocalId(1), target_type),
+                declared(LocalId(2), uint),
+                declared(LocalId(3), target_type),
+                declared(LocalId(4), error_type),
+                declared(LocalId(5), error_type),
+            ],
+            vec![write],
+            proven,
+        ),
+        (vec![], vec![], unproven),
+        (
+            vec![],
+            vec![],
+            HirTerminator::Return(HirValueRange::empty()),
+        ),
+    ]);
     let proofs = analyse_numeric_proofs(&module, &environment);
-
     assert!(proofs.integer_narrowing_is_safe(proven_id));
     assert!(!proofs.integer_narrowing_is_safe(unproven_id));
 }
 
 #[test]
-fn uint_proof_marks_recoverable_operation_safe_but_gate_still_rejects_delivery() {
-    // The analyser marks `1 + 2` safe even in `ReturnError` mode because the
-    // failure is impossible, but the Wasm gate must still reject the reachable
-    // recoverable statement: proofs discharge runtime checks, never delivery. The
-    // source-level pair is `uint_wasm_recoverable_rejected`; this pins the analysis
-    // half of that contract.
+fn uint_narrowing_is_proven_only_when_the_source_interval_fits() {
+    assert_narrowing_proofs(FixedScalar::I32);
+}
+
+#[test]
+fn uint_invoke_proof_preserves_recoverable_delivery() {
     let mut fixture = ProofFixture::new();
     let uint = fixture.uint();
-    let (carrier, exact) = (LocalId(0), LocalId(1));
-    let carrier_type = fixture.carrier(uint);
+    let error_type = fixture.error_type();
     let left = fixture.uint_literal(1, uint);
     let right = fixture.uint_literal(2, uint);
-    let operation = fixture.numeric_op(
-        uint_op(NumericOperator::Add),
-        binary(left, right),
-        HirLocalDestination::Define(carrier),
-        NumericFailureMode::ReturnError,
+    let (id, invoke) = fixture.invoke(
+        HirFallibleOperation::NumericOp {
+            op: uint_op(NumericOperator::Add),
+            operands: binary(left, right),
+        },
+        LocalId(0),
+        LocalId(1),
+        BlockId(1),
+        BlockId(2),
     );
-    let operation_id = operation.id;
-    let terminator = fixture.return_unit();
-    let (module, environment) = fixture.finish(vec![(
-        vec![declared(carrier, carrier_type), declared(exact, uint)],
-        vec![operation],
-        terminator,
-    )]);
-
-    let proofs = analyse_numeric_proofs(&module, &environment);
-
-    assert!(proofs.integer_operation_is_safe(operation_id));
+    let (module, environment) = fixture.finish(vec![
+        (
+            vec![declared(LocalId(0), uint), declared(LocalId(1), error_type)],
+            vec![],
+            invoke,
+        ),
+        (
+            vec![],
+            vec![],
+            HirTerminator::Return(HirValueRange::empty()),
+        ),
+        (
+            vec![],
+            vec![],
+            HirTerminator::Return(HirValueRange::empty()),
+        ),
+    ]);
+    assert!(analyse_numeric_proofs(&module, &environment).integer_operation_is_safe(id));
+    assert!(matches!(
+        &module.blocks[0].terminator,
+        HirTerminator::Invoke {
+            success: BlockId(1),
+            failure: BlockId(2),
+            ..
+        }
+    ));
 }

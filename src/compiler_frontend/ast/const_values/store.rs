@@ -1,27 +1,27 @@
 //! Module-local folded values.
 //!
 //! WHAT: owns the compact value graph and module-constant rows produced for one AST module after
-//! constant evaluation.  The graph is the only folded-value representation retained across the
-//! AST finalization boundary; public projection and HIR use its borrowed postorder visitor.
-//! WHY: a finalized module constant was previously retained as a declaration, recursively
-//! normalized into another declaration tree, then recursively interpreted once by public
-//! projection and again by HIR.  Stable scalar and aggregate facts belong in one indexed store.
+//! constant evaluation. The graph is the only folded-value representation retained across the
+//! AST finalisation boundary. Public projection and HIR use its borrowed postorder visitor.
+//! WHY: stable scalar and aggregate facts belong in one indexed store so each consumer reads
+//! the same resolved values without reconstructing declaration trees.
 //!
-//! The store is module-local.  Its IDs and rows must never enter a cross-module
-//! interface; public projection converts them to [`PublicFoldedValue`] before publication.
+//! The store is module-local. Its IDs and rows must never enter a cross-module
+//! interface. Public projection converts them to [`PublicFoldedValue`] before publication.
 
-use crate::compiler_frontend::ast::ast_nodes::Declaration;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    CoercionOperation, ConstructorFieldView, ExpressionOperationView, ExpressionView,
+};
 use crate::compiler_frontend::ast::expressions::expression_types::{
     ConstRecordState, ConstValueKind,
 };
 use crate::compiler_frontend::ast::module_ast::environment::declaration_table::{
     ResolvedConstantSet, TopLevelDeclarationTable,
 };
+use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
-use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::compiler_messages::{AstCapacityResource, CompilerDiagnostic};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::number::NumberValue;
@@ -39,8 +39,18 @@ use rustc_hash::FxHashMap;
 #[path = "tests/store_tests.rs"]
 mod tests;
 
-#[cfg(test)]
-mod test_support;
+fn checked_const_value_index(
+    prefix: usize,
+    offset: usize,
+    span: Option<SourceSpan>,
+) -> Result<u32, CompilerDiagnostic> {
+    prefix
+        .checked_add(offset)
+        .and_then(|index| u32::try_from(index).ok())
+        .ok_or_else(|| {
+            CompilerDiagnostic::compiler_capacity_exceeded(AstCapacityResource::ConstValues, span)
+        })
+}
 
 /// Dense identity for one node in a module's folded-value graph.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -108,16 +118,21 @@ impl From<CompilerError> for ConstValueStoreError {
     }
 }
 
-/// Metadata preserved for one folded value node.
+impl From<TemplateError> for ConstValueStoreError {
+    fn from(error: TemplateError) -> Self {
+        match error {
+            TemplateError::Diagnostic(diagnostic) => Self::Diagnostic(diagnostic),
+            TemplateError::Infrastructure(error) => Self::Infrastructure(error),
+        }
+    }
+}
+
+/// Canonical content metadata used by owned projection and HIR.
 ///
-/// WHAT: retains the semantic type, source context and value facts that were previously carried
-/// by every cloned `Expression`.  `diagnostic_type` and access metadata are kept for the short
-/// config/template services and for temporary advisory resolution; semantic consumers use
-/// `type_id`.
+/// Occurrence-specific failure and access facts remain on expression rows.
 #[derive(Clone, Debug)]
 pub(crate) struct ConstValueMetadata {
     pub(crate) type_id: TypeId,
-    pub(crate) diagnostic_type: DataType,
     pub(crate) value_mode: ValueMode,
     pub(crate) span: Option<SourceSpan>,
     pub(crate) const_record_state: ConstRecordState,
@@ -125,6 +140,43 @@ pub(crate) struct ConstValueMetadata {
     pub(crate) synthetic_interface_provenance: SyntheticInterfaceProvenance,
     pub(crate) value_kind: ConstValueKind,
     pub(crate) hir_visible: bool,
+}
+
+impl ConstValueMetadata {
+    pub(crate) fn resolved(
+        type_id: TypeId,
+        span: Option<SourceSpan>,
+        value_mode: ValueMode,
+    ) -> Self {
+        Self {
+            type_id,
+            span,
+            value_mode,
+            const_record_state: ConstRecordState::RuntimeValue,
+            contains_regular_division: false,
+            synthetic_interface_provenance: SyntheticInterfaceProvenance::empty(),
+            value_kind: ConstValueKind::Literal,
+            hir_visible: true,
+        }
+    }
+
+    /// Metadata for one use of a shared constant. Returns `None` when the use adds no provenance
+    /// members, so the stored value is reused unchanged.
+    ///
+    /// WHY: one stored constant serves every use, but each use's synthetic provenance must still
+    /// reach the value it resolves to, as a folded result did in the baseline.
+    pub(crate) fn with_occurrence_provenance(
+        &self,
+        occurrence: &SyntheticInterfaceProvenance,
+    ) -> Option<Self> {
+        if occurrence.is_subset_of(&self.synthetic_interface_provenance) {
+            return None;
+        }
+        let mut metadata = self.clone();
+        metadata.synthetic_interface_provenance =
+            self.synthetic_interface_provenance.union(occurrence);
+        Some(metadata)
+    }
 }
 
 /// A named field in a folded record or choice payload.
@@ -264,342 +316,597 @@ pub(crate) struct ConstValueStore {
     values_by_path: FxHashMap<PathId, ConstValueId>,
 }
 
-impl ConstValueStore {
-    /// Build the store in declaration-table order.
-    ///
-    /// `template_builder` remains owned by AST finalization.  It receives the exact original
-    /// template and its defining path (only for a root module constant) and returns the result
-    /// of the exact TIR view/fold operation.  The store never reconstructs template identity.
-    pub(crate) fn from_declaration_table(
-        declaration_table: &TopLevelDeclarationTable,
-        resolved_module_constants: &ResolvedConstantSet,
-        type_environment: &TypeEnvironment,
-        template_builder: &mut impl FnMut(
-            Option<&PathId>,
-            &crate::compiler_frontend::ast::templates::template::Template,
-        ) -> Result<ConstTemplateValue, ConstValueStoreError>,
-    ) -> Result<Self, ConstValueStoreError> {
-        let mut store = Self::default();
-        let mut pending: Vec<_> = resolved_module_constants.iter().collect();
+/// Producer-local content scratch. Its payload vocabulary is the ordinary constant graph.
+///
+/// Temporary IDs address this borrowed prefix plus staged suffix only inside `stage_values`.
+/// No staged payload is installed in expressions, defaults or module bindings.
+pub(crate) struct ConstValueCandidate<'a> {
+    prefix: &'a ConstValueStore,
+    values: Vec<ConstValue>,
+}
 
-        while !pending.is_empty() {
-            let mut deferred = Vec::new();
-            let mut progress = false;
-
-            for declaration_id in pending {
-                let declaration = declaration_table.get_by_id(declaration_id).ok_or_else(|| {
-                    CompilerError::compiler_error(
-                        "Resolved module-constant ID had no declaration-table row.",
-                    )
-                })?;
-
-                if Self::waits_for_const_record_target(&declaration.value, &store) {
-                    deferred.push(declaration_id);
-                    continue;
-                }
-
-                let value = store.insert_expression(
-                    &declaration.value,
-                    Some(&declaration.id),
-                    type_environment,
-                    template_builder,
-                )?;
-                store.rows.push(ConstValueRow {
-                    path: declaration.id,
-                    value,
-                });
-                if store.values_by_path.insert(declaration.id, value).is_some() {
-                    return Err(CompilerError::compiler_error(
-                        "ConstValueStore received duplicate module-constant declaration paths.",
-                    )
-                    .into());
-                }
-                progress = true;
-            }
-
-            if !deferred.is_empty() && !progress {
-                return Err(CompilerError::compiler_error(
-                    "module constant reference reached ConstValueStore before its target folded",
-                )
-                .into());
-            }
-
-            pending = deferred;
+impl ConstValueCandidate<'_> {
+    pub(crate) fn value(&self, id: ConstValueId) -> Option<&ConstValue> {
+        if id.index() < self.prefix.values.len() {
+            self.prefix.value(id)
+        } else {
+            self.values.get(id.index() - self.prefix.values.len())
         }
-
-        Ok(store)
     }
 
-    /// Bind a body-local const record by its qualified declaration path.
-    ///
-    /// WHAT: folds the record into the shared value graph without creating a module-constant
-    /// row. HIR looks the value up by path; public projection never sees it.
-    pub(crate) fn insert_body_local_binding(
+    pub(crate) fn metadata(&self, id: ConstValueId) -> Option<&ConstValueMetadata> {
+        self.value(id).map(|value| &value.metadata)
+    }
+
+    pub(crate) fn payload(&self, id: ConstValueId) -> Option<&ConstValuePayload> {
+        self.value(id).map(|value| &value.payload)
+    }
+
+    pub(crate) fn insert_value(
         &mut self,
-        declaration: &Declaration,
-        type_environment: &TypeEnvironment,
-        template_builder: &mut impl FnMut(
-            Option<&PathId>,
-            &Template,
-        ) -> Result<ConstTemplateValue, ConstValueStoreError>,
+        metadata: ConstValueMetadata,
+        payload: ConstValuePayload,
+    ) -> Result<ConstValueId, ConstValueStoreError> {
+        validate_payload_children(&payload, |id| self.value(id).is_some())?;
+        let index =
+            checked_const_value_index(self.prefix.values.len(), self.values.len(), metadata.span)?;
+        let id = ConstValueId(index);
+        self.values.push(ConstValue { metadata, payload });
+        Ok(id)
+    }
+
+    /// Attach one use's occurrence provenance to a staged shared constant. See
+    /// [`ConstValueStore::with_occurrence_provenance`].
+    pub(crate) fn with_occurrence_provenance(
+        &mut self,
+        expression: ExpressionView<'_>,
+        id: ConstValueId,
+    ) -> Result<ConstValueId, ConstValueStoreError> {
+        let Some(stored) = self.value(id) else {
+            return Err(
+                CompilerError::compiler_error("Shared constant lacks a stored value.").into(),
+            );
+        };
+        let Some((metadata, payload)) = occurrence_copy(stored, expression) else {
+            return Ok(id);
+        };
+        self.insert_value(metadata, payload)
+    }
+}
+
+/// Stage the copy one use of a shared constant needs, or `None` when the use adds no provenance.
+///
+/// WHAT: the copy carries the use's provenance and the shared payload. The stored value itself is
+/// never mutated.
+/// WHY: one stored constant serves every use, but each use's synthetic provenance must still reach
+/// the value it resolves to, as a folded result did in the baseline.
+fn occurrence_copy(
+    stored: &ConstValue,
+    expression: ExpressionView<'_>,
+) -> Option<(ConstValueMetadata, ConstValuePayload)> {
+    let facts = expression.occurrence_facts()?;
+    let metadata = stored
+        .metadata
+        .with_occurrence_provenance(&facts.provenance)?;
+    Some((metadata, stored.payload.clone()))
+}
+
+fn visit_payload_children(payload: &ConstValuePayload, mut visitor: impl FnMut(ConstValueId)) {
+    match payload {
+        ConstValuePayload::Collection(values) => {
+            for &value in values {
+                visitor(value);
+            }
+        }
+        ConstValuePayload::Record(fields) | ConstValuePayload::Choice { fields, .. } => {
+            for field in fields {
+                visitor(field.value);
+            }
+        }
+        ConstValuePayload::Range { start, end } => {
+            visitor(*start);
+            visitor(*end);
+        }
+        ConstValuePayload::Coerced(value) | ConstValuePayload::OptionSome(value) => visitor(*value),
+        _ => {}
+    }
+}
+
+fn validate_payload_children(
+    payload: &ConstValuePayload,
+    exists: impl Fn(ConstValueId) -> bool,
+) -> Result<(), CompilerError> {
+    let mut missing = false;
+    visit_payload_children(payload, |id| missing |= !exists(id));
+    if missing {
+        return Err(CompilerError::compiler_error(
+            "Constant child is outside its content owner.",
+        ));
+    }
+    if let ConstValuePayload::Record(fields) | ConstValuePayload::Choice { fields, .. } = payload {
+        let mut names = rustc_hash::FxHashSet::default();
+        for field in fields {
+            if !names.insert(field.name) {
+                return Err(CompilerError::compiler_error(
+                    "Duplicate folded record field.",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn remap_payload_children(
+    payload: &mut ConstValuePayload,
+    mut remap: impl FnMut(&mut ConstValueId),
+) {
+    match payload {
+        ConstValuePayload::Collection(values) => {
+            for value in values {
+                remap(value);
+            }
+        }
+        ConstValuePayload::Record(fields) | ConstValuePayload::Choice { fields, .. } => {
+            for field in fields {
+                remap(&mut field.value);
+            }
+        }
+        ConstValuePayload::Range { start, end } => {
+            remap(start);
+            remap(end);
+        }
+        ConstValuePayload::Coerced(value) | ConstValuePayload::OptionSome(value) => remap(value),
+        _ => {}
+    }
+}
+
+/// Depth-dependent work for the postorder value visitor.
+///
+/// Finishes borrow their immutable node rather than copying payload or type facts. Field
+/// boundaries defer validation until earlier siblings have completed their callbacks.
+enum FoldFrame<'a> {
+    Visit(ConstValueId),
+    Field(ConstValueId),
+    Finish {
+        value: &'a ConstValue,
+        result_start: usize,
+    },
+}
+
+/// The missing-id error every folded-value lookup queue reports.
+fn fold_value_missing_error<E>(id: ConstValueId) -> E
+where
+    E: From<CompilerError>,
+{
+    E::from(CompilerError::compiler_error(format!(
+        "ConstValueStore value id {:?} is outside the module value graph.",
+        id
+    )))
+}
+
+fn fold_stack_error<E: From<CompilerError>>() -> E {
+    CompilerError::compiler_error("Folded-value traversal lost a child result.").into()
+}
+
+/// Work item for the iterative constant ingestion walk.
+enum IngestFrame<'a> {
+    /// Ingest one expression node. Leaves complete at once. Composites queue `Finish` first.
+    Visit(ExpressionView<'a>),
+    /// Build one composite row once its children are complete on the result stack.
+    Finish {
+        expression: ExpressionView<'a>,
+        pending: IngestPending,
+    },
+}
+
+/// Node data captured before its children run and consumed once they are complete.
+enum IngestPending {
+    Collection,
+    Record,
+    Choice { nominal_path: PathId, tag: u32 },
+    Range,
+    Coerce { target: TypeId, inner_type: TypeId },
+}
+
+/// Push a finish frame, then the children so that the first child is visited first.
+fn queue_children<'a>(
+    work: &mut Vec<IngestFrame<'a>>,
+    finish: IngestFrame<'a>,
+    children: impl Iterator<Item = ExpressionView<'a>>,
+) {
+    let start = work.len();
+    work.push(finish);
+    work.extend(children.map(IngestFrame::Visit));
+    work[start + 1..].reverse();
+}
+
+fn ingest_invariant(message: &'static str) -> ConstValueStoreError {
+    CompilerError::compiler_error(message).into()
+}
+
+/// Index of the first of the `count` completed child values at the top of `results`.
+fn child_start(results: &[ConstValueId], count: usize) -> Result<usize, ConstValueStoreError> {
+    results
+        .len()
+        .checked_sub(count)
+        .ok_or_else(|| ingest_invariant("Constant ingestion lost a child value."))
+}
+
+fn pop_child(results: &mut Vec<ConstValueId>) -> Result<ConstValueId, ConstValueStoreError> {
+    results
+        .pop()
+        .ok_or_else(|| ingest_invariant("Constant ingestion lost a child value."))
+}
+
+/// Build named fields from the top `fields.len()` completed child values, in source order.
+fn take_fields<'a>(
+    results: &mut Vec<ConstValueId>,
+    fields: impl ExactSizeIterator<Item = ConstructorFieldView<'a>>,
+) -> Result<Vec<ConstValueField>, ConstValueStoreError> {
+    let start = child_start(results, fields.len())?;
+    Ok(results
+        .drain(start..)
+        .zip(fields)
+        .map(|(value, field)| ConstValueField {
+            name: field.name(),
+            value,
+        })
+        .collect())
+}
+
+impl ConstValueStore {
+    /// Stage ordinary content and move only the selected root's reachable suffix on acceptance.
+    pub(crate) fn stage_values<E>(
+        &mut self,
+        produce: impl FnOnce(&mut ConstValueCandidate<'_>) -> Result<Option<ConstValueId>, E>,
+    ) -> Result<Option<ConstValueId>, E>
+    where
+        E: From<ConstValueStoreError>,
+    {
+        let prefix_len = self.values.len();
+        let (root, values) = {
+            let mut candidate = ConstValueCandidate {
+                prefix: self,
+                values: Vec::new(),
+            };
+            let Some(root) = produce(&mut candidate)? else {
+                return Ok(None);
+            };
+            if candidate.value(root).is_none() {
+                return Err(E::from(
+                    CompilerError::compiler_error(
+                        "Selected constant root is outside its candidate.",
+                    )
+                    .into(),
+                ));
+            }
+            (root, candidate.values)
+        };
+        if root.index() < prefix_len {
+            return Ok(Some(root));
+        }
+
+        // Every staged edge is backwards: append validates against the already issued prefix.
+        // Reachability does not depend on visit order, so an explicit stack marks the same rows.
+        let mut live = vec![false; values.len()];
+        let mut pending = vec![root];
+        while let Some(id) = pending.pop() {
+            if id.index() < prefix_len {
+                continue;
+            }
+            let index = id.index() - prefix_len;
+            if live[index] {
+                continue;
+            }
+            live[index] = true;
+            visit_payload_children(&values[index].payload, |child| {
+                if child.index() >= prefix_len {
+                    pending.push(child);
+                }
+            });
+        }
+        let live_count = live.iter().filter(|&&live| live).count();
+        checked_const_value_index(
+            prefix_len,
+            live_count,
+            values[root.index() - prefix_len].metadata.span,
+        )
+        .map_err(|error| E::from(ConstValueStoreError::from(error)))?;
+        self.values.reserve(live_count);
+        let mut remapped = vec![None; values.len()];
+        for (index, mut value) in values.into_iter().enumerate() {
+            if !live[index] {
+                continue;
+            }
+            remap_payload_children(&mut value.payload, |child| {
+                if child.index() >= prefix_len {
+                    *child = remapped[child.index() - prefix_len]
+                        .expect("validated backwards edge has a live promoted child");
+                }
+            });
+            let id = ConstValueId(self.values.len() as u32);
+            self.values.push(value);
+            remapped[index] = Some(id);
+        }
+        Ok(Some(
+            remapped[root.index() - prefix_len].expect("selected staged root is marked reachable"),
+        ))
+    }
+
+    /// Bind every resolved module constant to its header-bound value and record its row.
+    ///
+    /// WHY: header resolution already folded each module constant into this graph, so
+    /// finalization only assigns declaration-order rows. A missing binding is an invariant
+    /// violation, never a reason to fold the initializer again.
+    pub(crate) fn populate_from_declaration_table(
+        &mut self,
+        declaration_table: &TopLevelDeclarationTable,
+        resolved_module_constants: &ResolvedConstantSet,
     ) -> Result<(), ConstValueStoreError> {
-        if Self::waits_for_const_record_target(&declaration.value, self) {
-            return Err(CompilerError::compiler_error(format!(
-                "body-local const record {:?} reached ConstValueStore before its target folded",
-                declaration.id
-            ))
-            .into());
+        for declaration_id in resolved_module_constants.iter() {
+            let declaration = declaration_table.get_by_id(declaration_id).ok_or_else(|| {
+                CompilerError::compiler_error("Resolved constant has no declaration row.")
+            })?;
+            let value = self.value_for_path(&declaration.id).ok_or_else(|| {
+                CompilerError::compiler_error("Resolved constant has no header-bound value.")
+            })?;
+            self.bind_module_constant(declaration.id, value)?;
         }
-
-        let value = self.insert_expression(
-            &declaration.value,
-            Some(&declaration.id),
-            type_environment,
-            template_builder,
-        )?;
-        if self.values_by_path.insert(declaration.id, value).is_some() {
-            return Err(CompilerError::compiler_error(
-                "ConstValueStore received duplicate body-local const-record paths.",
-            )
-            .into());
-        }
-
         Ok(())
     }
 
-    fn waits_for_const_record_target(expression: &Expression, store: &Self) -> bool {
-        match &expression.kind {
-            ExpressionKind::Reference(path) => {
-                expression.is_const_record_value() && !store.values_by_path.contains_key(path)
+    pub(crate) fn bind_module_constant(
+        &mut self,
+        path: PathId,
+        value: ConstValueId,
+    ) -> Result<(), ConstValueStoreError> {
+        self.bind_body_local(path, value)?;
+        if let Some(row) = self.rows.iter().find(|row| row.path == path) {
+            if row.value != value {
+                return Err(
+                    CompilerError::compiler_error("Constant binding changed content.").into(),
+                );
             }
-            ExpressionKind::AnonymousConstRecord { fields }
-            | ExpressionKind::StructInstance(fields) => fields
-                .iter()
-                .any(|field| Self::waits_for_const_record_target(&field.value, store)),
-            ExpressionKind::Collection(items) => items
-                .iter()
-                .any(|item| Self::waits_for_const_record_target(item, store)),
-            _ => false,
+        } else {
+            self.rows.push(ConstValueRow { path, value });
         }
+        Ok(())
     }
 
-    fn insert_record_fields(
+    pub(crate) fn bind_body_local(
         &mut self,
-        fields: &[Declaration],
-        type_environment: &TypeEnvironment,
-        template_builder: &mut impl FnMut(
-            Option<&PathId>,
-            &crate::compiler_frontend::ast::templates::template::Template,
-        ) -> Result<ConstTemplateValue, ConstValueStoreError>,
-    ) -> Result<Vec<ConstValueField>, ConstValueStoreError> {
-        let mut field_index_by_name: FxHashMap<PathId, usize> = FxHashMap::default();
-        let mut stored_fields = Vec::with_capacity(fields.len());
-
-        for field in fields {
-            let value =
-                self.insert_expression(&field.value, None, type_environment, template_builder)?;
-            let name = field.id;
-            if field_index_by_name
-                .insert(name, stored_fields.len())
-                .is_some()
-            {
-                return Err(CompilerError::compiler_error(
-                    "ConstValueStore received a record with duplicate field names.",
-                )
-                .into());
+        path: PathId,
+        value: ConstValueId,
+    ) -> Result<(), ConstValueStoreError> {
+        self.require_value(value)?;
+        if let Some(previous) = self.values_by_path.get(&path) {
+            if *previous != value {
+                return Err(
+                    CompilerError::compiler_error("Duplicate constant path binding.").into(),
+                );
             }
-
-            stored_fields.push(ConstValueField {
-                name: field.id,
-                value,
-            });
+        } else {
+            self.values_by_path.insert(path, value);
         }
-
-        Ok(stored_fields)
+        Ok(())
     }
 
-    fn insert_expression(
+    fn require_value(&self, value: ConstValueId) -> Result<(), CompilerError> {
+        if self.value(value).is_none() {
+            return Err(CompilerError::compiler_error(
+                "Constant child is outside its content owner.",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Insert resolved content. Children must already belong to this content graph.
+    pub(crate) fn insert_value(
         &mut self,
-        expression: &Expression,
-        defining_path: Option<&PathId>,
-        type_environment: &TypeEnvironment,
-        template_builder: &mut impl FnMut(
-            Option<&PathId>,
-            &Template,
-        ) -> Result<ConstTemplateValue, ConstValueStoreError>,
+        metadata: ConstValueMetadata,
+        payload: ConstValuePayload,
     ) -> Result<ConstValueId, ConstValueStoreError> {
-        if let ExpressionKind::Reference(path) = &expression.kind
-            && expression.is_const_record_value()
-        {
-            let target = self.values_by_path.get(path).copied().ok_or_else(|| {
-                ConstValueStoreError::from(CompilerError::compiler_error(format!(
-                    "module constant reference {:?} reached ConstValueStore before its target folded",
-                    path
-                )))
-            })?;
-            // Aliases share the target root. Distinct `ConstValueId`s would clone the field
-            // vector without alias-local metadata; path identity lives on `values_by_path`.
-            if self.values.get(target.index()).is_none() {
-                return Err(ConstValueStoreError::from(CompilerError::compiler_error(
-                    "ConstValueStore alias target was not allocated in the value graph.",
-                )));
-            }
-            return Ok(target);
-        }
+        validate_payload_children(&payload, |id| self.value(id).is_some())?;
+        let index = checked_const_value_index(self.values.len(), 0, metadata.span)?;
+        let id = ConstValueId(index);
+        self.values.push(ConstValue { metadata, payload });
+        Ok(id)
+    }
 
-        let (payload, value_kind, hir_visible, provenance) = match &expression.kind {
-            ExpressionKind::Number(value) => {
-                if type_environment.number_scale(expression.type_id) != Some(value.scale()) {
-                    return Err(CompilerError::compiler_error(format!(
-                        "ConstValueStore Dec value at scale {} disagrees with its resolved semantic type",
-                        value.scale()
-                    ))
+    pub(crate) fn insert_resolved(
+        &mut self,
+        type_id: TypeId,
+        payload: ConstValuePayload,
+        span: Option<SourceSpan>,
+    ) -> Result<ConstValueId, ConstValueStoreError> {
+        let value_kind = match &payload {
+            ConstValuePayload::Collection(_)
+            | ConstValuePayload::Record(_)
+            | ConstValuePayload::Choice { .. }
+            | ConstValuePayload::Range { .. }
+            | ConstValuePayload::Coerced(_)
+            | ConstValuePayload::OptionSome(_) => ConstValueKind::Composite,
+            _ => ConstValueKind::Literal,
+        };
+        self.insert_value(
+            ConstValueMetadata {
+                type_id,
+                value_mode: ValueMode::ImmutableOwned,
+                span,
+                const_record_state: ConstRecordState::RuntimeValue,
+                contains_regular_division: false,
+                synthetic_interface_provenance: SyntheticInterfaceProvenance::default(),
+                value_kind,
+                hir_visible: true,
+            },
+            payload,
+        )
+    }
+
+    /// Attach one use's occurrence provenance to a shared constant. Stages a copy only when the
+    /// occurrence adds members, so the stored value itself is never mutated.
+    fn with_occurrence_provenance(
+        &mut self,
+        expression: ExpressionView<'_>,
+        id: ConstValueId,
+    ) -> Result<ConstValueId, ConstValueStoreError> {
+        let Some(stored) = self.value(id) else {
+            return Err(
+                CompilerError::compiler_error("Shared constant lacks a stored value.").into(),
+            );
+        };
+        let Some((metadata, payload)) = occurrence_copy(stored, expression) else {
+            return Ok(id);
+        };
+        self.insert_value(metadata, payload)
+    }
+
+    /// Finalisation reads bound edges directly. Ordinary constant occurrences reuse content.
+    ///
+    /// WHY: composite nodes queue their children on an explicit stack, so ingestion depth is
+    /// bounded by the heap rather than the thread stack. Children complete in source order, so
+    /// rows are inserted in child-before-parent order.
+    pub(crate) fn ingest_view(
+        &mut self,
+        expression: ExpressionView<'_>,
+        type_environment: &TypeEnvironment,
+        template_builder: &mut impl FnMut(&Template) -> Result<ConstTemplateValue, ConstValueStoreError>,
+    ) -> Result<ConstValueId, ConstValueStoreError> {
+        let mut work = Vec::new();
+        if let Some(id) =
+            self.ingest_visit(expression, type_environment, template_builder, &mut work)?
+        {
+            return Ok(id);
+        }
+        let mut results = Vec::new();
+        while let Some(frame) = work.pop() {
+            let id = match frame {
+                IngestFrame::Visit(expression) => match self.ingest_visit(
+                    expression,
+                    type_environment,
+                    template_builder,
+                    &mut work,
+                )? {
+                    Some(id) => id,
+                    None => continue,
+                },
+                IngestFrame::Finish {
+                    expression,
+                    pending,
+                } => self.ingest_finish(expression, pending, type_environment, &mut results)?,
+            };
+            results.push(id);
+        }
+        match results.as_slice() {
+            [root] => Ok(*root),
+            _ => Err(ingest_invariant(
+                "Constant ingestion did not produce one root value.",
+            )),
+        }
+    }
+
+    /// Ingest one expression node. Leaves and templates complete here and return their id.
+    /// Composite nodes queue a `Finish` frame ahead of their children and return `None`.
+    fn ingest_visit<'a>(
+        &mut self,
+        expression: ExpressionView<'a>,
+        type_environment: &TypeEnvironment,
+        template_builder: &mut impl FnMut(&Template) -> Result<ConstTemplateValue, ConstValueStoreError>,
+        work: &mut Vec<IngestFrame<'a>>,
+    ) -> Result<Option<ConstValueId>, ConstValueStoreError> {
+        let type_id = expression.value_type_id()?;
+        match expression.operation() {
+            ExpressionOperationView::Constant(id) => {
+                self.require_value(id)?;
+                if self.metadata(id).map(|metadata| metadata.type_id) != Some(type_id) {
+                    return Err(CompilerError::compiler_error(
+                        "Constant occurrence has a foreign type.",
+                    )
                     .into());
                 }
-                (
-                    ConstValuePayload::Number(value.clone()),
-                    ConstValueKind::Literal,
-                    true,
-                    None,
-                )
+                self.with_occurrence_provenance(expression, id).map(Some)
             }
-            ExpressionKind::FixedScalar(value) => (
-                ConstValuePayload::FixedScalar(*value),
-                ConstValueKind::Literal,
-                true,
-                None,
-            ),
-            ExpressionKind::Bool(value) => (
-                ConstValuePayload::Bool(*value),
-                ConstValueKind::Literal,
-                true,
-                None,
-            ),
-            ExpressionKind::Char(value) => (
-                ConstValuePayload::Char(*value),
-                ConstValueKind::Literal,
-                true,
-                None,
-            ),
-            ExpressionKind::StringSlice(value) => (
-                ConstValuePayload::String(ConstStringValue::Text(*value)),
-                ConstValueKind::Literal,
-                true,
-                None,
-            ),
-            ExpressionKind::StructuralString { pieces } => (
-                ConstValuePayload::String(ConstStringValue::Pieces(pieces.clone())),
-                ConstValueKind::Literal,
-                true,
-                None,
-            ),
-            ExpressionKind::Collection(items) => {
-                let values = items
-                    .iter()
-                    .map(|item| {
-                        self.insert_expression(item, None, type_environment, template_builder)
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                (
-                    ConstValuePayload::Collection(values),
-                    ConstValueKind::Composite,
-                    true,
-                    None,
-                )
-            }
-            ExpressionKind::StructInstance(fields) => {
-                let stored_fields =
-                    self.insert_record_fields(fields, type_environment, template_builder)?;
-                (
-                    ConstValuePayload::Record(stored_fields),
-                    ConstValueKind::Composite,
-                    true,
-                    None,
-                )
-            }
-            ExpressionKind::AnonymousConstRecord { fields } => {
-                let stored_fields =
-                    self.insert_record_fields(fields, type_environment, template_builder)?;
-                (
-                    ConstValuePayload::Record(stored_fields),
-                    ConstValueKind::Composite,
-                    false,
-                    None,
-                )
-            }
-            ExpressionKind::ChoiceConstruct {
-                nominal_path,
-                tag,
-                fields,
-            } => {
-                let fields = fields
-                    .iter()
-                    .map(|field| {
-                        Ok(ConstValueField {
-                            name: field.id,
-                            value: self.insert_expression(
-                                &field.value,
-                                None,
-                                type_environment,
-                                template_builder,
-                            )?,
-                        })
-                    })
-                    .collect::<Result<Vec<_>, ConstValueStoreError>>()?;
-                (
-                    ConstValuePayload::Choice {
-                        nominal_path: *nominal_path,
-                        tag: *tag,
-                        fields,
-                    },
-                    ConstValueKind::Composite,
-                    true,
-                    None,
-                )
-            }
-            ExpressionKind::Range(start, end) => {
-                let start =
-                    self.insert_expression(start, None, type_environment, template_builder)?;
-                let end = self.insert_expression(end, None, type_environment, template_builder)?;
-                (
-                    ConstValuePayload::Range { start, end },
-                    ConstValueKind::Composite,
-                    true,
-                    None,
-                )
-            }
-            ExpressionKind::Coerced { value, to_type } => {
-                let value =
-                    self.insert_expression(value, None, type_environment, template_builder)?;
-                let inner_type = self
-                    .metadata(value)
-                    .ok_or_else(|| {
-                        CompilerError::compiler_error(
-                            "ConstValueStore coercion child was not allocated in the value graph.",
-                        )
-                    })?
-                    .type_id;
-                let payload = if type_environment.option_inner_type(*to_type) == Some(inner_type) {
-                    ConstValuePayload::OptionSome(value)
-                } else {
-                    ConstValuePayload::Coerced(value)
+            ExpressionOperationView::Reference(path) => {
+                let Some(id) = self.value_for_path(&path) else {
+                    return Err(CompilerError::compiler_error(
+                        "Constant reference has no folded binding.",
+                    )
+                    .into());
                 };
-                (payload, ConstValueKind::Composite, true, None)
+                self.with_occurrence_provenance(expression, id).map(Some)
             }
-            ExpressionKind::OptionNone => (
-                ConstValuePayload::OptionNone,
-                ConstValueKind::Literal,
-                true,
-                None,
-            ),
-            ExpressionKind::Template(template) => {
-                let result = template_builder(defining_path, template)?;
-                match result {
+            ExpressionOperationView::Collection(items) => {
+                queue_children(
+                    work,
+                    IngestFrame::Finish {
+                        expression,
+                        pending: IngestPending::Collection,
+                    },
+                    items.iter(),
+                );
+                Ok(None)
+            }
+            ExpressionOperationView::Struct { fields } => {
+                queue_children(
+                    work,
+                    IngestFrame::Finish {
+                        expression,
+                        pending: IngestPending::Record,
+                    },
+                    fields.iter().map(|field| field.value()),
+                );
+                Ok(None)
+            }
+            ExpressionOperationView::Choice { tag, fields } => {
+                let nominal_path = *type_environment.nominal_path(type_id).ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "Folded choice has no canonical nominal identity.",
+                    )
+                })?;
+                queue_children(
+                    work,
+                    IngestFrame::Finish {
+                        expression,
+                        pending: IngestPending::Choice { nominal_path, tag },
+                    },
+                    fields.iter().map(|field| field.value()),
+                );
+                Ok(None)
+            }
+            ExpressionOperationView::Range { start, end, .. } => {
+                queue_children(
+                    work,
+                    IngestFrame::Finish {
+                        expression,
+                        pending: IngestPending::Range,
+                    },
+                    [start, end].into_iter(),
+                );
+                Ok(None)
+            }
+            ExpressionOperationView::Coerce {
+                value,
+                operation: CoercionOperation::ToType(target),
+            } => {
+                let inner_type = value.value_type_id()?;
+                queue_children(
+                    work,
+                    IngestFrame::Finish {
+                        expression,
+                        pending: IngestPending::Coerce { target, inner_type },
+                    },
+                    [value].into_iter(),
+                );
+                Ok(None)
+            }
+            ExpressionOperationView::Template(template) => {
+                let result = template_builder(template)?;
+                let (payload, kind, visible, provenance) = match result {
                     ConstTemplateValue::Folded { value, provenance } => (
                         ConstValuePayload::String(value),
                         ConstValueKind::RenderableTemplate,
                         true,
-                        Some(provenance),
+                        provenance,
                     ),
                     ConstTemplateValue::Public {
                         template,
@@ -611,39 +918,91 @@ impl ConstValueStore {
                         ConstValuePayload::Template { template, folded },
                         kind,
                         hir_visible,
-                        Some(provenance),
+                        provenance,
                     ),
+                };
+                let mut metadata = Self::metadata_from_view(expression, kind)?;
+                metadata.hir_visible = visible;
+                metadata.synthetic_interface_provenance =
+                    metadata.synthetic_interface_provenance.union(&provenance);
+                self.insert_value(metadata, payload).map(Some)
+            }
+            _ => Err(CompilerError::compiler_error(
+                "Unfolded operation reached constant ingestion.",
+            )
+            .into()),
+        }
+    }
+
+    /// Build one composite row once its children are complete on top of `results`.
+    fn ingest_finish(
+        &mut self,
+        expression: ExpressionView<'_>,
+        pending: IngestPending,
+        type_environment: &TypeEnvironment,
+        results: &mut Vec<ConstValueId>,
+    ) -> Result<ConstValueId, ConstValueStoreError> {
+        let payload = match pending {
+            IngestPending::Collection => {
+                let ExpressionOperationView::Collection(items) = expression.operation() else {
+                    return Err(ingest_invariant("Collection row lost its expression."));
+                };
+                let start = child_start(results, items.len())?;
+                ConstValuePayload::Collection(results.drain(start..).collect())
+            }
+            IngestPending::Record => {
+                let ExpressionOperationView::Struct { fields } = expression.operation() else {
+                    return Err(ingest_invariant("Record row lost its expression."));
+                };
+                ConstValuePayload::Record(take_fields(results, fields.iter())?)
+            }
+            IngestPending::Choice { nominal_path, tag } => {
+                let ExpressionOperationView::Choice { fields, .. } = expression.operation() else {
+                    return Err(ingest_invariant("Choice row lost its expression."));
+                };
+                ConstValuePayload::Choice {
+                    nominal_path,
+                    tag: tag as usize,
+                    fields: take_fields(results, fields.iter())?,
                 }
             }
-            kind => {
-                return Err(CompilerError::compiler_error(format!(
-                    "module constant {:?} reached ConstValueStore without a folded value",
-                    kind
-                ))
-                .into());
+            IngestPending::Range => {
+                let end = pop_child(results)?;
+                let start = pop_child(results)?;
+                ConstValuePayload::Range { start, end }
+            }
+            IngestPending::Coerce { target, inner_type } => {
+                let value = pop_child(results)?;
+                if type_environment.option_inner_type(target) == Some(inner_type) {
+                    ConstValuePayload::OptionSome(value)
+                } else {
+                    ConstValuePayload::Coerced(value)
+                }
             }
         };
+        self.insert_value(
+            Self::metadata_from_view(expression, ConstValueKind::Composite)?,
+            payload,
+        )
+    }
 
-        let mut metadata = ConstValueMetadata {
-            type_id: expression.type_id,
-            diagnostic_type: expression.diagnostic_type.clone(),
-            value_mode: expression.value_mode.clone(),
-            span: expression.span,
-            const_record_state: expression.const_record_state,
-            contains_regular_division: expression.contains_regular_division,
-            synthetic_interface_provenance: expression.synthetic_interface_provenance.clone(),
+    pub(crate) fn metadata_from_view(
+        expression: ExpressionView<'_>,
+        value_kind: ConstValueKind,
+    ) -> Result<ConstValueMetadata, CompilerError> {
+        Ok(ConstValueMetadata {
+            type_id: expression.value_type_id()?,
+            value_mode: expression.value_mode(),
+            span: expression.span(),
+            const_record_state: expression.classification().const_record_state,
+            contains_regular_division: expression.classification().contains_regular_division,
+            synthetic_interface_provenance: expression
+                .occurrence_facts()
+                .map(|facts| facts.provenance.clone())
+                .unwrap_or_default(),
             value_kind,
-            hir_visible,
-        };
-        if let Some(provenance) = provenance {
-            metadata.synthetic_interface_provenance =
-                metadata.synthetic_interface_provenance.union(&provenance);
-        }
-
-        let value = ConstValue { metadata, payload };
-        let id = ConstValueId(self.values.len() as u32);
-        self.values.push(value);
-        Ok(id)
+            hir_visible: true,
+        })
     }
 
     pub(crate) fn value(&self, id: ConstValueId) -> Option<&ConstValue> {
@@ -652,21 +1011,6 @@ impl ConstValueStore {
 
     pub(crate) fn metadata(&self, id: ConstValueId) -> Option<&ConstValueMetadata> {
         self.value(id).map(|value| &value.metadata)
-    }
-
-    /// The semantic type of one field's folded value node.
-    ///
-    /// Field values are pushed into the graph before the field that references them, so a
-    /// miss is a construction invariant violation rather than a lookup miss.
-    fn field_value_type_id(&self, id: ConstValueId) -> Result<TypeId, CompilerError> {
-        self.value(id)
-            .map(|value| value.metadata.type_id)
-            .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "ConstValueStore field value id {:?} is outside the module value graph.",
-                    id
-                ))
-            })
     }
 
     pub(crate) fn payload(&self, id: ConstValueId) -> Option<&ConstValuePayload> {
@@ -735,7 +1079,11 @@ impl ConstValueStore {
         }
     }
 
-    /// Map one value tree through the common recursive visitor.
+    /// Map one value graph through the common postorder visitor.
+    ///
+    /// Depth-dependent work stays on the heap. Each edge produces its own `T`, including
+    /// repeated children, and callbacks and field validation retain authored depth-first order.
+    /// Leaf roots reach the callback before either scratch vector allocates.
     pub(crate) fn fold_value<T, E>(
         &self,
         id: ConstValueId,
@@ -744,235 +1092,181 @@ impl ConstValueStore {
     where
         E: From<CompilerError>,
     {
-        let value = self.value(id).ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "ConstValueStore value id {:?} is outside the module value graph.",
-                id
-            ))
-        })?;
+        let mut work = Vec::new();
+        let mut results: Vec<T> = Vec::new();
+        let mut next = Some(FoldFrame::Visit(id));
 
-        match &value.payload {
-            ConstValuePayload::Number(scalar) => {
-                visitor(&value.metadata, ConstValueVisit::Number(scalar))
-            }
-            ConstValuePayload::FixedScalar(scalar) => {
-                visitor(&value.metadata, ConstValueVisit::FixedScalar(*scalar))
-            }
-            ConstValuePayload::Bool(scalar) => {
-                visitor(&value.metadata, ConstValueVisit::Bool(*scalar))
-            }
-            ConstValuePayload::Char(scalar) => {
-                visitor(&value.metadata, ConstValueVisit::Char(*scalar))
-            }
-            ConstValuePayload::String(string) => {
-                visitor(&value.metadata, ConstValueVisit::String(string))
-            }
-            ConstValuePayload::Collection(items) => {
-                let mapped = items
-                    .iter()
-                    .copied()
-                    .map(|child| self.fold_value(child, visitor))
-                    .collect::<Result<Vec<_>, _>>()?;
-                visitor(&value.metadata, ConstValueVisit::Collection(mapped))
-            }
-            ConstValuePayload::Record(fields) => {
-                let mapped = fields
-                    .iter()
-                    .map(|field| {
-                        Ok(ConstValueFieldVisit {
-                            name: &field.name,
-                            type_id: self.field_value_type_id(field.value)?,
-                            value: self.fold_value(field.value, visitor)?,
-                        })
-                    })
-                    .collect::<Result<Vec<_>, E>>()?;
-                visitor(&value.metadata, ConstValueVisit::Record(mapped))
-            }
-            ConstValuePayload::Choice {
-                nominal_path,
-                tag,
-                fields,
-            } => {
-                let mapped = fields
-                    .iter()
-                    .map(|field| {
-                        Ok(ConstValueFieldVisit {
-                            name: &field.name,
-                            type_id: self.field_value_type_id(field.value)?,
-                            value: self.fold_value(field.value, visitor)?,
-                        })
-                    })
-                    .collect::<Result<Vec<_>, E>>()?;
-                visitor(
-                    &value.metadata,
-                    ConstValueVisit::Choice {
-                        nominal_path,
-                        tag: *tag,
-                        fields: mapped,
-                    },
-                )
-            }
-            ConstValuePayload::Range { start, end } => {
-                let mapped_start = self.fold_value(*start, visitor)?;
-                let mapped_end = self.fold_value(*end, visitor)?;
-                visitor(
-                    &value.metadata,
-                    ConstValueVisit::Range {
-                        start: mapped_start,
-                        end: mapped_end,
-                    },
-                )
-            }
-            ConstValuePayload::Coerced(child) => {
-                let mapped = self.fold_value(*child, visitor)?;
-                visitor(&value.metadata, ConstValueVisit::Coerced(mapped))
-            }
-            ConstValuePayload::OptionSome(child) => {
-                let mapped = self.fold_value(*child, visitor)?;
-                visitor(&value.metadata, ConstValueVisit::OptionSome(mapped))
-            }
-            ConstValuePayload::OptionNone => visitor(&value.metadata, ConstValueVisit::OptionNone),
-            ConstValuePayload::Template { template, folded } => visitor(
-                &value.metadata,
-                ConstValueVisit::Template {
-                    template,
-                    folded: folded.as_ref(),
-                },
-            ),
-        }
-    }
-
-    /// Return a temporary expression for advisory body-local resolution.
-    ///
-    /// This is deliberately not used as the module constant representation.  It exists only so
-    /// the separate `AstConstFacts` resolver can substitute an authored module constant into a
-    /// body-local RPN expression without making the fact collector a second folded-value owner.
-    pub(crate) fn expression_for_resolution(
-        &self,
-        id: ConstValueId,
-    ) -> Result<Expression, CompilerError> {
-        self.expression_for_store_value(id, &mut |_, _| {
-            Err(CompilerError::compiler_error(
-                "A wrapper or slot-insert template cannot be materialized for advisory expression resolution.",
-            ))
-        })
-    }
-
-    /// Rebuild one temporary expression tree for a generated environment boundary.
-    ///
-    /// The caller supplies the only TIR-dependent step: converting an owned public template
-    /// projection into a fresh generated-module template. All scalar and aggregate recursion
-    /// remains owned by this store visitor.
-    pub(crate) fn expression_for_materialisation(
-        &self,
-        id: ConstValueId,
-        template_builder: &mut impl FnMut(
-            &PublicConstTemplate,
-            &ConstValueMetadata,
-        ) -> Result<ExpressionKind, CompilerError>,
-    ) -> Result<Expression, CompilerError> {
-        self.expression_for_store_value(id, template_builder)
-    }
-
-    fn expression_for_store_value(
-        &self,
-        id: ConstValueId,
-        template_builder: &mut impl FnMut(
-            &PublicConstTemplate,
-            &ConstValueMetadata,
-        ) -> Result<ExpressionKind, CompilerError>,
-    ) -> Result<Expression, CompilerError> {
-        let value = self.value(id).ok_or_else(|| {
-            CompilerError::compiler_error(
-                "ConstValueStore advisory expression lookup missed a value.",
-            )
-        })?;
-        let kind = match &value.payload {
-            ConstValuePayload::Number(number) => ExpressionKind::Number(number.clone()),
-            ConstValuePayload::FixedScalar(value) => ExpressionKind::FixedScalar(*value),
-            ConstValuePayload::Bool(value) => ExpressionKind::Bool(*value),
-            ConstValuePayload::Char(value) => ExpressionKind::Char(*value),
-            ConstValuePayload::String(string) => match string {
-                ConstStringValue::Text(value) => ExpressionKind::StringSlice(*value),
-                ConstStringValue::Pieces(pieces) => ExpressionKind::StructuralString {
-                    pieces: pieces.clone(),
-                },
-            },
-            ConstValuePayload::Collection(items) => ExpressionKind::Collection(
-                items
-                    .iter()
-                    .map(|item| self.expression_for_store_value(*item, template_builder))
-                    .collect::<Result<Vec<_>, _>>()?,
-            ),
-            ConstValuePayload::Record(fields) => {
-                let projected = fields
-                    .iter()
-                    .map(|field| {
-                        Ok(Declaration {
-                            id: field.name,
-                            value: self
-                                .expression_for_store_value(field.value, template_builder)?,
-                            binding_span: None,
-                            config_qualifier: None,
-                        })
-                    })
-                    .collect::<Result<Vec<_>, CompilerError>>()?;
-                if value.metadata.hir_visible {
-                    ExpressionKind::StructInstance(projected)
-                } else {
-                    ExpressionKind::AnonymousConstRecord { fields: projected }
+        while let Some(frame) = next {
+            let (value, visit) = match frame {
+                FoldFrame::Finish {
+                    value,
+                    result_start,
+                } => {
+                    let visit = match &value.payload {
+                        ConstValuePayload::Collection(items) => {
+                            if results.len().checked_sub(result_start) != Some(items.len()) {
+                                return Err(fold_stack_error::<E>());
+                            }
+                            ConstValueVisit::Collection(results.drain(result_start..).collect())
+                        }
+                        ConstValuePayload::Record(fields) => ConstValueVisit::Record(
+                            self.drain_fold_fields::<T, E>(fields, &mut results, result_start)?,
+                        ),
+                        ConstValuePayload::Choice {
+                            nominal_path,
+                            tag,
+                            fields,
+                        } => ConstValueVisit::Choice {
+                            nominal_path,
+                            tag: *tag,
+                            fields: self.drain_fold_fields::<T, E>(
+                                fields,
+                                &mut results,
+                                result_start,
+                            )?,
+                        },
+                        ConstValuePayload::Range { .. } => {
+                            if results.len().checked_sub(result_start) != Some(2) {
+                                return Err(fold_stack_error::<E>());
+                            }
+                            let end = results.pop().ok_or_else(fold_stack_error::<E>)?;
+                            let start = results.pop().ok_or_else(fold_stack_error::<E>)?;
+                            ConstValueVisit::Range { start, end }
+                        }
+                        ConstValuePayload::Coerced(_) => {
+                            if results.len().checked_sub(result_start) != Some(1) {
+                                return Err(fold_stack_error::<E>());
+                            }
+                            ConstValueVisit::Coerced(
+                                results.pop().ok_or_else(fold_stack_error::<E>)?,
+                            )
+                        }
+                        ConstValuePayload::OptionSome(_) => {
+                            if results.len().checked_sub(result_start) != Some(1) {
+                                return Err(fold_stack_error::<E>());
+                            }
+                            ConstValueVisit::OptionSome(
+                                results.pop().ok_or_else(fold_stack_error::<E>)?,
+                            )
+                        }
+                        ConstValuePayload::Number(_)
+                        | ConstValuePayload::FixedScalar(_)
+                        | ConstValuePayload::Bool(_)
+                        | ConstValuePayload::Char(_)
+                        | ConstValuePayload::String(_)
+                        | ConstValuePayload::OptionNone
+                        | ConstValuePayload::Template { .. } => {
+                            return Err(fold_stack_error::<E>());
+                        }
+                    };
+                    (value, visit)
                 }
-            }
-            ConstValuePayload::Choice {
-                nominal_path,
-                tag,
-                fields,
-            } => ExpressionKind::ChoiceConstruct {
-                nominal_path: *nominal_path,
-                tag: *tag,
-                fields: fields
-                    .iter()
-                    .map(|field| {
-                        Ok(Declaration {
-                            id: field.name,
-                            value: self
-                                .expression_for_store_value(field.value, template_builder)?,
-                            binding_span: None,
-                            config_qualifier: None,
-                        })
-                    })
-                    .collect::<Result<Vec<_>, CompilerError>>()?,
-            },
-            ConstValuePayload::Range { start, end } => ExpressionKind::Range(
-                Box::new(self.expression_for_store_value(*start, template_builder)?),
-                Box::new(self.expression_for_store_value(*end, template_builder)?),
-            ),
-            ConstValuePayload::Coerced(child) => ExpressionKind::Coerced {
-                value: Box::new(self.expression_for_store_value(*child, template_builder)?),
-                to_type: value.metadata.type_id,
-            },
-            ConstValuePayload::OptionSome(child) => ExpressionKind::Coerced {
-                value: Box::new(self.expression_for_store_value(*child, template_builder)?),
-                to_type: value.metadata.type_id,
-            },
-            ConstValuePayload::Template { template, .. } => {
-                template_builder(template, &value.metadata)?
-            }
-            ConstValuePayload::OptionNone => ExpressionKind::OptionNone,
-        };
+                FoldFrame::Visit(id) | FoldFrame::Field(id) => {
+                    let value = self.value(id).ok_or_else(|| match frame {
+                        FoldFrame::Field(_) => E::from(CompilerError::compiler_error(format!(
+                            "ConstValueStore field value id {:?} is outside the module value graph.",
+                            id
+                        ))),
+                        _ => fold_value_missing_error::<E>(id),
+                    })?;
+                    let result_start = results.len();
+                    let visit = match &value.payload {
+                        ConstValuePayload::Number(number) => ConstValueVisit::Number(number),
+                        ConstValuePayload::FixedScalar(scalar) => {
+                            ConstValueVisit::FixedScalar(*scalar)
+                        }
+                        ConstValuePayload::Bool(boolean) => ConstValueVisit::Bool(*boolean),
+                        ConstValuePayload::Char(character) => ConstValueVisit::Char(*character),
+                        ConstValuePayload::String(string) => ConstValueVisit::String(string),
+                        ConstValuePayload::OptionNone => ConstValueVisit::OptionNone,
+                        ConstValuePayload::Template { template, folded } => {
+                            ConstValueVisit::Template {
+                                template,
+                                folded: folded.as_ref(),
+                            }
+                        }
+                        ConstValuePayload::Collection(items) => {
+                            work.push(FoldFrame::Finish {
+                                value,
+                                result_start,
+                            });
+                            work.extend(items.iter().rev().copied().map(FoldFrame::Visit));
+                            next = work.pop();
+                            continue;
+                        }
+                        ConstValuePayload::Record(fields)
+                        | ConstValuePayload::Choice { fields, .. } => {
+                            work.push(FoldFrame::Finish {
+                                value,
+                                result_start,
+                            });
+                            work.extend(
+                                fields
+                                    .iter()
+                                    .rev()
+                                    .map(|field| FoldFrame::Field(field.value)),
+                            );
+                            next = work.pop();
+                            continue;
+                        }
+                        ConstValuePayload::Range { start, end } => {
+                            work.push(FoldFrame::Finish {
+                                value,
+                                result_start,
+                            });
+                            work.push(FoldFrame::Visit(*end));
+                            work.push(FoldFrame::Visit(*start));
+                            next = work.pop();
+                            continue;
+                        }
+                        ConstValuePayload::Coerced(child)
+                        | ConstValuePayload::OptionSome(child) => {
+                            work.push(FoldFrame::Finish {
+                                value,
+                                result_start,
+                            });
+                            work.push(FoldFrame::Visit(*child));
+                            next = work.pop();
+                            continue;
+                        }
+                    };
+                    (value, visit)
+                }
+            };
 
-        let mut expression = Expression::new(
-            kind,
-            value.metadata.span,
-            value.metadata.type_id,
-            value.metadata.diagnostic_type.clone(),
-            value.metadata.value_mode.clone(),
-        );
-        expression.const_record_state = value.metadata.const_record_state;
-        expression.contains_regular_division = value.metadata.contains_regular_division;
-        expression.synthetic_interface_provenance =
-            value.metadata.synthetic_interface_provenance.clone();
-        Ok(expression)
+            let mapped = visitor(&value.metadata, visit)?;
+            if work.is_empty() {
+                return Ok(mapped);
+            }
+            results.push(mapped);
+            next = work.pop();
+        }
+        Err(fold_stack_error::<E>())
+    }
+
+    /// Drain directly into the field vector required by the callback, without an intermediate
+    /// child vector. Each field's immutable metadata was validated when its `Field` frame ran.
+    fn drain_fold_fields<'a, T, E>(
+        &self,
+        fields: &'a [ConstValueField],
+        results: &mut Vec<T>,
+        result_start: usize,
+    ) -> Result<Vec<ConstValueFieldVisit<'a, T>>, E>
+    where
+        E: From<CompilerError>,
+    {
+        if results.len().checked_sub(result_start) != Some(fields.len()) {
+            return Err(fold_stack_error::<E>());
+        }
+        Ok(results
+            .drain(result_start..)
+            .zip(fields)
+            .map(|(value, field)| ConstValueFieldVisit {
+                name: &field.name,
+                type_id: self.values[field.value.index()].metadata.type_id,
+                value,
+            })
+            .collect())
     }
 
     /// Validate every stored node's semantic type against the final module environment.

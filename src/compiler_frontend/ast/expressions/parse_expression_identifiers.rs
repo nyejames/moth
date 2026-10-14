@@ -7,8 +7,8 @@
 use super::choice_constructor::parse_choice_construct;
 use super::constructor_views::ParsedConstructorExpression;
 use super::error::ExpressionParseError;
-use super::expression::ExpressionKind;
 use super::expression_rpn::ExpressionRpnItem;
+use super::expression_store::{AstExpressionBuilder, ExpressionOperationView};
 use super::external_namespace_members::project_external_constant;
 use super::function_calls::{
     ExternalFunctionCallParseInput, ParsedFunctionCallExpression,
@@ -17,11 +17,13 @@ use super::function_calls::{
 use super::namespace_access::{NamespaceAccessInput, parse_namespace_access};
 use super::parse_expression_dispatch::{
     ExpressionOperandInput, push_expression_operand, push_expression_operand_with_span,
-    push_pending_numeric_binding,
+    push_pending_numeric_binding, stream_is_boundary_leading,
 };
 use super::source_function_calls::{SourceCallableMemberInput, parse_source_callable_member};
 use super::struct_instance::{StructConstructorParseInput, parse_struct_constructor_expression};
+use crate::compiler_frontend::ast::ast_nodes::{DeclarationShell, DeclarationValue};
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::field_access::reference_expression_from_declaration;
 use crate::compiler_frontend::ast::receiver_methods::free_function_receiver_method_call_error;
@@ -48,6 +50,8 @@ pub(super) fn parse_identifier_or_call(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     expression: &mut Vec<ExpressionRpnItem>,
     allow_boundary_catch: bool,
     expected_result_evidence_allowed: bool,
@@ -60,6 +64,8 @@ pub(super) fn parse_identifier_or_call(
             token_stream,
             context,
             type_interner,
+            expression_builder,
+            const_values,
             expression,
             allow_boundary_catch,
             string_table,
@@ -144,7 +150,10 @@ pub(super) fn parse_identifier_or_call(
 
         // Template slot inserts are only legal inside template bodies, constant
         // initializers, or constant headers.
-        if let ExpressionKind::Template(template_value) = &declaration.value.kind {
+        if let Some(initializer) = declaration.value.initializer()
+            && let ExpressionOperationView::Template(template_value) =
+                expression_builder.view(initializer)?.operation()
+        {
             let is_slot_insert = context
                 .template_ir_store
                 .borrow()
@@ -171,7 +180,9 @@ pub(super) fn parse_identifier_or_call(
         }
 
         // Const records are field-access-only in runtime contexts.
-        if declaration.value.is_const_record_value()
+        if declaration
+            .value
+            .is_const_record_value(expression_builder)?
             && token_stream.peek_next_tag() != Some(TokenTag::DOT)
             && !context.kind.is_constant_context()
         {
@@ -187,8 +198,12 @@ pub(super) fn parse_identifier_or_call(
         // record coercion can validate field values instead of rejecting the
         // struct symbol itself as a non-constant reference.
         if token_stream.peek_next_tag() == Some(TokenTag::OPEN_PARENTHESIS)
-            && let Some(struct_constructor) =
-                context.source_struct_constructor(declaration, type_interner.environment())?
+            && let Some(struct_constructor) = context.source_struct_constructor(
+                declaration,
+                type_interner.environment(),
+                expression_builder,
+                const_values,
+            )?
         {
             match parse_struct_constructor_expression(
                 token_stream,
@@ -201,6 +216,8 @@ pub(super) fn parse_identifier_or_call(
                 },
                 context,
                 type_interner,
+                expression_builder,
+                const_values,
                 path_fork,
                 string_table,
             )? {
@@ -209,6 +226,8 @@ pub(super) fn parse_identifier_or_call(
                         token_stream,
                         context,
                         type_interner,
+                        expression_builder,
+                        const_values,
                         string_table,
                         expression,
                         allow_boundary_catch,
@@ -228,12 +247,18 @@ pub(super) fn parse_identifier_or_call(
 
         // Choice constructors are routed through their own parser.
         if token_stream.peek_next_tag() == Some(TokenTag::DOUBLE_COLON) {
-            if context.is_source_choice_declaration(declaration, type_interner.environment())? {
+            if context.is_source_choice_declaration(
+                declaration,
+                expression_builder,
+                const_values,
+            )? {
                 match parse_choice_construct(
                     token_stream,
                     declaration,
                     context,
                     type_interner,
+                    expression_builder,
+                    const_values,
                     path_fork,
                     string_table,
                 )? {
@@ -242,6 +267,8 @@ pub(super) fn parse_identifier_or_call(
                             token_stream,
                             context,
                             type_interner,
+                            expression_builder,
+                            const_values,
                             string_table,
                             expression,
                             allow_boundary_catch,
@@ -269,9 +296,12 @@ pub(super) fn parse_identifier_or_call(
 
         // Type declarations live in the type namespace. Constructor and variant syntax above are
         // the only expression-position routes that may start from a nominal type name.
-        if context.is_nominal_type_declaration_path(&declaration.id)
-            && matches!(declaration.value.kind, ExpressionKind::NoValue)
-        {
+        if matches!(
+            declaration.value,
+            DeclarationValue::Shell(
+                DeclarationShell::Struct | DeclarationShell::Choice | DeclarationShell::TypeAlias
+            )
+        ) {
             return Err(CompilerDiagnostic::namespace_misuse(
                 identifier,
                 NameNamespace::Value,
@@ -289,12 +319,21 @@ pub(super) fn parse_identifier_or_call(
         if context.kind.is_constant_context()
             && !context.is_unresolved_constant_placeholder(declaration)
         {
-            let is_compile_time_constant = declaration
-                .value
-                .const_value_kind_with_template_classifier(&mut |template| {
-                    classify_template_from_effective_tir(template, &context.template_ir_store)
-                })?
-                .is_compile_time_value();
+            let is_compile_time_constant = match declaration.value.initializer() {
+                Some(initializer) => expression_builder
+                    .view(initializer)?
+                    .const_value_kind_with_template_classifier(const_values, &mut |template| {
+                        classify_template_from_effective_tir(
+                            template,
+                            &context.template_ir_store,
+                            expression_builder,
+                            const_values,
+                        )
+                    })?
+                    .is_compile_time_value(),
+                // Imported constants carry their folded value instead of an initializer.
+                None => context.is_explicit_compile_time_constant(declaration),
+            };
 
             if !is_compile_time_constant {
                 return Err(CompilerDiagnostic::compile_time_evaluation_error(
@@ -310,6 +349,7 @@ pub(super) fn parse_identifier_or_call(
             Some(signature) => {
                 let generic_template = context.lookup_generic_function_template(&declaration.id);
                 let call_span = Some(token_stream.current_span());
+                let expression_is_boundary_leading = stream_is_boundary_leading(expression);
 
                 parse_source_callable_member(SourceCallableMemberInput {
                     token_stream,
@@ -320,9 +360,12 @@ pub(super) fn parse_identifier_or_call(
                     call_span,
                     context,
                     expression,
+                    expression_is_boundary_leading,
                     allow_boundary_catch,
                     expected_result_evidence_allowed,
                     type_interner,
+                    expression_builder,
+                    const_values,
                     string_table,
                     path_fork,
                 })?;
@@ -336,14 +379,19 @@ pub(super) fn parse_identifier_or_call(
                     declaration,
                     context,
                     type_interner,
+                    expression_builder,
+                    const_values,
+                    string_table,
                     reference_span,
-                );
+                )?;
                 token_stream.advance();
 
                 push_expression_operand_with_span(
                     token_stream,
                     context,
                     type_interner,
+                    expression_builder,
+                    const_values,
                     string_table,
                     expression,
                     allow_boundary_catch,
@@ -371,6 +419,8 @@ pub(super) fn parse_identifier_or_call(
                 token_stream,
                 context,
                 type_interner,
+                expression_builder,
+                const_values,
                 expression,
                 allow_boundary_catch,
                 expected_result_evidence_allowed,
@@ -405,13 +455,22 @@ pub(super) fn parse_identifier_or_call(
         }
 
         let value_mode = ValueMode::ImmutableOwned;
-        let const_expr =
-            project_external_constant(const_def, identifier, span, value_mode, string_table)?;
+        let const_expr = project_external_constant(
+            const_def,
+            identifier,
+            span,
+            value_mode,
+            string_table,
+            expression_builder,
+            const_values,
+        )?;
 
         push_expression_operand(
             token_stream,
             context,
             type_interner,
+            expression_builder,
+            const_values,
             string_table,
             expression,
             allow_boundary_catch,
@@ -453,6 +512,8 @@ pub(super) fn parse_identifier_or_call(
                     && fallible_catch_allowed_in_context(context),
                 warnings: None,
                 type_interner,
+                expression_builder,
+                const_values,
                 string_table,
                 path_fork,
             })?;
@@ -463,6 +524,8 @@ pub(super) fn parse_identifier_or_call(
                     token_stream,
                     context,
                     type_interner,
+                    expression_builder,
+                    const_values,
                     string_table,
                     expression,
                     allow_boundary_catch,
@@ -541,10 +604,16 @@ pub(super) fn parse_identifier_or_call(
 /// and emits a reference node identical to a normal local read.
 /// WHY: `this` is a reserved keyword token, not an ordinary identifier, so it needs its own
 /// parse path, but semantically it behaves like any other parameter reference.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "this-reference parsing keeps the token stream, scope, type interner, expression builder, const store, expression output, catch policy, string table, and path fork as separate borrows"
+)]
 fn parse_this_reference(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     expression: &mut Vec<ExpressionRpnItem>,
     allow_boundary_catch: bool,
     string_table: &mut StringTable,
@@ -564,14 +633,19 @@ fn parse_this_reference(
         receiver_declaration,
         context,
         type_interner,
+        expression_builder,
+        const_values,
+        string_table,
         reference_span,
-    );
+    )?;
     token_stream.advance();
 
     push_expression_operand_with_span(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         expression,
         allow_boundary_catch,

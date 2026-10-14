@@ -25,10 +25,12 @@ use crate::compiler_frontend::ast::generic_functions::{
 use crate::compiler_frontend::ast::module_ast::build_context::AstPhaseContext;
 use crate::compiler_frontend::ast::module_ast::environment::AstModuleEnvironment;
 use crate::compiler_frontend::ast::module_ast::environment::TopLevelDeclarationTable;
-use crate::compiler_frontend::ast::module_ast::scope_context::{ContextKind, ScopeContext};
+use crate::compiler_frontend::ast::module_ast::scope_context::{
+    ContextKind, EnclosingCallableContract, EnclosingCallableOwner, ScopeContext,
+};
 use crate::compiler_frontend::ast::statements::body_dispatch::ParsedBody;
 use crate::compiler_frontend::ast::statements::functions::{
-    FunctionSignature, ReturnChannel, ReturnSlot,
+    FunctionParameter, FunctionSignature, ReturnChannel, ReturnSlot,
 };
 use crate::compiler_frontend::ast::templates::create_template_node::PreparedTemplateConstruction;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
@@ -74,6 +76,19 @@ use std::rc::Rc;
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::timed_stage_attributed_opt;
 
+fn enclosing_callable_contract(
+    signature: &FunctionSignature,
+    owner: EnclosingCallableOwner,
+) -> Rc<EnclosingCallableContract> {
+    let authored_success_slot_count = signature.success_return_slot_count();
+    Rc::new(EnclosingCallableContract {
+        owner,
+        success_types: signature.success_return_type_ids(),
+        authored_success_slot_count,
+        error_type: signature.error_return_type_id(),
+    })
+}
+
 fn attach_frozen_identity_handle_to_diagnostic(
     diagnostic: &mut CompilerDiagnostic,
     frozen_identity_handle: &FrozenIdentityHandle,
@@ -91,10 +106,10 @@ pub(in crate::compiler_frontend::ast) struct AstEmission {
         FxHashMap<PathId, FoldedConstTemplateResult>,
     /// Concrete generic function instances emitted while lowering visible calls.
     pub(in crate::compiler_frontend::ast) generic_instance_count: usize,
-    /// Every generic request slot recorded during emission, in ledger order (concrete, dropped
-    /// and pending). Static specialisation addresses slots by position; the finalizer commits
-    /// only the exact concrete survivors. Imported generic calls are materialised by the
-    /// generated-function transaction from the declaring module's retained context.
+    /// Every generic request slot recorded during emission, in ledger order, including
+    /// assertion-validation candidates. Static specialisation addresses slots by position;
+    /// finalization partitions executable survivors from witnessed validation-only requests.
+    /// Imported calls materialise through the declaring module's generated-function transaction.
     pub(in crate::compiler_frontend::ast) deferred_generic_requests: Vec<GenericRequestSlot>,
     /// Fully validated generic template bodies retained only through static specialisation and
     /// terminality. They never enter executable HIR.
@@ -194,8 +209,8 @@ fn count_root_scope_arena_consumers(headers: &[Header]) -> usize {
 pub(in crate::compiler_frontend::ast) struct AstEmitter<'context, 'services, 'environment> {
     ast: Vec<AstNode>,
     warnings: Vec<CompilerDiagnostic>,
-    context: &'context AstPhaseContext<'services>,
-    path_fork: &'services mut PathInternerFork,
+    context: &'context mut AstPhaseContext<'services>,
+    path_fork: &'context mut PathInternerFork,
     environment: &'environment mut AstModuleEnvironment,
     source_token_owners: crate::compiler_frontend::headers::SourceTokenOwners,
     const_templates_by_path: FxHashMap<PathId, FoldedConstTemplateResult>,
@@ -209,10 +224,10 @@ pub(in crate::compiler_frontend::ast) struct AstEmitter<'context, 'services, 'en
 }
 impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environment> {
     pub(in crate::compiler_frontend::ast) fn new(
-        context: &'context AstPhaseContext<'services>,
+        context: &'context mut AstPhaseContext<'services>,
         environment: &'environment mut AstModuleEnvironment,
         header_count: usize,
-        path_fork: &'services mut PathInternerFork,
+        path_fork: &'context mut PathInternerFork,
         source_token_owners: crate::compiler_frontend::headers::SourceTokenOwners,
     ) -> Self {
         let warnings = environment.lookups.warnings.clone();
@@ -550,13 +565,12 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
 
     /// Drains the module-wide generic request ledger exactly once, at emission finish.
     ///
-    /// WHAT: returns every ledger slot in recording order (concrete, dropped and pending) and
-    ///       registers each concrete request's key as a known instance.
-    /// WHY: static-if ranges and ticket indices address the ledger by position, so the ledger is
-    ///      never drained mid-emission; a mid-body drain would restart those positions. Dropped
-    ///      and pending slots keep their positions so those ranges stay valid. Every provisional
-    ///      origin survives until static specialisation removes inactive ranges, because
-    ///      deduplicating first would lose an active duplicate when its first call was inactive.
+    /// WHAT: returns every slot in recording order and registers only executable concrete keys
+    ///       as known instances. Assertion-validation candidates stay owned by their ledger slots.
+    /// WHY: static-if ranges and tickets address stable positions, so the ledger is never drained
+    ///      mid-emission. Every provisional origin survives until specialization removes inactive
+    ///      ranges and finalization selects retained assertion witnesses. Deduplicating earlier
+    ///      would lose an active duplicate whose first call was inactive or validation-only.
     fn take_generic_request_ledger(&mut self) -> Vec<GenericRequestSlot> {
         let slots = std::mem::take(&mut *self.generic_function_instantiation_requests.borrow_mut());
 
@@ -629,7 +643,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             let Some(TypeDefinition::GenericParameter(parameter)) = self
                 .environment
                 .type_environment
-                .get(source_parameter.value.type_id)
+                .get(source_parameter.type_id)
             else {
                 continue;
             };
@@ -814,9 +828,21 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         if let Some(frozen_identity_handle) = frozen_identity_handle.as_ref() {
             context = context.with_frozen_identity_handle(frozen_identity_handle.clone());
         }
-        context.current_function_return_type_ids = signature.success_return_type_ids();
-        context.expected_error_type = signature.error_return_type_id();
-        context.set_local_declarations(signature.parameters.to_owned(), &*self.path_fork);
+        context.enclosing_callable = Some(enclosing_callable_contract(
+            &signature,
+            EnclosingCallableOwner::Function,
+        ));
+        context
+            .set_local_declarations(
+                signature
+                    .parameters
+                    .iter()
+                    .map(FunctionParameter::to_local_declaration)
+                    .collect(),
+                &*self.path_fork,
+                string_table,
+            )
+            .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
         // --------------------------
         //  Parse body and materialize nested instances
         // --------------------------
@@ -829,6 +855,8 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             &mut body_cursor,
             context,
             &mut type_interner,
+            &mut self.context.expression_builder,
+            &mut self.context.const_values,
             &mut self.warnings,
             string_table,
             &mut *self.path_fork,
@@ -962,13 +990,22 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             string_table,
         )?;
         context = context.with_active_generic_type_context(generic_type_context);
-        context.current_function_return_type_ids =
-            resolved_signature.signature.success_return_type_ids();
-        context.expected_error_type = resolved_signature.signature.error_return_type_id();
-        context.set_local_declarations(
-            resolved_signature.signature.parameters.clone(),
-            &*self.path_fork,
-        );
+        context.enclosing_callable = Some(enclosing_callable_contract(
+            &resolved_signature.signature,
+            EnclosingCallableOwner::Function,
+        ));
+        context
+            .set_local_declarations(
+                resolved_signature
+                    .signature
+                    .parameters
+                    .iter()
+                    .map(FunctionParameter::to_local_declaration)
+                    .collect(),
+                &*self.path_fork,
+                string_table,
+            )
+            .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
 
         let mut type_interner = AstTypeInterner::new(
             &mut self.environment.type_environment,
@@ -978,6 +1015,8 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             template: &template,
             context,
             type_interner: &mut type_interner,
+            expression_builder: &mut self.context.expression_builder,
+            const_values: &mut self.context.const_values,
             warnings: &mut self.warnings,
             string_table,
             path_fork: &mut *self.path_fork,
@@ -1040,13 +1079,22 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
                 scope_frame_capacity,
             })
             .with_visible_declarations(Arc::new(visible_declarations));
-        context.current_function_return_type_ids =
-            resolved_signature.signature.success_return_type_ids();
-        context.expected_error_type = resolved_signature.signature.error_return_type_id();
-        context.set_local_declarations(
-            resolved_signature.signature.parameters.to_owned(),
-            &*self.path_fork,
-        );
+        context.enclosing_callable = Some(enclosing_callable_contract(
+            &resolved_signature.signature,
+            EnclosingCallableOwner::Function,
+        ));
+        context
+            .set_local_declarations(
+                resolved_signature
+                    .signature
+                    .parameters
+                    .iter()
+                    .map(FunctionParameter::to_local_declaration)
+                    .collect(),
+                &*self.path_fork,
+                string_table,
+            )
+            .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
 
         // --------------------------
         //  Parse body and emit node
@@ -1072,6 +1120,8 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             &mut body_cursor,
             context,
             &mut type_interner,
+            &mut self.context.expression_builder,
+            &mut self.context.const_values,
             &mut self.warnings,
             string_table,
             &mut *self.path_fork,
@@ -1143,7 +1193,10 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         };
         // Root initializers infer their own success types. The fragment collection
         // is an implicit HIR return, not a receiving expectation for those values.
-        context.expected_error_type = start_signature.error_return_type_id();
+        context.enclosing_callable = Some(enclosing_callable_contract(
+            &start_signature,
+            EnclosingCallableOwner::EntryStart,
+        ));
 
         let start_source = self
             .canonical_owner_for_header(&header)
@@ -1163,6 +1216,8 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             &mut body_cursor,
             context,
             &mut type_interner,
+            &mut self.context.expression_builder,
+            &mut self.context.const_values,
             &mut self.warnings,
             string_table,
             &mut *self.path_fork,
@@ -1251,6 +1306,8 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             source_path,
             context,
             &mut type_interner,
+            &mut self.context.expression_builder,
+            &mut self.context.const_values,
             vec![],
             string_table,
             &mut *self.path_fork,
@@ -1303,7 +1360,11 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             ));
         }
         let prepared = preparation;
-        let mut fold_context = context.new_tir_fold_context(string_table);
+        let mut fold_context = context.new_tir_fold_context(
+            string_table,
+            &mut self.context.expression_builder,
+            &mut self.context.const_values,
+        );
         // Top-level const fragments are builder-facing rendered text metadata; no semantic or
         // fingerprint consumer owns provenance at this boundary in the current milestone.
         let TemplateFoldResult { emission, .. } =

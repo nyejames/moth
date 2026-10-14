@@ -17,13 +17,15 @@ use super::super::{
     PublicInterfaceDraftBuilderInput, build_callable_seed_table,
 };
 use super::test_support::{path, receiver_entry, register_struct};
+use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
 
 use crate::compiler_frontend::ast::AstPublicInterfaceProjectionInput;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
-use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::const_values::store::{
+    ConstStringValue, ConstValueId, ConstValuePayload, ConstValueStore,
+};
 use crate::compiler_frontend::ast::statements::functions::{
-    FunctionSignature, ReturnChannel, ReturnSlot,
+    FunctionParameter, FunctionSignature, ReturnChannel, ReturnSlot,
 };
 use crate::compiler_frontend::ast::{
     ReceiverMethodEntry, ResolvedPublicTypeRoot, ResolvedPublicTypeRootKind,
@@ -130,17 +132,14 @@ fn param_declaration(
     type_id: TypeId,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Declaration {
-    Declaration {
+) -> FunctionParameter {
+    FunctionParameter {
         id: path(name, string_table, path_fork),
-        value: Expression::no_value_with_type_id(
-            None,
-            DataType::Inferred,
-            type_id,
-            ValueMode::default(),
-        ),
+        type_id,
+        diagnostic_type: DataType::Inferred,
+        value_mode: ValueMode::default(),
+        default: None,
         binding_span: None,
-        config_qualifier: None,
     }
 }
 
@@ -149,9 +148,9 @@ fn mutable_param_declaration(
     type_id: TypeId,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Declaration {
+) -> FunctionParameter {
     let mut declaration = param_declaration(name, type_id, string_table, path_fork);
-    declaration.value.value_mode = ValueMode::MutableReference;
+    declaration.value_mode = ValueMode::MutableReference;
     declaration
 }
 
@@ -163,12 +162,10 @@ fn field_declaration(
 ) -> Declaration {
     Declaration {
         id: path(name, string_table, path_fork),
-        value: Expression::no_value_with_type_id(
-            None,
-            DataType::Inferred,
-            type_id,
-            ValueMode::ImmutableOwned,
-        ),
+        type_id,
+        diagnostic_type: DataType::Inferred,
+        value_mode: ValueMode::ImmutableOwned,
+        value: DeclarationValue::Absent,
         binding_span: None,
         config_qualifier: None,
     }
@@ -204,7 +201,7 @@ fn unresolved_return_slot(channel: ReturnChannel) -> ReturnSlot {
 }
 
 fn free_function_signature(
-    parameters: Vec<Declaration>,
+    parameters: Vec<FunctionParameter>,
     return_type_ids: Vec<TypeId>,
 ) -> FunctionSignature {
     let returns = return_type_ids
@@ -415,7 +412,7 @@ fn build_draft(
         receiver_methods,
         bindings,
         trait_source_facts,
-        &[],
+        &ConstValueStore::default(),
         refs,
     )
 }
@@ -425,7 +422,7 @@ fn build_draft_with_constants(
     receiver_methods: Vec<ReceiverMethodEntry>,
     bindings: Vec<ExportBinding>,
     trait_source_facts: FxHashMap<TraitId, crate::compiler_frontend::ast::ResolvedTraitSourceFact>,
-    module_constants: &[Declaration],
+    module_constants: &ConstValueStore,
     refs: &DraftRefs<'_>,
 ) -> Result<Vec<PublicDeclarationRecord>, CompilerError> {
     let table = root_table(roots, receiver_methods, trait_source_facts);
@@ -437,8 +434,6 @@ fn build_draft_with_constants(
         trait_evidence_environment: Some(Rc::new(TraitEvidenceEnvironment::new())),
     };
     let registry = ExternalPackageRegistry::new();
-    let const_values =
-        ConstValueStore::from_test_declarations(module_constants.to_vec(), refs.env)?;
     PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
         path_fork: refs.path_fork,
         export_seed,
@@ -449,7 +444,7 @@ fn build_draft_with_constants(
         external_registry: &registry,
         string_table: refs.string_table,
         generic_function_templates: &FxHashMap::default(),
-        const_values: &const_values,
+        const_values: module_constants,
         module_resources: None,
     })
     .build()
@@ -459,15 +454,16 @@ fn build_draft_with_constants(
 fn field_declaration_with_default(
     name: &str,
     type_id: TypeId,
-    default: Expression,
+    default: ConstValueId,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Declaration {
-    let mut value = default;
-    value.type_id = type_id;
     Declaration {
         id: path(name, string_table, path_fork),
-        value,
+        type_id,
+        diagnostic_type: DataType::Inferred,
+        value_mode: ValueMode::ImmutableOwned,
+        value: DeclarationValue::Default(default),
         binding_span: None,
         config_qualifier: None,
     }
@@ -478,6 +474,7 @@ fn project_struct_record(
     string_table: &mut StringTable,
     field_definitions: Box<[FieldDefinition]>,
     retained_fields: Vec<Declaration>,
+    constants: &ConstValueStore,
     path_fork: &mut PathInternerFork,
 ) -> Result<Vec<PublicDeclarationRecord>, CompilerError> {
     let struct_path = path("Widget", string_table, path_fork);
@@ -489,7 +486,7 @@ fn project_struct_record(
         path_fork,
     );
 
-    build_draft(
+    build_draft_with_constants(
         vec![root],
         Vec::new(),
         vec![export_binding(
@@ -497,6 +494,7 @@ fn project_struct_record(
             OriginDeclarationId::Type(struct_origin("Widget")),
         )],
         FxHashMap::default(),
+        constants,
         &DraftRefs {
             nominal_origins: &nominal_origins,
             trait_origins: &FxHashMap::default(),
@@ -1225,7 +1223,7 @@ fn source_trait_bound_resolves_to_provider_module_origin_not_active_origin() {
 /// declaration, returning the projected function semantics so the access contract can be
 /// asserted on the final declaration record.
 fn project_free_function_with_parameter(
-    parameter: Declaration,
+    parameter: FunctionParameter,
     env: &TypeEnvironment,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
@@ -1877,7 +1875,7 @@ fn project_struct_with_receiver_method(
     let mut receiver_parameter = param_declaration("this", struct_type_id, string_table, path_fork);
     let receiver_mutable = matches!(access, ReceiverAccessFixture::Mutable);
     if receiver_mutable {
-        receiver_parameter.value.value_mode = ValueMode::MutableReference;
+        receiver_parameter.value_mode = ValueMode::MutableReference;
     }
 
     let mut entry = receiver_entry(
@@ -2412,6 +2410,7 @@ fn struct_record_rejects_field_count_mismatch() {
         &mut string_table,
         field_definitions,
         retained_fields,
+        &ConstValueStore::default(),
         &mut path_fork,
     )
     .expect_err("a missing retained field declaration must be rejected");
@@ -2441,6 +2440,7 @@ fn struct_record_rejects_field_name_or_order_mismatch() {
         &mut string_table,
         field_definitions,
         retained_fields,
+        &ConstValueStore::default(),
         &mut path_fork,
     )
     .expect_err("retained field order must match the canonical definition");
@@ -2457,11 +2457,14 @@ fn struct_record_rejects_field_type_id_mismatch() {
     let string_id = env.builtins().string;
 
     let field_definitions = Box::new([field_def("x", int_id, &mut string_table, &mut path_fork)]);
-    let default_value = Expression::string_slice(
-        string_table.intern("wrong"),
-        None,
-        ValueMode::ImmutableOwned,
-    );
+    let mut constants = ConstValueStore::default();
+    let default_value = constants
+        .insert_resolved(
+            string_id,
+            ConstValuePayload::String(ConstStringValue::Text(string_table.intern("wrong"))),
+            None,
+        )
+        .expect("fixture string constant inserts");
     let retained_fields = vec![field_declaration_with_default(
         "x",
         string_id,
@@ -2475,6 +2478,7 @@ fn struct_record_rejects_field_type_id_mismatch() {
         &mut string_table,
         field_definitions,
         retained_fields,
+        &constants,
         &mut path_fork,
     )
     .expect_err("a retained field TypeId mismatch must be rejected");
@@ -2504,6 +2508,7 @@ fn struct_record_rejects_duplicate_canonical_field_name() {
         &mut string_table,
         field_definitions,
         retained_fields,
+        &ConstValueStore::default(),
         &mut path_fork,
     )
     .expect_err("duplicate canonical field names must be rejected");

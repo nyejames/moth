@@ -9,7 +9,7 @@
 
 use crate::compiler_frontend::ast::generic_bounds::BoundEvidenceSelection;
 use crate::compiler_frontend::ast::generic_functions::{
-    GenericFunctionInstantiationRequest, GenericFunctionTemplate, ModuleMaterialisationPreparation,
+    GenericFunctionInstantiationRequest, GenericFunctionTemplate, ModuleMaterialisationCapture,
     bootstrap_call_summary_from_signature, substitute_function_signature,
 };
 use crate::compiler_frontend::ast::{Ast, AstImportedFunctionContract};
@@ -132,15 +132,16 @@ pub(crate) struct CanonicalGeneratedRequest {
     pub(crate) call_span: Option<SourceSpan>,
 }
 
-pub(crate) fn install_generated_request_contracts(
-    requests: &[GenericFunctionInstantiationRequest],
-    materialisation_context: &ModuleMaterialisationPreparation,
+pub(crate) fn install_generated_request_contracts<'a>(
+    requests: impl IntoIterator<Item = &'a GenericFunctionInstantiationRequest>,
+    materialisation_context: &ModuleMaterialisationCapture,
     templates: &FxHashMap<PathId, GenericFunctionTemplate>,
     external_registry: &ExternalPackageRegistry,
     path_fork: &PathInternerFork,
     module_ast: &mut Ast,
 ) -> Result<Vec<CanonicalGeneratedRequest>, CompilerError> {
-    let mut identities = Vec::with_capacity(requests.len());
+    let requests = requests.into_iter();
+    let mut identities = Vec::with_capacity(requests.size_hint().0);
     for request in requests {
         let template = templates.get(&request.key.function_path).ok_or_else(|| {
             CompilerError::compiler_error(
@@ -194,6 +195,27 @@ pub(crate) fn install_generated_request_contracts(
             )?,
         );
 
+        // Active occurrences arrive before assertion-only validation occurrences. Shared
+        // instances need one contract and one diagnostic request site, but path equality alone
+        // cannot discharge a collision: concrete types and selected evidence must also agree.
+        if let Some(contract) = module_ast
+            .imported_functions_by_local_path
+            .get(&request.instance_path)
+        {
+            if matches!(
+                &contract.target,
+                SourceFunctionTarget::Generated {
+                    identity: installed_identity,
+                    local_path,
+                } if installed_identity == &identity && *local_path == request.instance_path
+            ) {
+                continue;
+            }
+            return Err(CompilerError::compiler_error(
+                "Generated request path collides with another imported or generated callable",
+            ));
+        }
+
         let mapping = module_ast
             .type_environment
             .build_parameter_mapping(
@@ -210,16 +232,8 @@ pub(crate) fn install_generated_request_contracts(
             &mapping,
             &mut module_ast.type_environment,
         );
-        let fallible_carrier_type_id = signature.error_return_type_id().map(|error_type_id| {
-            let success_type_id = match signature.success_return_type_ids().as_slice() {
-                [] => crate::compiler_frontend::datatypes::builtin_type_ids::NONE,
-                [single] => *single,
-                many => module_ast.type_environment.intern_tuple(many.to_vec()),
-            };
-            module_ast
-                .type_environment
-                .intern_fallible_carrier(success_type_id, error_type_id)
-        });
+        let returns = signature.success_return_type_ids();
+        let error_return = signature.error_return_type_id();
         identities.push(CanonicalGeneratedRequest {
             identity: identity.clone(),
             function_name: path_fork.component(request.key.function_path),
@@ -232,18 +246,13 @@ pub(crate) fn install_generated_request_contracts(
                 local_path: request.instance_path,
             },
             summary,
-            fallible_carrier_type_id,
+            returns,
+            error_return,
         };
 
-        if module_ast
+        module_ast
             .imported_functions_by_local_path
-            .insert(request.instance_path, contract)
-            .is_some()
-        {
-            return Err(CompilerError::compiler_error(
-                "Generated request path collides with another imported or generated callable",
-            ));
-        }
+            .insert(request.instance_path, contract);
     }
 
     Ok(identities)
@@ -251,7 +260,7 @@ pub(crate) fn install_generated_request_contracts(
 
 fn canonicalize_generated_request_evidence(
     request: &GenericFunctionInstantiationRequest,
-    materialisation_context: &ModuleMaterialisationPreparation,
+    materialisation_context: &ModuleMaterialisationCapture,
     external_registry: &ExternalPackageRegistry,
 ) -> Result<Box<[CanonicalEvidenceIdentity]>, CompilerError> {
     if request.evidence.is_empty() {
@@ -276,7 +285,7 @@ fn canonicalize_generated_request_evidence(
         let (target_type_id, trait_id) = match selection {
             BoundEvidenceSelection::Registered(evidence_id) => {
                 let evidence = materialisation_context
-                    .trait_evidence_environment()
+                    .trait_evidence_environment
                     .get(evidence_id)
                     .ok_or_else(|| {
                         CompilerError::compiler_error(
@@ -293,7 +302,7 @@ fn canonicalize_generated_request_evidence(
                     source_type_id,
                     trait_id,
                     &materialisation_context.type_environment,
-                    materialisation_context.trait_environment(),
+                    &materialisation_context.trait_environment,
                 ) {
                     return Err(CompilerError::compiler_error(
                         "Generated request retained an invalid on-demand builtin cast proof",
@@ -308,7 +317,7 @@ fn canonicalize_generated_request_evidence(
             &projection_context,
         )?;
         let trait_identity = materialisation_context
-            .trait_environment()
+            .trait_environment
             .canonical_identity_for_id(trait_id)
             .cloned()
             .ok_or_else(|| {

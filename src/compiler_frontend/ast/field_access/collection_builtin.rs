@@ -7,8 +7,8 @@
 use super::MemberStepContext;
 use super::ParsedBuiltinMemberCall;
 use super::builtin_call_args::{
-    BuiltinCallSite, builtin_argument_expectations, builtin_argument_slots,
-    builtin_result_type_ids, concrete_shape_type, intern_concrete_shape,
+    BuiltinCallSite, builtin_argument_expectations, builtin_argument_shapes,
+    builtin_argument_slots, builtin_result_type_ids, concrete_shape_type, intern_concrete_shape,
     resolve_builtin_member_arguments,
 };
 use super::parse_chain::expression_from_postfix_node;
@@ -19,12 +19,13 @@ use super::receiver_calls::finish_pending_receiver_call_expression;
 use super::retained_postfix::{RetainedBuiltinKind, RetainedBuiltinStep, retained_builtin_operand};
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::call_arguments::{
     CallArgumentSyntax, ParsedCallArguments, parse_call_arguments_typed_with_numeric_retention,
 };
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::numeric_construction::DeferredCallHandling;
 use crate::compiler_frontend::ast::numeric_known_shape::{KnownShape, KnownShapeId};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
@@ -34,7 +35,6 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidAssignmentTargetReason, InvalidBuiltinCallReason,
 };
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
-use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -98,10 +98,10 @@ pub(super) fn collection_builtin_op_source_name(op: CollectionBuiltinOp) -> &'st
 pub(super) struct CollectionBuiltinMemberRule {
     /// The authored argument slots in order.
     pub(super) expected_argument_shapes: Vec<KnownShapeId>,
-    /// The success slot an authored `!` propagates, before the carrier wrap. `None` when the
-    /// operation produces no value.
+    /// The separate success slot an authored `!` propagates. `None` when the operation
+    /// produces no value.
     pub(super) success_shape: Option<KnownShapeId>,
-    /// The declared error an authored `!` unwraps; `None` for an infallible operation.
+    /// The separate declared error channel an authored `!` propagates; `None` if infallible.
     pub(super) error_return_type_id: Option<TypeId>,
 }
 
@@ -175,62 +175,16 @@ pub(super) fn resolve_collection_builtin_member(
         builtin_type_ids::fixed_scalar(FixedScalar::I32),
     )?;
 
-    let rule = match op {
-        CollectionBuiltinOp::Get => {
-            let error_type =
-                resolve_builtin_error_type_typed(scope_context, member_span, string_table)?;
-            CollectionBuiltinMemberRule {
-                expected_argument_shapes: vec![int_shape],
-                success_shape: Some(element_shape),
-                error_return_type_id: Some(error_type.type_id),
-            }
-        }
-
-        CollectionBuiltinOp::Set => {
-            let error_type =
-                resolve_builtin_error_type_typed(scope_context, member_span, string_table)?;
-            CollectionBuiltinMemberRule {
-                expected_argument_shapes: vec![int_shape, element_shape],
-                success_shape: None,
-                error_return_type_id: Some(error_type.type_id),
-            }
-        }
-
-        // Growable push has no recoverable source-visible `Error!` path: it needs no error
-        // resolution or fallible carrier and produces no result. A stray `catch`/`!` suffix is
-        // rejected after the postfix chain by the shared non-fallible handling diagnostics.
-        CollectionBuiltinOp::PushGrowable => CollectionBuiltinMemberRule {
-            expected_argument_shapes: vec![element_shape],
-            success_shape: None,
-            error_return_type_id: None,
-        },
-
-        // Fixed push can fail recoverably at capacity, so it keeps the fallible carrier bridge.
-        CollectionBuiltinOp::PushFixed => {
-            let error_type =
-                resolve_builtin_error_type_typed(scope_context, member_span, string_table)?;
-            CollectionBuiltinMemberRule {
-                expected_argument_shapes: vec![element_shape],
-                success_shape: None,
-                error_return_type_id: Some(error_type.type_id),
-            }
-        }
-
-        CollectionBuiltinOp::Remove => {
-            let error_type =
-                resolve_builtin_error_type_typed(scope_context, member_span, string_table)?;
-            CollectionBuiltinMemberRule {
-                expected_argument_shapes: vec![int_shape],
-                success_shape: Some(element_shape),
-                error_return_type_id: Some(error_type.type_id),
-            }
-        }
-
-        CollectionBuiltinOp::Length => CollectionBuiltinMemberRule {
-            expected_argument_shapes: Vec::new(),
-            success_shape: Some(int_shape),
-            error_return_type_id: None,
-        },
+    let semantic_rule = op.rule(element_shape, int_shape);
+    let error_return_type_id = if semantic_rule.fallible {
+        Some(resolve_builtin_error_type_typed(scope_context, member_span, string_table)?.type_id)
+    } else {
+        None
+    };
+    let rule = CollectionBuiltinMemberRule {
+        expected_argument_shapes: builtin_argument_shapes(semantic_rule.arguments),
+        success_shape: semantic_rule.success,
+        error_return_type_id,
     };
 
     Ok(Some(CollectionBuiltinMember {
@@ -251,6 +205,8 @@ pub(super) fn parse_collection_builtin_member_typed(
     token_stream: &mut AstCursor<'_>,
     context: MemberStepContext<'_>,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<Option<ParsedBuiltinMemberCall>, ExpressionParseError> {
@@ -291,6 +247,7 @@ pub(super) fn parse_collection_builtin_member_typed(
 
     validate_receiver_access(
         receiver_node,
+        expression_builder,
         path_fork,
         receiver_access_mode,
         member_span,
@@ -313,6 +270,8 @@ pub(super) fn parse_collection_builtin_member_typed(
         token_stream,
         scope_context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         &expectations,
         CallArgumentSyntax::UnsupportedBuiltinMember {
@@ -337,6 +296,8 @@ pub(super) fn parse_collection_builtin_member_typed(
                 &expectations,
                 scope_context,
                 type_interner,
+                expression_builder,
+                const_values,
                 string_table,
                 path_fork,
             )?)
@@ -364,7 +325,6 @@ pub(super) fn parse_collection_builtin_member_typed(
         // The operation and its result slots are already resolved, so the member step travels with
         // the retained argument and resumes through this same constructor once it completes.
         ParsedCallArguments::Retained(arguments) => {
-            increment_ast_counter(AstCounter::PostfixReceiverNodesCopied);
             return Ok(Some(ParsedBuiltinMemberCall::RetainedOperand(
                 retained_builtin_operand(
                     expression_from_postfix_node(receiver_node)?,
@@ -378,37 +338,40 @@ pub(super) fn parse_collection_builtin_member_typed(
                         error_return_type_id: member.rule.error_return_type_id,
                         authored_handling: DeferredCallHandling::Unhandled,
                     },
-                ),
+                    expression_builder,
+                )?,
             )));
         }
     };
 
-    increment_ast_counter(AstCounter::PostfixReceiverNodesCopied);
-
     let receiver_expression = expression_from_postfix_node(receiver_node)?;
-    let result_type_ids = builtin_result_type_ids(
-        member.rule.success_shape,
-        member.rule.error_return_type_id,
-        scope_context,
-        type_interner,
-    )?;
-    let builtin_expression = Expression::collection_builtin_call_with_typed_arguments(
-        receiver_expression,
+    let result_type_ids =
+        builtin_result_type_ids(member.rule.success_shape, scope_context, type_interner)?;
+    let builtin_expression = expression_builder.collection_builtin_call_with_typed_arguments(
+        expression_builder.own(receiver_expression),
         member.op,
         arguments,
         result_type_ids,
-        type_interner.environment_mut_for_derived_types(),
         member_span,
-    );
+    )?;
+    let builtin_expression = match member.rule.error_return_type_id {
+        Some(error_type) => expression_builder.with_typed_error_producer(
+            builtin_expression,
+            error_type,
+            Some(member_name),
+        )?,
+        None => builtin_expression,
+    };
     let builtin_expression = finish_pending_receiver_call_expression(
         builtin_expression,
         member_name,
         token_stream,
         type_interner,
-    );
+        expression_builder,
+    )?;
 
     Ok(Some(ParsedBuiltinMemberCall::Completed(AstNode {
-        kind: NodeKind::ExpressionStatement(builtin_expression),
+        kind: NodeKind::ExpressionStatement(builtin_expression.id()),
         scope: scope_context.scope.to_owned(),
         span: member_span,
     })))

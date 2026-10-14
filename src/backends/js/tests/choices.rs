@@ -76,18 +76,15 @@ fn choice_variant_construction_emits_tagged_carrier() {
                 value: choice_construct(2, types.choice_unit, RegionId(0), &mut expressions),
             },
         )],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let mut module = build_module(
@@ -201,11 +198,7 @@ fn choice_match_lowers_to_structured_if_with_choice_tags() {
             region: RegionId(0),
             locals: vec![],
             statements: vec![],
-            terminator: HirTerminator::Return(unit_expression(
-                types.unit,
-                RegionId(0),
-                &mut expressions,
-            )),
+            terminator: HirTerminator::Return(HirValueRange::empty()),
         },
     ];
 
@@ -213,7 +206,8 @@ fn choice_match_lowers_to_structured_if_with_choice_tags() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let mut module = build_module(
@@ -320,11 +314,7 @@ fn choice_match_with_wildcard_arm_emits_true_condition() {
             region: RegionId(0),
             locals: vec![],
             statements: vec![],
-            terminator: HirTerminator::Return(unit_expression(
-                types.unit,
-                RegionId(0),
-                &mut expressions,
-            )),
+            terminator: HirTerminator::Return(HirValueRange::empty()),
         },
     ];
 
@@ -332,7 +322,8 @@ fn choice_match_with_wildcard_arm_emits_true_condition() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let mut module = build_module(
@@ -479,11 +470,7 @@ fn relational_match_patterns_emit_correct_js_operators() {
             region: RegionId(0),
             locals: vec![],
             statements: vec![],
-            terminator: HirTerminator::Return(unit_expression(
-                types.unit,
-                RegionId(0),
-                &mut expressions,
-            )),
+            terminator: HirTerminator::Return(HirValueRange::empty()),
         },
     ];
 
@@ -491,7 +478,8 @@ fn relational_match_patterns_emit_correct_js_operators() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(

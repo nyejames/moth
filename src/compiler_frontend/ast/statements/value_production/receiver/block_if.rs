@@ -7,11 +7,12 @@
 
 use super::ValueIfParseInput;
 use super::block_body::{BlockBodyParseInput, parse_value_block_bodies};
-use super::result_type::{final_slot_type_ids, infer_block_if_result_type};
+use super::result_type::infer_block_if_result_type;
 use super::retained::{DeferredValueBlock, DeferredValueBlockForm, RetainedValueBlock};
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::generic_functions::IfGenericRequestRanges;
 use crate::compiler_frontend::ast::numeric_construction::StatementExpression;
 use crate::compiler_frontend::ast::statements::value_production::completeness::{
@@ -21,7 +22,6 @@ use crate::compiler_frontend::ast::statements::value_production::expression_buil
 use crate::compiler_frontend::ast::statements::value_production::types::{
     ParsedReceiverValue, ValueBlock, ValueIfBlock, ValueReceiverKind,
 };
-use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -37,6 +37,8 @@ pub(super) fn parse_block_value_if(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         target,
         string_table,
         condition,
@@ -53,6 +55,8 @@ pub(super) fn parse_block_value_if(
         then_parent: context,
         else_parent: context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         active_target: target.clone(),
         path_fork,
@@ -98,7 +102,8 @@ pub(super) fn parse_block_value_if(
         expected_result_type_ids,
         receiver_kind,
         needs_slot_inference,
-        type_interner,
+        expression_builder,
+        const_values,
     })
 }
 
@@ -109,8 +114,8 @@ pub(super) fn parse_block_value_if(
 /// WHY: branch-closure validation, result-slot inference and expression construction must run in
 ///      one place, whether the bodies came from this parse or from a retained body the enclosing
 ///      body root resolved later.
-pub(super) struct BlockValueIfFinishInput<'a, 'b> {
-    pub(super) condition: Expression,
+pub(super) struct BlockValueIfFinishInput<'a> {
+    pub(super) condition: ExprId,
     pub(super) then_body: Vec<AstNode>,
     pub(super) else_body: Vec<AstNode>,
     pub(super) then_scope: PathId,
@@ -120,7 +125,8 @@ pub(super) struct BlockValueIfFinishInput<'a, 'b> {
     pub(super) expected_result_type_ids: Vec<TypeId>,
     pub(super) receiver_kind: ValueReceiverKind,
     pub(super) needs_slot_inference: bool,
-    pub(super) type_interner: &'a mut AstTypeInterner<'b>,
+    pub(super) expression_builder: &'a mut AstExpressionBuilder,
+    pub(super) const_values: &'a mut ConstValueStore,
 }
 
 /// Finishes a block value-if from concrete branch bodies.
@@ -131,7 +137,7 @@ pub(super) struct BlockValueIfFinishInput<'a, 'b> {
 /// WHY: the parse path and a resumed retained body must share one construction owner, so no
 ///      second inference or validation path can disagree with the authored parse.
 pub(super) fn finish_block_value_if(
-    input: BlockValueIfFinishInput<'_, '_>,
+    input: BlockValueIfFinishInput<'_>,
 ) -> BlockIfResult<ParsedReceiverValue> {
     let BlockValueIfFinishInput {
         condition,
@@ -144,11 +150,12 @@ pub(super) fn finish_block_value_if(
         expected_result_type_ids,
         receiver_kind,
         needs_slot_inference,
-        type_interner,
+        expression_builder,
+        const_values,
     } = input;
 
-    let then_exits = analyze_branch_exits(&then_body);
-    let else_exits = analyze_branch_exits(&else_body);
+    let then_exits = analyze_branch_exits(&then_body, &*expression_builder, &*const_values);
+    let else_exits = analyze_branch_exits(&else_body, &*expression_builder, &*const_values);
     validate_closed_branch_pair(then_exits, else_exits, span)?;
 
     if needs_slot_inference {
@@ -167,15 +174,15 @@ pub(super) fn finish_block_value_if(
         });
     }
 
-    let result_type_id = infer_block_if_result_type(
+    let result_type_ids = infer_block_if_result_type(
         &then_body,
         &else_body,
         &expected_result_type_ids,
-        type_interner,
         span,
         receiver_kind,
+        expression_builder,
+        const_values,
     )?;
-    let result_type_ids = final_slot_type_ids(&expected_result_type_ids, result_type_id);
 
     Ok(ParsedReceiverValue::Complete(build_value_if_expression(
         ValueIfBlock {
@@ -189,7 +196,6 @@ pub(super) fn finish_block_value_if(
             result_type_ids,
         },
         span,
-        result_type_id,
-        type_interner.environment(),
-    )))
+        expression_builder,
+    )?))
 }

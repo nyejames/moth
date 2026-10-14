@@ -41,7 +41,7 @@ pub(crate) fn lower_statement(
         HirStatementKind::Call {
             target,
             args,
-            result,
+            results,
         } => {
             let args = context.module_context.hir_module.expressions.values(*args);
             let mut lowered_args = Vec::with_capacity(args.len());
@@ -87,12 +87,23 @@ pub(crate) fn lower_statement(
                 }
             };
 
-            let dst = result
-                .as_ref()
-                .and_then(|destination| context.local_map.get(&destination.local()).copied());
+            let mut lowered_results = Vec::with_capacity(results.len());
+            for destination in results {
+                let local = context
+                    .local_map
+                    .get(&destination.local())
+                    .copied()
+                    .ok_or_else(|| {
+                        lir_transformation_error(format!(
+                            "Wasm lowering missing call result local {:?}",
+                            destination.local()
+                        ))
+                    })?;
+                lowered_results.push(local);
+            }
 
             statements.push(WasmLirStmt::Call {
-                dst,
+                results: lowered_results,
                 callee,
                 args: lowered_args,
             });
@@ -101,9 +112,6 @@ pub(crate) fn lower_statement(
         }
         HirStatementKind::MapOp { .. } => Err(lir_transformation_error(
             "Wasm hashmap operation reached lowering before backend feature validation",
-        )),
-        HirStatementKind::CastOp { .. } => Err(lir_transformation_error(
-            "Wasm lowering does not yet support cast operations",
         )),
         HirStatementKind::NumericOp {
             op,

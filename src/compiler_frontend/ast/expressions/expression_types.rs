@@ -1,7 +1,7 @@
 //! Supporting expression type contracts shared by AST parsing, folding, and HIR lowering.
 //!
 //! WHAT: stores small semantic enums that describe constant classification,
-//! fallible-expression handling, compiler built-in casts, and temporary fallible carrier variants.
+//! fallible-expression handling and compiler built-in casts.
 //! WHY: these contracts are used across expression construction and lowering,
 //! but they are not the expression value shape itself.
 
@@ -38,8 +38,8 @@ pub enum ConstValueKind {
 
     /// Aggregate value whose fields or elements are all compile-time constants.
     ///
-    /// Covers struct instances, choice constructors, collections, ranges, and
-    /// fallible carriers when every sub-expression is itself constant.
+    /// Covers struct instances, choice constructors, collections and ranges when every
+    /// sub-expression is itself constant.
     Composite,
 
     /// Template that can be fully rendered to a constant string at compile time.
@@ -109,10 +109,9 @@ pub(crate) enum CastHandling {
     StoreConversion,
 }
 
-/// Bodyless fallible handling stored by expression variants.
+/// Bodyless handling retained in the expression store's handling records.
 ///
-/// WHAT: expression nodes need to know whether they propagate or recover, but recovery handler
-/// bodies are statement fragments and therefore live on `ValueCatchBlock`.
+/// Recovery statement bodies belong to `ValueCatchBlock`, not individual operation rows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FallibleExpressionHandling {
     /// The `!` operator: propagate the error upward to the caller.
@@ -150,12 +149,4 @@ pub enum FallibleHandling {
 #[derive(Clone, Debug)]
 pub struct CatchErrorBinding {
     pub error_binding: PathId,
-}
-
-/// Success or error variant for fallible carrier construction.
-#[cfg(test)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FallibleCarrierVariant {
-    Success,
-    Error,
 }

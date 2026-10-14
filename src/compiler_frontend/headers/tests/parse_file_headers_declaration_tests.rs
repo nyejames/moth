@@ -624,7 +624,7 @@ fn top_level_expression_symbols_stay_in_implicit_start_body() {
 
     let start_header = start_function_header(&headers);
     let start_symbols = symbol_tokens_in_header_body(&headers, start_header, &string_table);
-    let header_names = non_start_header_names(&headers, &string_table);
+    let header_names = declared_header_names(&headers, &string_table);
 
     assert!(
         start_symbols.iter().any(|symbol| symbol == "basic"),
@@ -662,7 +662,7 @@ fn compile_time_declarations_parse_as_headers_without_elevating_body_symbols() {
          theme\n",
     );
 
-    let header_names = non_start_header_names(&headers, &string_table);
+    let header_names = declared_header_names(&headers, &string_table);
     assert_eq!(
         header_names,
         vec![String::from("theme")],

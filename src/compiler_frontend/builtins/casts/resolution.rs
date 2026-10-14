@@ -3,7 +3,7 @@
 //! WHAT: resolves a parsed `cast` operand against an explicit typed boundary by
 //!      selecting builtin, user-defined, or validation-only generic-bound evidence,
 //!      instantiating generic evidence methods, and validating the handling form.
-//!      HIR and backend lowering consume the resolved `ExpressionKind::Cast` without
+//!      HIR and backend lowering consume the resolved `ExpressionOp::Cast` without
 //!      re-solving trait evidence.
 //! WHY: centralising evidence selection and cast-specific diagnostics prevents
 //!      boundary callers from duplicating trait/evidence lookup logic, and keeps the
@@ -14,14 +14,17 @@ use super::targets::{BuiltinCastFallibility, BuiltinCastTarget, builtin_cast_tar
 use super::traits::{builtin_cast_trait_metadata, core_cast_trait_for_target_and_fallibility};
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
-use crate::compiler_frontend::ast::expressions::expression_kind::ResolvedCastExpression;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, CastFacts, OwnedExpr,
+};
 use crate::compiler_frontend::ast::expressions::expression_types::{
     CastHandling, ResolvedCastEvidence,
 };
 use crate::compiler_frontend::ast::generic_functions::instantiate_generic_cast_evidence_method;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidCastReason};
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, InvalidCastReason, ValueReceiverContext,
+};
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_parameters::ActiveGenericTypeContext;
@@ -48,7 +51,7 @@ type CastResolutionResult<T> = Result<T, ExpressionParseError>;
 /// WHY: cast resolution is a stage-owned operation with several required
 ///      collaborators. Keeping them named prevents another long parser-to-AST
 pub(crate) struct CastResolutionInput<'a, 'interner> {
-    pub(crate) source: Expression,
+    pub(crate) source: OwnedExpr,
     pub(crate) target_type_id: TypeId,
     pub(crate) target: BuiltinCastTarget,
     pub(crate) requires_optional_wrap_after_cast: bool,
@@ -57,6 +60,7 @@ pub(crate) struct CastResolutionInput<'a, 'interner> {
     pub(crate) trait_environment: &'a TraitEnvironment,
     pub(crate) trait_evidence_environment: &'a TraitEvidenceEnvironment,
     pub(crate) type_interner: &'a mut AstTypeInterner<'interner>,
+    pub(crate) expression_builder: &'a mut AstExpressionBuilder,
     pub(crate) string_table: &'a mut StringTable,
     pub(crate) path_fork: &'a mut PathInternerFork,
     pub(crate) active_generic_type_context: Option<&'a ActiveGenericTypeContext>,
@@ -73,7 +77,7 @@ pub(crate) struct CastResolutionInput<'a, 'interner> {
 ///      duplicate the lookup logic.
 pub(crate) fn resolve_cast_expression(
     input: CastResolutionInput<'_, '_>,
-) -> CastResolutionResult<Expression> {
+) -> CastResolutionResult<OwnedExpr> {
     let CastResolutionInput {
         source,
         target_type_id,
@@ -84,14 +88,16 @@ pub(crate) fn resolve_cast_expression(
         trait_environment,
         trait_evidence_environment,
         type_interner,
+        expression_builder,
         string_table,
         path_fork,
         active_generic_type_context,
         span,
     } = input;
 
-    let source_type_id = source.type_id;
-    let source_span = source.span;
+    let source_view = expression_builder.view_owned(source)?;
+    let source_type_id = source_view.require_single(ValueReceiverContext::CastSource)?;
+    let source_span = source_view.span();
 
     if type_interner.environment().is_option(source_type_id) {
         return Err(CompilerDiagnostic::invalid_cast(
@@ -159,35 +165,32 @@ pub(crate) fn resolve_cast_expression(
         source_span,
         scope_context,
         type_interner,
+        expression_builder,
         string_table,
         path_fork,
     )?;
 
-    let cast = ResolvedCastExpression {
-        source: Box::new(source),
-        source_type_id,
-        target_type_id,
-        target,
-        requires_optional_wrap_after_cast,
-        evidence,
-        fallibility,
-        handling,
-        span,
-    };
-
-    let result_type_id = if cast.requires_optional_wrap_after_cast {
+    let result_type_id = if requires_optional_wrap_after_cast {
         type_interner
             .environment_mut_for_derived_types()
-            .intern_option(cast.target_type_id)
+            .intern_option(target_type_id)
     } else {
-        cast.target_type_id
+        target_type_id
     };
 
-    Ok(Expression::cast(
-        cast,
+    Ok(expression_builder.cast(
+        source,
+        CastFacts {
+            source_type_id,
+            target_type_id,
+            requires_optional_wrap_after_cast,
+            fallibility,
+            evidence,
+            handling,
+            span,
+        },
         result_type_id,
-        type_interner.environment(),
-    ))
+    )?)
 }
 
 /// Resolves one selected user-defined evidence method to its concrete instance.
@@ -199,15 +202,20 @@ pub(crate) fn resolve_cast_expression(
 /// WHY: a cast's evidence method is a hidden receiver call. Evidence resolves before HIR, so the
 ///      template origin must be replaced by its concrete instance here; the operand keeps one
 ///      authored evaluation and one AST allocation across inference and the final cast node.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "evidence method keeps the evidence, source, span, scope and mutable state separate"
+)]
 fn instantiate_user_defined_evidence_method(
     evidence: ResolvedCastEvidence,
-    source: Expression,
+    source: OwnedExpr,
     source_span: Option<SourceSpan>,
     scope_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &AstExpressionBuilder,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> CastResolutionResult<(ResolvedCastEvidence, Expression)> {
+) -> CastResolutionResult<(ResolvedCastEvidence, OwnedExpr)> {
     let ResolvedCastEvidence::UserDefined {
         evidence_id,
         method_path,
@@ -235,6 +243,7 @@ fn instantiate_user_defined_evidence_method(
         source_span,
         scope_context,
         type_interner,
+        expression_builder,
         string_table,
         path_fork,
     )?;

@@ -23,15 +23,15 @@
 //! - Receiver-method catalog construction
 //! - Body lowering and template normalization
 
-use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration};
-use crate::compiler_frontend::ast::expressions::expression::{
-    Expression, ExpressionKind, type_id_hint_for_diagnostic_type,
+use crate::compiler_frontend::ast::ast_nodes::{
+    AstNode, Declaration, DeclarationShell, DeclarationValue,
 };
-use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ReturnSlot};
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::datatypes::{DataType, builtin_type_ids};
 use crate::compiler_frontend::declaration_syntax::declaration_shell::DeclarationSyntax;
 use crate::compiler_frontend::declaration_syntax::type_syntax::parsed_ref_to_data_type;
+use crate::compiler_frontend::folded_value::PublicFoldedValue;
 
 use crate::compiler_frontend::headers::parse_file_headers::{
     FileRole, Header, HeaderKind, RetainedDependencyClause,
@@ -240,6 +240,7 @@ pub(crate) struct ModuleSymbols {
     pub(crate) builtin_struct_ast_nodes: Vec<AstNode>,
     pub(crate) resolved_struct_fields_by_path: FxHashMap<PathId, Vec<Declaration>>,
     pub(crate) struct_source_by_path: FxHashMap<PathId, PathId>,
+    pub(crate) folded_defaults_by_field_path: FxHashMap<PathId, PublicFoldedValue>,
 
     // Receiver-method paths detected during header parsing.
     // WHAT: every function whose first parameter is named `this` is recorded here so binding
@@ -331,6 +332,7 @@ impl ModuleSymbols {
             builtin_struct_ast_nodes: Vec::new(),
             resolved_struct_fields_by_path: FxHashMap::default(),
             struct_source_by_path: FxHashMap::default(),
+            folded_defaults_by_field_path: FxHashMap::default(),
             receiver_method_paths: FxHashSet::default(),
             receiver_method_receiver_names: FxHashMap::default(),
             type_alias_paths: FxHashSet::default(),
@@ -422,60 +424,45 @@ fn declaration_from_header(
     path_fork: &mut PathInternerFork,
 ) -> Option<Declaration> {
     match &header.kind {
-        HeaderKind::Function { .. } => Some(Declaration {
-            id: header.declaration_path.to_owned(),
-            value: {
-                let data_type = DataType::Function(Box::new(None), FunctionSignature::default());
-                Expression::new(
-                    ExpressionKind::NoValue,
-                    header.name_span,
-                    type_id_hint_for_diagnostic_type(&data_type),
-                    data_type,
-                    ValueMode::ImmutableReference,
-                )
-            },
-            binding_span: header.name_span,
-            config_qualifier: None,
-        }),
+        HeaderKind::Function { .. } => {
+            let diagnostic_type = DataType::Inferred;
+            Some(Declaration {
+                id: header.declaration_path,
+                type_id: builtin_type_ids::NONE,
+                diagnostic_type,
+                value_mode: ValueMode::ImmutableReference,
+                value: DeclarationValue::Shell(DeclarationShell::Function { receiver: None }),
+                binding_span: header.name_span,
+                config_qualifier: None,
+            })
+        }
         HeaderKind::Constant { declaration, .. } => Some(constant_declaration_placeholder(
             &header.declaration_path,
             declaration,
             header.name_span,
         )),
         HeaderKind::Struct { .. } => Some(Declaration {
-            id: header.declaration_path.to_owned(),
-            value: {
-                let data_type = DataType::runtime_struct(
-                    header.declaration_path.to_owned(),
-                    builtin_type_ids::NONE,
-                );
-                Expression::new(
-                    ExpressionKind::NoValue,
-                    header.name_span,
-                    type_id_hint_for_diagnostic_type(&data_type),
-                    data_type,
-                    ValueMode::ImmutableReference,
-                )
-            },
+            id: header.declaration_path,
+            type_id: builtin_type_ids::NONE,
+            diagnostic_type: DataType::runtime_struct(
+                header.declaration_path,
+                builtin_type_ids::NONE,
+            ),
+            value_mode: ValueMode::ImmutableReference,
+            value: DeclarationValue::Shell(DeclarationShell::Struct),
             binding_span: header.name_span,
             config_qualifier: None,
         }),
         HeaderKind::Choice { .. } => Some(Declaration {
-            id: header.declaration_path.to_owned(),
-            value: {
-                let data_type = DataType::Choices {
-                    nominal_path: header.declaration_path.to_owned(),
-                    type_id: builtin_type_ids::NONE,
-                    generic_instance_key: None,
-                };
-                Expression::new(
-                    ExpressionKind::NoValue,
-                    header.name_span,
-                    type_id_hint_for_diagnostic_type(&data_type),
-                    data_type,
-                    ValueMode::ImmutableReference,
-                )
+            id: header.declaration_path,
+            type_id: builtin_type_ids::NONE,
+            diagnostic_type: DataType::Choices {
+                nominal_path: header.declaration_path,
+                type_id: builtin_type_ids::NONE,
+                generic_instance_key: None,
             },
+            value_mode: ValueMode::ImmutableReference,
+            value: DeclarationValue::Shell(DeclarationShell::Choice),
             binding_span: header.name_span,
             config_qualifier: None,
         }),
@@ -485,26 +472,13 @@ fn declaration_from_header(
             let start_name = path_fork
                 .try_intern_child(source_file, string_table.intern(IMPLICIT_START_FUNC_NAME))
                 .expect("path table exhausted while interning implicit start path");
+            let diagnostic_type = DataType::Inferred;
             Some(Declaration {
-                id: start_name.to_owned(),
-                value: {
-                    let data_type = DataType::Function(
-                        Box::new(None),
-                        FunctionSignature {
-                            parameters: vec![],
-                            returns: vec![ReturnSlot::success(DataType::collection(
-                                DataType::StringSlice,
-                            ))],
-                        },
-                    );
-                    Expression::new(
-                        ExpressionKind::NoValue,
-                        header.name_span,
-                        type_id_hint_for_diagnostic_type(&data_type),
-                        data_type,
-                        ValueMode::ImmutableReference,
-                    )
-                },
+                id: start_name,
+                type_id: builtin_type_ids::NONE,
+                diagnostic_type,
+                value_mode: ValueMode::ImmutableReference,
+                value: DeclarationValue::Shell(DeclarationShell::Function { receiver: None }),
                 binding_span: None,
                 config_qualifier: None,
             })
@@ -522,18 +496,23 @@ fn constant_declaration_placeholder(
     declaration: &DeclarationSyntax,
     name_span: Option<SourceSpan>,
 ) -> Declaration {
+    let semantic_type = declaration.semantic_type();
+    let diagnostic_type = parsed_ref_to_data_type(&semantic_type);
+    // Seeded scalar annotations are already exact and remain visible to early constant
+    // references. Environment-owned annotations wait for AST type resolution.
+    let type_id = match semantic_type {
+        ParsedTypeRef::BuiltinBool { .. } => builtin_type_ids::BOOL,
+        ParsedTypeRef::BuiltinString { .. } => builtin_type_ids::STRING,
+        ParsedTypeRef::BuiltinChar { .. } => builtin_type_ids::CHAR,
+        ParsedTypeRef::BuiltinFixedScalar { scalar, .. } => builtin_type_ids::fixed_scalar(scalar),
+        _ => builtin_type_ids::NONE,
+    };
     Declaration {
-        id: path.to_owned(),
-        value: {
-            let data_type = parsed_ref_to_data_type(&declaration.semantic_type());
-            Expression::new(
-                ExpressionKind::NoValue,
-                name_span,
-                type_id_hint_for_diagnostic_type(&data_type),
-                data_type,
-                declaration.value_mode(),
-            )
-        },
+        id: *path,
+        type_id,
+        diagnostic_type,
+        value_mode: declaration.value_mode(),
+        value: DeclarationValue::PendingConstant,
         binding_span: name_span,
         config_qualifier: None,
     }

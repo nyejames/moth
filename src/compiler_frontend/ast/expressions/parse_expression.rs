@@ -7,17 +7,19 @@
 use super::call_arguments::ParsedCallArguments;
 use super::error::{ExpressionParseError, NumericDeferral};
 use super::eval_expression::{evaluate_expression, extract_expression_span};
-use super::expression::Expression;
-use super::expression_rpn::ExpressionRpnItem;
+use super::expression_rpn::{ExpressionRpnItem, single_operand};
+use super::expression_store::{AstExpressionBuilder, ExprId, ExpressionView, OwnedExpr};
 use super::failure_facts::{ExpressionFailureFacts, FailureDisposition, TypedErrorProducer};
 use super::parse_expression_dispatch::{
-    ExpressionDispatchState, ExpressionTokenStep, dispatch_expression_token,
+    ExpressionDispatchState, ExpressionTokenStep, GroupFrame, close_innermost_group,
+    dispatch_expression_token,
 };
 use super::parse_expression_input::{
     ExpressionParseInput, ExpressionParseResources, ExpressionTrailingPolicy,
 };
 use crate::ast_log;
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::const_values::ConstValueStore;
 use crate::compiler_frontend::ast::field_access::{
     DeferredCallReceiver, GenericSuccessSlots, RetainedOperandContinuation, RetainedPostfixStep,
     RetainedTerminalCall, retained_operand_numeric_origin_shape, retained_operand_result_shape,
@@ -26,8 +28,9 @@ use crate::compiler_frontend::ast::field_access::{
 use crate::compiler_frontend::ast::generic_functions::numeric_origins::GenericErrorReturn;
 use crate::compiler_frontend::ast::numeric_construction::{
     ConstructionResult, DeferredCall, DeferredCallArgument, DeferredCallHandling,
-    DeferredExpression, DeferredExpressionSuffix, TypedErrorFact, deferred_numeric_expression,
-    register_direct_reference_witness, retained_known_shape, single_direct_pending_reference,
+    DeferredExpression, DeferredExpressionSuffix, DeferredNumericExpression, TypedErrorFact,
+    deferred_numeric_expression, register_direct_reference_witness, retained_known_shape,
+    single_direct_pending_reference,
 };
 use crate::compiler_frontend::ast::numeric_known_shape::{KnownShapeId, register_shape_witness};
 use crate::compiler_frontend::ast::statements::fallible_handling::{
@@ -56,7 +59,7 @@ use crate::compiler_frontend::utilities::token_scan::ExpressionBoundaryDepth;
 //      fallback/return lists) must preserve line boundaries between statements.
 pub(crate) fn create_expression_with_trailing_newline_policy(
     mut input: ExpressionParseInput<'_, '_, '_>,
-) -> Result<Expression, ExpressionParseError> {
+) -> Result<OwnedExpr, ExpressionParseError> {
     if !input.scope_context.defer_typed_error_validation {
         let deferred_context = input
             .scope_context
@@ -66,6 +69,8 @@ pub(crate) fn create_expression_with_trailing_newline_policy(
                 token_stream: input.token_stream,
                 scope_context: &deferred_context,
                 type_interner: input.type_interner,
+                expression_builder: &mut *input.expression_builder,
+                const_values: &mut *input.const_values,
                 expected_type: input.expected_type,
                 cast_target_context: input.cast_target_context,
                 value_mode: input.value_mode,
@@ -78,23 +83,30 @@ pub(crate) fn create_expression_with_trailing_newline_policy(
         deferred_input.numeric_deferral_owner = input.numeric_deferral_owner;
         deferred_input.retain_pending_numeric_fragment = input.retain_pending_numeric_fragment;
         let expression = create_expression_with_trailing_newline_policy(deferred_input)?;
-        validate_completed_typed_errors(&expression)?;
+        validate_completed_typed_errors(input.expression_builder.view_owned(expression)?)?;
         return Ok(expression);
     }
 
     // Keep the authored terminator until recovery has selected its expression.
     let skip_trailing_newlines = input.trailing_policy.skip_trailing_newlines;
     input.trailing_policy.skip_trailing_newlines = false;
-    let nodes = match collect_expression_fragment(&mut input)? {
+    let fragment = match collect_expression_fragment(&mut input)? {
         ExpressionFragment::Value(value) => {
             if skip_trailing_newlines {
                 input.token_stream.skip_newlines();
             }
-            return Ok(*value);
+            return Ok(value);
         }
         ExpressionFragment::Nodes(nodes) => nodes,
     };
+    finish_collected_fragment(input, fragment, skip_trailing_newlines)
+}
 
+fn finish_collected_fragment(
+    mut input: ExpressionParseInput<'_, '_, '_>,
+    nodes: Vec<ExpressionRpnItem>,
+    skip_trailing_newlines: bool,
+) -> Result<OwnedExpr, ExpressionParseError> {
     // A fragment containing origins that only body completion can resolve is retained instead of
     // evaluated. The position's own receiving context travels with it so completion evaluates the
     // exact authored syntax at the resolved destination. An eligible origin boundary additionally
@@ -118,7 +130,7 @@ pub(crate) fn create_expression_with_trailing_newline_policy(
             return Err(retain_pending_fragment_catch(&mut input, nodes)?);
         }
         let suffix = consume_deferred_expression_suffix(input.token_stream)?;
-        let span = extract_expression_span(&nodes).ok().flatten();
+        let span = extract_expression_span(input.expression_builder, &nodes)?;
         return Err(ExpressionParseError::NumericDeferral(Box::new(
             NumericDeferral {
                 items: nodes,
@@ -135,6 +147,8 @@ pub(crate) fn create_expression_with_trailing_newline_policy(
         input.scope_context,
         nodes,
         input.type_interner,
+        input.expression_builder,
+        input.const_values,
         input.expected_type,
         input.value_mode,
         input.string_table,
@@ -145,6 +159,8 @@ pub(crate) fn create_expression_with_trailing_newline_policy(
         input.token_stream,
         input.scope_context,
         input.type_interner,
+        input.expression_builder,
+        input.const_values,
         expression,
         input.trailing_policy.allow_boundary_catch,
         input.string_table,
@@ -155,6 +171,213 @@ pub(crate) fn create_expression_with_trailing_newline_policy(
         input.token_stream.skip_newlines();
     }
     Ok(expression)
+}
+
+/// One already parsed prefix handed back into the shared expression parser.
+///
+/// WHAT: a completed subject contributes its retained ID, while a numeric-dependent subject
+///       contributes its ordered transient fragment exactly as authored.
+/// WHY: a tentative predicate must not be reparsed or discarded. A retained fragment's numeric
+///      origins, forward-producer tickets and generic requests stay issued once, and its receiving
+///      context travels with it into the resumed condition.
+pub(crate) enum ExpressionParseSeed {
+    /// A committed value reused by its identity, without rewalking the tokens that built it.
+    Completed(OwnedExpr),
+    /// A numeric-dependent fragment resumed before its body-root selection.
+    Fragment(DeferredNumericExpression),
+}
+
+/// Bounded seeded resume: parse the remaining tokens in `[start, stop)` after a scrutinee prefix.
+///
+/// WHAT: locates the stop-token window exactly like `create_expression_until`, narrows the cursor
+///       to it, pre-appends the seed (completed ID as one operand, or retained fragment items in
+///       order), then collects/evaluates the combined fragment through the shared pipeline.
+/// WHY: ordinary single-predicate subjects resume the central parser after classification, so the
+///      subject parse registers forward producers and generic requests exactly once. The bounded
+///      window keeps the `THEN`/`COLON` terminator for the receiver grammar.
+pub(crate) fn create_expression_until_with_seed(
+    input: ExpressionParseInput<'_, '_, '_>,
+    stop_tokens: &[TokenTag],
+    seed: ExpressionParseSeed,
+) -> Result<OwnedExpr, ExpressionParseError> {
+    let (seed_items, seed_expected, seed_value_mode) = match seed {
+        ExpressionParseSeed::Completed(id) => {
+            input.expression_builder.view_owned(id)?;
+            (vec![ExpressionRpnItem::Operand(id.id())], None, None)
+        }
+        ExpressionParseSeed::Fragment(fragment) => {
+            let DeferredNumericExpression {
+                items,
+                expected,
+                value_mode,
+                ..
+            } = fragment;
+            (items, Some(expected), Some(value_mode))
+        }
+    };
+    if let Some(expected) = seed_expected {
+        *input.expected_type = expected;
+    }
+    // The scrutinee and its resumed condition share one value mode (both parse under
+    // `ImmutableOwned`); the seed carries it so a future divergence fails loudly here.
+    if let Some(mode) = seed_value_mode {
+        debug_assert_eq!(
+            *input.value_mode, mode,
+            "seeded resume value mode must match caller"
+        );
+    }
+    create_expression_until_with_seeded_items(input, stop_tokens, seed_items)
+}
+
+fn create_expression_until_with_seeded_items(
+    input: ExpressionParseInput<'_, '_, '_>,
+    stop_tokens: &[TokenTag],
+    seed_items: Vec<ExpressionRpnItem>,
+) -> Result<OwnedExpr, ExpressionParseError> {
+    if !input.scope_context.defer_typed_error_validation {
+        let deferred_context = input
+            .scope_context
+            .new_pending_typed_error_expression_context();
+        let deferred_input = ExpressionParseInput::new(
+            ExpressionParseResources {
+                token_stream: input.token_stream,
+                scope_context: &deferred_context,
+                type_interner: input.type_interner,
+                expression_builder: &mut *input.expression_builder,
+                const_values: &mut *input.const_values,
+                expected_type: input.expected_type,
+                cast_target_context: input.cast_target_context,
+                value_mode: input.value_mode,
+                string_table: input.string_table,
+                path_fork: input.path_fork,
+            },
+            input.trailing_policy,
+        );
+        // Flag state travels explicitly: the deferred input starts clean.
+        let mut deferred_input = deferred_input;
+        deferred_input.stop_at_named_entry = input.stop_at_named_entry;
+        deferred_input.numeric_deferral_owner = input.numeric_deferral_owner;
+        deferred_input.retain_pending_numeric_fragment = input.retain_pending_numeric_fragment;
+        let expression = create_expression_until_with_seeded_items_inner(
+            deferred_input,
+            stop_tokens,
+            seed_items,
+        )?;
+        validate_completed_typed_errors(input.expression_builder.view_owned(expression)?)?;
+        return Ok(expression);
+    }
+    create_expression_until_with_seeded_items_inner(input, stop_tokens, seed_items)
+}
+
+fn create_expression_until_with_seeded_items_inner(
+    input: ExpressionParseInput<'_, '_, '_>,
+    stop_tokens: &[TokenTag],
+    seed_items: Vec<ExpressionRpnItem>,
+) -> Result<OwnedExpr, ExpressionParseError> {
+    // Empty stop list keeps the unbounded trailing policy with the seed prefix.
+    if stop_tokens.is_empty() {
+        let skip_trailing_newlines = input.trailing_policy.skip_trailing_newlines;
+        let mut input = input;
+        input.trailing_policy.skip_trailing_newlines = false;
+        let mut collected = seed_items;
+        collect_expression_fragment_into(&mut input, &mut collected)?;
+        return finish_collected_fragment(input, collected, skip_trailing_newlines);
+    }
+    // Reuse the bounded window scan: locate the stop token, narrow the cursor, collect the
+    // remainder onto the seed, then restore the cursor onto the stop token.
+    let start_index = input.token_stream.position();
+    let mut depth = ExpressionBoundaryDepth::default();
+    while !input.token_stream.is_at_end() {
+        if depth.is_top_level() && stop_tokens.contains(&input.token_stream.current_tag()) {
+            break;
+        }
+        depth.step_tag(input.token_stream.current_tag());
+        if input.token_stream.current_tag() == TokenTag::EOF {
+            break;
+        }
+        input.token_stream.advance();
+    }
+    let end_index = input.token_stream.position();
+    let end_tag =
+        (end_index < input.token_stream.length()).then(|| input.token_stream.current_tag());
+    let end_span = input.token_stream.span_at(end_index);
+    input
+        .token_stream
+        .set_position(start_index)
+        .expect("seeded expression boundary resume stays inside the active parser view");
+    if end_index >= input.token_stream.length() {
+        let expected_tokens = stop_tokens
+            .iter()
+            .map(|token| format!("{token:?}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let expected_delimiter = input.string_table.intern(&expected_tokens);
+        return Err(CompilerDiagnostic::unexpected_end_of_file(
+            Some(expected_delimiter),
+            Some(input.token_stream.current_span()),
+        )
+        .into());
+    }
+    let Some(end_tag) = end_tag else {
+        let expected_tokens = stop_tokens
+            .iter()
+            .map(|token| format!("{token:?}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let expected_delimiter = input.string_table.intern(&expected_tokens);
+        return Err(CompilerDiagnostic::unexpected_end_of_file(
+            Some(expected_delimiter),
+            Some(input.token_stream.current_span()),
+        )
+        .into());
+    };
+    if !stop_tokens.contains(&end_tag) {
+        return Err(CompilerDiagnostic::unexpected_token_from_tag(
+            DiagnosticToken::from_static_tag(end_tag),
+            end_span,
+        )
+        .into());
+    }
+    // An empty remainder means the scrutinee already spans the whole condition (e.g. a bare
+    // `is`-less subject is impossible here — the seed stopped at `is` — but a defensive empty
+    // window must not fabricate an empty fragment).
+    let previous_limit = input.token_stream.set_limit(end_index)?;
+    let mut inner_input = ExpressionParseInput::new(
+        ExpressionParseResources {
+            token_stream: input.token_stream,
+            scope_context: input.scope_context,
+            type_interner: input.type_interner,
+            expression_builder: input.expression_builder,
+            const_values: input.const_values,
+            expected_type: input.expected_type,
+            cast_target_context: input.cast_target_context,
+            value_mode: input.value_mode,
+            string_table: input.string_table,
+            path_fork: input.path_fork,
+        },
+        ExpressionTrailingPolicy {
+            consume_closing_parenthesis: false,
+            skip_trailing_newlines: false,
+            allow_boundary_catch: input.trailing_policy.allow_boundary_catch,
+            allow_expected_result_evidence: input.trailing_policy.allow_expected_result_evidence,
+        },
+    );
+    inner_input.numeric_deferral_owner = input.numeric_deferral_owner;
+    inner_input.retain_pending_numeric_fragment = input.retain_pending_numeric_fragment;
+    inner_input.stop_at_named_entry = input.stop_at_named_entry;
+    let mut collected = seed_items;
+    let early = collect_expression_fragment_into(&mut inner_input, &mut collected)?;
+    // A lone `is:` guard evaluates the seeded scrutinee alone and returns it; the receiver
+    // grammar still owns the stop token.
+    if let Some(value) = early {
+        input.token_stream.restore_limit(previous_limit);
+        input.token_stream.set_position(end_index)?;
+        return Ok(value);
+    }
+    let result = finish_collected_fragment(inner_input, collected, true);
+    input.token_stream.restore_limit(previous_limit);
+    input.token_stream.set_position(end_index)?;
+    result
 }
 
 /// Register a retained fragment's exact receiving constraint on the origin it uses directly.
@@ -174,6 +397,7 @@ fn register_retained_fragment_witness(
     register_direct_receiver_witness(
         input.scope_context,
         input.type_interner.environment(),
+        input.expression_builder,
         nodes,
         expected_type_id,
         false,
@@ -197,6 +421,7 @@ fn register_retained_fragment_witness(
 pub(crate) fn register_direct_receiver_witness(
     scope_context: &ScopeContext,
     environment: &TypeEnvironment,
+    expression_builder: &AstExpressionBuilder,
     items: &[ExpressionRpnItem],
     receiver_type_id: TypeId,
     include_unhandled_success: bool,
@@ -213,13 +438,17 @@ pub(crate) fn register_direct_receiver_witness(
         None => receiver_operand_shape(
             scope_context,
             environment,
+            expression_builder,
             items,
             receiver_type_id,
             include_unhandled_success,
         )?,
     };
     if let Some(shape) = shape {
-        let span = items.first().and_then(ExpressionRpnItem::source_span);
+        let span = match items.first() {
+            Some(item) => item.source_span(expression_builder)?,
+            None => None,
+        };
         let mut state = scope_context.numeric_state_mut();
         register_shape_witness(&mut state, environment, shape, receiver_type_id, span);
     }
@@ -237,11 +466,12 @@ pub(crate) fn register_direct_receiver_witness(
 fn receiver_operand_shape(
     scope_context: &ScopeContext,
     environment: &TypeEnvironment,
+    expression_builder: &AstExpressionBuilder,
     items: &[ExpressionRpnItem],
     receiver_type_id: TypeId,
     include_unhandled_success: bool,
 ) -> ConstructionResult<Option<KnownShapeId>> {
-    let [item] = items else {
+    let Some(item) = single_operand(items) else {
         return Ok(None);
     };
     if is_numeric_literal_destination_type_id(receiver_type_id, environment) {
@@ -251,9 +481,16 @@ fn receiver_operand_shape(
             environment,
             receiver_type_id,
             include_unhandled_success,
+            expression_builder,
         ));
     }
-    retained_operand_result_shape(item, scope_context, environment, include_unhandled_success)
+    retained_operand_result_shape(
+        item,
+        scope_context,
+        environment,
+        include_unhandled_success,
+        expression_builder,
+    )
 }
 
 /// Retain one deferred fragment whose authored `catch` suffix protects its whole value.
@@ -271,8 +508,9 @@ fn retain_pending_fragment_catch(
     items: Vec<ExpressionRpnItem>,
 ) -> Result<ExpressionParseError, ExpressionParseError> {
     let catch_span = Some(input.token_stream.current_span());
-    let fragment_span = extract_expression_span(&items).ok().flatten();
-    let (fragment_success, error_return) = fragment_fallible_site(&items, input.scope_context);
+    let fragment_span = extract_expression_span(input.expression_builder, &items)?;
+    let (fragment_success, error_return) =
+        fragment_fallible_site(input.expression_builder, &items, input.scope_context)?;
     // An authored destination is the protected value's exact type, so it is the immediate receiving
     // type of the handler's single slot. It applies to a fragment with no resolved contract and to a
     // single-slot generic call whose arity is fixed while its slot types resolve at completion; a
@@ -298,6 +536,8 @@ fn retain_pending_fragment_catch(
         input.token_stream,
         &catch_context,
         input.type_interner,
+        input.expression_builder,
+        input.const_values,
         success_contract,
         error_return,
         true,
@@ -320,6 +560,7 @@ fn retain_pending_fragment_catch(
         *input.expected_type,
         input.scope_context,
         input.type_interner.environment_mut_for_derived_types(),
+        input.expression_builder,
     )?;
     let handled = deferred_numeric_expression(
         items,
@@ -341,6 +582,8 @@ fn retain_pending_fragment_catch(
         &payload,
         &mut input.scope_context.numeric_state_mut(),
         input.type_interner.environment(),
+        input.expression_builder,
+        input.const_values,
     );
     Ok(ExpressionParseError::NumericDeferral(Box::new(
         NumericDeferral {
@@ -404,17 +647,18 @@ impl FragmentSuccess {
 ///      `1 / f(pending)` the call's I32 instead of the fragment's F64 result. Success arity is
 ///      independent of the typed error, so an error-free `pair(1 + 2)` keeps its declared slots.
 fn fragment_fallible_site(
+    expression_builder: &AstExpressionBuilder,
     items: &[ExpressionRpnItem],
     scope_context: &ScopeContext,
-) -> (FragmentSuccess, Option<GenericErrorReturn>) {
-    let success = match items {
-        [item] => match retained_terminal_call(item) {
+) -> Result<(FragmentSuccess, Option<GenericErrorReturn>), CompilerError> {
+    let success = match single_operand(items) {
+        Some(item) => match retained_terminal_call(item) {
             Some(terminal) => terminal_call_success(terminal, scope_context),
             None => FragmentSuccess::Unresolved,
         },
-        _ => FragmentSuccess::Unresolved,
+        None => FragmentSuccess::Unresolved,
     };
-    (success, fragment_error_site(items))
+    Ok((success, fragment_error_site(expression_builder, items)?))
 }
 
 /// The success contract of one retained terminal call, from its resolved or declared facts.
@@ -452,8 +696,11 @@ fn terminal_call_success(
 ///      call constructor merges exactly those summaries; reading them keeps the parse-time
 ///      contract identical to the completed one, so `outer(g(), pending) catch |err| ...` binds
 ///      g's custom error instead of a fabricated boundary type.
-fn fragment_error_site(items: &[ExpressionRpnItem]) -> Option<GenericErrorReturn> {
-    fragment_typed_error_summary(items)
+fn fragment_error_site(
+    expression_builder: &AstExpressionBuilder,
+    items: &[ExpressionRpnItem],
+) -> Result<Option<GenericErrorReturn>, CompilerError> {
+    Ok(fragment_typed_error_summary(expression_builder, items)?
         .0
         .map(|fact| match fact {
             TypedErrorFact::Completed(producer) => {
@@ -462,7 +709,7 @@ fn fragment_error_site(items: &[ExpressionRpnItem]) -> Option<GenericErrorReturn
             TypedErrorFact::Pending { error_return, .. } => {
                 GenericErrorReturn::Retained(error_return)
             }
-        })
+        }))
 }
 
 /// The first and first-disagreeing typed producers of one retained fragment.
@@ -472,8 +719,9 @@ fn fragment_error_site(items: &[ExpressionRpnItem]) -> Option<GenericErrorReturn
 /// WHY: a deferred call argument stores this summary when it registers as a forward producer, so
 ///      its enclosing call replays the summary without the fragment's items.
 pub(crate) fn fragment_typed_error_summary(
+    expression_builder: &AstExpressionBuilder,
     items: &[ExpressionRpnItem],
-) -> (Option<TypedErrorFact>, Option<TypedErrorFact>) {
+) -> Result<(Option<TypedErrorFact>, Option<TypedErrorFact>), CompilerError> {
     /// Two producers share one error only when both are concrete and equal, or both retain the
     /// same shape. Any other pair stays a disagreement: a pending producer's type is not known
     /// until its shape completes, and the completion owner decides whether it really conflicts.
@@ -526,27 +774,39 @@ pub(crate) fn fragment_typed_error_summary(
         }
     }
 
+    fn collect_expression_facts(
+        expression_builder: &AstExpressionBuilder,
+        expression: ExprId,
+        first: &mut Option<TypedErrorFact>,
+        conflicting: &mut Option<TypedErrorFact>,
+    ) -> Result<(), CompilerError> {
+        if let Some(facts) = expression_builder.view(expression)?.failure_facts() {
+            collect_facts(facts, first, conflicting);
+        }
+        Ok(())
+    }
+
     fn collect(
+        expression_builder: &AstExpressionBuilder,
         items: &[ExpressionRpnItem],
         first: &mut Option<TypedErrorFact>,
         conflicting: &mut Option<TypedErrorFact>,
-    ) {
+    ) -> Result<(), CompilerError> {
         for item in items {
             match item {
                 ExpressionRpnItem::PendingNumericCall { call, .. } => {
-                    collect_call(call, first, conflicting);
+                    collect_call(expression_builder, call, first, conflicting)?;
                 }
-                ExpressionRpnItem::PendingGroup { nodes, .. } => collect(nodes, first, conflicting),
                 // A completed sibling operand already carries the failure summary the completed
                 // call constructor merges, so an already-built typed producer must reach the
                 // fragment's handler contract; a handled one contributes none.
                 ExpressionRpnItem::Operand(expression) => {
-                    collect_facts(&expression.failure_facts, first, conflicting);
+                    collect_expression_facts(expression_builder, *expression, first, conflicting)?;
                 }
                 // A retained cast carries its own source fragment, so a fallible call inside the
                 // cast supplies its error to the enclosing fragment's handler contract.
                 ExpressionRpnItem::PendingNumericCast { source, .. } => {
-                    collect(source, first, conflicting);
+                    collect(expression_builder, source, first, conflicting)?;
                 }
                 // A retained operand continuation keeps its operand and postfix steps, so a
                 // pending method or builtin producer reaches the handler contract as the completed
@@ -555,12 +815,18 @@ pub(crate) fn fragment_typed_error_summary(
                     if let DeferredExpression::OperandContinuation(continuation) =
                         expression.as_ref()
                     {
-                        collect_operand_continuation(continuation, first, conflicting);
+                        collect_operand_continuation(
+                            expression_builder,
+                            continuation,
+                            first,
+                            conflicting,
+                        )?;
                     }
                 }
                 _ => {}
             }
         }
+        Ok(())
     }
 
     /// Walk one retained operand continuation in authored order: its operand first, then each
@@ -569,21 +835,28 @@ pub(crate) fn fragment_typed_error_summary(
     /// arguments are walked before its own producer, matching the order its completed call is
     /// built in.
     fn collect_operand_continuation(
+        expression_builder: &AstExpressionBuilder,
         continuation: &RetainedOperandContinuation,
         first: &mut Option<TypedErrorFact>,
         conflicting: &mut Option<TypedErrorFact>,
-    ) {
+    ) -> Result<(), CompilerError> {
         collect(
-            std::slice::from_ref(&continuation.operand),
+            expression_builder,
+            &continuation.operand,
             first,
             conflicting,
-        );
+        )?;
         for step in &continuation.steps {
             match step {
                 // The chained receiver is the preceding step's completed value, so only the
                 // call's arguments and its own producer are new facts here.
                 RetainedPostfixStep::Method(call) => {
-                    collect_deferred_arguments(&call.arguments, first, conflicting);
+                    collect_deferred_arguments(
+                        expression_builder,
+                        &call.arguments,
+                        first,
+                        conflicting,
+                    )?;
                     if matches!(call.authored_handling, DeferredCallHandling::Unhandled) {
                         collect_error_return(
                             call.error_return(),
@@ -597,11 +870,21 @@ pub(crate) fn fragment_typed_error_summary(
                     match &builtin.arguments {
                         ParsedCallArguments::Ready(arguments) => {
                             for argument in arguments {
-                                collect_facts(&argument.value.failure_facts, first, conflicting);
+                                collect_expression_facts(
+                                    expression_builder,
+                                    argument.value,
+                                    first,
+                                    conflicting,
+                                )?;
                             }
                         }
                         ParsedCallArguments::Retained(arguments) => {
-                            collect_deferred_arguments(arguments, first, conflicting);
+                            collect_deferred_arguments(
+                                expression_builder,
+                                arguments,
+                                first,
+                                conflicting,
+                            )?;
                         }
                     }
                     if let Some(error_type_id) = builtin.error_return_type_id
@@ -621,6 +904,7 @@ pub(crate) fn fragment_typed_error_summary(
                 RetainedPostfixStep::Field(_) | RetainedPostfixStep::DeclaredField(_) => {}
             }
         }
+        Ok(())
     }
 
     /// Record one call's own producer: a concrete error is a completed producer, a retained one
@@ -651,17 +935,18 @@ pub(crate) fn fragment_typed_error_summary(
     /// Walk a call's argument list: ready arguments contribute their facts, retained arguments
     /// their fragment items, and forwarded arguments the summary captured at registration.
     fn collect_deferred_arguments(
+        expression_builder: &AstExpressionBuilder,
         arguments: &[DeferredCallArgument],
         first: &mut Option<TypedErrorFact>,
         conflicting: &mut Option<TypedErrorFact>,
-    ) {
+    ) -> Result<(), CompilerError> {
         for argument in arguments {
             match argument {
                 DeferredCallArgument::Ready(ready) => {
-                    collect_facts(&ready.value.failure_facts, first, conflicting);
+                    collect_expression_facts(expression_builder, ready.value, first, conflicting)?;
                 }
                 DeferredCallArgument::Retained { expression, .. } => {
-                    collect(&expression.items, first, conflicting);
+                    collect(expression_builder, &expression.items, first, conflicting)?;
                 }
                 // A registered forward argument keeps its fragment items in the registry, so its
                 // call replays the summary the fragment computed at registration.
@@ -672,20 +957,28 @@ pub(crate) fn fragment_typed_error_summary(
                 }
             }
         }
+        Ok(())
     }
 
     fn collect_call(
+        expression_builder: &AstExpressionBuilder,
         call: &DeferredCall,
         first: &mut Option<TypedErrorFact>,
         conflicting: &mut Option<TypedErrorFact>,
-    ) {
+    ) -> Result<(), CompilerError> {
         collect_error_return(call.error_return(), call.call_span(), first, conflicting);
-        collect_deferred_arguments(deferred_call_arguments(call), first, conflicting);
+        collect_deferred_arguments(
+            expression_builder,
+            deferred_call_arguments(call),
+            first,
+            conflicting,
+        )?;
         if let DeferredCall::Receiver(deferred) = call
             && let DeferredCallReceiver::Ready(receiver) = &deferred.receiver
         {
-            collect_facts(&receiver.failure_facts, first, conflicting);
+            collect_expression_facts(expression_builder, *receiver, first, conflicting)?;
         }
+        Ok(())
     }
 
     fn deferred_call_arguments(call: &DeferredCall) -> &[DeferredCallArgument] {
@@ -702,8 +995,8 @@ pub(crate) fn fragment_typed_error_summary(
 
     let mut first = None;
     let mut conflicting = None;
-    collect(items, &mut first, &mut conflicting);
-    (first, conflicting)
+    collect(expression_builder, items, &mut first, &mut conflicting)?;
+    Ok((first, conflicting))
 }
 
 /// Consume the trailing handling that a deferred expression can carry.
@@ -744,17 +1037,24 @@ pub(crate) fn complete_pending_expression(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
-    mut expression: Expression,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    mut expression: OwnedExpr,
     allow_boundary_catch: bool,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<Expression, ExpressionParseError> {
+) -> Result<OwnedExpr, ExpressionParseError> {
     if token_stream_starts_typed_propagation_suffix(token_stream) {
-        let value_required = expression.type_id != type_interner.environment().builtins().none;
+        let value_required = !expression_builder
+            .view_owned(expression)?
+            .success_types()
+            .is_empty();
         expression = parse_fallible_handling_suffix_for_expression(
             token_stream,
             context,
             type_interner,
+            expression_builder,
+            const_values,
             expression,
             value_required,
             allow_boundary_catch,
@@ -767,6 +1067,8 @@ pub(crate) fn complete_pending_expression(
             token_stream,
             context,
             type_interner,
+            expression_builder,
+            const_values,
             expression,
             allow_boundary_catch,
             string_table,
@@ -774,13 +1076,13 @@ pub(crate) fn complete_pending_expression(
         )?;
     }
     if !context.defer_typed_error_validation {
-        validate_completed_typed_errors(&expression)?;
+        validate_completed_typed_errors(expression_builder.view_owned(expression)?)?;
     }
     Ok(expression)
 }
 
 pub(crate) fn validate_completed_typed_errors(
-    expression: &Expression,
+    expression: ExpressionView<'_>,
 ) -> Result<(), ExpressionParseError> {
     if let Some(diagnostic) = expression.unhandled_typed_error_diagnostic() {
         return Err(diagnostic.into());
@@ -790,20 +1092,29 @@ pub(crate) fn validate_completed_typed_errors(
 
 /// One parsed expression before evaluation.
 pub(super) enum ExpressionFragment {
-    /// An infix fragment, including pending groups, still awaiting ordering, typing and folding.
+    /// An infix fragment, including unresolved groups, still awaiting ordering, typing and folding.
     Nodes(Vec<ExpressionRpnItem>),
     /// A value returned early by a template or `is:` guard; it never reaches evaluation.
-    Value(Box<Expression>),
+    Value(OwnedExpr),
 }
 
 // WHAT: collects the infix AST fragment without evaluating it.
 // WHY: ordinary parentheses retain unresolved syntax so receiving and peer contexts can reach
 //      literal leaves before ordering, operator typing and folding.
-pub(super) fn collect_expression_fragment(
+fn collect_expression_fragment(
     input: &mut ExpressionParseInput<'_, '_, '_>,
 ) -> Result<ExpressionFragment, ExpressionParseError> {
     let mut expression: Vec<ExpressionRpnItem> = Vec::new();
+    match collect_expression_fragment_into(input, &mut expression)? {
+        Some(value) => Ok(ExpressionFragment::Value(value)),
+        None => Ok(ExpressionFragment::Nodes(expression)),
+    }
+}
 
+fn collect_expression_fragment_into(
+    input: &mut ExpressionParseInput<'_, '_, '_>,
+    expression: &mut Vec<ExpressionRpnItem>,
+) -> Result<Option<OwnedExpr>, ExpressionParseError> {
     ast_log!(
         "Parsing ",
         #input.value_mode,
@@ -811,12 +1122,17 @@ pub(super) fn collect_expression_fragment(
         " Expression"
     );
 
-    // Collect the infix AST fragment, retaining nested group syntax. `evaluate_expression`
-    // orders deferred groups into one RPN stream, resolves the final type, and folds constants.
+    // Collect the infix AST fragment as one flat stream. Each `(` pushes a `GroupOpen` marker and a
+    // frame, and the matching `)` closes the innermost frame in place. `evaluate_expression` orders
+    // deferred groups into one RPN stream, resolves the final type, and folds constants.
+    let root_allow_boundary_catch = input.trailing_policy.allow_boundary_catch;
     let mut next_number_negative = false;
+    let mut group_frames: Vec<GroupFrame> = Vec::new();
     while input.token_stream.position() < input.token_stream.length() {
         let token = input.token_stream.current_tag();
-        if input.stop_at_named_entry
+        let in_group = !group_frames.is_empty();
+        if !in_group
+            && input.stop_at_named_entry
             && expression
                 .last()
                 .is_some_and(ExpressionRpnItem::is_operand_shape)
@@ -826,18 +1142,26 @@ pub(super) fn collect_expression_fragment(
             break;
         }
         ast_log!("Parsing expression: ", #token);
+        // Inside a group the `)` is always consumed, so a missing `)` reports as a delimiter error.
+        // A group is never a receiving boundary and takes expected-result evidence from its own
+        // parse, so only the root keeps the grammar's boundary and consumption policy.
         let mut dispatch_state = ExpressionDispatchState {
             expected_type: input.expected_type,
             cast_target_context: input.cast_target_context,
             value_mode: input.value_mode,
-            consume_closing_parenthesis: input.trailing_policy.consume_closing_parenthesis,
-            allow_boundary_catch: input.trailing_policy.allow_boundary_catch,
-            allow_expected_result_evidence: input.trailing_policy.allow_expected_result_evidence,
-            expression: &mut expression,
+            consume_closing_parenthesis: input.trailing_policy.consume_closing_parenthesis
+                || in_group,
+            allow_boundary_catch: input.trailing_policy.allow_boundary_catch && !in_group,
+            allow_expected_result_evidence: input.trailing_policy.allow_expected_result_evidence
+                || in_group,
+            expression,
             next_number_negative: &mut next_number_negative,
             retain_pending_numeric_fragment: input.retain_pending_numeric_fragment,
+            group_frames: &mut group_frames,
+            expression_builder: &mut *input.expression_builder,
+            const_values: &mut *input.const_values,
         };
-        match dispatch_expression_token(
+        let (close_group, early_value) = match dispatch_expression_token(
             token,
             input.token_stream,
             input.scope_context,
@@ -846,18 +1170,47 @@ pub(super) fn collect_expression_fragment(
             input.string_table,
             input.path_fork,
         )? {
-            ExpressionTokenStep::Continue => continue,
-            ExpressionTokenStep::Advance => input.token_stream.advance(),
+            ExpressionTokenStep::Continue => (false, None),
+            ExpressionTokenStep::Advance => {
+                input.token_stream.advance();
+                (false, None)
+            }
+            ExpressionTokenStep::CloseGroup => (true, None),
+            // A break inside a group ends the group as one operand, and the parent re-dispatches
+            // the same token. A value-template return has already consumed the group's `)`.
+            ExpressionTokenStep::Break if dispatch_state.in_group() => (true, None),
             ExpressionTokenStep::Break => break,
-            ExpressionTokenStep::Return(value) => return Ok(ExpressionFragment::Value(value)),
+            ExpressionTokenStep::Return(value) if dispatch_state.in_group() => (true, Some(value)),
+            ExpressionTokenStep::Return(value) => return Ok(Some(value)),
+        };
+        if close_group {
+            close_innermost_group(
+                input.token_stream,
+                input.scope_context,
+                input.type_interner,
+                &mut dispatch_state,
+                input.string_table,
+                input.path_fork,
+                early_value,
+                root_allow_boundary_catch,
+            )?;
         }
+    }
+
+    if !group_frames.is_empty() {
+        // The stream ended before a group's `)`, so that group has no closing delimiter.
+        return Err(CompilerDiagnostic::missing_closing_delimiter(
+            input.string_table.intern(")"),
+            Some(input.token_stream.current_span()),
+        )
+        .into());
     }
 
     if input.trailing_policy.skip_trailing_newlines {
         input.token_stream.skip_newlines();
     }
 
-    Ok(ExpressionFragment::Nodes(expression))
+    Ok(None)
 }
 
 // WHAT: parses an expression from a bounded token slice without consuming the stop token.
@@ -866,14 +1219,14 @@ pub(super) fn collect_expression_fragment(
 pub(crate) fn create_expression_until(
     input: ExpressionParseInput<'_, '_, '_>,
     stop_tokens: &[TokenTag],
-) -> Result<Expression, ExpressionParseError> {
+) -> Result<OwnedExpr, ExpressionParseError> {
     create_expression_until_with_policy(input, stop_tokens)
 }
 
 fn create_expression_until_with_policy(
     input: ExpressionParseInput<'_, '_, '_>,
     stop_tokens: &[TokenTag],
-) -> Result<Expression, ExpressionParseError> {
+) -> Result<OwnedExpr, ExpressionParseError> {
     let allow_boundary_catch = input.trailing_policy.allow_boundary_catch;
     let allow_expected_result_evidence = input.trailing_policy.allow_expected_result_evidence;
 
@@ -985,6 +1338,8 @@ fn create_expression_until_with_policy(
             token_stream: input.token_stream,
             scope_context: input.scope_context,
             type_interner: input.type_interner,
+            expression_builder: input.expression_builder,
+            const_values: input.const_values,
             expected_type: input.expected_type,
             cast_target_context: input.cast_target_context,
             value_mode: input.value_mode,

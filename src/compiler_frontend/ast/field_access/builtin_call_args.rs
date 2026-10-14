@@ -7,21 +7,37 @@
 //!      through this one owner instead of restating the contract.
 
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
 use crate::compiler_frontend::ast::expressions::call_validation::{
     CallArgumentResolutionContext, CallDiagnosticContext, ExpectedAccessMode,
     ExpectedParameterType, ParameterExpectation, resolve_call_arguments,
 };
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, OwnedExpr,
+};
 use crate::compiler_frontend::ast::numeric_known_shape::{
     KnownShape, KnownShapeId, materialise_known_shape,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::builtins::member_rules::BuiltinArgumentSlots;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+
+/// Adapts the shared allocation-free member rule to the AST argument owner's shape list.
+pub(super) fn builtin_argument_shapes(
+    slots: BuiltinArgumentSlots<KnownShapeId>,
+) -> Vec<KnownShapeId> {
+    match slots {
+        BuiltinArgumentSlots::Zero => Vec::new(),
+        BuiltinArgumentSlots::One(value) => vec![value],
+        BuiltinArgumentSlots::Two(first, second) => vec![first, second],
+    }
+}
 
 /// The concrete type a construction shape already names, when it is a concrete leaf.
 pub(crate) fn concrete_shape_type(
@@ -65,40 +81,17 @@ pub(super) fn materialise_builtin_shape(
     )
 }
 
-/// Derives a builtin call's result slots from its success shape and declared error.
-///
-/// WHAT: materialises the success shape to its canonical type and wraps it in the fallible carrier
-///       when the operation declares an error. A zero-success operation yields `NONE!Error`, or no
-///       result slot when it declares no error.
-/// WHY: result slots are concrete only once every leaf is known, so they are derived here at
-///      completion and never at retained parse.
+/// Materialises only success slots; the call retains its error channel separately.
 pub(super) fn builtin_result_type_ids(
     success_shape: Option<KnownShapeId>,
-    error_return_type_id: Option<TypeId>,
     scope_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
 ) -> Result<Vec<TypeId>, ExpressionParseError> {
     let Some(success_shape) = success_shape else {
-        // A zero-success operation carries only its declared error, as `NONE!Error`. With no
-        // declared error it has no result slot at all.
-        return Ok(match error_return_type_id {
-            Some(error_type_id) => {
-                let none_type_id = type_interner.builtins().none;
-                vec![type_interner.intern_fallible_carrier(none_type_id, error_type_id)]
-            }
-            None => Vec::new(),
-        });
+        return Ok(Vec::new());
     };
     let success_type_id = materialise_builtin_shape(scope_context, type_interner, success_shape)?;
-    // Temporary carrier bridge: builtin fallibility is public `Error!` control flow, not a
-    // first-class `Result` value. HIR consumes this carrier immediately while lowering the
-    // handled call into explicit success/error edges.
-    Ok(vec![match error_return_type_id {
-        Some(error_type_id) => {
-            type_interner.intern_fallible_carrier(success_type_id, error_type_id)
-        }
-        None => success_type_id,
-    }])
+    Ok(vec![success_type_id])
 }
 
 /// The success slot as concrete types, when the shape is already concrete.
@@ -211,15 +204,21 @@ pub(super) struct BuiltinCallSite<'a> {
 /// WHY: a builtin member has no callable signature, so its fixed parameter expectations are the
 ///      whole contract; the completed lane validates here before construction and the retained lane
 ///      resumes the exact same owner once its arguments resolve, so no validation lane is skipped.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "builtin argument resolution keeps the call site, arguments, expectations, scope, type interner, expression builder, const store, string table, and path fork as separate borrows"
+)]
 pub(super) fn resolve_builtin_member_arguments(
     call_site: BuiltinCallSite<'_>,
-    arguments: &[CallArgument],
+    arguments: &[CallArgument<OwnedExpr>],
     expectations: &[ParameterExpectation],
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &PathInternerFork,
-) -> Result<Vec<CallArgument>, ExpressionParseError> {
+) -> Result<Vec<CallArgument<OwnedExpr>>, ExpressionParseError> {
     let expectations = materialised_builtin_expectations(context, type_interner, expectations)?;
     let type_check_context = type_interner.type_check_context();
 
@@ -229,6 +228,8 @@ pub(super) fn resolve_builtin_member_arguments(
         &expectations,
         call_site.member_span,
         CallArgumentResolutionContext {
+            expression_builder,
+            const_values,
             string_table,
             type_environment: type_check_context.type_environment,
             compatibility_cache: type_check_context.compatibility_cache,

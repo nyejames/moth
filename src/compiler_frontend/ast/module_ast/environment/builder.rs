@@ -5,9 +5,10 @@
 //! WHY: after this phase completes, AST emission can parse bodies against a stable environment
 //! instead of depending on pass-order-specific accumulator fields.
 
-use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration};
+use crate::compiler_frontend::ast::ast_nodes::{
+    AstNode, Declaration, DeclarationShell, DeclarationValue,
+};
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
 use crate::compiler_frontend::ast::module_ast::build_context::AstPhaseContext;
 use crate::compiler_frontend::ast::module_ast::environment::{
@@ -19,13 +20,6 @@ use crate::compiler_frontend::ast::module_ast::environment::{
 use crate::compiler_frontend::ast::module_ast::scope_context::ReceiverMethodCatalog;
 use crate::compiler_frontend::ast::module_ast::scope_context::{ContextKind, ScopeContext};
 use crate::compiler_frontend::ast::templates::error::TemplateError;
-use crate::compiler_frontend::ast::templates::template::{
-    SlotKey, Style, Template, TemplateSegmentOrigin, TemplateType,
-};
-use crate::compiler_frontend::ast::templates::tir::{
-    TemplateIr, TemplateIrNode, TemplateIrNodeKind, TemplateTirPhase, TemplateTirReference,
-    TemplateViewContext, TemplateWrapperReference, TirSlotPlaceholder, summarize_existing_root,
-};
 use crate::compiler_frontend::ast::type_resolution::{
     GenericParameterScopeBuildInput, ResolvedFunctionSignature, ResolvedTypeAlias,
     TypeResolutionContext, TypeResolutionContextInputs, build_generic_parameter_scope,
@@ -50,15 +44,10 @@ use crate::compiler_frontend::datatypes::environment::{
 use crate::compiler_frontend::datatypes::generic_parameters::{
     GenericParameterList, GenericParameterScope, TypeParameterId,
 };
-use crate::compiler_frontend::datatypes::ids::{
-    FunctionTypeKey, GenericParameterId, NominalTypeId, TypeId, builtin_type_ids,
-};
+use crate::compiler_frontend::datatypes::ids::{GenericParameterId, NominalTypeId, TypeId};
 use crate::compiler_frontend::datatypes::{DataType, diagnostic_type_spelling};
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariant;
-use crate::compiler_frontend::folded_value::{
-    PublicConstTemplate, PublicConstTemplateKind, PublicConstTemplatePiece,
-    PublicConstTemplateSlot, PublicFoldedField, PublicFoldedValue, PublicTemplateSlotKey,
-};
+use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::headers::binding_environment::{
     FileVisibility, HeaderBindingEnvironment,
 };
@@ -299,8 +288,8 @@ struct ImportedGenericParameterRegistration {
 }
 
 pub(crate) struct AstModuleEnvironmentBuilder<'context, 'services> {
-    pub(crate) context: &'context AstPhaseContext<'services>,
-    pub(crate) path_fork: &'services mut PathInternerFork,
+    pub(crate) context: &'context mut AstPhaseContext<'services>,
+    pub(crate) path_fork: &'context mut PathInternerFork,
     // Header-owned module symbol package from the header/dependency-sort phase.
     pub(crate) module_symbols: ModuleSymbols,
 
@@ -370,8 +359,8 @@ pub(crate) struct AstModuleEnvironmentBuilder<'context, 'services> {
 
 impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     pub(crate) fn new(
-        context: &'context AstPhaseContext<'services>,
-        path_fork: &'services mut PathInternerFork,
+        context: &'context mut AstPhaseContext<'services>,
+        path_fork: &'context mut PathInternerFork,
     ) -> Self {
         Self {
             context,
@@ -426,6 +415,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let resolved_struct_fields_by_path =
             std::mem::take(&mut module_symbols.resolved_struct_fields_by_path);
         let struct_source_by_path = std::mem::take(&mut module_symbols.struct_source_by_path);
+        let folded_defaults_by_field_path =
+            std::mem::take(&mut module_symbols.folded_defaults_by_field_path);
         // Generic declaration kinds have one owner from here on. Import projection adds imported
         // generic nominals to it and every environment pass reads it, so taking it now keeps one
         // map behind one handle: the per-header scopes borrow it instead of copying it, and no
@@ -460,7 +451,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // ------------------------------------
         //  Register builtin semantic types
         // ------------------------------------
-        self.register_builtin_structs_in_type_environment(string_table)?;
+        self.register_builtin_structs_in_type_environment(
+            &folded_defaults_by_field_path,
+            string_table,
+        )?;
         self.project_imported_nominal_declarations(string_table)
             .map_err(|error| self.error_messages(error, string_table))?;
         self.project_imported_alias_declarations()
@@ -724,6 +718,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             &self.nominal_type_ids_by_path,
             &self.type_environment,
             &self.context.template_ir_store,
+            &self.context.expression_builder,
+            &self.context.const_values,
         )
         .map_err(|error| match error {
             TemplateError::Diagnostic(diagnostic) => {
@@ -965,17 +961,30 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     /// unregistered builtins return empty field lists and break field access.
     pub(crate) fn register_builtin_structs_in_type_environment(
         &mut self,
+        folded_defaults_by_field_path: &FxHashMap<PathId, PublicFoldedValue>,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
         let builtin_paths = [builtin_error_type_path(self.path_fork, string_table)];
 
         for path in &builtin_paths {
-            let Some(fields) = self.resolved_struct_fields_by_path.get(path).cloned() else {
+            let Some(mut fields) = self.resolved_struct_fields_by_path.get(path).cloned() else {
                 continue;
             };
 
+            // Folded field defaults are materialised into this build's const store here, so
+            // body parsing sees the same `DeclarationValue::Default` as imported struct fields.
+            for field in &mut fields {
+                if let Some(folded) = folded_defaults_by_field_path.get(&field.id) {
+                    let default_id = self
+                        .project_imported_folded_value(folded, field.type_id, string_table)
+                        .map_err(|error| self.error_messages(error, string_table))?;
+                    field.value = DeclarationValue::Default(default_id);
+                }
+            }
+
             let field_definitions =
                 self.field_definitions_from_declarations(&fields, string_table)?;
+            Rc::make_mut(&mut self.resolved_struct_fields_by_path).insert(*path, fields);
 
             let struct_def = StructTypeDefinition {
                 id: NominalTypeId(0),
@@ -1011,13 +1020,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 declaration_id,
                 Declaration {
                     id: *path,
-                    value: Expression::new(
-                        ExpressionKind::NoValue,
-                        None,
-                        struct_type_id,
-                        DataType::runtime_struct(*path, struct_type_id),
-                        ValueMode::ImmutableReference,
-                    ),
+                    type_id: struct_type_id,
+                    diagnostic_type: DataType::runtime_struct(*path, struct_type_id),
+                    value_mode: ValueMode::ImmutableReference,
+                    value: DeclarationValue::Shell(DeclarationShell::Struct),
                     binding_span: None,
                     config_qualifier: None,
                 },
@@ -1036,27 +1042,19 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     pub(crate) fn type_resolution_context_for<'a>(
         &'a mut self,
         visibility: &'a FileVisibility,
-        declaring_file_id: SourceId,
         generic_parameters: Option<&'a GenericParameterScope>,
     ) -> TypeResolutionContext<'a> {
-        self.type_resolution_context_for_with_traits(
-            visibility,
-            declaring_file_id,
-            generic_parameters,
-            None,
-        )
+        self.type_resolution_context_for_with_traits(visibility, generic_parameters, None)
     }
 
     pub(crate) fn type_resolution_context_for_with_traits<'a>(
         &'a mut self,
         visibility: &'a FileVisibility,
-        declaring_file_id: SourceId,
         generic_parameters: Option<&'a GenericParameterScope>,
         trait_environment: Option<&'a TraitEnvironment>,
     ) -> TypeResolutionContext<'a> {
         let mut context = TypeResolutionContext::from_inputs(TypeResolutionContextInputs {
             declaration_table: &self.declaration_table,
-            declaring_file_id,
             visible_declaration_ids: Some(&visibility.visible_declaration_paths),
             visible_external_symbols: Some(&visibility.visible_external_symbols),
             visible_source_bindings: Some(&visibility.visible_source_names),
@@ -1065,6 +1063,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             generic_declarations_by_path: Some(&self.generic_declarations_by_path),
             resolved_struct_fields_by_path: Some(&self.resolved_struct_fields_by_path),
             type_environment: &mut self.type_environment,
+            const_values: &self.context.const_values,
             visible_namespace_records: Some(&visibility.visible_namespace_records),
             trait_environment,
             trait_evidence_environment: None,
@@ -1171,9 +1170,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
         for field in fields {
             let type_id = match resolve_diagnostic_type_to_type_id_checked(
-                &field.value.diagnostic_type,
+                &field.diagnostic_type,
                 &mut self.type_environment,
-                field.value.span,
+                field.binding_span,
             ) {
                 Ok(type_id) => type_id,
                 Err(diagnostic) => {
@@ -1184,7 +1183,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             definitions.push(FieldDefinition {
                 name: field.id,
                 type_id,
-                span: field.value.span,
+                span: field.binding_span,
             });
         }
 

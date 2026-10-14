@@ -155,8 +155,8 @@ pub(crate) enum WasmLirStmt {
         src: WasmLirLocalId,
     },
     Call {
-        /// Optional destination local for non-void calls.
-        dst: Option<WasmLirLocalId>,
+        /// Ordered success destinations, matching the callee's native Wasm results.
+        results: Vec<WasmLirLocalId>,
         callee: WasmCalleeRef,
         args: Vec<WasmLirLocalId>,
     },
@@ -374,7 +374,7 @@ pub(crate) enum WasmLirTerminator {
         else_block: WasmLirBlockId,
     },
     /// Function return.
-    Return { value: Option<WasmLirLocalId> },
+    Return { values: Vec<WasmLirLocalId> },
     /// Fallback hard stop for unsupported/unreachable paths.
     Trap,
 }

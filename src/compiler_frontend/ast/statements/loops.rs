@@ -8,8 +8,10 @@
 use crate::ast_log;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::const_values::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::numeric_construction::{
     BodyDraft, DeferredBody, DeferredConstruct, DeferredLoop, DeferredLoopHeader,
     DeferredRangeHeader, NumericContinuation, StatementExpression,
@@ -103,10 +105,16 @@ impl LoopBody {
 ///       in place, and the body then reaches the body root as an authored draft.
 /// WHY: a nested body's pending positions resolve at the body root, so the loop must keep its
 ///      authored header, body draft and request boundaries until then.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "loop construction keeps the token stream, scope, the shared type, expression and constant stores, warnings, string and path services, and the body draft as separate borrows"
+)]
 pub fn create_loop(
     token_stream: &mut AstCursor,
     context: ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
@@ -140,6 +148,8 @@ pub fn create_loop(
         &mut window,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         warnings,
         string_table,
         path_fork,
@@ -152,6 +162,8 @@ pub fn create_loop(
         token_stream,
         body_context,
         type_interner,
+        expression_builder,
+        const_values,
         warnings,
         string_table,
         path_fork,

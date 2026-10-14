@@ -5408,8 +5408,10 @@ Two migration-owned costs were found and removed during Phase 10:
   recursive frames. The debug parse recursion went from 32,992 to 2,336 bytes per
   nesting level, and `complete_nested_items` from 18,992 to 3,168 bytes. With a 1 MiB
   stack, release builds now accept 512 nested groups; the baseline accepted 384.
-  `check_tests.rs` holds a 1 MiB regression for 64 nested groups with a late `U64`
-  receiver.
+  `check_tests.rs` added a 1 MiB regression for 64 nested groups with a late `U64`
+  receiver. R1 later removes this redundant case after the same generator,
+  stack helper and configuration gain retained 512/2048 coverage. The historical
+  measurements above remain unchanged.
 
 Raw evidence: `tmp/exact-numerics/phase10/` (capture logs, comparison and scaling
 output) and `tmp/exact-numerics/p10-scaling-cost/`. These are local performance
@@ -5463,3 +5465,689 @@ where smaller sizes hide per-query cost under constant overhead, and
 would fit exponents of about 1.66 and 1.44, above the `n^1.25` budget. The corrected tree fits
 0.98 and 0.87 under `just validate-full`, which passes with all 13 series within budget. Raw
 evidence is in `tmp/exact-numerics/review-followup/`.
+
+## Typed-expression post-numeric restart comparison anchors
+
+The post-numeric reassessment at `ffb294956` retained these anchors before the
+exact-numeric closeout at `43c72330f`. They preserve the restart comparison and
+surviving Phase 5 default work, not measurements of the corrected Phase 4 tree.
+Raw evidence lives under `tmp/exact-numerics/phase11/P11ExpressionReassess/`.
+
+| Observation at the post-numeric restart | Baseline |
+|---|---:|
+| Expression / ExpressionKind / RPN stride | 360 / 88 / 360 bytes |
+| Declaration / HirExpression / HirExpressionKind / HirPlace | 440 / 56 / 32 / 12 bytes |
+| `generic_scaling_160` published expression occurrences / HIR rows | 10,251 (6,251 base plus 4,000 in 800 sidecars) / 15,549 |
+| Default/constructor clone events | 3,000 default applications, 6,000 parameter-default views, 2,000 constructor-default views |
+| `generic_scaling_160` live-report / peak allocator delta | 13,011,465 / 428,983,088 bytes |
+| `constant_chain_512` live-report / peak allocator delta | 36,155 / 4,341,185 bytes |
+
+The counter-on dev probe covered sixteen inputs. Two scratch inputs replaced
+removed `Int` with byte-length-preserving `I32`, retaining their volume, Unicode
+and CRLF shape. Those adapted inputs do not have identical fingerprints.
+Published counts measure occurrences rather than unique live nodes. Layout
+strides exclude nested payloads and capacity. Allocator deltas include observer
+cost and provide proxies rather than owner attribution, RSS or throughput.
+
+The restart's non-recording checks used Rust 1.99.0, Node 24.21.0, default thread
+identity, one preflight and ten measured iterations on a frozen source tree.
+Changed numeric workloads limit historical comparability. These single-run
+checks establish a restart baseline rather than a repeatable speed claim. Keep
+the numeric migration's qualified five-invocation matched comparison separate.
+The existing 1 MiB tests prove their accepted bounds rather than dynamic stack
+high-water usage or broader headroom.
+
+## Typed-expression hardening checkpoint
+
+The stack-safe baseline is `ad72b9cec`. Owner-token construction starts at
+`71e7e0b96` and narrowed generic constant projection lands at `110efe796`.
+The final accessor rework removes sampled duplicate row/token checks within
+private validated paths. Independent construction and install boundaries remain
+checked before index access or mutation. Durable expression IDs remain four bytes.
+
+The matched timing runs use macOS arm64, Rust 1.99.0 and identical release-linked,
+timers-only frontend runners. Five fresh matched pairs alternate candidate and
+baseline order. Each process preflights once and measures ten calls per case,
+with `RAYON_NUM_THREADS=1` and counters disabled. These scoped source digests
+match between trees. They are not canonical xtask manifest fingerprints.
+
+### Store capacity and retention
+
+The constant, grouped, generic and fold-stress census was measured at
+`71e7e0b96`. Generic rows sum all module and generated freeze events, rather than
+simultaneously resident stores. The later Phase 4.5 replacement fixture uses a
+release build with counters enabled. Live and capacity bytes describe inline
+rows and side entries, not nested payload, allocator usable sizes or RSS.
+
+| Workload | Boundary | Row live / capacity bytes | Side live / capacity bytes |
+|---|---|---:|---:|
+| constant chain 512 | Builder | 200,648 / 305,536 | 474,116 / 733,488 |
+| constant chain 512 | Frozen | 112 / 112 | 48 / 48 |
+| grouped arithmetic 512 | Builder | 86,184 / 87,248 | 217,256 / 389,120 |
+| grouped arithmetic 512 | Frozen | 112 / 112 | 168 / 168 |
+| generic scaling 20, 101 freezes | Builder | 68,432 / 79,856 | 105,964 / 145,664 |
+| generic scaling 20, 101 freezes | Frozen | 54,264 / 54,264 | 84,968 / 84,968 |
+| fold stress | Builder | 110,152 / 214,816 | 250,124 / 407,680 |
+| fold stress | Frozen | 7,112 / 7,112 | 13,640 / 13,640 |
+| 32 replaced roots | Builder | 1,904 / 3,584 | 6,400 / 6,400 |
+| 32 replaced roots | Frozen | 112 / 112 | 200 / 200 |
+
+The largest observed old-array plus remap/pending coexistence is 1,092,240
+bytes for constant chain 512 and 500,992 bytes for grouped arithmetic 512.
+Compaction retains and shrinks existing vectors rather than building a second
+complete graph. Allocator-internal reallocation overlap remains unobserved.
+
+The replacement fixture retains two distinct rows and one final fact/provenance
+pair, preserving reordered duplicate roots. It releases 9,672 bytes of inline
+array capacity. Observed old arrays plus actual remap/pending capacity total
+10,784 bytes, with 328 bytes for final arrays plus remaining pending storage.
+These accessible-array observations are not whole-process or allocator peak
+measurements.
+
+The generic retention correction filters local folded constants and aliases to
+actual artefact installer roots. Plain-string fixtures use unique 4 KiB values.
+These are boxed constant row bytes plus actual owned `String` capacities,
+excluding separately shared donor source and identity domains.
+
+| Fixture | Before payload bytes | After payload bytes |
+|---|---:|---:|
+| 512 constants, one generic selecting one constant | 2,228,224 | 4,352 |
+| 512 constants, no generic | 2,228,224 | 0 |
+| 8 constants, same generic | 34,816 | 4,352 |
+
+The no-generic before projection was transient, not a published generic context.
+After samples precede the borrowed-template selector coupling, which changes no
+retained payload. Shared donor domains still retain whole-module text separately.
+
+### Lifetime and inert assertion validation
+
+Owned-result proofs cover store compaction, losing and failed candidates,
+accepted TIR overlays and nested contexts, detached generic defaults and
+resources, recursive base/generated summaries and diagnostic snapshots after
+source mutation. Validation AST, expression stores and TIR construction owners
+end before their retained consumers run. Later instantiation keeps canonical
+preparation or frozen-provider projections, not validation graphs. Diagnostics
+keep the required `TypeEnvironment`.
+
+The integrated service proofs exposed an inert generic assertion witness whose
+canonical request was discarded before HIR target resolution. The existing
+ordered ledger now separates executable from assertion-validation demand.
+Canonical provider materialisation and failure-summary convergence consume
+both, then executable reachability removes validation-only sidecars. Safe
+messages pass, unsafe messages diagnose at the original call and shared
+active/inert identities publish only the active producer.
+
+An infallible numerical catch legitimately retains handler validation roots
+through AST freeze. Consuming HIR lowering proves the protected I32 value `3`,
+not fallback `9801`, with no fallback executable work or provenance. This
+checkpoint introduces no additional constant-folding pass.
+
+### Matched performance and accepted tradeoff
+
+The final source-frozen accessor rework reports:
+
+| Workload | Baseline total ms | Candidate total ms | Change |
+|---|---:|---:|---:|
+| grouped arithmetic 512 | 2.135562 | 2.161980 | +1.24% |
+| constant chain 512 | 4.644792 | 4.681083 | +0.78% |
+| pending-numeric copy chain 128 | 1.937458 | 1.930041 | -0.38% |
+| generic scaling 20 | 20.600271 | 20.655187 | +0.27% |
+| diagnosed data-layout fixture | 13.029292 | 10.831438 | -16.87% |
+
+The user explicitly accepted the remaining H2/H3 stage costs to preserve checked
+owner boundaries and continue Phase 4. This exception applies to this checkpoint,
+not to later work or existing scaling budgets. Grouped emission rises 5.88%
+(25.584 to 36.292 microseconds in each pair). Constant environment rises 5.60%,
+copy emission/finalisation 5.44%/5.45% and ordinary generic finalisation 7.39%.
+Sampling supports the duplicate-check removal but does not close every residual
+cost. These changes are neither noise claims nor proof of wholly unavoidable work.
+
+Generated finalisation timing now includes remaining phase-context destruction.
+A separate natural-drop experiment measured 100 generated contexts per call:
+all 5,000 baseline drops fell outside AST total/finalise timers and all 5,000
+candidate drops inside them. Actual candidate drop time of 2.119 to 2.348 ms
+accounts for 98.39 to 99.07% of the earlier finalisation increase. The remaining
+instrumented residual is 0.024 to 0.040 ms per call, with uncalibrated bookkeeping
+overhead. Old drop measurements are not subtracted from later uninstrumented runs.
+
+### Phase 4 contract closeout
+
+Final audit found incomplete new-binding collision coverage and proof assertions
+in the pre-audit candidate. The corrected semantic paths cover ordinary and
+multi-bind declarations, parameters, range/collection bindings and their
+position indices, option/choice captures and inline/block catch captures.
+Template option and loop binders use these same owners. Existing mutable
+parameter updates retain their legal assignment contract. Bound external and
+namespace collisions use `MOTH-RULE-0038` at the authored name token without
+inventing a previous-declaration label. Corrected-tree validation remains pending.
+
+Compact constant-value extent tests exercise the checked helper's artificial
+boundaries alongside choice/parameter-slot guards. Source review checks that
+compact publication validates extent before reserving or appending values.
+These checks do not prove production transaction atomicity. The injected helper
+error test has been removed.
+
+The native-result proof owners cover I32/F32/I64/F64 ABI types, permuted
+destinations and one producer through HIR-to-LIR lowering, validated emission
+and Node execution. The renamed source case `native_four_mixed_results_runtime`
+expects `7|1.25|9007199254740993|-9.5` on HTML and HTML-Wasm. `1.25` exercises an
+ABI-typed F32 slot, not F32 rounding. `9007199254740993` exposes I64 precision.
+Actual CLI validation reports the optional String HTML-Wasm gate
+`MOTH-RULE-0064` with reason
+`unsupported_backend_feature.mutable_local_binding_aliases` at
+`input/@page.moth:2:12`. Both actual target assertions pass on corrected source
+`12a6bfb43`, including HTML execution and the exact HTML-Wasm rejection identity
+and site. The path follows the harness's source-root normalisation.
+
+All 253 argument-count annotations were reviewed. Rust 1.99 Clippy includes
+method receivers in its count: nine obsolete allowances are removed and all
+244 retained allowances have reasons. No argument packing or signature refactor
+is part of this checkpoint.
+
+### Pre-audit matched timing qualification
+
+Two independent five-pair rounds compare the accepted `cd371176e` source with
+`0e8976137` plus the pre-audit Phase 4.6 production patch. They use unchanged
+runner and workload digests, release-linked timers-only builds, counters off,
+Rayon one and alternating order. Subsequent Clippy annotations and comments
+changed no function signature or body in that measured candidate. Final-audit
+corrections change production source and need fresh matched qualification.
+These historical records contain 550 stage rows and frontend measurements,
+not paired CLI timings.
+
+| Workload | Round 1 baseline ms | Round 1 candidate ms | Change | Round 2 baseline ms | Round 2 candidate ms | Change |
+|---|---:|---:|---:|---:|---:|---:|
+| grouped 512 | 2.087917 | 1.958292 | -6.21% | 2.035729 | 2.123313 | +4.30% |
+| constant 512 | 4.333896 | 4.134270 | -4.61% | 4.553978 | 4.475042 | -1.73% |
+| copy 128 | 1.891354 | 1.821542 | -3.69% | 1.893521 | 1.987625 | +4.97% |
+| generic 20 | 19.037459 | 19.203271 | +0.87% | 19.962729 | 20.574605 | +3.07% |
+| diagnosed layout | 11.982104 | 9.715542 | -18.92% | 12.567125 | 12.575417 | +0.07% |
+
+Round 1 flags generated finalisation at 2.531436 to 2.686834 ms, +6.14% and
+three of five pairs above 5%. Round 2 measures 2.636166 to 2.597602 ms, -1.46%
+and one of five above 5%, but flags other stages. Diagnosed emission changes
+from -0.22% to +7.73%, finalisation from -5.62% to +5.43% and HIR from -10.82%
+to +13.82%. Round 2 retains 16 majority flags, including small public-interface
+and config costs. Both rounds and every stage remain in the raw records.
+
+Isolated probes observe 1,100 generated finalisations per tree, all with empty
+request ledgers and validation roots and no assertion candidates. Added
+scan/validation/partition clock totals are about 0.00220 ms per call, including
+instrumentation overhead, not an estimate of uninstrumented cost. Empty vectors
+and sets allocate nothing. The request-slot layout grows from 200 to 208 bytes,
+but these generated ledgers are empty. `AstBuildResult` grows from 2,888 to
+2,912 bytes. Layout, inlining and natural-drop effects remain unquantified.
+Moving destruction outside the timer would change measurement ownership and
+was rejected. No defensible local production correction was isolated.
+
+The user explicitly selected **Accept documented checkpoint variation**. This
+is a separate, narrow Phase 4 exception, not proof of noise or unavoidable costs
+and not an extension of the H2/H3 exception. Later performance and scaling gates
+remain unchanged. Reproducible raw records, commands, source patches and identity
+digests are in `tmp/hardening/checkpoint/p46-performance/` and
+`tmp/hardening/checkpoint/p46-finalise-cost/`. One first-round analysis assertion
+was corrected using the original successful process output without a timed
+rerun. Its original start/wall metadata is unavailable and is not fabricated.
+
+### Failure and stack evidence
+
+Diagnosed, warning-heavy, malformed and missing-path probes preserve
+`MOTH-RULE-0034`, `MOTH-RULE-0022`, `MOTH-SYNTAX-0024` and `MOTH-INFRA-0001`.
+Injected compact row exhaustion returns `MOTH-SYNTAX-0037`. A real compound call
+constructor leaves two orphan side entries after row failure without rollback.
+An isolated consuming freeze drops both. Actual compilation stops before HIR.
+Covered memory ledgers report no tracking exhaustion, rather than complete
+whole-process ownership accounting.
+
+One-MiB regressions cover constant groups at 512 and 2,048, runtime leaves at
+256 and malformed/postfix groups at 2,048. Completed-expression walkers retain
+their deeper focused tests. The runtime-leaf cap excludes independently measured
+cubic borrow-state memory. Windows `bench-ci`, including in-process grouped 512,
+and scaling pass at `ad72b9cec` in
+[workflow 38470314908](https://github.com/nyejames/moth/actions/runs/38470314908).
+That workflow's Windows canvas launch failures with OS error 206 remain a
+separate historical outcome, not stack or benchmark failures.
+
+### Superseded corrected-source timing boundary
+
+The five-pair `12a6bfb43` comparison retained 33 majority-above-5% metric flags,
+including copy 128 at +5.808%, +0.107834 ms and four of five pairs above 5%.
+That tree later failed the full gate on two legal `start` parameter cases.
+Its complete medians, spreads and stage records remain under
+`tmp/hardening/checkpoint/p46-audit-performance/`. The later root-visibility
+correction changes source, so those timings do not qualify the final candidate.
+
+### Final-source matched timing qualification
+
+Five fresh pairs compare `cd371176e` with final production source `2e3ba0979`.
+The baseline runner binary retains its qualified hash. Ten new processes
+alternate candidate-first odd pairs and baseline-first even pairs, using the
+unchanged release-linked timers-only frontend runner and workloads, counters
+off, Rayon one, one preflight and ten measured calls. All 550 new stage records
+remain under `tmp/hardening/checkpoint/p46-final-source-performance/`.
+
+| Workload | Baseline ms | Final candidate ms | Change |
+|---|---:|---:|---:|
+| grouped 512 | 2.007875 | 2.001917 | -0.297% |
+| constant 512 | 4.278458 | 4.227438 | -1.192% |
+| copy 128 | 1.847021 | 1.845499 | -0.082% |
+| generic 20 | 18.564334 | 18.466875 | -0.525% |
+| diagnosed layout | 11.659167 | 11.565500 | -0.803% |
+
+Generated finalisation moves from 2.590231 to 2.590855 ms, +0.0241% and
++0.0006235 ms, with no pair above 5%. Four majority-above-5% flags remain,
+each in all five pairs:
+
+| Workload and metric | Change | Absolute delta |
+|---|---:|---:|
+| grouped 512 declaration ordering | +19.680% | +0.000209 ms |
+| grouped 512 finalisation | +24.713% | +0.0049375 ms |
+| grouped 512 module-constant finalisation | +25.053% | +0.0049375 ms |
+| copy 128 declaration ordering | +19.633% | +0.0002085 ms |
+
+The two grouped finalisation metrics overlap and do not represent independent
+added costs. The strict every-stage gate flags these residuals. The user
+explicitly selected **Accept these checkpoint costs** for this exact-source
+comparison. This narrow exception remains separate from both older exceptions
+and leaves later performance and scaling budgets unchanged. Neither small
+absolute deltas nor total medians establish noise, causality or an automatic
+waiver. These frontend records supply no paired CLI proof or confidence intervals.
+
+### Open Windows exposure ledger
+
+| Status | Platform | Failing test and cause | Evidence | Decision |
+|---|---|---|---|---|
+| OPEN | `windows-latest` | `canvas_error_tests::canvas_failures_keep_their_codes_and_messages` fails to launch Node with OS error 206, `InvalidFilename`, because the command is too long. | [Current unit job](https://github.com/nyejames/moth/actions/runs/38559789935/job/115837737056) passes 6,054 of 6,055 units. [Current feature job](https://github.com/nyejames/moth/actions/runs/38559789935/job/115837737137) fails seven standard lanes on this same test. Earlier f03 and 2e3 source workflows record the same exposure. | Record the exposed failure only. No harness fix or passing-gate reclassification. Both jobs remain non-blocking under existing CI policy, not resolved. |
+
+### Completed Phase 4 checkpoint and pause
+
+The local `just validate-full` result for prior candidate `f03ce768c` passed
+6,091 primary unit tests, 2,781 integration tests, 10 standard feature lanes,
+142 benchmark preflights and 13 scaling series. Final audit then found F1 to F8.
+The prior-candidate
+[workflow 38504523989](https://github.com/nyejames/moth/actions/runs/38504523989)
+concluded `SUCCESS` under Windows continue-on-error policy despite unit and
+feature-lane failures. Windows benchmark and scaling jobs passed alongside other
+jobs, but the workflow conclusion does not establish an all-green Windows gate.
+These historical results do not certify the current gate candidate. The
+superseded `12a6bfb43` full gate stops at 6,096 of 6,098 primary units, with two
+legal `start` parameter failures also recorded in
+[workflow 38509904239](https://github.com/nyejames/moth/actions/runs/38509904239).
+
+Measured production source `2e3ba0979` excludes the compiler-owned entry from
+source lookup while retaining its entry-assembly row. Independent review accepts
+the fix without findings. Workspace tests pass all 7,142 tests across 11 suites,
+including all 6,098 primary units and the unchanged regressions. The user accepts
+its four residual stage costs under the narrow exception above.
+
+Gate candidate `0b99f7470` keeps this production source unchanged and corrects
+only two fixtures' illegal parameter/global collisions, without expectation
+changes. Fresh release CLI checks pass corrected cast, composite-failure and
+four-result cases on both targets. An authored `io` parameter rejects with
+`MOTH-RULE-0038` at `1:9`, with one error and no warnings. A legal `start`
+parameter passes with no errors or warnings.
+
+[Production-source workflow 38519903771](https://github.com/nyejames/moth/actions/runs/38519903771)
+fails the four illegal-fixture targets, with 2,777 of 2,781 target results
+passing on each platform. Linux and macOS pass every non-integration gate.
+Windows retains the OPEN canvas exposure, but its development-built
+[benchmark job](https://github.com/nyejames/moth/actions/runs/38519903771/job/115706978164)
+passes 142 preflights, including in-process grouped 512. Its development-built
+[scaling job](https://github.com/nyejames/moth/actions/runs/38519903771/job/115706978198)
+passes all 13 series, with grouped arithmetic at exponent 0.68 against 1.25.
+
+The `0b99f7470` source/fixture candidate passes local `just validate-full` in
+1,074.65 seconds: 6,098 primary units, 7,142 workspace tests, 2,781 integration
+target results, all ten standard feature lanes, 142 benchmark preflights and
+all 13 scaling series, with grouped arithmetic at exponent 0.72 against 1.25.
+The docs check reports no errors or warnings and timer erasure confirms a clean
+10,350,432-byte no-timer binary.
+
+[Workflow 38559789935](https://github.com/nyejames/moth/actions/runs/38559789935)
+completes with `SUCCESS` for `0b99f7470`. Every Linux/macOS gate passes. Windows
+passes every gate except the non-blocking unit/feature jobs in the OPEN exposure
+ledger. Its
+[integration job](https://github.com/nyejames/moth/actions/runs/38559789935/job/115837737215)
+passes, its development-built
+[benchmark job](https://github.com/nyejames/moth/actions/runs/38559789935/job/115837737231)
+passes all 142 preflights, including in-process grouped 512, and its
+development-built
+[scaling job](https://github.com/nyejames/moth/actions/runs/38559789935/job/115837736986)
+passes all 13 series with grouped arithmetic at exponent 0.72 against 1.25.
+Workflow success does not erase the Windows launch exposure.
+
+Phase 4 is complete on `expression-refactor` and paused before Phase 5.
+Phases 5 to 8 have not started. No merge, squash or new roadmap-plan import has
+occurred. Scoped performance scratch cleanup retains raw records, drivers,
+identities, commands and cleanup logs without changing the root cache.
+
+### Final documentation compiler and surface proof
+
+`target/release/moth build docs --release` passes with 79 outputs in
+280.495833 ms, using production source `2e3ba0979` and the final status edits
+over gate candidate `0b99f7470`. The compiler changes 78 tracked release HTML
+routes. All 78 remove the same 20 lines of obsolete `__moth_result_propagate`
+and `__moth_result_fallback` helpers. Seventy-three routes change only that
+runtime protocol. Five also contain Phase 4 source-content changes. Preserve
+these compiler-produced outputs rather than editing HTML manually.
+
+Managed Chromium inspects the served release output on port 8587. DOM checks
+confirm the progress page's title, complete-and-paused Phase 4 status, candidate
+and production identities, accepted cost boundary, OPEN Windows exposure and
+absence of merge/squash/import claims. The binding row shows `Partial` and the
+qualified alias gap. Inspection finds no horizontal overflow. The five
+content-changed routes, Boracle, borrow validation, choices, errors and progress,
+show the expected titles, headings and tables, successful HTTP responses,
+loaded fonts and no broken local anchors.
+
+Screenshot capture times out across PNG, JPEG and raw-page attempts. This
+evidence covers compiler output and browser DOM inspection, not a captured
+screenshot or image-based visual proof.
+
+### R1 review follow-up qualification
+
+The bounded working-tree follow-up starts from reviewed checkpoint `1343c64ec`.
+Its source changes invalidate reuse of the historical `0b99f7470` full gate and
+`2e3ba0979` timing qualification. Retain the pre-cutover post-numeric restart
+anchors at `ffb294956` before `43c72330f` and both timing columns in the
+`cd371176e` versus `2e3ba0979` comparison. The accepted stage-cost exceptions
+cover their exact measured checkpoints, not future regressions.
+
+The existing new-binding guard now covers bound source names, aliases, traits,
+forward declarations and Core reservations without a second visibility owner.
+Local, parameter and capture matrices retain source spans and collision codes,
+including concrete choice, pending generic-choice and pending optional-field
+captures with six exact `MOTH-RULE-0038` sites. Hidden-original and namespace-name
+positives preserve visibility boundaries, and mutable updates remain assignments.
+Focused corrected CLI cases pass. Independent source reviews find no required
+visibility, Canvas, constant-visitor or final coverage corrections.
+
+The constant investigation changes the review's structural-risk qualification:
+legal sequential shallow anonymous const records overflow the debug compiler
+at depth 1024 after depth 512 passes. LLDB attributes that overflow to
+`fold_value<PublicFoldedValue, ...>` during public projection, not parser nesting.
+Release depth 2048 passes and depth 4096 aborts, but that abort remains
+unattributed. Raw source and debugger evidence stays under
+`tmp/hardening/review-followup/const-depth/`.
+
+The corrected visitor uses iterative postorder and explicit heap stacks without
+memoisation or shared output representation. Constant-store tests pass 17/17.
+The 1 MiB proofs cover store depth 2048 and source depth 256. A fresh debug CLI
+passes the previously failing depth-1024 source on its real main-thread stack
+with no errors or warnings in 77.061125 ms. The repeated-child public source
+passes with no errors or warnings in 16.158833 ms. Those single checks provide
+correctness evidence, not matched performance. Deep scalar-return store tests
+do not prove deep owned clone/drop or downstream walkers, and the bounded
+const-record CLI case does not exercise HIR-pool conversion.
+
+The Canvas test's unchanged script now runs from a test-owned temporary `.mjs`
+file. Its real local test passes 1/1 with the selected Node 24 runtime. Windows
+execution remains unexercised. Keep the historical OPEN ledger above and mark
+the corrected harness awaiting Windows proof, not an all-green Windows gate.
+
+The first R1 `just validate` passes 7,147 workspace tests, including 6,103
+primary units, but integration exposes three authored fixture errors at 2,781
+of 2,784 target results. Corrected focused checks pass. The clean final R1
+`just validate`, with Node 24.21.0 selected explicitly on PATH, then passes
+formatting, Clippy, feature coverage, all 1,516 source checks, the 24-file/81-JS
+first-party audit, all workspace tests and doctests, 6,102 primary units and
+all 2,784 integration target results. Its docs check reports no errors or
+warnings in 1.477745084 seconds. The primary count drops by one because the
+redundant 64-level grouped test is removed. Retained 512/2048 tests pass 2/2
+under the same 1 MiB helper, generator and configuration. At the R1 checkpoint,
+no new full gate, matched performance comparison or Windows result was claimed.
+
+R1 completed at `8d1c588c0` before R2 started. Phases 5 to 8 remained unstarted,
+with no merge, squash or new roadmap-plan import.
+
+A fresh release compiler build passes. `target/release/moth build docs --release`
+then passes with 79 outputs in 287.444625 ms. Managed Chromium inspects the new
+release progress page on port 8347 and captures a 1280 by 900 CSS-viewport
+screenshot (artifact 6971). Fonts load, with no broken images or local anchors,
+page errors or horizontal overflow. DOM checks confirm R1 completion, blocked
+P5 and the `Partial` variables row's visibility and pending-capture coverage.
+The DOM record stays at `tmp/hardening/review-followup/r1-docs-dom.json`.
+This fresh compiler, DOM and screenshot proof qualifies the R1 documentation,
+not the earlier checkpoint's unavailable screenshot capture.
+
+### R2 grouped-not hardening and optimisation
+
+R2.0 (`1fe1d86df`) separated quadratic continuation classification from the
+flat grouping parser and recursive HIR validation. The large focused baseline
+aborted during preflight and supplies no measured cohort. Five safe runtime
+frontend/CLI cohorts at depths 32–256 remain original pre-validator references
+under `tmp/hardening/review-followup/r2-grouped-not/`. The revised testing
+authority changed the standard docs workload, so earlier standard cohorts
+cannot certify changed inputs.
+
+R2.1 (`e70d351db`) validates consecutive logical-not HIR rows iteratively,
+preserving per-row invariants, active-path cycle detection and entered-row
+cleanup. Its 1 MiB proof covers 2048 rows. Actual debug `moth check` passes
+depths 512 and 2048, and a same-validator dangling retry checks error cleanup.
+Its routine validation and independent audit passed before lowering changed.
+
+R2.2 (`db636851e`) carries one current-block classification through consecutive
+successful logical-not operator frames. It retains the boundary scan, selected
+expression view, catch context, unary rows/spans and prelude/CFG delivery.
+Five post-R2.1 baseline and overlay-candidate cohorts used one warmup and ten
+measured runs, timers only and one Rayon thread. Medians of five cohort means:
+
+| Runtime depth | Dev frontend HIR, ms | Release CLI HIR, ms |
+|---:|---:|---:|
+| 512 | 8.041825 → 1.028942 | 1.473792 → 0.163571 |
+| 1024 | 29.641888 → 1.919392 | 5.448046 → 0.253425 |
+| 2048 | 116.455900 → 3.742067 | 21.340371 → 0.452338 |
+
+Pre-change HIR grows 3.7–3.9× per depth doubling, compared with about 1.55–1.95×
+afterwards. Depth-2048 CLI `command.check.total` falls from 25.098829 to
+4.135062 ms. These figures attribute HIR work, not an overall compiler speedup.
+Each cohort retains 176 frontend and 121 CLI observations. Case IDs and CLI
+paths match, and all seven runtime-fixture hashes match. Constant/control
+inputs have path matches only. The candidate ran as an uncommitted R2.2 overlay
+on `e70d351db` without raw patch or binary fingerprints. Retain those limits
+alongside the stronger committed-source R2.4 qualification below.
+
+R2.3 (`6b855aab9`) renders consecutive JS unary HIR nodes in one buffer,
+lowering the terminal once and emitting each parenthesised layer once. The
+existing depth-512 short-circuit scenario passes HTML-JS on Node 24.21.0 with
+unchanged exact output and side effects. HTML-Wasm retains `MOTH-RULE-0064`
+on line 11. The pre-change both-backend run overflowed, but no precise frame
+was isolated. Map-use and cast-policy prepasses still recurse by expression
+depth. This checkpoint doesn't establish broader backend stack safety.
+
+### R2.4 final qualification
+
+The compiler candidate `6b855aab9` includes R1 and R2.1–R2.3. R2.4 adds
+performance fixtures, manifest declarations and their existing authority
+inventory, not compiler production changes. The user's testing-authority commit
+`d767691b4` remains unchanged.
+
+#### Matched inputs and protocol
+
+All measurements use Darwin arm64, Rust/Cargo 1.99.0, Node 24.21.0, timers only
+and `RAYON_NUM_THREADS=1`. The official non-recording commands run sequentially:
+`just bench-check` and `just bench-frontend-check`, one warmup and ten measured
+iterations per case. Reported comparisons use medians of independently invoked
+cohort means. Protocol 4 and timing schema 2, case order, runner declarations,
+source/measurement fingerprints and thread identity match within every pair.
+Counter arrays are empty. These observations supply timings, not operation counts
+or confidence intervals.
+
+Five standard pairs compare `d767691b4` with `6b855aab9`: 70 CLI and 72 dev
+frontend cases. Both use the original 142-case manifest. The new grouped-not
+cases have separate focused/scaling evidence. The baseline overlays only the
+candidate's progress-page source so docs inputs match exactly. Its frozen SHA256
+is `dd7e7ac54b4769847b8c47c28bbbd6938f9487ba5fdf324b181eed3fceb21bb3`.
+Later R2.4 status wording doesn't belong to this timing workload.
+
+The standard manifest SHA256 is
+`c7ba0cf1de1b0e9aeaee700875ca774595597a8c8d047655ee44d926e7c41a68`.
+All three measured revisions share xtask Git tree
+`35a5da51aa050e2ff9ca323c6cc428b236ec45bb`. Commands, worktree changes,
+toolchain versions, runner sources and full binary digests remain in the local
+provenance files. Measured binary SHA256 prefixes below identify their full
+digests there:
+
+| Revision | Release moth | Dev xtask |
+|---|---|---|
+| Standard baseline `d767691b4` | `617e4051e6d0` | `02a7c1a7859d` |
+| Focused baseline `e70d351db` | `fc0a24d3d18a` | `952982526aca` |
+| Candidate `6b855aab9` | `a885cd7526d5` | `db4dff4a21ef` |
+
+The focused baseline rebuilds its initially reused binary before the first
+measurement. Its per-command digests then remain stable, as do the candidate's.
+Standard digests are captured after the completed cohorts, not per invocation.
+Raw evidence stays under `tmp/hardening/review-followup/r2-4/`: `standard/`,
+`focused/`, `supplementary/` and `tiny-repeat/` retain full stdout/stderr, exits,
+manifests, identities, observations, cohort summaries and provenance.
+
+#### Final runtime-chain comparison
+
+Five focused pairs compare post-validator/pre-lowering `e70d351db` with
+`6b855aab9`, using identical runtime Bool sources at depths 512/1024/2048.
+The temporary six-case manifest SHA256 is
+`cee32d9481404e4fd2b8d9832a21ab10ea9c4642945ba38fe0798661d7fe320b`.
+Its source hashes and exact manifest overlays remain in `focused/provenance.json`.
+Neither side measures depth 8192. Baseline-first order remains a limitation.
+
+| Depth | Dev frontend total, ms | Dev frontend HIR, ms | CLI check total, ms | CLI HIR, ms |
+|---:|---:|---:|---:|---:|
+| 512 | 20.176742 → 12.989917 | 7.805958 → 1.022583 | 3.824442 → 2.582534 | 1.474379 → 0.163971 |
+| 1024 | 45.063683 → 17.613217 | 28.806479 → 1.919071 | 8.211308 → 2.926087 | 5.462588 → 0.256008 |
+| 2048 | 134.598850 → 27.294079 | 110.496033 → 3.794308 | 24.856292 → 3.924067 | 21.229967 → 0.438971 |
+
+Candidate dev HIR grows about 1.88× and 1.98× per depth doubling, compared
+with baseline growth about 3.69× and 3.84×. This supports linear grouped-not
+lowering through measured depth 2048, not a claim about the whole compiler or
+unbounded backend stack safety. Candidate CLI HIR stays below the existing
+1 ms scaling floor, so the permanent series measures dev frontend HIR instead.
+
+#### Standard-suite movements and follow-up
+
+Median-of-five suite averages move from 86.723441 to 87.285477 ms for CLI
+and 299.074273 to 298.212483 ms for dev frontend. They aren't substitutes for
+case-level comparisons. Representative case results:
+
+| Case | Baseline, ms | Candidate, ms | Change |
+|---|---:|---:|---:|
+| Docs CLI | 202.815521 | 204.916862 | +1.04% |
+| Docs frontend | 1354.787338 | 1354.631167 | −0.01% |
+| Type-stress frontend | 28.958621 | 28.648958 | −1.07% |
+| Constant-chain-512 frontend | 37.703879 | 38.983742 | +3.39% |
+| Generic-20 frontend | 124.911371 | 128.053912 | +2.52% |
+| Numeric-copy-128 frontend | 13.643738 | 13.317525 | −2.39% |
+| Grouped-arithmetic-512 frontend | 14.630238 | 14.637067 | +0.05% |
+| Grouped-arithmetic-512 CLI | 6.924800 | 6.947150 | +0.32% |
+
+The fixed baseline-first standard round exposes five increases above 5%.
+An unchanged-case seven-workload subset repeats them in five alternating-order
+pairs, with type/environment controls. The same measured binary digests remain
+unchanged. Both rounds stay in the record:
+
+| Case | Full-suite change | Alternating subset change |
+|---|---:|---:|
+| Fold-stress frontend | +19.45% | +1.49% |
+| Code-highlighter frontend | +5.42% | −2.49% |
+| Tiny-seven-files frontend | +6.77% | +5.95% |
+| Narrow-chain-32 frontend | +6.18% | +4.21% |
+| Kitchen-sink CLI | +5.63% | +0.42% |
+
+Tiny-seven-files still merits investigation after that subset. Ten further
+alternating pairs retain it alongside tiny-two, tiny-eight and type-stress
+controls. Tiny-seven moves from 18.278637 to 18.377433 ms (+0.54%), with
+paired changes from −7.70% to +12.51%. The controls move −0.85%, +1.43% and
++0.85% respectively. The earlier >5% median doesn't persist in this repeat.
+Neither the repeat nor smaller totals prove noise, causality or unavoidable
+cost. No old checkpoint exception waives these new movements.
+
+Source review finds no logical-not chain in fold-stress or tiny-seven.
+The observed fold increase spans AST constant-header work and bootstrap, while
+tiny-seven's increase spans bootstrap, AST and HIR. HIR validation's ordinary
+expression wrapper could contribute to a small HIR change, but it doesn't
+explain bootstrap/AST movement. Timers-only evidence doesn't resolve that
+attribution. All case and stage records remain available for later comparisons,
+without resetting baseline sources or performance budgets.
+
+#### Full gate and platform limits
+
+The first full-gate attempt stops at the repository benchmark inventory's old
+76-workload expectation. R2.4 updates its existing ordered inventory to 79
+workloads and six new cases without weakening assertions. The corrected
+`PATH=/Users/aneirinjames/.nvm/versions/node/v24.21.0/bin:$PATH just validate-full`
+passes on the R2.4 source/fixture candidate over `6b855aab9`:
+
+- Formatting, Clippy and feature coverage pass.
+- Source audit scans 1,516 files with zero findings. First-party dependency audit
+  scans 24 files and 81 JS sources with zero findings.
+- All workspace unit/doctest suites pass, including 6,105 primary units.
+  Integration passes 2,784/2,784 target results and all ten standard feature lanes pass.
+- Docs check reports no errors or warnings in 1.508112083 seconds.
+- Honesty audit scans 1,517 files and 817 own tests with zero hard findings.
+- All 148 benchmark preflights and all 14 scaling series pass. Grouped arithmetic
+  fits n^0.72 under its unchanged n^1.25 budget.
+- The new grouped-not dev HIR series measures 0.339/1.170/3.944 ms at
+  depths 128/512/2048, fitting n^0.88 under its independent n^1.25 budget.
+  The largest point clears the existing 1 ms measurement floor.
+- Timer erasure confirms a clean 10,350,416-byte no-timer binary.
+
+`validate-full.log` retains the complete passing output. Subsequent changes
+update documentation only and receive a separate release build/surface check.
+The normal cache-maintenance gate retains build artefacts despite the soft-budget
+warning. No manual eviction changes this comparison.
+
+This local Darwin run supplies no fresh Windows Canvas or in-process frontend
+result. The corrected file-based Canvas harness still awaits Windows execution,
+and the historical OS error 206 ledger stays OPEN. Existing non-blocking Windows
+policy remains unchanged. Historical Windows benchmark/scaling success doesn't
+certify this new candidate. A later squash or integration onto main requires
+validation of that resulting tree.
+
+#### Documentation build and surface proof
+
+The current release compiler checks docs with no errors or warnings in
+291.111833 ms, then `target/release/moth build docs --release` produces 79
+outputs in 226.838 ms. Only two tracked routes change: progress status and the
+style guide's rendering of the user's already committed testing revision.
+The testing source remains untouched. Both outputs come from the compiler,
+not manual HTML edits.
+
+Managed Chromium inspects both served routes on port 8349 and captures their
+1280×900 CSS-viewport screenshots. The progress page displays fresh R2.4
+qualification, pending final review/Windows proof and unstarted Phases 5–8.
+The style guide displays the revised pruning contract. Both routes load fonts
+with no page errors, horizontal overflow or broken local anchors. Local DOM
+records remain in `r2-4/docs-dom.json` and `r2-4/style-guide-dom.json`.
+
+Three fresh read-only R2.4 audits accept the scaling contract, measurement
+comparability/repeatability and documentation preservation without required
+findings. They retain the Windows and attribution limits above. The
+audit-accepted status rebuild produces 79 outputs in 295.255542 ms.
+
+#### Separate final review and pause closeout
+
+Two fresh final audit lanes pass without required findings. The R1 lane traces
+visibility/assignment owners, generic and capture paths, constant projection,
+Canvas staging and retained depth-test coverage. The R2 lane traces per-row
+validation/cleanup, continuation routing, JS unary order and checked-negation
+semantics, runtime assertions and scaling consumption.
+
+The closeout candidate records the requested pause on `expression-refactor`
+after R2.4 checkpoint `358d2535f`. Phases 5–8 remain unstarted and require
+explicit reactivation. A separate cross-scope integration audit qualifies this
+candidate before the closeout commit. No merge, squash or roadmap-plan import
+belongs to this follow-up. The umbrella plan remains because its later phases
+still own undelivered work.
+
+Final paused-source docs check passes without errors or warnings in
+307.276958 ms. The release build produces 79 outputs in 243.121125 ms.
+Managed Chromium verifies the rebuilt pause paragraph, pending Windows proof
+and unstarted later phases, with loaded fonts, no page errors, broken images,
+broken local anchors or horizontal overflow. Its final DOM record and screenshot
+remain under `r2-4/`. These documentation-only edits don't change the compiler,
+tests, benchmark fixtures or runner qualified by the full gate.
+
+The fresh cross-scope integration audit passes the bounded R1/R2 follow-up
+without required findings. It checks visibility/binding and constant-projection
+handoffs, validation/continuation/JS interactions, retained regression owners,
+benchmark qualification and pause status. It doesn't approve unstarted later
+phases or a future merge tree.

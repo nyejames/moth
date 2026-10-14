@@ -1,0 +1,5 @@
+project #= (
+    name = "template_loop_overflow_non_foldable_rejected",
+    entry_root = "src",
+)
+html #= ()

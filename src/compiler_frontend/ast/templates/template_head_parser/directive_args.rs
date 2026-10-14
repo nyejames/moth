@@ -18,6 +18,8 @@
 //! - **Slot modules** own slot schema and composition; they do not parse tokens.
 
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::const_values::store::{ConstStringValue, ConstValuePayload};
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::call_argument::CallAccessMode;
 use crate::compiler_frontend::ast::expressions::call_arguments::{
@@ -25,10 +27,14 @@ use crate::compiler_frontend::ast::expressions::call_arguments::{
     CallArgumentSyntax, CallArgumentSyntaxContext, CallArgumentValuePolicy,
     parse_call_arguments_with_receiving_context,
 };
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    ExprId, ExpressionOperationView,
+};
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::SlotKey;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticPayload, DiagnosticToken, InvalidTemplateDirectiveReason,
 };
@@ -99,14 +105,20 @@ fn first_significant_argument_offset(token_stream: &AstCursor) -> usize {
 /// The caller stays on the directive token. The shared owner consumes the
 /// opening and closing parentheses, so a successful return leaves the cursor
 /// on the token after `)`.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the shared owner keeps the directive name and parser borrows as separate inputs"
+)]
 fn parse_single_directive_argument(
     directive_name: StringId,
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> DirectiveArgsResult<Expression> {
+) -> DirectiveArgsResult<ExprId> {
     // Move from the directive token to the opening delimiter. The shared
     // parser receives this exact cursor shape and consumes both delimiters.
     token_stream.advance();
@@ -148,6 +160,8 @@ fn parse_single_directive_argument(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         receiving_context,
         None,
@@ -211,21 +225,28 @@ fn parse_single_directive_argument(
         .into_iter()
         .next()
         .expect("validated directive argument list is non-empty")
-        .value)
+        .value
+        .id())
 }
 
 /// Parses an optional parenthesized compile-time expression after a directive.
 ///
 /// Returns `Ok(None)` if no `(` follows the directive.
 /// Returns `Ok(Some(expression))` if a single expression was parsed.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "optional parsing keeps the directive name and parser borrows as separate inputs"
+)]
 pub(crate) fn parse_optional_parenthesized_expression(
     directive_name: StringId,
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> DirectiveArgsResult<Option<Expression>> {
+) -> DirectiveArgsResult<Option<ExprId>> {
     if !directive_has_arguments(token_stream) {
         return Ok(None);
     }
@@ -235,6 +256,8 @@ pub(crate) fn parse_optional_parenthesized_expression(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     )
@@ -244,14 +267,20 @@ pub(crate) fn parse_optional_parenthesized_expression(
 /// Parses a required parenthesized compile-time expression after a directive.
 ///
 /// Returns an error if no `(` follows the directive.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "required parsing keeps the directive name and parser borrows as separate inputs"
+)]
 pub(crate) fn parse_required_parenthesized_expression(
     directive_name: StringId,
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> DirectiveArgsResult<Expression> {
+) -> DirectiveArgsResult<ExprId> {
     if !directive_has_arguments(token_stream) {
         let found = token_stream
             .current_diagnostic_token(string_table)
@@ -275,6 +304,8 @@ pub(crate) fn parse_required_parenthesized_expression(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     )
@@ -290,11 +321,17 @@ pub(crate) fn parse_required_parenthesized_expression(
 /// The caller stays on the directive token. The shared owner consumes the
 /// opening and closing parentheses, so a successful return leaves the cursor
 /// on the token after `)`.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "optional slot targets keep the directive name and parser borrows as separate inputs"
+)]
 pub(crate) fn parse_optional_slot_target_argument(
     directive_name: StringId,
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> DirectiveArgsResult<SlotKey> {
@@ -307,24 +344,33 @@ pub(crate) fn parse_optional_slot_target_argument(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     )?;
 
-    match expression.kind {
-        crate::compiler_frontend::ast::expressions::expression::ExpressionKind::StringSlice(
-            name,
-        ) => Ok(SlotKey::Named(name)),
-        crate::compiler_frontend::ast::expressions::expression::ExpressionKind::FixedScalar(
-            value,
-        ) => match fixed_slot_position(value) {
+    let expression = expression_builder.view(expression)?;
+    let payload = match expression.operation() {
+        ExpressionOperationView::Constant(value) => {
+            Some(const_values.payload(value).ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "template expression references an absent constant value",
+                )
+            })?)
+        }
+        _ => None,
+    };
+    match payload {
+        Some(ConstValuePayload::String(ConstStringValue::Text(name))) => Ok(SlotKey::Named(*name)),
+        Some(ConstValuePayload::FixedScalar(value)) => match fixed_slot_position(*value) {
             Some(position) => Ok(SlotKey::Positional(position)),
             None => Err(with_current_token_span(
                 token_stream,
                 CompilerDiagnostic::invalid_template_directive(
                     Some(directive_name),
                     InvalidTemplateDirectiveReason::InvalidSlotTarget,
-                    expression.span,
+                    expression.span(),
                 ),
             )
             .into()),
@@ -334,7 +380,7 @@ pub(crate) fn parse_optional_slot_target_argument(
             CompilerDiagnostic::invalid_template_directive(
                 Some(directive_name),
                 InvalidTemplateDirectiveReason::InvalidSlotTarget,
-                expression.span,
+                expression.span(),
             ),
         )
         .into()),
@@ -362,11 +408,17 @@ fn fixed_slot_position(value: FixedScalarValue) -> Option<usize> {
 /// The caller stays on the directive token. The shared owner consumes the
 /// opening and closing parentheses, so a successful return leaves the cursor
 /// on the token after `)`.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "required slot names keep the directive name and parser borrows as separate inputs"
+)]
 pub(crate) fn parse_required_slot_name_argument(
     directive_name: StringId,
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> DirectiveArgsResult<StringId> {
@@ -393,20 +445,31 @@ pub(crate) fn parse_required_slot_name_argument(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     )?;
 
-    match expression.kind {
-        crate::compiler_frontend::ast::expressions::expression::ExpressionKind::StringSlice(
-            name,
-        ) => Ok(name),
+    let expression = expression_builder.view(expression)?;
+    let payload = match expression.operation() {
+        ExpressionOperationView::Constant(value) => {
+            Some(const_values.payload(value).ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "template expression references an absent constant value",
+                )
+            })?)
+        }
+        _ => None,
+    };
+    match payload {
+        Some(ConstValuePayload::String(ConstStringValue::Text(name))) => Ok(*name),
         _ => Err(with_current_token_span(
             token_stream,
             CompilerDiagnostic::invalid_template_directive(
                 Some(directive_name),
                 InvalidTemplateDirectiveReason::InvalidInsertTarget,
-                expression.span,
+                expression.span(),
             ),
         )
         .into()),

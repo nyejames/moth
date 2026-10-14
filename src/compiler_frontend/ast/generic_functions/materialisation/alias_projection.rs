@@ -2,10 +2,9 @@
 
 use super::artefact_emit::{ModuleMaterialisationContext, append_materialised_declaration};
 use super::nominal_blueprints::intern_generated_canonical_type;
-use super::preparation_freeze::ModuleMaterialisationPreparation;
+use super::preparation_freeze::ModuleMaterialisationCapture;
 use super::stable_types::GenericTemplateArtefact;
-use crate::compiler_frontend::ast::ast_nodes::Declaration;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::ast_nodes::{Declaration, DeclarationShell, DeclarationValue};
 use crate::compiler_frontend::ast::module_ast::environment::AstModuleEnvironment;
 use crate::compiler_frontend::ast::type_resolution::ResolvedTypeAlias;
 use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
@@ -17,7 +16,7 @@ use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::rc::Rc;
-impl ModuleMaterialisationPreparation {
+impl ModuleMaterialisationCapture {
     pub(super) fn stable_alias_target_identity(
         &self,
         path: &PathId,
@@ -69,13 +68,10 @@ pub(super) fn restore_generated_local_alias(
     )?;
     let declaration = Declaration {
         id: local_path,
-        value: Expression::new(
-            ExpressionKind::NoValue,
-            None,
-            type_id,
-            diagnostic_type_spelling(type_id, &environment.type_environment),
-            ValueMode::ImmutableReference,
-        ),
+        type_id,
+        diagnostic_type: diagnostic_type_spelling(type_id, &environment.type_environment),
+        value_mode: ValueMode::ImmutableReference,
+        value: DeclarationValue::Shell(DeclarationShell::TypeAlias),
         binding_span: None,
         config_qualifier: None,
     };

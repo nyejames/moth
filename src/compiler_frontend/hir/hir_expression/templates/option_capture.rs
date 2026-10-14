@@ -5,7 +5,7 @@
 //! WHY: option capture has extra local-registration and payload-extraction rules that are easier
 //! to audit apart from ordinary Bool branch lowering.
 
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression_store::ExpressionView;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::blocks::HirLocal;
@@ -25,7 +25,7 @@ use crate::return_hir_transformation_error;
 impl<'a> HirBuilder<'a> {
     pub(super) fn append_runtime_option_present_template_branch(
         &mut self,
-        scrutinee: &Expression,
+        scrutinee: ExpressionView<'_>,
         pattern: &MatchPattern,
         span_ref: &Option<SourceSpan>,
         append_present: impl FnOnce(&mut HirBuilder<'a>) -> Result<(), HirConstructionFailure>,

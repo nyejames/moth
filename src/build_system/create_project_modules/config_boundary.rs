@@ -605,7 +605,7 @@ fn fixed_build_value_from_metadata(
             None,
         )),
         PublicFoldedValue::Number(_)
-        | PublicFoldedValue::ConstTemplate(_)
+        | PublicFoldedValue::ConstTemplate { .. }
         | PublicFoldedValue::Collection(_)
         | PublicFoldedValue::Record(_)
         | PublicFoldedValue::Choice { .. }
@@ -622,7 +622,7 @@ fn primitive_build_value_from_metadata(value: &PublicFoldedValue) -> Option<Prim
             Some(PrimitiveBuildValue::String(value.clone().into_text()?))
         }
         PublicFoldedValue::Number(_)
-        | PublicFoldedValue::ConstTemplate(_)
+        | PublicFoldedValue::ConstTemplate { .. }
         | PublicFoldedValue::Collection(_)
         | PublicFoldedValue::Record(_)
         | PublicFoldedValue::Choice { .. }

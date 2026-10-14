@@ -6,13 +6,13 @@
 //! on the public error type shape.
 
 use crate::compiler_frontend::ast::ScopeContext;
-use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, NodeKind};
-use crate::compiler_frontend::ast::expressions::expression::{
-    Expression, ExpressionKind, type_id_hint_for_diagnostic_type,
+use crate::compiler_frontend::ast::ast_nodes::{
+    AstNode, Declaration, DeclarationShell, DeclarationValue, NodeKind,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::{DataType, builtin_type_ids};
+use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -45,6 +45,7 @@ pub(crate) struct BuiltinErrorManifest {
     pub(crate) visible_symbol_paths: FxHashSet<PathId>,
     pub(crate) declarations: Vec<Declaration>,
     pub(crate) resolved_struct_fields_by_path: FxHashMap<PathId, Vec<Declaration>>,
+    pub(crate) folded_defaults_by_field_path: FxHashMap<PathId, PublicFoldedValue>,
     pub(crate) struct_source_by_path: FxHashMap<PathId, PathId>,
     pub(crate) ast_struct_nodes: Vec<AstNode>,
 }
@@ -78,14 +79,23 @@ pub(crate) fn register_builtin_error_types(
         .try_intern_child(error_path, string_table.intern(ERROR_FIELD_CODE))
         .expect("builtin Error.code path must fit the path table");
 
+    let mut folded_defaults_by_field_path = FxHashMap::default();
+    folded_defaults_by_field_path.insert(code_path, u32_field_default(0));
+
     let error_fields = vec![
-        required_field(message_path, DataType::StringSlice, None),
-        defaulted_u32_field(code_path, 0, None),
+        required_field(
+            message_path,
+            DataType::StringSlice,
+            builtin_type_ids::STRING,
+            None,
+        ),
+        defaulted_u32_field(code_path, None),
     ];
 
     let declarations = vec![type_declaration(
         error_path,
         DataType::runtime_struct(error_path, builtin_type_ids::NONE),
+        builtin_type_ids::NONE,
         None,
     )];
 
@@ -111,6 +121,7 @@ pub(crate) fn register_builtin_error_types(
         visible_symbol_paths,
         declarations,
         resolved_struct_fields_by_path,
+        folded_defaults_by_field_path,
         struct_source_by_path,
         ast_struct_nodes,
     }
@@ -142,55 +153,70 @@ fn resolve_builtin_named_type(
         )));
     };
 
-    if declaration.value.diagnostic_type == DataType::Inferred {
+    if declaration.diagnostic_type == DataType::Inferred {
         return Err(CompilerError::compiler_error(format!(
             "Builtin type '{type_name}' resolved to an inferred placeholder at {span:?}.",
         )));
     }
 
     Ok(ResolvedBuiltinType {
-        type_id: declaration.value.type_id,
+        type_id: declaration.type_id,
     })
 }
 
-fn type_declaration(id: PathId, data_type: DataType, span: Option<SourceSpan>) -> Declaration {
+fn type_declaration(
+    id: PathId,
+    data_type: DataType,
+    type_id: TypeId,
+    span: Option<SourceSpan>,
+) -> Declaration {
     Declaration {
         id,
-        value: Expression::new(
-            ExpressionKind::NoValue,
-            span,
-            type_id_hint_for_diagnostic_type(&data_type),
-            data_type,
-            ValueMode::ImmutableReference,
-        ),
-        binding_span: None,
+        type_id,
+        diagnostic_type: data_type,
+        value_mode: ValueMode::ImmutableReference,
+        value: DeclarationValue::Shell(DeclarationShell::Struct),
+        binding_span: span,
         config_qualifier: None,
     }
 }
-fn required_field(id: PathId, data_type: DataType, span: Option<SourceSpan>) -> Declaration {
+fn required_field(
+    id: PathId,
+    data_type: DataType,
+    type_id: TypeId,
+    span: Option<SourceSpan>,
+) -> Declaration {
     Declaration {
         id,
-        value: Expression::no_value(span, data_type, ValueMode::ImmutableOwned),
-        binding_span: None,
+        type_id,
+        diagnostic_type: data_type,
+        value_mode: ValueMode::ImmutableOwned,
+        value: DeclarationValue::Absent,
+        binding_span: span,
         config_qualifier: None,
     }
 }
 
-/// The canonical `Error.code` fixed-scalar identity; every code is an unsigned
-/// 32-bit value, so the default literal materialises through the existing
-/// fixed-scalar AST expression APIs without a signed-integer intermediate.
-fn defaulted_u32_field(id: PathId, value: u32, span: Option<SourceSpan>) -> Declaration {
+/// The canonical `Error.code` identity: an unsigned 32-bit fixed-scalar field. Its default
+/// is carried in `folded_defaults_by_field_path` until the AST build materialises it.
+fn defaulted_u32_field(id: PathId, span: Option<SourceSpan>) -> Declaration {
     Declaration {
         id,
-        value: Expression::fixed_scalar(
-            FixedScalarValue::unsigned(FixedScalar::U32, u64::from(value))
-                .expect("the builtin Error.code default must fit the U32 fixed-scalar domain"),
-            span,
-            ValueMode::ImmutableOwned,
-        ),
-        binding_span: None,
+        type_id: builtin_type_ids::fixed_scalar(FixedScalar::U32),
+        diagnostic_type: DataType::FixedScalar(FixedScalar::U32),
+        value_mode: ValueMode::ImmutableOwned,
+        value: DeclarationValue::Absent,
+        binding_span: span,
         config_qualifier: None,
     }
+}
+
+/// The owned folded default for a `U32` builtin field.
+fn u32_field_default(value: u32) -> PublicFoldedValue {
+    PublicFoldedValue::FixedScalar(
+        FixedScalarValue::unsigned(FixedScalar::U32, u64::from(value))
+            .expect("the builtin Error.code default must fit the U32 fixed-scalar domain"),
+    )
 }
 
 #[cfg(test)]

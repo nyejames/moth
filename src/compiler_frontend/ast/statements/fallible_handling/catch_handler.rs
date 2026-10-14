@@ -7,10 +7,15 @@
 
 use std::convert::Infallible;
 
-use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, NodeKind};
+use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, DeclarationValue, NodeKind};
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
-use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::expressions::expression_rpn::{
+    ExpressionRpnItem, single_operand,
+};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, OwnedExpr,
+};
 use crate::compiler_frontend::ast::expressions::expression_types::{
     CatchErrorBinding, FallibleHandling,
 };
@@ -61,8 +66,8 @@ use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 use super::parser::{
-    CarriedCatchOutcome, carried_catch_site, complete_catch_failure_fact,
-    completed_catch_attachment, wrap_catch_expression,
+    ProducerCatchOutcome, complete_catch_failure_fact, completed_catch_attachment,
+    producer_catch_site, wrap_catch_expression,
 };
 use super::validation::{
     validate_catch_fallible_handler_binding, validate_catch_fallible_handler_conflict,
@@ -225,15 +230,15 @@ pub(crate) enum ParsedCatchHandler {
 ///      the only place the authored catch can be finished — never as a placeholder, a defaulted
 ///      handler, or a second parse of the same source.
 pub(crate) fn complete_deferred_catch_handler<'env>(
-    handler: Box<DeferredCatchHandler>,
+    handler: DeferredCatchHandler,
     completion: &mut impl DeferredExpressionCompletion<'env>,
-) -> Result<Expression, ExpressionParseError> {
+) -> Result<OwnedExpr, ExpressionParseError> {
     let DeferredCatchHandler {
         mut handled,
         ready_site,
         protected_shape,
         handler,
-    } = *handler;
+    } = handler;
 
     // A handler body that parsed without an established site was validated against a provisional
     // contract; its fallthrough requirement must be revalidated against the resolved one below.
@@ -266,6 +271,8 @@ pub(crate) fn complete_deferred_catch_handler<'env>(
                 handled_expression,
                 services.context,
                 services.type_interner,
+                services.expression_builder,
+                services.const_values,
                 services.string_table,
             )?
         }
@@ -285,13 +292,18 @@ pub(crate) fn complete_deferred_catch_handler<'env>(
                 // (`value_required_span`); a retained body has no parse-time site, so the resolved
                 // protected expression supplies the same authored location, with the body's first
                 // authored statement as a fallback — never a synthetic span.
-                let fallthrough_span = handled_expression
-                    .span
+                let services = completion.session_services();
+                let fallthrough_span = services
+                    .expression_builder
+                    .view_owned(handled_expression)?
+                    .span()
                     .or_else(|| nodes.first().and_then(|node| node.span));
                 validate_catch_fallible_handler_value_requirement(
                     true,
                     Some(&success_result_type_ids),
                     &nodes,
+                    services.expression_builder,
+                    services.const_values,
                     fallthrough_span,
                 )?;
             }
@@ -324,10 +336,13 @@ pub(crate) fn complete_deferred_catch_handler<'env>(
             // exactly this body.
             let mut nodes = completion
                 .resolve_deferred_body_with_expectations(body, Some(&success_result_type_ids))?;
+            let services = completion.session_services();
             validate_catch_fallible_handler_value_requirement(
                 value_required,
                 Some(&success_result_type_ids),
                 &nodes,
+                services.expression_builder,
+                services.const_values,
                 value_required_span,
             )?;
 
@@ -344,17 +359,24 @@ pub(crate) fn complete_deferred_catch_handler<'env>(
         }
     };
 
+    let services = completion.session_services();
     let mut recovered = wrap_catch_expression(
+        services.expression_builder,
         handled_expression,
         FallibleHandling::Handler {
             error: handler.error,
             body,
         },
         success_result_type_ids,
-    );
+    )?;
 
     let services = completion.session_services();
-    complete_catch_failure_fact(&mut recovered, error_return_type_id, services.context)?;
+    complete_catch_failure_fact(
+        &mut recovered,
+        services.expression_builder,
+        error_return_type_id,
+        services.context,
+    )?;
 
     Ok(recovered)
 }
@@ -440,6 +462,7 @@ pub(crate) fn raw_protected_result_shape(
     expected: ExpectedType,
     scope_context: &ScopeContext,
     environment: &mut TypeEnvironment,
+    expression_builder: &AstExpressionBuilder,
 ) -> ConstructionResult<Option<KnownShapeId>> {
     if expected != ExpectedType::Infer || !items.iter().all(item_is_literal_recipe_shape) {
         return Ok(None);
@@ -447,7 +470,7 @@ pub(crate) fn raw_protected_result_shape(
     if raw_fragment_result_is_independently_fixed(items, NumericFamily::of_items(items)) {
         return Ok(None);
     }
-    fragment_shape(scope_context, environment, items).map(Some)
+    fragment_shape(scope_context, environment, items, expression_builder).map(Some)
 }
 
 /// Applies a retained catch's fallback witnesses to the slots its protected value opens.
@@ -462,6 +485,8 @@ pub(crate) fn constrain_protected_by_fallbacks(
     payload: &DeferredCatchHandler,
     state: &mut NumericConstructionState,
     environment: &TypeEnvironment,
+    expression_builder: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
 ) {
     if let Some(protected_shape) = payload.protected_shape {
         visit_fallback_witnesses(
@@ -469,6 +494,8 @@ pub(crate) fn constrain_protected_by_fallbacks(
             std::slice::from_ref(&protected_shape),
             state,
             environment,
+            expression_builder,
+            const_values,
         );
         return;
     }
@@ -478,7 +505,7 @@ pub(crate) fn constrain_protected_by_fallbacks(
     if deferred.expected != ExpectedType::Infer {
         return;
     }
-    let [item] = deferred.items.as_slice() else {
+    let Some(item) = single_operand(&deferred.items) else {
         return;
     };
     let Some(terminal) = retained_terminal_call(item) else {
@@ -487,7 +514,14 @@ pub(crate) fn constrain_protected_by_fallbacks(
     let Some(slot_shapes) = terminal.generic_result_shapes() else {
         return;
     };
-    visit_fallback_witnesses(&payload.handler.body, slot_shapes, state, environment);
+    visit_fallback_witnesses(
+        &payload.handler.body,
+        slot_shapes,
+        state,
+        environment,
+        expression_builder,
+        const_values,
+    );
 }
 
 /// Applies every reachable fallback witness of a catch body to the protected slots, in authored order.
@@ -502,12 +536,16 @@ fn visit_fallback_witnesses(
     slot_shapes: &[KnownShapeId],
     state: &mut NumericConstructionState,
     environment: &TypeEnvironment,
+    expression_builder: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
 ) {
     state.with_detached_continuations(|continuations, state| {
         FallbackWalk {
             continuations,
             slot_shapes,
             environment,
+            expression_builder,
+            const_values,
         }
         .visit_body(body, state);
     });
@@ -521,6 +559,8 @@ struct FallbackWalk<'walk> {
     continuations: &'walk DetachedContinuations,
     slot_shapes: &'walk [KnownShapeId],
     environment: &'walk TypeEnvironment,
+    expression_builder: &'walk AstExpressionBuilder,
+    const_values: &'walk ConstValueStore,
 }
 
 impl FallbackWalk<'_> {
@@ -547,16 +587,20 @@ impl FallbackWalk<'_> {
         nodes: &[AstNode],
         state: &mut NumericConstructionState,
     ) -> BranchExitSummary {
-        let visited: Result<(), Infallible> =
-            visit_reachable_then_values(nodes, &mut |produced: &ProducedValues| {
+        let visited: Result<(), Infallible> = visit_reachable_then_values(
+            nodes,
+            &mut |produced: &ProducedValues| {
                 self.apply_built_group(produced.expressions.as_slice(), state);
                 Ok(())
-            });
+            },
+            self.expression_builder,
+            self.const_values,
+        );
         match visited {
             Ok(()) => {}
             Err(never) => match never {},
         }
-        analyze_branch_exits(nodes)
+        analyze_branch_exits(nodes, self.expression_builder, self.const_values)
     }
 
     /// Applies a retained body's entries in authored order, stopping once no path falls through.
@@ -652,12 +696,18 @@ impl FallbackWalk<'_> {
     ///
     /// WHY: a group of the call's declared arity supplies one value per slot; any other arity
     ///      supplies no value at any slot.
-    fn apply_built_group(&self, values: &[Expression], state: &mut NumericConstructionState) {
+    fn apply_built_group(&self, values: &[ExprId], state: &mut NumericConstructionState) {
         if values.len() != self.slot_shapes.len() {
             return;
         }
-        for (shape, value) in self.slot_shapes.iter().copied().zip(values) {
-            register_shape_witness(state, self.environment, shape, value.type_id, value.span);
+        for (shape, fallback) in self.slot_shapes.iter().copied().zip(values) {
+            let fallback = self
+                .expression_builder
+                .view(*fallback)
+                .expect("completed fallback belongs to expression owner");
+            if let Ok(type_id) = fallback.value_type_id() {
+                register_shape_witness(state, self.environment, shape, type_id, fallback.span());
+            }
         }
     }
 
@@ -671,7 +721,9 @@ impl FallbackWalk<'_> {
             return;
         }
         for (index, shape) in self.slot_shapes.iter().copied().enumerate() {
-            if let Some(witness) = known_group_witness(values, index, state) {
+            if let Some(witness) =
+                known_group_witness(values, index, state, self.expression_builder)
+            {
                 self.apply_witness(witness, shape, state);
             }
         }
@@ -714,6 +766,7 @@ fn known_group_witness(
     values: &ThenValueContinuation,
     index: usize,
     state: &NumericConstructionState,
+    expression_builder: &AstExpressionBuilder,
 ) -> Option<FallbackWitness> {
     let value = values.values.get(index)?;
     let expected = values.slot_expected_types.get(index).copied().flatten();
@@ -722,11 +775,18 @@ fn known_group_witness(
         span: None,
     };
     match value {
-        ThenValueSlot::Pending(StatementExpression::Built(expression))
-        | ThenValueSlot::Completed(expression) => Some(FallbackWitness::Exact(ExactFallbackType {
-            type_id: expression.type_id,
-            span: expression.span,
-        })),
+        ThenValueSlot::Pending(StatementExpression::Built(fallback))
+        | ThenValueSlot::Completed(fallback) => {
+            let fallback = expression_builder
+                .view(*fallback)
+                .expect("completed fallback belongs to expression owner");
+            fallback.value_type_id().ok().map(|type_id| {
+                FallbackWitness::Exact(ExactFallbackType {
+                    type_id,
+                    span: fallback.span(),
+                })
+            })
+        }
         ThenValueSlot::Pending(StatementExpression::Retained(deferred)) => expected
             .map(expected_group)
             .or_else(|| retained_concrete_witness(deferred, state))
@@ -819,12 +879,11 @@ fn retained_concrete_witness(
 /// WHY: the declared return type is exact before the pending arguments complete. Reading it does
 ///      not complete the call, read the callee body, or allocate a shape.
 fn retained_single_call_result(items: &[ExpressionRpnItem]) -> Option<ExactFallbackType> {
-    match items {
-        [ExpressionRpnItem::PendingNumericCall { call, .. }] => Some(ExactFallbackType {
+    match single_operand(items) {
+        Some(ExpressionRpnItem::PendingNumericCall { call, .. }) => Some(ExactFallbackType {
             type_id: call.single_success_return_type_id()?,
             span: call.call_span(),
         }),
-        [ExpressionRpnItem::PendingGroup { nodes, .. }] => retained_single_call_result(nodes),
         _ => None,
     }
 }
@@ -861,16 +920,26 @@ fn validate_completed_handler_then_values(
 /// WHY: a retained protected value skips the parse-time site derivation, so completion must run
 ///      exactly the derivation the authored site would have run.
 fn resolved_catch_site(
-    expression: Expression,
+    expression: OwnedExpr,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
-) -> Result<(Expression, TypeId, Vec<TypeId>), ExpressionParseError> {
-    match carried_catch_site(expression, type_interner) {
-        CarriedCatchOutcome::Carrier(carried) => Ok(carried.recovery()),
-        CarriedCatchOutcome::NotCarrier(expression) => {
-            let span = expression.span;
-            completed_catch_attachment(expression, context, type_interner, string_table, span)
+) -> Result<(OwnedExpr, TypeId, Vec<TypeId>), ExpressionParseError> {
+    match producer_catch_site(expression, expression_builder)? {
+        ProducerCatchOutcome::Producer(producer) => producer.recovery(expression_builder),
+        ProducerCatchOutcome::NoErrorChannel(expression) => {
+            let span = expression_builder.view_owned(expression)?.span();
+            completed_catch_attachment(
+                expression,
+                context,
+                type_interner,
+                expression_builder,
+                const_values,
+                string_table,
+                span,
+            )
         }
     }
 }
@@ -888,10 +957,16 @@ struct ParsedCatchErrorBinding {
 /// WHY: expression and call fallible handling both use this entrypoint when the user
 /// supplies an error variable, and a handler body that retained numeric continuations must
 /// travel to the body root rather than resolve here.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "catch handler keeps stream, scope, site, warnings and mutable parse resources apart"
+)]
 pub(crate) fn parse_catch_fallible_handler_typed(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     site: CatchFallibleHandlerSite<'_>,
     warnings: Option<&mut Vec<CompilerDiagnostic>>,
     string_table: &mut StringTable,
@@ -910,6 +985,8 @@ pub(crate) fn parse_catch_fallible_handler_typed(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         site,
         Some(error_binding),
         warnings,
@@ -919,10 +996,16 @@ pub(crate) fn parse_catch_fallible_handler_typed(
 }
 
 /// Parses a `catch:` handler without an error binding.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "catch without binding keeps stream, scope, site, warnings and mutable parse resources apart"
+)]
 pub(crate) fn parse_catch_without_error_binding_typed(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     site: CatchFallibleHandlerSite<'_>,
     warnings: Option<&mut Vec<CompilerDiagnostic>>,
     string_table: &mut StringTable,
@@ -938,6 +1021,8 @@ pub(crate) fn parse_catch_without_error_binding_typed(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         site,
         None,
         warnings,
@@ -1000,7 +1085,12 @@ fn parse_catch_error_binding(
         string_table,
     )?;
 
-    validate_catch_fallible_handler_conflict(context, handler_name, handler_name_span)?;
+    validate_catch_fallible_handler_conflict(
+        context,
+        handler_name,
+        handler_name_span,
+        string_table,
+    )?;
 
     token_stream.advance();
 
@@ -1051,12 +1141,10 @@ fn bind_catch_error(
             handler_context.add_var(
                 Declaration {
                     id: error_binding,
-                    value: Expression::no_value_with_type_id(
-                        error.span,
-                        error_data_type,
-                        error_type_id,
-                        ValueMode::ImmutableOwned,
-                    ),
+                    type_id: error_type_id,
+                    diagnostic_type: error_data_type,
+                    value_mode: ValueMode::ImmutableOwned,
+                    value: DeclarationValue::Absent,
                     binding_span: error.span,
                     config_qualifier: None,
                 },
@@ -1098,6 +1186,8 @@ fn parse_catch_fallible_handler_body(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     site: CatchFallibleHandlerSite<'_>,
     error: Option<ParsedCatchErrorBinding>,
     warnings: &mut Vec<CompilerDiagnostic>,
@@ -1140,6 +1230,8 @@ fn parse_catch_fallible_handler_body(
         token_stream,
         handler_context,
         type_interner,
+        expression_builder,
+        const_values,
         warnings,
         string_table,
         path_fork,
@@ -1180,6 +1272,8 @@ fn parse_catch_fallible_handler_body(
             site.value_required,
             site.success_contract.known(),
             &handler.body,
+            expression_builder,
+            const_values,
             site.value_required_span,
         )?;
     }
@@ -1192,10 +1286,16 @@ fn parse_catch_fallible_handler_body(
 /// WHAT: builds the same one-node handler body as block-form `catch: then ... ;`.
 /// WHY: inline catch is only sugar at receiving sites; keeping the body as `ThenValue`
 /// lets AST/HIR reuse the value-block catch path without catch-specific fallback fields.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "inline catch keeps stream, scope, site and mutable parse resources apart"
+)]
 pub(super) fn parse_inline_catch_without_error_binding_typed(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     site: CatchFallibleHandlerSite<'_>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
@@ -1204,6 +1304,8 @@ pub(super) fn parse_inline_catch_without_error_binding_typed(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         site,
         None,
         string_table,
@@ -1216,10 +1318,16 @@ pub(super) fn parse_inline_catch_without_error_binding_typed(
 /// WHAT: validates and binds `err`, then parses the single inline produced-value list.
 /// WHY: the inline shorthand must preserve the same scoping and conflict rules as
 /// block-form catch handlers.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "inline catch keeps stream, scope, site, warnings and mutable parse resources apart"
+)]
 pub(super) fn parse_inline_catch_fallible_handler_typed(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     site: CatchFallibleHandlerSite<'_>,
     warnings: Option<&mut Vec<CompilerDiagnostic>>,
     string_table: &mut StringTable,
@@ -1237,16 +1345,24 @@ pub(super) fn parse_inline_catch_fallible_handler_typed(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         site,
         Some(error_binding),
         string_table,
         path_fork,
     )
 }
+#[allow(
+    clippy::too_many_arguments,
+    reason = "inline catch body keeps stream, scope, site, error binding and mutable parse resources apart"
+)]
 fn parse_inline_catch_handler_body(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     site: CatchFallibleHandlerSite<'_>,
     error: Option<ParsedCatchErrorBinding>,
     string_table: &mut StringTable,
@@ -1328,6 +1444,8 @@ fn parse_inline_catch_handler_body(
         token_stream,
         context: &handler_context,
         type_interner,
+        expression_builder,
+        const_values,
         target: &active_target,
         string_table,
         path_fork,

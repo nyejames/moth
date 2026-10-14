@@ -195,7 +195,7 @@ fn validate_feature_flags(request: &WasmBackendRequest) -> Result<(), CompilerEr
 
     if request.target_features.enable_multi_value {
         return Err(CompilerError::compiler_error(
-            "Wasm backend request enables multi-value, but the current ABI supports single-result only",
+            "Wasm backend request enables the reserved multi-value feature flag, which is unsupported. Native scalar multi-result lowering does not need this flag",
         )
         .with_error_type(ErrorType::Backend(BackendErrorType::WasmGeneration)));
     }

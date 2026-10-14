@@ -12,7 +12,9 @@ use super::function_calls::{
 };
 use super::parse_expression_dispatch::push_expression_operand;
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::generic_functions::{
     GenericCallExpectedContext, GenericFunctionCallParseInput, GenericFunctionTemplate,
     parse_generic_function_call_expression, validate_generic_function_template_call_expression,
@@ -43,9 +45,13 @@ pub(super) struct SourceCallableMemberInput<'a, 'env, 'tokens> {
     pub(super) call_span: Option<SourceSpan>,
     pub(super) context: &'a ScopeContext,
     pub(super) expression: &'a mut Vec<ExpressionRpnItem>,
+    /// Whether the innermost fragment frame had no items before this call.
+    pub(super) expression_is_boundary_leading: bool,
     pub(super) allow_boundary_catch: bool,
     pub(super) expected_result_evidence_allowed: bool,
     pub(super) type_interner: &'a mut AstTypeInterner<'env>,
+    pub(super) expression_builder: &'a mut AstExpressionBuilder,
+    pub(super) const_values: &'a mut ConstValueStore,
     pub(super) string_table: &'a mut StringTable,
     pub(super) path_fork: &'a mut PathInternerFork,
 }
@@ -70,14 +76,15 @@ pub(super) fn parse_source_callable_member(
         call_span,
         context,
         expression,
+        expression_is_boundary_leading,
         allow_boundary_catch,
         expected_result_evidence_allowed,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     } = input;
-
-    let expression_is_boundary_leading = expression.is_empty();
 
     // ------------------------
     //  Generic source call
@@ -138,6 +145,8 @@ pub(super) fn parse_source_callable_member(
             call_span,
             warnings: None,
             type_interner,
+            expression_builder,
+            const_values,
             string_table,
             path_fork,
         };
@@ -154,6 +163,8 @@ pub(super) fn parse_source_callable_member(
                     token_stream,
                     context,
                     type_interner,
+                    expression_builder,
+                    const_values,
                     string_table,
                     expression,
                     allow_boundary_catch,
@@ -186,6 +197,8 @@ pub(super) fn parse_source_callable_member(
         allow_boundary_catch,
         warnings: None,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     })?;
@@ -196,6 +209,8 @@ pub(super) fn parse_source_callable_member(
                 token_stream,
                 context,
                 type_interner,
+                expression_builder,
+                const_values,
                 string_table,
                 expression,
                 allow_boundary_catch,

@@ -1,96 +1,28 @@
-//! Expression-owned runtime RPN and place representations.
+//! Transient expression syntax and resolved operation facts.
 //!
-//! WHAT: defines the narrow contracts that replace broad `AstNode` fragments inside
-//! expression payloads. `ExpressionRpn` carries only `Expression` operands and
-//! located operators; `PlaceExpression` carries only local or field places.
-//! WHY: keeping runtime expression representation frontend-owned prevents statement
-//! nodes from leaking into value contexts and gives constant folding, HIR lowering,
-//! and template substitution one shared narrow language.
+//! RPN exists only while ordering, resolving and folding a producer. Completed operands name
+//! phase-owned immutable rows; no RPN container survives into the completed AST.
 
-use crate::compiler_frontend::ast::expressions::expression::Expression;
-use crate::compiler_frontend::ast::expressions::expression_kind::{ExpressionKind, Operator};
+use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
+use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::expressions::expression_types::CastHandling;
-use crate::compiler_frontend::ast::expressions::failure_facts::FailureDisposition;
-use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
-use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::ast::expressions::failure_facts::ImplicitFailureContributor;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_operators::{
+    NumericComparisonDomain, NumericOperator,
+};
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::path_interner::PathId;
-use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::value_mode::ValueMode;
 
-/// Reverse-Polish-Notation payload for a runtime expression.
-///
-/// WHAT: ordered list of operands and operators that survive AST constant folding.
-/// WHY: the operand type is `Expression`, not `AstNode`, so runtime RPN cannot
-/// smuggle statement bodies or broad parser fragments into expression values.
 #[derive(Clone, Debug)]
-pub struct ExpressionRpn {
-    pub items: Vec<ExpressionRpnItem>,
-}
-
-impl ExpressionRpn {
-    /// Returns an empty expression-owned RPN stack for coercion fixtures.
-    #[cfg(test)]
-    pub fn empty() -> Self {
-        Self { items: Vec::new() }
-    }
-
-    /// Returns true if the RPN contains at least one regular division operator.
-    pub fn contains_regular_division(&self) -> bool {
-        self.items.iter().any(|item| {
-            matches!(
-                item,
-                ExpressionRpnItem::Operator {
-                    operator: Operator::Divide,
-                    ..
-                }
-            )
-        })
-    }
-
-    /// Validate that RPN contains only ordinary operands or completed receiving-site recovery.
+pub(crate) enum ExpressionRpnItem {
+    /// A completed expression retained as a raw row ID in reused construction buffers.
     ///
-    /// A compound update evaluates its already-handled RHS before the separate arithmetic and
-    /// write-back checks. That completed catch is a value operand, not a new receiving boundary.
-    pub fn validate_no_statement_bodies(&self) -> bool {
-        self.items.iter().all(|item| match item {
-            ExpressionRpnItem::Operand(expression) => match &expression.kind {
-                ExpressionKind::ValueBlock { block } => matches!(
-                    block.as_ref(),
-                    ValueBlock::Catch(catch)
-                        if matches!(
-                            catch.handled_value.failure_facts.disposition,
-                            FailureDisposition::HandledByCatch { .. }
-                        )
-                ),
-                _ => true,
-            },
-            // Pending syntax never survives evaluation, so it fails this post-evaluation
-            // validation like any other non-lowered shape; the fallible HIR lowering arm
-            // reports the broken invariant with its span.
-            ExpressionRpnItem::PendingNumericLiteral { .. }
-            | ExpressionRpnItem::PendingGroup { .. }
-            | ExpressionRpnItem::PendingNumericBinding { .. }
-            | ExpressionRpnItem::PendingNumericCall { .. }
-            | ExpressionRpnItem::PendingNumericCast { .. }
-            | ExpressionRpnItem::PendingNumericExpression { .. } => false,
-            ExpressionRpnItem::Operator { .. } => true,
-        })
-    }
-}
-
-/// One item in a runtime RPN expression.
-// The `Operand` variant intentionally owns a full `Expression` (not a `Box<Expression>`)
-// so that RPN items stay self-contained for constant folding and HIR lowering. Cloning
-// an RPN item therefore copies the operand expression; this is acceptable for frontend-sized
-// expression payloads and keeps the API surface predictable.
-#[allow(clippy::large_enum_variant)]
-#[derive(Clone, Debug)]
-pub enum ExpressionRpnItem {
-    /// An expression operand whose value is only known at runtime.
-    Operand(Expression),
+    /// Evaluation issues an owned handle from the local builder before installing an edge.
+    Operand(ExprId),
     /// A numeric literal awaiting destination-aware materialisation.
     ///
     /// WHAT: retains the literal token (with parser-owned `-` already folded into its sign),
@@ -103,13 +35,26 @@ pub enum ExpressionRpnItem {
         span: Option<SourceSpan>,
         value_mode: ValueMode,
     },
-    /// A group's infix fragment awaiting ordering with the surrounding literal context.
+    /// Opens a deferred group in the flat fragment stream.
     ///
-    /// The stored span is its first non-operator anchor, not the opening parenthesis.
-    /// Ordering moves its items into one RPN stream without copying child fragments.
-    PendingGroup {
-        nodes: Vec<ExpressionRpnItem>,
-        span: Option<SourceSpan>,
+    /// WHAT: marks where a parenthesised group that could not complete at its close begins.
+    ///       Its content follows in source order, and a matching `GroupClose` ends it. The
+    ///       parser writes `anchor_span` when the group closes, so a fragment that starts with
+    ///       a group reports the same authored anchor as its close.
+    /// WHY: deep nesting must not cost one Rust frame or one owned `Vec` per level. Ordering
+    ///      pushes an operator floor here, and every other reader treats the pair as transparent.
+    ///      Markers live only in retained construction payloads and are gone once
+    ///      `evaluate_expression` completes the fragment.
+    GroupOpen { anchor_span: Option<SourceSpan> },
+    /// Ends the group whose `GroupOpen` sits `open_distance` items earlier.
+    ///
+    /// WHAT: occupies the group's operand position. `anchor_span` is the group's first operand
+    ///       span, which is the authored anchor for diagnostics about the deferred group.
+    /// WHY: a relative distance survives moving the group range with `split_off`, so postfix
+    ///      retention can take the whole group in O(group) without a side table.
+    GroupClose {
+        open_distance: u32,
+        anchor_span: Option<SourceSpan>,
     },
     /// A reference to a body-owned pending numeric binding.
     ///
@@ -170,67 +115,192 @@ pub enum ExpressionRpnItem {
         expression: Box<crate::compiler_frontend::ast::numeric_construction::DeferredExpression>,
         span: Option<SourceSpan>,
     },
-    /// A symbolic or keyword operator with its exact source span preserved for diagnostics.
+    /// Transient operator spelling awaiting result-type resolution.
     Operator {
         operator: Operator,
         span: Option<SourceSpan>,
     },
+    /// Completed operator facts selected once by AST result-type resolution.
+    ResolvedOperator(ResolvedOperation),
+}
+
+/// Canonical result and operation facts shared by folding and executable lowering.
+///
+/// Operand types describe authored edges. Conversion targets describe only inserted operation
+/// boundaries, so a decimal power never mistakes its I32 exponent for a decimal operand.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ResolvedOperation {
+    pub operator: Operator,
+    pub span: Option<SourceSpan>,
+    pub result_type: TypeId,
+    pub left_type: TypeId,
+    pub right_type: Option<TypeId>,
+    pub kind: ResolvedOperationKind,
+    pub(crate) failure: Option<ImplicitFailureContributor>,
+}
+
+/// Arithmetic and comparison facts are separate because exact integer comparisons need no
+/// common arithmetic domain.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum ResolvedOperationKind {
+    Numeric(ResolvedNumericOperation),
+    Comparison(ResolvedComparisonOperation),
+    Range { domain: NumericScalar },
+    NonNumeric,
+}
+
+/// Computation boundaries and semantic discharge selected by the canonical numeric policy.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ResolvedNumericOperation {
+    pub operator: NumericOperator,
+    pub left_domain: NumericScalar,
+    pub right_domain: Option<NumericScalar>,
+    pub domain: NumericScalar,
+    pub left_conversion: Option<NumericScalar>,
+    pub right_conversion: Option<NumericScalar>,
+    pub discharged: bool,
+}
+
+/// Exact source domains survive comparisons whose Bool result carries no numeric information.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ResolvedComparisonOperation {
+    pub left_domain: NumericScalar,
+    pub right_domain: NumericScalar,
+    pub domain: NumericComparisonDomain,
+    pub left_conversion: Option<NumericScalar>,
+    pub right_conversion: Option<NumericScalar>,
+}
+/// Strips enclosing group pairs and returns the one operand item they wrap.
+///
+/// WHY: `(x)` must classify like `x` wherever a consumer asks for a single operand. Every
+///      single-item match over a fragment goes through here so groups stay transparent.
+pub(crate) fn single_operand(items: &[ExpressionRpnItem]) -> Option<&ExpressionRpnItem> {
+    match &items[enclosed_range(items)] {
+        [item] => Some(item),
+        _ => None,
+    }
+}
+
+/// Mutable form of [`single_operand`] for completion sites that update the wrapped item.
+pub(crate) fn single_operand_mut(
+    items: &mut [ExpressionRpnItem],
+) -> Option<&mut ExpressionRpnItem> {
+    let range = enclosed_range(items);
+    match &mut items[range] {
+        [item] => Some(item),
+        _ => None,
+    }
+}
+
+/// Owned form of [`single_operand`] for sites that consume the fragment.
+pub(crate) fn into_single_operand(mut items: Vec<ExpressionRpnItem>) -> Option<ExpressionRpnItem> {
+    let range = enclosed_range(&items);
+    (range.len() == 1).then(|| items.swap_remove(range.start))
+}
+
+/// Index range left after peeling every group pair that encloses the whole slice.
+fn enclosed_range(items: &[ExpressionRpnItem]) -> std::ops::Range<usize> {
+    let (mut start, mut end) = (0, items.len());
+    while end - start >= 2
+        && matches!(items[start], ExpressionRpnItem::GroupOpen { .. })
+        && let Some(ExpressionRpnItem::GroupClose { open_distance, .. }) = items[start..end].last()
+        && *open_distance as usize == end - start - 1
+    {
+        start += 1;
+        end -= 1;
+    }
+    start..end
+}
+
+/// Index where the last operand of a fragment begins.
+///
+/// A trailing `GroupClose` spans back to its `GroupOpen`. Any other trailing item is its own
+/// operand. Returns `None` for an empty fragment.
+pub(crate) fn trailing_operand_start(
+    items: &[ExpressionRpnItem],
+) -> Result<Option<usize>, CompilerError> {
+    let Some(last) = items.len().checked_sub(1) else {
+        return Ok(None);
+    };
+    let start = match &items[last] {
+        ExpressionRpnItem::GroupClose { open_distance, .. } => usize::try_from(*open_distance)
+            .ok()
+            .and_then(|distance| last.checked_sub(distance))
+            .filter(|open| matches!(items[*open], ExpressionRpnItem::GroupOpen { .. }))
+            .ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "grouped expression close does not match its open marker",
+                )
+            })?,
+        _ => last,
+    };
+    Ok(Some(start))
 }
 
 impl ExpressionRpnItem {
-    /// Exact authored span of this RPN item, if the owning file has an identity.
-    pub fn source_span(&self) -> Option<SourceSpan> {
-        match self {
-            ExpressionRpnItem::Operand(expression) => expression.span,
+    /// Exact authored span, binding completed operands to their issuing owner.
+    pub(crate) fn source_span(
+        &self,
+        expressions: &AstExpressionBuilder,
+    ) -> Result<Option<SourceSpan>, CompilerError> {
+        Ok(match self {
+            ExpressionRpnItem::Operand(expression) => expressions.view(*expression)?.span(),
             ExpressionRpnItem::PendingNumericLiteral { span, .. }
-            | ExpressionRpnItem::PendingGroup { span, .. }
+            | ExpressionRpnItem::GroupOpen {
+                anchor_span: span, ..
+            }
+            | ExpressionRpnItem::GroupClose {
+                anchor_span: span, ..
+            }
             | ExpressionRpnItem::PendingNumericBinding { span, .. }
             | ExpressionRpnItem::PendingNumericCall { span, .. }
             | ExpressionRpnItem::PendingNumericCast { span, .. }
             | ExpressionRpnItem::PendingNumericExpression { span, .. } => *span,
             ExpressionRpnItem::Operator { span, .. } => *span,
+            ExpressionRpnItem::ResolvedOperator(operation) => operation.span,
+        })
+    }
+
+    /// Authored span that needs no completed-expression owner.
+    ///
+    /// WHAT: returns the span a pending or operator item carries itself; a completed
+    ///       operand has no authored span without its issuing owner, so it yields `None`.
+    /// WHY: deferral fallbacks in statement positions have no builder in scope; only the
+    ///      still-open leaves need a span for diagnostics.
+    pub(crate) fn authored_span(&self) -> Option<SourceSpan> {
+        match self {
+            ExpressionRpnItem::Operand(_) => None,
+            ExpressionRpnItem::PendingNumericLiteral { span, .. }
+            | ExpressionRpnItem::GroupOpen {
+                anchor_span: span, ..
+            }
+            | ExpressionRpnItem::GroupClose {
+                anchor_span: span, ..
+            }
+            | ExpressionRpnItem::PendingNumericBinding { span, .. }
+            | ExpressionRpnItem::PendingNumericCall { span, .. }
+            | ExpressionRpnItem::PendingNumericCast { span, .. }
+            | ExpressionRpnItem::PendingNumericExpression { span, .. } => *span,
+            ExpressionRpnItem::Operator { span, .. } => *span,
+            ExpressionRpnItem::ResolvedOperator(operation) => operation.span,
         }
     }
 
     /// True for resolved operands and deferred syntax occupying one operand position.
     ///
-    /// Parse-time adjacency and named-entry checks need shape, not a completed value.
+    /// A deferred group occupies its operand position through its `GroupClose`. `GroupOpen` is
+    /// neither operand nor operator. Parse-time adjacency and named-entry checks need shape,
+    /// not a completed value.
     pub fn is_operand_shape(&self) -> bool {
         matches!(
             self,
             ExpressionRpnItem::Operand(_)
                 | ExpressionRpnItem::PendingNumericLiteral { .. }
-                | ExpressionRpnItem::PendingGroup { .. }
+                | ExpressionRpnItem::GroupClose { .. }
                 | ExpressionRpnItem::PendingNumericBinding { .. }
                 | ExpressionRpnItem::PendingNumericCall { .. }
                 | ExpressionRpnItem::PendingNumericCast { .. }
                 | ExpressionRpnItem::PendingNumericExpression { .. }
         )
     }
-}
-
-/// Frontend place expression.
-///
-/// WHAT: identifies a readable or writable storage location: a local variable or a field
-/// projection from another place.
-/// WHY: copy expressions and assignment targets need a narrow place representation that
-/// cannot carry statement bodies or arbitrary expression-shaped AST nodes.
-#[derive(Clone, Debug)]
-pub struct PlaceExpression {
-    pub kind: PlaceExpressionKind,
-    pub type_id: TypeId,
-    pub diagnostic_type: DataType,
-    pub value_mode: ValueMode,
-    pub span: Option<SourceSpan>,
-}
-
-#[derive(Clone, Debug)]
-pub enum PlaceExpressionKind {
-    /// A local variable by its interned path.
-    Local(PathId),
-    /// A field projection from another place.
-    Field {
-        base: Box<PlaceExpression>,
-        field: StringId,
-    },
 }

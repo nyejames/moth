@@ -7,8 +7,11 @@
 //! synthesis and should remain independently auditable.
 
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::const_values::store::{ConstStringPiece, ConstStringValue};
-use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExpressionOperationView,
+};
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template::{CommentDirectiveKind, TemplateType};
@@ -22,6 +25,7 @@ use crate::compiler_frontend::ast::templates::tir::{
 use crate::compiler_frontend::ast::templates::top_level_templates::{
     AstDocFragment, AstDocFragmentKind,
 };
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, InvalidTemplateStructureReason,
 };
@@ -36,12 +40,16 @@ use std::rc::Rc;
 
 pub(in crate::compiler_frontend::ast::templates) fn collect_and_strip_comment_templates(
     ast_nodes: &mut [AstNode],
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     template_const_loop_iteration_limit: usize,
     template_ir_store: Rc<RefCell<TemplateIrStore>>,
 ) -> Result<Vec<AstDocFragment>, TemplateError> {
     let mut fragments = Vec::new();
     let mut context = DocFragmentCollectionContext {
+        expression_builder,
+        const_values,
         string_table,
         template_const_loop_iteration_limit,
         template_ir_store,
@@ -56,10 +64,14 @@ pub(in crate::compiler_frontend::ast::templates) fn collect_and_strip_comment_te
 
         for statement in std::mem::take(body) {
             if let Some((comment_template, comment_kind)) =
-                as_top_level_template_comment_declaration(&statement, &context.template_ir_store)
+                as_top_level_template_comment_declaration(
+                    &statement,
+                    context.expression_builder,
+                    &context.template_ir_store,
+                )?
             {
                 collect_doc_fragments(
-                    comment_template,
+                    &comment_template,
                     comment_kind,
                     &mut fragments,
                     &mut context,
@@ -85,6 +97,8 @@ pub(in crate::compiler_frontend::ast::templates) fn collect_and_strip_comment_te
 /// WHY: every fold should see the same module-store authority without
 /// growing helper signatures.
 struct DocFragmentCollectionContext<'strings> {
+    expression_builder: &'strings mut AstExpressionBuilder,
+    const_values: &'strings mut ConstValueStore,
     string_table: &'strings mut StringTable,
     template_const_loop_iteration_limit: usize,
     template_ir_store: Rc<RefCell<TemplateIrStore>>,
@@ -100,20 +114,22 @@ struct DocFragmentCollectionContext<'strings> {
 /// WHAT: reads the authoritative TIR kind from the shared module store.
 /// WHY: comment extraction runs after AST emission, when every template value
 ///      belongs to that store.
-fn as_top_level_template_comment_declaration<'a>(
-    node: &'a AstNode,
+fn as_top_level_template_comment_declaration(
+    node: &AstNode,
+    expression_builder: &AstExpressionBuilder,
     store: &Rc<RefCell<TemplateIrStore>>,
-) -> Option<(&'a Template, CommentDirectiveKind)> {
+) -> Result<Option<(Template, CommentDirectiveKind)>, CompilerError> {
     let NodeKind::PushStartRuntimeFragment(expression) = &node.kind else {
-        return None;
+        return Ok(None);
     };
 
-    let ExpressionKind::Template(template) = &expression.kind else {
-        return None;
+    let view = expression_builder.view(*expression)?;
+    let ExpressionOperationView::Template(template) = view.operation() else {
+        return Ok(None);
     };
 
-    let comment_kind = comment_kind_at_doc_fragment_boundary(template, store)?;
-    Some((template.as_ref(), comment_kind))
+    Ok(comment_kind_at_doc_fragment_boundary(template, store)
+        .map(|comment_kind| (template.clone(), comment_kind)))
 }
 
 /// Extracts one top-level `$doc` fragment.
@@ -125,7 +141,9 @@ fn collect_doc_fragments(
 ) -> Result<(), TemplateError> {
     if comment_kind == CommentDirectiveKind::Doc {
         let mut fold_context = TirFoldContext {
-            string_table: context.string_table,
+            expression_builder: &mut *context.expression_builder,
+            const_values: &mut *context.const_values,
+            string_table: &mut *context.string_table,
             template_const_loop_iteration_limit: context.template_const_loop_iteration_limit,
             bindings: Vec::new(),
             source_scope: None,
@@ -139,7 +157,12 @@ fn collect_doc_fragments(
             TemplateTirPhase::Composed,
             reference.context,
         )?;
-        let preparation = prepare_tir_view(&view, TemplatePreparationMode::ConstRequired)?;
+        let preparation = prepare_tir_view(
+            &view,
+            fold_context.expression_builder,
+            fold_context.const_values,
+            TemplatePreparationMode::ConstRequired,
+        )?;
         let prepared = match preparation {
             preparation if matches!(preparation.outcome, TemplatePreparationOutcome::Foldable) => {
                 preparation

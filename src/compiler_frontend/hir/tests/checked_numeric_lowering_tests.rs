@@ -1,18 +1,21 @@
 //! Focused tests for checked numeric HIR lowering (Phase 6b).
 //!
-//! WHAT: verifies that runtime arithmetic is lowered into `HirStatementKind::NumericOp` with the
-//!       correct `HirNumericOp`, operand conversion, and failure-mode selection.
-//! WHY: the checked numeric path is new HIR surface; dedicated tests guard against regressions back
-//!      to plain `BinOp`/`UnaryOp` arithmetic and against wrong failure-mode wiring.
+//! Verifies numeric domains, operand conversions and native failure delivery. Recoverable
+//! operations define success and error locals on Invoke edges; discharged and trapping operations
+//! remain statements.
 
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, Operator};
-use crate::compiler_frontend::ast::expressions::expression_kind::ResolvedCastExpression;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::eval_expression::result_type::resolved_operation;
+use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, CastFacts, ExprId,
+};
 use crate::compiler_frontend::ast::expressions::expression_types::{
     CastHandling, ResolvedCastEvidence,
 };
 use crate::compiler_frontend::builtins::casts::targets::{
-    BuiltinCastFallibility, BuiltinCastPolicyId, BuiltinCastTarget,
+    BuiltinCastFallibility, BuiltinCastPolicyId,
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
@@ -22,15 +25,15 @@ use crate::compiler_frontend::hir::expression_store::{HirConstructionFailure, Hi
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::hir_builder::{register_local, setup_builder};
-use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirValueId, LocalId};
+use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, HirValueId, LocalId};
 use crate::compiler_frontend::hir::numeric::{
     HirNumericOp, HirNumericOperands, NumericFailureMode,
 };
 use crate::compiler_frontend::hir::operators::HirBinOp;
-use crate::compiler_frontend::hir::statements::{
-    HirLocalDestination, HirStatementKind, HirWriteTarget,
+use crate::compiler_frontend::hir::statements::{HirStatementKind, HirWriteTarget};
+use crate::compiler_frontend::hir::terminators::{
+    HirFallibleOperation, HirTerminator, RuntimeFailureCause,
 };
-use crate::compiler_frontend::hir::terminators::{HirTerminator, RuntimeFailureCause};
 use crate::compiler_frontend::hir::tests::symbol;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -41,68 +44,154 @@ use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use crate::compiler_frontend::tests::ast_fixture_support::{
     assignment_target, node, reference_expr_with_type_id,
 };
-use crate::compiler_frontend::tests::type_id_fixture_support::{
-    runtime_expr, runtime_operand_item, runtime_operator_item,
-};
 use crate::compiler_frontend::value_mode::ValueMode;
 
-fn int_expr(value: i64, span: Option<crate::compiler_frontend::source::SourceSpan>) -> Expression {
-    Expression::fixed_scalar(
-        FixedScalarValue::signed(FixedScalar::I32, value).expect("I32 literal in range"),
-        span,
-        ValueMode::ImmutableOwned,
-    )
+fn int_expr(
+    expressions: &mut AstExpressionBuilder,
+    constants: &mut ConstValueStore,
+    value: i64,
+    span: Option<crate::compiler_frontend::source::SourceSpan>,
+) -> ExprId {
+    expressions
+        .fixed_scalar(
+            constants,
+            FixedScalarValue::signed(FixedScalar::I32, value).expect("I32 literal in range"),
+            span,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture literal fits store")
+        .id()
 }
 
 fn float_expr(
+    expressions: &mut AstExpressionBuilder,
+    constants: &mut ConstValueStore,
     value: f64,
     span: Option<crate::compiler_frontend::source::SourceSpan>,
-) -> Expression {
-    Expression::fixed_scalar(
-        FixedScalarValue::binary_float(FixedScalar::F64, value)
-            .expect("F64 literal is exactly representable"),
-        span,
-        ValueMode::ImmutableOwned,
-    )
+) -> ExprId {
+    expressions
+        .fixed_scalar(
+            constants,
+            FixedScalarValue::binary_float(FixedScalar::F64, value)
+                .expect("F64 literal is exactly representable"),
+            span,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture literal fits store")
+        .id()
 }
 
-/// One found `HirStatementKind::NumericOp` with everything the lowering fixtures assert on.
-///
-/// WHY: the operation, its failure mode, operands, result destination and owning block all belong
-///      to the same statement; one scanner keeps the narrower finders from drifting apart.
+/// Builds a resolved operation node in the expression store with its canonical operator facts.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "test fixture keeps operands, operator, result type, span, mode and environment separate"
+)]
+fn resolved_numeric_expression(
+    expressions: &mut AstExpressionBuilder,
+    left: ExprId,
+    right: Option<ExprId>,
+    operator: Operator,
+    result_type: crate::compiler_frontend::datatypes::ids::TypeId,
+    span: Option<crate::compiler_frontend::source::SourceSpan>,
+    mode: ValueMode,
+    environment: &crate::compiler_frontend::datatypes::environment::TypeEnvironment,
+) -> ExprId {
+    let left_type = expressions
+        .view(left)
+        .expect("fixture left operand")
+        .value_type_id()
+        .expect("single fixture operand");
+    let right_type = right.map(|right| {
+        expressions
+            .view(right)
+            .expect("fixture right operand")
+            .value_type_id()
+            .expect("single fixture operand")
+    });
+    let facts = resolved_operation(
+        operator,
+        span,
+        result_type,
+        left_type,
+        right_type,
+        environment,
+    )
+    .unwrap_or_else(|_| panic!("fixture operation facts resolve"));
+    expressions
+        .resolved_operation(
+            expressions.own(left),
+            right.map(|right| expressions.own(right)),
+            facts,
+            mode,
+        )
+        .expect("fixture operation fits store")
+        .id()
+}
+
+/// Delivery is separate from the numeric domain and from the operation's stable node identity.
+#[derive(Debug, PartialEq, Eq)]
+enum NumericDelivery {
+    Statement(NumericFailureMode),
+    Invoke,
+}
+
 #[derive(Debug)]
 struct FoundNumericOp {
+    id: HirNodeId,
     block: BlockId,
     op: HirNumericOp,
-    failure_mode: NumericFailureMode,
+    failure_mode: NumericDelivery,
     operands: HirNumericOperands,
-    result: HirLocalDestination,
+    result: LocalId,
 }
 
 fn find_numeric_op_statement(builder: &HirBuilder<'_>) -> Option<FoundNumericOp> {
     builder.module.blocks.iter().find_map(|block| {
-        block
-            .statements
-            .iter()
-            .find_map(|statement| match &statement.kind {
-                HirStatementKind::NumericOp {
-                    op,
-                    failure_mode,
-                    operands,
-                    result,
-                } => Some(FoundNumericOp {
+        for statement in &block.statements {
+            if let HirStatementKind::NumericOp {
+                op,
+                failure_mode,
+                operands,
+                result,
+            } = &statement.kind
+            {
+                return Some(FoundNumericOp {
+                    id: statement.id,
                     block: block.id,
                     op: *op,
-                    failure_mode: *failure_mode,
+                    failure_mode: NumericDelivery::Statement(*failure_mode),
                     operands: operands.clone(),
-                    result: *result,
-                }),
-                _ => None,
-            })
+                    result: result.local(),
+                });
+            }
+        }
+        match &block.terminator {
+            HirTerminator::Invoke {
+                id,
+                operation: HirFallibleOperation::NumericOp { op, operands },
+                success_results,
+                ..
+            } => {
+                assert_eq!(
+                    success_results.len(),
+                    1,
+                    "numeric operations define one success slot"
+                );
+                Some(FoundNumericOp {
+                    id: *id,
+                    block: block.id,
+                    op: *op,
+                    failure_mode: NumericDelivery::Invoke,
+                    operands: operands.clone(),
+                    result: success_results[0],
+                })
+            }
+            _ => None,
+        }
     })
 }
 
-fn find_single_numeric_op(builder: &HirBuilder<'_>) -> Option<(HirNumericOp, NumericFailureMode)> {
+fn find_single_numeric_op(builder: &HirBuilder<'_>) -> Option<(HirNumericOp, NumericDelivery)> {
     find_numeric_op_statement(builder).map(|found| (found.op, found.failure_mode))
 }
 
@@ -121,7 +210,7 @@ struct LoweredNumericFixture {
     expressions: HirExpressionStore,
     value: HirValueId,
     numeric_op: Option<(HirNumericOp, HirNumericOperands)>,
-    failure_mode: Option<NumericFailureMode>,
+    failure_mode: Option<NumericDelivery>,
 }
 
 fn lower_binary_with_types(
@@ -142,28 +231,44 @@ fn try_lower_binary_with_types(
 ) -> Result<LoweredNumericFixture, HirConstructionFailure> {
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let loc = None;
     let left_name = symbol("left", &mut path_fork, &mut string_table);
     let right_name = symbol("right", &mut path_fork, &mut string_table);
-    let left =
-        reference_expr_with_type_id(left_name, left_type, loc, ValueMode::ImmutableReference);
-    let right =
-        reference_expr_with_type_id(right_name, right_type, loc, ValueMode::ImmutableReference);
-    let expression = runtime_expr(
-        vec![
-            runtime_operand_item(left),
-            runtime_operand_item(right),
-            runtime_operator_item(op, loc),
-        ],
+    let left = reference_expr_with_type_id(
+        &mut expressions,
+        left_name,
+        left_type,
+        loc,
+        ValueMode::ImmutableReference,
+    );
+    let right = reference_expr_with_type_id(
+        &mut expressions,
+        right_name,
+        right_type,
+        loc,
+        ValueMode::ImmutableReference,
+    );
+    let mut builder = setup_builder(&mut string_table, &mut path_fork);
+    let expression = resolved_numeric_expression(
+        &mut expressions,
+        left,
+        Some(right),
+        op,
         result_type,
         loc,
         ValueMode::MutableOwned,
+        &builder.type_environment,
     );
 
-    let mut builder = setup_builder(&mut string_table, &mut path_fork);
     register_local(&mut builder, left_name, LocalId(10), left_type, loc);
     register_local(&mut builder, right_name, LocalId(11), right_type, loc);
-    let lowered = builder.lower_expression(&expression)?;
+    builder.module_const_values = std::mem::take(&mut constants);
+    let view = expressions
+        .view(expression)
+        .expect("fixture expression belongs to builder");
+    let lowered = builder.lower_expression(view)?;
 
     let found = find_numeric_op_statement(&builder);
     Ok(LoweredNumericFixture {
@@ -190,27 +295,35 @@ fn try_lower_negation_with_type(
 ) -> Result<LoweredNumericFixture, HirConstructionFailure> {
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let loc = None;
     let operand_name = symbol("operand", &mut path_fork, &mut string_table);
     let operand = reference_expr_with_type_id(
+        &mut expressions,
         operand_name,
         operand_type,
         loc,
         ValueMode::ImmutableReference,
     );
-    let expression = runtime_expr(
-        vec![
-            runtime_operand_item(operand),
-            runtime_operator_item(Operator::Negate, loc),
-        ],
+    let mut builder = setup_builder(&mut string_table, &mut path_fork);
+    let expression = resolved_numeric_expression(
+        &mut expressions,
+        operand,
+        None,
+        Operator::Negate,
         result_type,
         loc,
         ValueMode::MutableOwned,
+        &builder.type_environment,
     );
 
-    let mut builder = setup_builder(&mut string_table, &mut path_fork);
     register_local(&mut builder, operand_name, LocalId(10), operand_type, loc);
-    let lowered = builder.lower_expression(&expression)?;
+    builder.module_const_values = std::mem::take(&mut constants);
+    let view = expressions
+        .view(expression)
+        .expect("fixture expression belongs to builder");
+    let lowered = builder.lower_expression(view)?;
     let found =
         find_numeric_op_statement(&builder).expect("numeric negation should emit one NumericOp");
 
@@ -234,29 +347,38 @@ fn lower_explicitly_converted_int_float_comparison(
 ) -> LoweredNumericFixture {
     let loc = None;
     let float_type = fixed_type(FixedScalar::F64);
-    let int_operand = Expression::coerced(int_expr(1, loc), float_type);
-    let float_operand = float_expr(2.5, loc);
+    let mut path_fork = PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let int_value = int_expr(&mut expressions, &mut constants, 1, loc);
+    let int_operand = expressions
+        .coerced(expressions.own(int_value), float_type)
+        .expect("fixture coercion fits store");
+    let float_operand = float_expr(&mut expressions, &mut constants, 2.5, loc);
     let (left, right) = if int_on_left {
-        (int_operand, float_operand)
+        (int_operand.id(), float_operand)
     } else {
-        (float_operand, int_operand)
+        (float_operand, int_operand.id())
     };
-    let expression = runtime_expr(
-        vec![
-            runtime_operand_item(left),
-            runtime_operand_item(right),
-            runtime_operator_item(operator, loc),
-        ],
+    let mut builder = setup_builder(&mut string_table, &mut path_fork);
+    let expression = resolved_numeric_expression(
+        &mut expressions,
+        left,
+        Some(right),
+        operator,
         builtin_type_ids::BOOL,
         loc,
         ValueMode::MutableOwned,
+        &builder.type_environment,
     );
 
-    let mut path_fork = PathInternerFork::empty();
-    let mut string_table = StringTable::new();
-    let mut builder = setup_builder(&mut string_table, &mut path_fork);
+    builder.module_const_values = std::mem::take(&mut constants);
+    let view = expressions
+        .view(expression)
+        .expect("fixture expression belongs to builder");
     let lowered = builder
-        .lower_expression(&expression)
+        .lower_expression(view)
         .expect("explicitly converted int/float comparison lowering should succeed");
     let found = find_numeric_op_statement(&builder);
     LoweredNumericFixture {
@@ -293,7 +415,7 @@ fn set_current_function_return_type(
     return_type: crate::compiler_frontend::datatypes::ids::TypeId,
     name: PathId,
 ) {
-    builder.test_register_function_with_return_type(name, function_id, return_type);
+    builder.test_register_function_with_returns(name, function_id, vec![return_type], None);
     builder.test_set_current_function(function_id);
 }
 
@@ -302,56 +424,68 @@ fn lower_u8_compound_add_assignment(
     target_name: PathId,
     right_name: PathId,
 ) -> Result<(), HirConstructionFailure> {
+    let mut expressions = AstExpressionBuilder::new().unwrap();
     let u8_type = fixed_type(FixedScalar::U8);
     let i8_type = fixed_type(FixedScalar::I8);
     let i16_type = fixed_type(FixedScalar::I16);
-    let source = runtime_expr(
-        vec![
-            runtime_operand_item(reference_expr_with_type_id(
-                target_name,
-                u8_type,
-                None,
-                ValueMode::ImmutableReference,
-            )),
-            runtime_operand_item(reference_expr_with_type_id(
-                right_name,
-                i8_type,
-                None,
-                ValueMode::ImmutableReference,
-            )),
-            runtime_operator_item(Operator::Add, None),
-        ],
+    let left = reference_expr_with_type_id(
+        &mut expressions,
+        target_name,
+        u8_type,
+        None,
+        ValueMode::ImmutableReference,
+    );
+    let right = reference_expr_with_type_id(
+        &mut expressions,
+        right_name,
+        i8_type,
+        None,
+        ValueMode::ImmutableReference,
+    );
+    let source = resolved_numeric_expression(
+        &mut expressions,
+        left,
+        Some(right),
+        Operator::Add,
         i16_type,
         None,
         ValueMode::MutableOwned,
-    );
-    let value = Expression::cast(
-        ResolvedCastExpression {
-            source: Box::new(source),
-            source_type_id: i16_type,
-            target_type_id: u8_type,
-            target: BuiltinCastTarget::Fixed(FixedScalar::U8),
-            requires_optional_wrap_after_cast: false,
-            fallibility: BuiltinCastFallibility::Fallible,
-            evidence: ResolvedCastEvidence::Builtin {
-                policy: BuiltinCastPolicyId::NumericConversion {
-                    source: NumericScalar::Fixed(FixedScalar::I16),
-                    target: NumericScalar::Fixed(FixedScalar::U8),
-                },
-            },
-            handling: CastHandling::StoreConversion,
-            span: None,
-        },
-        u8_type,
         &builder.type_environment,
     );
-    builder.lower_statement_node(&node(
+    let value = expressions
+        .cast(
+            expressions.own(source),
+            CastFacts {
+                source_type_id: i16_type,
+                target_type_id: u8_type,
+                requires_optional_wrap_after_cast: false,
+                fallibility: BuiltinCastFallibility::Fallible,
+                evidence: ResolvedCastEvidence::Builtin {
+                    policy: BuiltinCastPolicyId::NumericConversion {
+                        source: NumericScalar::Fixed(FixedScalar::I16),
+                        target: NumericScalar::Fixed(FixedScalar::U8),
+                    },
+                },
+                handling: CastHandling::StoreConversion,
+                span: None,
+            },
+            u8_type,
+        )
+        .expect("fixture cast fits store");
+    let statement = node(
         NodeKind::Assignment {
-            target: assignment_target(target_name, DataType::Inferred, u8_type, None),
-            value,
+            target: assignment_target(
+                &mut expressions,
+                target_name,
+                DataType::Inferred,
+                u8_type,
+                None,
+            ),
+            value: value.id(),
         },
         None,
-    ))
+    );
+    builder.lower_statement_node(expressions.store(), &statement)
 }
 
 /// Lowers a same-type compound update (`target scalar += right scalar`).
@@ -366,69 +500,77 @@ fn lower_same_type_compound_add_assignment(
     right_name: PathId,
     scalar: FixedScalar,
 ) -> Result<(), HirConstructionFailure> {
+    let mut expressions = AstExpressionBuilder::new().unwrap();
     let scalar_type = fixed_type(scalar);
-    let value = runtime_expr(
-        vec![
-            runtime_operand_item(reference_expr_with_type_id(
-                target_name,
-                scalar_type,
-                None,
-                ValueMode::ImmutableReference,
-            )),
-            runtime_operand_item(reference_expr_with_type_id(
-                right_name,
-                scalar_type,
-                None,
-                ValueMode::ImmutableReference,
-            )),
-            runtime_operator_item(Operator::Add, None),
-        ],
+    let left = reference_expr_with_type_id(
+        &mut expressions,
+        target_name,
+        scalar_type,
+        None,
+        ValueMode::ImmutableReference,
+    );
+    let right = reference_expr_with_type_id(
+        &mut expressions,
+        right_name,
+        scalar_type,
+        None,
+        ValueMode::ImmutableReference,
+    );
+    let value = resolved_numeric_expression(
+        &mut expressions,
+        left,
+        Some(right),
+        Operator::Add,
         scalar_type,
         None,
         ValueMode::MutableOwned,
+        &builder.type_environment,
     );
-    builder.lower_statement_node(&node(
+    let statement = node(
         NodeKind::Assignment {
-            target: assignment_target(target_name, DataType::Inferred, scalar_type, None),
+            target: assignment_target(
+                &mut expressions,
+                target_name,
+                DataType::Inferred,
+                scalar_type,
+                None,
+            ),
             value,
         },
         None,
-    ))
+    );
+    builder.lower_statement_node(expressions.store(), &statement)
 }
 
-fn store_conversion_branch(
-    builder: &HirBuilder<'_>,
-) -> (
-    crate::compiler_frontend::hir::ids::BlockId,
-    crate::compiler_frontend::hir::ids::BlockId,
-) {
-    let cast_block = builder
+fn store_conversion_branch(builder: &HirBuilder<'_>) -> (BlockId, BlockId, LocalId, LocalId) {
+    builder
         .module
         .blocks
         .iter()
-        .find(|block| {
-            block.statements.iter().any(|statement| {
-                matches!(
-                    &statement.kind,
-                    HirStatementKind::CastOp {
-                        policy: BuiltinCastPolicyId::NumericConversion {
-                            source: NumericScalar::Fixed(FixedScalar::I16),
-                            target: NumericScalar::Fixed(FixedScalar::U8),
-                        },
+        .find_map(|block| match &block.terminator {
+            HirTerminator::Invoke {
+                operation:
+                    HirFallibleOperation::CastOp {
+                        policy:
+                            BuiltinCastPolicyId::NumericConversion {
+                                source: NumericScalar::Fixed(FixedScalar::I16),
+                                target: NumericScalar::Fixed(FixedScalar::U8),
+                            },
                         ..
-                    }
-                )
-            })
+                    },
+                success,
+                failure,
+                success_results,
+                error_result,
+                ..
+            } => {
+                assert_eq!(success_results.len(), 1);
+                assert_ne!(success_results[0], *error_result);
+                Some((*success, *failure, success_results[0], *error_result))
+            }
+            _ => None,
         })
-        .expect("compound U8 narrowing should emit one CastOp");
-    match &cast_block.terminator {
-        HirTerminator::FallibleBranch {
-            success_block,
-            error_block,
-            ..
-        } => (*success_block, *error_block),
-        _ => panic!("compound U8 conversion must branch on its fallible carrier"),
-    }
+        .expect("compound U8 narrowing should invoke a checked conversion")
 }
 
 fn compound_assignment_store_value<'a>(
@@ -508,29 +650,30 @@ fn compound_u8_store_conversion_traps_before_writing_target() {
     // The mixed-width U8 + I8 arithmetic completes inside its I16 common domain: it carries
     // no failure edge. The narrowing store conversion back to U8 remains the failing check
     // under test.
-    assert_eq!(failure_mode, NumericFailureMode::Infallible);
+    assert_eq!(
+        failure_mode,
+        NumericDelivery::Statement(NumericFailureMode::Infallible)
+    );
 
-    let (success_block, error_block) = store_conversion_branch(&builder);
+    let (success_block, error_block, converted, error) = store_conversion_branch(&builder);
     let error_block = &builder.module.blocks[error_block.0 as usize];
-    let carrier = match error_block.terminator {
-        HirTerminator::RuntimeFailure {
-            cause: Some(RuntimeFailureCause::StoreConversion { carrier }),
-            ..
-        } => carrier,
-        _ => panic!("non-fallible conversion failure must retain its store-conversion cause"),
-    };
+    assert!(
+        matches!(
+            error_block.terminator,
+            HirTerminator::RuntimeFailure {
+                cause: Some(RuntimeFailureCause::StoreConversion { error: cause_error }),
+                ..
+            } if cause_error == error
+        ),
+        "non-fallible conversion failure must retain its edge-local error"
+    );
     let stored_value = compound_assignment_store_value(&builder, LocalId(10), success_block);
     assert!(
         matches!(
             &stored_value.kind,
-            HirExpressionKind::FallibleUnwrapSuccess { result }
-                if matches!(
-                    &builder.module.expressions.expression(*result).kind,
-                    HirExpressionKind::Load(place)
-                        if place.root == carrier && super::is_local_place(place)
-                )
+            HirExpressionKind::Load(place) if place.root == converted && super::is_local_place(place)
         ),
-        "the store must consume the successful conversion payload"
+        "the store must consume the successful conversion local"
     );
 }
 
@@ -550,10 +693,13 @@ fn compound_u8_store_conversion_returns_error_before_writing_target() {
 
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
     let error_type = builder.test_register_builtin_error_type();
-    let return_type = builder
-        .type_environment
-        .intern_fallible_carrier(u8_type, error_type);
-    set_current_function_return_type(&mut builder, FunctionId(1), return_type, function_name);
+    builder.test_register_function_with_returns(
+        function_name,
+        FunctionId(1),
+        vec![u8_type],
+        Some(error_type),
+    );
+    builder.test_set_current_function(FunctionId(1));
     register_local(&mut builder, target_name, LocalId(10), u8_type, None);
     register_local(&mut builder, right_name, LocalId(11), i8_type, None);
     lower_u8_compound_add_assignment(&mut builder, target_name, right_name)
@@ -569,26 +715,31 @@ fn compound_u8_store_conversion_returns_error_before_writing_target() {
     );
     // Discharged arithmetic stays Infallible even inside Error! functions: only the store
     // conversion takes the recoverable path asserted below.
-    assert_eq!(failure_mode, NumericFailureMode::Infallible);
+    assert_eq!(
+        failure_mode,
+        NumericDelivery::Statement(NumericFailureMode::Infallible)
+    );
 
-    let (success_block, error_block) = store_conversion_branch(&builder);
+    let (success_block, error_block, converted, error) = store_conversion_branch(&builder);
     let error_block = &builder.module.blocks[error_block.0 as usize];
     assert!(
-        matches!(&error_block.terminator, HirTerminator::ReturnError(_)),
+        matches!(&error_block.terminator, HirTerminator::ReturnError(value)
+            if matches!(&expression_row(&builder, *value).kind,
+                HirExpressionKind::Load(place) if place.root == error)),
         "builtin Error! conversion failure must return through the error edge"
     );
     let stored_value = compound_assignment_store_value(&builder, LocalId(10), success_block);
     assert!(
         matches!(
             &stored_value.kind,
-            HirExpressionKind::FallibleUnwrapSuccess { .. }
+            HirExpressionKind::Load(place) if place.root == converted && super::is_local_place(place)
         ),
         "the store must consume the successful conversion payload"
     );
 }
 
 #[test]
-fn equal_type_compound_store_emits_no_conversion_carrier() {
+fn equal_type_compound_store_emits_no_conversion() {
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let function_name = symbol(
@@ -613,20 +764,13 @@ fn equal_type_compound_store_emits_no_conversion_carrier() {
     .expect("same-type compound assignment lowering should succeed");
 
     assert!(
-        !builder
-            .module
-            .blocks
-            .iter()
-            .flat_map(|block| &block.statements)
-            .any(|statement| matches!(&statement.kind, HirStatementKind::CastOp { .. })),
-        "an assignment-compatible result should not emit a cast carrier"
-    );
-    assert!(
-        !builder
-            .module
-            .blocks
-            .iter()
-            .any(|block| matches!(&block.terminator, HirTerminator::FallibleBranch { .. })),
+        !builder.module.blocks.iter().any(|block| matches!(
+            &block.terminator,
+            HirTerminator::Invoke {
+                operation: HirFallibleOperation::CastOp { .. },
+                ..
+            }
+        )),
         "same-type arithmetic should not emit a conversion branch"
     );
     let _stored_value = compound_assignment_store_value(
@@ -656,10 +800,13 @@ fn compound_same_type_u8_arithmetic_returns_error_before_writing_target() {
 
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
     let error_type = builder.test_register_builtin_error_type();
-    let return_type = builder
-        .type_environment
-        .intern_fallible_carrier(u8_type, error_type);
-    set_current_function_return_type(&mut builder, FunctionId(1), return_type, function_name);
+    builder.test_register_function_with_returns(
+        function_name,
+        FunctionId(1),
+        vec![u8_type],
+        Some(error_type),
+    );
+    builder.test_set_current_function(FunctionId(1));
     register_local(&mut builder, target_name, LocalId(10), u8_type, None);
     register_local(&mut builder, right_name, LocalId(11), u8_type, None);
     lower_same_type_compound_add_assignment(&mut builder, target_name, right_name, FixedScalar::U8)
@@ -676,27 +823,34 @@ fn compound_same_type_u8_arithmetic_returns_error_before_writing_target() {
     );
     // `255 + 1` overflows U8, so the operation stays checked; the builtin Error! contract must
     // deliver that failure recoverably rather than discharging it or substituting a trap.
-    assert_eq!(found.failure_mode, NumericFailureMode::ReturnError);
+    assert_eq!(found.failure_mode, NumericDelivery::Invoke);
     assert!(
-        !builder
-            .module
-            .blocks
-            .iter()
-            .flat_map(|block| &block.statements)
-            .any(|statement| matches!(&statement.kind, HirStatementKind::CastOp { .. })),
+        !builder.module.blocks.iter().any(|block| matches!(
+            &block.terminator,
+            HirTerminator::Invoke {
+                operation: HirFallibleOperation::CastOp { .. },
+                ..
+            }
+        )),
         "a same-type compound update must not fabricate a store conversion"
     );
 
     let numeric_block = &builder.module.blocks[found.block.0 as usize];
-    let HirTerminator::FallibleBranch {
-        success_block,
-        error_block,
+    let HirTerminator::Invoke {
+        id,
+        success,
+        failure,
+        success_results,
+        error_result,
         ..
     } = &numeric_block.terminator
     else {
-        panic!("checked same-type U8 arithmetic must branch on its fallible carrier");
+        panic!("checked same-type U8 arithmetic must invoke its failure continuation");
     };
-    let (success_block, error_block) = (*success_block, *error_block);
+    assert_eq!(*id, found.id);
+    assert_eq!(success_results, &[found.result]);
+    assert_ne!(found.result, *error_result);
+    let (success_block, error_block) = (*success, *failure);
     let error_row = &builder.module.blocks[error_block.0 as usize];
     assert!(
         matches!(&error_row.terminator, HirTerminator::ReturnError(_)),
@@ -709,12 +863,8 @@ fn compound_same_type_u8_arithmetic_returns_error_before_writing_target() {
     assert!(
         matches!(
             &stored_value.kind,
-            HirExpressionKind::FallibleUnwrapSuccess { result }
-                if matches!(
-                    &builder.module.expressions.expression(*result).kind,
-                    HirExpressionKind::Load(place)
-                        if place.root == found.result.local() && super::is_local_place(place)
-                )
+            HirExpressionKind::Load(place)
+                if place.root == found.result && super::is_local_place(place)
         ),
         "the store must consume the arithmetic success payload after its failure branch"
     );
@@ -724,15 +874,18 @@ fn compound_same_type_u8_arithmetic_returns_error_before_writing_target() {
 fn checked_int_addition_lowers_to_int_add_numeric_op() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let loc = None;
     let x_name = symbol("x", &mut path_fork, &mut string_table);
     let x_ref = reference_expr_with_type_id(
+        &mut expressions,
         x_name,
         builtin_type_ids::fixed_scalar(FixedScalar::I32),
         loc,
         ValueMode::ImmutableReference,
     );
-    let two = int_expr(2, loc);
+    let two = int_expr(&mut expressions, &mut constants, 2, loc);
 
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
     assert_eq!(
@@ -748,19 +901,23 @@ fn checked_int_addition_lowers_to_int_add_numeric_op() {
         loc,
     );
 
-    let expr = runtime_expr(
-        vec![
-            runtime_operand_item(x_ref),
-            runtime_operand_item(two),
-            runtime_operator_item(Operator::Add, loc),
-        ],
+    let expr = resolved_numeric_expression(
+        &mut expressions,
+        x_ref,
+        Some(two),
+        Operator::Add,
         builtin_type_ids::fixed_scalar(FixedScalar::I32),
         loc,
         ValueMode::MutableOwned,
+        &builder.type_environment,
     );
 
+    builder.module_const_values = std::mem::take(&mut constants);
+    let view = expressions
+        .view(expr)
+        .expect("fixture expression belongs to builder");
     let lowered = builder
-        .lower_expression(&expr)
+        .lower_expression(view)
         .expect("int addition lowering should succeed");
 
     assert!(lowered.prelude.is_empty());
@@ -784,28 +941,39 @@ fn checked_int_addition_lowers_to_int_add_numeric_op() {
             domain: NumericScalar::Fixed(FixedScalar::I32)
         }
     );
-    assert!(matches!(failure_mode, NumericFailureMode::Trap));
+    assert!(matches!(
+        failure_mode,
+        NumericDelivery::Statement(NumericFailureMode::Trap)
+    ));
 }
 
 #[test]
 fn checked_int_subtraction_lowers_to_int_sub_numeric_op() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let loc = None;
-    let expr = runtime_expr(
-        vec![
-            runtime_operand_item(int_expr(5, loc)),
-            runtime_operand_item(int_expr(3, loc)),
-            runtime_operator_item(Operator::Subtract, loc),
-        ],
+    let mut builder = setup_builder(&mut string_table, &mut path_fork);
+    let left = int_expr(&mut expressions, &mut constants, 5, loc);
+    let right = int_expr(&mut expressions, &mut constants, 3, loc);
+    let expr = resolved_numeric_expression(
+        &mut expressions,
+        left,
+        Some(right),
+        Operator::Subtract,
         builtin_type_ids::fixed_scalar(FixedScalar::I32),
         loc,
         ValueMode::MutableOwned,
+        &builder.type_environment,
     );
 
-    let mut builder = setup_builder(&mut string_table, &mut path_fork);
+    builder.module_const_values = std::mem::take(&mut constants);
+    let view = expressions
+        .view(expr)
+        .expect("fixture expression belongs to builder");
     let _ = builder
-        .lower_expression(&expr)
+        .lower_expression(view)
         .expect("int subtraction lowering should succeed");
 
     let (op, _) = find_single_numeric_op(&builder).expect("expected a NumericOp");
@@ -821,21 +989,29 @@ fn checked_int_subtraction_lowers_to_int_sub_numeric_op() {
 fn checked_regular_division_lowers_to_float_div_numeric_op() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let loc = None;
-    let expr = runtime_expr(
-        vec![
-            runtime_operand_item(int_expr(5, loc)),
-            runtime_operand_item(int_expr(2, loc)),
-            runtime_operator_item(Operator::Divide, loc),
-        ],
+    let mut builder = setup_builder(&mut string_table, &mut path_fork);
+    let left = int_expr(&mut expressions, &mut constants, 5, loc);
+    let right = int_expr(&mut expressions, &mut constants, 2, loc);
+    let expr = resolved_numeric_expression(
+        &mut expressions,
+        left,
+        Some(right),
+        Operator::Divide,
         builtin_type_ids::fixed_scalar(FixedScalar::F64),
         loc,
         ValueMode::MutableOwned,
+        &builder.type_environment,
     );
 
-    let mut builder = setup_builder(&mut string_table, &mut path_fork);
+    builder.module_const_values = std::mem::take(&mut constants);
+    let view = expressions
+        .view(expr)
+        .expect("fixture expression belongs to builder");
     let lowered = builder
-        .lower_expression(&expr)
+        .lower_expression(view)
         .expect("regular division lowering should succeed");
 
     assert_eq!(
@@ -852,14 +1028,8 @@ fn checked_regular_division_lowers_to_float_div_numeric_op() {
     );
 
     // Both I32 operands must have been explicitly converted to F64 before the division.
-    let numeric_op = builder
-        .test_current_block_statements()
-        .iter()
-        .find_map(|statement| match &statement.kind {
-            HirStatementKind::NumericOp { operands, .. } => Some(operands.clone()),
-            _ => None,
-        })
-        .expect("NumericOp statement should exist");
+    let (_, numeric_op) =
+        find_single_numeric_op_with_operands(&builder).expect("numeric division should exist");
     let HirNumericOperands::Binary { left, right } = numeric_op else {
         panic!("F64 divide should be binary");
     };
@@ -889,24 +1059,35 @@ fn checked_regular_division_lowers_to_float_div_numeric_op() {
 fn mixed_int_float_addition_converts_the_explicitly_coerced_operand() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let loc = None;
     let f64_type = builtin_type_ids::fixed_scalar(FixedScalar::F64);
     // Bounded fixed domains never mix implicitly, so the integer operand carries an
     // explicit coercion to the receiving F64 domain before the operation.
-    let expr = runtime_expr(
-        vec![
-            runtime_operand_item(Expression::coerced(int_expr(1, loc), f64_type)),
-            runtime_operand_item(float_expr(2.5, loc)),
-            runtime_operator_item(Operator::Add, loc),
-        ],
+    let mut builder = setup_builder(&mut string_table, &mut path_fork);
+    let int_value = int_expr(&mut expressions, &mut constants, 1, loc);
+    let left = expressions
+        .coerced(expressions.own(int_value), f64_type)
+        .expect("fixture coercion fits store");
+    let right = float_expr(&mut expressions, &mut constants, 2.5, loc);
+    let expr = resolved_numeric_expression(
+        &mut expressions,
+        left.id(),
+        Some(right),
+        Operator::Add,
         f64_type,
         loc,
         ValueMode::MutableOwned,
+        &builder.type_environment,
     );
 
-    let mut builder = setup_builder(&mut string_table, &mut path_fork);
+    builder.module_const_values = std::mem::take(&mut constants);
+    let view = expressions
+        .view(expr)
+        .expect("fixture expression belongs to builder");
     let _ = builder
-        .lower_expression(&expr)
+        .lower_expression(view)
         .expect("mixed addition lowering should succeed");
 
     let (op, _) = find_single_numeric_op(&builder).expect("expected a NumericOp");
@@ -917,14 +1098,8 @@ fn mixed_int_float_addition_converts_the_explicitly_coerced_operand() {
         }
     );
 
-    let numeric_op = builder
-        .test_current_block_statements()
-        .iter()
-        .find_map(|statement| match &statement.kind {
-            HirStatementKind::NumericOp { operands, .. } => Some(operands.clone()),
-            _ => None,
-        })
-        .expect("NumericOp statement should exist");
+    let (_, numeric_op) =
+        find_single_numeric_op_with_operands(&builder).expect("numeric addition should exist");
     let HirNumericOperands::Binary { left, right } = numeric_op else {
         panic!("F64 add should be binary");
     };
@@ -948,9 +1123,12 @@ fn mixed_int_float_addition_converts_the_explicitly_coerced_operand() {
 fn unary_int_negation_lowers_to_int_neg_numeric_op() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let loc = None;
     let x_name = symbol("x", &mut path_fork, &mut string_table);
     let x_ref = reference_expr_with_type_id(
+        &mut expressions,
         x_name,
         builtin_type_ids::fixed_scalar(FixedScalar::I32),
         loc,
@@ -966,18 +1144,23 @@ fn unary_int_negation_lowers_to_int_neg_numeric_op() {
         loc,
     );
 
-    let expr = runtime_expr(
-        vec![
-            runtime_operand_item(x_ref),
-            runtime_operator_item(Operator::Negate, loc),
-        ],
+    let expr = resolved_numeric_expression(
+        &mut expressions,
+        x_ref,
+        None,
+        Operator::Negate,
         builtin_type_ids::fixed_scalar(FixedScalar::I32),
         loc,
         ValueMode::MutableOwned,
+        &builder.type_environment,
     );
 
+    builder.module_const_values = std::mem::take(&mut constants);
+    let view = expressions
+        .view(expr)
+        .expect("fixture expression belongs to builder");
     let lowered = builder
-        .lower_expression(&expr)
+        .lower_expression(view)
         .expect("unary negation lowering should succeed");
 
     assert_eq!(
@@ -995,53 +1178,60 @@ fn unary_int_negation_lowers_to_int_neg_numeric_op() {
 }
 
 #[test]
-fn numeric_failure_mode_is_return_error_for_builtin_error_function() {
+fn numeric_failure_uses_invoke_for_builtin_error_function() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let loc = None;
     let fn_name = symbol("__test_fn_error", &mut path_fork, &mut string_table);
-    let expr = runtime_expr(
-        vec![
-            runtime_operand_item(int_expr(1, loc)),
-            runtime_operand_item(int_expr(2, loc)),
-            runtime_operator_item(Operator::Add, loc),
-        ],
+    let mut builder = setup_builder(&mut string_table, &mut path_fork);
+    let left = int_expr(&mut expressions, &mut constants, 1, loc);
+    let right = int_expr(&mut expressions, &mut constants, 2, loc);
+    let expr = resolved_numeric_expression(
+        &mut expressions,
+        left,
+        Some(right),
+        Operator::Add,
         builtin_type_ids::fixed_scalar(FixedScalar::I32),
         loc,
         ValueMode::MutableOwned,
+        &builder.type_environment,
     );
 
-    let mut builder = setup_builder(&mut string_table, &mut path_fork);
     let error_type_id = builder.test_register_builtin_error_type();
-    let return_type = builder.type_environment.intern_fallible_carrier(
-        builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        error_type_id,
+    builder.test_register_function_with_returns(
+        fn_name,
+        FunctionId(1),
+        vec![fixed_type(FixedScalar::I32)],
+        Some(error_type_id),
     );
-    set_current_function_return_type(&mut builder, FunctionId(1), return_type, fn_name);
+    builder.test_set_current_function(FunctionId(1));
 
+    builder.module_const_values = std::mem::take(&mut constants);
+    let view = expressions
+        .view(expr)
+        .expect("fixture expression belongs to builder");
     let lowered = builder
-        .lower_expression(&expr)
+        .lower_expression(view)
         .expect("addition lowering in Error! function should succeed");
 
-    let (_, failure_mode) = find_single_numeric_op(&builder).expect("expected a NumericOp");
+    let found = find_numeric_op_statement(&builder).expect("expected a NumericOp");
+    assert_eq!(found.failure_mode, NumericDelivery::Invoke);
     assert!(
-        matches!(failure_mode, NumericFailureMode::ReturnError),
-        "builtin Error! functions should use ReturnError numeric failure mode"
+        matches!(
+            &expression_row(&builder, lowered.value).kind,
+            HirExpressionKind::Load(place) if place.root == found.result && super::is_local_place(place)
+        ),
+        "recoverable numeric lowering should continue with its edge-defined success local"
     );
     assert!(
         matches!(
-            expression_row(&builder, lowered.value).kind,
-            HirExpressionKind::FallibleUnwrapSuccess { .. }
+            &builder.module.blocks[found.block.0 as usize].terminator,
+            HirTerminator::Invoke { id, success_results, error_result, .. }
+                if *id == found.id && success_results == &[found.result] && *error_result != found.result
         ),
-        "recoverable numeric lowering should continue with an unwrapped success value"
-    );
-    assert!(
-        builder
-            .module
-            .blocks
-            .iter()
-            .any(|block| matches!(block.terminator, HirTerminator::FallibleBranch { .. })),
-        "recoverable numeric lowering should branch on the internal carrier"
+        "recoverable numeric lowering preserves operation identity and disjoint edge definitions"
     );
     assert!(
         builder
@@ -1057,33 +1247,46 @@ fn numeric_failure_mode_is_return_error_for_builtin_error_function() {
 fn numeric_failure_mode_is_trap_for_custom_error_function() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let loc = None;
     let fn_name = symbol("__test_fn_string_error", &mut path_fork, &mut string_table);
-    let expr = runtime_expr(
-        vec![
-            runtime_operand_item(int_expr(1, loc)),
-            runtime_operand_item(int_expr(2, loc)),
-            runtime_operator_item(Operator::Add, loc),
-        ],
+    let mut builder = setup_builder(&mut string_table, &mut path_fork);
+    let left = int_expr(&mut expressions, &mut constants, 1, loc);
+    let right = int_expr(&mut expressions, &mut constants, 2, loc);
+    let expr = resolved_numeric_expression(
+        &mut expressions,
+        left,
+        Some(right),
+        Operator::Add,
         builtin_type_ids::fixed_scalar(FixedScalar::I32),
         loc,
         ValueMode::MutableOwned,
+        &builder.type_environment,
     );
 
-    let mut builder = setup_builder(&mut string_table, &mut path_fork);
-    let return_type = builder.type_environment.intern_fallible_carrier(
-        builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        builtin_type_ids::STRING,
+    builder.test_register_function_with_returns(
+        fn_name,
+        FunctionId(1),
+        vec![fixed_type(FixedScalar::I32)],
+        Some(builtin_type_ids::STRING),
     );
-    set_current_function_return_type(&mut builder, FunctionId(1), return_type, fn_name);
+    builder.test_set_current_function(FunctionId(1));
 
+    builder.module_const_values = std::mem::take(&mut constants);
+    let view = expressions
+        .view(expr)
+        .expect("fixture expression belongs to builder");
     let _ = builder
-        .lower_expression(&expr)
+        .lower_expression(view)
         .expect("addition lowering in custom-error function should succeed");
 
     let (_, failure_mode) = find_single_numeric_op(&builder).expect("expected a NumericOp");
     assert!(
-        matches!(failure_mode, NumericFailureMode::Trap),
+        matches!(
+            failure_mode,
+            NumericDelivery::Statement(NumericFailureMode::Trap)
+        ),
         "custom error functions should trap on numeric failure"
     );
 }
@@ -1092,20 +1295,24 @@ fn numeric_failure_mode_is_trap_for_custom_error_function() {
 fn numeric_failure_mode_is_trap_for_non_fallible_function() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let loc = None;
     let fn_name = symbol("__test_fn_non_fallible", &mut path_fork, &mut string_table);
-    let expr = runtime_expr(
-        vec![
-            runtime_operand_item(int_expr(1, loc)),
-            runtime_operand_item(int_expr(2, loc)),
-            runtime_operator_item(Operator::Add, loc),
-        ],
+    let mut builder = setup_builder(&mut string_table, &mut path_fork);
+    let left = int_expr(&mut expressions, &mut constants, 1, loc);
+    let right = int_expr(&mut expressions, &mut constants, 2, loc);
+    let expr = resolved_numeric_expression(
+        &mut expressions,
+        left,
+        Some(right),
+        Operator::Add,
         builtin_type_ids::fixed_scalar(FixedScalar::I32),
         loc,
         ValueMode::MutableOwned,
+        &builder.type_environment,
     );
 
-    let mut builder = setup_builder(&mut string_table, &mut path_fork);
     set_current_function_return_type(
         &mut builder,
         FunctionId(1),
@@ -1113,13 +1320,20 @@ fn numeric_failure_mode_is_trap_for_non_fallible_function() {
         fn_name,
     );
 
+    builder.module_const_values = std::mem::take(&mut constants);
+    let view = expressions
+        .view(expr)
+        .expect("fixture expression belongs to builder");
     let _ = builder
-        .lower_expression(&expr)
+        .lower_expression(view)
         .expect("addition lowering in non-fallible function should succeed");
 
     let (_, failure_mode) = find_single_numeric_op(&builder).expect("expected a NumericOp");
     assert!(
-        matches!(failure_mode, NumericFailureMode::Trap),
+        matches!(
+            failure_mode,
+            NumericDelivery::Statement(NumericFailureMode::Trap)
+        ),
         "non-fallible functions should trap on numeric failure"
     );
 }
@@ -1152,7 +1366,7 @@ fn fixed_u8_addition_keeps_the_operand_domain() {
     // discharged this operation to `Infallible` and must not return.
     assert_eq!(
         fixture.failure_mode,
-        Some(NumericFailureMode::Trap),
+        Some(NumericDelivery::Statement(NumericFailureMode::Trap)),
         "same-type U8 addition must keep its checked trap delivery"
     );
 }
@@ -1283,7 +1497,7 @@ fn fixed_i8_negation_keeps_its_operand_domain() {
     // I32 domain made the negation infallible and must not return.
     assert_eq!(
         fixture.failure_mode,
-        Some(NumericFailureMode::Trap),
+        Some(NumericDelivery::Statement(NumericFailureMode::Trap)),
         "signed minimum negation must keep its checked trap delivery"
     );
 }
@@ -1432,85 +1646,62 @@ fn mixed_signed_unsigned_addition_promotes_to_the_common_signed_width() {
     );
 }
 
-#[test]
-fn unsupported_arithmetic_pair_is_an_internal_lowering_error() {
-    let i32_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
-    let i64_type = fixed_type(FixedScalar::I64);
-    let u64_type = fixed_type(FixedScalar::U64);
-    let f64_type = fixed_type(FixedScalar::F64);
-
-    // Fixed integer and binary-float operands never mix implicitly, and a signed
-    // type paired with `U64` has no common domain: both require explicit conversion.
-    for (left_type, right_type, result_type) in [
-        (i32_type, f64_type, f64_type),
-        (f64_type, i32_type, f64_type),
-        (i64_type, u64_type, i64_type),
-    ] {
-        let failure =
-            try_lower_binary_with_types(Operator::Add, left_type, right_type, result_type)
-                .expect_err("unsupported arithmetic must not fall back to plain BinOp");
-        let HirConstructionFailure::Infrastructure(error) = failure else {
-            panic!("unsupported arithmetic should be an infrastructure failure");
-        };
-
-        assert_eq!(
-            error.error_type,
-            crate::compiler_frontend::compiler_errors::ErrorType::HirTransformation
-        );
-    }
-}
-
-#[test]
-fn unsupported_numeric_negation_is_an_internal_lowering_error() {
-    let u32_type = fixed_type(FixedScalar::U32);
-    let failure = try_lower_negation_with_type(u32_type, u32_type)
-        .expect_err("unsupported unsigned negation must not fall back to plain UnaryOp");
-    let HirConstructionFailure::Infrastructure(error) = failure else {
-        panic!("unsupported unsigned negation should be an infrastructure failure");
-    };
-
-    assert_eq!(
-        error.error_type,
-        crate::compiler_frontend::compiler_errors::ErrorType::HirTransformation
-    );
-}
-
 // WHAT: verifies that fixed-width numeric HIR keeps the builtin Error! failure mode.
 // WHY: operation-domain coverage alone would not catch a regression in failure-channel selection.
 #[test]
-fn fixed_u32_addition_uses_return_error_failure_mode() {
+fn fixed_u32_addition_uses_native_error_delivery() {
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let loc = None;
     let function_name = symbol("__test_fixed_u32_error", &mut path_fork, &mut string_table);
     let left_name = symbol("left", &mut path_fork, &mut string_table);
     let right_name = symbol("right", &mut path_fork, &mut string_table);
     let u32_type = fixed_type(FixedScalar::U32);
-    let left = reference_expr_with_type_id(left_name, u32_type, loc, ValueMode::ImmutableReference);
-    let right =
-        reference_expr_with_type_id(right_name, u32_type, loc, ValueMode::ImmutableReference);
-    let expression = runtime_expr(
-        vec![
-            runtime_operand_item(left),
-            runtime_operand_item(right),
-            runtime_operator_item(Operator::Add, loc),
-        ],
+    let left = reference_expr_with_type_id(
+        &mut expressions,
+        left_name,
+        u32_type,
+        loc,
+        ValueMode::ImmutableReference,
+    );
+    let right = reference_expr_with_type_id(
+        &mut expressions,
+        right_name,
+        u32_type,
+        loc,
+        ValueMode::ImmutableReference,
+    );
+    let mut builder = setup_builder(&mut string_table, &mut path_fork);
+    let expression = resolved_numeric_expression(
+        &mut expressions,
+        left,
+        Some(right),
+        Operator::Add,
         u32_type,
         loc,
         ValueMode::MutableOwned,
+        &builder.type_environment,
     );
 
-    let mut builder = setup_builder(&mut string_table, &mut path_fork);
     let error_type_id = builder.test_register_builtin_error_type();
-    let return_type = builder
-        .type_environment
-        .intern_fallible_carrier(u32_type, error_type_id);
-    set_current_function_return_type(&mut builder, FunctionId(1), return_type, function_name);
+    builder.test_register_function_with_returns(
+        function_name,
+        FunctionId(1),
+        vec![u32_type],
+        Some(error_type_id),
+    );
+    builder.test_set_current_function(FunctionId(1));
     register_local(&mut builder, left_name, LocalId(10), u32_type, loc);
     register_local(&mut builder, right_name, LocalId(11), u32_type, loc);
 
+    builder.module_const_values = std::mem::take(&mut constants);
+    let view = expressions
+        .view(expression)
+        .expect("fixture expression belongs to builder");
     let lowered = builder
-        .lower_expression(&expression)
+        .lower_expression(view)
         .expect("U32 addition in a builtin Error! function should lower");
 
     let (op, failure_mode) =
@@ -1523,12 +1714,13 @@ fn fixed_u32_addition_uses_return_error_failure_mode() {
         }
     );
     assert!(
-        matches!(failure_mode, NumericFailureMode::ReturnError),
-        "fixed-width numeric failures in builtin Error! functions should use ReturnError"
+        matches!(failure_mode, NumericDelivery::Invoke),
+        "fixed-width numeric failures in builtin Error! functions should invoke the error edge"
     );
+    let found = find_numeric_op_statement(&builder).expect("expected the numeric Invoke");
     assert!(matches!(
-        expression_row(&builder, lowered.value).kind,
-        HirExpressionKind::FallibleUnwrapSuccess { .. }
+        &expression_row(&builder, lowered.value).kind,
+        HirExpressionKind::Load(place) if place.root == found.result && super::is_local_place(place)
     ));
     assert!(
         builder
@@ -1544,6 +1736,8 @@ fn fixed_u32_addition_uses_return_error_failure_mode() {
 fn number_arithmetic_converts_mixed_integer_operands_to_the_number_scale() {
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let integer_name = symbol("integer", &mut path_fork, &mut string_table);
     let number_name = symbol("number", &mut path_fork, &mut string_table);
     let integer_type = fixed_type(FixedScalar::U64);
@@ -1551,31 +1745,39 @@ fn number_arithmetic_converts_mixed_integer_operands_to_the_number_scale() {
 
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
     let number_type = builder.type_environment.intern_number(scale);
-    let expression = runtime_expr(
-        vec![
-            runtime_operand_item(reference_expr_with_type_id(
-                integer_name,
-                integer_type,
-                None,
-                ValueMode::ImmutableReference,
-            )),
-            runtime_operand_item(reference_expr_with_type_id(
-                number_name,
-                number_type,
-                None,
-                ValueMode::ImmutableReference,
-            )),
-            runtime_operator_item(Operator::Add, None),
-        ],
+    let integer = reference_expr_with_type_id(
+        &mut expressions,
+        integer_name,
+        integer_type,
+        None,
+        ValueMode::ImmutableReference,
+    );
+    let number = reference_expr_with_type_id(
+        &mut expressions,
+        number_name,
+        number_type,
+        None,
+        ValueMode::ImmutableReference,
+    );
+    let expression = resolved_numeric_expression(
+        &mut expressions,
+        integer,
+        Some(number),
+        Operator::Add,
         number_type,
         None,
         ValueMode::MutableOwned,
+        &builder.type_environment,
     );
     register_local(&mut builder, integer_name, LocalId(10), integer_type, None);
     register_local(&mut builder, number_name, LocalId(11), number_type, None);
 
+    builder.module_const_values = std::mem::take(&mut constants);
+    let view = expressions
+        .view(expression)
+        .expect("fixture expression belongs to builder");
     let lowered = builder
-        .lower_expression(&expression)
+        .lower_expression(view)
         .expect("Dec addition with a fixed integer should lower");
     let (op, operands) = find_single_numeric_op_with_operands(&builder)
         .expect("Dec addition should emit one checked NumericOp");
@@ -1608,6 +1810,8 @@ fn number_arithmetic_converts_mixed_integer_operands_to_the_number_scale() {
 fn number_power_keeps_its_exponent_in_fixed_i32() {
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let base_name = symbol("base", &mut path_fork, &mut string_table);
     let exponent_name = symbol("exponent", &mut path_fork, &mut string_table);
     let scale = NumberScale::new(3).expect("test Dec scale is valid");
@@ -1615,31 +1819,39 @@ fn number_power_keeps_its_exponent_in_fixed_i32() {
 
     let mut builder = setup_builder(&mut string_table, &mut path_fork);
     let number_type = builder.type_environment.intern_number(scale);
-    let expression = runtime_expr(
-        vec![
-            runtime_operand_item(reference_expr_with_type_id(
-                base_name,
-                number_type,
-                None,
-                ValueMode::ImmutableReference,
-            )),
-            runtime_operand_item(reference_expr_with_type_id(
-                exponent_name,
-                int_type,
-                None,
-                ValueMode::ImmutableReference,
-            )),
-            runtime_operator_item(Operator::Exponent, None),
-        ],
+    let base = reference_expr_with_type_id(
+        &mut expressions,
+        base_name,
+        number_type,
+        None,
+        ValueMode::ImmutableReference,
+    );
+    let exponent = reference_expr_with_type_id(
+        &mut expressions,
+        exponent_name,
+        int_type,
+        None,
+        ValueMode::ImmutableReference,
+    );
+    let expression = resolved_numeric_expression(
+        &mut expressions,
+        base,
+        Some(exponent),
+        Operator::Exponent,
         number_type,
         None,
         ValueMode::MutableOwned,
+        &builder.type_environment,
     );
     register_local(&mut builder, base_name, LocalId(10), number_type, None);
     register_local(&mut builder, exponent_name, LocalId(11), int_type, None);
 
+    builder.module_const_values = std::mem::take(&mut constants);
+    let view = expressions
+        .view(expression)
+        .expect("fixture expression belongs to builder");
     let lowered = builder
-        .lower_expression(&expression)
+        .lower_expression(view)
         .expect("Dec power with an I32 exponent should lower");
     let (op, operands) = find_single_numeric_op_with_operands(&builder)
         .expect("Dec power should emit one checked NumericOp");
@@ -1666,6 +1878,8 @@ fn number_power_keeps_its_exponent_in_fixed_i32() {
 fn mixed_number_comparisons_convert_the_integer_side_to_the_number_scale() {
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let integer_name = symbol("integer", &mut path_fork, &mut string_table);
     let number_name = symbol("number", &mut path_fork, &mut string_table);
     let integer_type = fixed_type(FixedScalar::U64);
@@ -1675,28 +1889,36 @@ fn mixed_number_comparisons_convert_the_integer_side_to_the_number_scale() {
     register_local(&mut builder, integer_name, LocalId(10), integer_type, None);
     register_local(&mut builder, number_name, LocalId(11), number_type, None);
 
-    let number_on_left = runtime_expr(
-        vec![
-            runtime_operand_item(reference_expr_with_type_id(
-                number_name,
-                number_type,
-                None,
-                ValueMode::ImmutableReference,
-            )),
-            runtime_operand_item(reference_expr_with_type_id(
-                integer_name,
-                integer_type,
-                None,
-                ValueMode::ImmutableReference,
-            )),
-            runtime_operator_item(Operator::LessThan, None),
-        ],
+    let number = reference_expr_with_type_id(
+        &mut expressions,
+        number_name,
+        number_type,
+        None,
+        ValueMode::ImmutableReference,
+    );
+    let integer = reference_expr_with_type_id(
+        &mut expressions,
+        integer_name,
+        integer_type,
+        None,
+        ValueMode::ImmutableReference,
+    );
+    let number_on_left = resolved_numeric_expression(
+        &mut expressions,
+        number,
+        Some(integer),
+        Operator::LessThan,
         builtin_type_ids::BOOL,
         None,
         ValueMode::MutableOwned,
+        &builder.type_environment,
     );
+    builder.module_const_values = std::mem::take(&mut constants);
+    let view = expressions
+        .view(number_on_left)
+        .expect("fixture expression belongs to builder");
     let lowered = builder
-        .lower_expression(&number_on_left)
+        .lower_expression(view)
         .expect("Dec and fixed integer comparison should lower");
     let HirExpressionKind::BinOp { left, right, .. } =
         &expression_row(&builder, lowered.value).kind
@@ -1717,28 +1939,35 @@ fn mixed_number_comparisons_convert_the_integer_side_to_the_number_scale() {
         ))
     );
 
-    let integer_on_left = runtime_expr(
-        vec![
-            runtime_operand_item(reference_expr_with_type_id(
-                integer_name,
-                integer_type,
-                None,
-                ValueMode::ImmutableReference,
-            )),
-            runtime_operand_item(reference_expr_with_type_id(
-                number_name,
-                number_type,
-                None,
-                ValueMode::ImmutableReference,
-            )),
-            runtime_operator_item(Operator::LessThan, None),
-        ],
+    let integer = reference_expr_with_type_id(
+        &mut expressions,
+        integer_name,
+        integer_type,
+        None,
+        ValueMode::ImmutableReference,
+    );
+    let number = reference_expr_with_type_id(
+        &mut expressions,
+        number_name,
+        number_type,
+        None,
+        ValueMode::ImmutableReference,
+    );
+    let integer_on_left = resolved_numeric_expression(
+        &mut expressions,
+        integer,
+        Some(number),
+        Operator::LessThan,
         builtin_type_ids::BOOL,
         None,
         ValueMode::MutableOwned,
+        &builder.type_environment,
     );
+    let view = expressions
+        .view(integer_on_left)
+        .expect("fixture expression belongs to builder");
     let lowered = builder
-        .lower_expression(&integer_on_left)
+        .lower_expression(view)
         .expect("reversed Dec and fixed integer comparison should lower");
     let HirExpressionKind::BinOp { left, right, .. } =
         &expression_row(&builder, lowered.value).kind

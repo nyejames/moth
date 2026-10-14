@@ -1,0 +1,12 @@
+@types ACTIVE as LOCAL_ACTIVE
+
+Slot type T = |value T?|
+
+read_u64 |value U64| -> U64:
+    return value
+;
+
+capture_binding || -> U64:
+    slot = Slot(1)
+    return if slot.value is |LOCAL_ACTIVE| then read_u64(LOCAL_ACTIVE) else 0
+;

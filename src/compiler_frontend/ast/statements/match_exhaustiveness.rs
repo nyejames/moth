@@ -7,11 +7,15 @@
 //! stays with the caller. A retained numeric pattern has no scalar until the body root selects
 //! the subject type, so its duplicate facts are recorded when the pattern materialises.
 
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-use crate::compiler_frontend::ast::numeric_construction::{
-    DeferredArmPattern, PendingOptionPattern, StatementExpression,
+use crate::compiler_frontend::ast::const_values::store::{
+    ConstStringValue, ConstValuePayload, ConstValueStore,
 };
-use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
+use crate::compiler_frontend::ast::numeric_construction::{
+    DeferredArmPattern, PendingOptionPattern,
+};
+use crate::compiler_frontend::ast::statements::match_patterns::{
+    MatchPattern, PatternValue, PatternValueKind,
+};
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, NonExhaustiveMatchReason};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -111,17 +115,23 @@ impl MatchArmCoverageTracker {
 
     /// Record one fully materialised arm.
     ///
-    /// WHAT: takes an already-built pattern and guard so duplicate/unreachable facts use their
-    ///       exact values.
+    /// WHAT: takes an already-built pattern and guard presence so duplicate/unreachable facts use
+    ///       their exact literal values.
     /// WHY: the parse path uses it for patterns whose values exist then, and the completion path
     ///      uses it again for retained numeric patterns once the subject type is selected.
     pub(crate) fn record_arm(
         &mut self,
         pattern: &MatchPattern,
-        guard: Option<&Expression>,
+        guard_is_present: bool,
         matched_choice_variant: Option<StringId>,
+        const_values: &ConstValueStore,
     ) -> MatchArmCoverageRecord {
-        self.record_materialised_pattern(pattern, guard.is_some(), matched_choice_variant)
+        self.record_materialised_pattern(
+            pattern,
+            guard_is_present,
+            matched_choice_variant,
+            const_values,
+        )
     }
 
     /// Record one parsed arm whose pattern is built or retained and whose guard is only known by
@@ -134,32 +144,33 @@ impl MatchArmCoverageTracker {
     pub(crate) fn record_deferred_arm(
         &mut self,
         pattern: &DeferredArmPattern,
-        guard: Option<&StatementExpression>,
+        guard_is_present: bool,
         matched_choice_variant: Option<StringId>,
+        const_values: &ConstValueStore,
     ) -> MatchArmCoverageRecord {
-        match (pattern, guard) {
-            (DeferredArmPattern::Ready(pattern), Some(StatementExpression::Built(guard))) => {
-                self.record_arm(pattern, Some(guard), matched_choice_variant)
-            }
-            (DeferredArmPattern::Ready(pattern), guard) => {
-                self.record_materialised_pattern(pattern, guard.is_some(), matched_choice_variant)
-            }
-            (DeferredArmPattern::Retained(_), guard) => {
+        match pattern {
+            DeferredArmPattern::Ready(pattern) => self.record_materialised_pattern(
+                pattern,
+                guard_is_present,
+                matched_choice_variant,
+                const_values,
+            ),
+            DeferredArmPattern::Retained(_) => {
                 // Guard presence still feeds the choice-subject `else` requirement; the literal
                 // duplicate policy waits for the materialised scalar.
-                self.facts.record_guard(guard.is_some());
+                self.facts.record_guard(guard_is_present);
                 MatchArmCoverageRecord { unreachable: false }
             }
-            (DeferredArmPattern::PendingChoice(_), guard) => {
+            DeferredArmPattern::PendingChoice(_) => {
                 // The declared owner names the variant before the subject instance is selected, so
                 // the duplicate rule runs now, exactly as it does for a built choice pattern.
                 let unreachable = matched_choice_variant
                     .is_some_and(|variant_name| !self.facts.record_choice_variant(variant_name));
-                self.facts.record_guard(guard.is_some());
+                self.facts.record_guard(guard_is_present);
                 MatchArmCoverageRecord { unreachable }
             }
-            (DeferredArmPattern::PendingOption(pending), guard) => {
-                self.record_pending_option_arm(pending, guard.is_some())
+            DeferredArmPattern::PendingOption(pending) => {
+                self.record_pending_option_arm(pending, guard_is_present)
             }
         }
     }
@@ -196,6 +207,7 @@ impl MatchArmCoverageTracker {
         pattern: &MatchPattern,
         guard_is_present: bool,
         matched_choice_variant: Option<StringId>,
+        const_values: &ConstValueStore,
     ) -> MatchArmCoverageRecord {
         let option_present_arm_after_catch_all = self.seen_unguarded_present_capture
             && matches!(
@@ -214,8 +226,8 @@ impl MatchArmCoverageTracker {
                 unreachable = true;
             }
 
-            if let MatchPattern::Literal(expression) = pattern
-                && let Some(key) = extract_literal_key(expression)
+            if let MatchPattern::Literal(value) = pattern
+                && let Some(key) = extract_literal_key(value, const_values)
             {
                 if self.matched_unguarded_literal_patterns.contains(&key) {
                     unreachable = true;
@@ -249,13 +261,26 @@ impl MatchArmCoverageTracker {
     }
 }
 
-fn extract_literal_key(expression: &Expression) -> Option<LiteralPatternKey> {
-    match &expression.kind {
-        ExpressionKind::FixedScalar(value) => Some(LiteralPatternKey::FixedScalar(*value)),
-        ExpressionKind::Number(value) => Some(LiteralPatternKey::Number(value.to_owned())),
-        ExpressionKind::StringSlice(id) => Some(LiteralPatternKey::StringSlice(*id)),
-        ExpressionKind::Bool(value) => Some(LiteralPatternKey::Bool(*value)),
-        ExpressionKind::Char(value) => Some(LiteralPatternKey::Char(*value)),
+/// The literal identity of one pattern value, read from its constant content.
+///
+/// WHAT: a constant scalar, bool, char or plain text keys its literal; a runtime value has no
+///       compile-time content, so it never takes part in duplicate-literal detection.
+/// WHY: literal arms compare exact constant content, so two occurrences of one value share a key.
+fn extract_literal_key(
+    value: &PatternValue,
+    const_values: &ConstValueStore,
+) -> Option<LiteralPatternKey> {
+    let PatternValueKind::Constant(id) = value.kind else {
+        return None;
+    };
+    match const_values.payload(id)? {
+        ConstValuePayload::FixedScalar(scalar) => Some(LiteralPatternKey::FixedScalar(*scalar)),
+        ConstValuePayload::Number(number) => Some(LiteralPatternKey::Number(number.clone())),
+        ConstValuePayload::String(ConstStringValue::Text(text)) => {
+            Some(LiteralPatternKey::StringSlice(*text))
+        }
+        ConstValuePayload::Bool(bool_value) => Some(LiteralPatternKey::Bool(*bool_value)),
+        ConstValuePayload::Char(char_value) => Some(LiteralPatternKey::Char(*char_value)),
         _ => None,
     }
 }

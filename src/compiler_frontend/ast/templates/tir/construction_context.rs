@@ -10,8 +10,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::compiler_frontend::ast::ast_nodes::LoopBindings;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::expressions::expression_store::ExprId;
 use crate::compiler_frontend::ast::numeric_construction::{
     DeferredArmPattern, DeferredExpressionSuffix, DeferredNumericExpression, DeferredRangeHeader,
     NumericBindingId, NumericConstructionDomainId, StatementExpression,
@@ -149,7 +149,7 @@ impl TemplateConstructionContext {
 
     pub(crate) fn record_head_dynamic_expression(
         &mut self,
-        expression: Expression,
+        expression: ExprId,
         span: Option<SourceSpan>,
     ) -> TemplateIrNodeId {
         let node_id = {
@@ -157,7 +157,7 @@ impl TemplateConstructionContext {
             let site_id = store.next_expression_site_id();
             store.push_node(TemplateIrNode::new(
                 TemplateIrNodeKind::DynamicExpression {
-                    expression: Box::new(expression),
+                    expression,
                     origin: TemplateSegmentOrigin::Head,
                     site_id,
                 },

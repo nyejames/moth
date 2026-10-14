@@ -1,86 +1,44 @@
-//! External fallible call lowering helpers.
-//!
-//! WHAT: carrier creation and call emission for fallible external function calls.
-//! WHY: external calls have a separate metadata path for error types, so their carrier
-//! construction is isolated here to keep the main fallible lowering focused on source calls.
+//! Native fallible external call emission, retaining boundary float-validation facts.
 
-use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
+use super::EmittedFallibleResults;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    ArgumentListView, ExpressionView,
+};
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::datatypes::ids::TypeId as FrontendTypeId;
-use crate::compiler_frontend::external_packages::CallTarget;
+use crate::compiler_frontend::external_packages::{CallTarget, ExternalFunctionId};
 use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
+use crate::compiler_frontend::hir::terminators::HirFallibleOperation;
 use crate::compiler_frontend::source::SourceSpan;
 
-use super::carrier::EmittedFallibleCarrier;
-
-/// Input struct for lowering a handled external fallible call.
-///
-/// WHAT: packages the external function ID, arguments, result types, error type, handling policy,
-/// and both authored spans needed by call emission and propagation.
-/// WHY: external fallible calls have more metadata than source calls; a context struct keeps the
-/// call site readable while preserving the boundary between ordinary call mapping and propagation
-/// control flow.
-pub(crate) struct ExternalFallibleCallLoweringInput<'a> {
-    pub(crate) id: crate::compiler_frontend::external_packages::ExternalFunctionId,
-    pub(crate) args: &'a [CallArgument],
-    pub(crate) result_type_ids: &'a [FrontendTypeId],
-    pub(crate) requires_external_float_validation: bool,
-    pub(crate) error_type_id: FrontendTypeId,
-    pub(crate) handling:
-        &'a crate::compiler_frontend::ast::expressions::expression::FallibleExpressionHandling,
-    pub(crate) call_span: &'a Option<SourceSpan>,
-    pub(crate) propagation_span: &'a Option<SourceSpan>,
-}
-
 impl<'a> HirBuilder<'a> {
-    /// Builds a fallible carrier from explicit success and error type IDs.
-    pub(crate) fn fallible_call_carrier_from_slots(
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "external result call keeps the mutable builder, callee, arguments, receiver, result types, float-validation flag, error type and span as separate inputs"
+    )]
+    pub(in crate::compiler_frontend::hir) fn emit_external_result_call_to_current_block(
         &mut self,
-        result_type_ids: &[FrontendTypeId],
-        error_type_id: FrontendTypeId,
-        span: &Option<SourceSpan>,
-    ) -> Result<(TypeId, TypeId, TypeId), HirConstructionFailure> {
-        let ok_type = self.lower_call_result_type(result_type_ids, span)?;
-        let err_type = self.lower_type_id(error_type_id, span)?;
-        let carrier_type = self
-            .type_environment
-            .intern_fallible_carrier(ok_type, err_type);
-
-        Ok((carrier_type, ok_type, err_type))
-    }
-
-    /// Emits an external fallible call carrier to the current block.
-    ///
-    /// WHAT: builds the carrier slots from the resolved success/error types and stores the
-    ///       producer's float-validation fact alongside the emitted call result.
-    /// WHY: only a raw successful binary-float payload may later be validated; the fact comes
-    ///      from AST call parsing, and the resolved success type must agree with it.
-    pub(in crate::compiler_frontend::hir) fn emit_external_result_call_carrier_to_current_block(
-        &mut self,
-        id: crate::compiler_frontend::external_packages::ExternalFunctionId,
-        args: &[CallArgument],
-        result_type_ids: &[FrontendTypeId],
+        id: ExternalFunctionId,
+        args: ArgumentListView<'_>,
+        receiver: Option<ExpressionView<'_>>,
+        result_type_ids: &[TypeId],
         requires_external_float_validation: bool,
-        error_type_id: FrontendTypeId,
-        call_span: &Option<SourceSpan>,
-    ) -> Result<EmittedFallibleCarrier, HirConstructionFailure> {
-        let (carrier_type, ok_type, err_type) =
-            self.fallible_call_carrier_from_slots(result_type_ids, error_type_id, call_span)?;
-        let result_local = self.emit_result_call_to_current_block(
-            CallTarget::External(id),
-            args,
-            carrier_type,
-            call_span,
+        error_type_id: TypeId,
+        span: &Option<SourceSpan>,
+    ) -> Result<EmittedFallibleResults, HirConstructionFailure> {
+        let args = self.lower_invoke_arguments(args, receiver, span)?;
+        let types = self.lower_call_result_types(result_type_ids, span)?;
+        let error = self.lower_type_id(error_type_id, span)?;
+        let mut results = self.emit_fallible_operation(
+            HirFallibleOperation::Call {
+                target: CallTarget::External(id),
+                args,
+            },
+            &types,
+            error,
+            span,
         )?;
-
-        Ok(EmittedFallibleCarrier {
-            result_local,
-            carrier_type,
-            ok_type,
-            err_type,
-            validate_float_success: requires_external_float_validation
-                && self.type_id_is_exact_binary_float(ok_type),
-        })
+        results.validate_float_success = requires_external_float_validation;
+        Ok(results)
     }
 }

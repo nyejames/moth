@@ -9,12 +9,16 @@
 //! `CompilerError` in this module means an internal compiler invariant or setup failure only.
 //! Source-authored syntax, type, and rule failures are rejected earlier with `CompilerDiagnostic`.
 
-use crate::compiler_frontend::ast::expressions::expression::{Expression, PlaceExpression};
+use crate::compiler_frontend::ast::const_values::ConstValueId;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, PlaceId,
+};
 use crate::compiler_frontend::ast::generic_functions::IfGenericRequestRanges;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
-use crate::compiler_frontend::ast::statements::match_patterns::MatchArm;
+use crate::compiler_frontend::ast::statements::match_patterns::{MatchArm, MatchPattern};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::{DataType, ReceiverKey};
 use crate::compiler_frontend::declaration_syntax::build_config_contract::BuildConfigQualifierSyntax;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -25,7 +29,13 @@ use crate::return_compiler_error;
 #[derive(Debug, Clone)]
 pub struct Declaration {
     pub id: PathId,
-    pub value: Expression,
+    /// Canonical static type of the binding, independent of any initializer result.
+    pub type_id: TypeId,
+    /// Display-only declared type spelling.
+    pub diagnostic_type: DataType,
+    /// Access mode of the binding rather than the initializer value.
+    pub value_mode: ValueMode,
+    pub value: DeclarationValue,
     /// Span of the declaration name/binding token when authored.
     ///
     /// WHAT: exact source span of the binding-name token for authored declarations.
@@ -35,6 +45,83 @@ pub struct Declaration {
     /// Declaration-owned `#Config of T` syntax metadata, consumed by config resolution when
     /// applicable and otherwise retained for source-contract header consumers.
     pub(crate) config_qualifier: Option<BuildConfigQualifierSyntax>,
+}
+
+/// Declaration state is distinct from a value-producing expression.
+#[derive(Debug, Clone)]
+pub enum DeclarationValue {
+    /// An authored expression. In struct-field shells it is an unfolded default that the strict
+    /// member pass folds to `Default`; a folded field never keeps this variant.
+    Initializer(ExprId),
+    /// Folded content owned by the callable or field-default contract, not an executable root.
+    Default(ConstValueId),
+    /// Nominal definition data, never a first-class semantic expression.
+    StructDefinition(Vec<Declaration>),
+    /// A caller or control-flow owner supplies the binding value.
+    Absent,
+    /// An authored constant-header value awaiting folding. Struct field defaults never use this
+    /// variant; they stay `Initializer` until the strict member pass folds them.
+    PendingConstant,
+    /// An identity-only declaration whose semantic contract lives in its owning table.
+    Shell(DeclarationShell),
+}
+
+#[derive(Debug, Clone)]
+pub enum DeclarationShell {
+    Function { receiver: Option<ReceiverKey> },
+    Struct,
+    Choice,
+    TypeAlias,
+}
+
+impl DeclarationValue {
+    pub fn default(&self) -> Option<ConstValueId> {
+        match self {
+            Self::Default(value) => Some(*value),
+            _ => None,
+        }
+    }
+
+    pub fn initializer(&self) -> Option<ExprId> {
+        match self {
+            Self::Initializer(expression) => Some(*expression),
+            Self::Default(_)
+            | Self::StructDefinition(_)
+            | Self::Absent
+            | Self::PendingConstant
+            | Self::Shell(_) => None,
+        }
+    }
+
+    pub fn initializer_mut(&mut self) -> Option<&mut ExprId> {
+        match self {
+            Self::Initializer(expression) => Some(expression),
+            Self::Default(_)
+            | Self::StructDefinition(_)
+            | Self::Absent
+            | Self::PendingConstant
+            | Self::Shell(_) => None,
+        }
+    }
+
+    pub fn is_const_record_value(
+        &self,
+        expressions: &AstExpressionBuilder,
+    ) -> Result<bool, CompilerError> {
+        match self.initializer() {
+            Some(id) => Ok(expressions.view(id)?.is_const_record_value()),
+            None => Ok(false),
+        }
+    }
+}
+
+impl Declaration {
+    pub fn is_receiver_function(&self) -> bool {
+        match &self.value {
+            DeclarationValue::Shell(DeclarationShell::Function { receiver }) => receiver.is_some(),
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -101,10 +188,10 @@ pub struct LoopBindings {
 
 #[derive(Debug, Clone)]
 pub struct RangeLoopSpec {
-    pub start: Expression,
-    pub end: Expression,
+    pub start: ExprId,
+    pub end: ExprId,
     pub end_kind: RangeEndKind,
-    pub step: Option<Expression>,
+    pub step: Option<ExprId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -117,23 +204,17 @@ pub enum MatchExhaustiveness {
 
 /// Statement node payloads.
 ///
-/// Every `AstNode` occupies the largest variant, and recursive body parsing keeps several nodes
-/// live per nesting level. Bulky, comparatively rare payloads (loop headers and assertion
-/// messages) are boxed so nested bodies do not pay their inline size on the native stack.
+/// Executable expressions are compact IDs into the phase store. Bulky loop header records
+/// remain boxed because recursive body parsing keeps several statement nodes live per level.
 #[derive(Debug, Clone)]
 pub enum NodeKind {
     // Control Flow
-    Return(Vec<Expression>), // Return value,
-    ReturnError(Expression), // return! value
-    If(
-        Expression,
-        Vec<AstNode>,
-        Option<Vec<AstNode>>,
-        IfBranchMetadata,
-    ), // Condition, If true, Else, provisional generic work
+    Return(Vec<ExprId>), // Return values
+    ReturnError(ExprId), // return! value
+    If(ExprId, Vec<AstNode>, Option<Vec<AstNode>>, IfBranchMetadata), // Condition, If true, Else, provisional generic work
 
     Match {
-        scrutinee: Expression,
+        scrutinee: ExprId,
         arms: Vec<MatchArm>,
         default: Option<Vec<AstNode>>,
         exhaustiveness: MatchExhaustiveness,
@@ -152,10 +233,10 @@ pub enum NodeKind {
     },
     CollectionLoop {
         bindings: Box<LoopBindings>,
-        iterable: Expression,
+        iterable: ExprId,
         body: Vec<AstNode>,
     },
-    WhileLoop(Expression, Vec<AstNode>), // Condition, Body,
+    WhileLoop(ExprId, Vec<AstNode>), // Condition, Body
     Break,
     Continue,
 
@@ -166,8 +247,8 @@ pub enum NodeKind {
     /// WHY: keeping assert statement-only prevents shadowing and result handling while the
     ///      shared call parser owns its named/default/access/type argument contract.
     Assert {
-        condition: Expression,
-        message: Box<Expression>,
+        condition: ExprId,
+        message: ExprId,
     },
 
     /// Value-production terminator for active value-producing blocks.
@@ -188,7 +269,7 @@ pub enum NodeKind {
     /// WHY: explicit intent avoids synthetic variable protocols and post-hoc fragment
     /// extraction from the start body.
     /// The HIR builder lowers this into a `PushRuntimeFragment` statement inside entry start().
-    PushStartRuntimeFragment(Expression),
+    PushStartRuntimeFragment(ExprId),
 
     // example: new_struct_instance = MyStructDefinition(arg1, arg2)
     //          new_struct_instance(arg) -- Calls the main function of the struct
@@ -200,13 +281,13 @@ pub enum NodeKind {
     Function(PathId, FunctionSignature, Vec<AstNode>),
     // Mutation of existing mutable variables
     Assignment {
-        target: PlaceExpression, // Variable or field projection
-        value: Expression,
+        target: PlaceId, // Variable or field projection
+        value: ExprId,
     },
 
     MultiBind {
         targets: Vec<MultiBindTarget>,
-        value: Expression,
+        value: ExprId,
     },
 
     /// Statement-level expression.
@@ -215,34 +296,417 @@ pub enum NodeKind {
     ///       a temporary statement-side expression value during parsing.
     /// WHY: expression internals own calls/operators/literals; this statement
     ///      node carries the expression value when a body position needs it.
-    ExpressionStatement(Expression),
+    ExpressionStatement(ExprId),
+}
+
+/// One pending row of the immutable expression walk.
+///
+/// WHAT: a statement, declaration, match pattern or expression row that has not been visited yet.
+/// WHY: nested bodies are walked on an explicit heap stack, so nesting depth costs heap space
+/// rather than call-stack frames. Rows are pushed in reverse, so popping them visits rows
+/// in authored pre-order.
+enum ExpressionVisit<'a> {
+    Node(&'a AstNode),
+    Declaration(&'a Declaration),
+    Pattern(&'a MatchPattern),
+    Expression(ExprId),
+}
+
+/// Mutable counterpart of [`ExpressionVisit`], with identical row order.
+enum ExpressionVisitMut<'a> {
+    Node(&'a mut AstNode),
+    Declaration(&'a mut Declaration),
+    Pattern(&'a mut MatchPattern),
+    Expression(&'a mut ExprId),
+}
+
+fn push_body<'a>(stack: &mut Vec<ExpressionVisit<'a>>, body: &'a [AstNode]) {
+    for node in body.iter().rev() {
+        stack.push(ExpressionVisit::Node(node));
+    }
+}
+
+fn push_declarations<'a>(stack: &mut Vec<ExpressionVisit<'a>>, declarations: &'a [Declaration]) {
+    for declaration in declarations.iter().rev() {
+        stack.push(ExpressionVisit::Declaration(declaration));
+    }
+}
+
+fn visit_declaration_expressions<'a>(
+    declaration: &'a Declaration,
+    stack: &mut Vec<ExpressionVisit<'a>>,
+    visitor: &mut dyn FnMut(ExprId),
+) {
+    match &declaration.value {
+        DeclarationValue::Initializer(expression) => visitor(*expression),
+        DeclarationValue::StructDefinition(fields) => push_declarations(stack, fields),
+        DeclarationValue::Default(_)
+        | DeclarationValue::Absent
+        | DeclarationValue::PendingConstant
+        | DeclarationValue::Shell(_) => {}
+    }
+}
+
+/// Pushes loop bindings so the item declaration is visited before the index declaration.
+fn push_bindings<'a>(stack: &mut Vec<ExpressionVisit<'a>>, bindings: &'a LoopBindings) {
+    if let Some(index) = &bindings.index {
+        stack.push(ExpressionVisit::Declaration(index));
+    }
+    if let Some(item) = &bindings.item {
+        stack.push(ExpressionVisit::Declaration(item));
+    }
+}
+
+/// Visits immediate roots directly and schedules nested work in reverse authored order.
+///
+/// Ordinary statements need no heap work rows. Deferred expression rows only preserve order
+/// around match patterns and loop declarations that must be visited first.
+fn visit_node_expressions<'a>(
+    node: &'a AstNode,
+    stack: &mut Vec<ExpressionVisit<'a>>,
+    visitor: &mut dyn FnMut(ExprId),
+) {
+    match &node.kind {
+        NodeKind::Return(values) => {
+            for &value in values {
+                visitor(value);
+            }
+        }
+        NodeKind::ReturnError(value)
+        | NodeKind::PushStartRuntimeFragment(value)
+        | NodeKind::ExpressionStatement(value)
+        | NodeKind::Assignment { value, .. }
+        | NodeKind::MultiBind { value, .. } => visitor(*value),
+        NodeKind::If(condition, then_body, else_body, _) => {
+            visitor(*condition);
+            if let Some(body) = else_body {
+                push_body(stack, body);
+            }
+            push_body(stack, then_body);
+        }
+        NodeKind::Match {
+            scrutinee,
+            arms,
+            default,
+            ..
+        } => {
+            visitor(*scrutinee);
+            if let Some(body) = default {
+                push_body(stack, body);
+            }
+            for arm in arms.iter().rev() {
+                push_body(stack, &arm.body);
+                if let Some(guard) = arm.guard {
+                    stack.push(ExpressionVisit::Expression(guard));
+                }
+                stack.push(ExpressionVisit::Pattern(&arm.pattern));
+            }
+        }
+        NodeKind::LexicalScope { body } | NodeKind::Function(_, _, body) => {
+            push_body(stack, body);
+        }
+        NodeKind::RangeLoop {
+            bindings,
+            range,
+            body,
+        } => {
+            push_body(stack, body);
+            if let Some(step) = range.step {
+                stack.push(ExpressionVisit::Expression(step));
+            }
+            stack.push(ExpressionVisit::Expression(range.end));
+            stack.push(ExpressionVisit::Expression(range.start));
+            push_bindings(stack, bindings);
+        }
+        NodeKind::CollectionLoop {
+            bindings,
+            iterable,
+            body,
+        } => {
+            push_body(stack, body);
+            stack.push(ExpressionVisit::Expression(*iterable));
+            push_bindings(stack, bindings);
+        }
+        NodeKind::WhileLoop(condition, body) => {
+            visitor(*condition);
+            push_body(stack, body);
+        }
+        NodeKind::Assert { condition, message } => {
+            visitor(*condition);
+            visitor(*message);
+        }
+        NodeKind::ThenValue(values) => {
+            for &value in &values.expressions {
+                visitor(value);
+            }
+        }
+        NodeKind::VariableDeclaration(declaration) => {
+            visit_declaration_expressions(declaration, stack, visitor);
+        }
+        NodeKind::StructDefinition(_, fields) => push_declarations(stack, fields),
+        NodeKind::Break | NodeKind::Continue => {}
+    }
+}
+
+fn push_body_mut<'a>(stack: &mut Vec<ExpressionVisitMut<'a>>, body: &'a mut [AstNode]) {
+    for node in body.iter_mut().rev() {
+        stack.push(ExpressionVisitMut::Node(node));
+    }
+}
+
+fn push_declarations_mut<'a>(
+    stack: &mut Vec<ExpressionVisitMut<'a>>,
+    declarations: &'a mut [Declaration],
+) {
+    for declaration in declarations.iter_mut().rev() {
+        stack.push(ExpressionVisitMut::Declaration(declaration));
+    }
+}
+
+fn visit_declaration_expressions_mut<'a>(
+    declaration: &'a mut Declaration,
+    stack: &mut Vec<ExpressionVisitMut<'a>>,
+    visitor: &mut dyn FnMut(&mut ExprId),
+) {
+    match &mut declaration.value {
+        DeclarationValue::Initializer(expression) => visitor(expression),
+        DeclarationValue::StructDefinition(fields) => push_declarations_mut(stack, fields),
+        DeclarationValue::Default(_)
+        | DeclarationValue::Absent
+        | DeclarationValue::PendingConstant
+        | DeclarationValue::Shell(_) => {}
+    }
+}
+
+/// Pushes loop bindings so the item declaration is visited before the index declaration.
+fn push_bindings_mut<'a>(stack: &mut Vec<ExpressionVisitMut<'a>>, bindings: &'a mut LoopBindings) {
+    if let Some(index) = &mut bindings.index {
+        stack.push(ExpressionVisitMut::Declaration(index));
+    }
+    if let Some(item) = &mut bindings.item {
+        stack.push(ExpressionVisitMut::Declaration(item));
+    }
+}
+
+/// Mutable counterpart of [`visit_node_expressions`], with identical visitation order.
+fn visit_node_expressions_mut<'a>(
+    node: &'a mut AstNode,
+    stack: &mut Vec<ExpressionVisitMut<'a>>,
+    visitor: &mut dyn FnMut(&mut ExprId),
+) {
+    match &mut node.kind {
+        NodeKind::Return(values) => {
+            for value in values {
+                visitor(value);
+            }
+        }
+        NodeKind::ReturnError(value)
+        | NodeKind::PushStartRuntimeFragment(value)
+        | NodeKind::ExpressionStatement(value)
+        | NodeKind::Assignment { value, .. }
+        | NodeKind::MultiBind { value, .. } => visitor(value),
+        NodeKind::If(condition, then_body, else_body, _) => {
+            visitor(condition);
+            if let Some(body) = else_body {
+                push_body_mut(stack, body);
+            }
+            push_body_mut(stack, then_body);
+        }
+        NodeKind::Match {
+            scrutinee,
+            arms,
+            default,
+            ..
+        } => {
+            visitor(scrutinee);
+            if let Some(body) = default {
+                push_body_mut(stack, body);
+            }
+            for arm in arms.iter_mut().rev() {
+                push_body_mut(stack, &mut arm.body);
+                if let Some(guard) = &mut arm.guard {
+                    stack.push(ExpressionVisitMut::Expression(guard));
+                }
+                stack.push(ExpressionVisitMut::Pattern(&mut arm.pattern));
+            }
+        }
+        NodeKind::LexicalScope { body } | NodeKind::Function(_, _, body) => {
+            push_body_mut(stack, body);
+        }
+        NodeKind::RangeLoop {
+            bindings,
+            range,
+            body,
+        } => {
+            push_body_mut(stack, body);
+            if let Some(step) = &mut range.step {
+                stack.push(ExpressionVisitMut::Expression(step));
+            }
+            stack.push(ExpressionVisitMut::Expression(&mut range.end));
+            stack.push(ExpressionVisitMut::Expression(&mut range.start));
+            push_bindings_mut(stack, bindings);
+        }
+        NodeKind::CollectionLoop {
+            bindings,
+            iterable,
+            body,
+        } => {
+            push_body_mut(stack, body);
+            stack.push(ExpressionVisitMut::Expression(iterable));
+            push_bindings_mut(stack, bindings);
+        }
+        NodeKind::WhileLoop(condition, body) => {
+            visitor(condition);
+            push_body_mut(stack, body);
+        }
+        NodeKind::Assert { condition, message } => {
+            visitor(condition);
+            visitor(message);
+        }
+        NodeKind::ThenValue(values) => {
+            for value in &mut values.expressions {
+                visitor(value);
+            }
+        }
+        NodeKind::VariableDeclaration(declaration) => {
+            visit_declaration_expressions_mut(declaration, stack, visitor);
+        }
+        NodeKind::StructDefinition(_, fields) => push_declarations_mut(stack, fields),
+        NodeKind::Break | NodeKind::Continue => {}
+    }
+}
+
+fn push_place_bodies<'a>(stack: &mut Vec<&'a AstNode>, body: &'a [AstNode]) {
+    for node in body.iter().rev() {
+        stack.push(node);
+    }
+}
+
+fn push_place_bodies_mut<'a>(stack: &mut Vec<&'a mut AstNode>, body: &'a mut [AstNode]) {
+    for node in body.iter_mut().rev() {
+        stack.push(node);
+    }
 }
 
 impl AstNode {
-    /// Returns the expression TypeId for expression-shaped nodes without rebuilding
-    /// an owned `Expression`.
-    ///
-    /// WHAT: postfix/member parsing needs the receiver type at every chain step.
-    /// WHY: using this lightweight query avoids cloning call arguments, field
-    /// access trees, and diagnostic `DataType` payloads just to inspect type
-    /// identity.
-    pub fn expression_type_id(&self) -> Result<TypeId, CompilerError> {
-        match &self.kind {
-            NodeKind::VariableDeclaration(declaration) => Ok(declaration.value.type_id),
-            NodeKind::ExpressionStatement(expression) => Ok(expression.type_id),
+    pub(crate) fn visit_place_ids_mut(&mut self, visitor: &mut dyn FnMut(&mut PlaceId)) {
+        let mut stack = Vec::new();
+        let mut next = Some(self);
+        while let Some(node) = next {
+            match &mut node.kind {
+                NodeKind::Assignment { target, .. } => visitor(target),
+                NodeKind::If(_, then_body, else_body, _) => {
+                    if let Some(body) = else_body {
+                        push_place_bodies_mut(&mut stack, body);
+                    }
+                    push_place_bodies_mut(&mut stack, then_body);
+                }
+                NodeKind::Match { arms, default, .. } => {
+                    if let Some(body) = default {
+                        push_place_bodies_mut(&mut stack, body);
+                    }
+                    for arm in arms.iter_mut().rev() {
+                        push_place_bodies_mut(&mut stack, &mut arm.body);
+                    }
+                }
+                NodeKind::LexicalScope { body }
+                | NodeKind::Function(_, _, body)
+                | NodeKind::RangeLoop { body, .. }
+                | NodeKind::CollectionLoop { body, .. }
+                | NodeKind::WhileLoop(_, body) => push_place_bodies_mut(&mut stack, body),
+                NodeKind::Return(_)
+                | NodeKind::ReturnError(_)
+                | NodeKind::Break
+                | NodeKind::Continue
+                | NodeKind::Assert { .. }
+                | NodeKind::ThenValue(_)
+                | NodeKind::VariableDeclaration(_)
+                | NodeKind::PushStartRuntimeFragment(_)
+                | NodeKind::StructDefinition(_, _)
+                | NodeKind::MultiBind { .. }
+                | NodeKind::ExpressionStatement(_) => {}
+            }
+            next = stack.pop();
+        }
+    }
 
-            // Non-expression nodes — compiler invariant violation.
-            // This path should never be reached from well-formed AST; it indicates a bug in
-            // an earlier stage that allowed a non-expression node into expression context.
-            _ => {
-                return_compiler_error!(
-                    "AST invariant: tried to get the type of a non-expression AST node: {:?}",
-                    &self.kind
-                );
+    pub(crate) fn visit_expression_ids_mut(&mut self, visitor: &mut dyn FnMut(&mut ExprId)) {
+        let mut stack = Vec::new();
+        visit_node_expressions_mut(self, &mut stack, visitor);
+        while let Some(item) = stack.pop() {
+            match item {
+                ExpressionVisitMut::Node(node) => {
+                    visit_node_expressions_mut(node, &mut stack, visitor)
+                }
+                ExpressionVisitMut::Declaration(declaration) => {
+                    visit_declaration_expressions_mut(declaration, &mut stack, visitor)
+                }
+                ExpressionVisitMut::Pattern(pattern) => pattern.visit_expression_ids_mut(visitor),
+                ExpressionVisitMut::Expression(expression) => visitor(expression),
             }
         }
     }
 
+    pub(crate) fn visit_place_ids(&self, visitor: &mut dyn FnMut(PlaceId)) {
+        let mut stack = Vec::new();
+        let mut next = Some(self);
+        while let Some(node) = next {
+            match &node.kind {
+                NodeKind::Assignment { target, .. } => visitor(*target),
+                NodeKind::If(_, then_body, else_body, _) => {
+                    if let Some(body) = else_body {
+                        push_place_bodies(&mut stack, body);
+                    }
+                    push_place_bodies(&mut stack, then_body);
+                }
+                NodeKind::Match { arms, default, .. } => {
+                    if let Some(body) = default {
+                        push_place_bodies(&mut stack, body);
+                    }
+                    for arm in arms.iter().rev() {
+                        push_place_bodies(&mut stack, &arm.body);
+                    }
+                }
+                NodeKind::LexicalScope { body }
+                | NodeKind::Function(_, _, body)
+                | NodeKind::RangeLoop { body, .. }
+                | NodeKind::CollectionLoop { body, .. }
+                | NodeKind::WhileLoop(_, body) => push_place_bodies(&mut stack, body),
+                NodeKind::Return(_)
+                | NodeKind::ReturnError(_)
+                | NodeKind::Break
+                | NodeKind::Continue
+                | NodeKind::Assert { .. }
+                | NodeKind::ThenValue(_)
+                | NodeKind::VariableDeclaration(_)
+                | NodeKind::PushStartRuntimeFragment(_)
+                | NodeKind::StructDefinition(_, _)
+                | NodeKind::MultiBind { .. }
+                | NodeKind::ExpressionStatement(_) => {}
+            }
+            next = stack.pop();
+        }
+    }
+
+    /// Visit semantic expression roots held by this statement and its nested bodies.
+    /// Place projections remain owned and visited by the expression store's place owner.
+    pub(crate) fn visit_expression_ids(&self, visitor: &mut dyn FnMut(ExprId)) {
+        let mut stack = Vec::new();
+        visit_node_expressions(self, &mut stack, visitor);
+        while let Some(item) = stack.pop() {
+            match item {
+                ExpressionVisit::Node(node) => visit_node_expressions(node, &mut stack, visitor),
+                ExpressionVisit::Declaration(declaration) => {
+                    visit_declaration_expressions(declaration, &mut stack, visitor)
+                }
+                ExpressionVisit::Pattern(pattern) => pattern.visit_expression_ids(visitor),
+                ExpressionVisit::Expression(expression) => visitor(expression),
+            }
+        }
+    }
+}
+
+impl AstNode {
     /// Returns whether this expression-shaped node represents a const-record value.
     ///
     /// WHAT: receiver-call validation needs to distinguish an actual const-record
@@ -251,12 +715,17 @@ impl AstNode {
     /// and const-record values; the const-record call restriction is value-level,
     /// so it must inspect the explicit `ConstRecordState` on the expression rather
     /// than branching on diagnostic-only `DataType` spelling.
-    pub fn expression_is_const_record_value(&self) -> Result<bool, CompilerError> {
+    pub fn expression_is_const_record_value(
+        &self,
+        expressions: &AstExpressionBuilder,
+    ) -> Result<bool, CompilerError> {
         match &self.kind {
             NodeKind::VariableDeclaration(declaration) => {
-                Ok(declaration.value.is_const_record_value())
+                declaration.value.is_const_record_value(expressions)
             }
-            NodeKind::ExpressionStatement(expression) => Ok(expression.is_const_record_value()),
+            NodeKind::ExpressionStatement(expression) => {
+                Ok(expressions.view(*expression)?.is_const_record_value())
+            }
 
             // Non-expression nodes — compiler invariant violation.
             // This path should never be reached from well-formed AST; it indicates a bug in
@@ -270,3 +739,7 @@ impl AstNode {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "tests/ast_nodes_tests.rs"]
+mod ast_nodes_tests;

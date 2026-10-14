@@ -4,10 +4,12 @@
 //! This owner resolves producer compatibility, types the optional binding and validates handler
 //! success slots or termination. Call finishers consume only postfix propagation; neither
 //! implicit failure facts nor handlers create a source-level carrier type.
+//! Completed protected and fallback values retain owner-local expression IDs. Parsing borrows
+//! the phase builder and constant store explicitly; catch disposition updates publish fresh
+//! immutable rows, while only unresolved suffixes remain in the numeric construction owner.
 
 mod catch_handler;
 mod parser;
-mod success_types;
 mod validation;
 
 use crate::compiler_frontend::ast::cursor::AstCursor;
@@ -35,7 +37,7 @@ pub(crate) use parser::{
     parse_completed_expression_catch, parse_fallible_handling_suffix_for_call_expression,
     parse_fallible_handling_suffix_for_expression,
     parse_fallible_handling_suffix_for_host_call_expression, parse_fragment_handling_suffix,
-    retain_pending_catch_handler,
+    retain_pending_catch_handler, validate_postfix_propagation_contract,
 };
 
 pub(crate) const FUNCTION_CALL_STAGE: &str = "Function Call Parsing";

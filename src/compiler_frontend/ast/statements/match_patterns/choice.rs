@@ -316,7 +316,7 @@ fn parse_choice_pattern_captures(
                 captures.push(ParsedChoicePayloadCapture {
                     binding_name,
                     field_index,
-                    type_id: field_decl.value.type_id,
+                    type_id: field_decl.type_id,
                     span: capture_span,
                     binding_span,
                 });

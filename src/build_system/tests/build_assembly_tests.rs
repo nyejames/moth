@@ -152,7 +152,7 @@ fn synthetic_module(
                 kind: HirStatementKind::Call {
                     target,
                     args: HirValueRange::empty(),
-                    result: None,
+                    results: Vec::new(),
                 },
                 span: None,
             });
@@ -178,30 +178,19 @@ fn synthetic_module(
             });
         }
 
-        let return_value = hir
-            .expressions
-            .append_expression(HirExpression {
-                kind: HirExpressionKind::TupleConstruct {
-                    elements: HirValueRange::empty(),
-                },
-                ty: crate::compiler_frontend::datatypes::ids::builtin_type_ids::NONE,
-                value_kind: ValueKind::Const,
-                region: RegionId(0),
-                span: None,
-            })
-            .expect("fixture expression fits");
         hir.blocks.push(HirBlock {
             id: block_id,
             region: RegionId(0),
             locals: Vec::new(),
             statements,
-            terminator: HirTerminator::Return(return_value),
+            terminator: HirTerminator::Return(HirValueRange::empty()),
         });
         hir.functions.push(HirFunction {
             id: function_id,
             entry: block_id,
             params: Vec::new(),
-            return_type: crate::compiler_frontend::datatypes::ids::builtin_type_ids::NONE,
+            returns: Box::new([]),
+            error_return: None,
         });
         hir.function_origins.insert(
             function_id,

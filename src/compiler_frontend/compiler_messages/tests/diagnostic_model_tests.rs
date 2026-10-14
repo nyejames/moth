@@ -1,6 +1,6 @@
 use super::{
     BorrowAccessKind, BorrowDiagnosticKind, BuiltinFailureOriginKind, BuiltinFailureWitness,
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic, ConfigDiagnosticKind,
+    CapacityResource, CompileTimeEvaluationErrorReason, CompilerDiagnostic, ConfigDiagnosticKind,
     DeferredFeatureDiagnosticKind, DeferredFeatureReason, DependencyClauseKind, DiagnosticBag,
     DiagnosticCategory, DiagnosticKind, DiagnosticLabel, DiagnosticLabelMessage,
     DiagnosticOperator, DiagnosticPayload, DiagnosticPlace, DiagnosticSeverity, DiagnosticToken,
@@ -9,14 +9,14 @@ use super::{
     InvalidAssignmentTargetReason, InvalidCallShapeReason, InvalidCastReason,
     InvalidChoiceVariantReason, InvalidCollectionTypeReason, InvalidConfigReason,
     InvalidDependencyClauseReason, InvalidExpressionReason, InvalidFallibleHandlingReason,
-    InvalidFallibleOperandReason, InvalidFunctionSignatureReason, InvalidGenericParameterReason,
-    InvalidImportPathReason, InvalidMapTypeReason, InvalidOutputFolderReason,
-    InvalidReceiverCallReason, InvalidSignatureMemberReason, InvalidStandaloneStatementReason,
-    InvalidStatementPositionReason, InvalidStringEscapeReason, InvalidTemplateDirectiveReason,
-    InvalidTemplateStructureReason, InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason,
-    NameNamespace, NamespaceTypeValueMisuseKind, PathKind, ReceiverCallKind, RuleDiagnosticKind,
+    InvalidFunctionSignatureReason, InvalidGenericParameterReason, InvalidImportPathReason,
+    InvalidMapTypeReason, InvalidOutputFolderReason, InvalidReceiverCallReason,
+    InvalidSignatureMemberReason, InvalidStandaloneStatementReason, InvalidStatementPositionReason,
+    InvalidStringEscapeReason, InvalidTemplateDirectiveReason, InvalidTemplateStructureReason,
+    InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason, NameNamespace,
+    NamespaceTypeValueMisuseKind, PathKind, ReceiverCallKind, RuleDiagnosticKind,
     SyntaxDiagnosticKind, TokenTag, TypeAnnotationContext, TypeDiagnosticKind, TypeMismatchContext,
-    UnsupportedBackendFeatureReason, UnsupportedOperatorCategory, is_well_formed_reason_key,
+    UnsupportedBackendFeatureReason, ValueReceiverContext, is_well_formed_reason_key,
 };
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
@@ -183,7 +183,7 @@ fn compiler_capacity_diagnostic_keeps_the_triggering_span_and_resource() {
     assert_eq!(
         diagnostic.payload,
         DiagnosticPayload::CompilerCapacityExceeded {
-            resource: HirCapacityResource::ExpressionRows,
+            resource: CapacityResource::Hir(HirCapacityResource::ExpressionRows),
         }
     );
 
@@ -317,6 +317,47 @@ fn unsupported_backend_feature_exposes_stable_reason_key() {
         diagnostic.identity().reason_key,
         Some("unsupported_backend_feature.hashmap_operation")
     );
+}
+
+#[test]
+fn body_declaration_placement_preserves_source_name_and_stable_reason() {
+    use super::InvalidDeclarationReason;
+
+    let mut string_table = StringTable::new();
+    let name = string_table.intern("nested");
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let name_span = Some(exact_span(
+        SourceId::from_index(1),
+        12,
+        6,
+        &mut span_builder,
+    ));
+    let diagnostic = CompilerDiagnostic::invalid_declaration(
+        InvalidDeclarationReason::DeclarationRequiresModuleTopLevel,
+        Some(name),
+        name_span,
+    );
+
+    assert_eq!(diagnostic.primary_span, name_span);
+    assert_eq!(diagnostic.identity().code, "MOTH-RULE-0043");
+    assert_eq!(
+        diagnostic.identity().reason_key,
+        Some("invalid_declaration.declaration_requires_module_top_level"),
+    );
+    assert!(matches!(
+        &diagnostic.payload,
+        DiagnosticPayload::InvalidDeclaration {
+            reason: InvalidDeclarationReason::DeclarationRequiresModuleTopLevel,
+            name: Some(source_name),
+        } if *source_name == name
+    ));
+    let guidance = terminal::format_payload_guidance(
+        &diagnostic.payload,
+        DiagnosticRenderContext::new(&string_table),
+    )
+    .join("\n");
+    assert!(guidance.contains("Declaration 'nested' cannot appear inside an executable body"));
+    assert!(guidance.contains("Declare it at module top level"));
 }
 
 #[test]
@@ -1906,6 +1947,54 @@ fn duplicate_declaration_without_previous_location_omits_secondary_label() {
 }
 
 #[test]
+fn value_receiver_diagnostic_preserves_factual_arity_and_producer_span() {
+    let mut spans = ExtendedSpanBuilder::new();
+    let producer_span = Some(exact_span(SourceId::from_index(1), 12, 6, &mut spans));
+    let local_table = StringTable::new();
+    let mut merged_table = StringTable::new();
+    merged_table.intern("unrelated");
+    let remap = merged_table.merge_from(&local_table);
+
+    for produced_count in [0, 2] {
+        let mut diagnostic = CompilerDiagnostic::invalid_value_receiver(
+            ValueReceiverContext::Declaration,
+            1,
+            produced_count,
+            producer_span,
+        );
+        diagnostic.payload.remap_string_ids(&remap);
+        assert_eq!(
+            diagnostic.kind,
+            DiagnosticKind::Rule(RuleDiagnosticKind::InvalidValueReceiver)
+        );
+        assert_eq!(diagnostic.identity().code, "MOTH-RULE-0087");
+        assert_eq!(diagnostic.identity().reason_key, None);
+        assert_eq!(diagnostic.primary_span, producer_span);
+        assert_eq!(
+            diagnostic.payload,
+            DiagnosticPayload::InvalidValueReceiver {
+                receiver: ValueReceiverContext::Declaration,
+                target_count: 1,
+                produced_count,
+            }
+        );
+        let context = DiagnosticRenderContext::new(&merged_table);
+        let rendered = terse::format_terse_diagnostic_with_context(&diagnostic, context);
+        assert!(rendered.contains(&format!(
+            "Invalid declaration receiver: expected 1 success slot(s), but this expression produces {produced_count}."
+        )));
+        let guidance = terminal::format_payload_guidance(&diagnostic.payload, context).join("\n");
+        if produced_count == 0 {
+            assert!(
+                guidance.contains("Use an expression that produces the required success values.")
+            );
+        } else {
+            assert!(guidance.contains("Use a multi-bind with one target per success slot."));
+        }
+    }
+}
+
+#[test]
 fn type_mismatch_constructor_carries_type_ids_without_rendering() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -2536,16 +2625,6 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
             "Operator `+` cannot concatenate",
             "Add",
         ),
-        (
-            CompilerDiagnostic::invalid_fallible_operand(
-                InvalidFallibleOperandReason::FallibleValueNotHandled,
-                UnsupportedOperatorCategory::Arithmetic,
-                builtin_type_ids::STRING,
-                span(source_path),
-            ),
-            "arithmetic operator cannot use a fallible value that has not been handled",
-            "FallibleValueNotHandled",
-        ),
     ];
     let render_context = DiagnosticRenderContext::new(&string_table);
 
@@ -2664,6 +2743,19 @@ fn failure_handling_diagnostics_preserve_producer_types_and_spans() {
     let second_span = Some(exact_span(source, 11, 9, &mut span_builder));
     let reasons = [
         (
+            InvalidFallibleHandlingReason::FunctionHasMultipleSuccessReturns { count: 3 },
+            "invalid_fallible_handling.function_has_multiple_success_returns",
+            vec![],
+        ),
+        (
+            InvalidFallibleHandlingReason::EntryHasIncompatibleError {
+                produced_error_type: builtin_type_ids::STRING,
+                entry_error_type: builtin_type_ids::BOOL,
+            },
+            "invalid_fallible_handling.entry_has_incompatible_error",
+            vec![],
+        ),
+        (
             InvalidFallibleHandlingReason::IncompatibleCatchErrorTypes {
                 first_error_type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 second_error_type_id: builtin_type_ids::STRING,
@@ -2731,6 +2823,78 @@ fn failure_handling_diagnostics_preserve_producer_types_and_spans() {
                 .collect::<Vec<_>>(),
             producer_spans,
         );
+    }
+}
+
+#[test]
+fn propagation_boundary_renderers_preserve_authored_count_and_semantic_error_types() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut type_environment = TypeEnvironment::new();
+    let error_path = path_fork
+        .try_intern_portable_path("ParseFailure", &mut string_table)
+        .expect("test path fits");
+    let (_, produced_error_type) = type_environment.register_nominal_struct(StructTypeDefinition {
+        id: NominalTypeId(0),
+        path: error_path,
+        fields: Box::new([]),
+        generic_parameters: None,
+        const_record: false,
+    });
+    let entry_error_path = path_fork
+        .try_intern_portable_path("Error", &mut string_table)
+        .expect("test path fits");
+    let (_, entry_error_type) = type_environment.register_nominal_struct(StructTypeDefinition {
+        id: NominalTypeId(0),
+        path: entry_error_path,
+        fields: Box::new([]),
+        generic_parameters: None,
+        const_record: false,
+    });
+    let path_table = path_fork.snapshot_table();
+    let context = DiagnosticRenderContext::new(&string_table)
+        .with_optional_type_environment(Some(&type_environment))
+        .with_path_table(&path_table);
+
+    for count in [2, 5] {
+        let diagnostic = CompilerDiagnostic::invalid_fallible_handling(
+            InvalidFallibleHandlingReason::FunctionHasMultipleSuccessReturns { count },
+            None,
+        );
+        let guidance = terminal::format_payload_guidance(&diagnostic.payload, context).join("\n");
+        let terse = terse::format_terse_diagnostic_with_context(&diagnostic, context);
+        let count_fact = format!("{count} authored success return slots");
+        for message in [&guidance, &terse] {
+            assert!(message.contains(&count_fact), "{message}");
+            assert!(message.contains("Inspect the option locally"), "{message}");
+            assert!(
+                message.contains("use a single optional success return slot"),
+                "{message}",
+            );
+            assert!(!message.contains("FunctionHasMultipleSuccessReturns"));
+        }
+    }
+
+    let diagnostic = CompilerDiagnostic::invalid_fallible_handling(
+        InvalidFallibleHandlingReason::EntryHasIncompatibleError {
+            produced_error_type,
+            entry_error_type,
+        },
+        None,
+    );
+    let guidance = terminal::format_payload_guidance(&diagnostic.payload, context).join("\n");
+    let terse = terse::format_terse_diagnostic_with_context(&diagnostic, context);
+    for message in [&guidance, &terse] {
+        assert!(message.contains("produces `ParseFailure!`"), "{message}");
+        assert!(message.contains("`start` `Error!` boundary"), "{message}");
+        assert!(
+            message.contains("Handle `ParseFailure` locally with `catch` or recover explicitly"),
+            "{message}",
+        );
+        assert!(!message.contains("EntryHasIncompatibleError"));
+        assert!(!message.contains("TypeId"));
+        assert!(!message.contains("declare"));
+        assert!(!message.contains("add"));
     }
 }
 
@@ -2849,12 +3013,6 @@ fn phase_1_2_renderers_keep_source_language_terminology() {
         ),
         CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::TemplateIfConditionNotConst,
-            span(source_path),
-        ),
-        CompilerDiagnostic::invalid_fallible_operand(
-            InvalidFallibleOperandReason::FallibleValueNotHandled,
-            UnsupportedOperatorCategory::Arithmetic,
-            builtin_type_ids::STRING,
             span(source_path),
         ),
         CompilerDiagnostic::invalid_fallible_handling(
@@ -4123,7 +4281,6 @@ impl TypeDiagnosticKind {
             Self::TypeMismatch,
             Self::EmptyCollectionTypeAmbiguity,
             Self::UnsupportedOperatorTypes,
-            Self::InvalidFallibleOperand,
             Self::IncompatibleChoiceComparison,
         ]
         .into_iter()
@@ -4156,6 +4313,7 @@ impl RuleDiagnosticKind {
             Self::InvalidDeclaration,
             Self::InvalidAssignmentTarget,
             Self::InvalidMultiBind,
+            Self::InvalidValueReceiver,
             Self::InvalidBuiltinCall,
             Self::InvalidCast,
             Self::InvalidReceiverCall,

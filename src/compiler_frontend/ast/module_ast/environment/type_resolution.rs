@@ -5,10 +5,9 @@
 //! can reference constants, so constants are resolved before struct fields.
 
 use super::builder::{AstModuleEnvironmentBuilder, DeclarationPassLanes};
-use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::ast_nodes::{Declaration, DeclarationShell, DeclarationValue};
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::generic_bounds::{
     GenericBoundEvidenceContext, validate_nominal_generic_bound_evidence,
 };
@@ -16,7 +15,7 @@ use crate::compiler_frontend::ast::module_ast::environment::constant_resolution:
     ConstantHeaderInput, ConstantResolutionSession, ConstantResolutionSessionInput,
 };
 use crate::compiler_frontend::ast::statements::functions::{
-    SignatureTypeFallbackPolicy, signature_member_to_declaration,
+    SignatureDefaultMode, SignatureTypeFallbackPolicy, signature_member_to_declaration,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::type_resolution::{
@@ -164,16 +163,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         declaration_id,
                         Declaration {
                             id: header.declaration_path.to_owned(),
-                            value: Expression::new(
-                                ExpressionKind::NoValue,
-                                header.name_span,
+                            type_id: struct_type_id,
+                            diagnostic_type: DataType::runtime_struct(
+                                header.declaration_path.to_owned(),
                                 struct_type_id,
-                                DataType::runtime_struct(
-                                    header.declaration_path.to_owned(),
-                                    struct_type_id,
-                                ),
-                                ValueMode::ImmutableReference,
                             ),
+                            value_mode: ValueMode::ImmutableReference,
+                            value: DeclarationValue::Shell(DeclarationShell::Struct),
                             binding_span: header.name_span,
                             config_qualifier: None,
                         },
@@ -214,17 +210,14 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         declaration_id,
                         Declaration {
                             id: header.declaration_path.to_owned(),
-                            value: Expression::new(
-                                ExpressionKind::NoValue,
-                                header.name_span,
-                                choice_type_id,
-                                DataType::Choices {
-                                    nominal_path: header.declaration_path.to_owned(),
-                                    type_id: choice_type_id,
-                                    generic_instance_key: None,
-                                },
-                                ValueMode::ImmutableReference,
-                            ),
+                            type_id: choice_type_id,
+                            diagnostic_type: DataType::Choices {
+                                nominal_path: header.declaration_path.to_owned(),
+                                type_id: choice_type_id,
+                                generic_instance_key: None,
+                            },
+                            value_mode: ValueMode::ImmutableReference,
+                            value: DeclarationValue::Shell(DeclarationShell::Choice),
                             binding_span: header.name_span,
                             config_qualifier: None,
                         },
@@ -244,6 +237,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     /// scaffold. Final TypeIds still come from the later constant-aware member pass.
     /// WHY: member types may name same-module aliases, so this must follow alias resolution
     /// without waiting for folded constant capacities.
+    /// Struct defaults stay unfolded here; the strict member pass folds them once constants publish.
     pub(in crate::compiler_frontend::ast) fn prepare_nominal_member_shells(
         &mut self,
         declaration_lanes: &DeclarationPassLanes,
@@ -254,7 +248,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             let header = declaration_lanes
                 .header(declaration_id, sorted_headers)
                 .map_err(|error| self.error_messages(error, string_table))?;
-            self.prepare_nominal_member_shell(header, true, string_table)?;
+            self.prepare_nominal_member_shell(
+                header,
+                SignatureDefaultMode::KeepAuthored,
+                string_table,
+            )?;
         }
 
         Ok(())
@@ -264,12 +262,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     ///
     /// WHY: the Stage 3 constant walk repeats this for a nominal once its member aliases and
     /// capacity constants are published, so the constructor scaffold it feeds is never built
-    /// from a provisional alias target. A repeat pass sets `emit_warnings` to false because the
-    /// first pass already reported every member warning.
+    /// from a provisional alias target. The shell passes keep struct defaults unfolded, because the
+    /// module constants they name may not be published yet. Shell passes never report member
+    /// warnings: the strict member pass folds every default and reports those warnings once.
     fn prepare_nominal_member_shell(
         &mut self,
         header: &Header,
-        emit_warnings: bool,
+        default_mode: SignatureDefaultMode,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
         match &header.kind {
@@ -280,7 +279,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     MemberShellSemanticContext::StructField,
                     string_table,
                     SignatureTypeFallbackPolicy::AllowUnresolvedCapacity,
-                    emit_warnings,
+                    default_mode,
+                    false,
                 )?;
                 Rc::make_mut(&mut self.resolved_struct_fields_by_path)
                     .insert(header.declaration_path.to_owned(), unresolved_fields);
@@ -291,7 +291,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     variants,
                     string_table,
                     SignatureTypeFallbackPolicy::AllowUnresolvedCapacity,
-                    emit_warnings,
+                    default_mode,
+                    false,
                 )?;
                 Rc::make_mut(&mut self.choice_variant_shells_by_path)
                     .insert(header.declaration_path.to_owned(), unresolved_variants);
@@ -376,13 +377,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 MemberShellSemanticContext::StructField,
                 string_table,
                 SignatureTypeFallbackPolicy::StrictCapacity,
-                false,
+                SignatureDefaultMode::FoldNow,
+                true,
             )?;
-            let template_ir_store = Rc::clone(&self.context.template_ir_store);
             let path_fork = self.path_fork as *const PathInternerFork;
             let mut type_resolution_context = self.type_resolution_context_for_with_traits(
                 &visibility,
-                header.tokens.source(),
                 generic_parameter_scope.as_ref(),
                 Some(trait_environment),
             );
@@ -391,7 +391,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 &header.declaration_path,
                 &unresolved_fields,
                 &mut type_resolution_context,
-                &template_ir_store,
                 string_table,
                 unsafe { &*path_fork },
             )
@@ -439,8 +438,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 for field in &resolved_fields {
                     validate_no_recursive_generic_type(
                         &header.declaration_path,
-                        &field.value.diagnostic_type,
-                        field.value.span,
+                        &field.diagnostic_type,
+                        field.binding_span,
                         string_table,
                     )
                     .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
@@ -485,11 +484,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 variants,
                 string_table,
                 SignatureTypeFallbackPolicy::StrictCapacity,
-                false,
+                SignatureDefaultMode::FoldNow,
+                true,
             )?;
             let mut type_resolution_context = self.type_resolution_context_for_with_traits(
                 &visibility,
-                header.tokens.source(),
                 generic_parameter_scope.as_ref(),
                 Some(trait_environment),
             );
@@ -524,8 +523,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         for field in fields {
                             validate_no_recursive_generic_type(
                                 &header.declaration_path,
-                                &field.value.diagnostic_type,
-                                field.value.span,
+                                &field.diagnostic_type,
+                                field.binding_span,
                                 string_table,
                             )
                             .map_err(|diagnostic| {
@@ -591,17 +590,14 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 declaration_id,
                 Declaration {
                     id: header.declaration_path.to_owned(),
-                    value: Expression::new(
-                        ExpressionKind::NoValue,
-                        header.name_span,
-                        choice_type_id,
-                        DataType::Choices {
-                            nominal_path: header.declaration_path.to_owned(),
-                            type_id: choice_type_id,
-                            generic_instance_key: None,
-                        },
-                        ValueMode::ImmutableReference,
-                    ),
+                    type_id: choice_type_id,
+                    diagnostic_type: DataType::Choices {
+                        nominal_path: header.declaration_path.to_owned(),
+                        type_id: choice_type_id,
+                        generic_instance_key: None,
+                    },
+                    value_mode: ValueMode::ImmutableReference,
+                    value: DeclarationValue::Shell(DeclarationShell::Choice),
                     binding_span: header.name_span,
                     config_qualifier: None,
                 },
@@ -745,8 +741,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         continue;
                     };
                     self.validate_nominal_generic_bound_type_id(
-                        declaration.value.type_id,
-                        declaration.value.span,
+                        declaration.type_id,
+                        declaration.binding_span,
                         &validation_context,
                         string_table,
                     )?;
@@ -761,8 +757,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     };
                     for field in fields.clone() {
                         self.validate_nominal_generic_bound_type_id(
-                            field.value.type_id,
-                            field.value.span,
+                            field.type_id,
+                            field.binding_span,
                             &validation_context,
                             string_table,
                         )?;
@@ -780,8 +776,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         if let ChoiceVariantPayload::Record { fields } = variant.payload {
                             for field in fields {
                                 self.validate_nominal_generic_bound_type_id(
-                                    field.value.type_id,
-                                    field.value.span,
+                                    field.type_id,
+                                    field.binding_span,
                                     &validation_context,
                                     string_table,
                                 )?;
@@ -799,16 +795,16 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         continue;
                     };
 
-                    for parameter in resolved_signature.signature.parameters {
+                    for parameter in &resolved_signature.signature.parameters {
                         self.validate_nominal_generic_bound_type_id(
-                            parameter.value.type_id,
-                            parameter.value.span,
+                            parameter.type_id,
+                            parameter.binding_span,
                             &validation_context,
                             string_table,
                         )?;
                     }
 
-                    for return_slot in resolved_signature.signature.returns {
+                    for return_slot in &resolved_signature.signature.returns {
                         if let Some(type_id) = return_slot.type_id {
                             self.validate_nominal_generic_bound_type_id(
                                 type_id,
@@ -895,7 +891,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         let mut type_resolution_context = self
                             .type_resolution_context_for_with_traits(
                                 &visibility,
-                                header.tokens.source(),
                                 generic_parameter_scope.as_ref(),
                                 Some(trait_environment),
                             );
@@ -964,7 +959,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         let mut type_resolution_context = self
                             .type_resolution_context_for_with_traits(
                                 &visibility,
-                                header.tokens.source(),
                                 generic_parameter_scope.as_ref(),
                                 Some(trait_environment),
                             );
@@ -1127,7 +1121,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 HeaderKind::Struct { .. } | HeaderKind::Choice { .. } => {
                     // Rebuild this nominal's constructor scaffold now that every alias and
                     // capacity constant it depends on is published.
-                    self.prepare_nominal_member_shell(header, false, string_table)?;
+                    self.prepare_nominal_member_shell(
+                        header,
+                        SignatureDefaultMode::KeepAuthored,
+                        string_table,
+                    )?;
                     self.resolve_constructor_shell_for_nominal(
                         header,
                         trait_environment,
@@ -1168,6 +1166,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                                 file_visibility: &visibility,
                                 source_file_scope,
                                 type_environment: &mut self.type_environment,
+                                expression_builder: &mut self.context.expression_builder,
+                                const_values: &mut self.context.const_values,
                                 warnings: &mut self.warnings,
                                 path_fork: self.path_fork,
                             },
@@ -1192,6 +1192,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     /// from the shared signature-member parser.
     /// WHY: struct and choice declarations use the same surface syntax for members,
     /// but struct defaults require different diagnostics when they reference non-constant values.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "member resolution keeps the mutable environment builder, header, fields, context, policies, flags and mutable string table as separate inputs"
+    )]
     fn unresolved_member_syntax_to_declarations(
         &mut self,
         header: &Header,
@@ -1199,6 +1203,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         member_context: MemberShellSemanticContext,
         string_table: &mut StringTable,
         fallback_policy: SignatureTypeFallbackPolicy,
+        default_mode: SignatureDefaultMode,
         emit_warnings: bool,
     ) -> Result<Vec<Declaration>, CompilerMessages> {
         let visibility = self.header_visibility(header, string_table)?;
@@ -1243,8 +1248,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     &source_owner,
                     &field_context,
                     &mut type_interner,
+                    &mut self.context.expression_builder,
+                    &mut self.context.const_values,
                     string_table,
                     fallback_policy,
+                    default_mode,
                     self.path_fork,
                     match member_context {
                         MemberShellSemanticContext::StructField => {
@@ -1296,6 +1304,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         variants: &[ChoiceVariantSyntax],
         string_table: &mut StringTable,
         fallback_policy: SignatureTypeFallbackPolicy,
+        default_mode: SignatureDefaultMode,
         emit_warnings: bool,
     ) -> Result<Vec<ChoiceVariant>, CompilerMessages> {
         let mut resolved_variants = Vec::with_capacity(variants.len());
@@ -1312,6 +1321,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             MemberShellSemanticContext::ChoicePayloadField,
                             string_table,
                             fallback_policy,
+                            default_mode,
                             emit_warnings,
                         )
                         .map_err(|mut messages| {

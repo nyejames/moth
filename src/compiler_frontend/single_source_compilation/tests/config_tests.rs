@@ -60,13 +60,14 @@ fn compiles_one_authored_source_to_folded_declarations_and_key_spans() {
     let _path_fork = PathInternerFork::empty();
     let surface = BuilderSurface::with_mandatory_core();
     let style_directives = StyleDirectiveRegistry::built_ins();
+    let source_code =
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n";
 
-    let compiled = compile_config_source(
+    let outcome = compile_config_source(
         ConfigCompilationRequest {
             authored_path: Path::new("project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
-            source_code:
-                "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+            source_code,
             style_directives: &style_directives,
             binding_packages: &surface.binding_packages,
             build_config_inputs: &crate::compiler_frontend::build_config::BuildConfigInputSet::new(
@@ -79,17 +80,35 @@ fn compiles_one_authored_source_to_folded_declarations_and_key_spans() {
                 .project_field_config_policies(),
         },
         &mut string_table,
-    )
-    .result
-    .expect("an authored config source should compile to folded declarations");
+    );
+    let compiled = outcome
+        .result
+        .expect("an authored config source should compile to folded declarations");
+    let span_builder = outcome.span_builder;
+    drop(style_directives);
+    drop(surface);
 
     let project = compiled
         .declarations
         .iter()
         .find(|declaration| string_table.resolve(declaration.name) == "project")
         .expect("the authored project record should reach the folded declarations");
-    assert!(matches!(project.value, PublicFoldedValue::Record(_)));
-    assert!(project.name_span.is_some());
+    assert_eq!(
+        compiled
+            .declarations
+            .iter()
+            .map(|declaration| string_table.resolve(declaration.name))
+            .collect::<Vec<_>>(),
+        ["project", "html"]
+    );
+    let name_range = project
+        .name_span
+        .expect("the owned declaration should retain its name")
+        .resolve_with(span_builder.resolver_for(outcome.file_id));
+    assert_eq!(
+        &source_code[name_range.start() as usize..name_range.end() as usize],
+        "project"
+    );
     let PublicFoldedValue::Record(fields) = &project.value else {
         panic!("project value must be a record");
     };
@@ -98,9 +117,34 @@ fn compiles_one_authored_source_to_folded_declarations_and_key_spans() {
         project.direct_field_spans.len(),
         "direct field spans must align with folded record fields"
     );
-    assert!(
-        fields.iter().any(|field| field.name == "name"),
-        "folded record fields must retain compiler-owned project fields"
+    assert_eq!(
+        fields
+            .iter()
+            .map(|field| (field.name.as_str(), &field.value))
+            .collect::<Vec<_>>(),
+        [
+            (
+                "name",
+                &PublicFoldedValue::String(OwnedFoldedString::Text("docs".to_owned())),
+            ),
+            (
+                "entry_root",
+                &PublicFoldedValue::String(OwnedFoldedString::Text("src".to_owned())),
+            ),
+        ]
+    );
+    assert_eq!(
+        project
+            .direct_field_spans
+            .iter()
+            .map(|span| {
+                let range = span
+                    .expect("each owned field retains its initializer span")
+                    .resolve_with(span_builder.resolver_for(outcome.file_id));
+                &source_code[range.start() as usize..range.end() as usize]
+            })
+            .collect::<Vec<_>>(),
+        ["\"docs\"", "\"src\""]
     );
 }
 

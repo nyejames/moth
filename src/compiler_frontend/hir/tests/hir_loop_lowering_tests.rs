@@ -6,8 +6,10 @@
 //!      catch break-target and induction-variable regressions early.
 
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{function_node, node};
@@ -24,17 +26,25 @@ fn lowers_while_to_header_body_exit_shape() {
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let condition = builder
+        .bool(&mut constants, false, None, ValueMode::ImmutableOwned)
+        .expect("test literal fits expression store")
+        .id();
+    let body_value = builder
+        .fixed_scalar(
+            &mut constants,
+            FixedScalarValue::signed(FixedScalar::I32, 10).expect("test literal fits I32"),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("test literal fits expression store")
+        .id();
     let while_node = node(
         NodeKind::WhileLoop(
-            Expression::bool(false, None, ValueMode::ImmutableOwned),
-            vec![node(
-                NodeKind::ExpressionStatement(Expression::fixed_scalar(
-                    FixedScalarValue::signed(FixedScalar::I32, 10).expect("test literal fits I32"),
-                    None,
-                    ValueMode::ImmutableOwned,
-                )),
-                None,
-            )],
+            condition,
+            vec![node(NodeKind::ExpressionStatement(body_value), None)],
         ),
         None,
     );
@@ -49,9 +59,20 @@ fn lowers_while_to_header_body_exit_shape() {
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
-    let (module, _type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
+    let ast = build_ast_with_registered_types(
+        vec![start_fn],
+        entry_path,
+        builder,
+        constants,
+        TypeEnvironment::new(),
+    );
+    let (module, _type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
+    )
+    .expect("HIR lowering should succeed");
 
     let start = &module.functions[module
         .start_function
@@ -91,11 +112,14 @@ fn break_in_while_targets_loop_exit_block() {
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let condition = builder
+        .bool(&mut constants, true, None, ValueMode::ImmutableOwned)
+        .expect("test literal fits expression store")
+        .id();
     let while_node = node(
-        NodeKind::WhileLoop(
-            Expression::bool(true, None, ValueMode::ImmutableOwned),
-            vec![node(NodeKind::Break, None)],
-        ),
+        NodeKind::WhileLoop(condition, vec![node(NodeKind::Break, None)]),
         None,
     );
 
@@ -109,9 +133,20 @@ fn break_in_while_targets_loop_exit_block() {
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![start_fn], entry_path);
-    let (module, _type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
+    let ast = build_ast_with_registered_types(
+        vec![start_fn],
+        entry_path,
+        builder,
+        constants,
+        TypeEnvironment::new(),
+    );
+    let (module, _type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
+    )
+    .expect("HIR lowering should succeed");
 
     let start = &module.functions[module
         .start_function

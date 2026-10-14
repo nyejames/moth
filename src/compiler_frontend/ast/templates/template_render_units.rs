@@ -10,6 +10,8 @@
 //! pipeline.
 
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::Style;
 use crate::compiler_frontend::ast::templates::tir::{
@@ -33,6 +35,8 @@ pub(in crate::compiler_frontend::ast::templates) fn install_formatted_tir_refere
     has_control_flow: bool,
     style: &Style,
     context: &ScopeContext,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
 ) -> Result<(), TemplateError> {
     if has_control_flow {
@@ -48,6 +52,8 @@ pub(in crate::compiler_frontend::ast::templates) fn install_formatted_tir_refere
     let mut store = context.template_ir_store.borrow_mut();
     let formatter_result = run_tir_formatter_with_warnings(
         &mut store,
+        expression_builder,
+        const_values,
         reference.root,
         reference.phase,
         reference.context,
@@ -90,6 +96,8 @@ fn compose_conditional_body_tir_root(
     style: &Style,
     body_root: TemplateIrNodeId,
     context: &ScopeContext,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
 ) -> Result<TemplateIrNodeId, TemplateError> {
     // Derive the head-prefix TIR nodes from the owning template's parser-emitted
@@ -101,7 +109,14 @@ fn compose_conditional_body_tir_root(
 
     // The parser-emitted body is formatted before head-chain composition so the
     // final body tree carries formatted text.
-    let body_root = format_tir_body_root(body_root, style, context, string_table)?;
+    let body_root = format_tir_body_root(
+        body_root,
+        style,
+        context,
+        expression_builder,
+        const_values,
+        string_table,
+    )?;
 
     let mut store = context.template_ir_store.borrow_mut();
     let body_children = sequence_children(&store, body_root).map_err(TemplateError::from)?;
@@ -111,13 +126,22 @@ fn compose_conditional_body_tir_root(
         &mut store,
     )?;
 
-    compose_tir_head_chain_from_root(&mut store, candidate_root, string_table, true)
+    compose_tir_head_chain_from_root(
+        &mut store,
+        expression_builder,
+        const_values,
+        candidate_root,
+        string_table,
+        true,
+    )
 }
 
 /// Installs the shared conditional render unit on a concrete control-flow node.
 fn prepare_conditional_body_tir_root(
     input: TirBodyRootInput<'_>,
     context: &ScopeContext,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
 ) -> Result<(), TemplateError> {
     let TirBodyRootInput {
@@ -127,8 +151,15 @@ fn prepare_conditional_body_tir_root(
         control_flow_node_id,
     } = input;
 
-    let composed_root =
-        compose_conditional_body_tir_root(root_children, style, body_root, context, string_table)?;
+    let composed_root = compose_conditional_body_tir_root(
+        root_children,
+        style,
+        body_root,
+        context,
+        expression_builder,
+        const_values,
+        string_table,
+    )?;
 
     context
         .template_ir_store
@@ -156,14 +187,25 @@ fn prepare_loop_render_unit_roots(
     construction_context: &TemplateConstructionContext,
     style: &Style,
     context: &ScopeContext,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
 ) -> Result<PreparedLoopRenderUnit, TemplateError> {
-    let body = format_tir_body_root(body, style, context, string_table)?;
+    let body = format_tir_body_root(
+        body,
+        style,
+        context,
+        expression_builder,
+        const_values,
+        string_table,
+    )?;
     let mut store = context.template_ir_store.borrow_mut();
     let aggregate_wrapper = prepare_loop_aggregate_wrapper(
         construction_context.root_children(),
         string_table,
         &mut store,
+        expression_builder,
+        const_values,
     )?;
     Ok(PreparedLoopRenderUnit {
         body,
@@ -175,6 +217,9 @@ fn prepare_loop_render_unit_roots(
 pub(in crate::compiler_frontend::ast::templates) struct ControlFlowRenderUnitRequest<'a> {
     pub(in crate::compiler_frontend::ast::templates) style: &'a Style,
     pub(in crate::compiler_frontend::ast::templates) context: &'a ScopeContext,
+    pub(in crate::compiler_frontend::ast::templates) expression_builder:
+        &'a mut AstExpressionBuilder,
+    pub(in crate::compiler_frontend::ast::templates) const_values: &'a mut ConstValueStore,
     pub(in crate::compiler_frontend::ast::templates) string_table: &'a mut StringTable,
 }
 
@@ -194,12 +239,6 @@ pub(in crate::compiler_frontend::ast::templates) fn prepare_control_flow_render_
     construction_context: &TemplateConstructionContext,
     request: ControlFlowRenderUnitRequest<'_>,
 ) -> Result<(), TemplateError> {
-    let ControlFlowRenderUnitRequest {
-        style,
-        context,
-        string_table,
-    } = request;
-
     let control_flow_node_id = construction_context.control_flow_node_id().ok_or_else(|| {
         CompilerError::compiler_error(
             "prepare_control_flow_render_units called on template without a TIR control-flow node",
@@ -208,7 +247,7 @@ pub(in crate::compiler_frontend::ast::templates) fn prepare_control_flow_render_
 
     // Copy the target shape before formatting mutates the shared store.
     let target = {
-        let store = context.template_ir_store.borrow();
+        let store = request.context.template_ir_store.borrow();
         let node = store.get_node(control_flow_node_id).ok_or_else(|| {
             CompilerError::compiler_error(
                 "Control-flow node disappeared from the TIR store during render-unit preparation.",
@@ -266,12 +305,14 @@ pub(in crate::compiler_frontend::ast::templates) fn prepare_control_flow_render_
                 prepare_conditional_body_tir_root(
                     TirBodyRootInput {
                         root_children: construction_context.root_children(),
-                        style,
+                        style: request.style,
                         body_root,
                         control_flow_node_id,
                     },
-                    context,
-                    string_table,
+                    request.context,
+                    request.expression_builder,
+                    request.const_values,
+                    request.string_table,
                 )?;
             }
             ControlFlowBodyKind::LoopBody => {
@@ -279,9 +320,7 @@ pub(in crate::compiler_frontend::ast::templates) fn prepare_control_flow_render_
                     control_flow_node_id,
                     body_root,
                     construction_context,
-                    style,
-                    context,
-                    string_table,
+                    request,
                 )?;
             }
         },
@@ -293,10 +332,12 @@ pub(in crate::compiler_frontend::ast::templates) fn prepare_control_flow_render_
                 ControlFlowBodyKind::ConditionalBody => (
                     compose_conditional_body_tir_root(
                         construction_context.root_children(),
-                        style,
+                        request.style,
                         body_root,
-                        context,
-                        string_table,
+                        request.context,
+                        request.expression_builder,
+                        request.const_values,
+                        request.string_table,
                     )?,
                     RetainedControlFlowRenderUnit::Conditional,
                 ),
@@ -304,9 +345,11 @@ pub(in crate::compiler_frontend::ast::templates) fn prepare_control_flow_render_
                     let prepared = prepare_loop_render_unit_roots(
                         body_root,
                         construction_context,
-                        style,
-                        context,
-                        string_table,
+                        request.style,
+                        request.context,
+                        request.expression_builder,
+                        request.const_values,
+                        request.string_table,
                     )?;
                     (
                         prepared.body,
@@ -317,7 +360,8 @@ pub(in crate::compiler_frontend::ast::templates) fn prepare_control_flow_render_
                 }
             };
 
-            context
+            request
+                .context
                 .template_ir_store
                 .borrow_mut()
                 .record_retained_control_flow_render_unit(control_flow_node_id, body, render_unit)
@@ -333,14 +377,19 @@ fn prepare_loop_render_units(
     control_flow_node_id: TemplateIrNodeId,
     body: TemplateIrNodeId,
     construction_context: &TemplateConstructionContext,
-    style: &Style,
-    context: &ScopeContext,
-    string_table: &mut StringTable,
+    request: ControlFlowRenderUnitRequest<'_>,
 ) -> Result<(), TemplateError> {
-    let prepared =
-        prepare_loop_render_unit_roots(body, construction_context, style, context, string_table)?;
+    let prepared = prepare_loop_render_unit_roots(
+        body,
+        construction_context,
+        request.style,
+        request.context,
+        request.expression_builder,
+        request.const_values,
+        request.string_table,
+    )?;
 
-    let mut store = context.template_ir_store.borrow_mut();
+    let mut store = request.context.template_ir_store.borrow_mut();
 
     store.replace_control_flow_body(
         control_flow_node_id,

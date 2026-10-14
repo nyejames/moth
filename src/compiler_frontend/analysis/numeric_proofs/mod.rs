@@ -1,6 +1,6 @@
 //! Conservative bounded-integer proof side table.
 //!
-//! WHAT: an optional, statement-keyed table of proven-safe checked integer operations and
+//! WHAT: an optional, operation-keyed table of proven-safe checked integer operations and
 //!       proven-safe fallible integer narrowings, computed once per validated HIR executable
 //!       from its exact numeric domains. Consumers (the scalar backends) elide redundant runtime
 //!       range predicates only where a fact exists; every unproven operation keeps its check.
@@ -20,7 +20,7 @@
 //!
 //! ## Identity contract
 //!
-//! Facts are keyed by the statement's own `HirNodeId` and carry no interned strings, paths or
+//! Facts are keyed by the statement or Invoke operation's own `HirNodeId` and carry no interned strings, paths or
 //! dense local layouts, so a table needs no remap when its executable is published. The table
 //! is computed inside the compiler services after HIR validation, before publication, and is
 //! consumed only together with that same executable's HIR.
@@ -37,10 +37,9 @@ use crate::compiler_frontend::hir::expression_store::HirExpressionStore;
 use crate::compiler_frontend::hir::expressions::HirExpressionKind;
 use crate::compiler_frontend::hir::ids::{HirNodeId, HirValueId, LocalId};
 use crate::compiler_frontend::hir::module::HirModule;
-use crate::compiler_frontend::hir::numeric::{
-    HirNumericOp, HirNumericOperands, NumericFailureMode,
-};
+use crate::compiler_frontend::hir::numeric::{HirNumericOp, HirNumericOperands};
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
+use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
 
 #[cfg(test)]
 mod tests;
@@ -50,16 +49,16 @@ type Interval = (i128, i128);
 
 /// Proven-safe integer operation and narrowing facts for one immutable HIR executable.
 ///
-/// WHAT: sparse statement-keyed side table computed from the executable it is paired with. The
-///       empty default table retains every runtime check.
-/// WHY: backends query per statement instead of re-deriving ranges, and a missing fact degrades
-///      to the fully checked behavior.
+/// WHAT: sparse operation-keyed side table paired with its executable. The empty default
+///       table retains every runtime check.
+/// WHY: backends query an operation rather than re-deriving ranges, and a missing fact
+///      degrades to fully checked behaviour.
 #[derive(Debug, Default)]
 pub(crate) struct NumericProofs {
-    /// `NumericOp` statement ids whose relevant failures are impossible.
+    /// `NumericOp` statement or Invoke ids whose relevant failures are impossible.
     safe_operations: FxHashSet<HirNodeId>,
-    /// Fallible integer-to-integer `NumericConversion` `CastOp` statement ids whose range
-    /// predicates can never fail.
+    /// Fallible integer-to-integer `NumericConversion` Invoke ids whose range predicates
+    /// can never fail.
     safe_narrowings: FxHashSet<HirNodeId>,
 }
 
@@ -101,6 +100,7 @@ pub(crate) fn analyse_numeric_proofs(
         for statement in &block.statements {
             analyser.visit_statement(statement);
         }
+        analyser.visit_terminator(&block.terminator);
     }
 
     analyser.facts
@@ -146,38 +146,18 @@ impl BlockAnalyser<'_> {
             }
             HirStatementKind::NumericOp {
                 op,
-                failure_mode,
                 operands,
                 result,
+                ..
             } => {
                 // Operand facts are derived before any invalidation.
                 if let Some(result_interval) = self.prove_operation(op, operands) {
                     self.facts.safe_operations.insert(statement.id);
-                    if matches!(
-                        *failure_mode,
-                        NumericFailureMode::Trap | NumericFailureMode::Infallible
-                    ) {
-                        // A safe trap operation writes the scalar success value directly, so
-                        // the destination keeps its exact proven interval. A discharged
-                        // operation is already semantically safe and writes the same scalar.
-                        self.cache = Some((result.local(), result_interval));
-                        return;
-                    }
+                    // Statement operations write scalar results directly.
+                    self.cache = Some((result.local(), result_interval));
+                    return;
                 }
-                // ReturnError results are fallible carriers: narrower carrier-success facts
-                // never propagate, and unproven operations conservatively drop the cache.
-                self.cache = None;
-            }
-            HirStatementKind::CastOp { policy, source, .. } => {
-                // Source facts are derived before invalidation.
-                if let Some(source_interval) = self.expression_interval(*source)
-                    && self.cast_narrowing_is_provable(policy, source_interval)
-                {
-                    self.facts.safe_narrowings.insert(statement.id);
-                }
-                // CastOp statements lower fallible builtin casts, so the result local receives
-                // a carrier; the success scalar only exists after the paired FallibleBranch
-                // unwraps it. No value-specific fact survives the statement.
+                // Unproven operations conservatively drop the cache.
                 self.cache = None;
             }
             // Range guards always fail and have no numeric success interval to retain.
@@ -186,6 +166,30 @@ impl BlockAnalyser<'_> {
             // other unsupported statement conservatively drop value-specific facts.
             _ => self.cache = None,
         }
+    }
+
+    fn visit_terminator(&mut self, terminator: &HirTerminator) {
+        let HirTerminator::Invoke { id, operation, .. } = terminator else {
+            return;
+        };
+        // Read operand facts from this block before the edge transfer. A proof discharges
+        // only the runtime predicate, never the failure edge or successor-local definitions.
+        match operation {
+            HirFallibleOperation::NumericOp { op, operands } => {
+                if self.prove_operation(op, operands).is_some() {
+                    self.facts.safe_operations.insert(*id);
+                }
+            }
+            HirFallibleOperation::CastOp { policy, source } => {
+                if let Some(interval) = self.expression_interval(*source)
+                    && self.cast_narrowing_is_provable(policy, interval)
+                {
+                    self.facts.safe_narrowings.insert(*id);
+                }
+            }
+            _ => {}
+        }
+        self.cache = None;
     }
 
     /// Proves one checked numeric operation safe, returning its exact result interval.

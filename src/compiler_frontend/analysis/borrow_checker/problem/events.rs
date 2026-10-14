@@ -25,7 +25,6 @@ pub(crate) enum TerminatorEventKind {
         targets: Box<[BlockId]>,
     },
     Return,
-    ReturnSuccess,
     ReturnError,
     Break {
         target: BlockId,
@@ -195,7 +194,7 @@ pub(crate) struct CallResult {
 pub(crate) struct CallEffect {
     pub(crate) call: CallId,
     pub(crate) arguments: Box<[CallArgument]>,
-    pub(crate) result: Option<CallResult>,
+    pub(crate) results: Box<[CallResult]>,
 }
 
 /// A stable call-summary handle. The label is opaque to Phase 2 and deterministic in fixtures.

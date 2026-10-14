@@ -6,8 +6,12 @@
 //! holding raw TIR IDs or rediscovering source-level `$slot` / `$insert(...)`
 //! semantics.
 
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::const_values::store::{
+    ConstStringValue, ConstValuePayload, ConstValueStore,
+};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    ExpressionOperationView, ExpressionView,
+};
 use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeSlotContributionSource,
     OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
@@ -36,10 +40,11 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn lower_runtime_slot_application_template_expression(
         &mut self,
         handoff: &OwnedRuntimeSlotApplicationHandoff,
+        anchor: ExpressionView<'_>,
         span_ref: &Option<SourceSpan>,
     ) -> Result<LoweredExpression, HirConstructionFailure> {
         let output_accumulator = self.initialize_runtime_template_accumulator(span_ref)?;
-        let append_context = RuntimeTemplateAppendContext::new(output_accumulator);
+        let append_context = RuntimeTemplateAppendContext::new(output_accumulator, anchor);
         self.append_runtime_slot_application_with_context(handoff, append_context, span_ref)?;
 
         let region = self.current_region_or_error(span_ref)?;
@@ -66,11 +71,18 @@ impl<'a> HirBuilder<'a> {
         append_context: RuntimeTemplateAppendContext<'_>,
         span_ref: &Option<SourceSpan>,
     ) -> Result<RuntimeTemplateEmission, HirConstructionFailure> {
-        let source_accumulators =
-            self.initialize_runtime_slot_source_accumulators(handoff, span_ref)?;
+        let source_accumulators = self.initialize_runtime_slot_source_accumulators(
+            handoff,
+            append_context.anchor,
+            span_ref,
+        )?;
 
-        let emitted_any_contribution =
-            self.append_runtime_slot_contributions(handoff, &source_accumulators, span_ref)?;
+        let emitted_any_contribution = self.append_runtime_slot_contributions(
+            handoff,
+            &source_accumulators,
+            append_context.anchor,
+            span_ref,
+        )?;
 
         if let Some(emitted_any_contribution) = emitted_any_contribution {
             return self.append_runtime_slot_wrapper_if_contributed(
@@ -88,6 +100,7 @@ impl<'a> HirBuilder<'a> {
     fn initialize_runtime_slot_source_accumulators(
         &mut self,
         handoff: &OwnedRuntimeSlotApplicationHandoff,
+        anchor: ExpressionView<'_>,
         span_ref: &Option<SourceSpan>,
     ) -> Result<RuntimeSlotSourceAccumulatorContext, HirConstructionFailure> {
         let mut context = RuntimeSlotSourceAccumulatorContext::new();
@@ -95,6 +108,8 @@ impl<'a> HirBuilder<'a> {
         for source in &handoff.contribution_sources {
             let guarantees_output = owned_runtime_template_node_guarantees_output(
                 &source.render_root,
+                anchor,
+                &self.module_const_values,
                 self.string_table,
             );
             let accumulator = self.initialize_runtime_template_accumulator(span_ref)?;
@@ -120,12 +135,18 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         handoff: &OwnedRuntimeSlotApplicationHandoff,
         source_accumulators: &RuntimeSlotSourceAccumulatorContext,
+        anchor: ExpressionView<'_>,
         span_ref: &Option<SourceSpan>,
     ) -> Result<Option<LocalId>, HirConstructionFailure> {
         // Wrapper-owned output, such as a list shell, survives when conditional
         // children contribute nothing; conditional sources keep their emission tracking.
         let mut renders_wrapper_unconditionally = handoff.contribution_sources.is_empty()
-            || owned_runtime_template_node_guarantees_output(&handoff.wrapper, self.string_table);
+            || owned_runtime_template_node_guarantees_output(
+                &handoff.wrapper,
+                anchor,
+                &self.module_const_values,
+                self.string_table,
+            );
 
         // Reuse the per-source proof gathered during local initialization. Only
         // allocate a shared contribution flag when it still controls wrapper selection.
@@ -160,7 +181,7 @@ impl<'a> HirBuilder<'a> {
                 );
             };
 
-            self.append_runtime_slot_contribution_content(source, source_locals, span_ref)?;
+            self.append_runtime_slot_contribution_content(source, source_locals, anchor, span_ref)?;
 
             let current_block = self.current_block_id_or_error(span_ref)?;
             if self.block_has_explicit_terminator(current_block, span_ref)? {
@@ -187,12 +208,15 @@ impl<'a> HirBuilder<'a> {
         &mut self,
         source: &OwnedRuntimeSlotContributionSource,
         source_locals: RuntimeSlotSourceLocals,
+        anchor: ExpressionView<'_>,
         span_ref: &Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
         let append_context = match source_locals.emitted_output {
-            Some(emitted_output) => RuntimeTemplateAppendContext::new(source_locals.accumulator)
-                .with_emitted_output(emitted_output),
-            None => RuntimeTemplateAppendContext::new(source_locals.accumulator),
+            Some(emitted_output) => {
+                RuntimeTemplateAppendContext::new(source_locals.accumulator, anchor)
+                    .with_emitted_output(emitted_output)
+            }
+            None => RuntimeTemplateAppendContext::new(source_locals.accumulator, anchor),
         };
 
         self.append_owned_runtime_template_node_to_accumulator(
@@ -345,12 +369,14 @@ impl<'a> HirBuilder<'a> {
 
 fn owned_runtime_template_node_guarantees_output(
     node: &OwnedRuntimeTemplateNode,
+    anchor: ExpressionView<'_>,
+    const_values: &ConstValueStore,
     string_table: &StringTable,
 ) -> bool {
     match node {
-        OwnedRuntimeTemplateNode::Sequence { children, .. } => children
-            .iter()
-            .any(|child| owned_runtime_template_node_guarantees_output(child, string_table)),
+        OwnedRuntimeTemplateNode::Sequence { children, .. } => children.iter().any(|child| {
+            owned_runtime_template_node_guarantees_output(child, anchor, const_values, string_table)
+        }),
 
         OwnedRuntimeTemplateNode::Text { text, .. } => match text {
             OwnedFoldedString::Text(text) => !text.trim().is_empty(),
@@ -363,11 +389,15 @@ fn owned_runtime_template_node_guarantees_output(
         OwnedRuntimeTemplateNode::AggregateOutput => true,
 
         OwnedRuntimeTemplateNode::DynamicExpression { expression, .. } => {
-            dynamic_expression_guarantees_output(expression, string_table)
+            // Store construction validates every handoff leaf before this read-only query.
+            let expression = anchor
+                .bind(*expression)
+                .expect("validated runtime handoff leaf");
+            dynamic_expression_guarantees_output(expression, const_values, string_table)
         }
 
         OwnedRuntimeTemplateNode::ChildTemplate { template, .. } => {
-            runtime_template_handoff_guarantees_output(template, string_table)
+            runtime_template_handoff_guarantees_output(template, anchor, const_values, string_table)
         }
 
         // Runtime template control flow can structurally produce no output
@@ -385,61 +415,58 @@ fn owned_runtime_template_node_guarantees_output(
 }
 
 fn dynamic_expression_guarantees_output(
-    expression: &Expression,
+    expression: ExpressionView<'_>,
+    const_values: &ConstValueStore,
     string_table: &StringTable,
 ) -> bool {
-    match &expression.kind {
-        ExpressionKind::StringSlice(text) => !string_table.resolve(*text).is_empty(),
-
-        ExpressionKind::Template(_) => false,
-
-        ExpressionKind::RuntimeTemplateHandoff(handoff) => {
-            runtime_template_handoff_guarantees_output(handoff, string_table)
-        }
-
-        ExpressionKind::RuntimeSlotApplicationHandoff(handoff) => {
-            owned_runtime_template_node_guarantees_output(&handoff.wrapper, string_table)
-        }
-
-        ExpressionKind::Coerced { value, .. } => {
-            dynamic_expression_guarantees_output(value, string_table)
-        }
-
-        ExpressionKind::Runtime(rpn) if rpn.items.len() == 1 => match &rpn.items[0] {
-            ExpressionRpnItem::Operand(expression) => {
-                dynamic_expression_guarantees_output(expression, string_table)
+    match expression.operation() {
+        ExpressionOperationView::Constant(id) => match const_values.payload(id) {
+            Some(ConstValuePayload::String(ConstStringValue::Text(text))) => {
+                !string_table.resolve(*text).is_empty()
             }
-            ExpressionRpnItem::Operator { .. } => true,
-            // Pending syntax never survives evaluation; flag it in debug builds so the invalid
-            // boundary is visible instead of silently assuming output.
-            ExpressionRpnItem::PendingNumericLiteral { .. }
-            | ExpressionRpnItem::PendingGroup { .. }
-            | ExpressionRpnItem::PendingNumericBinding { .. }
-            | ExpressionRpnItem::PendingNumericCast { .. }
-            | ExpressionRpnItem::PendingNumericCall { .. }
-            | ExpressionRpnItem::PendingNumericExpression { .. } => {
-                debug_assert!(
-                    false,
-                    "pending expression syntax reached HIR output-guarantee query"
-                );
-                true
-            }
+            _ => true,
         },
-
+        ExpressionOperationView::Template(_) => false,
+        ExpressionOperationView::RuntimeTemplate(handoff) => {
+            runtime_template_handoff_guarantees_output(
+                handoff,
+                expression,
+                const_values,
+                string_table,
+            )
+        }
+        ExpressionOperationView::RuntimeSlotApplication(handoff) => {
+            owned_runtime_template_node_guarantees_output(
+                &handoff.wrapper,
+                expression,
+                const_values,
+                string_table,
+            )
+        }
+        ExpressionOperationView::Coerce { value, .. } => {
+            dynamic_expression_guarantees_output(value, const_values, string_table)
+        }
         _ => true,
     }
 }
 
 fn runtime_template_handoff_guarantees_output(
     handoff: &OwnedRuntimeTemplateHandoff,
+    anchor: ExpressionView<'_>,
+    const_values: &ConstValueStore,
     string_table: &StringTable,
 ) -> bool {
     match &handoff.body {
         OwnedRuntimeTemplateBody::Render(node) => {
-            owned_runtime_template_node_guarantees_output(node, string_table)
+            owned_runtime_template_node_guarantees_output(node, anchor, const_values, string_table)
         }
         OwnedRuntimeTemplateBody::RuntimeSlotApplication(handoff) => {
-            owned_runtime_template_node_guarantees_output(&handoff.wrapper, string_table)
+            owned_runtime_template_node_guarantees_output(
+                &handoff.wrapper,
+                anchor,
+                const_values,
+                string_table,
+            )
         }
     }
 }

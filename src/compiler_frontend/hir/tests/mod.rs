@@ -3,6 +3,7 @@
 //! WHAT: groups the HIR test suites and exposes common naming and relationship helpers for them.
 //! WHY: HIR tests should discover one another through a single module entry.
 
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::expression_store::HirProjection;
 use crate::compiler_frontend::hir::expressions::HirExpression;
 use crate::compiler_frontend::hir::functions::HirFunction;
@@ -31,6 +32,7 @@ mod hir_module_lowering_tests;
 mod hir_result_lowering_tests;
 mod hir_validation_tests;
 mod loop_lowering_tests;
+mod native_channel_validation_tests;
 mod private_failure_lane_tests;
 mod reachability_tests;
 mod value_block_lowering_tests;

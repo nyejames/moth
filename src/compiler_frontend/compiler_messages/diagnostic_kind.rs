@@ -109,7 +109,6 @@ pub enum TypeDiagnosticKind {
     TypeMismatch,
     EmptyCollectionTypeAmbiguity,
     UnsupportedOperatorTypes,
-    InvalidFallibleOperand,
     IncompatibleChoiceComparison,
 }
 
@@ -138,6 +137,7 @@ pub enum RuleDiagnosticKind {
     InvalidDeclaration,
     InvalidAssignmentTarget,
     InvalidMultiBind,
+    InvalidValueReceiver,
     InvalidBuiltinCall,
     InvalidCast,
     InvalidReceiverCall,

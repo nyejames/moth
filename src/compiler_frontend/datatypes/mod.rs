@@ -27,7 +27,6 @@ pub mod datatype;
 pub mod definitions;
 pub mod display;
 pub mod environment;
-pub mod fallible_carrier;
 pub mod generic_bindings;
 pub mod generic_identity_bridge;
 pub mod generic_parameters;
@@ -43,7 +42,6 @@ pub mod queries;
 pub use datatype::DataType;
 pub(crate) use datatype::diagnostic_type_spelling;
 
-pub use environment::TypeEnvironment;
 pub use ids::*;
 
 use crate::compiler_frontend::external_packages::ExternalTypeId;

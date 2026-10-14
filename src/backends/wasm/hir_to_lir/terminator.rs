@@ -1,11 +1,10 @@
 //! Terminator lowering for HIR -> Wasm LIR.
 
 use crate::backends::error_types::lir_transformation_error;
-use crate::backends::wasm::hir_to_lir::context::{WasmFunctionLoweringContext, lower_type_to_abi};
+use crate::backends::wasm::hir_to_lir::context::WasmFunctionLoweringContext;
 use crate::backends::wasm::hir_to_lir::expr::{lower_concrete_string, lower_expression};
 use crate::backends::wasm::hir_to_lir::imports::ensure_host_import;
 use crate::backends::wasm::lir::instructions::{WasmCalleeRef, WasmLirStmt, WasmLirTerminator};
-use crate::backends::wasm::lir::types::WasmAbiType;
 use crate::backends::wasm::runtime::imports::WasmHostFunction;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirVariantCarrier};
@@ -20,8 +19,8 @@ pub(crate) fn lower_terminator(
     terminator: &HirTerminator,
     statements: &mut Vec<WasmLirStmt>,
 ) -> Result<WasmLirTerminator, CompilerError> {
-    // Unsupported high-level control-flow forms intentionally error here so lowering failures are
-    // structured and visible while Wasm control-flow support remains experimental.
+    // Unsupported legal source features are diagnosed before lowering. Reaching one here
+    // indicates an inconsistent validated backend input.
     match terminator {
         HirTerminator::Jump { target, args } => {
             let target = lower_jump_argument_transfer(context, *target, args, statements)?;
@@ -42,34 +41,25 @@ pub(crate) fn lower_terminator(
                 else_block: resolve_block_id(context, *else_block)?,
             })
         }
-        HirTerminator::Return(value) => {
-            // Preserve unit-return as `Return(None)` to keep ABI shape explicit.
-            let return_abi = lower_type_to_abi(
-                context.module_context,
-                context
-                    .module_context
-                    .hir_module
-                    .expressions
-                    .expression(*value)
-                    .ty,
-            );
-            if matches!(return_abi, WasmAbiType::Void) {
-                return Ok(WasmLirTerminator::Return { value: None });
+        HirTerminator::Return(values) => {
+            let values = context
+                .module_context
+                .hir_module
+                .expressions
+                .values(*values);
+            let mut lowered_values = Vec::with_capacity(values.len());
+            for value in values {
+                lowered_values.push(lower_expression(context, *value, statements)?.value);
             }
-
-            let lowered_value = lower_expression(context, *value, statements)?;
             Ok(WasmLirTerminator::Return {
-                value: Some(lowered_value.value),
+                values: lowered_values,
             })
         }
-        HirTerminator::ReturnSuccess(_) => Err(lir_transformation_error(
-            "Wasm lowering does not yet support fallible success-return terminators",
-        )),
         HirTerminator::ReturnError(_) => Err(lir_transformation_error(
-            "Wasm lowering does not yet support fallible error-return terminators",
+            "Wasm ReturnError reached lowering before backend feature validation",
         )),
-        HirTerminator::FallibleBranch { .. } => Err(lir_transformation_error(
-            "Wasm lowering does not yet support fallible branch terminators",
+        HirTerminator::Invoke { .. } => Err(lir_transformation_error(
+            "Wasm Invoke reached lowering before backend feature validation",
         )),
         HirTerminator::Uninitialized => Err(lir_transformation_error(
             "Wasm lowering encountered Uninitialized terminator",
@@ -125,7 +115,7 @@ pub(crate) fn lower_terminator(
             let import =
                 ensure_host_import(context.module_context, WasmHostFunction::AssertionFailed);
             statements.push(WasmLirStmt::Call {
-                dst: None,
+                results: Vec::new(),
                 callee: WasmCalleeRef::Import(import),
                 args: vec![message.value],
             });

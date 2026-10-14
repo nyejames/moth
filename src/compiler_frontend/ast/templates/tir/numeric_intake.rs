@@ -23,8 +23,9 @@ use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{
     Declaration, LoopBindings, RangeEndKind, RangeLoopSpec,
 };
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::numeric_construction::{
     DeferredArmPattern, DeferredExpressionSuffix, NumericBindingId, NumericConstructionDomainId,
 };
@@ -293,7 +294,7 @@ enum RetainedRangeCompletion {
         omitted_start_span: Option<SourceSpan>,
         /// Operands already built at parse time, indexed by `RangeOperandSlot` (Start, End, Step);
         /// retained operands arrive through their records.
-        built_operands: Box<[Option<Expression>; 3]>,
+        built_operands: Box<[Option<ExprId>; 3]>,
     },
 
     /// A retained `|counter|` binding owns the operands and the forward domain.
@@ -341,7 +342,6 @@ pub(crate) struct NumericTemplateIntakeRecord {
 }
 
 impl NumericTemplateIntakeRecord {
-    #[allow(clippy::too_many_arguments)]
     fn new(
         domain: NumericConstructionDomainId,
         position: NumericTemplateIntakePosition,
@@ -364,8 +364,9 @@ impl NumericTemplateIntakeRecord {
 
 /// Whether one RPN item is a construction-only pending numeric item.
 ///
-/// WHAT: the retained-intake marker; `PendingNumericLiteral`/`PendingGroup` are broken-invariant
-///       items at this boundary and are deliberately not treated as retained construction.
+/// WHAT: the retained-intake marker; `PendingNumericLiteral` is a broken-invariant item at this
+///       boundary and is deliberately not treated as retained construction. Group markers are
+///       never pending, so a flat scan of a fragment reaches each pending item inside a group.
 /// WHY: one predicate keeps the store and the template boundaries agreeing on what a retained
 ///      numeric recipe is.
 /// NOTE: a bound range header keeps its operands inside its counter row and registers no operand
@@ -381,20 +382,6 @@ pub(crate) fn is_pending_numeric_intake_item(item: &ExpressionRpnItem) -> bool {
     )
 }
 
-/// Whether this expression's own payload still holds a construction-only pending numeric item.
-///
-/// WHAT: the allocation-free predicate behind retention decisions and the completion install
-///       guard.
-/// WHY: it must never clone retained RPN items, and it answers from the expression's own payload
-///      rather than from a store probe.
-pub(crate) fn expression_contains_pending_numeric_item(expression: &Expression) -> bool {
-    match &expression.kind {
-        ExpressionKind::Runtime(rpn) => rpn.items.iter().any(is_pending_numeric_intake_item),
-        ExpressionKind::Coerced { value, .. } => expression_contains_pending_numeric_item(value),
-        _ => false,
-    }
-}
-
 impl TemplateIrStore {
     /// Registers one retained numeric intake for a payload-free TIR position.
     ///
@@ -403,7 +390,6 @@ impl TemplateIrStore {
     /// WHY: registration happens once, when the template boundary retains the fragment, so body
     ///      completion never has to reinterpret the expression tree. The domain key keeps
     ///      body-local numeric binding IDs from crossing into a sibling body's completion.
-    #[allow(clippy::too_many_arguments)]
     pub(crate) fn register_pending_numeric_template_intake(
         &mut self,
         domain: NumericConstructionDomainId,
@@ -462,7 +448,7 @@ impl TemplateIrStore {
         bindings: Box<LoopBindings>,
         end_kind: RangeEndKind,
         omitted_start_span: Option<SourceSpan>,
-        built_operands: [Option<Expression>; 3],
+        built_operands: [Option<ExprId>; 3],
     ) {
         let id = RetainedRangeHeaderId(self.retained_range_headers.len());
         let range = self.numeric_intake_index.node_mut(node);
@@ -791,7 +777,7 @@ impl TemplateIrStore {
                 position: record.position,
                 items: std::mem::take(&mut record.items),
                 expected: record.expected,
-                value_mode: record.value_mode.clone(),
+                value_mode: record.value_mode,
                 suffix: record.suffix,
             });
             record.state = NumericTemplateIntakeState::Taken;
@@ -809,7 +795,7 @@ impl TemplateIrStore {
     pub(crate) fn install_completed_numeric_intake(
         &mut self,
         site: NumericTemplateIntakeSiteId,
-        value: Expression,
+        value: ExprId,
         selector_pattern: Option<MatchPattern>,
     ) -> Result<(), CompilerError> {
         let Some(record) = self.numeric_template_intakes.get(site.index()) else {
@@ -832,13 +818,6 @@ impl TemplateIrStore {
             }
         }
 
-        if expression_contains_pending_numeric_item(&value) {
-            return Err(CompilerError::compiler_error(format!(
-                "numeric template intake site {site} received a value that still holds a pending \
-                 numeric item; only completed typed expressions may be installed."
-            )));
-        }
-
         let position = record.position;
         self.install_at_numeric_intake_position(site, position, value, selector_pattern)?;
 
@@ -851,7 +830,7 @@ impl TemplateIrStore {
         &mut self,
         site: NumericTemplateIntakeSiteId,
         position: NumericTemplateIntakePosition,
-        value: Expression,
+        value: ExprId,
         selector_pattern: Option<MatchPattern>,
     ) -> Result<(), CompilerError> {
         let node_id = position.node_id();
@@ -936,7 +915,7 @@ impl TemplateIrStore {
         let completed_kind = match role {
             RetainedNumericIntakeRole::HeadExpression { expression_site } => {
                 TemplateIrNodeKind::DynamicExpression {
-                    expression: Box::new(value),
+                    expression: value,
                     origin: TemplateSegmentOrigin::Head,
                     site_id: expression_site,
                 }
@@ -948,9 +927,7 @@ impl TemplateIrStore {
                 let aggregate_wrapper =
                     require_retained_loop_aggregate_wrapper(render_unit, node_id)?;
                 TemplateIrNodeKind::Loop {
-                    header: TemplateLoopHeader::Conditional {
-                        condition: Box::new(value),
-                    },
+                    header: TemplateLoopHeader::Conditional { condition: value },
                     header_sites,
                     body,
                     aggregate_wrapper: Some(aggregate_wrapper),
@@ -1003,7 +980,7 @@ impl TemplateIrStore {
                 TemplateIrNodeKind::Loop {
                     header: TemplateLoopHeader::Collection {
                         bindings,
-                        iterable: Box::new(value),
+                        iterable: value,
                     },
                     header_sites,
                     body,
@@ -1034,12 +1011,18 @@ impl TemplateIrStore {
     /// Errors: an authored range policy violation (missing float step, zero step) surfaces as the
     ///         producer's diagnostic; a position without its retained header row, a bound header
     ///         installed through this entry point, or a missing operand is a broken invariant.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the header id and completed operands are extra inputs beside the parser borrows"
+    )]
     pub(crate) fn install_completed_numeric_range_header(
         &mut self,
         header_id: RetainedRangeHeaderId,
-        completed_operands: [Option<Expression>; 3],
+        completed_operands: [Option<ExprId>; 3],
         context: &ScopeContext,
         type_interner: &mut AstTypeInterner<'_>,
+        expression_builder: &mut AstExpressionBuilder,
+        const_values: &mut ConstValueStore,
         string_table: &mut StringTable,
         path_fork: &mut PathInternerFork,
     ) -> Result<(), TemplateError> {
@@ -1119,13 +1102,15 @@ impl TemplateIrStore {
         };
 
         let range = range_loop_spec_from_completed_operands(
-            start,
-            end,
+            start.map(|id| expression_builder.own(id)),
+            expression_builder.own(end),
             end_kind,
-            step,
+            step.map(|id| expression_builder.own(id)),
             omitted_start_span,
             context,
             type_interner,
+            expression_builder,
+            const_values,
             string_table,
             path_fork,
         )
@@ -1347,7 +1332,7 @@ impl TemplateIrStore {
                 record.position,
                 record.items.clone(),
                 record.expected,
-                record.value_mode.clone(),
+                record.value_mode,
                 record.suffix,
             );
             self.register_pending_numeric_template_intake(

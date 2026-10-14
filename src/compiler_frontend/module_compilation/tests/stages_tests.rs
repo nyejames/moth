@@ -5,13 +5,15 @@
 //!      the failure's source, frozen-identity, and type-rendering context.
 
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, HirCapacityResource,
-    PremergeFailure, SyntaxDiagnosticKind,
+    CapacityResource, CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity,
+    HirCapacityResource, PremergeFailure, SyntaxDiagnosticKind,
 };
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::expression_store::HirExpressionStoreTestLimits;
 use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
@@ -46,6 +48,16 @@ fn lower_hir_capacity_failure_keeps_each_warning_and_render_context_once() {
     let ast_warning = CompilerDiagnostic::unreachable_match_arm(Some(ast_warning_span));
     let preparation_warning =
         CompilerDiagnostic::unreachable_match_arm(Some(preparation_warning_span));
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let literal = expressions
+        .fixed_scalar(
+            &mut constants,
+            FixedScalarValue::signed(FixedScalar::I32, 42).expect("I32 literal in range"),
+            Some(authored_span),
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture literal fits store");
     let mut ast = build_ast_with_registered_types(
         vec![function_node(
             start_name,
@@ -54,16 +66,15 @@ fn lower_hir_capacity_failure_keeps_each_warning_and_render_context_once() {
                 returns: vec![],
             },
             vec![node(
-                NodeKind::ExpressionStatement(Expression::fixed_scalar(
-                    FixedScalarValue::signed(FixedScalar::I32, 42).expect("I32 literal in range"),
-                    Some(authored_span),
-                    ValueMode::ImmutableOwned,
-                )),
+                NodeKind::ExpressionStatement(literal.id()),
                 Some(authored_span),
             )],
             Some(authored_span),
         )],
         entry_path,
+        expressions,
+        constants,
+        Default::default(),
     );
     ast.warnings.push(ast_warning.clone());
     let warnings = [preparation_warning.clone(), ast_warning.clone()];
@@ -80,7 +91,7 @@ fn lower_hir_capacity_failure_keeps_each_warning_and_render_context_once() {
         rows: 0,
         ..Default::default()
     });
-    let hir_messages = match builder.build_hir_module(ast) {
+    let hir_messages = match builder.build_hir_module(ast, &ExternalPackageRegistry::new()) {
         Ok(_) => panic!("the first authored HIR expression should exceed the forced row limit"),
         Err(messages) => messages,
     };
@@ -129,7 +140,7 @@ fn lower_hir_capacity_failure_keeps_each_warning_and_render_context_once() {
     assert_eq!(
         capacity_diagnostic.payload,
         DiagnosticPayload::CompilerCapacityExceeded {
-            resource: HirCapacityResource::ExpressionRows,
+            resource: CapacityResource::Hir(HirCapacityResource::ExpressionRows),
         }
     );
     assert_eq!(

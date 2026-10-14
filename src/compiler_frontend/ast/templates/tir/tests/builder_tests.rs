@@ -2,7 +2,12 @@ use super::super::node::{TemplateIr, TemplateIrNodeKind, TemplateLoopHeaderExpre
 use super::super::store::TemplateIrStore;
 use super::super::summary::TemplateIrSummary;
 use super::builder::TemplateIrBuilder;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::const_values::store::{
+    ConstStringValue, ConstValuePayload, ConstValueStore,
+};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, ExpressionOperationView,
+};
 use crate::compiler_frontend::ast::templates::template::{
     SlotKey, Style, TemplateSegmentOrigin, TemplateType,
 };
@@ -10,17 +15,45 @@ use crate::compiler_frontend::ast::templates::template_control_flow::TemplateBra
 use crate::compiler_frontend::ast::templates::tir::ids::{
     ChildTemplateOccurrenceId, ExpressionSiteId, SlotOccurrenceId, TemplateIrNodeId,
 };
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::value_mode::ValueMode;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 /// One exact `I32` range literal for builder fixtures.
-fn integer(value: i64) -> Expression {
-    Expression::fixed_scalar(
-        FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32"),
-        None,
-        ValueMode::ImmutableOwned,
-    )
+fn integer(
+    expressions: &mut AstExpressionBuilder,
+    values: &mut ConstValueStore,
+    value: i64,
+) -> ExprId {
+    let literal = FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32");
+    expressions
+        .fixed_scalar(values, literal, None, ValueMode::ImmutableOwned)
+        .expect("test literal should construct")
+        .id()
+}
+
+/// One string literal expression for builder fixtures.
+fn string_literal(
+    expressions: &mut AstExpressionBuilder,
+    values: &mut ConstValueStore,
+    text: StringId,
+) -> ExprId {
+    expressions
+        .string_slice(values, text, None, ValueMode::ImmutableOwned)
+        .expect("test string literal should construct")
+        .id()
+}
+
+/// One bool literal expression for builder fixtures.
+fn bool_literal(
+    expressions: &mut AstExpressionBuilder,
+    values: &mut ConstValueStore,
+    value: bool,
+) -> ExprId {
+    expressions
+        .bool(values, value, None, ValueMode::ImmutableOwned)
+        .expect("test bool literal should construct")
+        .id()
 }
 
 fn slot_occurrence_id(store: &TemplateIrStore, node_id: TemplateIrNodeId) -> SlotOccurrenceId {
@@ -336,15 +369,13 @@ fn push_insert_contribution_node_stores_child_template_id() {
 fn push_dynamic_expression_node_stores_expression_payload() {
     let mut store = TemplateIrStore::new();
     let mut string_table = StringTable::new();
-    let expression = Expression::string_slice(
-        string_table.intern("expr"),
-        None,
-        crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
-    );
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut values = ConstValueStore::default();
+    let expression = string_literal(&mut expressions, &mut values, string_table.intern("expr"));
 
     let node_id = {
         let mut builder = TemplateIrBuilder::new(&mut store);
-        builder.push_dynamic_expression_node(expression.clone(), TemplateSegmentOrigin::Head, None)
+        builder.push_dynamic_expression_node(expression, TemplateSegmentOrigin::Head, None)
     };
 
     let node = store
@@ -352,12 +383,22 @@ fn push_dynamic_expression_node_stores_expression_payload() {
         .expect("dynamic expression node should exist");
     match &node.kind {
         TemplateIrNodeKind::DynamicExpression {
-            expression, origin, ..
+            expression: stored_expression,
+            origin,
+            ..
         } => {
             assert_eq!(*origin, TemplateSegmentOrigin::Head);
+            assert_eq!(*stored_expression, expression);
+            let stored_view = expressions
+                .view(*stored_expression)
+                .expect("stored expression should be in the store");
             assert!(matches!(
-                expression.kind,
-                crate::compiler_frontend::ast::expressions::expression_kind::ExpressionKind::StringSlice(_)
+                stored_view.operation(),
+                ExpressionOperationView::Constant(constant)
+                    if matches!(
+                        values.payload(constant),
+                        Some(ConstValuePayload::String(ConstStringValue::Text(_)))
+                    )
             ));
         }
         other => panic!("expected DynamicExpression node, got {other:?}"),
@@ -454,35 +495,16 @@ fn child_template_occurrence_ids_assigned_in_document_order() {
 fn expression_site_ids_assigned_in_document_order() {
     let mut store = TemplateIrStore::new();
     let mut string_table = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut values = ConstValueStore::default();
+    let expr_a = string_literal(&mut expressions, &mut values, string_table.intern("a"));
+    let expr_b = string_literal(&mut expressions, &mut values, string_table.intern("b"));
+    let expr_c = string_literal(&mut expressions, &mut values, string_table.intern("c"));
     let (id_a, id_b, id_c) = {
         let mut builder = TemplateIrBuilder::new(&mut store);
-        let id_a = builder.push_dynamic_expression_node(
-            Expression::string_slice(
-                string_table.intern("a"),
-                None,
-                crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
-            ),
-            TemplateSegmentOrigin::Body,
-            None,
-        );
-        let id_b = builder.push_dynamic_expression_node(
-            Expression::string_slice(
-                string_table.intern("b"),
-                None,
-                crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
-            ),
-            TemplateSegmentOrigin::Body,
-            None,
-        );
-        let id_c = builder.push_dynamic_expression_node(
-            Expression::string_slice(
-                string_table.intern("c"),
-                None,
-                crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
-            ),
-            TemplateSegmentOrigin::Body,
-            None,
-        );
+        let id_a = builder.push_dynamic_expression_node(expr_a, TemplateSegmentOrigin::Body, None);
+        let id_b = builder.push_dynamic_expression_node(expr_b, TemplateSegmentOrigin::Body, None);
+        let id_c = builder.push_dynamic_expression_node(expr_c, TemplateSegmentOrigin::Body, None);
         (id_a, id_b, id_c)
     };
 
@@ -522,6 +544,8 @@ fn expression_site_ids_assigned_in_document_order() {
 fn derived_root_preserves_existing_occurrence_and_site_ids() {
     let mut store = TemplateIrStore::new();
     let mut string_table = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut values = ConstValueStore::default();
 
     // Build a sequence root with one slot, one child template, and one
     // dynamic expression so all three occurrence/site ID families are
@@ -547,11 +571,7 @@ fn derived_root_preserves_existing_occurrence_and_site_ids() {
         let child_id = builder.push_child_template_node(child_template, None);
 
         let expr_id = builder.push_dynamic_expression_node(
-            Expression::string_slice(
-                string_table.intern("expr"),
-                None,
-                crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
-            ),
+            string_literal(&mut expressions, &mut values, string_table.intern("expr")),
             TemplateSegmentOrigin::Body,
             None,
         );
@@ -626,6 +646,8 @@ fn newly_created_nodes_receive_fresh_ids_after_existing_allocations() {
 
     let mut store = TemplateIrStore::new();
     let mut string_table = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut values = ConstValueStore::default();
 
     let (
         slot_occ_first,
@@ -663,11 +685,7 @@ fn newly_created_nodes_receive_fresh_ids_after_existing_allocations() {
         let child_first = builder.push_child_template_node(child_template_a, None);
 
         let expr_first = builder.push_dynamic_expression_node(
-            Expression::string_slice(
-                string_table.intern("e1"),
-                None,
-                crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
-            ),
+            string_literal(&mut expressions, &mut values, string_table.intern("e1")),
             TemplateSegmentOrigin::Body,
             None,
         );
@@ -679,11 +697,7 @@ fn newly_created_nodes_receive_fresh_ids_after_existing_allocations() {
             None,
         );
         let conditional_first = builder.push_conditional_node(
-            TemplateBranchSelector::Bool(Expression::bool(
-                true,
-                None,
-                crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
-            )),
+            TemplateBranchSelector::Bool(bool_literal(&mut expressions, &mut values, true)),
             conditional_body_a,
             None,
         );
@@ -696,11 +710,7 @@ fn newly_created_nodes_receive_fresh_ids_after_existing_allocations() {
         );
         let loop_first = builder.push_loop_node(
             TemplateLoopHeader::Conditional {
-                condition: Box::new(Expression::bool(
-                    true,
-                    None,
-                    crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
-                )),
+                condition: bool_literal(&mut expressions, &mut values, true),
             },
             loop_body_a,
             None,
@@ -727,11 +737,7 @@ fn newly_created_nodes_receive_fresh_ids_after_existing_allocations() {
         let child_second = builder.push_child_template_node(child_template_b, None);
 
         let expr_second = builder.push_dynamic_expression_node(
-            Expression::string_slice(
-                string_table.intern("e2"),
-                None,
-                crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
-            ),
+            string_literal(&mut expressions, &mut values, string_table.intern("e2")),
             TemplateSegmentOrigin::Body,
             None,
         );
@@ -743,11 +749,7 @@ fn newly_created_nodes_receive_fresh_ids_after_existing_allocations() {
             None,
         );
         let conditional_second = builder.push_conditional_node(
-            TemplateBranchSelector::Bool(Expression::bool(
-                false,
-                None,
-                crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
-            )),
+            TemplateBranchSelector::Bool(bool_literal(&mut expressions, &mut values, false)),
             conditional_body_b,
             None,
         );
@@ -765,10 +767,10 @@ fn newly_created_nodes_receive_fresh_ids_after_existing_allocations() {
                     index: None,
                 }),
                 range: Box::new(RangeLoopSpec {
-                    start: integer(0),
-                    end: integer(10),
+                    start: integer(&mut expressions, &mut values, 0),
+                    end: integer(&mut expressions, &mut values, 10),
                     end_kind: crate::compiler_frontend::ast::ast_nodes::RangeEndKind::Exclusive,
-                    step: Some(integer(1)),
+                    step: Some(integer(&mut expressions, &mut values, 1)),
                 }),
             },
             loop_body_b,
@@ -820,6 +822,8 @@ fn newly_created_nodes_receive_fresh_ids_after_existing_allocations() {
 fn conditional_selector_site_ids_assigned_in_document_order() {
     let mut store = TemplateIrStore::new();
     let mut string_table = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut values = ConstValueStore::default();
     let (conditional_a_site, conditional_b_site) = {
         let mut builder = TemplateIrBuilder::new(&mut store);
 
@@ -837,20 +841,12 @@ fn conditional_selector_site_ids_assigned_in_document_order() {
         );
 
         let conditional_a = builder.push_conditional_node(
-            TemplateBranchSelector::Bool(Expression::bool(
-                true,
-                None,
-                crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
-            )),
+            TemplateBranchSelector::Bool(bool_literal(&mut expressions, &mut values, true)),
             body_a,
             None,
         );
         let conditional_b = builder.push_conditional_node(
-            TemplateBranchSelector::Bool(Expression::bool(
-                false,
-                None,
-                crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
-            )),
+            TemplateBranchSelector::Bool(bool_literal(&mut expressions, &mut values, false)),
             body_b,
             None,
         );
@@ -872,6 +868,8 @@ fn loop_conditional_and_collection_headers_each_assign_one_expression_site() {
 
     let mut store = TemplateIrStore::new();
     let mut string_table = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut values = ConstValueStore::default();
     let (conditional_node_id, collection_node_id) = {
         let mut builder = TemplateIrBuilder::new(&mut store);
 
@@ -883,11 +881,7 @@ fn loop_conditional_and_collection_headers_each_assign_one_expression_site() {
         );
         let conditional_node_id = builder.push_loop_node(
             TemplateLoopHeader::Conditional {
-                condition: Box::new(Expression::bool(
-                    true,
-                    None,
-                    crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
-                )),
+                condition: bool_literal(&mut expressions, &mut values, true),
             },
             conditional_body,
             None,
@@ -906,11 +900,11 @@ fn loop_conditional_and_collection_headers_each_assign_one_expression_site() {
                     item: None,
                     index: None,
                 }),
-                iterable: Box::new(Expression::string_slice(
+                iterable: string_literal(
+                    &mut expressions,
+                    &mut values,
                     string_table.intern("items"),
-                    None,
-                    crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
-                )),
+                ),
             },
             collection_body,
             None,
@@ -956,6 +950,8 @@ fn loop_range_header_assigns_start_end_and_optional_step_sites() {
 
     let mut store = TemplateIrStore::new();
     let mut string_table = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut values = ConstValueStore::default();
     let (with_step_id, without_step_id) = {
         let mut builder = TemplateIrBuilder::new(&mut store);
 
@@ -973,10 +969,10 @@ fn loop_range_header_assigns_start_end_and_optional_step_sites() {
                     index: None,
                 }),
                 range: Box::new(RangeLoopSpec {
-                    start: integer(0),
-                    end: integer(10),
+                    start: integer(&mut expressions, &mut values, 0),
+                    end: integer(&mut expressions, &mut values, 10),
                     end_kind: crate::compiler_frontend::ast::ast_nodes::RangeEndKind::Exclusive,
-                    step: Some(integer(2)),
+                    step: Some(integer(&mut expressions, &mut values, 2)),
                 }),
             },
             with_step_body,
@@ -998,8 +994,8 @@ fn loop_range_header_assigns_start_end_and_optional_step_sites() {
                     index: None,
                 }),
                 range: Box::new(RangeLoopSpec {
-                    start: integer(0),
-                    end: integer(10),
+                    start: integer(&mut expressions, &mut values, 0),
+                    end: integer(&mut expressions, &mut values, 10),
                     end_kind: crate::compiler_frontend::ast::ast_nodes::RangeEndKind::Exclusive,
                     step: None,
                 }),
@@ -1050,17 +1046,15 @@ fn expression_sites_share_one_document_order_counter() {
 
     let mut store = TemplateIrStore::new();
     let mut string_table = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut values = ConstValueStore::default();
 
     let (expr_site, conditional_site, range_start, range_end, range_step) = {
         let mut builder = TemplateIrBuilder::new(&mut store);
 
         // First: a dynamic expression splice (site 0).
         let expr_node = builder.push_dynamic_expression_node(
-            Expression::string_slice(
-                string_table.intern("expr"),
-                None,
-                crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
-            ),
+            string_literal(&mut expressions, &mut values, string_table.intern("expr")),
             TemplateSegmentOrigin::Body,
             None,
         );
@@ -1073,11 +1067,7 @@ fn expression_sites_share_one_document_order_counter() {
             None,
         );
         let conditional_node = builder.push_conditional_node(
-            TemplateBranchSelector::Bool(Expression::bool(
-                true,
-                None,
-                crate::compiler_frontend::value_mode::ValueMode::ImmutableOwned,
-            )),
+            TemplateBranchSelector::Bool(bool_literal(&mut expressions, &mut values, true)),
             conditional_body,
             None,
         );
@@ -1096,10 +1086,10 @@ fn expression_sites_share_one_document_order_counter() {
                     index: None,
                 }),
                 range: Box::new(RangeLoopSpec {
-                    start: integer(0),
-                    end: integer(10),
+                    start: integer(&mut expressions, &mut values, 0),
+                    end: integer(&mut expressions, &mut values, 10),
                     end_kind: crate::compiler_frontend::ast::ast_nodes::RangeEndKind::Exclusive,
-                    step: Some(integer(1)),
+                    step: Some(integer(&mut expressions, &mut values, 1)),
                 }),
             },
             loop_body,

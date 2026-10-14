@@ -594,6 +594,7 @@ impl<'a> CompilerFrontend<'a> {
             function_origin_lookup,
             module_resources,
             capacity_estimate,
+            self.external_package_registry.as_ref(),
         )?;
         for (function_path, provenance) in static_if_function_provenance {
             let Some(function_id) = result.hir_module.functions.iter().find_map(|function| {

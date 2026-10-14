@@ -6,29 +6,38 @@
 //!      regressions in error-path routing and fallback binding.
 
 use crate::compiler_frontend::ast::ast_nodes::{MultiBindTargetKind, NodeKind};
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::call_argument::{CallAccessMode, CallArgument};
-use crate::compiler_frontend::ast::expressions::expression::{
-    Expression, FallibleExpressionHandling, FallibleHandling, Operator,
+use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
+use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
+use crate::compiler_frontend::ast::expressions::expression_types::{
+    CatchErrorBinding, FallibleExpressionHandling, FallibleHandling,
 };
-use crate::compiler_frontend::ast::expressions::expression_types::CatchErrorBinding;
 use crate::compiler_frontend::ast::expressions::failure_facts::FailureDisposition;
 use crate::compiler_frontend::ast::statements::fallible_handling::wrap_catch_expression;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
+use crate::compiler_frontend::ast::statements::value_production::{
+    ProducedValues,
+    types::{ValueBlock, ValueIfBlock},
+};
+use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
-use crate::compiler_frontend::external_packages::CallTarget;
+use crate::compiler_frontend::external_packages::{CallTarget, ExternalPackageRegistry};
 use crate::compiler_frontend::hir::expressions::HirExpressionKind;
+use crate::compiler_frontend::hir::hir_builder::{build_ast_with_registered_types, lower_ast};
 use crate::compiler_frontend::hir::numeric::HirNumericOp;
-use crate::compiler_frontend::hir::statements::{HirStatementKind, HirWriteTarget};
-use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::hir::statements::{
+    HirLocalDestination, HirStatementKind, HirWriteTarget,
+};
+use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    fresh_success_returns, function_node, make_test_variable, node, param_with_type_id,
-    reference_expr_with_type_id, success_return_slot,
+    assignment_target, fresh_success_returns, function_node, make_test_variable, node,
+    param_with_type_id, reference_expr_with_type_id, success_return_slot,
 };
-
 use crate::compiler_frontend::tests::type_id_fixture_support::{
     error_return_slot, multi_bind_target, runtime_expr, runtime_handled_function_call_item,
     runtime_operand_item, runtime_operator_item,
@@ -36,21 +45,52 @@ use crate::compiler_frontend::tests::type_id_fixture_support::{
 use crate::compiler_frontend::value_mode::ValueMode;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
-use crate::compiler_frontend::hir::hir_builder::{build_ast_with_registered_types, lower_ast};
-
 /// One exact `I32` literal expression.
 ///
 /// WHY: these fixtures pin the exact `I32` width explicitly at the scalar carrier.
 fn i32_literal(
+    builder: &mut AstExpressionBuilder,
+    constants: &mut ConstValueStore,
     value: i64,
     span: Option<crate::compiler_frontend::source::SourceSpan>,
     value_mode: ValueMode,
-) -> Expression {
-    Expression::fixed_scalar(
-        FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32"),
-        span,
-        value_mode,
-    )
+) -> ExprId {
+    let value = FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32");
+    builder
+        .fixed_scalar(constants, value, span, value_mode)
+        .expect("fixture scalar")
+        .id()
+}
+
+/// Follow the per-slot snapshot that prevents earlier multi-bind writes changing later inputs.
+fn staged_result_local(
+    module: &crate::compiler_frontend::hir::module::HirModule,
+    block: &crate::compiler_frontend::hir::blocks::HirBlock,
+    result: crate::compiler_frontend::hir::ids::LocalId,
+) -> crate::compiler_frontend::hir::ids::LocalId {
+    let snapshots = block
+        .statements
+        .iter()
+        .filter_map(|statement| {
+            let HirStatementKind::Write {
+                target: HirWriteTarget::DefineLocal(local),
+                value,
+            } = &statement.kind
+            else {
+                return None;
+            };
+            matches!(&module.expressions.expression(*value).kind,
+            HirExpressionKind::Load(place)
+                if place.root == result && super::is_local_place(place))
+            .then_some(*local)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        snapshots.len(),
+        1,
+        "each native result slot should be staged once"
+    );
+    snapshots[0]
 }
 
 #[test]
@@ -59,26 +99,41 @@ fn statement_result_propagation_with_unit_success_lowers_to_explicit_error_edge(
     let mut string_table = StringTable::new();
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let can_fail_name = super::symbol("can_fail", &mut path_fork, &mut string_table);
     let location = None;
 
+    let boom = builder
+        .string_slice(
+            &mut constants,
+            string_table.intern("boom"),
+            location,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture string fits expression store")
+        .id();
     let can_fail_function = function_node(
         can_fail_name,
         FunctionSignature {
             parameters: vec![],
             returns: vec![error_return_slot(builtin_type_ids::STRING)],
         },
-        vec![node(
-            NodeKind::ReturnError(Expression::string_slice(
-                string_table.intern("boom"),
-                location,
-                ValueMode::ImmutableOwned,
-            )),
-            location,
-        )],
+        vec![node(NodeKind::ReturnError(boom), location)],
         location,
     );
 
+    let propagated_call = builder
+        .handled_fallible_function_call_with_typed_arguments(
+            can_fail_name,
+            vec![],
+            vec![],
+            builtin_type_ids::STRING,
+            FallibleExpressionHandling::Propagate,
+            location,
+        )
+        .expect("fixture handled call fits expression store")
+        .id();
     let start_function = function_node(
         start_name,
         FunctionSignature {
@@ -86,22 +141,23 @@ fn statement_result_propagation_with_unit_success_lowers_to_explicit_error_edge(
             returns: vec![error_return_slot(builtin_type_ids::STRING)],
         },
         vec![node(
-            NodeKind::ExpressionStatement(Expression::handled_fallible_function_call(
-                can_fail_name,
-                vec![],
-                vec![],
-                FallibleExpressionHandling::Propagate,
-                location,
-            )),
+            NodeKind::ExpressionStatement(propagated_call),
             location,
         )],
         location,
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast_with_registered_types(vec![can_fail_function, start_function], entry_path),
+        build_ast_with_registered_types(
+            vec![can_fail_function, start_function],
+            entry_path,
+            builder,
+            constants,
+            TypeEnvironment::new(),
+        ),
         &mut string_table,
         &mut path_fork,
+        &ExternalPackageRegistry::new(),
     )
     .expect("statement propagation lowering should succeed");
 
@@ -116,19 +172,20 @@ fn statement_result_propagation_with_unit_success_lowers_to_explicit_error_edge(
         .find(|block| block.id == start_function.entry)
         .expect("start entry block should exist");
 
-    let HirTerminator::FallibleBranch {
-        success_block: _,
-        error_block,
+    let HirTerminator::Invoke {
+        success_results,
+        failure: error_block,
         ..
-    } = start_entry.terminator
+    } = &start_entry.terminator
     else {
-        panic!("unit-success statement propagation should lower to FallibleBranch");
+        panic!("zero-success statement propagation should lower to Invoke");
     };
+    assert!(success_results.is_empty());
 
     let error_block = module
         .blocks
         .iter()
-        .find(|block| block.id == error_block)
+        .find(|block| block.id == *error_block)
         .expect("statement propagation should create an error block");
     assert!(
         matches!(error_block.terminator, HirTerminator::ReturnError(_)),
@@ -142,10 +199,21 @@ fn direct_return_result_propagation_lowers_to_explicit_success_and_error_edges()
     let mut string_table = StringTable::new();
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let can_fail_name = super::symbol("can_fail", &mut path_fork, &mut string_table);
     let forward_name = super::symbol("forward", &mut path_fork, &mut string_table);
     let location = None;
 
+    let ok_value = builder
+        .string_slice(
+            &mut constants,
+            string_table.intern("ok"),
+            location,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture string fits expression store")
+        .id();
     let can_fail_function = function_node(
         can_fail_name,
         FunctionSignature {
@@ -155,26 +223,21 @@ fn direct_return_result_propagation_lowers_to_explicit_success_and_error_edges()
                 error_return_slot(builtin_type_ids::STRING),
             ],
         },
-        vec![node(
-            NodeKind::Return(vec![Expression::string_slice(
-                string_table.intern("ok"),
-                location,
-                ValueMode::ImmutableOwned,
-            )]),
-            location,
-        )],
+        vec![node(NodeKind::Return(vec![ok_value]), location)],
         location,
     );
 
-    let mut expression_types = TypeEnvironment::new();
-    let propagated_call = Expression::handled_fallible_function_call_with_typed_arguments(
-        can_fail_name,
-        vec![],
-        vec![builtin_type_ids::STRING],
-        FallibleExpressionHandling::Propagate,
-        &mut expression_types,
-        location,
-    );
+    let propagated_call = builder
+        .handled_fallible_function_call_with_typed_arguments(
+            can_fail_name,
+            vec![],
+            vec![builtin_type_ids::STRING],
+            builtin_type_ids::STRING,
+            FallibleExpressionHandling::Propagate,
+            location,
+        )
+        .expect("fixture handled call fits expression store")
+        .id();
 
     let forward_function = function_node(
         forward_name,
@@ -203,9 +266,13 @@ fn direct_return_result_propagation_lowers_to_explicit_success_and_error_edges()
         build_ast_with_registered_types(
             vec![can_fail_function, forward_function, start_function],
             entry_path,
+            builder,
+            constants,
+            TypeEnvironment::new(),
         ),
         &mut string_table,
         &mut path_fork,
+        &ExternalPackageRegistry::new(),
     )
     .expect("direct return propagation lowering should succeed");
 
@@ -225,35 +292,42 @@ fn direct_return_result_propagation_lowers_to_explicit_success_and_error_edges()
         .find(|block| block.id == forward_function.entry)
         .expect("forward entry block should exist");
 
-    let HirTerminator::FallibleBranch {
-        success_block,
-        error_block,
+    let HirTerminator::Invoke {
+        success: success_block,
+        success_results,
+        failure: error_block,
+        error_result,
         ..
-    } = forward_entry.terminator
+    } = &forward_entry.terminator
     else {
-        panic!("direct return propagation should lower to FallibleBranch");
+        panic!("direct return propagation should lower to Invoke");
     };
+    assert_eq!(success_results.len(), 1);
+    assert!(!success_results.contains(error_result));
 
     let success_block = module
         .blocks
         .iter()
-        .find(|block| block.id == success_block)
+        .find(|block| block.id == *success_block)
         .expect("direct return propagation should create a success block");
-    let HirTerminator::ReturnSuccess(success_value) = &success_block.terminator else {
-        panic!("success edge should return through ReturnSuccess");
+    let HirTerminator::Return(success_values) = &success_block.terminator else {
+        panic!("success edge should return its ordered values");
     };
+    let success_values = module.expressions.values(*success_values);
+    assert_eq!(success_values.len(), 1);
     assert!(
         matches!(
-            &module.expressions.expression(*success_value).kind,
-            HirExpressionKind::FallibleUnwrapSuccess { .. }
+            &module.expressions.expression(success_values[0]).kind,
+            HirExpressionKind::Load(place)
+                if place.root == success_results[0] && super::is_local_place(place)
         ),
-        "success edge should unwrap the carrier success payload"
+        "success edge should forward the native success local"
     );
 
     let error_block = module
         .blocks
         .iter()
-        .find(|block| block.id == error_block)
+        .find(|block| block.id == *error_block)
         .expect("direct return propagation should create an error block");
     let HirTerminator::ReturnError(error_value) = &error_block.terminator else {
         panic!("error edge should return through ReturnError");
@@ -261,9 +335,10 @@ fn direct_return_result_propagation_lowers_to_explicit_success_and_error_edges()
     assert!(
         matches!(
             &module.expressions.expression(*error_value).kind,
-            HirExpressionKind::FallibleUnwrapError { .. }
+            HirExpressionKind::Load(place)
+                if place.root == *error_result && super::is_local_place(place)
         ),
-        "error edge should unwrap the carrier error payload"
+        "error edge should forward the native error local"
     );
 }
 
@@ -273,12 +348,21 @@ fn direct_return_result_propagation_allows_alias_success_return() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let constants = ConstValueStore::default();
     let source_name = super::symbol("source", &mut path_fork, &mut string_table);
     let source_input = super::symbol("input", &mut path_fork, &mut string_table);
     let forward_name = super::symbol("forward", &mut path_fork, &mut string_table);
     let forward_input = super::symbol("input", &mut path_fork, &mut string_table);
     let location = None;
 
+    let source_input_ref = reference_expr_with_type_id(
+        &mut builder,
+        source_input,
+        builtin_type_ids::STRING,
+        location,
+        ValueMode::ImmutableReference,
+    );
     let source_function = function_node(
         source_name,
         FunctionSignature {
@@ -293,36 +377,32 @@ fn direct_return_result_propagation_allows_alias_success_return() {
                 error_return_slot(builtin_type_ids::STRING),
             ],
         },
-        vec![node(
-            NodeKind::Return(vec![reference_expr_with_type_id(
-                source_input,
-                builtin_type_ids::STRING,
-                location,
-                ValueMode::ImmutableReference,
-            )]),
-            location,
-        )],
+        vec![node(NodeKind::Return(vec![source_input_ref]), location)],
         location,
     );
 
-    let mut expression_types = TypeEnvironment::new();
-    let propagated_call = Expression::handled_fallible_function_call_with_typed_arguments(
-        source_name,
-        vec![CallArgument::positional(
-            reference_expr_with_type_id(
-                forward_input,
-                builtin_type_ids::STRING,
-                location,
-                ValueMode::ImmutableReference,
-            ),
-            CallAccessMode::Shared,
-            location,
-        )],
-        vec![builtin_type_ids::STRING],
-        FallibleExpressionHandling::Propagate,
-        &mut expression_types,
+    let forward_input_ref = reference_expr_with_type_id(
+        &mut builder,
+        forward_input,
+        builtin_type_ids::STRING,
         location,
+        ValueMode::ImmutableReference,
     );
+    let propagated_call = builder
+        .handled_fallible_function_call_with_typed_arguments(
+            source_name,
+            vec![CallArgument::positional(
+                builder.own(forward_input_ref),
+                CallAccessMode::Shared,
+                location,
+            )],
+            vec![builtin_type_ids::STRING],
+            builtin_type_ids::STRING,
+            FallibleExpressionHandling::Propagate,
+            location,
+        )
+        .expect("fixture handled call fits expression store")
+        .id();
 
     let forward_function = function_node(
         forward_name,
@@ -356,9 +436,13 @@ fn direct_return_result_propagation_allows_alias_success_return() {
         build_ast_with_registered_types(
             vec![source_function, forward_function, start_function],
             entry_path,
+            builder,
+            constants,
+            TypeEnvironment::new(),
         ),
         &mut string_table,
         &mut path_fork,
+        &ExternalPackageRegistry::new(),
     )
     .expect("direct alias-return propagation lowering should succeed");
 
@@ -378,33 +462,44 @@ fn direct_return_result_propagation_allows_alias_success_return() {
         .iter()
         .find(|block| block.id == forward_function.entry)
         .expect("forward entry block should exist");
-    let HirTerminator::FallibleBranch { success_block, .. } = forward_entry.terminator else {
-        panic!("alias-return propagation should lower to FallibleBranch");
+    let HirTerminator::Invoke {
+        success: success_block,
+        success_results,
+        ..
+    } = &forward_entry.terminator
+    else {
+        panic!("alias-return propagation should lower to Invoke");
     };
+    assert_eq!(success_results.len(), 1);
 
     let success_block = module
         .blocks
         .iter()
-        .find(|block| block.id == success_block)
+        .find(|block| block.id == *success_block)
         .expect("alias-return propagation should create a success block");
-    let HirTerminator::ReturnSuccess(success_value) = &success_block.terminator else {
-        panic!("alias success edge should return through ReturnSuccess");
+    let HirTerminator::Return(success_values) = &success_block.terminator else {
+        panic!("alias success edge should return ordered values");
     };
+    let success_values = module.expressions.values(*success_values);
+    assert_eq!(success_values.len(), 1);
     assert!(
         matches!(
-            &module.expressions.expression(*success_value).kind,
-            HirExpressionKind::FallibleUnwrapSuccess { .. }
+            &module.expressions.expression(success_values[0]).kind,
+            HirExpressionKind::Load(place)
+                if place.root == success_results[0] && super::is_local_place(place)
         ),
-        "alias success edge should forward the unwrapped success payload"
+        "alias success edge should forward its native result binding without copying"
     );
 }
 
 #[test]
-fn declaration_result_propagation_assigns_unwrapped_success_on_success_edge() {
+fn declaration_result_propagation_assigns_native_success_on_success_edge() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let can_fail_name = super::symbol("can_fail", &mut path_fork, &mut string_table);
     let forward_name = super::symbol("forward", &mut path_fork, &mut string_table);
     let value_name = path_fork
@@ -412,6 +507,15 @@ fn declaration_result_propagation_assigns_unwrapped_success_on_success_edge() {
         .expect("test path fits");
     let location = None;
 
+    let ok_value = builder
+        .string_slice(
+            &mut constants,
+            string_table.intern("ok"),
+            location,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture string fits expression store")
+        .id();
     let can_fail_function = function_node(
         can_fail_name,
         FunctionSignature {
@@ -421,27 +525,30 @@ fn declaration_result_propagation_assigns_unwrapped_success_on_success_edge() {
                 error_return_slot(builtin_type_ids::STRING),
             ],
         },
-        vec![node(
-            NodeKind::Return(vec![Expression::string_slice(
-                string_table.intern("ok"),
-                location,
-                ValueMode::ImmutableOwned,
-            )]),
+        vec![node(NodeKind::Return(vec![ok_value]), location)],
+        location,
+    );
+
+    let propagated_call = builder
+        .handled_fallible_function_call_with_typed_arguments(
+            can_fail_name,
+            vec![],
+            vec![builtin_type_ids::STRING],
+            builtin_type_ids::STRING,
+            FallibleExpressionHandling::Propagate,
             location,
-        )],
-        location,
-    );
+        )
+        .expect("fixture handled call fits expression store")
+        .id();
 
-    let mut expression_types = TypeEnvironment::new();
-    let propagated_call = Expression::handled_fallible_function_call_with_typed_arguments(
-        can_fail_name,
-        vec![],
-        vec![builtin_type_ids::STRING],
-        FallibleExpressionHandling::Propagate,
-        &mut expression_types,
+    let declared_value = make_test_variable(value_name, propagated_call, &builder);
+    let forward_value_ref = reference_expr_with_type_id(
+        &mut builder,
+        value_name,
+        builtin_type_ids::STRING,
         location,
+        ValueMode::ImmutableReference,
     );
-
     let forward_function = function_node(
         forward_name,
         FunctionSignature {
@@ -452,19 +559,8 @@ fn declaration_result_propagation_assigns_unwrapped_success_on_success_edge() {
             ],
         },
         vec![
-            node(
-                NodeKind::VariableDeclaration(make_test_variable(value_name, propagated_call)),
-                location,
-            ),
-            node(
-                NodeKind::Return(vec![reference_expr_with_type_id(
-                    value_name,
-                    builtin_type_ids::STRING,
-                    location,
-                    ValueMode::ImmutableReference,
-                )]),
-                location,
-            ),
+            node(NodeKind::VariableDeclaration(declared_value), location),
+            node(NodeKind::Return(vec![forward_value_ref]), location),
         ],
         location,
     );
@@ -483,9 +579,13 @@ fn declaration_result_propagation_assigns_unwrapped_success_on_success_edge() {
         build_ast_with_registered_types(
             vec![can_fail_function, forward_function, start_function],
             entry_path,
+            builder,
+            constants,
+            TypeEnvironment::new(),
         ),
         &mut string_table,
         &mut path_fork,
+        &ExternalPackageRegistry::new(),
     )
     .expect("declaration result propagation lowering should succeed");
 
@@ -505,33 +605,36 @@ fn declaration_result_propagation_assigns_unwrapped_success_on_success_edge() {
         .find(|block| block.id == forward_function.entry)
         .expect("forward entry block should exist");
 
-    let HirTerminator::FallibleBranch {
-        success_block,
-        error_block,
+    let HirTerminator::Invoke {
+        success: success_block,
+        success_results,
+        failure: error_block,
         ..
-    } = forward_entry.terminator
+    } = &forward_entry.terminator
     else {
-        panic!("declaration propagation should lower to FallibleBranch");
+        panic!("declaration propagation should lower to Invoke");
     };
+    assert_eq!(success_results.len(), 1);
 
     let success_block = module
         .blocks
         .iter()
-        .find(|block| block.id == success_block)
+        .find(|block| block.id == *success_block)
         .expect("declaration propagation should create a success block");
     assert!(
         success_block.statements.iter().any(|statement| {
             super::write_value(&module, statement).is_some_and(|value| {
-                matches!(&value.kind, HirExpressionKind::FallibleUnwrapSuccess { .. })
+                matches!(&value.kind, HirExpressionKind::Load(place)
+                    if place.root == success_results[0] && super::is_local_place(place))
             })
         }),
-        "success edge should assign the unwrapped success payload to the declaration local"
+        "success edge should assign the native success local to the declaration local"
     );
 
     let error_block = module
         .blocks
         .iter()
-        .find(|block| block.id == error_block)
+        .find(|block| block.id == *error_block)
         .expect("declaration propagation should create an error block");
     assert!(
         matches!(error_block.terminator, HirTerminator::ReturnError(_)),
@@ -540,11 +643,13 @@ fn declaration_result_propagation_assigns_unwrapped_success_on_success_edge() {
 }
 
 #[test]
-fn multi_bind_result_propagation_projects_tuple_slots_after_success_edge() {
+fn multi_bind_result_propagation_binds_ordered_slots_on_success_edge() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let pair_name = super::symbol("pair", &mut path_fork, &mut string_table);
     let forward_name = super::symbol("forward", &mut path_fork, &mut string_table);
     let first_id = path_fork
@@ -555,6 +660,22 @@ fn multi_bind_result_propagation_projects_tuple_slots_after_success_edge() {
         .expect("test path fits");
     let location = None;
 
+    let ok_value = builder
+        .string_slice(
+            &mut constants,
+            string_table.intern("ok"),
+            location,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture string fits expression store")
+        .id();
+    let two = i32_literal(
+        &mut builder,
+        &mut constants,
+        2,
+        location,
+        ValueMode::ImmutableOwned,
+    );
     let pair_function = function_node(
         pair_name,
         FunctionSignature {
@@ -565,33 +686,39 @@ fn multi_bind_result_propagation_projects_tuple_slots_after_success_edge() {
                 error_return_slot(builtin_type_ids::STRING),
             ],
         },
-        vec![node(
-            NodeKind::Return(vec![
-                Expression::string_slice(
-                    string_table.intern("ok"),
-                    location,
-                    ValueMode::ImmutableOwned,
-                ),
-                i32_literal(2, location, ValueMode::ImmutableOwned),
-            ]),
-            location,
-        )],
+        vec![node(NodeKind::Return(vec![ok_value, two]), location)],
         location,
     );
 
-    let mut expression_types = TypeEnvironment::new();
-    let propagated_call = Expression::handled_fallible_function_call_with_typed_arguments(
-        pair_name,
-        vec![],
-        vec![
+    let propagated_call = builder
+        .handled_fallible_function_call_with_typed_arguments(
+            pair_name,
+            vec![],
+            vec![
+                builtin_type_ids::STRING,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            ],
             builtin_type_ids::STRING,
-            builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        ],
-        FallibleExpressionHandling::Propagate,
-        &mut expression_types,
-        location,
-    );
+            FallibleExpressionHandling::Propagate,
+            location,
+        )
+        .expect("fixture handled call fits expression store")
+        .id();
 
+    let first_ref = reference_expr_with_type_id(
+        &mut builder,
+        first_id,
+        builtin_type_ids::STRING,
+        location,
+        ValueMode::ImmutableReference,
+    );
+    let count_ref = reference_expr_with_type_id(
+        &mut builder,
+        count_id,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        location,
+        ValueMode::ImmutableReference,
+    );
     let forward_function = function_node(
         forward_name,
         FunctionSignature {
@@ -625,23 +752,7 @@ fn multi_bind_result_propagation_projects_tuple_slots_after_success_edge() {
                 },
                 location,
             ),
-            node(
-                NodeKind::Return(vec![
-                    reference_expr_with_type_id(
-                        first_id,
-                        builtin_type_ids::STRING,
-                        location,
-                        ValueMode::ImmutableReference,
-                    ),
-                    reference_expr_with_type_id(
-                        count_id,
-                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
-                        location,
-                        ValueMode::ImmutableReference,
-                    ),
-                ]),
-                location,
-            ),
+            node(NodeKind::Return(vec![first_ref, count_ref]), location),
         ],
         location,
     );
@@ -660,9 +771,13 @@ fn multi_bind_result_propagation_projects_tuple_slots_after_success_edge() {
         build_ast_with_registered_types(
             vec![pair_function, forward_function, start_function],
             entry_path,
+            builder,
+            constants,
+            TypeEnvironment::new(),
         ),
         &mut string_table,
         &mut path_fork,
+        &ExternalPackageRegistry::new(),
     )
     .expect("multi-bind result propagation lowering should succeed");
 
@@ -682,36 +797,48 @@ fn multi_bind_result_propagation_projects_tuple_slots_after_success_edge() {
         .find(|block| block.id == forward_function.entry)
         .expect("forward entry block should exist");
 
-    let HirTerminator::FallibleBranch { success_block, .. } = forward_entry.terminator else {
-        panic!("multi-bind propagation should lower to FallibleBranch");
+    let HirTerminator::Invoke {
+        success: success_block,
+        success_results,
+        ..
+    } = &forward_entry.terminator
+    else {
+        panic!("multi-bind propagation should lower to Invoke");
     };
+    assert_eq!(success_results.len(), 2);
 
     let success_block = module
         .blocks
         .iter()
-        .find(|block| block.id == success_block)
+        .find(|block| block.id == *success_block)
         .expect("multi-bind propagation should create a success block");
-    assert!(
-        success_block.statements.iter().any(|statement| {
-            super::write_value(&module, statement).is_some_and(|value| {
-                matches!(&value.kind, HirExpressionKind::FallibleUnwrapSuccess { .. })
+    for (name, result) in ["first", "count"].iter().zip(success_results) {
+        let staged = staged_result_local(&module, success_block, *result);
+        let definitions = success_block
+            .statements
+            .iter()
+            .filter(|statement| {
+                let HirStatementKind::Write {
+                    target: HirWriteTarget::DefineLocal(local),
+                    value,
+                } = &statement.kind
+                else {
+                    return false;
+                };
+                module
+                    .side_table
+                    .resolve_local_name(*local, &path_fork, &string_table)
+                    == Some(*name)
+                    && matches!(&module.expressions.expression(*value).kind,
+                    HirExpressionKind::Load(place)
+                        if place.root == staged && super::is_local_place(place))
             })
-        }),
-        "success edge should materialize the unwrapped tuple payload before projection"
-    );
-
-    let tuple_get_count = success_block
-        .statements
-        .iter()
-        .filter(|statement| {
-            super::write_value(&module, statement)
-                .is_some_and(|value| matches!(&value.kind, HirExpressionKind::TupleGet { .. }))
-        })
-        .count();
-    assert_eq!(
-        tuple_get_count, 2,
-        "multi-bind propagation should project both tuple slots from the success payload"
-    );
+            .count();
+        assert_eq!(
+            definitions, 1,
+            "success slot should define {name} once in order"
+        );
+    }
 }
 
 #[test]
@@ -720,6 +847,8 @@ fn call_argument_result_propagation_lowers_before_outer_call() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let can_fail_name = super::symbol("can_fail", &mut path_fork, &mut string_table);
     let consume_name = super::symbol("consume", &mut path_fork, &mut string_table);
     let consume_input = path_fork
@@ -731,6 +860,15 @@ fn call_argument_result_propagation_lowers_before_outer_call() {
         .expect("test path fits");
     let location = None;
 
+    let ok_value = builder
+        .string_slice(
+            &mut constants,
+            string_table.intern("ok"),
+            location,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture string fits expression store")
+        .id();
     let can_fail_function = function_node(
         can_fail_name,
         FunctionSignature {
@@ -740,17 +878,17 @@ fn call_argument_result_propagation_lowers_before_outer_call() {
                 error_return_slot(builtin_type_ids::STRING),
             ],
         },
-        vec![node(
-            NodeKind::Return(vec![Expression::string_slice(
-                string_table.intern("ok"),
-                location,
-                ValueMode::ImmutableOwned,
-            )]),
-            location,
-        )],
+        vec![node(NodeKind::Return(vec![ok_value]), location)],
         location,
     );
 
+    let consume_input_ref = reference_expr_with_type_id(
+        &mut builder,
+        consume_input,
+        builtin_type_ids::STRING,
+        location,
+        ValueMode::ImmutableReference,
+    );
     let consume_function = function_node(
         consume_name,
         FunctionSignature {
@@ -762,39 +900,43 @@ fn call_argument_result_propagation_lowers_before_outer_call() {
             )],
             returns: vec![success_return_slot(builtin_type_ids::STRING)],
         },
-        vec![node(
-            NodeKind::Return(vec![reference_expr_with_type_id(
-                consume_input,
-                builtin_type_ids::STRING,
+        vec![node(NodeKind::Return(vec![consume_input_ref]), location)],
+        location,
+    );
+
+    let propagated_call = builder
+        .handled_fallible_function_call_with_typed_arguments(
+            can_fail_name,
+            vec![],
+            vec![builtin_type_ids::STRING],
+            builtin_type_ids::STRING,
+            FallibleExpressionHandling::Propagate,
+            location,
+        )
+        .expect("fixture handled call fits expression store")
+        .id();
+    let outer_call = builder
+        .function_call_with_typed_arguments(
+            consume_name,
+            vec![CallArgument::positional(
+                builder.own(propagated_call),
+                CallAccessMode::Shared,
                 location,
-                ValueMode::ImmutableReference,
-            )]),
+            )],
+            vec![builtin_type_ids::STRING],
             location,
-        )],
-        location,
-    );
+        )
+        .expect("fixture outer call fits expression store")
+        .id();
 
-    let mut expression_types = TypeEnvironment::new();
-    let propagated_call = Expression::handled_fallible_function_call_with_typed_arguments(
-        can_fail_name,
-        vec![],
-        vec![builtin_type_ids::STRING],
-        FallibleExpressionHandling::Propagate,
-        &mut expression_types,
+    let declared_value = make_test_variable(value_name, outer_call, &builder);
+    let forward_value_ref = reference_expr_with_type_id(
+        &mut builder,
+        value_name,
+        builtin_type_ids::STRING,
         location,
+        ValueMode::ImmutableReference,
     );
-    let outer_call = Expression::function_call_with_typed_arguments(
-        consume_name,
-        vec![CallArgument::positional(
-            propagated_call,
-            CallAccessMode::Shared,
-            location,
-        )],
-        vec![builtin_type_ids::STRING],
-        &mut expression_types,
-        location,
-    );
-
     let forward_function = function_node(
         forward_name,
         FunctionSignature {
@@ -805,19 +947,8 @@ fn call_argument_result_propagation_lowers_before_outer_call() {
             ],
         },
         vec![
-            node(
-                NodeKind::VariableDeclaration(make_test_variable(value_name, outer_call)),
-                location,
-            ),
-            node(
-                NodeKind::Return(vec![reference_expr_with_type_id(
-                    value_name,
-                    builtin_type_ids::STRING,
-                    location,
-                    ValueMode::ImmutableReference,
-                )]),
-                location,
-            ),
+            node(NodeKind::VariableDeclaration(declared_value), location),
+            node(NodeKind::Return(vec![forward_value_ref]), location),
         ],
         location,
     );
@@ -841,9 +972,13 @@ fn call_argument_result_propagation_lowers_before_outer_call() {
                 start_function,
             ],
             entry_path,
+            builder,
+            constants,
+            TypeEnvironment::new(),
         ),
         &mut string_table,
         &mut path_fork,
+        &ExternalPackageRegistry::new(),
     )
     .expect("call-argument propagation lowering should succeed");
 
@@ -862,13 +997,17 @@ fn call_argument_result_propagation_lowers_before_outer_call() {
         .iter()
         .find(|block| block.id == forward_function.entry)
         .expect("forward entry block should exist");
-    let HirTerminator::FallibleBranch { success_block, .. } = forward_entry.terminator else {
-        panic!("call argument propagation should branch before the outer call");
+    let HirTerminator::Invoke {
+        success: success_block,
+        ..
+    } = &forward_entry.terminator
+    else {
+        panic!("call argument propagation should invoke before the outer call");
     };
     let success_block = module
         .blocks
         .iter()
-        .find(|block| block.id == success_block)
+        .find(|block| block.id == *success_block)
         .expect("call argument propagation should create a success block");
 
     let entry_calls_consume = forward_entry.statements.iter().any(|statement| {
@@ -912,6 +1051,8 @@ fn runtime_binary_result_propagation_lowers_before_operator() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let can_fail_name = super::symbol("can_fail", &mut path_fork, &mut string_table);
     let forward_name = super::symbol("forward", &mut path_fork, &mut string_table);
     let value_name = path_fork
@@ -919,6 +1060,13 @@ fn runtime_binary_result_propagation_lowers_before_operator() {
         .expect("test path fits");
     let location = None;
 
+    let forty_one = i32_literal(
+        &mut builder,
+        &mut constants,
+        41,
+        location,
+        ValueMode::ImmutableOwned,
+    );
     let can_fail_function = function_node(
         can_fail_name,
         FunctionSignature {
@@ -928,27 +1076,37 @@ fn runtime_binary_result_propagation_lowers_before_operator() {
                 error_return_slot(builtin_type_ids::STRING),
             ],
         },
-        vec![node(
-            NodeKind::Return(vec![i32_literal(41, location, ValueMode::ImmutableOwned)]),
-            location,
-        )],
+        vec![node(NodeKind::Return(vec![forty_one]), location)],
         location,
     );
 
+    let call_item = runtime_handled_function_call_item(
+        &mut builder,
+        can_fail_name,
+        vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
+        builtin_type_ids::STRING,
+        FallibleHandling::Propagate,
+        location,
+    );
+    let one = i32_literal(
+        &mut builder,
+        &mut constants,
+        1,
+        location,
+        ValueMode::ImmutableOwned,
+    );
     let runtime_value = runtime_expr(
+        &mut builder,
+        &mut constants,
         vec![
-            runtime_handled_function_call_item(
-                can_fail_name,
-                vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
-                FallibleHandling::Propagate,
-                location,
-            ),
-            runtime_operand_item(i32_literal(1, location, ValueMode::ImmutableOwned)),
+            call_item,
+            runtime_operand_item(one),
             runtime_operator_item(Operator::Add, location),
         ],
         builtin_type_ids::fixed_scalar(FixedScalar::I32),
         location,
         ValueMode::MutableOwned,
+        &TypeEnvironment::new(),
     );
 
     let forward_function = function_node(
@@ -962,11 +1120,16 @@ fn runtime_binary_result_propagation_lowers_before_operator() {
         },
         vec![
             node(
-                NodeKind::VariableDeclaration(make_test_variable(value_name, runtime_value)),
+                NodeKind::VariableDeclaration(make_test_variable(
+                    value_name,
+                    runtime_value,
+                    &builder,
+                )),
                 location,
             ),
             node(
                 NodeKind::Return(vec![reference_expr_with_type_id(
+                    &mut builder,
                     value_name,
                     builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     location,
@@ -992,9 +1155,13 @@ fn runtime_binary_result_propagation_lowers_before_operator() {
         build_ast_with_registered_types(
             vec![can_fail_function, forward_function, start_function],
             entry_path,
+            builder,
+            constants,
+            TypeEnvironment::new(),
         ),
         &mut string_table,
         &mut path_fork,
+        &ExternalPackageRegistry::new(),
     )
     .expect("runtime binary propagation lowering should succeed");
 
@@ -1013,26 +1180,42 @@ fn runtime_binary_result_propagation_lowers_before_operator() {
         .iter()
         .find(|block| block.id == forward_function.entry)
         .expect("forward entry block should exist");
-    let HirTerminator::FallibleBranch { success_block, .. } = forward_entry.terminator else {
-        panic!("runtime binary propagation should branch before the numeric operator");
+    let HirTerminator::Invoke {
+        success: success_block,
+        ..
+    } = &forward_entry.terminator
+    else {
+        panic!("runtime binary propagation should invoke before the numeric operator");
     };
     let success_block = module
         .blocks
         .iter()
-        .find(|block| block.id == success_block)
+        .find(|block| block.id == *success_block)
         .expect("runtime binary propagation should create a success block");
 
     let entry_has_numeric_op = forward_entry
         .statements
         .iter()
         .any(|statement| matches!(statement.kind, HirStatementKind::NumericOp { .. }));
-    let success_has_add = success_block.statements.iter().any(|statement| {
+    let success_has_add = matches!(
+        &success_block.terminator,
+        HirTerminator::Invoke {
+            operation: HirFallibleOperation::NumericOp {
+                op: HirNumericOp {
+                    operator: NumericOperator::Add,
+                    domain: NumericScalar::Fixed(FixedScalar::I32),
+                },
+                ..
+            },
+            ..
+        }
+    ) || success_block.statements.iter().any(|statement| {
         matches!(
-            statement.kind,
+            &statement.kind,
             HirStatementKind::NumericOp {
                 op: HirNumericOp {
                     operator: NumericOperator::Add,
-                    domain: NumericScalar::Fixed(FixedScalar::I32)
+                    domain: NumericScalar::Fixed(FixedScalar::I32),
                 },
                 ..
             }
@@ -1051,23 +1234,27 @@ fn return_bang_lowers_to_explicit_error_terminator() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let can_fail_name = super::symbol("can_fail", &mut path_fork, &mut string_table);
     let location = None;
 
+    let boom = builder
+        .string_slice(
+            &mut constants,
+            string_table.intern("boom"),
+            location,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture string fits expression store")
+        .id();
     let can_fail_function = function_node(
         can_fail_name,
         FunctionSignature {
             parameters: vec![],
             returns: vec![error_return_slot(builtin_type_ids::STRING)],
         },
-        vec![node(
-            NodeKind::ReturnError(Expression::string_slice(
-                string_table.intern("boom"),
-                location,
-                ValueMode::ImmutableOwned,
-            )),
-            location,
-        )],
+        vec![node(NodeKind::ReturnError(boom), location)],
         location,
     );
 
@@ -1082,9 +1269,16 @@ fn return_bang_lowers_to_explicit_error_terminator() {
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast_with_registered_types(vec![can_fail_function, start_function], entry_path),
+        build_ast_with_registered_types(
+            vec![can_fail_function, start_function],
+            entry_path,
+            builder,
+            constants,
+            TypeEnvironment::new(),
+        ),
         &mut string_table,
         &mut path_fork,
+        &ExternalPackageRegistry::new(),
     )
     .expect("return! lowering should succeed");
 
@@ -1106,14 +1300,25 @@ fn return_bang_lowers_to_explicit_error_terminator() {
 }
 
 #[test]
-fn fallible_success_return_lowers_to_explicit_success_terminator() {
+fn fallible_success_return_preserves_success_slots_and_error_signature() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let can_succeed_name = super::symbol("can_succeed", &mut path_fork, &mut string_table);
     let location = None;
 
+    let ok_value = builder
+        .string_slice(
+            &mut constants,
+            string_table.intern("ok"),
+            location,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture string fits expression store")
+        .id();
     let can_succeed_function = function_node(
         can_succeed_name,
         FunctionSignature {
@@ -1123,14 +1328,7 @@ fn fallible_success_return_lowers_to_explicit_success_terminator() {
                 error_return_slot(builtin_type_ids::STRING),
             ],
         },
-        vec![node(
-            NodeKind::Return(vec![Expression::string_slice(
-                string_table.intern("ok"),
-                location,
-                ValueMode::ImmutableOwned,
-            )]),
-            location,
-        )],
+        vec![node(NodeKind::Return(vec![ok_value]), location)],
         location,
     );
 
@@ -1145,9 +1343,16 @@ fn fallible_success_return_lowers_to_explicit_success_terminator() {
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast_with_registered_types(vec![can_succeed_function, start_function], entry_path),
+        build_ast_with_registered_types(
+            vec![can_succeed_function, start_function],
+            entry_path,
+            builder,
+            constants,
+            TypeEnvironment::new(),
+        ),
         &mut string_table,
         &mut path_fork,
+        &ExternalPackageRegistry::new(),
     )
     .expect("fallible success return lowering should succeed");
 
@@ -1162,12 +1367,17 @@ fn fallible_success_return_lowers_to_explicit_success_terminator() {
         .find(|block| block.id == can_succeed_function.entry)
         .expect("fallible function entry block should exist");
 
+    assert_eq!(
+        can_succeed_function.returns.as_ref(),
+        &[builtin_type_ids::STRING]
+    );
+    assert_eq!(
+        can_succeed_function.error_return,
+        Some(builtin_type_ids::STRING)
+    );
     assert!(
-        matches!(
-            can_succeed_entry.terminator,
-            HirTerminator::ReturnSuccess(_)
-        ),
-        "success return in a fallible function should lower to a dedicated HIR success terminator"
+        matches!(&can_succeed_entry.terminator, HirTerminator::Return(values) if values.len() == 1),
+        "success return in a fallible function should preserve its ordinary ordered success slot"
     );
 }
 
@@ -1177,28 +1387,70 @@ fn statement_catch_handler_lowering_builds_explicit_result_branching() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let can_fail_name = super::symbol("can_fail", &mut path_fork, &mut string_table);
     let location = None;
     let error_binding = path_fork
         .try_intern_child(start_name, string_table.intern("err"))
         .expect("test path fits");
 
+    let boom = builder
+        .string_slice(
+            &mut constants,
+            string_table.intern("boom"),
+            location,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture string fits expression store")
+        .id();
     let can_fail_function = function_node(
         can_fail_name,
         FunctionSignature {
             parameters: vec![],
             returns: vec![error_return_slot(builtin_type_ids::STRING)],
         },
-        vec![node(
-            NodeKind::ReturnError(Expression::string_slice(
-                string_table.intern("boom"),
-                location,
-                ValueMode::ImmutableOwned,
-            )),
-            location,
-        )],
+        vec![node(NodeKind::ReturnError(boom), location)],
         location,
     );
+
+    let caught_call = builder
+        .handled_fallible_function_call_with_typed_arguments(
+            can_fail_name,
+            vec![],
+            vec![],
+            builtin_type_ids::STRING,
+            FallibleExpressionHandling::Recover,
+            location,
+        )
+        .expect("fixture handled call fits expression store")
+        .id();
+    // Parser-produced catches carry a resolved HandledByCatch disposition on the protected
+    // node; synthetic fixtures set it explicitly to match.
+    let mut caught_facts = builder
+        .view(caught_call)
+        .expect("fixture handled call belongs to builder")
+        .failure_facts()
+        .cloned()
+        .unwrap_or_default();
+    caught_facts.disposition = FailureDisposition::HandledByCatch {
+        error_type_id: builtin_type_ids::STRING,
+    };
+    let caught_call = builder
+        .with_failure_facts(builder.own(caught_call), caught_facts)
+        .expect("fixture handled call accepts catch disposition")
+        .id();
+    let caught_call = builder.own(caught_call);
+    let catch_expression = wrap_catch_expression(
+        &mut builder,
+        caught_call,
+        FallibleHandling::Handler {
+            error: Some(CatchErrorBinding { error_binding }),
+            body: vec![],
+        },
+        vec![],
+    )
+    .expect("fixture catch fits expression store");
 
     let start_function = function_node(
         start_name,
@@ -1207,68 +1459,99 @@ fn statement_catch_handler_lowering_builds_explicit_result_branching() {
             returns: vec![],
         },
         vec![node(
-            NodeKind::ExpressionStatement({
-                let mut caught_call = Expression::handled_fallible_function_call(
-                    can_fail_name,
-                    vec![],
-                    vec![],
-                    FallibleExpressionHandling::Recover,
-                    location,
-                );
-                // Parser-produced catches carry a resolved HandledByCatch disposition on the
-                // protected node; synthetic fixtures set it explicitly to match.
-                caught_call.failure_facts.disposition = FailureDisposition::HandledByCatch {
-                    error_type_id: builtin_type_ids::STRING,
-                };
-                wrap_catch_expression(
-                    caught_call,
-                    FallibleHandling::Handler {
-                        error: Some(CatchErrorBinding { error_binding }),
-                        body: vec![],
-                    },
-                    vec![],
-                )
-            }),
+            NodeKind::ExpressionStatement(catch_expression.id()),
             location,
         )],
         location,
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast_with_registered_types(vec![can_fail_function, start_function], entry_path),
+        build_ast_with_registered_types(
+            vec![can_fail_function, start_function],
+            entry_path,
+            builder,
+            constants,
+            TypeEnvironment::new(),
+        ),
         &mut string_table,
         &mut path_fork,
+        &ExternalPackageRegistry::new(),
     )
     .expect("catch-handler statement lowering should succeed");
 
-    let saw_fallible_branch = module
-        .blocks
-        .iter()
-        .any(|block| matches!(block.terminator, HirTerminator::FallibleBranch { .. }));
+    let start = &module.functions[module.start_function.expect("start function").0 as usize];
+    let entry = &module.blocks[start.entry.0 as usize];
+    let HirTerminator::Invoke {
+        failure,
+        error_result,
+        success_results,
+        ..
+    } = &entry.terminator
+    else {
+        panic!("catch handler should branch with an explicit Invoke");
+    };
+    assert!(success_results.is_empty());
+    let failure_block = &module.blocks[failure.0 as usize];
+    let HirTerminator::Jump {
+        target: handler,
+        args,
+    } = &failure_block.terminator
+    else {
+        panic!("failure edge should transfer its native error to the catch handler");
+    };
+    let [error_transfer] = args.as_slice() else {
+        panic!("failure edge should transfer exactly one error slot");
+    };
+    assert_eq!(error_transfer.source, *error_result);
     assert!(
-        saw_fallible_branch,
-        "expected catch-handler lowering to branch with an explicit fallible HIR terminator"
+        failure_block
+            .locals
+            .iter()
+            .any(|local| local.id == *error_result),
+        "the selected failure edge owns its error result"
     );
-
-    let saw_err_unwrap_assign = module.blocks.iter().any(|block| {
-        block.statements.iter().any(|statement| {
-            super::write_value(&module, statement).is_some_and(|value| {
-                matches!(&value.kind, HirExpressionKind::FallibleUnwrapError { .. })
-            })
-        })
-    });
+    let handler_block = &module.blocks[handler.0 as usize];
     assert!(
-        saw_err_unwrap_assign,
-        "expected catch-handler lowering to unwrap and bind the err branch payload"
+        handler_block
+            .locals
+            .iter()
+            .any(|local| local.id == error_transfer.destination),
+        "the handler owns its transferred error destination"
+    );
+    let error_bindings = handler_block
+        .statements
+        .iter()
+        .filter(|statement| {
+            let HirStatementKind::Write {
+                target: HirWriteTarget::DefineLocal(local),
+                value,
+            } = &statement.kind
+            else {
+                return false;
+            };
+            module
+                .side_table
+                .resolve_local_name(*local, &path_fork, &string_table)
+                == Some("err")
+                && matches!(&module.expressions.expression(*value).kind,
+                HirExpressionKind::Load(place)
+                    if place.root == error_transfer.destination && super::is_local_place(place))
+        })
+        .count();
+    assert_eq!(
+        error_bindings, 1,
+        "catch should bind the transferred native error once in its handler"
     );
 }
 
 #[test]
-fn multi_bind_lowering_projects_tuple_slots_from_single_rhs_call() {
+fn multi_bind_lowering_binds_ordered_slots_from_single_rhs_call() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let pair_name = super::symbol("pair", &mut path_fork, &mut string_table);
     let location = None;
 
@@ -1283,12 +1566,22 @@ fn multi_bind_lowering_projects_tuple_slots_from_single_rhs_call() {
         },
         vec![node(
             NodeKind::Return(vec![
-                i32_literal(1, location, ValueMode::ImmutableOwned),
-                Expression::string_slice(
-                    string_table.intern("value"),
+                i32_literal(
+                    &mut builder,
+                    &mut constants,
+                    1,
                     location,
                     ValueMode::ImmutableOwned,
                 ),
+                builder
+                    .string_slice(
+                        &mut constants,
+                        string_table.intern("value"),
+                        location,
+                        ValueMode::ImmutableOwned,
+                    )
+                    .expect("fixture string fits expression store")
+                    .id(),
             ]),
             location,
         )],
@@ -1326,15 +1619,18 @@ fn multi_bind_lowering_projects_tuple_slots_from_single_rhs_call() {
                         location,
                     ),
                 ],
-                value: Expression::function_call(
-                    pair_name,
-                    vec![],
-                    vec![
-                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
-                        builtin_type_ids::STRING,
-                    ],
-                    location,
-                ),
+                value: builder
+                    .function_call_with_typed_arguments(
+                        pair_name,
+                        vec![],
+                        vec![
+                            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                            builtin_type_ids::STRING,
+                        ],
+                        location,
+                    )
+                    .expect("fixture multi-bind call fits expression store")
+                    .id(),
             },
             location,
         )],
@@ -1342,9 +1638,16 @@ fn multi_bind_lowering_projects_tuple_slots_from_single_rhs_call() {
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast_with_registered_types(vec![pair_function, start_function], entry_path),
+        build_ast_with_registered_types(
+            vec![pair_function, start_function],
+            entry_path,
+            builder,
+            constants,
+            TypeEnvironment::new(),
+        ),
         &mut string_table,
         &mut path_fork,
+        &ExternalPackageRegistry::new(),
     )
     .expect("multi-bind lowering should succeed");
 
@@ -1359,23 +1662,28 @@ fn multi_bind_lowering_projects_tuple_slots_from_single_rhs_call() {
         "multi-bind RHS call should lower exactly once"
     );
 
-    let tuple_get_assignments = module
+    let call_results = module
         .blocks
         .iter()
         .flat_map(|block| block.statements.iter())
-        .filter(|statement| {
-            super::write_value(&module, statement)
-                .is_some_and(|value| matches!(&value.kind, HirExpressionKind::TupleGet { .. }))
+        .find_map(|statement| match &statement.kind {
+            HirStatementKind::Call { results, .. } => Some(results),
+            _ => None,
         })
-        .count();
-    assert_eq!(
-        tuple_get_assignments, 2,
-        "multi-bind lowering should stage both tuple slots before target writes"
-    );
+        .expect("multi-bind should emit its RHS call");
+    assert_eq!(call_results.len(), 2);
+    let result_locals = call_results
+        .iter()
+        .map(|result| match result {
+            HirLocalDestination::Define(local) => *local,
+            _ => panic!("multi-bind RHS should define fresh result bindings"),
+        })
+        .collect::<Vec<_>>();
 
     let start = &module.functions[module.start_function.expect("start function").0 as usize];
     let entry = &module.blocks[start.entry.0 as usize];
-    for name in ["left", "right"] {
+    for (name, result) in ["left", "right"].iter().zip(result_locals) {
+        let staged = staged_result_local(&module, entry, result);
         let local = entry
             .locals
             .iter()
@@ -1383,7 +1691,7 @@ fn multi_bind_lowering_projects_tuple_slots_from_single_rhs_call() {
                 module
                     .side_table
                     .resolve_local_name(local.id, &path_fork, &string_table)
-                    == Some(name)
+                    == Some(*name)
             })
             .expect("multi-bind declaration should own its authored local");
         let definitions = entry
@@ -1394,8 +1702,12 @@ fn multi_bind_lowering_projects_tuple_slots_from_single_rhs_call() {
                     &statement.kind,
                     HirStatementKind::Write {
                         target: HirWriteTarget::DefineLocal(target),
-                        ..
-                    } if *target == local.id
+                        value,
+                    } if *target == local.id && matches!(
+                        &module.expressions.expression(*value).kind,
+                        HirExpressionKind::Load(place)
+                            if place.root == staged && super::is_local_place(place)
+                    )
                 )
             })
             .count();
@@ -1403,5 +1715,275 @@ fn multi_bind_lowering_projects_tuple_slots_from_single_rhs_call() {
             definitions, 1,
             "multi-bind declaration {name} should define once"
         );
+    }
+}
+
+#[test]
+fn multi_value_then_snapshots_earlier_scalar_before_later_mutation() {
+    let mut path_fork = super::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let (entry_path, start_name) =
+        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let count = super::symbol("count", &mut path_fork, &mut string_table);
+    let bump = super::symbol("bump", &mut path_fork, &mut string_table);
+    let input = path_fork
+        .try_intern_child(bump, string_table.intern("input"))
+        .expect("test parameter path should fit");
+    let scalar_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
+    let bump_target = assignment_target(
+        &mut builder,
+        input,
+        DataType::FixedScalar(FixedScalar::I32),
+        scalar_type,
+        None,
+    );
+    let bump_value = i32_literal(
+        &mut builder,
+        &mut constants,
+        2,
+        None,
+        ValueMode::ImmutableOwned,
+    );
+    let bump_return = reference_expr_with_type_id(
+        &mut builder,
+        input,
+        scalar_type,
+        None,
+        ValueMode::ImmutableReference,
+    );
+    let bump_function = function_node(
+        bump,
+        FunctionSignature {
+            parameters: vec![param_with_type_id(input, scalar_type, true, None)],
+            returns: fresh_success_returns(vec![scalar_type]),
+        },
+        vec![
+            node(
+                NodeKind::Assignment {
+                    target: bump_target,
+                    value: bump_value,
+                },
+                None,
+            ),
+            node(NodeKind::Return(vec![bump_return]), None),
+        ],
+        None,
+    );
+    let count_snapshot = reference_expr_with_type_id(
+        &mut builder,
+        count,
+        scalar_type,
+        None,
+        ValueMode::ImmutableReference,
+    );
+    let bump_argument = reference_expr_with_type_id(
+        &mut builder,
+        count,
+        scalar_type,
+        None,
+        ValueMode::MutableReference,
+    );
+    let bump_call = builder
+        .function_call_with_typed_arguments(
+            bump,
+            vec![CallArgument::positional(
+                builder.own(bump_argument),
+                CallAccessMode::Mutable,
+                None,
+            )],
+            vec![scalar_type],
+            None,
+        )
+        .expect("fixture call fits expression store")
+        .id();
+    let produced = ProducedValues {
+        expressions: vec![count_snapshot, bump_call],
+        span: None,
+    };
+    let flag = super::symbol("flag", &mut path_fork, &mut string_table);
+    let flag_value = builder
+        .bool(&mut constants, true, None, ValueMode::ImmutableOwned)
+        .expect("fixture bool fits expression store")
+        .id();
+    let flag_decl = node(
+        NodeKind::VariableDeclaration(make_test_variable(flag, flag_value, &builder)),
+        None,
+    );
+    let condition = reference_expr_with_type_id(
+        &mut builder,
+        flag,
+        builtin_type_ids::BOOL,
+        None,
+        ValueMode::ImmutableReference,
+    );
+    let else_first = i32_literal(
+        &mut builder,
+        &mut constants,
+        0,
+        None,
+        ValueMode::ImmutableOwned,
+    );
+    let else_second = i32_literal(
+        &mut builder,
+        &mut constants,
+        0,
+        None,
+        ValueMode::ImmutableOwned,
+    );
+    let value_if_success = builder
+        .success_from_slots(vec![scalar_type, scalar_type], None)
+        .expect("fixture value-if success fits store");
+    let value_if = builder
+        .value_block(
+            ValueBlock::If(ValueIfBlock {
+                condition,
+                then_body: vec![node(NodeKind::ThenValue(produced), None)],
+                else_body: vec![node(
+                    NodeKind::ThenValue(ProducedValues {
+                        expressions: vec![else_first, else_second],
+                        span: None,
+                    }),
+                    None,
+                )],
+                then_scope: entry_path,
+                else_scope: entry_path,
+                span: None,
+                generic_request_ranges: Default::default(),
+                result_type_ids: vec![scalar_type, scalar_type],
+            }),
+            None,
+            value_if_success,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture value block fits expression store")
+        .id();
+    let start_initial = i32_literal(
+        &mut builder,
+        &mut constants,
+        1,
+        None,
+        ValueMode::MutableOwned,
+    );
+    let start_function = function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: fresh_success_returns(vec![scalar_type, scalar_type]),
+        },
+        vec![
+            flag_decl,
+            node(
+                NodeKind::VariableDeclaration(make_test_variable(count, start_initial, &builder)),
+                None,
+            ),
+            node(NodeKind::Return(vec![value_if]), None),
+        ],
+        None,
+    );
+    let (module, _) = lower_ast(
+        build_ast_with_registered_types(
+            vec![bump_function, start_function],
+            entry_path,
+            builder,
+            constants,
+            TypeEnvironment::new(),
+        ),
+        &mut string_table,
+        &mut path_fork,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("multi-value then with later mutation should lower");
+    let start = &module.functions[module.start_function.expect("start function").0 as usize];
+    let entry = &module.blocks[start.entry.0 as usize];
+    let count_local = entry
+        .locals
+        .iter()
+        .find(|local| {
+            module
+                .side_table
+                .resolve_local_name(local.id, &path_fork, &string_table)
+                == Some("count")
+        })
+        .expect("count should be an authored mutable local")
+        .id;
+    let branch = module
+        .blocks
+        .iter()
+        .find(|block| {
+            block.statements.iter().any(|statement| {
+                matches!(&statement.kind,
+            HirStatementKind::Call { target: CallTarget::Local(function), .. }
+                if module.side_table.function_name_path(*function) == Some(bump))
+            })
+        })
+        .expect("then branch should execute bump");
+    let (call_position, call_results) = branch
+        .statements
+        .iter()
+        .enumerate()
+        .find_map(|(index, statement)| match &statement.kind {
+            HirStatementKind::Call { results, .. } => Some((index, results)),
+            _ => None,
+        })
+        .expect("then branch should contain bump call");
+    let [HirLocalDestination::Define(second_result)] = call_results.as_slice() else {
+        panic!("bump should define one result");
+    };
+    let HirTerminator::Jump { target, args } = &branch.terminator else {
+        panic!("then should transfer ordered slots to its join");
+    };
+    assert_eq!(args.len(), 2);
+    let first_snapshot = branch.statements.iter().position(|statement| matches!(
+        &statement.kind,
+        HirStatementKind::Write { target: HirWriteTarget::DefineLocal(local), value }
+            if *local == args[0].source && matches!(&module.expressions.expression(*value).kind,
+                HirExpressionKind::Load(place)
+                    if place.root == count_local && super::is_local_place(place))
+    )).expect("first slot should snapshot count");
+    assert!(
+        first_snapshot < call_position,
+        "the first scalar value must be read before the second producer mutates count"
+    );
+    assert!(
+        branch
+            .statements
+            .iter()
+            .enumerate()
+            .any(|(index, statement)| {
+                index > call_position
+                    && matches!(&statement.kind,
+            HirStatementKind::Write { target: HirWriteTarget::DefineLocal(local), value }
+                if *local == args[1].source && matches!(&module.expressions.expression(*value).kind,
+                    HirExpressionKind::Load(place)
+                        if place.root == *second_result && super::is_local_place(place)))
+            }),
+        "second slot should snapshot the later call result"
+    );
+    let join = &module.blocks[target.0 as usize];
+    for argument in args {
+        assert!(
+            join.locals
+                .iter()
+                .any(|local| local.id == argument.destination),
+            "join destinations must be owned by the target block"
+        );
+        assert!(
+            !branch
+                .locals
+                .iter()
+                .any(|local| local.id == argument.destination)
+        );
+    }
+    let HirTerminator::Return(return_values) = &join.terminator else {
+        panic!("join should return the ordered success slots");
+    };
+    let return_values = module.expressions.values(*return_values);
+    assert_eq!(return_values.len(), args.len());
+    for (value, argument) in return_values.iter().zip(args) {
+        assert!(matches!(&module.expressions.expression(*value).kind,
+            HirExpressionKind::Load(place)
+                if place.root == argument.destination && super::is_local_place(place)));
     }
 }

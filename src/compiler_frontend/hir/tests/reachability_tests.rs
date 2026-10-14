@@ -8,6 +8,7 @@ use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::compiler_errors::ErrorType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalFunctionId};
 use crate::compiler_frontend::hir::blocks::HirBlock;
@@ -16,16 +17,20 @@ use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKin
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, HirValueId, RegionId};
 use crate::compiler_frontend::hir::module::HirModule;
-use crate::compiler_frontend::hir::numeric::NumericFailureMode;
+use crate::compiler_frontend::hir::numeric::{
+    HirNumericOp, HirNumericOperands, NumericFailureMode,
+};
 use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern};
 use crate::compiler_frontend::hir::reachability::{
-    HirReachability, ReachableFloatStatementKind, ReachableMapUseKind,
+    HirReachability, ReachableFloatStatementKind, ReachableMapUseKind, ReachableNumericDelivery,
     collect_module_function_link_facts, collect_reachability_from_function_link_facts,
 };
 use crate::compiler_frontend::hir::statements::{
     HirLocalDestination, HirStatement, HirStatementKind,
 };
-use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
+use crate::compiler_frontend::hir::terminators::{
+    HirAssertionMessageEvaluation, HirFallibleOperation, HirTerminator,
+};
 use crate::compiler_frontend::hir::{expressions::ValueKind, ids::LocalId};
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::resource_identity::{
@@ -62,7 +67,7 @@ fn start_reachability_ignores_unreachable_function_external_calls() {
                     CallTarget::External(reachable_external_function),
                     reachable_location,
                 )],
-                HirTerminator::Return(unit_expression(0)),
+                HirTerminator::Return(HirValueRange::empty()),
             ),
             block(
                 BlockId(1),
@@ -71,7 +76,7 @@ fn start_reachability_ignores_unreachable_function_external_calls() {
                     CallTarget::External(unreachable_external_function),
                     unreachable_location,
                 )],
-                HirTerminator::Return(unit_expression(1)),
+                HirTerminator::Return(HirValueRange::empty()),
             ),
         ],
     );
@@ -112,7 +117,7 @@ fn reachable_collection_push_call_sites_preserve_ids_and_duplicates() {
                     repeated_growable_location,
                 ),
             ],
-            HirTerminator::Return(unit_expression(0)),
+            HirTerminator::Return(HirValueRange::empty()),
         )],
     );
 
@@ -156,12 +161,12 @@ fn user_function_calls_make_transitive_functions_and_external_calls_reachable() 
             block(
                 BlockId(1),
                 vec![],
-                HirTerminator::Return(unit_expression(1)),
+                HirTerminator::Return(HirValueRange::empty()),
             ),
             block(
                 BlockId(2),
                 vec![call_statement(1, CallTarget::External(external_function))],
-                HirTerminator::Return(unit_expression(2)),
+                HirTerminator::Return(HirValueRange::empty()),
             ),
         ],
     );
@@ -192,7 +197,7 @@ fn per_function_facts_build_the_exact_reachable_union() {
             block(
                 BlockId(0),
                 vec![call_statement(0, CallTarget::Local(FunctionId(1)))],
-                HirTerminator::Return(unit_expression(0)),
+                HirTerminator::Return(HirValueRange::empty()),
             ),
             block(
                 BlockId(1),
@@ -200,7 +205,7 @@ fn per_function_facts_build_the_exact_reachable_union() {
                     1,
                     CallTarget::External(reachable_external_function),
                 )],
-                HirTerminator::Return(unit_expression(1)),
+                HirTerminator::Return(HirValueRange::empty()),
             ),
             block(
                 BlockId(2),
@@ -208,7 +213,7 @@ fn per_function_facts_build_the_exact_reachable_union() {
                     2,
                     CallTarget::External(unreachable_external_function),
                 )],
-                HirTerminator::Return(unit_expression(2)),
+                HirTerminator::Return(HirValueRange::empty()),
             ),
         ],
     );
@@ -254,17 +259,17 @@ fn reachable_function_provenance_unions_only_reachable_functions() {
             block(
                 BlockId(0),
                 vec![call_statement(0, CallTarget::Local(FunctionId(1)))],
-                HirTerminator::Return(unit_expression(0)),
+                HirTerminator::Return(HirValueRange::empty()),
             ),
             block(
                 BlockId(1),
                 Vec::new(),
-                HirTerminator::Return(unit_expression(1)),
+                HirTerminator::Return(HirValueRange::empty()),
             ),
             block(
                 BlockId(2),
                 Vec::new(),
-                HirTerminator::Return(unit_expression(2)),
+                HirTerminator::Return(HirValueRange::empty()),
             ),
         ],
     );
@@ -326,17 +331,17 @@ fn first_project_context_function_preserves_breadth_first_direct_provenance() {
                     call_statement(0, CallTarget::Local(FunctionId(1))),
                     call_statement(1, CallTarget::Local(FunctionId(2))),
                 ],
-                HirTerminator::Return(unit_expression(0)),
+                HirTerminator::Return(HirValueRange::empty()),
             ),
             block(
                 BlockId(1),
                 Vec::new(),
-                HirTerminator::Return(unit_expression(1)),
+                HirTerminator::Return(HirValueRange::empty()),
             ),
             block(
                 BlockId(2),
                 Vec::new(),
-                HirTerminator::Return(unit_expression(2)),
+                HirTerminator::Return(HirValueRange::empty()),
             ),
         ],
     );
@@ -387,7 +392,7 @@ fn function_link_facts_reject_missing_function_provenance() {
         vec![block(
             BlockId(0),
             Vec::new(),
-            HirTerminator::Return(unit_expression(0)),
+            HirTerminator::Return(HirValueRange::empty()),
         )],
     );
     let mut module_without_provenance = module;
@@ -422,7 +427,7 @@ fn retained_block_facts_preserve_cross_function_breadth_first_diagnostic_order()
                     call_statement(0, CallTarget::Local(FunctionId(1))),
                     call_statement(1, CallTarget::Local(FunctionId(2))),
                 ],
-                HirTerminator::Return(unit_expression(0)),
+                HirTerminator::Return(HirValueRange::empty()),
             ),
             block(
                 BlockId(1),
@@ -442,7 +447,7 @@ fn retained_block_facts_preserve_cross_function_breadth_first_diagnostic_order()
                     ),
                     map_statement_at(4, HirMapOp::Contains, second_callee_location),
                 ],
-                HirTerminator::Return(unit_expression(2)),
+                HirTerminator::Return(HirValueRange::empty()),
             ),
             block(
                 BlockId(3),
@@ -454,7 +459,7 @@ fn retained_block_facts_preserve_cross_function_breadth_first_diagnostic_order()
                     ),
                     map_statement_at(5, HirMapOp::Clear, first_callee_successor_location),
                 ],
-                HirTerminator::Return(unit_expression(3)),
+                HirTerminator::Return(HirValueRange::empty()),
             ),
         ],
     );
@@ -492,7 +497,7 @@ fn backend_selection_rejects_a_detached_cfg_with_colliding_ids() {
         vec![block(
             BlockId(0),
             vec![],
-            HirTerminator::Return(unit_expression(0)),
+            HirTerminator::Return(HirValueRange::empty()),
         )],
     );
     let source_reachability = collect_test_reachability(&source_module, &[FunctionId(0)])
@@ -512,7 +517,7 @@ fn backend_selection_rejects_a_detached_cfg_with_colliding_ids() {
             block(
                 BlockId(1),
                 vec![],
-                HirTerminator::Return(unit_expression(1)),
+                HirTerminator::Return(HirValueRange::empty()),
             ),
         ],
     );
@@ -533,7 +538,7 @@ fn backend_selection_rejects_a_detached_call_graph_with_colliding_ids() {
         vec![block(
             BlockId(0),
             vec![],
-            HirTerminator::Return(unit_expression(0)),
+            HirTerminator::Return(HirValueRange::empty()),
         )],
     );
     let source_reachability = collect_test_reachability(&source_module, &[FunctionId(0)])
@@ -548,12 +553,12 @@ fn backend_selection_rejects_a_detached_call_graph_with_colliding_ids() {
             block(
                 BlockId(0),
                 vec![call_statement(0, CallTarget::Local(FunctionId(1)))],
-                HirTerminator::Return(unit_expression(0)),
+                HirTerminator::Return(HirValueRange::empty()),
             ),
             block(
                 BlockId(1),
                 vec![],
-                HirTerminator::Return(unit_expression(1)),
+                HirTerminator::Return(HirValueRange::empty()),
             ),
         ],
     );
@@ -592,10 +597,16 @@ fn cfg_successors_cover_branch_match_break_continue_and_terminal_edges() {
             block(
                 BlockId(2),
                 vec![],
-                HirTerminator::FallibleBranch {
-                    result: bool_expression(1),
-                    success_block: BlockId(4),
-                    error_block: BlockId(5),
+                HirTerminator::Invoke {
+                    id: HirNodeId(100),
+                    span: None,
+                    operation: HirFallibleOperation::ValidateFloat {
+                        source: float_expression(3),
+                    },
+                    success: BlockId(4),
+                    success_results: vec![LocalId(100)],
+                    failure: BlockId(5),
+                    error_result: LocalId(101),
                 },
             ),
             block(
@@ -619,7 +630,7 @@ fn cfg_successors_cover_branch_match_break_continue_and_terminal_edges() {
             block(
                 BlockId(6),
                 vec![],
-                HirTerminator::ReturnSuccess(unit_expression(3)),
+                HirTerminator::Return(HirValueRange::empty()),
             ),
             block(
                 BlockId(7),
@@ -675,7 +686,7 @@ fn custom_roots_are_supported_without_using_module_start() {
             block(
                 BlockId(0),
                 vec![],
-                HirTerminator::Return(unit_expression(0)),
+                HirTerminator::Return(HirValueRange::empty()),
             ),
             block(
                 BlockId(1),
@@ -684,7 +695,7 @@ fn custom_roots_are_supported_without_using_module_start() {
                     CallTarget::External(external_function),
                     call_site_location,
                 )],
-                HirTerminator::Return(unit_expression(1)),
+                HirTerminator::Return(HirValueRange::empty()),
             ),
         ],
     );
@@ -717,7 +728,7 @@ fn reachability_records_reachable_map_uses_only() {
                     },
                     map_statement_at(11, HirMapOp::Contains, operation_location),
                 ],
-                HirTerminator::Return(unit_expression(0)),
+                HirTerminator::Return(HirValueRange::empty()),
             ),
             block(
                 BlockId(1),
@@ -729,7 +740,7 @@ fn reachability_records_reachable_map_uses_only() {
                     },
                     map_statement_at(13, HirMapOp::Clear, unreachable_location),
                 ],
-                HirTerminator::Return(unit_expression(1)),
+                HirTerminator::Return(HirValueRange::empty()),
             ),
         ],
     );
@@ -797,7 +808,7 @@ fn reachability_records_ordered_resource_and_site_root_uses_per_owner() {
                         second_location,
                     ),
                 ],
-                HirTerminator::Return(unit_expression(0)),
+                HirTerminator::Return(HirValueRange::empty()),
             ),
             block(
                 BlockId(1),
@@ -807,7 +818,7 @@ fn reachability_records_ordered_resource_and_site_root_uses_per_owner() {
                     vec![ConstStringPiece::Resource(resource_id)],
                     unreachable_location,
                 )],
-                HirTerminator::Return(unit_expression(1)),
+                HirTerminator::Return(HirValueRange::empty()),
             ),
         ],
         expressions,
@@ -935,7 +946,7 @@ fn reachability_records_ordered_resource_and_site_root_uses_across_blocks() {
                     ],
                     after_branch_location,
                 )],
-                HirTerminator::Return(unit_expression(4)),
+                HirTerminator::Return(HirValueRange::empty()),
             ),
         ],
         expressions,
@@ -1074,15 +1085,10 @@ fn hir_module_with_expressions(
 
 fn test_expression_store() -> HirExpressionStore {
     let mut expressions = HirExpressionStore::default();
-    let empty_values = expressions
-        .append_values(&[], None)
-        .expect("empty tuple values should append");
     expressions
         .append_expression(HirExpression {
-            kind: HirExpressionKind::TupleConstruct {
-                elements: empty_values,
-            },
-            ty: builtin_type_ids::NONE,
+            kind: HirExpressionKind::Bool(false),
+            ty: builtin_type_ids::BOOL,
             value_kind: ValueKind::RValue,
             region: RegionId(0),
             span: None,
@@ -1168,7 +1174,8 @@ fn function(id: FunctionId, entry: BlockId) -> HirFunction {
         id,
         entry,
         params: vec![],
-        return_type: builtin_type_ids::NONE,
+        returns: Box::new([]),
+        error_return: None,
     }
 }
 
@@ -1226,7 +1233,7 @@ fn call_statement_at(id: u32, target: CallTarget, span: Option<SourceSpan>) -> H
         kind: HirStatementKind::Call {
             target,
             args: HirValueRange::empty(),
-            result: None::<HirLocalDestination>,
+            results: vec![],
         },
         span,
     }
@@ -1308,7 +1315,7 @@ fn reachability_records_reachable_runtime_casts_only() {
                     kind: HirStatementKind::Expr(cast_expression(10)),
                     span: None,
                 }],
-                HirTerminator::Return(unit_expression(0)),
+                HirTerminator::Return(HirValueRange::empty()),
             ),
             block(
                 BlockId(1),
@@ -1317,7 +1324,7 @@ fn reachability_records_reachable_runtime_casts_only() {
                     kind: HirStatementKind::Expr(cast_expression(11)),
                     span: None,
                 }],
-                HirTerminator::Return(unit_expression(1)),
+                HirTerminator::Return(HirValueRange::empty()),
             ),
         ],
     );
@@ -1355,7 +1362,7 @@ fn reachability_records_reachable_float_statements_only() {
                     ReachableFloatStatementKind::FormatFloat,
                     reachable_location,
                 )],
-                HirTerminator::Return(unit_expression(0)),
+                HirTerminator::Return(HirValueRange::empty()),
             ),
             block(
                 BlockId(1),
@@ -1364,7 +1371,7 @@ fn reachability_records_reachable_float_statements_only() {
                     ReachableFloatStatementKind::ValidateFloat,
                     unreachable_location,
                 )],
-                HirTerminator::Return(unit_expression(1)),
+                HirTerminator::Return(HirValueRange::empty()),
             ),
         ],
     );
@@ -1537,4 +1544,167 @@ fn external_id_sort_key(id: &ExternalFunctionId) -> String {
         ExternalFunctionId::CollectionLength => "builtin:collection_length".to_owned(),
         ExternalFunctionId::Synthetic(id) => format!("synthetic:{id}"),
     }
+}
+
+#[test]
+fn invoke_calls_retain_call_facts_and_both_successors() {
+    let external = ExternalFunctionId::Synthetic(900);
+    let span = call_site_span(30, 4);
+    let module = hir_module(
+        FunctionId(0),
+        vec![
+            function(FunctionId(0), BlockId(0)),
+            function(FunctionId(1), BlockId(3)),
+        ],
+        vec![
+            block(
+                BlockId(0),
+                vec![],
+                HirTerminator::Invoke {
+                    id: HirNodeId(0),
+                    span,
+                    operation: HirFallibleOperation::Call {
+                        target: CallTarget::Local(FunctionId(1)),
+                        args: HirValueRange::empty(),
+                    },
+                    success: BlockId(1),
+                    success_results: vec![],
+                    failure: BlockId(2),
+                    error_result: LocalId(0),
+                },
+            ),
+            block(
+                BlockId(1),
+                vec![],
+                HirTerminator::Return(HirValueRange::empty()),
+            ),
+            block(
+                BlockId(2),
+                vec![call_statement_at(1, CallTarget::External(external), span)],
+                HirTerminator::Return(HirValueRange::empty()),
+            ),
+            block(
+                BlockId(3),
+                vec![],
+                HirTerminator::Return(HirValueRange::empty()),
+            ),
+        ],
+    );
+    let facts = collect_module_function_link_facts(&module).expect("Invoke facts should collect");
+    assert_eq!(
+        facts.direct_call_targets(),
+        vec![(FunctionId(0), CallTarget::Local(FunctionId(1)))]
+    );
+    let reachable = collect_reachability_from_function_link_facts(&facts, &[FunctionId(0)])
+        .expect("Invoke successors and callee should remain reachable");
+    assert_reachability(&reachable, &[0, 1], &[0, 1, 2, 3], &[external]);
+    assert_reachable_external_calls(&reachable, &[(external, span)]);
+}
+
+#[test]
+fn invoke_numeric_facts_preserve_exact_domain_and_recoverable_delivery() {
+    let op = HirNumericOp {
+        operator: NumericOperator::Add,
+        domain: NumericScalar::Fixed(FixedScalar::I32),
+    };
+    let span = call_site_span(40, 2);
+    let module = hir_module(
+        FunctionId(0),
+        vec![function(FunctionId(0), BlockId(0))],
+        vec![
+            block(
+                BlockId(0),
+                vec![],
+                HirTerminator::Invoke {
+                    id: HirNodeId(0),
+                    span,
+                    operation: HirFallibleOperation::NumericOp {
+                        op,
+                        operands: HirNumericOperands::Binary {
+                            left: int_expression(2),
+                            right: int_expression(2),
+                        },
+                    },
+                    success: BlockId(1),
+                    success_results: vec![LocalId(0)],
+                    failure: BlockId(2),
+                    error_result: LocalId(1),
+                },
+            ),
+            block(
+                BlockId(1),
+                vec![],
+                HirTerminator::Return(HirValueRange::empty()),
+            ),
+            block(
+                BlockId(2),
+                vec![],
+                HirTerminator::Return(HirValueRange::empty()),
+            ),
+        ],
+    );
+    let reachable = collect_test_reachability(&module, &[FunctionId(0)])
+        .expect("numeric Invoke should retain both edges");
+    assert_reachability(&reachable, &[0], &[0, 1, 2], &[]);
+    assert_eq!(reachable.reachable_numeric_ops.len(), 1);
+    let operation = &reachable.reachable_numeric_ops[0];
+    assert_eq!(operation.op, op);
+    assert_eq!(operation.delivery, ReachableNumericDelivery::Invoke);
+    assert_eq!(operation.span, span);
+}
+
+#[test]
+fn invoke_map_operations_retain_map_facts_and_operand_uses() {
+    let span = call_site_span(45, 3);
+    let mut expressions = test_expression_store();
+    let receiver_statement =
+        structural_string_statement(&mut expressions, 0, vec![ConstStringPiece::SiteRoot], span);
+    let HirStatementKind::Expr(receiver) = receiver_statement.kind else {
+        unreachable!("structural string fixture produces an expression");
+    };
+    let module = hir_module_with_expressions(
+        FunctionId(0),
+        vec![function(FunctionId(0), BlockId(0))],
+        vec![
+            block(
+                BlockId(0),
+                vec![],
+                HirTerminator::Invoke {
+                    id: HirNodeId(0),
+                    span,
+                    operation: HirFallibleOperation::MapOp {
+                        op: HirMapOp::Get,
+                        receiver,
+                        args: HirValueRange::empty(),
+                    },
+                    success: BlockId(1),
+                    success_results: vec![LocalId(0)],
+                    failure: BlockId(2),
+                    error_result: LocalId(1),
+                },
+            ),
+            block(
+                BlockId(1),
+                vec![],
+                HirTerminator::Return(HirValueRange::empty()),
+            ),
+            block(
+                BlockId(2),
+                vec![],
+                HirTerminator::Return(HirValueRange::empty()),
+            ),
+        ],
+        expressions,
+    );
+    let reachable = collect_test_reachability(&module, &[FunctionId(0)])
+        .expect("native map Invoke should retain both edges");
+    assert_reachability(&reachable, &[0], &[0, 1, 2], &[]);
+    assert_eq!(reachable.reachable_map_uses.len(), 1);
+    assert_eq!(
+        reachable.reachable_map_uses[0].kind,
+        ReachableMapUseKind::Operation(HirMapOp::Get)
+    );
+    assert_eq!(reachable.reachable_map_uses[0].span, span);
+    assert_eq!(reachable.reachable_site_root_uses.len(), 1);
+    assert_eq!(reachable.reachable_site_root_uses[0].span, span);
 }

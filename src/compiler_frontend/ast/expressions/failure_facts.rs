@@ -4,8 +4,7 @@
 //! classifier collects origin witnesses once for function projection; folding discharges only
 //! the checked work it owns. Catch disposition protects work, never its handler.
 
-use super::expression::ExpressionKind;
-use super::expression_rpn::ExpressionRpnItem;
+use super::expression_store::{ExpressionOperationView, ExpressionView};
 use super::expression_types::{CastHandling, FallibleExpressionHandling, ResolvedCastEvidence};
 use crate::compiler_frontend::builtins::casts::policies::builtin_cast_failure_codes;
 use crate::compiler_frontend::builtins::casts::targets::{
@@ -14,10 +13,6 @@ use crate::compiler_frontend::builtins::casts::targets::{
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::compiler_messages::BuiltinFailureWitness;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::datatypes::numeric_operators::{
-    NumericOperator, numeric_failure_codes, numeric_operation_cannot_fail,
-};
-use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringId;
@@ -243,7 +238,7 @@ impl FailureSummary {
         }
     }
 
-    fn record_implicit(&mut self, contributor: ImplicitFailureContributor) {
+    pub(crate) fn record_implicit(&mut self, contributor: ImplicitFailureContributor) {
         let witness = Some(ImplicitFailureContributorSummary {
             span: contributor.span,
         });
@@ -285,26 +280,27 @@ impl ExpressionFailureFacts {
         self.summary.merge_from(&other.summary);
     }
 
+    /// Authored eligibility that a folded constant keeps from the operation it replaced.
+    ///
+    /// WHAT: copies only the pending `checked_numeric_operation`, `authored_cast` and saturated
+    ///       safety call count; origins, witnesses and deferred checks stay with their producers.
+    /// WHY: a folded root cannot fail at runtime, so it owns no origins, but a `catch` on the
+    ///      folded value must still see the authored checked operation or cast it replaced.
+    pub(crate) fn folded_constant_eligibility(&self) -> Self {
+        if self.disposition != FailureDisposition::Pending {
+            return Self::default();
+        }
+        Self {
+            checked_numeric_operation: self.checked_numeric_operation,
+            authored_cast: self.authored_cast,
+            safety_call_count: self.safety_call_count,
+            ..Self::default()
+        }
+    }
+
     pub(crate) fn record_implicit(&mut self, contributor: ImplicitFailureContributor) {
         self.summary.record_implicit(contributor);
         self.implicit.push(contributor);
-    }
-
-    /// Rebuild implicit summaries after constant folding discharges checked operators.
-    ///
-    /// Eligibility metadata is deliberately left untouched: an authored operation remains
-    /// catch-eligible even when its runtime failure origin was folded away.
-    pub(crate) fn retain_implicit_contributors(
-        &mut self,
-        mut retain: impl FnMut(&ImplicitFailureContributor) -> bool,
-    ) {
-        self.implicit.retain(|contributor| retain(contributor));
-        self.summary.first_implicit = None;
-        self.summary.first_numeric = None;
-        self.summary.first_private_call = None;
-        for contributor in &self.implicit {
-            self.summary.record_implicit(*contributor);
-        }
     }
 
     pub(crate) fn record_typed_error(&mut self, producer: TypedErrorProducer) {
@@ -313,16 +309,6 @@ impl ExpressionFailureFacts {
             ..FailureSummary::default()
         });
         self.typed_error = Some(producer);
-    }
-
-    /// Folding transfers surviving authored eligibility and witnesses to the reduced expression.
-    pub(crate) fn take_origin_work_from(&mut self, mut other: Self) {
-        self.checked_numeric_operation |= other.checked_numeric_operation;
-        self.authored_cast |= other.authored_cast;
-        self.safety_call_count = self.safety_call_count.max(other.safety_call_count);
-        for contributor in other.implicit.drain(..) {
-            self.record_implicit(contributor);
-        }
     }
 
     pub(crate) fn has_authored_safety_catch_eligibility(&self) -> bool {
@@ -344,186 +330,204 @@ impl ExpressionFailureFacts {
         self.safety_call_count = self.safety_call_count.saturating_add(count).min(2);
     }
 
-    pub(crate) fn record_numeric_operation(
-        &mut self,
-        operator: NumericOperator,
-        left: NumericScalar,
-        right: Option<NumericScalar>,
-        domain: NumericScalar,
+    /// Summaries join evaluated children in authored order; witnesses stay at their origin row.
+    pub(crate) fn from_operation(
+        operation: ExpressionOperationView<'_>,
         span: Option<SourceSpan>,
-    ) {
-        // Semantically proven-safe operations stay catch-eligible (an eligible handler does not
-        // become invalid because proof removes its runtime path) but record no contributor, so
-        // no failure edge or boundary diagnostic follows.
-        self.checked_numeric_operation = true;
-        if numeric_operation_cannot_fail(operator, left, right, domain) {
-            return;
-        }
-        let codes = numeric_failure_codes(operator, domain);
-        if codes.is_empty() {
-            return;
-        }
-        self.record_implicit(ImplicitFailureContributor {
-            span,
-            codes,
-            source: ImplicitFailureSource::NumericOperation,
-        });
-    }
-
-    /// Aggregate actual evaluated children, not references to their declaration initialisers.
-    pub(crate) fn from_expression_kind(kind: &ExpressionKind, span: Option<SourceSpan>) -> Self {
+    ) -> Self {
+        use ExpressionOperationView as V;
         let mut facts = Self::default();
-        match kind {
-            ExpressionKind::Runtime(rpn) => {
-                for item in &rpn.items {
-                    // Pending syntax never survives evaluation. This infallible aggregation runs
-                    // inside `Expression::new` for every constructed expression, so it ignores
-                    // pending items like operators; fallible consumers report the broken
-                    // invariant when they visit them.
-                    if let ExpressionRpnItem::Operand(value) = item {
-                        facts.merge_pending_from(&value.failure_facts);
-                        facts.add_call_count(value.failure_facts.safety_call_count);
-                    }
+        match operation {
+            V::NumericUnary {
+                operand,
+                facts: operation,
+            } => {
+                facts.merge_child(operand, true);
+                facts.checked_numeric_operation = true;
+                if let Some(contributor) = operation.failure {
+                    facts.record_implicit(contributor);
                 }
             }
-            ExpressionKind::FunctionCall { args, .. }
-            | ExpressionKind::HostFunctionCall { args, .. }
-            | ExpressionKind::HandledFallibleFunctionCall { args, .. }
-            | ExpressionKind::HandledFallibleHostFunctionCall { args, .. } => {
+            V::NumericBinary {
+                left,
+                right,
+                facts: operation,
+            }
+            | V::Compare {
+                left,
+                right,
+                facts: operation,
+            }
+            | V::Range {
+                start: left,
+                end: right,
+                facts: operation,
+            } => {
+                facts.merge_child(left, true);
+                facts.merge_child(right, true);
+                facts.checked_numeric_operation |= operation.operator.numeric_operator().is_some();
+                if let Some(contributor) = operation.failure {
+                    facts.record_implicit(contributor);
+                }
+            }
+            V::LogicalNot { operand } => facts.merge_child(operand, true),
+            V::LogicalBinary { left, right, .. } => {
+                facts.merge_child(left, true);
+                facts.merge_child(right, true);
+            }
+            V::Call(call) => {
                 facts.safety_call_count = 1;
-                for argument in args {
-                    facts.merge_pending_from(&argument.value.failure_facts);
+                for argument in call.arguments().iter() {
+                    facts.merge_child(argument.value(), false);
+                }
+                if let Some(handling) = call.handling()
+                    && handling.handling == FallibleExpressionHandling::Propagate
+                {
+                    facts.postfix_exit_span = handling.propagation_span.or(span);
                 }
             }
-            ExpressionKind::MethodCall { receiver, args, .. }
-            | ExpressionKind::CollectionBuiltinCall { receiver, args, .. }
-            | ExpressionKind::MapBuiltinCall { receiver, args, .. } => {
-                facts.safety_call_count = receiver.failure_facts.safety_call_count;
+            V::MethodCall { receiver, call } => {
+                facts.merge_child(receiver, true);
                 facts.add_call_count(1);
-                facts.merge_pending_from(&receiver.failure_facts);
-                for argument in args {
-                    facts.merge_pending_from(&argument.value.failure_facts);
+                for argument in call.arguments().iter() {
+                    facts.merge_child(argument.value(), false);
+                }
+                if let Some(handling) = call.handling()
+                    && handling.handling == FallibleExpressionHandling::Propagate
+                {
+                    facts.postfix_exit_span = facts
+                        .postfix_exit_span
+                        .or(handling.propagation_span.or(span));
                 }
             }
-            ExpressionKind::FieldAccess { base, .. }
-            | ExpressionKind::Coerced { value: base, .. }
-            | ExpressionKind::OptionPropagation { value: base } => {
-                facts.safety_call_count = base.failure_facts.safety_call_count;
-                facts.merge_pending_from(&base.failure_facts);
+            V::CollectionBuiltin {
+                receiver,
+                arguments,
+                ..
             }
-            ExpressionKind::HandledFallibleExpression { value, .. } => {
-                facts.safety_call_count = value.failure_facts.safety_call_count;
-                facts.merge_pending_from(&value.failure_facts);
+            | V::MapBuiltin {
+                receiver,
+                arguments,
+                ..
+            } => {
+                facts.merge_child(receiver, true);
+                facts.add_call_count(1);
+                for argument in arguments.iter() {
+                    facts.merge_child(argument.value(), false);
+                }
             }
-            ExpressionKind::Cast(cast) => {
-                let is_store_conversion = matches!(cast.handling, CastHandling::StoreConversion);
-                facts.authored_cast = !is_store_conversion;
-                facts.safety_call_count = cast.source.failure_facts.safety_call_count;
-
-                if cast.fallibility == BuiltinCastFallibility::Fallible {
-                    if is_store_conversion {
-                        if let ResolvedCastEvidence::Builtin { policy } = &cast.evidence
-                            && matches!(policy, BuiltinCastPolicyId::NumericConversion { .. })
-                        {
-                            let codes = builtin_cast_failure_codes(*policy, cast.fallibility);
-                            if !codes.is_empty() {
-                                facts.record_implicit(ImplicitFailureContributor {
-                                    span,
-                                    codes,
-                                    source: ImplicitFailureSource::CompoundWriteBack {
-                                        target: cast.target_type_id,
-                                        arithmetic_span: cast
-                                            .source
-                                            .failure_facts
-                                            .implicit
-                                            .iter()
-                                            .rev()
-                                            .find(|contributor| {
-                                                matches!(
-                                                    contributor.source,
-                                                    ImplicitFailureSource::NumericOperation
-                                                )
-                                            })
-                                            .and_then(|contributor| contributor.span),
-                                    },
-                                });
-                            }
+            V::FieldAccess { base, .. } | V::Coerce { value: base, .. } => {
+                facts.merge_child(base, true)
+            }
+            V::PropagateOption { value } => {
+                facts.merge_child(value, true);
+                facts.postfix_exit_span = facts.postfix_exit_span.or(span);
+            }
+            V::HandleFallible { value, handling } => {
+                facts.merge_child(value, true);
+                if handling.handling == FallibleExpressionHandling::Propagate {
+                    // Only this producer's channel is consumed. Argument failures remain pending.
+                    if let Some(producer) =
+                        value.failure_facts().and_then(|child| child.typed_error)
+                    {
+                        if facts.summary.first_typed == Some(producer) {
+                            facts.summary.first_typed = facts.summary.conflicting_typed.take();
+                        } else if facts.summary.conflicting_typed == Some(producer) {
+                            facts.summary.conflicting_typed = None;
                         }
-                    } else {
-                        let codes = match &cast.evidence {
-                            ResolvedCastEvidence::Builtin { policy } => {
-                                builtin_cast_failure_codes(*policy, cast.fallibility)
-                            }
-                            ResolvedCastEvidence::UserDefined { .. }
-                            | ResolvedCastEvidence::GenericBound { .. } => &[],
-                        };
+                    }
+                    facts.postfix_exit_span = facts
+                        .postfix_exit_span
+                        .or(handling.propagation_span.or(span));
+                }
+            }
+            V::Cast {
+                source,
+                facts: cast,
+            } => {
+                let store_conversion = cast.handling == CastHandling::StoreConversion;
+                facts.merge_child(source, true);
+                facts.authored_cast |= !store_conversion;
+                if cast.fallibility == BuiltinCastFallibility::Fallible {
+                    let codes = match &cast.evidence {
+                        ResolvedCastEvidence::Builtin { policy } => {
+                            builtin_cast_failure_codes(*policy, cast.fallibility)
+                        }
+                        _ => &[],
+                    };
+                    if !store_conversion {
                         facts.record_implicit(ImplicitFailureContributor {
                             span,
                             codes,
                             source: ImplicitFailureSource::AuthoredCastConversion,
                         });
+                    } else if matches!(
+                        cast.evidence,
+                        ResolvedCastEvidence::Builtin {
+                            policy: BuiltinCastPolicyId::NumericConversion { .. }
+                        }
+                    ) && !codes.is_empty()
+                    {
+                        let arithmetic_span = match source.operation() {
+                            V::NumericUnary { facts, .. } | V::NumericBinary { facts, .. } => {
+                                facts.failure.and_then(|origin| origin.span)
+                            }
+                            _ => source
+                                .failure_facts()
+                                .and_then(|child| {
+                                    child.implicit.iter().rev().find(|origin| {
+                                        origin.source == ImplicitFailureSource::NumericOperation
+                                    })
+                                })
+                                .and_then(|origin| origin.span),
+                        };
+                        facts.record_implicit(ImplicitFailureContributor {
+                            span,
+                            codes,
+                            source: ImplicitFailureSource::CompoundWriteBack {
+                                target: cast.target_type_id,
+                                arithmetic_span,
+                            },
+                        });
                     }
                 }
-                facts.merge_pending_from(&cast.source.failure_facts);
             }
-            ExpressionKind::Collection(values) => {
-                for value in values {
-                    facts.merge_pending_from(&value.failure_facts);
-                    facts.add_call_count(value.failure_facts.safety_call_count);
+            V::Collection(values) => {
+                for value in values.iter() {
+                    facts.merge_child(value, true);
                 }
             }
-            ExpressionKind::MapLiteral(entries) => {
-                for entry in entries {
-                    facts.merge_pending_from(&entry.key.failure_facts);
-                    facts.add_call_count(entry.key.failure_facts.safety_call_count);
-                    facts.merge_pending_from(&entry.value.failure_facts);
-                    facts.add_call_count(entry.value.failure_facts.safety_call_count);
+            V::Map(entries) => {
+                for entry in entries.iter() {
+                    facts.merge_child(entry.key(), true);
+                    facts.merge_child(entry.value(), true);
                 }
             }
-            ExpressionKind::StructInstance(fields)
-            | ExpressionKind::AnonymousConstRecord { fields }
-            | ExpressionKind::ChoiceConstruct { fields, .. } => {
-                // Constructor fields are arguments: an argument expression keeps its own
-                // call-count level, so calls inside one never raise this occurrence's count.
-                for field in fields {
-                    facts.merge_pending_from(&field.value.failure_facts);
+            V::Struct { fields } | V::Choice { fields, .. } => {
+                for field in fields.iter() {
+                    facts.merge_child(field.value(), false);
                 }
             }
-            ExpressionKind::Range(start, end) => {
-                facts.merge_pending_from(&start.failure_facts);
-                facts.add_call_count(start.failure_facts.safety_call_count);
-                facts.merge_pending_from(&end.failure_facts);
-                facts.add_call_count(end.failure_facts.safety_call_count);
-            }
-            #[cfg(test)]
-            ExpressionKind::FallibleCarrierConstruct { value, .. } => {
-                facts.safety_call_count = value.failure_facts.safety_call_count;
-                facts.merge_pending_from(&value.failure_facts);
-            }
-            // Template and value-block payloads need their owning store-aware completion walker.
-            _ => {}
+            // These payloads have store-aware completion walkers. Constant/reference rows do
+            // not inherit the eligibility or witnesses of their declaration's initializer.
+            V::Constant(_)
+            | V::Reference(_)
+            | V::Copy(_)
+            | V::ValueBlock(_)
+            | V::Template(_)
+            | V::RuntimeTemplate(_)
+            | V::RuntimeSlotApplication(_) => {}
         }
-        let own_exit_span = match kind {
-            ExpressionKind::HandledFallibleFunctionCall {
-                handling: FallibleExpressionHandling::Propagate,
-                propagation_span,
-                ..
-            }
-            | ExpressionKind::HandledFallibleHostFunctionCall {
-                handling: FallibleExpressionHandling::Propagate,
-                propagation_span,
-                ..
-            }
-            | ExpressionKind::HandledFallibleExpression {
-                handling: FallibleExpressionHandling::Propagate,
-                propagation_span,
-                ..
-            } => propagation_span.or(span),
-            ExpressionKind::OptionPropagation { .. } => span,
-            _ => None,
-        };
-        facts.postfix_exit_span = facts.postfix_exit_span.or(own_exit_span);
         facts
+    }
+
+    fn merge_child(&mut self, child: ExpressionView<'_>, count_calls: bool) {
+        if let Some(other) = child.failure_facts() {
+            self.merge_pending_from(other);
+            if count_calls {
+                self.add_call_count(other.safety_call_count);
+            }
+        }
     }
 }
 

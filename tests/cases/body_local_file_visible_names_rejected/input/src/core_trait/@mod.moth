@@ -1,0 +1,4 @@
+local_binding || -> I32:
+    CASTABLE_TO_I32 = 1
+    return CASTABLE_TO_I32
+;

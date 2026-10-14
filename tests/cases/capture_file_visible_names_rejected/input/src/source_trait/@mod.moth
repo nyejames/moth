@@ -1,0 +1,6 @@
+capture_binding |maybe I32?| -> I32:
+    return if maybe is |ACTIVE| then ACTIVE else 0
+;
+
+ACTIVE must:
+;

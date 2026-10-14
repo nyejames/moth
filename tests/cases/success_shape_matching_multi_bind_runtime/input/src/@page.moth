@@ -1,0 +1,15 @@
+pair |calls ~I32, first I32, second I32| -> I32, I32:
+    calls += 1
+    return second, first
+;
+
+
+
+calls ~= 0
+[:before-bind calls=[calls]]
+inferred_first, inferred_second = pair(~calls, 20, 10)
+[:inferred-bind first=[inferred_first] second=[inferred_second] calls=[calls]]
+first ~I32, second ~I32 = pair(~calls, inferred_second, inferred_first)
+[:typed-bind first=[first] second=[second] calls=[calls]]
+first, second = pair(~calls, first, second)
+[:after-assignment first=[first] second=[second] calls=[calls]]

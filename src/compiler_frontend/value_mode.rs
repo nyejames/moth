@@ -9,7 +9,7 @@
 //! This is not the final runtime ownership flag model. Runtime ownership remains a later lowering
 //! concern driven by borrow/last-use analysis.
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ValueMode {
     MutableOwned,
     MutableReference,
@@ -27,7 +27,7 @@ impl ValueMode {
         match self {
             Self::MutableReference => Self::MutableOwned,
             Self::ImmutableReference => Self::ImmutableOwned,
-            _ => self.clone(),
+            _ => *self,
         }
     }
 }

@@ -20,7 +20,8 @@ use super::builder::TemplateIrBuilder;
 use super::support::{
     expand_tir_slot_placeholders, wrap_tir_node_in_wrapper_references, wrap_tir_node_in_wrappers,
 };
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{
     SlotKey, Style, TemplateSegmentOrigin, TemplateType,
@@ -40,8 +41,15 @@ fn slot_summary(slot_count: u32) -> TemplateIrSummary {
     }
 }
 
-fn bool_expression(value: bool) -> Expression {
-    Expression::bool(value, None, ValueMode::ImmutableOwned)
+fn bool_expression(
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    value: bool,
+) -> ExprId {
+    expressions
+        .bool(const_values, value, None, ValueMode::ImmutableOwned)
+        .expect("test bool should construct")
+        .id()
 }
 
 fn build_single_slot_template(store: &mut TemplateIrStore, key: SlotKey) -> TemplateIrId {
@@ -518,11 +526,13 @@ fn schema_from_conditional_containing_slot() {
     let name_id = string_table.intern("branch_slot");
 
     let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut builder = TemplateIrBuilder::new(&mut store);
 
     let conditional_body_slot = builder.push_slot_node(SlotKey::Named(name_id), None);
     let conditional = builder.push_conditional_node(
-        TemplateBranchSelector::Bool(bool_expression(true)),
+        TemplateBranchSelector::Bool(bool_expression(&mut expressions, &mut const_values, true)),
         conditional_body_slot,
         None,
     );
@@ -549,12 +559,14 @@ fn schema_from_loop_containing_slot() {
     let name_id = string_table.intern("loop_slot");
 
     let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut builder = TemplateIrBuilder::new(&mut store);
 
     let body_slot = builder.push_slot_node(SlotKey::Named(name_id), None);
     let loop_node = builder.push_loop_node(
         TemplateLoopHeader::Conditional {
-            condition: Box::new(bool_expression(true)),
+            condition: bool_expression(&mut expressions, &mut const_values, true),
         },
         body_slot,
         None,
@@ -580,13 +592,15 @@ fn schema_from_loop_containing_slot() {
 #[test]
 fn loose_fill_target_prefers_positional_slot_after_default_in_conditional_body() {
     let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut builder = TemplateIrBuilder::new(&mut store);
 
     let default_slot = builder.push_slot_node(SlotKey::Default, None);
     let positional_slot = builder.push_slot_node(SlotKey::Positional(2), None);
     let body = builder.push_sequence_node(vec![default_slot, positional_slot], None);
     let root = builder.push_conditional_node(
-        TemplateBranchSelector::Bool(bool_expression(true)),
+        TemplateBranchSelector::Bool(bool_expression(&mut expressions, &mut const_values, true)),
         body,
         None,
     );
@@ -616,6 +630,8 @@ fn loose_fill_target_prefers_positional_slot_after_default_in_conditional_body()
 #[test]
 fn loose_fill_target_prefers_aggregate_positional_slot_after_loop_body_default() {
     let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut builder = TemplateIrBuilder::new(&mut store);
 
     let body_default_slot = builder.push_slot_node(SlotKey::Default, None);
@@ -623,7 +639,7 @@ fn loose_fill_target_prefers_aggregate_positional_slot_after_loop_body_default()
     let aggregate_wrapper = builder.push_sequence_node(vec![aggregate_positional_slot], None);
     let root = builder.push_loop_node(
         TemplateLoopHeader::Conditional {
-            condition: Box::new(bool_expression(true)),
+            condition: bool_expression(&mut expressions, &mut const_values, true),
         },
         body_default_slot,
         Some(aggregate_wrapper),
@@ -759,6 +775,8 @@ fn skipped_node_kinds_do_not_contribute_to_schema() {
     let text_id = string_table.intern("literal");
 
     let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
 
     // Push the aggregate node directly via the store so the builder borrow is
     // not active while mutating the store through a second path.
@@ -771,7 +789,10 @@ fn skipped_node_kinds_do_not_contribute_to_schema() {
 
     let text_len = string_table.resolve(text_id).len();
     let text_node = builder.push_text_node(text_id, text_len, TemplateSegmentOrigin::Body, None);
-    let expression = Expression::string_slice(text_id, None, ValueMode::ImmutableOwned);
+    let expression = expressions
+        .string_slice(&mut const_values, text_id, None, ValueMode::ImmutableOwned)
+        .expect("test string literal should construct")
+        .id();
     let dynamic_node =
         builder.push_dynamic_expression_node(expression, TemplateSegmentOrigin::Body, None);
     let root = builder.push_sequence_node(vec![text_node, dynamic_node, aggregate_node], None);
@@ -1440,6 +1461,8 @@ fn expand_routes_each_slot_key_branch_to_its_contribution() {
     let mut string_table = StringTable::new();
     let name = string_table.intern("title");
     let mut store = TemplateIrStore::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
 
     let wrapper = build_wrapper_with_slot_sequence(
         &mut store,
@@ -1464,8 +1487,15 @@ fn expand_routes_each_slot_key_branch_to_its_contribution() {
         positional_nodes: [(0, vec![positional_node])].into_iter().collect(),
     };
 
-    let expanded_root = expand_tir_slot_placeholders(&mut store, wrapper, &routed, &string_table)
-        .expect("expansion should succeed");
+    let expanded_root = expand_tir_slot_placeholders(
+        &mut store,
+        &expressions,
+        &const_values,
+        wrapper,
+        &routed,
+        &string_table,
+    )
+    .expect("expansion should succeed");
 
     let children = root_child_node_ids_for_node(expanded_root, &store);
     assert_eq!(
@@ -1480,13 +1510,22 @@ fn missing_slot_renders_as_empty() {
     let mut string_table = StringTable::new();
     let name = string_table.intern("missing");
     let mut store = TemplateIrStore::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
 
     let wrapper = build_wrapper_with_slot_sequence(&mut store, vec![SlotKey::Named(name)]);
 
     let routed = TirSlotContributions::default();
 
-    let expanded_root = expand_tir_slot_placeholders(&mut store, wrapper, &routed, &string_table)
-        .expect("expansion should succeed");
+    let expanded_root = expand_tir_slot_placeholders(
+        &mut store,
+        &expressions,
+        &const_values,
+        wrapper,
+        &routed,
+        &string_table,
+    )
+    .expect("expansion should succeed");
 
     // A named slot with no routed contributions expands to a fresh empty
     // Sequence node, not the original placeholder and not a dropped child.
@@ -1509,6 +1548,8 @@ fn missing_slot_renders_as_empty() {
 fn expansion_missing_wrapper_set_produces_internal_error() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
     let placeholder = TirSlotPlaceholder::with_wrapper_sets(
         SlotKey::Default,
         store.next_slot_occurrence_id(),
@@ -1534,8 +1575,15 @@ fn expansion_missing_wrapper_set_produces_internal_error() {
         ..TirSlotContributions::default()
     };
 
-    let error = expand_tir_slot_placeholders(&mut store, wrapper, &routed, &string_table)
-        .expect_err("missing wrapper sets must fail slot expansion");
+    let error = expand_tir_slot_placeholders(
+        &mut store,
+        &expressions,
+        &const_values,
+        wrapper,
+        &routed,
+        &string_table,
+    )
+    .expect_err("missing wrapper sets must fail slot expansion");
 
     assert_internal_authority_error(&error, "placeholder referenced a missing wrapper set");
 }
@@ -1544,6 +1592,8 @@ fn expansion_missing_wrapper_set_produces_internal_error() {
 fn expansion_missing_conditional_wrapper_set_produces_internal_error() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let placeholder = TirSlotPlaceholder::with_wrapper_sets(
         SlotKey::Default,
         store.next_slot_occurrence_id(),
@@ -1571,7 +1621,11 @@ fn expansion_missing_conditional_wrapper_set_produces_internal_error() {
             None,
         );
         builder.push_conditional_node(
-            TemplateBranchSelector::Bool(bool_expression(true)),
+            TemplateBranchSelector::Bool(bool_expression(
+                &mut expressions,
+                &mut const_values,
+                true,
+            )),
             body,
             None,
         )
@@ -1581,8 +1635,15 @@ fn expansion_missing_conditional_wrapper_set_produces_internal_error() {
         ..TirSlotContributions::default()
     };
 
-    let error = expand_tir_slot_placeholders(&mut store, wrapper, &routed, &string_table)
-        .expect_err("missing conditional wrapper sets must fail slot expansion");
+    let error = expand_tir_slot_placeholders(
+        &mut store,
+        &expressions,
+        &const_values,
+        wrapper,
+        &routed,
+        &string_table,
+    )
+    .expect_err("missing conditional wrapper sets must fail slot expansion");
 
     assert_internal_authority_error(&error, "conditional child wrapper set ID");
 }
@@ -1591,6 +1652,8 @@ fn expansion_missing_conditional_wrapper_set_produces_internal_error() {
 fn repeated_slot_replays_same_contributions() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
 
     let wrapper =
         build_wrapper_with_slot_sequence(&mut store, vec![SlotKey::Default, SlotKey::Default]);
@@ -1602,8 +1665,15 @@ fn repeated_slot_replays_same_contributions() {
         ..TirSlotContributions::default()
     };
 
-    let expanded_root = expand_tir_slot_placeholders(&mut store, wrapper, &routed, &string_table)
-        .expect("expansion should succeed");
+    let expanded_root = expand_tir_slot_placeholders(
+        &mut store,
+        &expressions,
+        &const_values,
+        wrapper,
+        &routed,
+        &string_table,
+    )
+    .expect("expansion should succeed");
 
     let root_children = root_child_node_ids_for_node(expanded_root, &store);
     assert_eq!(
@@ -1627,6 +1697,8 @@ fn nested_child_template_clone_vs_reuse_by_slot_presence() {
     let mut string_table = StringTable::new();
     let name = string_table.intern("inner");
     let mut store = TemplateIrStore::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
 
     let slot_bearing_child =
         build_wrapper_with_slot_sequence(&mut store, vec![SlotKey::Named(name)]);
@@ -1654,9 +1726,15 @@ fn nested_child_template_clone_vs_reuse_by_slot_presence() {
         ..TirSlotContributions::default()
     };
 
-    let expanded_root =
-        expand_tir_slot_placeholders(&mut store, parent_wrapper, &routed, &string_table)
-            .expect("expansion should succeed");
+    let expanded_root = expand_tir_slot_placeholders(
+        &mut store,
+        &expressions,
+        &const_values,
+        parent_wrapper,
+        &routed,
+        &string_table,
+    )
+    .expect("expansion should succeed");
 
     let parent_children = root_child_node_ids_for_node(expanded_root, &store);
     assert_eq!(
@@ -1719,6 +1797,8 @@ fn nested_child_slot_expansion_preserves_phase_context_wrapper_set_and_slot_plan
     let mut string_table = StringTable::new();
     let name = string_table.intern("inner");
     let mut store = TemplateIrStore::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
 
     let slot_bearing_child =
         build_wrapper_with_slot_sequence(&mut store, vec![SlotKey::Named(name)]);
@@ -1726,7 +1806,6 @@ fn nested_child_slot_expansion_preserves_phase_context_wrapper_set_and_slot_plan
     let slot_plan_id = store.push_slot_plan(TemplateSlotPlan {
         contribution_sources: vec![],
         slot_sites: vec![],
-        span: None,
     });
     {
         let child_template = store
@@ -1775,9 +1854,15 @@ fn nested_child_slot_expansion_preserves_phase_context_wrapper_set_and_slot_plan
         ..TirSlotContributions::default()
     };
 
-    let expanded_root =
-        expand_tir_slot_placeholders(&mut store, parent_wrapper, &routed, &string_table)
-            .expect("expansion should succeed");
+    let expanded_root = expand_tir_slot_placeholders(
+        &mut store,
+        &expressions,
+        &const_values,
+        parent_wrapper,
+        &routed,
+        &string_table,
+    )
+    .expect("expansion should succeed");
     let parent_children = root_child_node_ids_for_node(expanded_root, &store);
     assert_eq!(parent_children.len(), 1);
 
@@ -1817,6 +1902,8 @@ fn nested_child_slot_expansion_preserves_phase_context_wrapper_set_and_slot_plan
 fn wrapper_application_preserves_only_authorised_structural_context() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
     let wrapper = build_wrapper_with_slot_sequence(&mut store, vec![SlotKey::Default]);
     let child = build_single_text_template(&mut store, &mut string_table, "child");
     let child_node = build_child_template_node_for_template(&mut store, child);
@@ -1839,6 +1926,8 @@ fn wrapper_application_preserves_only_authorised_structural_context() {
         TemplateWrapperReference::new(wrapper, TemplateTirPhase::Parsed, context);
     let parsed_result = wrap_tir_node_in_wrapper_references(
         &mut store,
+        &expressions,
+        &const_values,
         child_node,
         &[parsed_reference],
         &string_table,
@@ -1880,6 +1969,8 @@ fn wrapper_application_preserves_only_authorised_structural_context() {
     );
     let composed_result = wrap_tir_node_in_wrapper_references(
         &mut store,
+        &expressions,
+        &const_values,
         child_node,
         &[composed_reference],
         &string_table,
@@ -1899,6 +1990,8 @@ fn wrapper_application_preserves_only_authorised_structural_context() {
 fn slotless_wrapper_application_preserves_complete_reference_identity() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
     let wrapper = build_single_text_template(&mut store, &mut string_table, "prefix");
     let child = build_single_text_template(&mut store, &mut string_table, "child");
     let child_node = build_child_template_node_for_template(&mut store, child);
@@ -1921,9 +2014,15 @@ fn slotless_wrapper_application_preserves_complete_reference_identity() {
         },
     );
 
-    let wrapped =
-        wrap_tir_node_in_wrapper_references(&mut store, child_node, &[reference], &string_table)
-            .expect("slotless wrapper should apply");
+    let wrapped = wrap_tir_node_in_wrapper_references(
+        &mut store,
+        &expressions,
+        &const_values,
+        child_node,
+        &[reference],
+        &string_table,
+    )
+    .expect("slotless wrapper should apply");
     let derived_reference = expect_child_template_reference(wrapped, &store);
     assert_ne!(derived_reference.root, wrapper);
     assert_eq!(derived_reference.phase, reference.phase);
@@ -1956,6 +2055,8 @@ fn slotless_wrapper_application_preserves_complete_reference_identity() {
 fn conditional_with_slot_in_body_is_expanded() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
 
     let occurrence_id = store.next_slot_occurrence_id();
     let placeholder =
@@ -1967,7 +2068,7 @@ fn conditional_with_slot_in_body_is_expanded() {
 
     let mut builder = TemplateIrBuilder::new(&mut store);
     let conditional = builder.push_conditional_node(
-        TemplateBranchSelector::Bool(bool_expression(true)),
+        TemplateBranchSelector::Bool(bool_expression(&mut expressions, &mut const_values, true)),
         body_slot,
         None,
     );
@@ -1986,8 +2087,15 @@ fn conditional_with_slot_in_body_is_expanded() {
         ..TirSlotContributions::default()
     };
 
-    let expanded_root = expand_tir_slot_placeholders(&mut store, wrapper, &routed, &string_table)
-        .expect("expansion should succeed");
+    let expanded_root = expand_tir_slot_placeholders(
+        &mut store,
+        &expressions,
+        &const_values,
+        wrapper,
+        &routed,
+        &string_table,
+    )
+    .expect("expansion should succeed");
 
     let expanded_conditional_body = match &store
         .get_node(expanded_root)
@@ -2021,12 +2129,14 @@ fn conditional_with_slot_in_body_is_expanded() {
 fn loop_with_slots_in_body_is_expanded() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
 
     let mut builder = TemplateIrBuilder::new(&mut store);
     let body_slot = builder.push_slot_node(SlotKey::Default, None);
     let loop_node = builder.push_loop_node(
         TemplateLoopHeader::Conditional {
-            condition: Box::new(bool_expression(true)),
+            condition: bool_expression(&mut expressions, &mut const_values, true),
         },
         body_slot,
         None,
@@ -2047,8 +2157,15 @@ fn loop_with_slots_in_body_is_expanded() {
         ..TirSlotContributions::default()
     };
 
-    let expanded_root = expand_tir_slot_placeholders(&mut store, wrapper, &routed, &string_table)
-        .expect("expansion should succeed");
+    let expanded_root = expand_tir_slot_placeholders(
+        &mut store,
+        &expressions,
+        &const_values,
+        wrapper,
+        &routed,
+        &string_table,
+    )
+    .expect("expansion should succeed");
 
     let expanded_loop = match &store
         .get_node(expanded_root)
@@ -2079,6 +2196,8 @@ fn loop_with_slots_in_body_is_expanded() {
 fn no_slots_in_wrapper_returns_original_root() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
 
     let wrapper = build_single_text_template(&mut store, &mut string_table, "plain");
     let original_root = store
@@ -2088,8 +2207,15 @@ fn no_slots_in_wrapper_returns_original_root() {
 
     let routed = TirSlotContributions::default();
 
-    let expanded_root = expand_tir_slot_placeholders(&mut store, wrapper, &routed, &string_table)
-        .expect("expansion should succeed");
+    let expanded_root = expand_tir_slot_placeholders(
+        &mut store,
+        &expressions,
+        &const_values,
+        wrapper,
+        &routed,
+        &string_table,
+    )
+    .expect("expansion should succeed");
 
     assert_eq!(
         expanded_root, original_root,
@@ -2101,6 +2227,8 @@ fn no_slots_in_wrapper_returns_original_root() {
 fn expand_preserves_non_slot_nodes() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
 
     let text_id = string_table.intern("literal");
     let text_len = string_table.resolve(text_id).len();
@@ -2119,11 +2247,14 @@ fn expand_preserves_non_slot_nodes() {
         None,
     ));
 
-    let expression = Expression::string_slice(text_id, None, ValueMode::ImmutableOwned);
+    let expression = expressions
+        .string_slice(&mut const_values, text_id, None, ValueMode::ImmutableOwned)
+        .expect("test string literal should construct")
+        .id();
     let site_id = store.next_expression_site_id();
     let dynamic_node = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::DynamicExpression {
-            expression: Box::new(expression),
+            expression,
             origin: TemplateSegmentOrigin::Body,
             site_id,
         },
@@ -2132,7 +2263,6 @@ fn expand_preserves_non_slot_nodes() {
 
     let runtime_slot_plan_id = store.push_slot_plan(
         crate::compiler_frontend::ast::templates::tir::slot_plan::TemplateSlotPlan {
-            span: None,
             contribution_sources: vec![],
             slot_sites: vec![],
         },
@@ -2185,8 +2315,15 @@ fn expand_preserves_non_slot_nodes() {
         ..TirSlotContributions::default()
     };
 
-    let expanded_root = expand_tir_slot_placeholders(&mut store, wrapper, &routed, &string_table)
-        .expect("expansion should succeed");
+    let expanded_root = expand_tir_slot_placeholders(
+        &mut store,
+        &expressions,
+        &const_values,
+        wrapper,
+        &routed,
+        &string_table,
+    )
+    .expect("expansion should succeed");
 
     let child_kinds = root_child_kinds_for_node(expanded_root, &store);
     let child_ids = root_child_node_ids_for_node(expanded_root, &store);
@@ -2237,6 +2374,8 @@ fn expand_preserves_non_slot_nodes() {
 fn single_receiver_routes_head_and_body_fill_in_authored_order() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
 
     let wrapper = build_wrapper_with_slot_sequence(&mut store, vec![SlotKey::Default]);
     let wrapper_node = build_child_template_node_for_template(&mut store, wrapper);
@@ -2256,8 +2395,15 @@ fn single_receiver_routes_head_and_body_fill_in_authored_order() {
     let template_id =
         build_template_with_children(&mut store, vec![wrapper_node, head_fill, body_fill]);
 
-    let composed_root = compose_tir_head_chain(&mut store, template_id, &string_table, false)
-        .expect("composition should succeed");
+    let composed_root = compose_tir_head_chain(
+        &mut store,
+        &expressions,
+        &const_values,
+        template_id,
+        &string_table,
+        false,
+    )
+    .expect("composition should succeed");
 
     let composed_children = root_child_node_ids_for_node(composed_root, &store);
     assert_eq!(
@@ -2294,6 +2440,8 @@ fn head_chain_receiver_collects_one_slot_layout() {
 
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
     let wrapper = build_wrapper_with_slot_sequence(&mut store, vec![SlotKey::Default]);
     let wrapper_node = build_child_template_node_for_template(&mut store, wrapper);
     let fill = build_text_node(
@@ -2305,8 +2453,15 @@ fn head_chain_receiver_collects_one_slot_layout() {
     let template_id = build_template_with_children(&mut store, vec![wrapper_node, fill]);
 
     reset_ast_counters();
-    compose_tir_head_chain(&mut store, template_id, &string_table, false)
-        .expect("head-chain composition should succeed");
+    compose_tir_head_chain(
+        &mut store,
+        &expressions,
+        &const_values,
+        template_id,
+        &string_table,
+        false,
+    )
+    .expect("head-chain composition should succeed");
 
     assert_eq!(
         test_read_ast_counter(AstCounter::TirSlotSchemaWalks),
@@ -2319,6 +2474,8 @@ fn head_chain_receiver_collects_one_slot_layout() {
 fn composed_wrapper_published_summary_matches_the_expanded_tree() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
 
     let wrapper = build_text_slot_text_wrapper(&mut store, &mut string_table, SlotKey::Default);
     let wrapper_node = build_child_template_node_for_template(&mut store, wrapper);
@@ -2330,8 +2487,15 @@ fn composed_wrapper_published_summary_matches_the_expanded_tree() {
     );
     let template_id = build_template_with_children(&mut store, vec![wrapper_node, fill]);
 
-    let composed_root = compose_tir_head_chain(&mut store, template_id, &string_table, false)
-        .expect("composition should succeed");
+    let composed_root = compose_tir_head_chain(
+        &mut store,
+        &expressions,
+        &const_values,
+        template_id,
+        &string_table,
+        false,
+    )
+    .expect("composition should succeed");
     let composed_children = root_child_node_ids_for_node(composed_root, &store);
     let resolved_wrapper_id = expect_child_template_id(composed_children[0], &store);
     let published = store
@@ -2361,6 +2525,8 @@ fn composed_wrapper_published_summary_matches_the_expanded_tree() {
 fn head_chain_missing_root_authority_remains_infrastructure_error() {
     let string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
     let missing_root = TemplateIrNodeId::new(99);
     let template_id = store.push_template(TemplateIr::new(
         missing_root,
@@ -2373,8 +2539,15 @@ fn head_chain_missing_root_authority_remains_infrastructure_error() {
         None,
     ));
 
-    let error = compose_tir_head_chain(&mut store, template_id, &string_table, false)
-        .expect_err("missing head-chain root authority must fail composition");
+    let error = compose_tir_head_chain(
+        &mut store,
+        &expressions,
+        &const_values,
+        template_id,
+        &string_table,
+        false,
+    )
+    .expect_err("missing head-chain root authority must fail composition");
 
     assert_internal_authority_error(&error, "root node ID was not present");
 }
@@ -2388,6 +2561,8 @@ fn head_chain_missing_root_authority_remains_infrastructure_error() {
 fn nested_receivers_route_multiple_fills_in_chain_order() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
 
     let inner_wrapper = build_wrapper_with_slot_sequence(&mut store, vec![SlotKey::Default]);
     let inner_wrapper_node = build_child_template_node_for_template(&mut store, inner_wrapper);
@@ -2420,8 +2595,15 @@ fn nested_receivers_route_multiple_fills_in_chain_order() {
         ],
     );
 
-    let composed_root = compose_tir_head_chain(&mut store, template_id, &string_table, false)
-        .expect("composition should succeed");
+    let composed_root = compose_tir_head_chain(
+        &mut store,
+        &expressions,
+        &const_values,
+        template_id,
+        &string_table,
+        false,
+    )
+    .expect("composition should succeed");
 
     let composed_children = root_child_node_ids_for_node(composed_root, &store);
     assert_eq!(
@@ -2469,6 +2651,8 @@ fn nested_receivers_route_multiple_fills_in_chain_order() {
 fn receiver_with_no_fill_stays_unresolved() {
     let string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
 
     let wrapper = build_wrapper_with_slot_sequence(&mut store, vec![SlotKey::Default]);
     let wrapper_node = build_child_template_node_for_template(&mut store, wrapper);
@@ -2476,8 +2660,15 @@ fn receiver_with_no_fill_stays_unresolved() {
     let template_id = build_template_with_children(&mut store, vec![wrapper_node]);
     let original_root = template_root_node_id(template_id, &store);
 
-    let composed_root = compose_tir_head_chain(&mut store, template_id, &string_table, false)
-        .expect("composition should succeed");
+    let composed_root = compose_tir_head_chain(
+        &mut store,
+        &expressions,
+        &const_values,
+        template_id,
+        &string_table,
+        false,
+    )
+    .expect("composition should succeed");
 
     assert_eq!(
         composed_root, original_root,
@@ -2491,6 +2682,8 @@ fn receiver_with_named_slots() {
     let name = string_table.intern("title");
 
     let mut store = TemplateIrStore::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
 
     let wrapper = build_wrapper_with_slot_sequence(&mut store, vec![SlotKey::Named(name)]);
     let wrapper_node = build_child_template_node_for_template(&mut store, wrapper);
@@ -2503,8 +2696,15 @@ fn receiver_with_named_slots() {
 
     let template_id = build_template_with_children(&mut store, vec![wrapper_node, insert_node]);
 
-    let composed_root = compose_tir_head_chain(&mut store, template_id, &string_table, false)
-        .expect("composition should succeed");
+    let composed_root = compose_tir_head_chain(
+        &mut store,
+        &expressions,
+        &const_values,
+        template_id,
+        &string_table,
+        false,
+    )
+    .expect("composition should succeed");
 
     let composed_children = root_child_node_ids_for_node(composed_root, &store);
     assert_eq!(composed_children.len(), 1);
@@ -2529,6 +2729,8 @@ fn receiver_with_named_slots() {
 fn mixed_head_text_and_receiver() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
 
     let head_text = build_text_node(
         &mut store,
@@ -2550,8 +2752,15 @@ fn mixed_head_text_and_receiver() {
     let template_id =
         build_template_with_children(&mut store, vec![head_text, wrapper_node, body_text]);
 
-    let composed_root = compose_tir_head_chain(&mut store, template_id, &string_table, false)
-        .expect("composition should succeed");
+    let composed_root = compose_tir_head_chain(
+        &mut store,
+        &expressions,
+        &const_values,
+        template_id,
+        &string_table,
+        false,
+    )
+    .expect("composition should succeed");
 
     let composed_children = root_child_node_ids_for_node(composed_root, &store);
     assert_eq!(
@@ -2578,6 +2787,8 @@ fn mixed_head_text_and_receiver() {
 fn no_receiver_returns_original_root_with_head_and_body_in_order() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
 
     let head_text = build_text_node(
         &mut store,
@@ -2595,8 +2806,15 @@ fn no_receiver_returns_original_root_with_head_and_body_in_order() {
     let template_id = build_template_with_children(&mut store, vec![head_text, body_text]);
     let original_root = template_root_node_id(template_id, &store);
 
-    let composed_root = compose_tir_head_chain(&mut store, template_id, &string_table, false)
-        .expect("composition should succeed");
+    let composed_root = compose_tir_head_chain(
+        &mut store,
+        &expressions,
+        &const_values,
+        template_id,
+        &string_table,
+        false,
+    )
+    .expect("composition should succeed");
 
     assert_eq!(
         composed_root, original_root,
@@ -2615,6 +2833,8 @@ fn no_receiver_returns_original_root_with_head_and_body_in_order() {
 fn compose_preserves_non_receiver_head_child_templates() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
 
     let non_receiver = build_single_text_template(&mut store, &mut string_table, "no slots");
     let non_receiver_node = build_child_template_node_for_template(&mut store, non_receiver);
@@ -2628,8 +2848,15 @@ fn compose_preserves_non_receiver_head_child_templates() {
     let template_id = build_template_with_children(&mut store, vec![non_receiver_node, body_text]);
     let original_root = template_root_node_id(template_id, &store);
 
-    let composed_root = compose_tir_head_chain(&mut store, template_id, &string_table, false)
-        .expect("composition should succeed");
+    let composed_root = compose_tir_head_chain(
+        &mut store,
+        &expressions,
+        &const_values,
+        template_id,
+        &string_table,
+        false,
+    )
+    .expect("composition should succeed");
 
     assert_eq!(
         composed_root, original_root,
@@ -2721,13 +2948,21 @@ fn root_child_kinds_for_node(
 fn wrap_direct_child_in_single_wrapper_with_default_slot() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
 
     let wrapper = build_wrapper_with_slot_sequence(&mut store, vec![SlotKey::Default]);
     let child = build_single_text_template(&mut store, &mut string_table, "child");
     let child_node = build_child_template_node_for_template(&mut store, child);
-    let wrapped_child_node_id =
-        wrap_tir_node_in_wrappers(&mut store, child_node, &[wrapper], &string_table)
-            .expect("wrapper application should succeed");
+    let wrapped_child_node_id = wrap_tir_node_in_wrappers(
+        &mut store,
+        &expressions,
+        &const_values,
+        child_node,
+        &[wrapper],
+        &string_table,
+    )
+    .expect("wrapper application should succeed");
 
     let wrapped_template_id = expect_child_template_id(wrapped_child_node_id, &store);
     let wrapped_children = root_child_node_ids(wrapped_template_id, &store);
@@ -2752,6 +2987,8 @@ fn wrap_direct_child_in_single_wrapper_with_default_slot() {
 fn shared_child_dag_replays_one_application_at_each_structural_occurrence() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
 
     let slot_wrapper = build_wrapper_with_slot_sequence(&mut store, vec![SlotKey::Default]);
     let first_slot_wrapper_node = build_child_template_node_for_template(&mut store, slot_wrapper);
@@ -2765,6 +3002,8 @@ fn shared_child_dag_replays_one_application_at_each_structural_occurrence() {
 
     let wrapped = wrap_tir_node_in_wrapper_references(
         &mut store,
+        &expressions,
+        &const_values,
         contribution_node,
         &[TemplateWrapperReference::new(
             shared_child_wrapper,
@@ -2792,13 +3031,21 @@ fn shared_child_dag_replays_one_application_at_each_structural_occurrence() {
 fn wrap_direct_child_in_wrapper_without_slots() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
 
     let wrapper = build_single_text_template(&mut store, &mut string_table, "prefix");
     let child = build_single_text_template(&mut store, &mut string_table, "child");
     let child_node = build_child_template_node_for_template(&mut store, child);
-    let wrapped_child_node_id =
-        wrap_tir_node_in_wrappers(&mut store, child_node, &[wrapper], &string_table)
-            .expect("wrapper application should succeed");
+    let wrapped_child_node_id = wrap_tir_node_in_wrappers(
+        &mut store,
+        &expressions,
+        &const_values,
+        child_node,
+        &[wrapper],
+        &string_table,
+    )
+    .expect("wrapper application should succeed");
 
     let combined_template_id = expect_child_template_id(wrapped_child_node_id, &store);
     let combined_children = root_child_node_ids(combined_template_id, &store);
@@ -2829,6 +3076,8 @@ fn wrap_direct_child_in_wrapper_without_slots() {
 fn wrap_direct_child_in_multiple_wrappers() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
 
     let inner_wrapper = build_text_slot_text_wrapper_with_markers(
         &mut store,
@@ -2851,9 +3100,15 @@ fn wrap_direct_child_in_multiple_wrappers() {
     // innermost wrapper directly around the child and each later wrapper
     // around the previous result, so the final nesting is outer(inner(child)).
     let wrapper_ids = vec![inner_wrapper, outer_wrapper];
-    let wrapped_child_node_id =
-        wrap_tir_node_in_wrappers(&mut store, child_node, &wrapper_ids, &string_table)
-            .expect("wrapper application should succeed");
+    let wrapped_child_node_id = wrap_tir_node_in_wrappers(
+        &mut store,
+        &expressions,
+        &const_values,
+        child_node,
+        &wrapper_ids,
+        &string_table,
+    )
+    .expect("wrapper application should succeed");
 
     let outer_resolved_id = expect_child_template_id(wrapped_child_node_id, &store);
     let outer_children = root_child_node_ids(outer_resolved_id, &store);
@@ -2889,6 +3144,8 @@ fn wrap_direct_child_in_multiple_wrappers() {
 fn head_chain_returns_the_original_root_when_no_receiver_exists() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
     let body_text = build_text_node(
         &mut store,
         &mut string_table,
@@ -2898,8 +3155,15 @@ fn head_chain_returns_the_original_root_when_no_receiver_exists() {
     let template_id = build_template_with_children(&mut store, vec![body_text]);
     let original_root = store.get_template(template_id).expect("template").root;
 
-    let composed_root = compose_tir_head_chain(&mut store, template_id, &string_table, false)
-        .expect("head-chain composition should succeed");
+    let composed_root = compose_tir_head_chain(
+        &mut store,
+        &expressions,
+        &const_values,
+        template_id,
+        &string_table,
+        false,
+    )
+    .expect("head-chain composition should succeed");
 
     assert_eq!(
         composed_root, original_root,

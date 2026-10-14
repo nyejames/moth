@@ -7,14 +7,18 @@
 //! parse patterns, or run an independent completeness algorithm.
 
 use super::block_body::{BlockBodyParseInput, ParsedValueBlockBodies, parse_value_block_bodies};
-use super::result_type::{final_slot_type_ids, infer_value_match_result_type};
+use super::result_type::infer_value_match_result_type;
 use super::retained::{DeferredValueBlock, DeferredValueBlockForm, RetainedValueBlock};
-use super::single_predicate::{SinglePredicateHeaderInput, try_parse_single_predicate_header};
+use super::single_predicate::{
+    ClassifiedSinglePredicateHeader, SinglePredicateHeaderInput, SinglePredicateParseOutcome,
+    classify_single_predicate_header,
+};
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, MatchExhaustiveness};
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::numeric_construction::{
     DeferredArmPattern, StatementExpression,
 };
@@ -43,6 +47,8 @@ pub(super) struct BlockSinglePredicateParseInput<'a, 'b, 'tokens> {
     pub(super) token_stream: &'a mut AstCursor<'tokens>,
     pub(super) context: &'a ScopeContext,
     pub(super) type_interner: &'a mut AstTypeInterner<'b>,
+    pub(super) expression_builder: &'a mut AstExpressionBuilder,
+    pub(super) const_values: &'a mut ConstValueStore,
     pub(super) target: ActiveValueProductionTarget,
     pub(super) string_table: &'a mut StringTable,
     pub(super) span: Option<SourceSpan>,
@@ -56,11 +62,13 @@ pub(super) struct BlockSinglePredicateParseInput<'a, 'b, 'tokens> {
 /// Returns `None` if the header is not a committed option/choice predicate so
 pub(super) fn try_parse_block_single_predicate_value_match(
     input: BlockSinglePredicateParseInput<'_, '_, '_>,
-) -> Option<Result<ParsedReceiverValue, ExpressionParseError>> {
+) -> SinglePredicateParseOutcome {
     let BlockSinglePredicateParseInput {
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         target,
         string_table,
         classification,
@@ -68,17 +76,22 @@ pub(super) fn try_parse_block_single_predicate_value_match(
         path_fork,
     } = input;
 
-    let header = match try_parse_single_predicate_header(SinglePredicateHeaderInput {
+    let header = match classify_single_predicate_header(SinglePredicateHeaderInput {
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         classification,
         path_fork,
     }) {
-        Some(Ok(header)) => header,
-        Some(Err(error)) => return Some(Err(error)),
-        None => return None,
+        Some(Ok(ClassifiedSinglePredicateHeader::Predicate(header))) => *header,
+        Some(Ok(ClassifiedSinglePredicateHeader::OrdinarySubject(seed))) => {
+            return SinglePredicateParseOutcome::OrdinarySubject(seed);
+        }
+        Some(Err(error)) => return SinglePredicateParseOutcome::Decided(Err(error)),
+        None => return SinglePredicateParseOutcome::Absent,
     };
 
     token_stream.skip_newlines();
@@ -86,18 +99,22 @@ pub(super) fn try_parse_block_single_predicate_value_match(
     if header.body_delimiter != IfHeaderDelimiter::Colon
         || token_stream.current_tag() != TokenTag::COLON
     {
-        return Some(Err(CompilerDiagnostic::invalid_control_flow_statement(
-            InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
-            Some(token_stream.current_span()),
-        )
-        .into()));
+        return SinglePredicateParseOutcome::Decided(Err(
+            CompilerDiagnostic::invalid_control_flow_statement(
+                InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
+                Some(token_stream.current_span()),
+            )
+            .into(),
+        ));
     }
 
-    Some(parse_block_value_match(BlockValueMatchParseInput {
+    SinglePredicateParseOutcome::Decided(parse_block_value_match(BlockValueMatchParseInput {
         token_stream,
         context,
         then_parent: &header.then_context,
         type_interner,
+        expression_builder,
+        const_values,
         target,
         string_table,
         scrutinee: header.scrutinee,
@@ -112,6 +129,8 @@ struct BlockValueMatchParseInput<'a, 'b, 'tokens> {
     context: &'a ScopeContext,
     then_parent: &'a ScopeContext,
     type_interner: &'a mut AstTypeInterner<'b>,
+    expression_builder: &'a mut AstExpressionBuilder,
+    const_values: &'a mut ConstValueStore,
     target: ActiveValueProductionTarget,
     string_table: &'a mut StringTable,
     scrutinee: StatementExpression,
@@ -130,6 +149,8 @@ fn parse_block_value_match(
         context,
         then_parent,
         type_interner,
+        expression_builder,
+        const_values,
         target,
         string_table,
         scrutinee,
@@ -147,6 +168,8 @@ fn parse_block_value_match(
         then_parent,
         else_parent: context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         active_target: target.clone(),
         path_fork,
@@ -195,7 +218,8 @@ fn parse_block_value_match(
         expected_result_type_ids,
         receiver_kind,
         needs_slot_inference,
-        type_interner,
+        expression_builder,
+        const_values,
     })
 }
 
@@ -236,8 +260,8 @@ fn retained_single_predicate_value_block(
 /// WHY: match completeness, result slots and expression construction must run in one place,
 ///      whether the bodies came from this parse or from retained bodies resolved later at the
 ///      enclosing body root.
-pub(super) struct BlockValueMatchFinishInput<'a, 'b> {
-    pub(super) scrutinee: Expression,
+pub(super) struct BlockValueMatchFinishInput<'a> {
+    pub(super) scrutinee: ExprId,
     pub(super) pattern: MatchPattern,
     pub(super) then_body: Vec<AstNode>,
     pub(super) else_body: Vec<AstNode>,
@@ -245,7 +269,8 @@ pub(super) struct BlockValueMatchFinishInput<'a, 'b> {
     pub(super) expected_result_type_ids: Vec<TypeId>,
     pub(super) receiver_kind: ValueReceiverKind,
     pub(super) needs_slot_inference: bool,
-    pub(super) type_interner: &'a mut AstTypeInterner<'b>,
+    pub(super) expression_builder: &'a mut AstExpressionBuilder,
+    pub(super) const_values: &'a mut ConstValueStore,
 }
 
 /// Finishes a block single-predicate value match from concrete branch bodies.
@@ -255,7 +280,7 @@ pub(super) struct BlockValueMatchFinishInput<'a, 'b> {
 /// WHY: the parse path and a resumed retained body must share one construction owner, so no
 ///      second inference or validation path can disagree with the authored parse.
 pub(super) fn finish_block_value_match(
-    input: BlockValueMatchFinishInput<'_, '_>,
+    input: BlockValueMatchFinishInput<'_>,
 ) -> BlockValueMatchResult<ParsedReceiverValue> {
     let BlockValueMatchFinishInput {
         scrutinee,
@@ -266,7 +291,8 @@ pub(super) fn finish_block_value_match(
         expected_result_type_ids,
         receiver_kind,
         needs_slot_inference,
-        type_interner,
+        expression_builder,
+        const_values,
     } = input;
 
     let arms = vec![MatchArm {
@@ -276,7 +302,13 @@ pub(super) fn finish_block_value_match(
     }];
     let default = Some(else_body);
 
-    validate_value_match_completeness(&arms, default.as_deref(), span)?;
+    validate_value_match_completeness(
+        &arms,
+        default.as_deref(),
+        span,
+        &*expression_builder,
+        &*const_values,
+    )?;
 
     if needs_slot_inference {
         return Ok(ParsedReceiverValue::NeedsSlotInference {
@@ -292,15 +324,15 @@ pub(super) fn finish_block_value_match(
         });
     }
 
-    let result_type_id = infer_value_match_result_type(
+    let result_type_ids = infer_value_match_result_type(
         &arms,
         default.as_deref(),
         &expected_result_type_ids,
-        type_interner,
         span,
         receiver_kind,
+        &*expression_builder,
+        &*const_values,
     )?;
-    let result_type_ids = final_slot_type_ids(&expected_result_type_ids, result_type_id);
 
     Ok(ParsedReceiverValue::Complete(build_value_match_expression(
         ValueMatchBlock {
@@ -312,7 +344,6 @@ pub(super) fn finish_block_value_match(
             result_type_ids,
         },
         span,
-        result_type_id,
-        type_interner.environment(),
-    )))
+        expression_builder,
+    )?))
 }

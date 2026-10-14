@@ -8,14 +8,16 @@
 
 use crate::compiler_frontend::ast::Ast;
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-use crate::compiler_frontend::ast::expressions::expression_kind::ResolvedCastExpression;
+use crate::compiler_frontend::ast::const_values::store::ConstValuePayload;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    CastFacts, ExpressionOperationView, ExpressionView,
+};
 use crate::compiler_frontend::ast::expressions::expression_types::{
     CastHandling, ResolvedCastEvidence,
 };
 use crate::compiler_frontend::ast::expressions::failure_facts::ImplicitFailureSource;
 use crate::compiler_frontend::builtins::casts::targets::{
-    BuiltinCastFallibility, BuiltinCastPolicyId, BuiltinCastTarget,
+    BuiltinCastFallibility, BuiltinCastPolicyId,
 };
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidBuiltinCallReason, InvalidCallShapeReason, InvalidCastReason,
@@ -69,24 +71,25 @@ fn returned_expression<'a>(
     path_fork: &PathInternerFork,
     string_table: &StringTable,
     function_name: &str,
-) -> &'a Expression {
+) -> ExpressionView<'a> {
     let body = function_body_by_name(ast, path_fork, string_table, function_name);
-    body.iter()
+    let id = body
+        .iter()
         .find_map(|node| match &node.kind {
             NodeKind::Return(values) => values.first(),
             _ => None,
         })
-        .expect("function should return a value")
+        .expect("function should return a value");
+    ast.expressions
+        .view(*id)
+        .expect("returned expression belongs to AST")
 }
 
-fn resolved_cast(expression: &Expression) -> &ResolvedCastExpression {
-    let ExpressionKind::Cast(cast) = &expression.kind else {
-        panic!(
-            "expected a resolved cast expression, found {:?}",
-            expression.kind
-        );
+fn resolved_cast<'a>(expression: ExpressionView<'a>) -> &'a CastFacts {
+    let ExpressionOperationView::Cast { facts, .. } = expression.operation() else {
+        panic!("expected a resolved cast expression");
     };
-    cast
+    facts
 }
 
 // ------------------------
@@ -242,15 +245,17 @@ apply_text |text String| -> Item:
 "#,
     );
     let expression = returned_expression(&ast, &path_fork, &string_table, "apply_text");
-    let ExpressionKind::MethodCall { args, .. } = &expression.kind else {
+    let ExpressionOperationView::MethodCall { call, .. } = expression.operation() else {
         panic!("expected a receiver method call");
     };
-    let [argument] = args.as_slice() else {
-        panic!("expected one receiver method argument");
-    };
-    let cast = resolved_cast(&argument.value);
+    assert_eq!(
+        call.arguments().len(),
+        1,
+        "expected one receiver method argument"
+    );
+    let argument = call.arguments().iter().next().expect("one argument");
+    let cast = resolved_cast(argument.value());
 
-    assert_eq!(cast.target, BuiltinCastTarget::Fixed(FixedScalar::I32));
     assert_eq!(cast.fallibility, BuiltinCastFallibility::Fallible);
     assert!(matches!(
         &cast.evidence,
@@ -259,9 +264,15 @@ apply_text |text String| -> Item:
         }
     ));
     assert!(matches!(&cast.handling, CastHandling::Implicit));
-    assert!(argument.value.failure_facts.authored_cast);
+    assert!(
+        argument
+            .value()
+            .failure_facts()
+            .expect("cast failure facts")
+            .authored_cast
+    );
     assert!(matches!(
-        argument.value.failure_facts.implicit.as_slice(),
+        argument.value().failure_facts().expect("cast failure facts").implicit.as_slice(),
         [contributor]
             if contributor.source == ImplicitFailureSource::AuthoredCastConversion
                 && !contributor.codes.is_empty()
@@ -331,7 +342,6 @@ parse_count |text String| -> I32, Error!:
     let cast = resolved_cast(expression);
 
     assert!(signature.error_return_type_id().is_some());
-    assert_eq!(cast.target, BuiltinCastTarget::Fixed(FixedScalar::I32));
     assert_eq!(cast.fallibility, BuiltinCastFallibility::Fallible);
     assert!(matches!(
         &cast.evidence,
@@ -341,7 +351,7 @@ parse_count |text String| -> I32, Error!:
     ));
     assert!(matches!(&cast.handling, CastHandling::Implicit));
     assert!(matches!(
-        expression.failure_facts.implicit.as_slice(),
+        expression.failure_facts().expect("cast failure facts").implicit.as_slice(),
         [contributor] if contributor.source == ImplicitFailureSource::AuthoredCastConversion
     ));
 }
@@ -373,10 +383,11 @@ value I32 = cast "42" catch:
     };
 
     assert!(matches!(
-        &declaration.value.kind,
-        ExpressionKind::FixedScalar(value)
+        ast.expressions.view(declaration.value.initializer().expect("fixture initializer")).expect("owned initializer").operation(),
+        ExpressionOperationView::Constant(id)
+            if matches!(ast.const_values.payload(id), Some(ConstValuePayload::FixedScalar(value))
             if *value == FixedScalarValue::signed(FixedScalar::I32, 42)
-                .expect("42 is an I32 value")
+                .expect("42 is an I32 value"))
     ));
 }
 

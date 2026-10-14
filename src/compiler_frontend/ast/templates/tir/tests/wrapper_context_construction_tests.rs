@@ -1,6 +1,7 @@
 //! TIR wrapper-context overlay construction tests.
 
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::templates::template::{
     SlotKey, Style, TemplateSegmentOrigin, TemplateType,
 };
@@ -48,11 +49,27 @@ fn text_template(
     )
 }
 
-fn control_flow_template(store: &mut TemplateIrStore, strings: &mut StringTable) -> TemplateIrId {
+fn bool_fixture(
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    value: bool,
+) -> ExprId {
+    expressions
+        .bool(const_values, value, None, ValueMode::ImmutableOwned)
+        .expect("test bool should construct")
+        .id()
+}
+
+fn control_flow_template(
+    store: &mut TemplateIrStore,
+    strings: &mut StringTable,
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+) -> TemplateIrId {
     let mut builder = TemplateIrBuilder::new(store);
     let body = builder.push_text_node(strings.intern("body"), 4, TemplateSegmentOrigin::Body, None);
     let root = builder.push_conditional_node(
-        TemplateBranchSelector::Bool(Expression::bool(false, None, ValueMode::ImmutableOwned)),
+        TemplateBranchSelector::Bool(bool_fixture(expressions, const_values, false)),
         body,
         None,
     );
@@ -105,6 +122,8 @@ fn parent_with_conditional_body_child(
     store: &mut TemplateIrStore,
     child: TemplateIrId,
     context: TemplateViewContext,
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
 ) -> TemplateIrId {
     let mut builder = TemplateIrBuilder::new(store);
     let child_node = builder.push_child_template_node_with_reference(
@@ -113,7 +132,7 @@ fn parent_with_conditional_body_child(
     );
     let body = builder.push_sequence_node(vec![child_node], None);
     let root = builder.push_conditional_node(
-        TemplateBranchSelector::Bool(Expression::bool(true, None, ValueMode::ImmutableOwned)),
+        TemplateBranchSelector::Bool(bool_fixture(expressions, const_values, true)),
         body,
         None,
     );
@@ -133,6 +152,8 @@ fn parent_with_loop_body_child(
     store: &mut TemplateIrStore,
     child: TemplateIrId,
     context: TemplateViewContext,
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
 ) -> TemplateIrId {
     let mut builder = TemplateIrBuilder::new(store);
     let child_node = builder.push_child_template_node_with_reference(
@@ -142,7 +163,7 @@ fn parent_with_loop_body_child(
     let body = builder.push_sequence_node(vec![child_node], None);
     let root = builder.push_loop_node(
         TemplateLoopHeader::Conditional {
-            condition: Box::new(Expression::bool(true, None, ValueMode::ImmutableOwned)),
+            condition: bool_fixture(expressions, const_values, true),
         },
         body,
         None,
@@ -231,10 +252,17 @@ fn fresh_child_suppresses_inherited_wrappers() {
 fn control_flow_child_uses_if_child_emits_wrapper_mode() {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let empty = TemplateViewContext::default();
     let (parent, wrapper) = {
         let mut store = store.borrow_mut();
-        let child = control_flow_template(&mut store, &mut strings);
+        let child = control_flow_template(
+            &mut store,
+            &mut strings,
+            &mut expressions,
+            &mut const_values,
+        );
         let parent = parent_with_child(&mut store, child, empty);
         (parent, wrapper_template(&mut store, &mut strings))
     };
@@ -265,11 +293,19 @@ fn control_flow_child_uses_if_child_emits_wrapper_mode() {
 fn overlay_records_direct_child_inside_conditional_body() {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let empty = TemplateViewContext::default();
     let (parent, wrapper) = {
         let mut store = store.borrow_mut();
         let child = text_template(&mut store, &mut strings, "child", Style::default());
-        let parent = parent_with_conditional_body_child(&mut store, child, empty);
+        let parent = parent_with_conditional_body_child(
+            &mut store,
+            child,
+            empty,
+            &mut expressions,
+            &mut const_values,
+        );
         (parent, wrapper_template(&mut store, &mut strings))
     };
     let mut parent_reference = reference(parent, empty);
@@ -297,11 +333,19 @@ fn overlay_records_direct_child_inside_conditional_body() {
 fn overlay_records_direct_child_inside_loop_body() {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let empty = TemplateViewContext::default();
     let (parent, wrapper) = {
         let mut store = store.borrow_mut();
         let child = text_template(&mut store, &mut strings, "child", Style::default());
-        let parent = parent_with_loop_body_child(&mut store, child, empty);
+        let parent = parent_with_loop_body_child(
+            &mut store,
+            child,
+            empty,
+            &mut expressions,
+            &mut const_values,
+        );
         (parent, wrapper_template(&mut store, &mut strings))
     };
     let mut parent_reference = reference(parent, empty);

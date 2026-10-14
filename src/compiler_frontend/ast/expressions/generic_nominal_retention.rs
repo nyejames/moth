@@ -12,8 +12,8 @@ use crate::compiler_frontend::ast::expressions::choice_constructor::{
 };
 use crate::compiler_frontend::ast::expressions::constructor_views::ConstructorField;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::expressions::expression_store::OwnedExpr;
 use crate::compiler_frontend::ast::expressions::generic_nominal_inference::GenericNominalConstructorSeed;
 use crate::compiler_frontend::ast::expressions::struct_instance::{
     GenericStructCompletion, complete_generic_struct_instance,
@@ -100,7 +100,7 @@ pub(crate) fn complete_deferred_generic_nominal_call<
 >(
     deferred: DeferredGenericNominalCall,
     session: &mut S,
-) -> Result<Expression, ExpressionParseError> {
+) -> Result<OwnedExpr, ExpressionParseError> {
     let DeferredGenericNominalCall {
         nominal_path,
         display_name,
@@ -126,6 +126,8 @@ pub(crate) fn complete_deferred_generic_nominal_call<
     let DeferredExpressionServices {
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     } = session.session_services();
@@ -148,6 +150,8 @@ pub(crate) fn complete_deferred_generic_nominal_call<
             },
             context,
             type_interner,
+            expression_builder,
+            const_values,
             path_fork,
             string_table,
         ),
@@ -172,6 +176,8 @@ pub(crate) fn complete_deferred_generic_nominal_call<
             },
             context,
             type_interner,
+            expression_builder,
+            const_values,
             path_fork,
             string_table,
         ),

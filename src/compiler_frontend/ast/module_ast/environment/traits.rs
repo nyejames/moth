@@ -459,11 +459,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         )?;
 
         let path_fork = self.path_fork as *const PathInternerFork;
-        let mut type_resolution_context = self.type_resolution_context_for(
-            &visibility,
-            header.tokens.source(),
-            generic_parameter_scope,
-        );
+        let mut type_resolution_context =
+            self.type_resolution_context_for(&visibility, generic_parameter_scope);
         let resolved_signature = resolve_function_signature(
             &header.declaration_path,
             &unresolved_signature,
@@ -485,7 +482,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             ));
         };
 
-        let receiver = if first_parameter.value.value_mode.is_mutable() {
+        let receiver = if first_parameter.value_mode.is_mutable() {
             TraitReceiverRequirement::Mutable { this_type }
         } else {
             TraitReceiverRequirement::Immutable { this_type }
@@ -501,9 +498,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         for parameter in resolved_signature.signature.parameters.iter().skip(1) {
             parameters.push(requirement_parameter_from_type(
                 parameter.id,
-                parameter.value.value_mode.clone(),
-                parameter.value.type_id,
-                parameter.value.span,
+                parameter.value_mode,
+                parameter.type_id,
+                parameter.binding_span,
             ));
         }
 
@@ -590,6 +587,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             &source_owner,
             &signature_context,
             &mut type_interner,
+            &mut self.context.expression_builder,
+            &mut self.context.const_values,
             string_table,
             SignatureTypeFallbackPolicy::StrictCapacity,
             self.path_fork,

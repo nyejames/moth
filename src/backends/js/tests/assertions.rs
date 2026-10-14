@@ -65,7 +65,8 @@ fn function_with_assertion(
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: type_environment.builtins().none,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
     let module = build_module(
         expressions,

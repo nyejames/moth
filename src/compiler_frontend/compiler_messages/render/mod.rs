@@ -36,16 +36,16 @@ pub(crate) use syntax::*;
 pub(crate) use templates::*;
 
 use crate::compiler_frontend::compiler_messages::{
-    BorrowAccessKind, CssTemplateWarning, DeferredFeatureReason, DiagnosticOperator,
-    DiagnosticPlace, GenericApplicationErrorReason, HirCapacityResource, HtmlTemplateWarning,
-    IncompatibleChoiceComparisonReason, InvalidChoiceVariantReason, InvalidCollectionTypeReason,
-    InvalidCompileTimePathReason, InvalidConfigReason, InvalidDependencyClauseReason,
-    InvalidExpressionReason, InvalidExternalModuleReason, InvalidFallibleOperandReason,
-    InvalidGenericParameterReason, InvalidImportPathReason, InvalidMapLiteralReason,
-    InvalidMapTypeReason, InvalidMutableAccessReason, InvalidOutputFolderReason,
-    InvalidPageMetadataReason, InvalidRangeOperandReason, InvalidTemplateDirectiveReason,
-    MalformedTemplateReason, NameNamespace, NamespaceTypeValueMisuseKind, PathKind,
-    RangeOperandKind, SourceSpanCapacityResource, UnsupportedOperatorCategory,
+    AstCapacityResource, BorrowAccessKind, CapacityResource, CssTemplateWarning,
+    DeferredFeatureReason, DiagnosticOperator, DiagnosticPlace, GenericApplicationErrorReason,
+    HirCapacityResource, HtmlTemplateWarning, IncompatibleChoiceComparisonReason,
+    InvalidChoiceVariantReason, InvalidCollectionTypeReason, InvalidCompileTimePathReason,
+    InvalidConfigReason, InvalidDependencyClauseReason, InvalidExpressionReason,
+    InvalidExternalModuleReason, InvalidGenericParameterReason, InvalidImportPathReason,
+    InvalidMapLiteralReason, InvalidMapTypeReason, InvalidMutableAccessReason,
+    InvalidOutputFolderReason, InvalidPageMetadataReason, InvalidRangeOperandReason,
+    InvalidTemplateDirectiveReason, MalformedTemplateReason, NameNamespace,
+    NamespaceTypeValueMisuseKind, PathKind, RangeOperandKind, SourceSpanCapacityResource,
 };
 use crate::compiler_frontend::compiler_messages::{DiagnosticToken, TokenDescriptorPayload};
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
@@ -530,24 +530,6 @@ fn generic_parameter_name(type_id: TypeId, context: DiagnosticRenderContext<'_>)
     }
 }
 
-pub(crate) fn invalid_fallible_operand_message(
-    reason: InvalidFallibleOperandReason,
-    category: UnsupportedOperatorCategory,
-    operand_type: TypeId,
-    context: DiagnosticRenderContext<'_>,
-) -> String {
-    let category_name = unsupported_operator_category_name(category);
-    let type_name = diagnostic_type_name(operand_type, context);
-
-    match reason {
-        InvalidFallibleOperandReason::FallibleValueNotHandled => {
-            format!(
-                "{category_name} operator cannot use a fallible value that has not been handled. Use postfix `!` in a compatible fallible function or recover with `catch` before applying the operator (found '{type_name}')."
-            )
-        }
-    }
-}
-
 fn namespace_name(namespace: NameNamespace) -> &'static str {
     match namespace {
         NameNamespace::Value => "value",
@@ -559,17 +541,6 @@ fn namespace_name(namespace: NameNamespace) -> &'static str {
         NameNamespace::Method => "method",
         NameNamespace::TemplateSlot => "template slot",
         NameNamespace::ConfigKey => "config key",
-    }
-}
-
-fn unsupported_operator_category_name(category: UnsupportedOperatorCategory) -> &'static str {
-    match category {
-        UnsupportedOperatorCategory::Arithmetic => "arithmetic",
-        UnsupportedOperatorCategory::Comparison => "comparison",
-        UnsupportedOperatorCategory::Range => "range",
-        UnsupportedOperatorCategory::Logical => "logical",
-        UnsupportedOperatorCategory::Unary => "unary",
-        UnsupportedOperatorCategory::Other => "this",
     }
 }
 

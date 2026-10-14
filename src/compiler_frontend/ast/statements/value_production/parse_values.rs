@@ -7,9 +7,10 @@
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::expressions::parse_expression::create_expression_with_trailing_newline_policy;
 use crate::compiler_frontend::ast::expressions::parse_expression_input::{
     ExpressionParseInput, ExpressionParseResources, ExpressionTrailingPolicy,
@@ -26,7 +27,7 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidFallibleHandlingReason, InvalidReturnShapeReason,
-    TypeMismatchContext,
+    TypeMismatchContext, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -48,6 +49,8 @@ pub struct ProducedValuesParseInput<'a, 'b, 'tokens> {
     pub token_stream: &'a mut AstCursor<'tokens>,
     pub context: &'a ScopeContext,
     pub type_interner: &'a mut AstTypeInterner<'b>,
+    pub expression_builder: &'a mut AstExpressionBuilder,
+    pub const_values: &'a mut ConstValueStore,
     pub target: &'a ActiveValueProductionTarget,
     pub string_table: &'a mut StringTable,
     pub path_fork: &'a mut PathInternerFork,
@@ -83,6 +86,8 @@ pub(crate) fn parse_retained_produced_values(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         target,
         string_table,
         path_fork,
@@ -115,6 +120,8 @@ pub(crate) fn parse_retained_produced_values(
                 token_stream,
                 scope_context: &expression_context,
                 type_interner,
+                expression_builder,
+                const_values,
                 expected_type: &mut expected_type,
                 cast_target_context: &mut slot_cast_target,
                 value_mode: &ValueMode::ImmutableOwned,
@@ -134,7 +141,9 @@ pub(crate) fn parse_retained_produced_values(
             // unresolved too; a known slot materialises it through its own expectation.
             input = input.with_retained_pending_numeric_fragment();
         }
-        let value = match create_expression_with_trailing_newline_policy(input) {
+        let value = match create_expression_with_trailing_newline_policy(input)
+            .map(|expression| expression.id())
+        {
             Ok(expression) => StatementExpression::Built(expression),
             Err(error) => {
                 let deferral = error.take_numeric_deferral(
@@ -212,6 +221,7 @@ pub(crate) fn parse_retained_produced_values(
             &slot_expected_types,
             type_interner.environment(),
             target.receiver_kind,
+            expression_builder,
         )?;
         return Ok(coerced
             .into_iter()
@@ -229,22 +239,30 @@ pub(crate) fn parse_retained_produced_values(
 ///      produced-values boundary does, while an inferred slot's value is typed by the site that
 ///      resolves later and must not be forced into a default.
 fn coerce_built_values_at_known_slots(
-    values: Vec<Expression>,
+    values: Vec<ExprId>,
     slot_expected_types: &[Option<TypeId>],
     type_environment: &TypeEnvironment,
     receiver_kind: ValueReceiverKind,
-) -> Result<Vec<Expression>, ExpressionParseError> {
+    expression_builder: &mut AstExpressionBuilder,
+) -> Result<Vec<ExprId>, ExpressionParseError> {
     let mismatch_context = mismatch_context_for_receiver(receiver_kind);
     let mut coerced = Vec::with_capacity(values.len());
 
     for (value, slot_type_id) in values.into_iter().zip(slot_expected_types.iter()) {
+        expression_builder
+            .view(value)?
+            .require_single(ValueReceiverContext::Then)?;
         match slot_type_id {
-            Some(slot_type_id) => coerced.push(coerce_expression_to_explicit_type_boundary(
-                value,
-                *slot_type_id,
-                type_environment,
-                mismatch_context,
-            )?),
+            Some(slot_type_id) => coerced.push(
+                coerce_expression_to_explicit_type_boundary(
+                    expression_builder.own(value),
+                    *slot_type_id,
+                    type_environment,
+                    mismatch_context,
+                    expression_builder,
+                )
+                .map(|expression| expression.id())?,
+            ),
             None => coerced.push(value),
         }
     }
@@ -354,7 +372,7 @@ pub(crate) fn complete_retained_then_value<'env>(
                 .into());
             }
         };
-        expressions.push(completion.resolve_statement_expression(value)?);
+        expressions.push(completion.resolve_statement_expression(value)?.id());
     }
 
     let expressions = {
@@ -364,6 +382,7 @@ pub(crate) fn complete_retained_then_value<'env>(
             &effective_slot_types,
             services.type_interner.environment(),
             receiver_kind,
+            services.expression_builder,
         )?
     };
 
@@ -407,12 +426,20 @@ pub(crate) fn validate_and_coerce_completed_then_group(
     let mismatch_context = mismatch_context_for_receiver(receiver_kind);
     let mut coerced = Vec::with_capacity(produced.expressions.len());
     for (value, slot_type_id) in produced.expressions.drain(..).zip(slot_type_ids.iter()) {
-        coerced.push(coerce_expression_to_explicit_type_boundary(
-            value,
-            *slot_type_id,
-            services.type_interner.environment(),
-            mismatch_context,
-        )?);
+        services
+            .expression_builder
+            .view(value)?
+            .require_single(ValueReceiverContext::Then)?;
+        coerced.push(
+            coerce_expression_to_explicit_type_boundary(
+                services.expression_builder.own(value),
+                *slot_type_id,
+                services.type_interner.environment(),
+                mismatch_context,
+                services.expression_builder,
+            )?
+            .id(),
+        );
     }
     produced.expressions = coerced;
 

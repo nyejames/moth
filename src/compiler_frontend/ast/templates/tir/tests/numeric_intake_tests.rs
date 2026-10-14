@@ -11,9 +11,13 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use crate::compiler_frontend::ast::ast_nodes::{Declaration, RangeEndKind, RangeLoopSpec};
-use crate::compiler_frontend::ast::expressions::expression::{Expression, Operator};
+use crate::compiler_frontend::ast::ast_nodes::{
+    Declaration, DeclarationValue, RangeEndKind, RangeLoopSpec,
+};
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::module_ast::scope_context::AuthoredBindingFacts;
 use crate::compiler_frontend::ast::numeric_construction::{
     DeferredExpressionSuffix, DeferredNumericExpression, DeferredRangeHeader, DeferredRangeSpec,
@@ -31,6 +35,8 @@ use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrStore,
 };
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarationTable};
+use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -46,6 +52,8 @@ struct IntakeBody {
     context: ScopeContext,
     string_table: StringTable,
     path_fork: PathInternerFork,
+    expressions: AstExpressionBuilder,
+    constants: ConstValueStore,
 }
 
 impl IntakeBody {
@@ -76,6 +84,8 @@ impl IntakeBody {
             context,
             string_table,
             path_fork,
+            expressions: AstExpressionBuilder::new().unwrap(),
+            constants: ConstValueStore::default(),
         }
     }
 
@@ -219,16 +229,31 @@ impl IntakeBody {
     }
 }
 
-fn bool_expression(value: bool) -> Expression {
-    Expression::bool(value, None, ValueMode::ImmutableOwned)
+fn bool_expression(
+    expressions: &mut AstExpressionBuilder,
+    constants: &mut ConstValueStore,
+    value: bool,
+) -> ExprId {
+    expressions
+        .bool(constants, value, None, ValueMode::ImmutableOwned)
+        .expect("test bool fits expression owner")
+        .id()
 }
 
-fn i32_expression(value: i64) -> Expression {
-    Expression::fixed_scalar(
-        FixedScalarValue::signed(FixedScalar::I32, value).expect("test value fits I32"),
-        None,
-        ValueMode::ImmutableOwned,
-    )
+fn i32_expression(
+    expressions: &mut AstExpressionBuilder,
+    constants: &mut ConstValueStore,
+    value: i64,
+) -> ExprId {
+    expressions
+        .fixed_scalar(
+            constants,
+            FixedScalarValue::signed(FixedScalar::I32, value).expect("test value fits I32"),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("test i32 fits expression owner")
+        .id()
 }
 
 #[test]
@@ -252,6 +277,8 @@ fn retained_condition_intake_is_domain_scoped_and_installs_once_at_its_position(
             style: &style,
             context: &body.context,
             string_table: &mut body.string_table,
+            expression_builder: &mut body.expressions,
+            const_values: &mut body.constants,
         },
     )
     .expect("retained control-flow render unit is prepared before header completion");
@@ -284,7 +311,11 @@ fn retained_condition_intake_is_domain_scoped_and_installs_once_at_its_position(
 
     body.store
         .borrow_mut()
-        .install_completed_numeric_intake(intake.site, bool_expression(true), None)
+        .install_completed_numeric_intake(
+            intake.site,
+            bool_expression(&mut body.expressions, &mut body.constants, true),
+            None,
+        )
         .expect("the completed condition installs at its position");
 
     assert!(
@@ -302,7 +333,11 @@ fn retained_condition_intake_is_domain_scoped_and_installs_once_at_its_position(
     assert!(
         body.store
             .borrow_mut()
-            .install_completed_numeric_intake(intake.site, bool_expression(false), None)
+            .install_completed_numeric_intake(
+                intake.site,
+                bool_expression(&mut body.expressions, &mut body.constants, false),
+                None,
+            )
             .is_err(),
         "installing one retained intake twice is a broken invariant"
     );
@@ -311,6 +346,8 @@ fn retained_condition_intake_is_domain_scoped_and_installs_once_at_its_position(
 /// The const condition a completed conditional `Loop` carries at `node_id`, when one is installed.
 fn completed_loop_condition(
     store: &RefCell<TemplateIrStore>,
+    expressions: &AstExpressionBuilder,
+    constants: &ConstValueStore,
     node_id: TemplateIrNodeId,
 ) -> Option<bool> {
     let store = store.borrow();
@@ -321,7 +358,12 @@ fn completed_loop_condition(
         TemplateIrNodeKind::Loop {
             header: TemplateLoopHeader::Conditional { condition },
             ..
-        } => const_conditional_loop_condition_value(condition),
+        } => const_conditional_loop_condition_value(
+            expressions
+                .view(*condition)
+                .expect("completed loop condition is a committed expression"),
+            constants,
+        ),
         _ => None,
     }
 }
@@ -346,6 +388,8 @@ fn copied_retained_condition_completes_independently_of_its_source() {
             style: &style,
             context: &body.context,
             string_table: &mut body.string_table,
+            expression_builder: &mut body.expressions,
+            const_values: &mut body.constants,
         },
     )
     .expect("retained control-flow render unit is prepared before the copy");
@@ -376,20 +420,38 @@ fn copied_retained_condition_completes_independently_of_its_source() {
 
     body.store
         .borrow_mut()
-        .install_completed_numeric_intake(source_intake.site, bool_expression(true), None)
+        .install_completed_numeric_intake(
+            source_intake.site,
+            bool_expression(&mut body.expressions, &mut body.constants, true),
+            None,
+        )
         .expect("the source condition installs its own completed value");
     body.store
         .borrow_mut()
-        .install_completed_numeric_intake(copied_intake.site, bool_expression(false), None)
+        .install_completed_numeric_intake(
+            copied_intake.site,
+            bool_expression(&mut body.expressions, &mut body.constants, false),
+            None,
+        )
         .expect("the copy installs its own completed value");
 
     assert_eq!(
-        completed_loop_condition(&body.store, source_position),
+        completed_loop_condition(
+            &body.store,
+            &body.expressions,
+            &body.constants,
+            source_position,
+        ),
         Some(true),
         "completing the copy must not change the source's resolved condition"
     );
     assert_eq!(
-        completed_loop_condition(&body.store, copied_position),
+        completed_loop_condition(
+            &body.store,
+            &body.expressions,
+            &body.constants,
+            copied_position,
+        ),
         Some(false),
         "the copy must resolve to its own completed condition"
     );
@@ -459,6 +521,8 @@ fn bound_range_headers_are_isolated_by_body_domain_and_copies_keep_their_row() {
             style: &style,
             context: &outer.context,
             string_table: &mut outer.string_table,
+            expression_builder: &mut outer.expressions,
+            const_values: &mut outer.constants,
         },
     )
     .expect("outer retained range render unit is prepared");
@@ -468,6 +532,8 @@ fn bound_range_headers_are_isolated_by_body_domain_and_copies_keep_their_row() {
             style: &style,
             context: &local.context,
             string_table: &mut local.string_table,
+            expression_builder: &mut local.expressions,
+            const_values: &mut local.constants,
         },
     )
     .expect("body-local retained range render unit is prepared");
@@ -502,16 +568,22 @@ fn bound_range_headers_are_isolated_by_body_domain_and_copies_keep_their_row() {
         .install_completed_numeric_range_header_with_counter(
             selected_outer,
             RangeLoopSpec {
-                start: i32_expression(0),
-                end: i32_expression(2),
+                start: i32_expression(&mut outer.expressions, &mut outer.constants, 0),
+                end: i32_expression(&mut outer.expressions, &mut outer.constants, 2),
                 end_kind: RangeEndKind::Exclusive,
                 step: None,
             },
-            Declaration {
-                id: outer_counter_path,
-                value: i32_expression(0),
-                binding_span: None,
-                config_qualifier: None,
+            {
+                let value = i32_expression(&mut outer.expressions, &mut outer.constants, 0);
+                Declaration {
+                    id: outer_counter_path,
+                    type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                    diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+                    value_mode: ValueMode::ImmutableOwned,
+                    value: DeclarationValue::Initializer(value),
+                    binding_span: None,
+                    config_qualifier: None,
+                }
             },
         )
         .expect("the selected outer header installs");
@@ -599,7 +671,11 @@ fn retained_range_operand_takes_one_slot_record_and_never_installs_singly() {
     assert!(
         body.store
             .borrow_mut()
-            .install_completed_numeric_intake(intake.site, bool_expression(true), None)
+            .install_completed_numeric_intake(
+                intake.site,
+                bool_expression(&mut body.expressions, &mut body.constants, true),
+                None,
+            )
             .is_err(),
         "a range operand never installs on its own; the header installs once as a set"
     );
@@ -645,6 +721,8 @@ fn bound_range_completion_inspects_each_pending_header_once() {
                     style: &style,
                     context: &body.context,
                     string_table: &mut body.string_table,
+                    expression_builder: &mut body.expressions,
+                    const_values: &mut body.constants,
                 },
             )
             .expect("range render unit is prepared");
@@ -687,16 +765,23 @@ fn bound_range_completion_inspects_each_pending_header_once() {
                     .install_completed_numeric_range_header_with_counter(
                         expected,
                         RangeLoopSpec {
-                            start: i32_expression(0),
-                            end: i32_expression(2),
+                            start: i32_expression(&mut body.expressions, &mut body.constants, 0),
+                            end: i32_expression(&mut body.expressions, &mut body.constants, 2),
                             end_kind: RangeEndKind::Exclusive,
                             step: None,
                         },
-                        Declaration {
-                            id: path,
-                            value: i32_expression(0),
-                            binding_span: None,
-                            config_qualifier: None,
+                        {
+                            let value =
+                                i32_expression(&mut body.expressions, &mut body.constants, 0);
+                            Declaration {
+                                id: path,
+                                type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                                diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+                                value_mode: ValueMode::ImmutableOwned,
+                                value: DeclarationValue::Initializer(value),
+                                binding_span: None,
+                                config_qualifier: None,
+                            }
                         },
                     )
                     .expect("pending header installs");
@@ -801,7 +886,7 @@ fn duplicate_numeric_intake_registration_preserves_the_original_record() {
             position,
             fragment.items.clone(),
             fragment.expected,
-            fragment.value_mode.clone(),
+            fragment.value_mode,
             fragment.suffix,
         )
         .expect("first registration succeeds");

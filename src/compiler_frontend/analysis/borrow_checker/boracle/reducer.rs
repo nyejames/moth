@@ -431,9 +431,7 @@ fn event_nested_size(event: &Event) -> usize {
         }
         EventKind::Aggregate { fields, .. } => fields.len(),
         EventKind::CallArgument { .. } => 1,
-        EventKind::CallEffect(effect) => {
-            effect.arguments.len() + usize::from(effect.result.is_some())
-        }
+        EventKind::CallEffect(effect) => effect.arguments.len() + effect.results.len(),
         EventKind::Terminator {
             kind: TerminatorEventKind::Branch { targets },
         } => targets.len(),
@@ -803,7 +801,10 @@ fn remap_call_result_provenance(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "event remapping keeps the event and shared binding/block/place/origin/loan/use/call maps separate because each map belongs to a distinct identifier domain"
+)]
 fn remap_event_kind(
     kind: &EventKind,
     binding_map: &[Option<BindingId>],
@@ -985,13 +986,17 @@ fn remap_call_effect(
     use_map: &[Option<UseId>],
     call: impl Fn(CallId) -> Option<CallId>,
 ) -> Option<CallEffect> {
-    let result = match effect.result {
-        Some(result) => Some(CallResult {
-            destination: remap_binding_destination(result.destination, &place)?,
-            origin: origin(result.origin)?,
-        }),
-        None => None,
-    };
+    let results = effect
+        .results
+        .iter()
+        .map(|result| {
+            Some(CallResult {
+                destination: remap_binding_destination(result.destination, &place)?,
+                origin: origin(result.origin)?,
+            })
+        })
+        .collect::<Option<Vec<_>>>()?
+        .into_boxed_slice();
     Some(CallEffect {
         call: call(effect.call)?,
         arguments: effect
@@ -1000,7 +1005,7 @@ fn remap_call_effect(
             .map(|argument| remap_call_argument(argument, &place, use_map))
             .collect::<Option<Vec<_>>>()?
             .into_boxed_slice(),
-        result,
+        results,
     })
 }
 
@@ -1028,7 +1033,6 @@ fn remap_terminator_kind(
             targets: remap_values(targets, |target| mapped(block_map, target.index()))?,
         }),
         TerminatorEventKind::Return => Some(TerminatorEventKind::Return),
-        TerminatorEventKind::ReturnSuccess => Some(TerminatorEventKind::ReturnSuccess),
         TerminatorEventKind::ReturnError => Some(TerminatorEventKind::ReturnError),
         TerminatorEventKind::Break { target } => Some(TerminatorEventKind::Break {
             target: mapped(block_map, target.index())?,
@@ -1294,7 +1298,6 @@ pub(super) fn terminator_after_edge_removal(
             _ => None,
         },
         TerminatorEventKind::Return
-        | TerminatorEventKind::ReturnSuccess
         | TerminatorEventKind::ReturnError
         | TerminatorEventKind::RuntimeFailure
         | TerminatorEventKind::AssertFailure => None,
@@ -1504,8 +1507,9 @@ fn event_kind_references_origin(kind: &EventKind, origin_id: ValueOriginId) -> b
             RebindValue::AliasFromPlace(_) => false,
         },
         EventKind::CallEffect(effect) => effect
-            .result
-            .is_some_and(|result| result.origin == origin_id),
+            .results
+            .iter()
+            .any(|result| result.origin == origin_id),
         EventKind::AliasFromPlace { .. }
         | EventKind::ExclusiveAliasFromPlace { .. }
         | EventKind::ScopeExit { .. }
@@ -1612,8 +1616,9 @@ fn event_kind_references_place(kind: &EventKind, place_id: PlaceId) -> bool {
                 .iter()
                 .any(|argument| argument.place == place_id)
                 || effect
-                    .result
-                    .is_some_and(|result| result.destination.place() == place_id)
+                    .results
+                    .iter()
+                    .any(|result| result.destination.place() == place_id)
         }
         EventKind::Terminator {
             kind: TerminatorEventKind::Jump { arguments, .. },
@@ -1743,16 +1748,17 @@ fn attempt_simplify_call_arguments(
             arguments.pop();
             let argument_count = arguments.len();
             candidate_effect.arguments = arguments.into_boxed_slice();
-            if let Some(result) = candidate_effect.result
-                && let Some(origin) = candidate_parts.origins.get_mut(result.origin.index())
-                && let OriginKind::CallResult { provenance, .. } = &mut origin.kind
-                && matches!(
-                    provenance,
-                    CallResultProvenance::AliasParams(indices)
-                        if indices.iter().any(|index| *index >= argument_count)
-                )
-            {
-                *provenance = CallResultProvenance::Fresh;
+            for result in &candidate_effect.results {
+                if let Some(origin) = candidate_parts.origins.get_mut(result.origin.index())
+                    && let OriginKind::CallResult { provenance, .. } = &mut origin.kind
+                    && matches!(
+                        provenance,
+                        CallResultProvenance::AliasParams(indices)
+                            if indices.iter().any(|index| *index >= argument_count)
+                    )
+                {
+                    *provenance = CallResultProvenance::Fresh;
+                }
             }
         }
         let mut keep = KeepRows::all(&candidate_parts);
@@ -1804,25 +1810,30 @@ fn attempt_replace_calls_with_simpler_effects(
         let EventKind::CallEffect(effect) = &event.kind else {
             continue;
         };
-        let Some(result) = effect.result else {
-            continue;
-        };
-        if origin_referenced_except_event(&parts, result.origin, event.id) {
-            continue;
-        }
-        let mut candidate_parts = parts.clone();
-        if let EventKind::CallEffect(candidate_effect) =
-            &mut candidate_parts.events[event_index].kind
-        {
-            candidate_effect.result = None;
-        }
-        let mut keep = KeepRows::all(&parts);
-        keep.origins[result.origin.index()] = false;
-        let Some(candidate_parts) = remap_parts(candidate_parts, &keep) else {
-            return Ok(None);
-        };
-        if let Some(candidate) = try_candidate(current, candidate_parts, current.bounds)? {
-            return Ok(Some(candidate));
+        for (result_index, result) in effect.results.iter().enumerate() {
+            if origin_referenced_except_event(&parts, result.origin, event.id) {
+                continue;
+            }
+            let mut candidate_parts = parts.clone();
+            if let EventKind::CallEffect(candidate_effect) =
+                &mut candidate_parts.events[event_index].kind
+            {
+                let mut results = candidate_effect.results.to_vec();
+                results.remove(result_index);
+                candidate_effect.results = results.into_boxed_slice();
+            }
+            let mut keep = KeepRows::all(&parts);
+            keep.origins[result.origin.index()] = effect
+                .results
+                .iter()
+                .enumerate()
+                .any(|(index, other)| index != result_index && other.origin == result.origin);
+            let Some(candidate_parts) = remap_parts(candidate_parts, &keep) else {
+                return Ok(None);
+            };
+            if let Some(candidate) = try_candidate(current, candidate_parts, current.bounds)? {
+                return Ok(Some(candidate));
+            }
         }
     }
 
@@ -2183,7 +2194,7 @@ fn render_call_argument(argument: &CallArgument) -> String {
     )
 }
 
-fn render_call_result(result: CallResult) -> String {
+fn render_call_result(result: &CallResult) -> String {
     format!(
         "CallResult {{ destination: {}, origin: {} }}",
         render_binding_destination(result.destination),
@@ -2192,16 +2203,11 @@ fn render_call_result(result: CallResult) -> String {
 }
 
 fn render_call_effect(effect: &CallEffect) -> String {
-    let result = effect
-        .result
-        .map(render_call_result)
-        .map(|result| format!("Some({result})"))
-        .unwrap_or_else(|| "None".to_string());
     format!(
-        "CallEffect {{ call: {}, arguments: {}, result: {} }}",
+        "CallEffect {{ call: {}, arguments: {}, results: {} }}",
         render_call_id(effect.call),
         render_boxed(&effect.arguments, render_call_argument),
-        result
+        render_boxed(&effect.results, render_call_result)
     )
 }
 
@@ -2294,7 +2300,6 @@ fn render_terminator(kind: &TerminatorEventKind) -> String {
             render_boxed(targets, |id| render_block_id(*id))
         ),
         TerminatorEventKind::Return => "TerminatorEventKind::Return".to_string(),
-        TerminatorEventKind::ReturnSuccess => "TerminatorEventKind::ReturnSuccess".to_string(),
         TerminatorEventKind::ReturnError => "TerminatorEventKind::ReturnError".to_string(),
         TerminatorEventKind::Break { target } => {
             format!(

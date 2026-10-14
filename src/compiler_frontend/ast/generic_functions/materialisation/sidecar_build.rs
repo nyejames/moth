@@ -1,55 +1,39 @@
 //! Generated sidecar environment construction, emission and evidence installation.
 use super::super::MaterialisedGenericAst;
 use super::super::{GenericFunctionInstantiationRequest, GenericFunctionTemplate};
-use super::frozen_syntax::StableBodySyntax;
-use super::nominal_blueprints::{
-    intern_generated_canonical_type, intern_materialisation_type_blueprint,
-};
-use super::preparation_freeze::ModuleMaterialisationPreparation;
-use super::stable_types::{
-    GeneratedFoldedValueMaterialiser, MaterialisationNominalSource,
-    generated_file_value_resolution_services,
-};
-use crate::compiler_frontend::ast::AstBuildContext;
+use super::artefact_emit::ModuleMaterialisationContext;
+use super::nominal_blueprints::intern_generated_canonical_type;
+use super::preparation_freeze::{ModuleMaterialisationCapture, ModuleMaterialisationPreparation};
+use super::stable_types::{GeneratedValueMaterialisationServices, MaterialisationNominalSource};
 use crate::compiler_frontend::ast::AstBuildResult;
 use crate::compiler_frontend::ast::AstImportedFunctionContract;
-use crate::compiler_frontend::ast::const_values::store::ConstValueMetadata;
-use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
 use crate::compiler_frontend::ast::generic_bounds::{BoundEvidenceSelection, evidence_for_type};
 use crate::compiler_frontend::ast::module_ast::build_context::AstPhaseContext;
 use crate::compiler_frontend::ast::module_ast::emission::AstEmitter;
-use crate::compiler_frontend::ast::module_ast::environment::builder::import_projection::values::materialize_public_const_template;
-use crate::compiler_frontend::ast::module_ast::environment::{
-    AstModuleEnvironment, AstModuleLookups, ResolvedConstantSet, TopLevelDeclarationTable,
-};
+use crate::compiler_frontend::ast::module_ast::environment::AstModuleEnvironment;
 use crate::compiler_frontend::ast::module_ast::finalization::{
     AstFinalizer, MaterialisationContextRetention,
 };
-use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ReturnChannel};
+use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::builtins::casts::evidence::builtin_cast_proves_core_trait;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalEvidenceIdentity, CanonicalTraitIdentity, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
-use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_bindings::GenericTypeBindings;
 use crate::compiler_frontend::datatypes::generic_parameters::TypeParameterId;
-use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
+use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
-use crate::compiler_frontend::folded_value::PublicConstTemplate;
 use crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget;
-use crate::compiler_frontend::headers::module_symbols::ModuleSymbols;
-use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallMutationEffect, PublicCallParameterAccess,
     PublicCallParameterSummary, PublicCallTransferEffect,
 };
 use crate::compiler_frontend::semantic_identity::{
-    GeneratedDeclarationIdentity, GeneratedFunctionIdentity, ModuleRootRole,
+    GeneratedDeclarationIdentity, GeneratedFunctionIdentity,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -59,135 +43,22 @@ use crate::compiler_frontend::traits::definitions::{
     ResolvedTraitDefinition, ResolvedTraitParameter, ResolvedTraitRequirement, ResolvedTraitReturn,
     TraitReceiverRequirement,
 };
-use crate::compiler_frontend::traits::environment::{TraitEnvironment, trait_this_name};
+use crate::compiler_frontend::traits::environment::trait_this_name;
+use crate::compiler_frontend::traits::evidence::TraitEvidenceDefinition;
 use crate::compiler_frontend::traits::evidence::environment::{
     TraitEvidenceKind, TraitRequirementEvidence,
-};
-use crate::compiler_frontend::traits::evidence::{
-    TraitEvidenceDefinition, TraitEvidenceEnvironment,
 };
 use crate::compiler_frontend::traits::ids::{TraitEvidenceId, TraitId};
 use rustc_hash::FxHashMap;
 use rustc_hash::FxHashSet;
-use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::rc::Rc;
-use std::sync::Arc;
 
 type MaterialisedSidecarOutcome = (AstBuildResult, PathId);
 
-impl ModuleMaterialisationPreparation {
-    pub(crate) fn build_environment(
-        &self,
-        phase_context: &AstPhaseContext<'_>,
-        module_resources: Rc<RefCell<ModuleResourceTable>>,
-        string_table: &mut StringTable,
-        path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
-    ) -> Result<AstModuleEnvironment, CompilerError> {
-        let mut declaration_table =
-            TopLevelDeclarationTable::fork_for_generated(Rc::clone(&self.declaration_table));
-        let mut resolved_module_constants = ResolvedConstantSet::default();
-        let mut generated_type_environment = self.type_environment.fork_for_generated();
-        let mut template_materialiser = GeneratedFoldedValueMaterialiser {
-            type_environment: &mut generated_type_environment,
-            external_registry: &self.external_package_registry,
-            nominal_source: self,
-            template_ir_store: Rc::clone(&phase_context.template_ir_store),
-            module_resources: Rc::clone(&module_resources),
-            path_fork,
-        };
-        for row in self.const_values.iter_module_constant_views() {
-            let value_id = row.id;
-            let Some(declaration_id) = declaration_table.declaration_id_by_path(row.path) else {
-                return Err(CompilerError::compiler_error(
-                    "Generated materialisation store row has no declaration-table entry",
-                ));
-            };
-            let Some(declaration) = declaration_table.get_mut_by_id(declaration_id) else {
-                return Err(CompilerError::compiler_error(
-                    "Generated materialisation store row has no declaration-table value",
-                ));
-            };
-            let mut template_builder =
-                |projected: &PublicConstTemplate, metadata: &ConstValueMetadata| {
-                    let template = materialize_public_const_template(
-                        &mut template_materialiser,
-                        projected,
-                        &phase_context.template_ir_store,
-                        string_table,
-                        metadata.span,
-                    )?;
-                    Ok(ExpressionKind::Template(Box::new(template)))
-                };
-            declaration.value = self
-                .const_values
-                .expression_for_materialisation(value_id, &mut template_builder)?;
-            resolved_module_constants.insert(declaration_id);
-        }
-
-        let lookups = AstModuleLookups {
-            module_symbols: ModuleSymbols::empty(),
-            exported_callable_paths: FxHashSet::default(),
-            binding_environment: Rc::clone(&self.binding_environment),
-            warnings: Vec::new(),
-            declaration_table: Rc::new(declaration_table),
-            imported_functions_by_local_path: self.imported_functions_by_local_path.clone(),
-            imported_struct_definitions: self.imported_struct_definitions.clone(),
-            imported_choice_definitions: self.imported_choice_definitions.clone(),
-            resolved_module_constants: Rc::new(resolved_module_constants),
-            builtin_struct_ast_nodes: self.builtin_struct_ast_nodes.clone(),
-            // Preparing sidecars inherit compatible type IDs and immutable lookup owners.
-            // Request-local templates and evidence remain independently owned; generated evidence
-            // installation writes each sidecar's evidence environment, so sharing one owner would
-            // only move the deep copy into that first write.
-            resolved_struct_fields_by_path: Rc::clone(&self.resolved_struct_fields_by_path),
-            resolved_function_signatures_by_path: Rc::clone(
-                &self.resolved_function_signatures_by_path,
-            ),
-            generic_function_templates_by_path: self.generic_function_templates_by_path.clone(),
-            resolved_type_aliases_by_path: Rc::clone(&self.resolved_type_aliases_by_path),
-            choice_variant_shells_by_path: Rc::clone(&self.choice_variant_shells_by_path),
-            declaration_semantics: Rc::clone(&self.declaration_semantics),
-            receiver_methods: Rc::clone(&self.receiver_methods),
-            trait_environment: Rc::clone(&self.trait_environment),
-            trait_evidence_environment: Rc::new(self.trait_evidence_environment.clone()),
-            generic_declarations_by_path: Rc::clone(&self.generic_declarations_by_path),
-            nominal_type_ids_by_path: Rc::clone(&self.nominal_type_ids_by_path),
-            source_nominal_paths: Rc::clone(&self.source_nominal_paths),
-            external_package_registry: Arc::clone(&self.external_package_registry),
-            style_directives: self.style_directives.clone(),
-            build_profile: self.build_profile,
-        };
-
-        Ok(AstModuleEnvironment {
-            lookups: Rc::new(lookups),
-            generated_evidence_pairs: Rc::new(FxHashSet::default()),
-            type_environment: generated_type_environment,
-            resolved_public_type_roots: Default::default(),
-            resolved_public_trait_roots: Vec::new(),
-        })
-    }
-
+impl ModuleMaterialisationCapture {
     pub(crate) fn generic_function_templates(&self) -> &FxHashMap<PathId, GenericFunctionTemplate> {
         &self.generic_function_templates_by_path
-    }
-
-    pub(crate) fn trait_environment(&self) -> &TraitEnvironment {
-        &self.trait_environment
-    }
-
-    pub(crate) fn trait_evidence_environment(&self) -> &TraitEvidenceEnvironment {
-        &self.trait_evidence_environment
-    }
-
-    pub(crate) fn template_for_identity(
-        &self,
-        identity: &GeneratedDeclarationIdentity,
-    ) -> Option<&GenericFunctionTemplate> {
-        let path = self.generic_template_paths_by_identity.get(identity)?;
-        let template = self.generic_function_templates_by_path.get(path)?;
-        (template.declaration_identity.as_ref() == Some(identity) && template.body_tokens.is_some())
-            .then_some(template)
     }
 
     pub(super) fn rebuild_generic_template_identity_index(&mut self) -> Result<(), CompilerError> {
@@ -215,18 +86,20 @@ impl ModuleMaterialisationPreparation {
         }
         Ok(paths_by_identity)
     }
+}
 
+impl ModuleMaterialisationPreparation {
     pub(crate) fn materialise_ast(
         &self,
         identity: &GeneratedFunctionIdentity,
         requester_context: &ModuleMaterialisationPreparation,
         requester_call_span: Option<SourceSpan>,
         string_table: &mut StringTable,
-        path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
+        path_fork: &mut PathInternerFork,
         #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
     ) -> Result<MaterialisedGenericAst, CompilerMessages> {
-        let template = self
-            .template_for_identity(identity.declaration())
+        let (declaring_context, template_index) = self
+            .declaring_context_for_identity(identity.declaration())
             .ok_or_else(|| {
                 CompilerMessages::from_error_ref(
                     CompilerError::compiler_error(
@@ -235,189 +108,30 @@ impl ModuleMaterialisationPreparation {
                     &self.string_table,
                 )
             })?;
-        let content_value_at_path = |logical_path: &PathId| {
-            let content_path = self.content_constant_path_for_capture(logical_path, path_fork)?;
-            let resources = self.module_resources.as_ref().ok_or_else(|| {
-                CompilerError::compiler_error(
-                    "nested generic content capture has no module resource table",
-                )
-            })?;
-            let resources = resources.borrow();
-            self.stable_folded_value_at_path(&content_path, &resources, path_fork)
-        };
-        let body = template.body_tokens.as_ref().ok_or_else(|| {
-            CompilerMessages::from_error_ref(
-                CompilerError::compiler_error(
-                    "Generated request's retained generic template has no body syntax",
-                ),
-                &self.string_table,
-            )
-        })?;
-        // Share the declaring preparation's lazily frozen donor owner across every request.
-        // Source bodies share the cached owner; a nested body that retained its own donor pair
-        // keeps that pair.
-        let donor_identity = self.donor_identity().clone();
-        let stage0_resolution_facts = body
-            .resolution_facts()
-            .map(Arc::as_ref)
-            .or(self.stage0_resolution_facts.as_deref());
-        let frozen_identity_handle = body
-            .frozen_identity_handle()
-            .cloned()
-            .unwrap_or_else(|| self.frozen_identity_handle.clone());
-        let stable_body = StableBodySyntax::capture(
-            body,
-            template.source_file,
-            path_fork,
-            Some(&donor_identity),
-            stage0_resolution_facts,
-            frozen_identity_handle,
-            &content_value_at_path,
-        )
-        .map_err(|error| CompilerMessages::from_error_ref(error, &self.string_table))?;
-        let mut stable_nested_bodies = Vec::new();
-        for (path, nested_template) in &self.generic_function_templates_by_path {
-            if path == &template.function_path {
-                continue;
-            }
-            let Some(nested_body) = nested_template.body_tokens.as_ref() else {
-                continue;
-            };
-            let nested_stage0_resolution_facts = nested_body
-                .resolution_facts()
-                .map(Arc::as_ref)
-                .or(self.stage0_resolution_facts.as_deref());
-            let nested_frozen_identity_handle = nested_body
-                .frozen_identity_handle()
-                .cloned()
-                .unwrap_or_else(|| self.frozen_identity_handle.clone());
-            let stable_nested_body = StableBodySyntax::capture(
-                nested_body,
-                nested_template.source_file,
-                path_fork,
-                Some(&donor_identity),
-                nested_stage0_resolution_facts,
-                nested_frozen_identity_handle,
-                &content_value_at_path,
-            )
-            .map_err(|error| CompilerMessages::from_error_ref(error, &self.string_table))?;
-            stable_nested_bodies.push((*path, nested_template.source_file, stable_nested_body));
-        }
-
-        self.validate_requester_string_prefix(string_table)
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-        let source_file = template.source_file;
-        let identity_tables = body.source_identity_tables();
-        let materialised_body = stable_body
-            .materialise(source_file, path_fork, string_table, identity_tables)
-            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-        let module_resources = Rc::new(RefCell::new(ModuleResourceTable::new()));
-        let file_value_resolution = generated_file_value_resolution_services(
-            Rc::clone(&module_resources),
-            self.module_origin.clone(),
-            Arc::clone(&materialised_body.resolution_facts),
-        );
-        let build_context = AstBuildContext {
-            external_package_registry: Arc::clone(&self.external_package_registry),
-            style_directives: &self.style_directives,
-            string_table,
-            path_fork,
-            entry_dir: self.entry_dir,
-            root_role: ModuleRootRole::Support,
-            build_profile: self.build_profile,
-            file_value_resolution: Some(file_value_resolution),
-            config_resolution: None,
-            build_config_values: Arc::new(Default::default()),
-            template_const_loop_iteration_limit: self.template_const_loop_iteration_limit,
-            capacity_estimate: self.capacity_estimate,
-            #[cfg(feature = "timers")]
-            timing_context,
-            #[cfg(feature = "timers")]
-            timing_metric_family: crate::compiler_frontend::ast::AstTimingMetricFamily::Generated,
-        };
-        let (phase_context, string_table_ref, path_fork_ref) =
-            AstPhaseContext::from_build_context(build_context, Arc::new(Default::default()));
-        crate::timing_scope_attributed!(
-            timing_guard_generated_ast_total,
-            crate::timing::TimingMetric::FrontendGeneratedAstTotal,
-            timing_context
-        );
-        let mut environment = self
-            .build_environment(
-                &phase_context,
-                Rc::clone(&module_resources),
-                string_table_ref,
-                path_fork_ref,
-            )
-            // `build_environment` uses the path fork retained by the AST build context.
-            .map_err(|error| CompilerMessages::from_error_ref(error, &self.string_table))?;
-        {
-            let lookups = Rc::make_mut(&mut environment.lookups);
-            let generated_template = lookups
-                .generic_function_templates_by_path
-                .get_mut(&template.function_path)
-                .ok_or_else(|| {
-                    CompilerError::compiler_error(
-                        "Generated materialisation lost its selected generic template",
-                    )
-                })
-                .map_err(|error| CompilerMessages::from_error_ref(error, string_table_ref))?;
-            generated_template.body_tokens = Some(
-                materialised_body
-                    .into_generic_body()
-                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table_ref))?,
-            );
-            for (path, source_file, stable_nested_body) in stable_nested_bodies {
-                let materialised_nested_body = stable_nested_body
-                    .materialise(source_file, path_fork_ref, string_table_ref, None)
-                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table_ref))?;
-                let nested_template = lookups
-                    .generic_function_templates_by_path
-                    .get_mut(&path)
-                    .ok_or_else(|| {
-                        CompilerError::compiler_error(
-                            "Generated materialisation lost a nested generic template",
-                        )
-                    })
-                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table_ref))?;
-                nested_template.body_tokens = Some(
-                    materialised_nested_body
-                        .into_generic_body()
-                        .map_err(|error| {
-                            CompilerMessages::from_error_ref(error, string_table_ref)
-                        })?,
-                );
-            }
-        }
-        let (build_result, instance_path) = emit_materialised_sidecar(
-            &phase_context,
-            environment,
-            GeneratedSidecarRequest {
+        declaring_context.materialise_ast_at(
+            template_index,
+            super::ModuleMaterialisationInput {
                 identity,
-                function_path: template.function_path,
                 requester_context,
                 requester_call_span,
+                external_package_registry: &self.external_package_registry,
+                string_table,
+                path_fork,
+                style_directives: &self.style_directives,
+                build_profile: self.build_profile,
+                template_const_loop_iteration_limit: self.template_const_loop_iteration_limit,
+                #[cfg(feature = "timers")]
+                timing_context,
             },
-            self,
-            path_fork_ref,
-            string_table_ref,
-        )?;
-        Ok(MaterialisedGenericAst {
-            build_result,
-            instance_path,
-        })
+        )
     }
 }
-/// One generated sidecar request as described by the lane that asked for it.
-///
-/// WHAT: groups the generated identity, its instance path and the requester evidence that
-///       both materialisation lanes supply unchanged.
-/// WHY: the two lanes differ only in how the body and environment are reconstructed, so the
-///       request description belongs to the shared contract rather than its parameter list.
+/// One generated request with the original stable declaring authority and requester evidence.
 pub(super) struct GeneratedSidecarRequest<'a> {
     pub identity: &'a GeneratedFunctionIdentity,
     pub function_path: PathId,
     pub requester_context: &'a ModuleMaterialisationPreparation,
+    pub declaring_context: &'a ModuleMaterialisationContext,
     pub requester_call_span: Option<SourceSpan>,
 }
 
@@ -425,10 +139,10 @@ pub(super) struct GeneratedSidecarRequest<'a> {
 ///
 /// WHAT: reconstructs generated type arguments and requester evidence, emits the generated
 ///       request, finalises its AST and carries both source blueprint sets into the result.
-/// WHY: the frozen artefact and live preparation lanes differ only in how their body and
-///       environment are reconstructed; sidecar emission must remain one contract.
+/// WHY: all bodies use the same stable reconstruction path, and requester evidence must enter
+///       that fresh domain before body emission.
 pub(super) fn emit_materialised_sidecar<PrimarySource>(
-    phase_context: &AstPhaseContext<'_>,
+    mut phase_context: AstPhaseContext<'_>,
     mut environment: AstModuleEnvironment,
     request: GeneratedSidecarRequest<'_>,
     primary_source: &PrimarySource,
@@ -442,6 +156,7 @@ where
         identity,
         function_path,
         requester_context,
+        declaring_context,
         requester_call_span,
     } = request;
     let type_arguments = identity.type_arguments();
@@ -459,6 +174,43 @@ where
         .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
         materialised_type_arguments.push(type_id);
     }
+    // Canonical reconstruction issues new definition paths. Restore the requester's existing
+    // lookup spellings from detached rows so publication retains its imported nominal aliases.
+    for binding in &requester_context.nominal_bindings {
+        let type_id = intern_generated_canonical_type(
+            &binding.identity,
+            &mut environment.type_environment,
+            phase_context.external_package_registry.as_ref(),
+            &nominal_source,
+            string_table,
+            path_fork,
+        )
+        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        environment
+            .type_environment
+            .register_nominal_path_alias(binding.local_path, type_id)
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    }
+    let mut value_services = GeneratedValueMaterialisationServices {
+        external_registry: phase_context.external_package_registry.as_ref(),
+        template_ir_store: &phase_context.template_ir_store,
+        module_resources: Rc::clone(
+            &phase_context
+                .file_value_resolution
+                .as_ref()
+                .ok_or_else(|| {
+                    CompilerMessages::from_error_ref(
+                        CompilerError::compiler_error(
+                            "Generated evidence has no file-value services",
+                        ),
+                        string_table,
+                    )
+                })?
+                .module_resources,
+        ),
+        expression_builder: &mut phase_context.expression_builder,
+        const_values: &mut phase_context.const_values,
+    };
     install_generated_request_evidence(
         identity,
         &materialised_type_arguments,
@@ -467,7 +219,7 @@ where
         &mut environment,
         string_table,
         path_fork,
-        phase_context.external_package_registry.as_ref(),
+        &mut value_services,
     )
     .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
 
@@ -481,14 +233,16 @@ where
     )
     .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
     let instance_path = request.instance_path;
+    #[cfg(feature = "timers")]
+    let timing_context = phase_context.timing_context;
     let emitted = {
         crate::timing_scope_attributed!(
             timing_guard_generated_ast_emit,
             crate::timing::TimingMetric::FrontendGeneratedAstEmit,
-            phase_context.timing_context
+            timing_context
         );
         AstEmitter::new(
-            phase_context,
+            &mut phase_context,
             &mut environment,
             1,
             path_fork,
@@ -502,7 +256,7 @@ where
         crate::timing_scope_attributed!(
             timing_guard_generated_ast_finalise,
             crate::timing::TimingMetric::FrontendGeneratedAstFinalise,
-            phase_context.timing_context
+            timing_context
         );
         AstFinalizer::new(phase_context, environment, path_fork).finalize(
             emitted,
@@ -515,11 +269,15 @@ where
     // blueprints omit those spans, so donor-first merging keeps source ranges stable.
     if let Some(context) = &mut build_result.materialisation_context {
         context
+            .inherit_stable_context(declaring_context)
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        context
             .inherit_nominal_blueprints(primary_source)
             .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
         context
             .inherit_nominal_blueprints(requester_context)
             .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        context.inherit_requester_declaring_contexts(requester_context);
     }
 
     Ok((build_result, instance_path))
@@ -562,11 +320,12 @@ fn install_generated_request_evidence<PrimarySource>(
     environment: &mut AstModuleEnvironment,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-    external_registry: &ExternalPackageRegistry,
+    services: &mut super::stable_types::GeneratedValueMaterialisationServices<'_>,
 ) -> Result<(), CompilerError>
 where
     PrimarySource: MaterialisationNominalSource,
 {
+    let external_registry = services.external_registry;
     // Declaring provenance stays authoritative; requester blueprints fill only the identities the
     // declaring source does not retain, exactly as the generated type-argument lane composes them.
     let nominal_source = (primary_source, requester_context);
@@ -770,23 +529,15 @@ where
                 });
             }
 
-            if let Some(template) = requester_context
-                .generic_function_templates_by_path
-                .get(&method_path)
-            {
-                // A template origin is the only case that still has to become a concrete callable
-                // inside the materialised body, so it is reinstalled into this domain before the
-                // body is emitted; the instance itself materialises later through the shared
-                // request lane. A generic evidence method is a non-executable placeholder here:
-                // deriving a carrier from the retained template signature would invent one for a
-                // call shape that must never reach HIR, because the instance's own contract owns
-                // the ordinary call carrier.
+            if let Some(template) = requester_context.generic_callable_for_path(&method_path) {
+                // Canonical signatures reconstruct owned folded defaults in the generated domain;
+                // requester declaration and expression graphs never cross this boundary.
                 install_generated_requester_template(
                     method_path,
                     template,
                     requester_context,
                     environment,
-                    external_registry,
+                    services,
                     &nominal_source,
                     string_table,
                     path_fork,
@@ -806,102 +557,48 @@ where
                     environment,
                 )?;
                 if install_row {
-                    let target = match template.declaration_identity.as_ref() {
-                        Some(GeneratedDeclarationIdentity::Public(origin)) => {
+                    let target = match &template.declaration_identity {
+                        GeneratedDeclarationIdentity::Public(origin) => {
                             SourceFunctionTarget::Imported {
                                 origin: origin.clone(),
                                 local_path: method_path,
                             }
                         }
-                        Some(GeneratedDeclarationIdentity::ModulePrivate(identity)) => {
+                        GeneratedDeclarationIdentity::ModulePrivate(identity) => {
                             SourceFunctionTarget::ModulePrivate {
                                 identity: identity.clone(),
                                 local_path: method_path,
                             }
                         }
-                        None => {
-                            return Err(CompilerError::compiler_error(
-                                "Generated evidence generic method has no frozen executable identity",
-                            ));
-                        }
                     };
                     imported_contracts.push((
                         method_path,
-                        AstImportedFunctionContract {
-                            target,
-                            summary: bootstrap_call_summary_from_signature(&template.signature),
-                            fallible_carrier_type_id: None,
-                        },
+                        generated_requester_template_contract(method_path, target, environment)?,
                     ));
                 }
-            } else if let Some(source_contract) = requester_context
-                .imported_functions_by_local_path
-                .get(&method_path)
+            } else if let Some(source_contract) = requester_context.callable_for_path(&method_path)
             {
-                // The first installation installed this contract; a repeat discovery reuses it
-                // and must not re-materialise the same carrier.
                 if !install_row {
                     continue;
                 }
-                let fallible_carrier_type_id = match requester_context
-                    .resolved_function_signatures_by_path
-                    .get(&method_path)
-                {
-                    Some(resolved_signature) => materialise_generated_fallible_carrier(
-                        &resolved_signature.signature,
-                        requester_context,
-                        &mut environment.type_environment,
-                        external_registry,
+                if matches!(
+                    &source_contract.target,
+                    super::stable_types::StableFunctionTarget::Generated(_)
+                ) {
+                    return Err(CompilerError::compiler_error(
+                        "Generated evidence method retained an invalid executable target",
+                    ));
+                }
+                imported_contracts.push((
+                    method_path,
+                    source_contract.materialise_requester_contract(
+                        method_path,
+                        environment,
+                        services,
                         &nominal_source,
                         string_table,
                         path_fork,
                     )?,
-                    // A requester that is itself a generated sidecar installed this contract
-                    // without the requester's own signature projection. That contract already
-                    // carries the requester-domain carrier for the same method, so it is
-                    // re-interned through the stable-identity bridge instead of being replaced.
-                    None => source_contract
-                        .fallible_carrier_type_id
-                        .map(|carrier_type_id| {
-                            intern_generated_requester_type(
-                                carrier_type_id,
-                                requester_context,
-                                &mut environment.type_environment,
-                                external_registry,
-                                &nominal_source,
-                                string_table,
-                                path_fork,
-                            )
-                        })
-                        .transpose()?,
-                };
-                let source_target = source_contract.target.clone();
-                let target = match source_target {
-                    SourceFunctionTarget::Imported { origin, .. } => {
-                        SourceFunctionTarget::Imported {
-                            origin,
-                            local_path: method_path,
-                        }
-                    }
-                    SourceFunctionTarget::ModulePrivate { identity, .. } => {
-                        SourceFunctionTarget::ModulePrivate {
-                            identity,
-                            local_path: method_path,
-                        }
-                    }
-                    SourceFunctionTarget::Local(_) | SourceFunctionTarget::Generated { .. } => {
-                        return Err(CompilerError::compiler_error(
-                            "Generated evidence method retained an invalid executable target",
-                        ));
-                    }
-                };
-                imported_contracts.push((
-                    method_path,
-                    AstImportedFunctionContract {
-                        target,
-                        summary: source_contract.summary.clone(),
-                        fallible_carrier_type_id,
-                    },
                 ));
             } else {
                 return Err(CompilerError::compiler_error(
@@ -951,36 +648,48 @@ where
     Ok(())
 }
 
-/// Reinstalls one requester-projected generic template into the generated sidecar domain.
+/// Builds an evidence contract from the template already translated into this sidecar's domain.
 ///
-/// WHAT: registers the requester's generic parameter list with its canonical trait bounds,
-///       re-interns the template signature's slots through the requester's materialisation
-///       blueprints, and inserts the template without body syntax at the evidence method's
-///       projected path.
-/// WHY: a materialised body resolves its evidence and receiver calls against the sidecar's own
-///      environment, so an evidence template the declaring module never projected must exist
-///      there before the body is emitted. The instance itself is materialised later from the
-///      provider's frozen body, so this placeholder carries only the identity, parameters and
-///      signature that inference reads; the body stays absent by construction.
+/// The retained requester signature is not a valid source of local slot handles. Reusing the
+/// installed template also keeps generic slots tied to its generated parameter list.
+fn generated_requester_template_contract(
+    method_path: PathId,
+    target: SourceFunctionTarget,
+    environment: &AstModuleEnvironment,
+) -> Result<AstImportedFunctionContract, CompilerError> {
+    let template = environment
+        .lookups
+        .generic_function_templates_by_path
+        .get(&method_path)
+        .ok_or_else(|| {
+            CompilerError::compiler_error("Generated evidence template was not installed")
+        })?;
+    Ok(AstImportedFunctionContract {
+        target,
+        summary: bootstrap_call_summary_from_signature(&template.signature),
+        returns: template.signature.success_return_type_ids(),
+        error_return: template.signature.error_return_type_id(),
+    })
+}
+
+/// Restore requester inference contracts from canonical slots and owned folded defaults.
 ///
-/// `method_path` is the evidence requirement's projected path, which is also the key every later
-/// lookup uses; it is passed explicitly so the installation cannot silently key elsewhere.
+/// Retain the resolved receiver alongside the bodyless template. Public methods reuse the
+/// nominal's parameter identities, but each callable owns its declaration-specific bound list.
 #[allow(
     clippy::too_many_arguments,
-    reason = "template reinstallation keeps the evidence path, the requester template, its context, and the generated domain's collaborators as separate borrows"
+    reason = "requester-template installation keeps method identity, stable callable contract and requester domain, mutable target environment and value services, nominal source and mutable string/path tables separate"
 )]
 fn install_generated_requester_template<N: MaterialisationNominalSource>(
     method_path: PathId,
-    template: &GenericFunctionTemplate,
+    template: &super::stable_types::StableGenericCallableContract,
     requester_context: &ModuleMaterialisationPreparation,
     environment: &mut AstModuleEnvironment,
-    external_registry: &ExternalPackageRegistry,
+    services: &mut super::stable_types::GeneratedValueMaterialisationServices<'_>,
     nominal_source: &N,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<(), CompilerError> {
-    // A same-module requester already injected this template with its own materialised body, and
-    // its type IDs are already compatible with the generated environment.
     if environment
         .lookups
         .generic_function_templates_by_path
@@ -988,35 +697,24 @@ fn install_generated_requester_template<N: MaterialisationNominalSource>(
     {
         return Ok(());
     }
-
-    let parameter_list = requester_context
-        .type_environment
-        .generic_parameters(template.generic_parameter_list_id)
-        .ok_or_else(|| {
-            CompilerError::compiler_error(
-                "Generated evidence template has no requester-local generic parameter list",
-            )
-        })?;
-    let mut parameter_slots: FxHashMap<GenericParameterId, usize> = FxHashMap::default();
     let mut bounds_by_local = FxHashMap::default();
-    for (slot, parameter) in parameter_list.parameters.iter().enumerate() {
-        parameter_slots.insert(parameter.id, slot);
-        let mut bounds = Vec::with_capacity(parameter.trait_bounds.len());
-        for trait_id in &parameter.trait_bounds {
-            let identity = requester_context
+    for (slot, parameter) in template.generic_parameters.iter().enumerate() {
+        let mut bounds = Vec::with_capacity(parameter.bounds.len());
+        for identity in &parameter.bounds {
+            let requester_trait_id = requester_context
                 .trait_environment
-                .canonical_identity_for_id(*trait_id)
+                .id_for_canonical_identity(identity)
                 .ok_or_else(|| {
                     CompilerError::compiler_error(
-                        "Generated evidence template bound has no canonical requester identity",
+                        "Generated requester template bound has no canonical requester trait",
                     )
                 })?;
             bounds.push(install_generated_requester_bound_trait(
                 identity,
-                *trait_id,
+                requester_trait_id,
                 requester_context,
                 environment,
-                external_registry,
+                services.external_registry,
                 nominal_source,
                 string_table,
                 path_fork,
@@ -1024,207 +722,152 @@ fn install_generated_requester_template<N: MaterialisationNominalSource>(
         }
         bounds_by_local.insert(TypeParameterId(slot as u32), bounds);
     }
-
-    let registered = environment
-        .type_environment
-        .register_generic_parameter_list(
-            parameter_list
-                .parameters
-                .iter()
-                .enumerate()
-                .map(|(slot, parameter)| (TypeParameterId(slot as u32), parameter.name)),
-            &bounds_by_local,
-        );
-    let mut generic_parameter_type_ids = Vec::with_capacity(parameter_list.parameters.len());
-    for slot in 0..parameter_list.parameters.len() as u32 {
-        let parameter_id = registered
-            .canonical_by_local
-            .get(&TypeParameterId(slot))
-            .copied()
+    let receiver_identity = template.generic_parameter_owner.as_ref()
+        .and_then(crate::compiler_frontend::canonical_type_identity::GenericDeclarationOrigin::nominal_type_origin)
+        .map(|origin| CanonicalTypeIdentity::SourceNominal(origin.clone()));
+    // Public receiver templates share exported parameter identities, not bound contracts.
+    // Private receiver methods retain their own substitution handles.
+    let (generic_parameter_list_id, canonical_by_local) = if let Some(identity) = &receiver_identity
+    {
+        let receiver_type = intern_generated_canonical_type(
+            identity,
+            &mut environment.type_environment,
+            services.external_registry,
+            nominal_source,
+            string_table,
+            path_fork,
+        )?;
+        let list_id = match environment.type_environment.get(receiver_type) {
+            Some(TypeDefinition::Struct(definition)) => definition.generic_parameters,
+            Some(TypeDefinition::Choice(definition)) => definition.generic_parameters,
+            _ => None,
+        }
+        .ok_or_else(|| {
+            CompilerError::compiler_error(
+                "Generated requester generic receiver has no nominal parameter list",
+            )
+        })?;
+        let parameters = environment
+            .type_environment
+            .generic_parameters(list_id)
             .ok_or_else(|| {
                 CompilerError::compiler_error(
-                    "Generated evidence template parameter registration omitted a slot",
+                    "Generated requester generic receiver parameter list is missing",
                 )
             })?;
-        generic_parameter_type_ids.push(
-            environment
-                .type_environment
-                .type_id_for_generic_parameter(parameter_id)
-                .ok_or_else(|| {
-                    CompilerError::compiler_error(
-                        "Generated evidence template parameter registration omitted its type handle",
-                    )
-                })?,
-        );
-    }
-
-    let mut parameters = Vec::with_capacity(template.signature.parameters.len());
-    for parameter in &template.signature.parameters {
-        let type_id = intern_generated_template_slot(
-            parameter.value.type_id,
-            &parameter_slots,
-            &generic_parameter_type_ids,
-            requester_context,
-            environment,
-            external_registry,
-            nominal_source,
-            string_table,
-            path_fork,
-        )?;
-        let mut declaration = parameter.clone();
-        declaration.value.type_id = type_id;
-        declaration.value.diagnostic_type =
-            diagnostic_type_spelling(type_id, &environment.type_environment);
-        parameters.push(declaration);
-    }
-    let mut returns = Vec::with_capacity(template.signature.returns.len());
-    for slot in &template.signature.returns {
-        let Some(type_id) = slot.type_id else {
-            returns.push(slot.clone());
-            continue;
-        };
-        let type_id = intern_generated_template_slot(
-            type_id,
-            &parameter_slots,
-            &generic_parameter_type_ids,
-            requester_context,
-            environment,
-            external_registry,
-            nominal_source,
-            string_table,
-            path_fork,
-        )?;
-        let mut remapped = slot.clone();
-        remapped.value = diagnostic_type_spelling(type_id, &environment.type_environment);
-        remapped.type_id = Some(type_id);
-        returns.push(remapped);
-    }
-
-    Rc::make_mut(&mut environment.lookups)
-        .generic_function_templates_by_path
-        .insert(
-            method_path,
-            GenericFunctionTemplate {
-                function_path: method_path,
-                source_file: template.source_file,
-                declaration_identity: template.declaration_identity.clone(),
-                generic_parameter_owner: template.generic_parameter_owner.clone(),
-                generic_parameter_list_id: registered.list_id,
-                signature: FunctionSignature {
-                    parameters,
-                    returns,
-                },
-                body_tokens: None,
-                declaration_span: template.declaration_span,
-            },
-        );
-
-    Ok(())
-}
-
-/// Re-interns one requester template signature slot into the generated sidecar domain.
-///
-/// WHAT: projects the requester-local slot through its stable materialisation blueprint, where the
-///       template's own generic parameters map to their generated-domain slots, and interns the
-///       result in the generated environment.
-/// WHY: the template's signature is requester-domain data, so every slot must cross the boundary
-///      through the same stable bridge nominal members use; a raw requester `TypeId` cannot be
-///      interpreted against the declaring module's environment.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "slot interning keeps the requester blueprint context, its parameter slots, the generated parameter handles, and the generated domain's collaborators as separate borrows"
-)]
-fn intern_generated_template_slot<N: MaterialisationNominalSource>(
-    type_id: TypeId,
-    parameter_slots: &FxHashMap<GenericParameterId, usize>,
-    generic_parameter_type_ids: &[TypeId],
-    requester_context: &ModuleMaterialisationPreparation,
-    environment: &mut AstModuleEnvironment,
-    external_registry: &ExternalPackageRegistry,
-    nominal_source: &N,
-    string_table: &mut StringTable,
-    path_fork: &mut PathInternerFork,
-) -> Result<TypeId, CompilerError> {
-    let blueprint = requester_context.materialisation_type_blueprint(type_id, parameter_slots)?;
-    intern_materialisation_type_blueprint(
-        &blueprint,
-        generic_parameter_type_ids,
-        nominal_source,
-        &mut environment.type_environment,
-        external_registry,
-        string_table,
-        path_fork,
-    )
-}
-
-/// Materialises one evidence method's fallible carrier into the generated type domain.
-///
-/// WHAT: reverse-projects the resolved signature's success and error slots through the requester's
-///       stable type identities, re-interns them in the generated environment, and applies the
-///       shared carrier shape rule for zero, single and multiple success returns.
-/// WHY: a generated sidecar lowers the evidence call against its own module-local type domain, so
-///      the requester's carrier `TypeId` cannot be reused across the boundary. A signature without
-///      an error slot is genuinely infallible and keeps no carrier. Zero and single success
-///      returns stay on the stack; only a multi-return signature pays for its tuple list.
-fn materialise_generated_fallible_carrier<N: MaterialisationNominalSource>(
-    signature: &FunctionSignature,
-    requester_context: &ModuleMaterialisationPreparation,
-    type_environment: &mut TypeEnvironment,
-    external_registry: &ExternalPackageRegistry,
-    nominal_source: &N,
-    string_table: &mut StringTable,
-    path_fork: &mut PathInternerFork,
-) -> Result<Option<TypeId>, CompilerError> {
-    let Some(error_type_id) = signature.error_return_type_id() else {
-        return Ok(None);
-    };
-    let error_type_id = intern_generated_requester_type(
-        error_type_id,
-        requester_context,
-        type_environment,
-        external_registry,
-        nominal_source,
-        string_table,
-        path_fork,
-    )?;
-    let mut intern_success = |success_type_id: TypeId| {
-        intern_generated_requester_type(
-            success_type_id,
-            requester_context,
-            type_environment,
-            external_registry,
-            nominal_source,
-            string_table,
-            path_fork,
-        )
-    };
-    let mut success_slots = signature
-        .returns
-        .iter()
-        .filter(|slot| slot.channel == ReturnChannel::Success)
-        .filter_map(|slot| slot.type_id);
-    let first_success = success_slots.next().map(&mut intern_success).transpose()?;
-    let second_success = success_slots.next().map(&mut intern_success).transpose()?;
-    Ok(match (first_success, second_success) {
-        (None, _) => fallible_carrier_from_type_ids(&[], Some(error_type_id), type_environment),
-        (Some(success_type_id), None) => fallible_carrier_from_type_ids(
-            &[success_type_id],
-            Some(error_type_id),
-            type_environment,
-        ),
-        (Some(first_success), Some(second_success)) => {
-            let mut success_type_ids = Vec::with_capacity(signature.returns.len());
-            success_type_ids.push(first_success);
-            success_type_ids.push(second_success);
-            for success_type_id in success_slots {
-                success_type_ids.push(intern_success(success_type_id)?);
-            }
-            // The slice entry point would copy this already-translated list, so the tuple shape
-            // interns it through the same `intern_tuple` API that entry point uses.
-            let success_type_id = type_environment.intern_tuple(success_type_ids);
-            Some(type_environment.intern_fallible_carrier(success_type_id, error_type_id))
+        if parameters.parameters.len() != template.generic_parameters.len() {
+            return Err(CompilerError::compiler_error(
+                "Generated requester generic receiver parameter count disagrees with its owner",
+            ));
         }
-    })
+        let registered = environment
+            .type_environment
+            .register_generic_parameter_contract(
+                list_id,
+                template
+                    .generic_parameters
+                    .iter()
+                    .enumerate()
+                    .map(|(slot, parameter)| {
+                        (
+                            TypeParameterId(slot as u32),
+                            string_table.intern(&parameter.name),
+                        )
+                    }),
+                &bounds_by_local,
+            )
+            .ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "Generated requester template contract disagrees with its parameter owner",
+                )
+            })?;
+        (registered.list_id, registered.canonical_by_local)
+    } else {
+        let registered = environment
+            .type_environment
+            .register_generic_parameter_list(
+                template
+                    .generic_parameters
+                    .iter()
+                    .enumerate()
+                    .map(|(slot, parameter)| {
+                        (
+                            TypeParameterId(slot as u32),
+                            string_table.intern(&parameter.name),
+                        )
+                    }),
+                &bounds_by_local,
+            );
+        (registered.list_id, registered.canonical_by_local)
+    };
+    let mut generic_parameter_type_ids = Vec::with_capacity(template.generic_parameters.len());
+    for (slot, parameter) in template.generic_parameters.iter().enumerate() {
+        let parameter_id = canonical_by_local
+            .get(&TypeParameterId(slot as u32))
+            .ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "Generated requester template registration omitted a parameter",
+                )
+            })?;
+        let type_id = environment
+            .type_environment
+            .type_id_for_generic_parameter(*parameter_id)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "Generated requester template parameter has no type handle",
+                )
+            })?;
+        if let Some(identity) = &parameter.exported_identity {
+            environment.type_environment.register_canonical_identity(
+                CanonicalTypeIdentity::GenericParameter(identity.clone()),
+                type_id,
+            )?;
+        }
+        generic_parameter_type_ids.push(type_id);
+    }
+    let (signature, _, _, _) = template.signature.materialise(
+        &method_path,
+        &mut super::artefact_emit::StableFunctionMaterialisationContext {
+            generic_parameter_type_ids: &generic_parameter_type_ids,
+            nominal_source,
+            type_environment: &mut environment.type_environment,
+            const_values: &mut *services.const_values,
+            external_package_registry: services.external_registry,
+            module_resources: Rc::clone(&services.module_resources),
+            path_fork,
+            string_table,
+        },
+    )?;
+    let receiver = if template.receiver.is_some() {
+        Some(super::artefact_emit::materialised_receiver_key(
+            &signature,
+            &environment.type_environment,
+        )?)
+    } else {
+        None
+    };
+    let lookups = Rc::make_mut(&mut environment.lookups);
+    Rc::make_mut(&mut lookups.resolved_function_signatures_by_path).insert(
+        method_path,
+        crate::compiler_frontend::ast::type_resolution::ResolvedFunctionSignature {
+            receiver,
+            signature: signature.clone(),
+        },
+    );
+    lookups.generic_function_templates_by_path.insert(
+        method_path,
+        GenericFunctionTemplate {
+            function_path: method_path,
+            source_file: template.source_file,
+            declaration_identity: Some(template.declaration_identity.clone()),
+            generic_parameter_owner: template.generic_parameter_owner.clone(),
+            generic_parameter_list_id,
+            signature,
+            body_tokens: None,
+            declaration_span: template.declaration_span,
+        },
+    );
+    Ok(())
 }
 
 /// Re-interns one requester-local signature slot in the generated sidecar's type domain.
@@ -1253,43 +896,14 @@ fn intern_generated_requester_type<N: MaterialisationNominalSource>(
     )
 }
 
-pub(super) fn fallible_carrier_from_type_ids(
-    success_type_ids: &[TypeId],
-    error_type_id: Option<TypeId>,
-    type_environment: &mut TypeEnvironment,
-) -> Option<TypeId> {
-    let error_type_id = error_type_id?;
-    let success_type_id = match success_type_ids {
-        [] => builtin_type_ids::NONE,
-        [single] => *single,
-        many => type_environment.intern_tuple(many.to_vec()),
-    };
-    Some(type_environment.intern_fallible_carrier(success_type_id, error_type_id))
-}
-pub(super) fn fallible_carrier_for_signature(
-    signature: &crate::compiler_frontend::ast::statements::functions::FunctionSignature,
-    type_environment: &mut TypeEnvironment,
-) -> Option<TypeId> {
-    let error_type_id = signature
-        .returns
-        .iter()
-        .find(|slot| {
-            slot.channel
-                == crate::compiler_frontend::ast::statements::functions::ReturnChannel::Error
-        })?
-        .type_id?;
-    let success_types = signature.success_return_type_ids();
-    fallible_carrier_from_type_ids(&success_types, Some(error_type_id), type_environment)
-}
-
 pub(crate) fn bootstrap_call_summary_from_signature(
-    signature: &crate::compiler_frontend::ast::statements::functions::FunctionSignature,
+    signature: &FunctionSignature,
 ) -> PublicCallSummary {
     let parameters = signature
         .parameters
         .iter()
         .map(|parameter| {
-            let access = if parameter.value.value_mode.is_mutable() {
+            let access = if parameter.value_mode.is_mutable() {
                 PublicCallParameterAccess::Mutable
             } else {
                 PublicCallParameterAccess::Shared
@@ -1354,7 +968,7 @@ fn requester_type_id_for_canonical_identity(
 fn discover_generated_requester_bound_evidence(
     pending: &mut VecDeque<PendingGeneratedEvidence>,
     method_path: PathId,
-    requester_template: &GenericFunctionTemplate,
+    requester_template: &super::stable_types::StableGenericCallableContract,
     evidence_identity: &CanonicalEvidenceIdentity,
     concrete_receiver: Option<TypeId>,
     materialised_type_arguments: &[TypeId],
@@ -1408,7 +1022,7 @@ fn discover_generated_requester_bound_evidence(
 fn push_generated_template_bound_evidence(
     pending: &mut VecDeque<PendingGeneratedEvidence>,
     method_path: PathId,
-    requester_template: &GenericFunctionTemplate,
+    requester_template: &super::stable_types::StableGenericCallableContract,
     receiver: TypeId,
     requester_context: &ModuleMaterialisationPreparation,
     environment: &AstModuleEnvironment,
@@ -1430,7 +1044,7 @@ fn push_generated_template_bound_evidence(
     if !environment
         .type_environment
         .try_collect_type_parameter_bindings_typeid(
-            receiver_parameter.value.type_id,
+            receiver_parameter.type_id,
             receiver,
             &mut bindings,
         )
@@ -1444,15 +1058,9 @@ fn push_generated_template_bound_evidence(
     else {
         return Ok(());
     };
-    let Some(requester_parameters) = requester_context
-        .type_environment
-        .generic_parameters(requester_template.generic_parameter_list_id)
-    else {
-        return Ok(());
-    };
 
-    for (requester_parameter, generated_parameter) in requester_parameters
-        .parameters
+    for (requester_parameter, generated_parameter) in requester_template
+        .generic_parameters
         .iter()
         .zip(generated_parameters.parameters.iter())
     {
@@ -1461,7 +1069,15 @@ fn push_generated_template_bound_evidence(
         let Some(concrete_argument) = bindings.get(generated_parameter.id) else {
             continue;
         };
-        for bound_trait_id in &requester_parameter.trait_bounds {
+        for bound_identity in &requester_parameter.bounds {
+            let bound_trait_id = requester_context
+                .trait_environment
+                .id_for_canonical_identity(bound_identity)
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "Generated requester template bound has no canonical requester trait",
+                    )
+                })?;
             let Some(requester_argument_type_id) = requester_evidence_argument_type_id(
                 concrete_argument,
                 requester_context,
@@ -1471,7 +1087,7 @@ fn push_generated_template_bound_evidence(
             };
             let Some(BoundEvidenceSelection::Registered(evidence_id)) = evidence_for_type(
                 requester_argument_type_id,
-                *bound_trait_id,
+                bound_trait_id,
                 &requester_context.type_environment,
                 &requester_context.trait_environment,
                 &requester_context.trait_evidence_environment,
@@ -1625,7 +1241,7 @@ fn install_generated_requester_bound_trait<N: MaterialisationNominalSource>(
             .map(|parameter| {
                 Ok(ResolvedTraitParameter {
                     name: parameter.name,
-                    value_mode: parameter.value_mode.clone(),
+                    value_mode: parameter.value_mode,
                     type_id: intern_generated_trait_requirement_slot(
                         parameter.type_id,
                         source.this_type,
@@ -1730,3 +1346,7 @@ fn intern_generated_trait_requirement_slot<N: MaterialisationNominalSource>(
         path_fork,
     )
 }
+
+#[cfg(test)]
+#[path = "../tests/sidecar_build_tests.rs"]
+mod sidecar_build_tests;

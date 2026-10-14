@@ -31,9 +31,6 @@ use crate::compiler_frontend::source::SourceSpan;
 /// view without re-running AST slot routing.
 #[derive(Clone, Debug)]
 pub(crate) struct TemplateSlotPlan {
-    /// Exact source span for invariant reporting at the AST/HIR handoff.
-    pub(crate) span: Option<SourceSpan>,
-
     /// TIR-rendered contribution source plans, one per runtime contribution.
     pub(crate) contribution_sources: Vec<TemplateSlotContributionSourcePlan>,
 

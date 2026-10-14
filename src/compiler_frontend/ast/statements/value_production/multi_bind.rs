@@ -9,9 +9,12 @@ use super::expression_build::{build_value_if_expression, build_value_match_expre
 use super::receiver::try_parse_value_block_at_receiver_with_target;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, OwnedExpr,
+};
 use crate::compiler_frontend::ast::statements::match_patterns::MatchArm;
 use crate::compiler_frontend::ast::statements::value_production::completeness::{
     visit_authored_then_values_mut, visit_reachable_then_values,
@@ -22,7 +25,7 @@ use crate::compiler_frontend::ast::statements::value_production::types::{
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidControlFlowStatementReason, InvalidReturnShapeReason,
-    TypeMismatchContext,
+    TypeMismatchContext, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -45,21 +48,29 @@ type MultiBindValueResult<T> = Result<T, ExpressionParseError>;
 /// WHAT: routes every multi-bind value `if` through the shared receiver dispatcher.
 /// Mixed slots parse a structural block; this owner infers and coerces, then wraps once.
 /// WHY: partially inferred multi-bind must not keep a second header or body grammar.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "multi-bind parsing keeps the cursor, scope, slot shape and mutable state as separate inputs"
+)]
 pub fn try_parse_multi_bind_value_block(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     target_count: usize,
     known_slot_types: &[Option<TypeId>],
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Option<MultiBindValueResult<Expression>> {
+) -> Option<MultiBindValueResult<OwnedExpr>> {
     debug_assert_eq!(known_slot_types.len(), target_count);
 
     let parsed = try_parse_value_block_at_receiver_with_target(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         ActiveValueProductionTarget::mixed(known_slot_types, ValueReceiverKind::MultiBind),
         string_table,
         path_fork,
@@ -73,6 +84,8 @@ pub fn try_parse_multi_bind_value_block(
             known_slot_types,
             target_count,
             type_interner,
+            expression_builder,
+            const_values,
         ),
         // A branch body still holds numeric continuations, so the block cannot be finished here.
         // The block is this right-hand position's whole authored syntax, so it travels to the
@@ -87,8 +100,7 @@ pub fn try_parse_multi_bind_value_block(
 /// Complete one inferred mixed-slot value block into its multi-bind result expression.
 ///
 /// WHAT: infers every unknown slot from the block's producing bodies, coerces each produced value
-///       against the final slot list, and builds the value-block expression with the interned
-///       result type.
+///       against the final slot list, and builds the value-block expression from those slots.
 /// WHY `pub(crate)`: this is the single semantic finalizer for an inferred or mixed value block.
 /// The retained mixed-slot resume in this module's subtree and the pending-target assignment
 /// value-if lane both need it, so it stays reachable across the crate instead of being duplicated
@@ -99,7 +111,9 @@ pub(crate) fn finalize_inferred_value_block(
     known_slot_types: &[Option<TypeId>],
     target_count: usize,
     type_interner: &mut AstTypeInterner<'_>,
-) -> MultiBindValueResult<Expression> {
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+) -> MultiBindValueResult<OwnedExpr> {
     match block {
         ValueBlock::If(mut value_if) => {
             let result_type_ids = infer_and_coerce_if_slots(
@@ -108,16 +122,16 @@ pub(crate) fn finalize_inferred_value_block(
                 known_slot_types,
                 target_count,
                 type_interner,
+                expression_builder,
+                const_values,
                 value_if.span,
             )?;
-            value_if.result_type_ids = result_type_ids.clone();
-            let result_type_id = intern_multi_bind_result_type(&result_type_ids, type_interner);
+            value_if.result_type_ids = result_type_ids;
             Ok(build_value_if_expression(
                 value_if,
                 span,
-                result_type_id,
-                type_interner.environment(),
-            ))
+                expression_builder,
+            )?)
         }
         ValueBlock::Match(mut value_match) => {
             let result_type_ids = infer_and_coerce_match_slots(
@@ -126,16 +140,16 @@ pub(crate) fn finalize_inferred_value_block(
                 known_slot_types,
                 target_count,
                 type_interner,
+                expression_builder,
+                const_values,
                 value_match.span,
             )?;
-            value_match.result_type_ids = result_type_ids.clone();
-            let result_type_id = intern_multi_bind_result_type(&result_type_ids, type_interner);
+            value_match.result_type_ids = result_type_ids;
             Ok(build_value_match_expression(
                 value_match,
                 span,
-                result_type_id,
-                type_interner.environment(),
-            ))
+                expression_builder,
+            )?)
         }
         ValueBlock::Catch(_) => unreachable!(
             "value-if receivers do not parse catch handlers; mixed-slot catch is not a multi-bind path"
@@ -146,32 +160,56 @@ pub(crate) fn finalize_inferred_value_block(
     }
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "if slot inference keeps both branch bodies, slot shape and mutable state as separate inputs"
+)]
 fn infer_and_coerce_if_slots(
     then_body: &mut [AstNode],
     else_body: &mut [AstNode],
     known_slot_types: &[Option<TypeId>],
     target_count: usize,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     span: Option<SourceSpan>,
 ) -> MultiBindValueResult<Vec<TypeId>> {
     let result_type_ids = infer_slots_from_bodies(
         &[then_body, else_body],
         known_slot_types,
         target_count,
+        expression_builder,
+        const_values,
         type_interner.environment(),
         span,
     )?;
-    coerce_produced_values_in_body(then_body, &result_type_ids, type_interner.environment())?;
-    coerce_produced_values_in_body(else_body, &result_type_ids, type_interner.environment())?;
+    coerce_produced_values_in_body(
+        then_body,
+        &result_type_ids,
+        expression_builder,
+        type_interner.environment(),
+    )?;
+    coerce_produced_values_in_body(
+        else_body,
+        &result_type_ids,
+        expression_builder,
+        type_interner.environment(),
+    )?;
     Ok(result_type_ids)
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "match slot inference keeps the arms, default, slot shape and mutable state as separate inputs"
+)]
 fn infer_and_coerce_match_slots(
     arms: &mut [MatchArm],
     default: Option<&mut [AstNode]>,
     known_slot_types: &[Option<TypeId>],
     target_count: usize,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     span: Option<SourceSpan>,
 ) -> MultiBindValueResult<Vec<TypeId>> {
     let mut slot_types = known_slot_types.to_vec();
@@ -183,6 +221,8 @@ fn infer_and_coerce_match_slots(
             known_slot_types,
             &mut slot_types,
             target_count,
+            expression_builder,
+            const_values,
             type_interner.environment(),
             &mut saw_producing_path,
         )?;
@@ -193,6 +233,8 @@ fn infer_and_coerce_match_slots(
             known_slot_types,
             &mut slot_types,
             target_count,
+            expression_builder,
+            const_values,
             type_interner.environment(),
             &mut saw_producing_path,
         )?;
@@ -204,6 +246,7 @@ fn infer_and_coerce_match_slots(
         coerce_produced_values_in_body(
             &mut arm.body,
             &result_type_ids,
+            expression_builder,
             type_interner.environment(),
         )?;
     }
@@ -211,6 +254,7 @@ fn infer_and_coerce_match_slots(
         coerce_produced_values_in_body(
             default_body,
             &result_type_ids,
+            expression_builder,
             type_interner.environment(),
         )?;
     }
@@ -222,6 +266,8 @@ fn infer_slots_from_bodies(
     bodies: &[&[AstNode]],
     known_slot_types: &[Option<TypeId>],
     target_count: usize,
+    expression_builder: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
     type_environment: &TypeEnvironment,
     span: Option<SourceSpan>,
 ) -> MultiBindValueResult<Vec<TypeId>> {
@@ -234,6 +280,8 @@ fn infer_slots_from_bodies(
             known_slot_types,
             &mut slot_types,
             target_count,
+            expression_builder,
+            const_values,
             type_environment,
             &mut saw_producing_path,
         )?;
@@ -242,24 +290,36 @@ fn infer_slots_from_bodies(
     finish_inferred_slots(slot_types, saw_producing_path, span)
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "slot accumulation keeps the body, slot shape, outputs and read-only state separate"
+)]
 fn accumulate_slots_from_body(
     body: &[AstNode],
     known_slot_types: &[Option<TypeId>],
     slot_types: &mut [Option<TypeId>],
     target_count: usize,
+    expression_builder: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
     type_environment: &TypeEnvironment,
     saw_producing_path: &mut bool,
 ) -> MultiBindValueResult<()> {
-    visit_reachable_then_values(body, &mut |produced_values| {
-        *saw_producing_path = true;
-        accumulate_produced_group(
-            produced_values,
-            known_slot_types,
-            slot_types,
-            target_count,
-            type_environment,
-        )
-    })
+    visit_reachable_then_values(
+        body,
+        &mut |produced_values| {
+            *saw_producing_path = true;
+            accumulate_produced_group(
+                produced_values,
+                known_slot_types,
+                slot_types,
+                target_count,
+                expression_builder,
+                type_environment,
+            )
+        },
+        expression_builder,
+        const_values,
+    )
 }
 
 fn accumulate_produced_group(
@@ -267,6 +327,7 @@ fn accumulate_produced_group(
     known_slot_types: &[Option<TypeId>],
     slot_types: &mut [Option<TypeId>],
     target_count: usize,
+    expression_builder: &AstExpressionBuilder,
     type_environment: &TypeEnvironment,
 ) -> MultiBindValueResult<()> {
     validate_optional_produced_arity(
@@ -276,24 +337,32 @@ fn accumulate_produced_group(
     )?;
 
     for (slot_index, expression) in produced_values.expressions.iter().enumerate() {
+        let produced_type = expression_builder
+            .view(*expression)?
+            .require_single(ValueReceiverContext::Then)?;
         if let Some(known_type) = known_slot_types[slot_index] {
-            validate_expression_against_slot(expression, known_type, type_environment)?;
+            validate_expression_against_slot(
+                expression,
+                known_type,
+                expression_builder,
+                type_environment,
+            )?;
             slot_types[slot_index] = Some(known_type);
             continue;
         }
 
         if let Some(existing) = slot_types[slot_index] {
-            if existing != expression.type_id {
+            if existing != produced_type {
                 return Err(CompilerDiagnostic::type_mismatch(
                     existing,
-                    expression.type_id,
+                    produced_type,
                     TypeMismatchContext::Assignment,
-                    expression.span,
+                    expression_builder.view(*expression)?.span(),
                 )
                 .into());
             }
         } else {
-            slot_types[slot_index] = Some(expression.type_id);
+            slot_types[slot_index] = Some(produced_type);
         }
     }
 
@@ -328,27 +397,31 @@ fn finish_inferred_slots(
 }
 
 fn validate_expression_against_slot(
-    expression: &Expression,
+    expression: &ExprId,
     expected_type: TypeId,
+    expression_builder: &AstExpressionBuilder,
     type_environment: &TypeEnvironment,
 ) -> MultiBindValueResult<()> {
-    if expression.type_id == expected_type
-        || is_type_compatible(expected_type, expression.type_id, type_environment)
+    let produced_type = expression_builder
+        .view(*expression)?
+        .require_single(ValueReceiverContext::Then)?;
+    if produced_type == expected_type
+        || is_type_compatible(expected_type, produced_type, type_environment)
     {
         return Ok(());
     }
 
     Err(CompilerDiagnostic::type_mismatch(
         expected_type,
-        expression.type_id,
+        produced_type,
         TypeMismatchContext::Assignment,
-        expression.span,
+        expression_builder.view(*expression)?.span(),
     )
     .into())
 }
 
 fn validate_optional_produced_arity(
-    values: Option<&[Expression]>,
+    values: Option<&[ExprId]>,
     target_count: usize,
     span: Option<SourceSpan>,
 ) -> MultiBindValueResult<()> {
@@ -384,6 +457,7 @@ fn validate_optional_produced_arity(
 fn coerce_produced_values_in_body(
     body: &mut [AstNode],
     expected_types: &[TypeId],
+    expression_builder: &mut AstExpressionBuilder,
     type_environment: &TypeEnvironment,
 ) -> MultiBindValueResult<()> {
     visit_authored_then_values_mut(body, &mut |produced_values| {
@@ -400,37 +474,28 @@ fn coerce_produced_values_in_body(
             .iter_mut()
             .zip(expected_types.iter())
         {
-            if expr.type_id == *expected_type {
+            let produced_type = expression_builder
+                .view(*expr)?
+                .require_single(ValueReceiverContext::Then)?;
+            if produced_type == *expected_type {
                 continue;
             }
 
-            if !is_type_compatible(*expected_type, expr.type_id, type_environment) {
+            if !is_type_compatible(*expected_type, produced_type, type_environment) {
                 return Err(CompilerDiagnostic::type_mismatch(
                     *expected_type,
-                    expr.type_id,
+                    produced_type,
                     TypeMismatchContext::Assignment,
-                    expr.span,
+                    expression_builder.view(*expr)?.span(),
                 )
                 .into());
             }
 
-            *expr = Expression::coerced(expr.clone(), *expected_type);
+            *expr = expression_builder
+                .coerced(expression_builder.own(*expr), *expected_type)?
+                .id();
         }
 
         Ok(())
     })
-}
-
-/// A single inferred slot is the block's own value type; only several slots form a tuple, the
-/// same result shape the known-slot receivers build.
-fn intern_multi_bind_result_type(
-    result_type_ids: &[TypeId],
-    type_interner: &mut AstTypeInterner<'_>,
-) -> TypeId {
-    if let [single] = result_type_ids {
-        return *single;
-    }
-    type_interner
-        .environment_mut_for_derived_types()
-        .intern_tuple(result_type_ids.to_vec())
 }

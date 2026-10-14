@@ -233,7 +233,10 @@ fn declarations_with_receiver_methods(
 /// The declarations passed in must already expose the public receiver-method origins the
 /// evidence projection will join against; the helper no longer accepts a raw
 /// receiver-method catalog; the declarations already carry finalized origins.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the evidence fixture joins shared trait and evidence environments, finalised declarations, nominal and trait origin maps, type environment and string/path tables without invoking the full draft builder"
+)]
 fn project_evidence(
     trait_environment: &TraitEnvironment,
     trait_evidence_environment: &TraitEvidenceEnvironment,

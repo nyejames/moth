@@ -12,19 +12,28 @@
 //!
 //! Ownership: this module is construction-only. It must not mirror statements, and it
 //! must not fabricate a `Declaration`, `Expression` or `TypeId` for an unresolved value.
+//!
+//! Expression recipes retain raw four-byte IDs. Completion attaches those IDs to the phase
+//! builder only when they re-enter construction and strips transient owner handles before
+//! retaining a completed result.
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::MatchExhaustiveness;
 use crate::compiler_frontend::ast::ast_nodes::{
     AstNode, Declaration, LoopBindings, MultiBindTarget, MultiBindTargetKind, RangeLoopSpec,
 };
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::call_argument::{
     CallAccessMode, CallArgument, ParameterSlot,
 };
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
-use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::expressions::expression_rpn::{
+    ExpressionRpnItem, single_operand,
+};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, OwnedExpr,
+};
 use crate::compiler_frontend::ast::expressions::failure_facts::TypedErrorProducer;
 use crate::compiler_frontend::ast::expressions::generic_nominal_retention::DeferredGenericNominalCall;
 use crate::compiler_frontend::ast::generic_functions::numeric_origins::GenericErrorReturn;
@@ -157,17 +166,14 @@ struct ForwardProducer {
 }
 
 #[derive(Debug)]
-// `Completed` keeps the natural result inline until `take_completed_forward_producer` takes it.
-// Boxing it would add one heap allocation per forward producer; the dense registry instead pays
-// the expression's size on every row.
+// Keep pending fragments inline in the dense registry rather than allocating per producer.
+// Completed results retain only their committed identity until the one-shot take.
 #[allow(clippy::large_enum_variant)]
 enum ForwardProducerState {
     Pending(DeferredNumericExpression),
     Resolving,
-    Completed(Expression),
+    Completed(ExprId),
     Taken,
-    /// Dropped by a rolled-back speculative parse; never completes and never publishes.
-    Abandoned,
 }
 
 /// Authored literal family of a retained recipe.
@@ -200,21 +206,16 @@ impl NumericFamily {
 
     /// Derive the family of a retained recipe from its authored literal tokens.
     ///
-    /// Nested groups occupy the same operand positions after ordering, so a decimal token inside
-    /// parentheses selects the floating family for the whole recipe.
+    /// WHAT: one flat scan of the ordered fragment. Group markers carry no literal token.
+    /// WHY: groups stay flat in the RPN stream, so a decimal token anywhere inside parentheses
+    /// selects the floating family for the whole recipe.
     pub(crate) fn of_items(items: &[ExpressionRpnItem]) -> NumericFamily {
         let mut family = NumericFamily::Whole;
         for item in items {
-            match item {
-                ExpressionRpnItem::PendingNumericLiteral { token, .. }
-                    if token.kind != NumericLiteralKind::WholeNumber =>
-                {
-                    family = NumericFamily::Decimal;
-                }
-                ExpressionRpnItem::PendingGroup { nodes, .. } => {
-                    family = family.merge(NumericFamily::of_items(nodes));
-                }
-                _ => {}
+            if let ExpressionRpnItem::PendingNumericLiteral { token, .. } = item
+                && token.kind != NumericLiteralKind::WholeNumber
+            {
+                family = NumericFamily::Decimal;
             }
         }
         family
@@ -545,8 +546,8 @@ pub(crate) enum TypedErrorFact {
 // `Ready` moves a completed argument into its retained argument list once. Boxing it would add
 // one heap allocation per ready argument joining such a list.
 #[allow(clippy::large_enum_variant)]
-pub(crate) enum DeferredCallArgument {
-    Ready(CallArgument),
+pub(crate) enum DeferredCallArgument<E = ExprId> {
+    Ready(CallArgument<E>),
     Retained {
         shape: DeferredCallArgumentShape,
         expression: DeferredNumericExpression,
@@ -559,6 +560,27 @@ pub(crate) enum DeferredCallArgument {
         /// because its items no longer travel with the argument.
         typed_errors: (Option<TypedErrorFact>, Option<TypedErrorFact>),
     },
+}
+
+impl<E> DeferredCallArgument<E> {
+    /// Change ready edges without changing retained numeric recipes.
+    pub(crate) fn map_value<T>(self, map: impl FnOnce(E) -> T) -> DeferredCallArgument<T> {
+        match self {
+            Self::Ready(argument) => DeferredCallArgument::Ready(argument.map_value(map)),
+            Self::Retained { shape, expression } => {
+                DeferredCallArgument::Retained { shape, expression }
+            }
+            Self::Forward {
+                shape,
+                producer,
+                typed_errors,
+            } => DeferredCallArgument::Forward {
+                shape,
+                producer,
+                typed_errors,
+            },
+        }
+    }
 }
 
 /// Authored handling consumed at a call's receiving site.
@@ -859,7 +881,7 @@ pub(crate) enum DeferredExpression {
 #[allow(clippy::large_enum_variant)]
 pub(crate) enum DeferredLiteralValue {
     /// A completed value whose type is already fixed.
-    Ready(Expression),
+    Ready(ExprId),
     /// A retained numeric fragment whose shape has not joined its side yet.
     Fragment(DeferredNumericExpression),
     /// A retained numeric fragment joined to its side; `shape` is the fragment's own entry shape.
@@ -976,7 +998,7 @@ pub(crate) trait DeferredExpressionCompletion<'env> {
     fn resolve_statement_expression(
         &mut self,
         expression: StatementExpression,
-    ) -> Result<Expression, ExpressionParseError>;
+    ) -> Result<OwnedExpr, ExpressionParseError>;
 
     /// Complete one retained statement expression that an enclosing catch protects.
     ///
@@ -989,7 +1011,7 @@ pub(crate) trait DeferredExpressionCompletion<'env> {
     fn resolve_protected_statement_expression(
         &mut self,
         expression: StatementExpression,
-    ) -> Result<Expression, ExpressionParseError>;
+    ) -> Result<OwnedExpr, ExpressionParseError>;
 
     /// Complete one retained ordered fragment against its authored expectation.
     fn resolve_fragment(
@@ -997,7 +1019,7 @@ pub(crate) trait DeferredExpressionCompletion<'env> {
         items: Vec<ExpressionRpnItem>,
         expected: ExpectedType,
         value_mode: &ValueMode,
-    ) -> Result<Expression, ExpressionParseError>;
+    ) -> Result<OwnedExpr, ExpressionParseError>;
 
     /// Complete one retained call argument against its authored receiving shape.
     ///
@@ -1009,7 +1031,7 @@ pub(crate) trait DeferredExpressionCompletion<'env> {
     fn complete_call_argument(
         &mut self,
         argument: DeferredCallArgument,
-    ) -> Result<CallArgument, ExpressionParseError>;
+    ) -> Result<CallArgument<OwnedExpr>, ExpressionParseError>;
 
     /// Whether an enclosing catch protects the typed-error producers of the subtree being completed.
     ///
@@ -1038,13 +1060,15 @@ pub(crate) trait DeferredExpressionCompletion<'env> {
         &mut self,
         producer: ForwardProducerId,
         expected: Option<ExpectedType>,
-    ) -> Result<Expression, ExpressionParseError>;
+    ) -> Result<OwnedExpr, ExpressionParseError>;
 }
 
 /// One disjoint borrow of the completion session's interning services.
 pub(crate) struct DeferredExpressionServices<'session, 'env> {
     pub(crate) context: &'session ScopeContext,
     pub(crate) type_interner: &'session mut AstTypeInterner<'env>,
+    pub(crate) expression_builder: &'session mut AstExpressionBuilder,
+    pub(crate) const_values: &'session mut ConstValueStore,
     pub(crate) string_table: &'session mut StringTable,
     pub(crate) path_fork: &'session mut PathInternerFork,
 }
@@ -1319,7 +1343,7 @@ pub(crate) enum DeferredAssignmentTarget {
     Pending(PendingPlaceTarget),
     /// The target is an already-resolved place; only the statement's value deferred.
     Ready {
-        target: crate::compiler_frontend::ast::expressions::expression_rpn::PlaceExpression,
+        target: crate::compiler_frontend::ast::expressions::expression_store::PlaceId,
         /// The authored declaration's value mode, used by the promoted compound arithmetic.
         declaration_value_mode: ValueMode,
         /// The authored declaration's binding span, for the immutable-target diagnostic.
@@ -1353,7 +1377,7 @@ pub(crate) struct AssignmentContinuation {
 #[derive(Debug, Clone)]
 pub(crate) struct CompoundAssignmentContinuation {
     pub(crate) target: DeferredAssignmentTarget,
-    pub(crate) operator: crate::compiler_frontend::ast::expressions::expression::Operator,
+    pub(crate) operator: Operator,
     /// The authored right-hand side: already built, or retained until the target's type is known.
     pub(crate) value: StatementExpression,
     pub(crate) span: Option<SourceSpan>,
@@ -1362,12 +1386,11 @@ pub(crate) struct CompoundAssignmentContinuation {
 
 /// Continuation for a statement-position expression.
 #[derive(Debug, Clone)]
-// `Built` is a statement-position expression moved into its statement once. Boxing it would
-// add one heap allocation per statement-position value.
+// Retained fragments stay inline; completed positions carry only their committed identity.
 #[allow(clippy::large_enum_variant)]
 pub(crate) enum StatementExpression {
-    /// The expression is already built and may still contain pending items.
-    Built(Expression),
+    /// The expression is already completed in the phase owner.
+    Built(ExprId),
     /// The expression could not be built; its ordered fragment is retained.
     Retained(DeferredNumericExpression),
 }
@@ -1832,9 +1855,7 @@ impl NumericConstructionState {
     /// WHY: template heads must read the declared mode without defaulting the binding, and an
     ///      unresolvable row must surface as a broken compiler invariant, never as a value.
     pub(crate) fn binding_value_mode(&self, id: NumericBindingId) -> Option<ValueMode> {
-        self.bindings
-            .get(id.as_usize())
-            .map(|row| row.value_mode.clone())
+        self.bindings.get(id.as_usize()).map(|row| row.value_mode)
     }
 
     // --------------------------
@@ -2282,7 +2303,7 @@ impl NumericConstructionState {
         &mut self,
         id: NumericContinuationId,
         value_index: usize,
-        expression: Expression,
+        expression: ExprId,
     ) -> Result<(), CompilerError> {
         let Some(Some(NumericContinuation::ThenValue(continuation))) =
             self.continuations.get_mut(id.as_usize())
@@ -2585,7 +2606,7 @@ impl NumericConstructionState {
     pub(crate) fn complete_forward_producer(
         &mut self,
         producer: ForwardProducerId,
-        expression: Expression,
+        expression: ExprId,
     ) -> Result<(), CompilerError> {
         let row = self.forward_producer_mut(producer)?;
         if !matches!(row.state, ForwardProducerState::Resolving) {
@@ -2603,7 +2624,7 @@ impl NumericConstructionState {
     pub(crate) fn take_completed_forward_producer(
         &mut self,
         producer: ForwardProducerId,
-    ) -> Result<Option<Expression>, CompilerError> {
+    ) -> Result<Option<ExprId>, CompilerError> {
         let row = self.forward_producer_mut(producer)?;
         if !matches!(row.state, ForwardProducerState::Completed(_)) {
             return Ok(None);
@@ -2625,25 +2646,6 @@ impl NumericConstructionState {
     ///      rollback needs a boundary that covers only the rows the probe registered.
     pub(crate) fn forward_producer_checkpoint(&self) -> usize {
         self.forward_producers.len()
-    }
-
-    /// Make every pending producer registered since `checkpoint` permanently inert.
-    ///
-    /// WHAT: rows at or after the checkpoint that are still pending drop their fragment and become
-    ///       `Abandoned`; no other state is pending, so no other row changes.
-    /// WHY: the probe's consumers are dropped with it, but a pending row still resolves through its
-    ///      class root, so a later live consumer would pull and complete a fragment the source no
-    ///      longer contains. An abandoned row never completes, so it cannot publish a witness, a
-    ///      diagnostic or a generic request.
-    pub(crate) fn abandon_forward_producers_since(&mut self, checkpoint: usize) {
-        let Some(rows) = self.forward_producers.get_mut(checkpoint..) else {
-            return;
-        };
-        for row in rows {
-            if matches!(row.state, ForwardProducerState::Pending(_)) {
-                row.state = ForwardProducerState::Abandoned;
-            }
-        }
     }
 
     fn forward_producer_mut(
@@ -2673,6 +2675,9 @@ fn checked_dense_id(len: usize, table: &'static str) -> Result<u32, CompilerErro
 }
 
 /// True when an ordered fragment still contains construction-only numeric items.
+///
+/// WHAT: group markers are structural and never pending, so a group that holds only completed
+///       operands is not retained on its own account.
 pub(crate) fn items_contain_pending(items: &[ExpressionRpnItem]) -> bool {
     items.iter().any(|item| {
         matches!(
@@ -2681,7 +2686,6 @@ pub(crate) fn items_contain_pending(items: &[ExpressionRpnItem]) -> bool {
                 | ExpressionRpnItem::PendingNumericBinding { .. }
                 | ExpressionRpnItem::PendingNumericCast { .. }
                 | ExpressionRpnItem::PendingNumericCall { .. }
-                | ExpressionRpnItem::PendingGroup { .. }
                 | ExpressionRpnItem::PendingNumericExpression { .. }
         )
     })
@@ -2689,46 +2693,23 @@ pub(crate) fn items_contain_pending(items: &[ExpressionRpnItem]) -> bool {
 
 /// True when an ordered fragment contains items the evaluator cannot resolve itself.
 ///
-/// WHAT: pending numeric literals and groups resolve during ordinary evaluation; a binding
-///       reference, retained cast or retained call needs body-root completion before the
-///       expression can be evaluated at all.
-/// WHY: only the unresolvable items force a position to defer, and groups are searched because
-///      their nested items occupy the same operand positions after ordering.
+/// WHAT: pending numeric literals resolve during ordinary evaluation; a binding reference, retained
+///       cast or retained call needs body-root completion before the expression can be evaluated.
+/// WHY: only the unresolvable items force a position to defer. Group markers are structural, so one
+///      flat scan reaches every item inside a group at its own operand position.
 pub(crate) fn items_contain_unresolvable_numeric(items: &[ExpressionRpnItem]) -> bool {
     items.iter().any(|item| match item {
         ExpressionRpnItem::PendingNumericBinding { .. }
         | ExpressionRpnItem::PendingNumericCast { .. }
         | ExpressionRpnItem::PendingNumericCall { .. }
         | ExpressionRpnItem::PendingNumericExpression { .. } => true,
-        ExpressionRpnItem::PendingGroup { nodes, .. } => items_contain_unresolvable_numeric(nodes),
         ExpressionRpnItem::PendingNumericLiteral { .. }
+        | ExpressionRpnItem::GroupOpen { .. }
+        | ExpressionRpnItem::GroupClose { .. }
         | ExpressionRpnItem::Operand(_)
-        | ExpressionRpnItem::Operator { .. } => false,
+        | ExpressionRpnItem::Operator { .. }
+        | ExpressionRpnItem::ResolvedOperator(_) => false,
     })
-}
-
-/// True when an expression payload still contains construction-only numeric items.
-///
-/// WHAT: recursive scan used to detect a statement whose built expression needs numeric
-///       completion before the node can enter the completed AST.
-/// WHY: placeholders are the only construction-only payload that can be present inside an
-///      otherwise built expression, and they must never reach publication.
-pub(crate) fn expression_contains_pending(expression: &Expression) -> bool {
-    match &expression.kind {
-        crate::compiler_frontend::ast::expressions::expression::ExpressionKind::Runtime(rpn) => {
-            rpn.items.iter().any(|item| match item {
-                ExpressionRpnItem::Operand(operand) => expression_contains_pending(operand),
-                ExpressionRpnItem::PendingNumericLiteral { .. }
-                | ExpressionRpnItem::PendingNumericBinding { .. }
-                | ExpressionRpnItem::PendingNumericCast { .. }
-                | ExpressionRpnItem::PendingNumericCall { .. }
-                | ExpressionRpnItem::PendingGroup { .. }
-                | ExpressionRpnItem::PendingNumericExpression { .. } => true,
-                ExpressionRpnItem::Operator { .. } => false,
-            })
-        }
-        _ => false,
-    }
 }
 
 /// Build the diagnostic for a receiver whose completed numeric value disagrees.
@@ -2881,25 +2862,21 @@ pub(crate) struct DirectPendingReference {
     pub(crate) is_copy: bool,
 }
 
-/// Read the single direct pending binding reference of a fragment, following groups.
+/// Read the single direct pending binding reference of a fragment, through any enclosing groups.
 pub(crate) fn single_direct_pending_reference(
     items: &[ExpressionRpnItem],
 ) -> Option<DirectPendingReference> {
-    match items {
-        [item] => match item {
-            ExpressionRpnItem::PendingNumericBinding {
-                binding,
-                span,
-                value_mode: _,
-                is_copy,
-            } => Some(DirectPendingReference {
-                binding: *binding,
-                span: *span,
-                is_copy: *is_copy,
-            }),
-            ExpressionRpnItem::PendingGroup { nodes, .. } => single_direct_pending_reference(nodes),
-            _ => None,
-        },
+    match single_operand(items)? {
+        ExpressionRpnItem::PendingNumericBinding {
+            binding,
+            span,
+            value_mode: _,
+            is_copy,
+        } => Some(DirectPendingReference {
+            binding: *binding,
+            span: *span,
+            is_copy: *is_copy,
+        }),
         _ => None,
     }
 }
@@ -3011,7 +2988,9 @@ pub(crate) fn join_protected_catch_class(
     class: NumericClassId,
     items: &[ExpressionRpnItem],
 ) {
-    let [ExpressionRpnItem::PendingNumericExpression { expression, .. }] = items else {
+    let Some(ExpressionRpnItem::PendingNumericExpression { expression, .. }) =
+        single_operand(items)
+    else {
         return;
     };
     let DeferredExpression::CatchHandler(payload) = expression.as_ref() else {
@@ -3183,15 +3162,15 @@ fn is_collection_node(state: &NumericConstructionState, shape: KnownShapeId) -> 
 /// The known shape node an inline retained fragment's value has, when it is exactly one literal or
 /// one retained generic call with one declared result.
 ///
-/// WHAT: a retained collection or map literal, possibly wrapped in one pending group, answers its
+/// WHAT: a retained collection or map literal, looking through any enclosing groups, answers its
 ///       node ID; a retained catch handler answers the protected shape its fragment recorded at
 ///       retention; a retained generic call answers the shape its declared result links to. Any
 ///       other fragment answers `None`.
-/// WHY: following a group's single child is the projection the retained operand path already uses;
+/// WHY: looking through enclosing groups is the same projection the retained operand path uses;
 ///      no lookup or reparse is needed, and a generic result keeps its numeric link across a join.
 pub(crate) fn retained_known_shape(items: &[ExpressionRpnItem]) -> Option<KnownShapeId> {
-    match items {
-        [ExpressionRpnItem::PendingNumericExpression { expression, .. }] => {
+    match single_operand(items)? {
+        ExpressionRpnItem::PendingNumericExpression { expression, .. } => {
             match expression.as_ref() {
                 DeferredExpression::Collection(literal) => Some(literal.shape),
                 DeferredExpression::Map(literal) => Some(literal.shape),
@@ -3201,8 +3180,7 @@ pub(crate) fn retained_known_shape(items: &[ExpressionRpnItem]) -> Option<KnownS
                 }
             }
         }
-        [ExpressionRpnItem::PendingNumericCall { call, .. }] => call.single_success_result_shape(),
-        [ExpressionRpnItem::PendingGroup { nodes, .. }] => retained_known_shape(nodes),
+        ExpressionRpnItem::PendingNumericCall { call, .. } => call.single_success_result_shape(),
         _ => None,
     }
 }
@@ -3252,15 +3230,17 @@ pub(crate) fn classify_recipe(
 }
 
 /// True when an item can materialise at a selected destination without a completed operand.
+///
+/// WHAT: group markers are neutral, so a group of literal leaves is a raw recipe,
+///       like its bare leaves.
 pub(crate) fn item_is_literal_recipe_shape(item: &ExpressionRpnItem) -> bool {
     match item {
-        ExpressionRpnItem::PendingNumericLiteral { .. } | ExpressionRpnItem::Operator { .. } => {
-            true
-        }
-        ExpressionRpnItem::PendingGroup { nodes, .. } => {
-            nodes.iter().all(item_is_literal_recipe_shape)
-        }
+        ExpressionRpnItem::PendingNumericLiteral { .. }
+        | ExpressionRpnItem::Operator { .. }
+        | ExpressionRpnItem::GroupOpen { .. }
+        | ExpressionRpnItem::GroupClose { .. } => true,
         ExpressionRpnItem::Operand(_)
+        | ExpressionRpnItem::ResolvedOperator(_)
         | ExpressionRpnItem::PendingNumericBinding { .. }
         | ExpressionRpnItem::PendingNumericCast { .. }
         | ExpressionRpnItem::PendingNumericCall { .. }
@@ -3301,43 +3281,31 @@ pub(crate) fn pending_multi_bind_producer_kind(
 ///      validated against the receiver afterwards. A decimal or binary-float fragment stays
 ///      receiver-driven — `1.0 / 2.0` under an accepted decimal-family receiver materialises its
 ///      leaves and result at that receiver's domain — so only the whole-integer division and the
-///      comparison boundary change the rule. Detection walks the retained items (groups included)
-///      and classifies through the existing operator policy, never by counting operators.
+///      comparison boundary change the rule. Detection scans the flat retained items, where group
+///      markers carry no operator, and classifies through the existing operator policy, never by
+///      counting operators.
 pub(crate) fn raw_fragment_result_is_independently_fixed(
     items: &[ExpressionRpnItem],
     family: NumericFamily,
 ) -> bool {
-    fn classify(items: &[ExpressionRpnItem]) -> (bool, bool) {
-        let mut has_comparison = false;
-        let mut has_division = false;
-        for item in items {
-            match item {
-                ExpressionRpnItem::Operator { operator, .. } => {
-                    has_comparison |= matches!(
-                        operator,
-                        Operator::Equality
-                            | Operator::NotEqual
-                            | Operator::GreaterThan
-                            | Operator::GreaterThanOrEqual
-                            | Operator::LessThan
-                            | Operator::LessThanOrEqual
-                            | Operator::And
-                            | Operator::Or
-                    );
-                    has_division |= matches!(operator, Operator::Divide);
-                }
-                ExpressionRpnItem::PendingGroup { nodes, .. } => {
-                    let (nested_comparison, nested_division) = classify(nodes);
-                    has_comparison |= nested_comparison;
-                    has_division |= nested_division;
-                }
-                _ => {}
-            }
+    let mut has_comparison = false;
+    let mut has_division = false;
+    for item in items {
+        if let ExpressionRpnItem::Operator { operator, .. } = item {
+            has_comparison |= matches!(
+                operator,
+                Operator::Equality
+                    | Operator::NotEqual
+                    | Operator::GreaterThan
+                    | Operator::GreaterThanOrEqual
+                    | Operator::LessThan
+                    | Operator::LessThanOrEqual
+                    | Operator::And
+                    | Operator::Or
+            );
+            has_division |= matches!(operator, Operator::Divide);
         }
-        (has_comparison, has_division)
     }
-
-    let (has_comparison, has_division) = classify(items);
     if has_comparison {
         return true;
     }

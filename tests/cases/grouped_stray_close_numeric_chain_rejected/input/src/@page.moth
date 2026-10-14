@@ -1,0 +1,4 @@
+grouped || -> U64:
+    value = (((1 + 1) + 1) + 1))
+    return value
+;

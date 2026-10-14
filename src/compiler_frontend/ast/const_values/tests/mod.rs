@@ -1,397 +1,308 @@
-//! Tests for the shared AST const value resolver.
-
-use std::cell::RefCell;
-use std::rc::Rc;
-
-use crate::compiler_frontend::ast::ast_nodes::Declaration;
+//! Resolver tests use one explicit phase expression/content pair.
+use crate::compiler_frontend::ast::ast_nodes::{Declaration, DeclarationValue};
 use crate::compiler_frontend::ast::const_values::facts::ConstFactValueKind;
 use crate::compiler_frontend::ast::const_values::resolver::{
     ConstResolutionError, ConstValueEnvironment, ConstValueResolver,
 };
-use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
-use crate::compiler_frontend::ast::expressions::expression::{
-    Expression, ExpressionKind, Operator,
+use crate::compiler_frontend::ast::const_values::store::{
+    ConstStringValue, ConstValueId, ConstValuePayload, ConstValueStore,
 };
-use crate::compiler_frontend::ast::expressions::expression_rpn::{
-    ExpressionRpn, ExpressionRpnItem,
+use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
+use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
+use crate::compiler_frontend::ast::expressions::expression_types::{
+    ConstRecordState, ConstValueKind,
 };
-use crate::compiler_frontend::ast::expressions::expression_types::ConstValueKind;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::tests::type_id_fixture_support::runtime_expr;
 use crate::compiler_frontend::value_mode::ValueMode;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+use std::cell::RefCell;
+use std::rc::Rc;
 
-fn make_resolver<'a>(
-    string_table: &'a mut StringTable,
-    const_values: &'a ConstValueStore,
-    store: &mut TemplateIrStore,
-) -> ConstValueResolver<'a> {
-    ConstValueResolver::new(
-        string_table,
-        const_values,
-        Rc::new(RefCell::new(std::mem::take(store))),
-    )
+struct Fixture {
+    builder: AstExpressionBuilder,
+    values: ConstValueStore,
+    strings: StringTable,
+    paths: PathInternerFork,
+    type_environment: TypeEnvironment,
 }
 
-fn make_environment_with(
-    path: &str,
-    expression: Expression,
-    path_fork: &mut PathInternerFork,
-    string_table: &mut StringTable,
-) -> ConstValueEnvironment {
-    let mut env = ConstValueEnvironment::default();
-    let interned_path = path_fork
-        .try_intern_portable_path(path, string_table)
-        .expect("test path fits");
-    env.insert(interned_path, expression);
-    env
-}
-
-fn rvalue_item(expression: Expression) -> ExpressionRpnItem {
-    ExpressionRpnItem::Operand(expression)
-}
-
-fn operator_item(operator: Operator) -> ExpressionRpnItem {
-    ExpressionRpnItem::Operator {
-        operator,
-        span: None,
+impl Default for Fixture {
+    fn default() -> Self {
+        Self {
+            builder: AstExpressionBuilder::new().unwrap(),
+            values: ConstValueStore::default(),
+            strings: StringTable::default(),
+            paths: PathInternerFork::empty(),
+            type_environment: TypeEnvironment::default(),
+        }
     }
 }
 
-// ------------------------------
-//  Literal expression resolves
-// ------------------------------
+impl Fixture {
+    fn resolver(&mut self) -> ConstValueResolver<'_> {
+        ConstValueResolver::new(
+            &mut self.strings,
+            &mut self.values,
+            &mut self.builder,
+            Rc::new(RefCell::new(TemplateIrStore::new())),
+            &self.type_environment,
+        )
+    }
+    fn path(&mut self, name: &str) -> PathId {
+        self.paths
+            .try_intern_portable_path(name, &mut self.strings)
+            .expect("test path")
+    }
+    fn integer(&mut self, value: i64) -> ExprId {
+        self.builder
+            .fixed_scalar(
+                &mut self.values,
+                FixedScalarValue::signed(FixedScalar::I32, value).expect("I32 fixture"),
+                None,
+                ValueMode::ImmutableOwned,
+            )
+            .expect("literal occurrence")
+            .id()
+    }
+    fn reference(&mut self, path: PathId) -> ExprId {
+        self.builder
+            .reference_with_type_id(
+                path,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                None,
+                ValueMode::ImmutableReference,
+                ConstRecordState::RuntimeValue,
+            )
+            .expect("reference")
+            .id()
+    }
+    fn operation(&mut self, left: ExprId, right: ExprId, operator: Operator) -> ExprId {
+        runtime_expr(
+            &mut self.builder,
+            &mut self.values,
+            vec![
+                ExpressionRpnItem::Operand(left),
+                ExpressionRpnItem::Operand(right),
+                ExpressionRpnItem::Operator {
+                    operator,
+                    span: None,
+                },
+            ],
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            None,
+            ValueMode::ImmutableOwned,
+            &TypeEnvironment::new(),
+        )
+    }
+    fn resolve(
+        &mut self,
+        expression: ExprId,
+        environment: &ConstValueEnvironment,
+    ) -> Result<ConstValueId, ConstResolutionError> {
+        self.resolver().resolve_expression(expression, environment)
+    }
+    fn assert_integer(&self, value: ConstValueId, expected: i64) {
+        assert!(
+            matches!(self.values.payload(value), Some(ConstValuePayload::FixedScalar(value)) if value.as_i64() == Some(expected))
+        );
+    }
+    fn declaration(&mut self, value: ExprId, mutable: bool) -> Declaration {
+        Declaration {
+            id: self.path("local"),
+            type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+            value_mode: if mutable {
+                ValueMode::MutableOwned
+            } else {
+                ValueMode::ImmutableOwned
+            },
+            value: DeclarationValue::Initializer(value),
+            binding_span: None,
+            config_qualifier: None,
+        }
+    }
+}
 
 #[test]
 fn literal_int_resolves_as_const() {
-    let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    let mut store = TemplateIrStore::new();
-    let const_values = ConstValueStore::default();
-    let expression = Expression::fixed_scalar(
-        FixedScalarValue::signed(FixedScalar::I32, 42).expect("42 fits I32"),
-        None,
-        ValueMode::ImmutableOwned,
-    );
-    let env = ConstValueEnvironment::default();
-    let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
-
-    let result = resolver
-        .resolve_expression(&expression, &env)
-        .expect("literal should resolve");
-
-    assert!(matches!(
-        result.kind,
-        ExpressionKind::FixedScalar(value) if value.as_i64() == Some(42)
-    ));
+    let mut fixture = Fixture::default();
+    let expression = fixture.integer(42);
+    let value = fixture
+        .resolve(expression, &ConstValueEnvironment::default())
+        .expect("literal");
+    fixture.assert_integer(value, 42);
 }
 
 #[test]
 fn literal_string_resolves_as_const() {
-    let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    let mut store = TemplateIrStore::new();
-    let const_values = ConstValueStore::default();
-    let string_id = string_table.intern("hello");
-    let expression = Expression::string_slice(string_id, None, ValueMode::ImmutableOwned);
-    let env = ConstValueEnvironment::default();
-    let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
-
-    let result = resolver
-        .resolve_expression(&expression, &env)
-        .expect("literal should resolve");
-
-    assert!(matches!(result.kind, ExpressionKind::StringSlice(_)));
+    let mut fixture = Fixture::default();
+    let text = fixture.strings.intern("hello");
+    let expression = fixture
+        .builder
+        .string_slice(&mut fixture.values, text, None, ValueMode::ImmutableOwned)
+        .expect("string")
+        .id();
+    let value = fixture
+        .resolve(expression, &ConstValueEnvironment::default())
+        .expect("literal");
+    assert!(
+        matches!(fixture.values.payload(value), Some(ConstValuePayload::String(ConstStringValue::Text(stored))) if *stored == text)
+    );
 }
-
-// ------------------------------
-//  Folded arithmetic resolves
-// ------------------------------
 
 #[test]
 fn folded_arithmetic_resolves_to_literal() {
-    let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    let mut store = TemplateIrStore::new();
-    let const_values = ConstValueStore::default();
-    let rpn = ExpressionRpn {
-        items: vec![
-            rvalue_item(Expression::fixed_scalar(
-                FixedScalarValue::signed(FixedScalar::I32, 1).expect("1 fits I32"),
-                None,
-                ValueMode::ImmutableOwned,
-            )),
-            rvalue_item(Expression::fixed_scalar(
-                FixedScalarValue::signed(FixedScalar::I32, 2).expect("2 fits I32"),
-                None,
-                ValueMode::ImmutableOwned,
-            )),
-            operator_item(Operator::Add),
-        ],
-    };
-    let expression = Expression::runtime_with_type_id(
-        rpn,
-        DataType::FixedScalar(FixedScalar::I32),
-        builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        None,
-        ValueMode::ImmutableOwned,
+    let mut fixture = Fixture::default();
+    let left = fixture.integer(1);
+    let right = fixture.integer(2);
+    let expression = fixture.operation(left, right, Operator::Add);
+    let value = fixture
+        .resolve(expression, &ConstValueEnvironment::default())
+        .expect("arithmetic");
+    fixture.assert_integer(value, 3);
+}
+
+fn substituted_arithmetic(coerced: bool) {
+    let mut fixture = Fixture::default();
+    let path = fixture.path("x");
+    let local = fixture
+        .values
+        .insert_resolved(
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            ConstValuePayload::FixedScalar(
+                FixedScalarValue::signed(FixedScalar::I32, if coerced { 40 } else { 3 })
+                    .expect("I32"),
+            ),
+            None,
+        )
+        .expect("binding");
+    let mut environment = ConstValueEnvironment::default();
+    environment.insert(path, local);
+    let mut left = fixture.reference(path);
+    if coerced {
+        left = fixture
+            .builder
+            .coerced(
+                fixture.builder.own(left),
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            )
+            .expect("coercion")
+            .id();
+    }
+    let right = fixture.integer(if coerced { 2 } else { 5 });
+    let expression = fixture.operation(
+        left,
+        right,
+        if coerced {
+            Operator::Add
+        } else {
+            Operator::Multiply
+        },
     );
-    let env = ConstValueEnvironment::default();
-    let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
-
-    let result = resolver
-        .resolve_expression(&expression, &env)
-        .expect("folded arithmetic should resolve");
-
-    assert!(matches!(
-        result.kind,
-        ExpressionKind::FixedScalar(value) if value.as_i64() == Some(3)
-    ));
+    let value = fixture
+        .resolve(expression, &environment)
+        .expect("substitution");
+    fixture.assert_integer(value, if coerced { 42 } else { 15 });
 }
 
 #[test]
 fn folded_arithmetic_with_reference_substitution_resolves() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut store = TemplateIrStore::new();
-    let const_values = ConstValueStore::default();
-    let rpn = ExpressionRpn {
-        items: vec![
-            rvalue_item(Expression::reference(
-                path_fork
-                    .try_intern_portable_path("x", &mut string_table)
-                    .expect("test path fits"),
-                DataType::FixedScalar(FixedScalar::I32),
-                None,
-                ValueMode::ImmutableReference,
-            )),
-            rvalue_item(Expression::fixed_scalar(
-                FixedScalarValue::signed(FixedScalar::I32, 5).expect("5 fits I32"),
-                None,
-                ValueMode::ImmutableOwned,
-            )),
-            operator_item(Operator::Multiply),
-        ],
-    };
-    let expression = Expression::runtime_with_type_id(
-        rpn,
-        DataType::FixedScalar(FixedScalar::I32),
-        builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        None,
-        ValueMode::ImmutableOwned,
-    );
-
-    let env = make_environment_with(
-        "x",
-        Expression::fixed_scalar(
-            FixedScalarValue::signed(FixedScalar::I32, 3).expect("3 fits I32"),
-            None,
-            ValueMode::ImmutableOwned,
-        ),
-        &mut path_fork,
-        &mut string_table,
-    );
-    let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
-
-    let result = resolver
-        .resolve_expression(&expression, &env)
-        .expect("substituted arithmetic should resolve");
-
-    assert!(matches!(
-        result.kind,
-        ExpressionKind::FixedScalar(value) if value.as_i64() == Some(15)
-    ));
+    substituted_arithmetic(false);
 }
-
 #[test]
 fn folded_arithmetic_with_coerced_reference_substitution_resolves() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut store = TemplateIrStore::new();
-    let const_values = ConstValueStore::default();
-    let reference = Expression::reference(
-        path_fork
-            .try_intern_portable_path("x", &mut string_table)
-            .expect("test path fits"),
-        DataType::FixedScalar(FixedScalar::I32),
-        None,
-        ValueMode::ImmutableReference,
-    );
-    let rpn = ExpressionRpn {
-        items: vec![
-            rvalue_item(Expression::coerced(
-                reference,
-                builtin_type_ids::fixed_scalar(FixedScalar::I32),
-            )),
-            rvalue_item(Expression::fixed_scalar(
-                FixedScalarValue::signed(FixedScalar::I32, 2).expect("2 fits I32"),
-                None,
-                ValueMode::ImmutableOwned,
-            )),
-            operator_item(Operator::Add),
-        ],
-    };
-    let expression = Expression::runtime_with_type_id(
-        rpn,
-        DataType::FixedScalar(FixedScalar::I32),
-        builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        None,
-        ValueMode::ImmutableOwned,
-    );
-
-    let env = make_environment_with(
-        "x",
-        Expression::fixed_scalar(
-            FixedScalarValue::signed(FixedScalar::I32, 40).expect("40 fits I32"),
-            None,
-            ValueMode::ImmutableOwned,
-        ),
-        &mut path_fork,
-        &mut string_table,
-    );
-    let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
-
-    let result = resolver
-        .resolve_expression(&expression, &env)
-        .expect("coerced reference arithmetic should resolve");
-
-    assert!(matches!(
-        result.kind,
-        ExpressionKind::FixedScalar(value) if value.as_i64() == Some(42)
-    ));
+    substituted_arithmetic(true);
 }
-
-// ------------------------------
-//  Reference to known const resolves
-// ------------------------------
 
 #[test]
 fn reference_to_known_const_resolves() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut store = TemplateIrStore::new();
-    let const_values = ConstValueStore::default();
-    let path = path_fork
-        .try_intern_portable_path("ratio", &mut string_table)
-        .expect("test path fits");
-    let expression = Expression::reference_with_type_id(path, DataType::FixedScalar(FixedScalar::F64), builtin_type_ids::fixed_scalar(FixedScalar::F64), None, ValueMode::ImmutableReference, crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue);
-
-    let env = make_environment_with(
-        "ratio",
-        Expression::fixed_scalar(
-            FixedScalarValue::binary_float(FixedScalar::F64, 2.71).expect("2.71 is a finite F64"),
+    let mut fixture = Fixture::default();
+    let path = fixture.path("ratio");
+    let scalar = FixedScalarValue::binary_float(FixedScalar::F64, 2.71).expect("finite F64");
+    let local = fixture
+        .values
+        .insert_resolved(
+            builtin_type_ids::fixed_scalar(FixedScalar::F64),
+            ConstValuePayload::FixedScalar(scalar),
             None,
-            ValueMode::ImmutableOwned,
-        ),
-        &mut path_fork,
-        &mut string_table,
+        )
+        .expect("binding");
+    let mut environment = ConstValueEnvironment::default();
+    environment.insert(path, local);
+    let expression = fixture
+        .builder
+        .reference_with_type_id(
+            path,
+            builtin_type_ids::fixed_scalar(FixedScalar::F64),
+            None,
+            ValueMode::ImmutableReference,
+            ConstRecordState::RuntimeValue,
+        )
+        .expect("reference")
+        .id();
+    let value = fixture
+        .resolve(expression, &environment)
+        .expect("reference resolves");
+    assert!(
+        matches!(fixture.values.payload(value), Some(ConstValuePayload::FixedScalar(value)) if *value == scalar)
     );
-    let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
-
-    let result = resolver
-        .resolve_expression(&expression, &env)
-        .expect("reference should resolve");
-
-    assert!(matches!(
-        result.kind,
-        ExpressionKind::FixedScalar(value)
-            if value.as_f64().is_some_and(|resolved| (resolved - 2.71).abs() < f64::EPSILON)
-    ));
 }
-
-// ------------------------------
-//  Forward reference fails
-// ------------------------------
 
 #[test]
 fn unresolved_reference_fails() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut store = TemplateIrStore::new();
-    let const_values = ConstValueStore::default();
-    let path = path_fork
-        .try_intern_portable_path("unknown", &mut string_table)
-        .expect("test path fits");
-    let expression = Expression::reference_with_type_id(path, DataType::FixedScalar(FixedScalar::I32), builtin_type_ids::fixed_scalar(FixedScalar::I32), None, ValueMode::ImmutableReference, crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue);
-
-    let env = ConstValueEnvironment::default();
-    let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
-
-    let error = resolver
-        .resolve_expression(&expression, &env)
-        .expect_err("unresolved reference should fail");
-
-    assert_eq!(error, ConstResolutionError::UnresolvedReference);
+    let mut fixture = Fixture::default();
+    let path = fixture.path("unknown");
+    let expression = fixture.reference(path);
+    assert_eq!(
+        fixture
+            .resolve(expression, &ConstValueEnvironment::default())
+            .expect_err("unresolved"),
+        ConstResolutionError::UnresolvedReference
+    );
 }
-
-// ------------------------------
-//  Function call fails
-// ------------------------------
 
 #[test]
 fn function_call_fails_const_resolution() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut store = TemplateIrStore::new();
-    let const_values = ConstValueStore::default();
-    let expression = Expression::function_call(
-        path_fork
-            .try_intern_portable_path("foo", &mut string_table)
-            .expect("test path fits"),
-        vec![],
-        vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
-        None,
+    let mut fixture = Fixture::default();
+    let path = fixture.path("foo");
+    let expression = fixture
+        .builder
+        .function_call_with_typed_arguments(
+            path,
+            vec![],
+            vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
+            None,
+        )
+        .expect("call")
+        .id();
+    assert_eq!(
+        fixture
+            .resolve(expression, &ConstValueEnvironment::default())
+            .expect_err("call"),
+        ConstResolutionError::CallInConstContext
     );
-
-    let env = ConstValueEnvironment::default();
-    let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
-
-    let error = resolver
-        .resolve_expression(&expression, &env)
-        .expect_err("function call should fail");
-
-    assert_eq!(error, ConstResolutionError::CallInConstContext);
 }
-
-// ------------------------------
-//  Mutable declaration fails
-// ------------------------------
 
 #[test]
 fn mutable_declaration_fails_private_const_resolution() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut store = TemplateIrStore::new();
-    let const_values = ConstValueStore::default();
-    let declaration = Declaration {
-        id: path_fork
-            .try_intern_portable_path("value", &mut string_table)
-            .expect("test path fits"),
-        value: Expression::fixed_scalar(
-            FixedScalarValue::signed(FixedScalar::I32, 1).expect("1 fits I32"),
-            None,
-            ValueMode::MutableOwned,
-        ),
-        binding_span: None,
-        config_qualifier: None,
-    };
-
-    let env = ConstValueEnvironment::default();
-    let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
-
-    let error = resolver
-        .resolve_private_top_level_declaration(&declaration, &env)
-        .expect_err("mutable declaration should fail");
-
-    assert_eq!(error, ConstResolutionError::MutableDeclaration);
+    let mut fixture = Fixture::default();
+    let value = fixture.integer(1);
+    let declaration = fixture.declaration(value, true);
+    assert_eq!(
+        fixture
+            .resolver()
+            .resolve_private_top_level_declaration(&declaration, &ConstValueEnvironment::default())
+            .expect_err("mutable"),
+        ConstResolutionError::MutableDeclaration
+    );
 }
-
-// ------------------------------
-//  Fact value kinds
-// ------------------------------
 
 #[test]
 fn fact_value_kind_from_literal_is_literal() {
@@ -400,7 +311,6 @@ fn fact_value_kind_from_literal_is_literal() {
         ConstFactValueKind::Literal
     );
 }
-
 #[test]
 fn fact_value_kind_from_runtime_is_non_const() {
     assert_eq!(
@@ -409,143 +319,102 @@ fn fact_value_kind_from_runtime_is_non_const() {
     );
 }
 
-// ------------------------------
-//  Coerced expression resolution
-// ------------------------------
-
 #[test]
 fn coerced_expression_resolves_inner_value() {
-    let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    let mut store = TemplateIrStore::new();
-    let const_values = ConstValueStore::default();
-    let inner = Expression::fixed_scalar(
-        FixedScalarValue::signed(FixedScalar::I32, 7).expect("7 fits I32"),
-        None,
-        ValueMode::ImmutableOwned,
+    let mut fixture = Fixture::default();
+    let inner = fixture.integer(7);
+    let expression = fixture
+        .builder
+        .coerced(
+            fixture.builder.own(inner),
+            builtin_type_ids::fixed_scalar(FixedScalar::F64),
+        )
+        .expect("coercion")
+        .id();
+    let value = fixture
+        .resolve(expression, &ConstValueEnvironment::default())
+        .expect("coerced literal");
+    assert!(matches!(
+        fixture.values.payload(value),
+        Some(ConstValuePayload::Coerced(_))
+    ));
+    assert_eq!(
+        fixture.values.metadata(value).expect("metadata").type_id,
+        builtin_type_ids::fixed_scalar(FixedScalar::F64)
     );
-    let coerced = Expression::coerced(inner, builtin_type_ids::fixed_scalar(FixedScalar::F64));
-
-    let env = ConstValueEnvironment::default();
-    let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
-
-    let result = resolver
-        .resolve_expression(&coerced, &env)
-        .expect("coerced literal should resolve");
-
-    // The fast path preserves the Coerced wrapper because it is_compile_time_constant.
-    assert!(matches!(result.kind, ExpressionKind::Coerced { .. }));
 }
-
-// ------------------------------
-//  Runtime RPN with non-const reference fails
-// ------------------------------
 
 #[test]
-fn runtime_rpn_with_unresolved_reference_fails() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut store = TemplateIrStore::new();
-    let const_values = ConstValueStore::default();
-    let rpn = ExpressionRpn {
-        items: vec![
-            rvalue_item(Expression::reference(
-                path_fork
-                    .try_intern_portable_path("missing", &mut string_table)
-                    .expect("test path fits"),
-                DataType::FixedScalar(FixedScalar::I32),
-                None,
-                ValueMode::ImmutableReference,
-            )),
-            rvalue_item(Expression::fixed_scalar(
-                FixedScalarValue::signed(FixedScalar::I32, 2).expect("2 fits I32"),
-                None,
-                ValueMode::ImmutableOwned,
-            )),
-            operator_item(Operator::Add),
-        ],
-    };
-    let expression = Expression::runtime_with_type_id(
-        rpn,
-        DataType::FixedScalar(FixedScalar::I32),
-        builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        None,
-        ValueMode::ImmutableOwned,
+fn runtime_operation_with_unresolved_reference_fails() {
+    let mut fixture = Fixture::default();
+    let path = fixture.path("missing");
+    let left = fixture.reference(path);
+    let right = fixture.integer(2);
+    let expression = fixture.operation(left, right, Operator::Add);
+    assert_eq!(
+        fixture
+            .resolve(expression, &ConstValueEnvironment::default())
+            .expect_err("unresolved"),
+        ConstResolutionError::UnresolvedReference
     );
-
-    let env = ConstValueEnvironment::default();
-    let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
-
-    let error = resolver
-        .resolve_expression(&expression, &env)
-        .expect_err("unresolved reference in RPN should fail");
-
-    assert_eq!(error, ConstResolutionError::UnresolvedReference);
 }
-
-// ------------------------------
-//  Body-local declaration resolution
-// ------------------------------
 
 #[test]
 fn body_local_immutable_literal_resolves() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut store = TemplateIrStore::new();
-    let const_values = ConstValueStore::default();
-    let declaration = Declaration {
-        id: path_fork
-            .try_intern_portable_path("local", &mut string_table)
-            .expect("test path fits"),
-        value: Expression::fixed_scalar(
-            FixedScalarValue::signed(FixedScalar::I32, 99).expect("99 fits I32"),
-            None,
-            ValueMode::ImmutableOwned,
-        ),
-        binding_span: None,
-        config_qualifier: None,
-    };
-
-    let env = ConstValueEnvironment::default();
-    let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
-
-    let resolved = resolver
-        .resolve_body_local_declaration(&declaration, &env)
-        .expect("body-local immutable literal should resolve");
-
-    assert_eq!(resolved.value_kind, ConstFactValueKind::Literal);
-    assert_eq!(resolved.expression.span, None);
-    assert!(matches!(
-        resolved.expression.kind,
-        ExpressionKind::FixedScalar(value) if value.as_i64() == Some(99)
-    ));
+    let mut fixture = Fixture::default();
+    let value = fixture.integer(99);
+    let declaration = fixture.declaration(value, false);
+    let result = fixture
+        .resolver()
+        .resolve_body_local_declaration(&declaration, &ConstValueEnvironment::default())
+        .expect("immutable local");
+    assert_eq!(result.value_kind, ConstFactValueKind::Literal);
+    fixture.assert_integer(result.value, 99);
+    assert_eq!(
+        fixture
+            .values
+            .metadata(result.value)
+            .expect("metadata")
+            .span,
+        None
+    );
 }
 
 #[test]
 fn body_local_mutable_declaration_fails() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut store = TemplateIrStore::new();
-    let const_values = ConstValueStore::default();
-    let declaration = Declaration {
-        id: path_fork
-            .try_intern_portable_path("local", &mut string_table)
-            .expect("test path fits"),
-        value: Expression::fixed_scalar(
-            FixedScalarValue::signed(FixedScalar::I32, 99).expect("99 fits I32"),
-            None,
-            ValueMode::MutableOwned,
-        ),
-        binding_span: None,
-        config_qualifier: None,
-    };
+    let mut fixture = Fixture::default();
+    let value = fixture.integer(99);
+    let declaration = fixture.declaration(value, true);
+    assert_eq!(
+        fixture
+            .resolver()
+            .resolve_body_local_declaration(&declaration, &ConstValueEnvironment::default())
+            .expect_err("mutable"),
+        ConstResolutionError::MutableDeclaration
+    );
+}
 
-    let env = ConstValueEnvironment::default();
-    let mut resolver = make_resolver(&mut string_table, &const_values, &mut store);
-
-    let error = resolver
-        .resolve_body_local_declaration(&declaration, &env)
-        .expect_err("body-local mutable declaration should fail");
-
-    assert_eq!(error, ConstResolutionError::MutableDeclaration);
+#[test]
+fn deep_reference_validation_preserves_unresolved_error_on_one_mib_stack() {
+    std::thread::Builder::new()
+        .name("deep-reference-validation".into())
+        .stack_size(1024 * 1024)
+        .spawn(|| {
+            let mut fixture = Fixture::default();
+            let path = fixture.path("missing");
+            let mut expression = fixture.reference(path);
+            for _ in 0..4096 {
+                let right = fixture.integer(1);
+                expression = fixture.operation(expression, right, Operator::Add);
+            }
+            assert_eq!(
+                fixture
+                    .resolver()
+                    .resolve_expression(expression, &ConstValueEnvironment::default()),
+                Err(ConstResolutionError::UnresolvedReference)
+            );
+        })
+        .expect("spawn reference validation thread")
+        .join()
+        .expect("reference validation completes");
 }

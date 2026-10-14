@@ -5,17 +5,19 @@ use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::blocks::HirBlock;
+use crate::compiler_frontend::hir::expression_store::HirValueRange;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
 use crate::compiler_frontend::hir::ids::HirValueId;
-use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId};
+use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, LocalId, RegionId};
 use crate::compiler_frontend::hir::numeric::{
     HirNumericOp, HirNumericOperands, NumericFailureMode, RangeStepFailureCause,
 };
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirLocalDestination, HirStatementKind};
-use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
 use crate::compiler_frontend::hir::validate_hir_module;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use std::process::Command;
@@ -26,7 +28,7 @@ fn trap_mode_range_step_failure_lowers_to_fatal_throw() {
         RangeStepFailureCause::ZeroStep,
         RangeStepFailureCause::NoProgress,
     ] {
-        let mut expressions = HirExpressionStore::default();
+        let expressions = HirExpressionStore::default();
         let mut string_table = StringTable::new();
         let mut path_fork = PathInternerFork::empty();
         let (type_environment, types) = build_type_environment();
@@ -43,17 +45,14 @@ fn trap_mode_range_step_failure_lowers_to_fatal_throw() {
                     result: HirLocalDestination::Define(LocalId(0)),
                 },
             )],
-            terminator: HirTerminator::Return(unit_expression(
-                types.unit,
-                region,
-                &mut expressions,
-            )),
+            terminator: HirTerminator::Return(HirValueRange::empty()),
         };
         let function = HirFunction {
             id: FunctionId(0),
             entry: BlockId(0),
             params: vec![],
-            return_type: types.unit,
+            returns: Box::new([]),
+            error_return: None,
         };
         let module = build_module(
             expressions,
@@ -100,11 +99,11 @@ fn lower_minimal_module_with_float_statement(
     failure_mode: NumericFailureMode,
     source: HirValueId,
     result_type: TypeId,
-    mut expressions: HirExpressionStore,
+    expressions: HirExpressionStore,
 ) -> String {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (type_environment, types) = build_type_environment();
+    let (type_environment, _) = build_type_environment();
     let region = RegionId(0);
 
     let statement_kind = match kind {
@@ -127,14 +126,15 @@ fn lower_minimal_module_with_float_statement(
         region,
         locals: vec![local(0, result_type, region)],
         statements: vec![float_statement],
-        terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: Box::new([]),
+        error_return: None,
     };
 
     let module = build_module(
@@ -188,28 +188,26 @@ fn trap_mode_format_float_lowers_to_trapped_helper() {
     );
 }
 
-/// Verifies that return-error-mode `FormatFloat` assigns the fallible carrier directly.
+/// Recoverable formatting delivers the scalar on the success edge, without a trap.
 #[test]
-fn return_error_mode_format_float_lowers_to_carrier() {
+fn recoverable_format_float_uses_native_success_channel() {
     let mut expressions = HirExpressionStore::default();
-    let region = RegionId(0);
     let (_, types) = build_type_environment();
-
-    let output = lower_minimal_module_with_float_statement(
-        HirFloatStatementKind::Format,
-        NumericFailureMode::ReturnError,
-        f64_expression(1.5, types.f64, region, &mut expressions),
-        types.fallible_i32_string,
+    let source = f64_expression(1.5, types.f64, RegionId(0), &mut expressions);
+    let entry = lower_returned_operation(
+        HirFallibleOperation::FormatFloat { source },
+        types.string,
         expressions,
     );
-
     assert!(
-        output.contains("moth_result_l0 = __moth_binding(__moth_format_float(1.5, 64, \"F64\"));"),
-        "ReturnError FormatFloat must assign the helper carrier directly"
+        !entry
+            .source
+            .contains("__moth_numeric_trap(__moth_format_float")
     );
-    assert!(
-        !output.contains("__moth_numeric_trap(__moth_format_float"),
-        "ReturnError FormatFloat must not wrap the helper in __moth_numeric_trap"
+    let driver = format!("console.log(JSON.stringify({}()));", entry.function_name);
+    assert_eq!(
+        run_javascript(&format!("{}\n{driver}", entry.source)).trim(),
+        r#"{"tag":"ok","value":"1.5"}"#
     );
 }
 
@@ -221,7 +219,7 @@ fn return_error_mode_format_float_lowers_to_carrier() {
 enum FloatBoundaryLane {
     /// Trap mode: the entry returns the validated scalar and throws on a rejected carrier.
     Scalar,
-    /// Recoverable mode: the entry returns the internal fallible carrier for observation.
+    /// Recoverable mode: native success/error returns are packed only at the JS ABI.
     Fallible,
 }
 
@@ -234,7 +232,7 @@ struct LoweredEntry {
 /// Builds and lowers a module whose entry parameter is one raw external float carrier.
 ///
 /// WHAT: the entry takes a raw carrier, validates it at the source type's exact precision, and
-///       returns the scalar or the fallible carrier so a Node driver observes the real boundary.
+///       returns the scalar or ABI envelope so a Node driver observes the real boundary.
 /// WHY: non-finite, malformed and signed-zero carriers cannot exist as HIR literals, so boundary
 ///      behavior is only testable by executing the generated module with raw runtime values.
 fn lower_float_boundary_module(
@@ -244,20 +242,10 @@ fn lower_float_boundary_module(
     let mut expressions = HirExpressionStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (mut type_environment, _) = build_type_environment();
+    let (type_environment, types) = build_type_environment();
     let region = RegionId(0);
 
     let source_type = source_scalar.type_id(&type_environment);
-    // The internal carrier carries the builtin `Error`, exactly like the carrier validated HIR
-    // attaches to a ReturnError boundary result.
-    let result_type = match lane {
-        FloatBoundaryLane::Scalar => source_type,
-        FloatBoundaryLane::Fallible => fixture_carrier(&mut type_environment, source_type),
-    };
-    let failure_mode = match lane {
-        FloatBoundaryLane::Scalar => NumericFailureMode::Trap,
-        FloatBoundaryLane::Fallible => NumericFailureMode::ReturnError,
-    };
     let source = expression(
         HirExpressionKind::Load(HirPlace::local(LocalId(0))),
         source_type,
@@ -267,40 +255,58 @@ fn lower_float_boundary_module(
     );
     let returned = expression(
         HirExpressionKind::Load(HirPlace::local(LocalId(1))),
-        result_type,
+        source_type,
         region,
         ValueKind::RValue,
         &mut expressions,
     );
 
-    let block = HirBlock {
-        id: BlockId(0),
-        region,
-        locals: vec![local(0, source_type, region), local(1, result_type, region)],
-        statements: vec![statement(
+    let blocks = match lane {
+        FloatBoundaryLane::Scalar => vec![HirBlock {
+            id: BlockId(0),
+            region,
+            locals: vec![local(0, source_type, region), local(1, source_type, region)],
+            statements: vec![statement(
+                1,
+                HirStatementKind::ValidateFloat {
+                    source,
+                    failure_mode: NumericFailureMode::Trap,
+                    result: HirLocalDestination::Define(LocalId(1)),
+                },
+            )],
+            terminator: HirTerminator::Return(append_values(&[returned], &mut expressions)),
+        }],
+        FloatBoundaryLane::Fallible => invoke_return_blocks(
+            HirFallibleOperation::ValidateFloat { source },
+            source_type,
+            types.error,
+            vec![local(0, source_type, region)],
             1,
-            HirStatementKind::ValidateFloat {
-                source,
-                failure_mode,
-                result: HirLocalDestination::Define(LocalId(1)),
-            },
-        )],
-        terminator: HirTerminator::Return(returned),
+            &mut expressions,
+        ),
     };
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![LocalId(0)],
-        return_type: result_type,
+        returns: vec![source_type].into_boxed_slice(),
+        error_return: match lane {
+            FloatBoundaryLane::Scalar => None,
+            FloatBoundaryLane::Fallible => Some(types.error),
+        },
     };
     let mut module = build_module(
         expressions,
         &mut path_fork,
         &mut string_table,
         "main",
-        vec![block],
+        blocks,
         function,
-        &[(LocalId(0), "value"), (LocalId(1), "result")],
+        &[
+            (LocalId(0), "value"),
+            (LocalId(1), "result"),
+            (LocalId(2), "error"),
+        ],
     );
 
     // The fixture carries the entry-start tag production lowering records and passes the same HIR
@@ -308,7 +314,7 @@ fn lower_float_boundary_module(
     module
         .function_origins
         .insert(FunctionId(0), HirFunctionOrigin::EntryStart);
-    validate_hir_module(&module, &type_environment)
+    validate_hir_module(&module, &type_environment, &ExternalPackageRegistry::new())
         .expect("binary-float boundary fixture must satisfy production HIR validation");
 
     let lowered = lower_hir_to_js(
@@ -720,33 +726,25 @@ fn trap_mode_int_add_lowers_to_trapped_helper() {
     );
 }
 
-/// Verifies that return-error-mode I32 addition assigns the fallible carrier directly.
+/// Recoverable addition delivers its result through native edge-local definitions.
 #[test]
-fn return_error_mode_int_add_lowers_to_carrier() {
+fn recoverable_int_add_uses_native_success_channel() {
     let mut expressions = HirExpressionStore::default();
-    let region = RegionId(0);
     let (_, types) = build_type_environment();
-
-    let output = lower_minimal_module_with_numeric_op(
+    let operands = HirNumericOperands::Binary {
+        left: i32_expression(1, types.i32, RegionId(0), &mut expressions),
+        right: i32_expression(2, types.i32, RegionId(0), &mut expressions),
+    };
+    let entry = lower_returned_numeric_op(
         i32_op(NumericOperator::Add),
-        NumericFailureMode::ReturnError,
-        HirNumericOperands::Binary {
-            left: i32_expression(1, types.i32, region, &mut expressions),
-            right: i32_expression(2, types.i32, region, &mut expressions),
-        },
-        types.fallible_i32_string,
+        operands,
+        types.i32,
         expressions,
     );
-
-    assert!(
-        output.contains(
-            "moth_result_l0 = __moth_binding(__moth_int_add(1, 2, -2147483648, 2147483647));"
-        ),
-        "ReturnError I32 addition must assign the helper carrier directly"
-    );
-    assert!(
-        !output.contains("__moth_numeric_trap(__moth_int_add"),
-        "ReturnError I32 addition must not wrap the helper in __moth_numeric_trap"
+    assert!(!entry.source.contains("__moth_numeric_trap(__moth_int_add"));
+    assert_eq!(
+        run_returned_numeric_op(&entry).trim(),
+        "value:3:signedZero=false"
     );
 }
 
@@ -980,14 +978,15 @@ fn numeric_op_arity_mismatch_returns_error() {
         region,
         locals: vec![local(0, types.i32, region)],
         statements: vec![numeric_statement],
-        terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: Box::new([]),
+        error_return: None,
     };
 
     let module = build_module(
@@ -1041,13 +1040,14 @@ fn numeric_op_update_uses_value_assignment() {
         region,
         locals: vec![local(0, types.i32, region)],
         statements: vec![operation],
-        terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![LocalId(0)],
-        return_type: types.unit,
+        returns: Box::new([]),
+        error_return: None,
     };
     let module = build_module(
         expressions,
@@ -1095,58 +1095,111 @@ fn lower_returned_numeric_op(
     op: HirNumericOp,
     operands: HirNumericOperands,
     result_type: TypeId,
+    expressions: HirExpressionStore,
+) -> LoweredEntry {
+    lower_returned_operation(
+        HirFallibleOperation::NumericOp { op, operands },
+        result_type,
+        expressions,
+    )
+}
+
+/// Edge locals carry semantic values; only Return/ReturnError pack the external ABI.
+fn invoke_return_blocks(
+    operation: HirFallibleOperation,
+    result_type: TypeId,
+    error_type: TypeId,
+    mut locals: Vec<crate::compiler_frontend::hir::blocks::HirLocal>,
+    result_id: u32,
+    expressions: &mut HirExpressionStore,
+) -> Vec<HirBlock> {
+    let region = RegionId(0);
+    let error_id = result_id + 1;
+    locals.push(local(result_id, result_type, region));
+    locals.push(local(error_id, error_type, region));
+    let returned = expression(
+        HirExpressionKind::Load(HirPlace::local(LocalId(result_id))),
+        result_type,
+        region,
+        ValueKind::RValue,
+        expressions,
+    );
+    let error = expression(
+        HirExpressionKind::Load(HirPlace::local(LocalId(error_id))),
+        error_type,
+        region,
+        ValueKind::RValue,
+        expressions,
+    );
+    vec![
+        HirBlock {
+            id: BlockId(0),
+            region,
+            locals,
+            statements: vec![],
+            terminator: HirTerminator::Invoke {
+                id: HirNodeId(1),
+                span: None,
+                operation,
+                success: BlockId(1),
+                success_results: vec![LocalId(result_id)],
+                failure: BlockId(2),
+                error_result: LocalId(error_id),
+            },
+        },
+        HirBlock {
+            id: BlockId(1),
+            region,
+            locals: vec![],
+            statements: vec![],
+            terminator: HirTerminator::Return(append_values(&[returned], expressions)),
+        },
+        HirBlock {
+            id: BlockId(2),
+            region,
+            locals: vec![],
+            statements: vec![],
+            terminator: HirTerminator::ReturnError(error),
+        },
+    ]
+}
+
+fn lower_returned_operation(
+    operation: HirFallibleOperation,
+    result_type: TypeId,
     mut expressions: HirExpressionStore,
 ) -> LoweredEntry {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (mut type_environment, _) = build_type_environment();
-    let region = RegionId(0);
-
-    // The entry recovers a rejected operation as the internal carrier, so the driver observes the
-    // shared builtin error code instead of depending on trap wording.
-    let carrier_type = fixture_carrier(&mut type_environment, result_type);
-    let operation = statement(
-        1,
-        HirStatementKind::NumericOp {
-            op,
-            failure_mode: NumericFailureMode::ReturnError,
-            operands,
-            result: HirLocalDestination::Define(LocalId(0)),
-        },
-    );
-    let returned = expression(
-        HirExpressionKind::Load(HirPlace::local(LocalId(0))),
-        carrier_type,
-        region,
-        ValueKind::RValue,
+    let (type_environment, types) = build_type_environment();
+    let blocks = invoke_return_blocks(
+        operation,
+        result_type,
+        types.error,
+        vec![],
+        0,
         &mut expressions,
     );
-    let block = HirBlock {
-        id: BlockId(0),
-        region,
-        locals: vec![local(0, carrier_type, region)],
-        statements: vec![operation],
-        terminator: HirTerminator::Return(returned),
-    };
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: carrier_type,
+        returns: vec![result_type].into_boxed_slice(),
+        error_return: Some(types.error),
     };
     let mut module = build_module(
         expressions,
         &mut path_fork,
         &mut string_table,
         "main",
-        vec![block],
+        blocks,
         function,
-        &[(LocalId(0), "result")],
+        &[(LocalId(0), "result"), (LocalId(1), "error")],
     );
     module
         .function_origins
         .insert(FunctionId(0), HirFunctionOrigin::EntryStart);
-    validate_hir_module(&module, &type_environment)
+    validate_hir_module(&module, &type_environment, &ExternalPackageRegistry::new())
         .expect("the D15 completion fixture must satisfy production HIR validation");
 
     let lowered = lower_hir_to_js(
@@ -1171,7 +1224,7 @@ fn lower_returned_numeric_op(
 
 /// The recovered outcome one emitted D15 operation must report.
 ///
-/// WHY: the entry returns the internal carrier, so a completed operation is proved by its exact
+/// WHY: the entry returns an ABI envelope, so a completed operation is proved by its exact
 ///      scalar and signed zero while a rejected one is proved by the shared builtin error code;
 ///      neither depends on trap wording or emitted helper text.
 #[derive(Clone, Copy)]
@@ -1197,9 +1250,9 @@ impl ExpectedOperation {
     }
 }
 
-/// Executes one lowered entry and renders the recovered carrier it returns.
+/// Executes one lowered entry and renders its success/error ABI envelope.
 ///
-/// WHY: the entry recovers failures as the internal carrier, so success is proved by the exact
+/// WHY: the entry exposes native success/error channels at its ABI, so success is proved by the exact
 ///      returned scalar and failure by the shared builtin error code. An engine exception is
 ///      rendered as `threw:` and can never read as a numeric failure.
 fn run_returned_numeric_op(entry: &LoweredEntry) -> String {

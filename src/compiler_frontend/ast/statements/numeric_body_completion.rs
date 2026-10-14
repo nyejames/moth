@@ -18,14 +18,19 @@ use std::rc::Rc;
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{
-    AstNode, Declaration, IfBranchMetadata, LoopBindings, MultiBindTarget, NodeKind, RangeLoopSpec,
+    AstNode, Declaration, DeclarationValue, IfBranchMetadata, LoopBindings, MultiBindTarget,
+    NodeKind, RangeLoopSpec,
 };
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::assertion_message_effects::assertion_condition_is_statically_true;
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::eval_expression::evaluate_expression;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_rpn::{
-    ExpressionRpnItem, PlaceExpression, PlaceExpressionKind,
+    ExpressionRpnItem, single_operand_mut,
+};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, ExpressionOp, OwnedExpr, PlaceId,
 };
 use crate::compiler_frontend::ast::expressions::expression_types::{
     ConstRecordState, FallibleExpressionHandling, FallibleHandling,
@@ -77,10 +82,10 @@ use crate::compiler_frontend::builtins::casts::resolution::{
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidAssignmentTargetReason, TypeMismatchContext,
+    CompilerDiagnostic, InvalidAssignmentTargetReason, TypeMismatchContext, ValueReceiverContext,
 };
+use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::datatypes::{DataType, diagnostic_type_spelling};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -91,11 +96,9 @@ use crate::compiler_frontend::value_mode::ValueMode;
 /// One resolved pending binding: its selected type, the metadata later uses need, and the
 /// completed declaration payload until it moves into its single authored AST position.
 ///
-/// WHY: a resolved binding is read long after it resolved — copies, places, substituted operands
-///      and mutability checks need its identity, mode and const-record classification — while the
-///      completed expression tree must exist only in its authored position plus the ready frame
-///      slot. Keeping only metadata here removes the third full-body-sized declaration copy that
-///      continuation memoization used to hold.
+/// WHY: later copies, places and substituted operands need the binding's identity, mode and
+/// const-record classification even after its declaration moves. The completed initializer
+/// remains an immutable store ID; the declaration itself is taken once at its authored position.
 struct ResolvedBinding {
     type_id: TypeId,
     /// The completed declaration; taken exactly once by its owning AST position.
@@ -111,15 +114,23 @@ struct ResolvedBinding {
 }
 
 impl ResolvedBinding {
-    fn new(type_id: TypeId, declaration: Declaration) -> Self {
-        Self {
+    fn new(
+        type_id: TypeId,
+        declaration: Declaration,
+        expressions: &AstExpressionBuilder,
+    ) -> Result<Self, ExpressionParseError> {
+        let const_record_state = match declaration.value.initializer() {
+            Some(value) => expressions.view(value)?.classification().const_record_state,
+            None => ConstRecordState::RuntimeValue,
+        };
+        Ok(Self {
             declaration_id: declaration.id,
-            value_mode: declaration.value.value_mode.to_owned(),
-            const_record_state: declaration.value.const_record_state,
+            value_mode: declaration.value_mode,
+            const_record_state,
             binding_span: declaration.binding_span,
             type_id,
             declaration: Some(declaration),
-        }
+        })
     }
 }
 
@@ -174,6 +185,8 @@ enum ContinuationResolution {
 struct Completion<'a, 'env> {
     context: &'a ScopeContext,
     type_interner: &'a mut AstTypeInterner<'env>,
+    expression_builder: &'a mut AstExpressionBuilder,
+    const_values: &'a mut ConstValueStore,
     string_table: &'a mut StringTable,
     path_fork: &'a mut PathInternerFork,
     state: Rc<RefCell<NumericConstructionState>>,
@@ -199,6 +212,8 @@ pub(crate) fn complete_numeric_body(
     draft: BodyDraft,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<Vec<AstNode>, ExpressionParseError> {
@@ -210,6 +225,8 @@ pub(crate) fn complete_numeric_body(
     let mut completion = Completion {
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
         state,
@@ -280,8 +297,8 @@ impl Completion<'_, '_> {
     ///      released, so no pending recipe survives into a published template. Grouping happens
     ///      before completion and installation so no store borrow is held across fragment work.
     ///
-    /// Nested statement blocks share this body's domain, but body-local callable roots do not.
-    /// The module-shared TIR store therefore drains only this root's issuing domain.
+    /// Nested statement blocks share this body's domain, while each independent function body
+    /// owns its own. The module-shared TIR store therefore drains only this root's issuing domain.
     fn complete_template_intakes(&mut self) -> Result<(), ExpressionParseError> {
         let domain = self.context.numeric_domain_id();
         let intakes = self
@@ -303,7 +320,7 @@ impl Completion<'_, '_> {
                     &intake.value_mode,
                     intake.suffix,
                 )?;
-                validate_completed_typed_errors(&value)?;
+                validate_completed_typed_errors(self.expression_builder.view_owned(value)?)?;
                 if group == range_headers.len() {
                     range_headers.push((header, [None, None, None]));
                 }
@@ -313,7 +330,7 @@ impl Completion<'_, '_> {
                     RangeOperandSlot::End => &mut operands[1],
                     RangeOperandSlot::Step => &mut operands[2],
                 };
-                *operand = Some(value);
+                *operand = Some(value.id());
                 continue;
             }
             // A retained collection header's pending item installs before its iterable completes,
@@ -325,11 +342,14 @@ impl Completion<'_, '_> {
                 &intake.value_mode,
                 intake.suffix,
             )?;
-            validate_completed_typed_errors(&value)?;
+            validate_completed_typed_errors(self.expression_builder.view_owned(value)?)?;
             if let NumericTemplateIntakePosition::HeadExpression(node_id) = intake.position {
                 // A head is a formatting consumer: its completed value must be renderable text.
                 // Template values take the head's own template path, not this scalar check.
-                if !matches!(value.kind, ExpressionKind::Template(_)) {
+                if !matches!(
+                    self.expression_builder.view_owned(value)?.operation_id(),
+                    ExpressionOp::Template(_)
+                ) {
                     let span = self
                         .context
                         .template_ir_store
@@ -337,7 +357,7 @@ impl Completion<'_, '_> {
                         .get_node(node_id)
                         .and_then(|node| node.span);
                     validate_template_head_value_type(
-                        &value,
+                        self.expression_builder.view_owned(value)?,
                         span,
                         self.type_interner.environment(),
                     )
@@ -355,7 +375,9 @@ impl Completion<'_, '_> {
             let selector_pattern = match pending_selector_pattern {
                 Some(pattern) => Some(finish_retained_selector_pattern(
                     *pattern,
-                    value.type_id,
+                    self.expression_builder
+                        .view_owned(value)?
+                        .require_single(ValueReceiverContext::MatchScrutinee)?,
                     self,
                 )?),
                 None => None,
@@ -363,7 +385,7 @@ impl Completion<'_, '_> {
             self.context
                 .template_ir_store
                 .borrow_mut()
-                .install_completed_numeric_intake(intake.site, value, selector_pattern)?;
+                .install_completed_numeric_intake(intake.site, value.id(), selector_pattern)?;
         }
 
         for (header, operands) in range_headers {
@@ -375,6 +397,8 @@ impl Completion<'_, '_> {
                     operands,
                     self.context,
                     self.type_interner,
+                    self.expression_builder,
+                    self.const_values,
                     self.string_table,
                     self.path_fork,
                 )
@@ -452,7 +476,11 @@ impl Completion<'_, '_> {
             let row = self.state.borrow().binding(binding).clone();
             let resolved = match recipe {
                 NumericRecipe::Raw { items, family } => {
-                    let recipe_span = items.first().and_then(|item| item.source_span());
+                    let recipe_span = items
+                        .first()
+                        .map(|item| item.source_span(self.expression_builder))
+                        .transpose()?
+                        .flatten();
                     // A numeric receiver types the raw leaves; without one the authored family
                     // default does. The literal destination is never the binding's final type:
                     // a comparison completes into `Bool` and integer division into `F64` even
@@ -488,17 +516,34 @@ impl Completion<'_, '_> {
                     // Binding initializers and template intakes are closed receiving sites: an enclosing
                     // catch never handles an independent initializer, so the completed value is validated
                     // before it is accepted or installed.
-                    validate_completed_typed_errors(&value)?;
-                    let computed = value.type_id;
+                    validate_completed_typed_errors(self.expression_builder.view_owned(value)?)?;
+                    let computed = self
+                        .expression_builder
+                        .view_owned(value)?
+                        .require_single(ValueReceiverContext::Declaration)?;
                     {
                         let mut state = self.state.borrow_mut();
                         accept_forward_binding_result(&mut state, binding, computed, recipe_span)?;
                     }
                     let value = self.coerce_to_binding_annotation(binding, value)?;
-                    ResolvedBinding::new(value.type_id, declaration_for(&row, value))
+                    let declaration = declaration_for(
+                        &row,
+                        value,
+                        self.expression_builder,
+                        self.type_interner.environment(),
+                    )?;
+                    ResolvedBinding::new(
+                        self.expression_builder.view_owned(value)?.value_type_id()?,
+                        declaration,
+                        self.expression_builder,
+                    )?
                 }
                 NumericRecipe::Directed { items, .. } => {
-                    let recipe_span = items.first().and_then(|item| item.source_span());
+                    let recipe_span = items
+                        .first()
+                        .map(|item| item.source_span(self.expression_builder))
+                        .transpose()?
+                        .flatten();
                     // Only the initializer's own annotation is an immediate receiver. A later class
                     // witness never types these raw leaves; the acceptance check below validates
                     // the completed value against it.
@@ -509,14 +554,27 @@ impl Completion<'_, '_> {
                     )
                     .map_or(ExpectedType::Infer, ExpectedType::NumericLiteral);
                     let value = self.complete_items(items, destination, &row.value_mode)?;
-                    validate_completed_typed_errors(&value)?;
-                    let computed = value.type_id;
+                    validate_completed_typed_errors(self.expression_builder.view_owned(value)?)?;
+                    let computed = self
+                        .expression_builder
+                        .view_owned(value)?
+                        .require_single(ValueReceiverContext::Declaration)?;
                     {
                         let mut state = self.state.borrow_mut();
                         accept_forward_binding_result(&mut state, binding, computed, recipe_span)?;
                     }
                     let value = self.coerce_to_binding_annotation(binding, value)?;
-                    ResolvedBinding::new(value.type_id, declaration_for(&row, value))
+                    let declaration = declaration_for(
+                        &row,
+                        value,
+                        self.expression_builder,
+                        self.type_interner.environment(),
+                    )?;
+                    ResolvedBinding::new(
+                        self.expression_builder.view_owned(value)?.value_type_id()?,
+                        declaration,
+                        self.expression_builder,
+                    )?
                 }
                 NumericRecipe::RangeCounter { range } => {
                     // The counter's type is the iteration domain of its own completed operands, so
@@ -528,6 +586,7 @@ impl Completion<'_, '_> {
                         crate::compiler_frontend::ast::statements::loop_headers::range_binding_type(
                             &spec,
                             self.type_interner.environment(),
+                            self.expression_builder,
                         )?;
                     {
                         let mut state = self.state.borrow_mut();
@@ -536,8 +595,9 @@ impl Completion<'_, '_> {
                     self.range_specs[binding.as_usize()] = Some(spec);
                     let resolved = ResolvedBinding::new(
                         computed,
-                        no_value_declaration(&row, computed, self.type_interner.environment()),
-                    );
+                        absent_declaration(&row, computed, self.type_interner.environment()),
+                        self.expression_builder,
+                    )?;
                     // A template range header bound to this counter installs its finished spec
                     // right here: its operands live in this recipe, which already ran the shared
                     // range policy exactly once.
@@ -548,14 +608,15 @@ impl Completion<'_, '_> {
                     let type_id = self.resolve_multi_bind_slot(binding, producers)?;
                     ResolvedBinding::new(
                         type_id,
-                        no_value_declaration(&row, type_id, self.type_interner.environment()),
-                    )
+                        absent_declaration(&row, type_id, self.type_interner.environment()),
+                        self.expression_builder,
+                    )?
                 }
                 NumericRecipe::Alias { source, is_copy } => {
                     let source_facts = self.binding_use_facts(source)?;
                     let type_id = source_facts.type_id;
                     let value = {
-                        let environment = self.type_interner.environment();
+                        let expressions = &mut *self.expression_builder;
                         alias_value(
                             &row,
                             source_facts.declaration_id,
@@ -563,11 +624,21 @@ impl Completion<'_, '_> {
                             source_facts.const_record_state,
                             type_id,
                             is_copy,
-                            environment,
-                        )
+                            expressions,
+                        )?
                     };
                     let value = self.coerce_to_binding_annotation(binding, value)?;
-                    ResolvedBinding::new(value.type_id, declaration_for(&row, value))
+                    let declaration = declaration_for(
+                        &row,
+                        value,
+                        self.expression_builder,
+                        self.type_interner.environment(),
+                    )?;
+                    ResolvedBinding::new(
+                        self.expression_builder.view_owned(value)?.value_type_id()?,
+                        declaration,
+                        self.expression_builder,
+                    )?
                 }
                 NumericRecipe::CollectionElement { element } => {
                     // A collection-element loop item has no initializer of its own; its loop
@@ -584,8 +655,9 @@ impl Completion<'_, '_> {
                     };
                     ResolvedBinding::new(
                         type_id,
-                        no_value_declaration(&row, type_id, self.type_interner.environment()),
-                    )
+                        absent_declaration(&row, type_id, self.type_interner.environment()),
+                        self.expression_builder,
+                    )?
                 }
                 NumericRecipe::CaughtError { shape } | NumericRecipe::PatternPayload { shape } => {
                     // A pending handler's error or pattern payload capture has no initializer: the
@@ -603,8 +675,9 @@ impl Completion<'_, '_> {
                     };
                     ResolvedBinding::new(
                         type_id,
-                        no_value_declaration(&row, type_id, self.type_interner.environment()),
-                    )
+                        absent_declaration(&row, type_id, self.type_interner.environment()),
+                        self.expression_builder,
+                    )?
                 }
             };
             self.install_binding(binding, resolved)?;
@@ -623,8 +696,8 @@ impl Completion<'_, '_> {
     fn coerce_to_binding_annotation(
         &mut self,
         binding: NumericBindingId,
-        value: Expression,
-    ) -> Result<Expression, ExpressionParseError> {
+        value: OwnedExpr,
+    ) -> Result<OwnedExpr, ExpressionParseError> {
         let Some(annotated) = binding_annotation_type(&self.state.borrow(), binding) else {
             return Ok(value);
         };
@@ -633,6 +706,7 @@ impl Completion<'_, '_> {
             annotated,
             self.type_interner.environment(),
             TypeMismatchContext::Declaration,
+            self.expression_builder,
         )?;
         Ok(value)
     }
@@ -772,11 +846,14 @@ impl Completion<'_, '_> {
             }
         };
         let expression = self.resolve_protected_statement_expression(expression)?;
-        let type_id = expression.type_id;
+        let type_id = self
+            .expression_builder
+            .view_owned(expression)?
+            .require_single(ValueReceiverContext::Then)?;
         self.state.borrow_mut().complete_then_value(
             producer.continuation,
             producer.value_index,
-            expression,
+            expression.id(),
         )?;
         Ok(type_id)
     }
@@ -967,7 +1044,7 @@ impl Completion<'_, '_> {
     fn assignment_target_facts(
         &mut self,
         target: DeferredAssignmentTarget,
-    ) -> Result<(PlaceExpression, ValueMode, Option<SourceSpan>), ExpressionParseError> {
+    ) -> Result<(PlaceId, ValueMode, Option<SourceSpan>), ExpressionParseError> {
         match target {
             DeferredAssignmentTarget::Ready {
                 target,
@@ -981,15 +1058,21 @@ impl Completion<'_, '_> {
             } => {
                 let expression =
                     self.resolve_statement_expression(StatementExpression::Retained(target))?;
-                let Some(place) = place_expression_from_expression(&expression) else {
+                let Some(place) =
+                    place_expression_from_expression(self.expression_builder, expression)?
+                else {
                     return Err(CompilerDiagnostic::invalid_assignment_target(
                         InvalidAssignmentTargetReason::TemporaryNotAssignable,
                         None,
-                        Some(expression.type_id),
+                        Some(
+                            self.expression_builder
+                                .view_owned(expression)?
+                                .require_single(ValueReceiverContext::ReceiverBase)?,
+                        ),
                         None,
                         None,
                         None,
-                        expression.span,
+                        self.expression_builder.view_owned(expression)?.span(),
                     )
                     .into());
                 };
@@ -1012,23 +1095,28 @@ impl Completion<'_, '_> {
     ) -> Result<Vec<AstNode>, ExpressionParseError> {
         let (target, _declaration_value_mode, declaration_span) =
             self.assignment_target_facts(continuation.target)?;
-        if !place_expression_is_mutable(&target) {
+        let target_type_id = self.expression_builder.place(target)?.metadata().type_id;
+        if !place_expression_is_mutable(self.expression_builder.place(target)?) {
             return Err(immutable_binding_diagnostic(
-                target.type_id,
+                target_type_id,
                 declaration_span,
                 continuation.span,
             )
             .into());
         }
-        let value = self.complete_mutation_value(continuation.value, target.type_id)?;
+        let value = self.complete_mutation_value(continuation.value, target_type_id)?;
         let value = coerce_expression_to_explicit_type_boundary(
             value,
-            target.type_id,
+            target_type_id,
             self.type_interner.environment(),
             TypeMismatchContext::Assignment,
+            self.expression_builder,
         )?;
         Ok(vec![AstNode {
-            kind: NodeKind::Assignment { target, value },
+            kind: NodeKind::Assignment {
+                target,
+                value: value.id(),
+            },
             span: continuation.span,
             scope: continuation.scope,
         }])
@@ -1040,28 +1128,34 @@ impl Completion<'_, '_> {
     ) -> Result<Vec<AstNode>, ExpressionParseError> {
         let (target, declaration_value_mode, declaration_span) =
             self.assignment_target_facts(continuation.target)?;
-        if !place_expression_is_mutable(&target) {
+        let target_type_id = self.expression_builder.place(target)?.metadata().type_id;
+        if !place_expression_is_mutable(self.expression_builder.place(target)?) {
             return Err(immutable_binding_diagnostic(
-                target.type_id,
+                target_type_id,
                 declaration_span,
                 continuation.span,
             )
             .into());
         }
-        let rhs = self.complete_mutation_value(continuation.value, target.type_id)?;
+        let rhs = self.complete_mutation_value(continuation.value, target_type_id)?;
         let value = evaluate_compound_assignment_with_ready_rhs(CompoundAssignmentReadyInput {
             declaration_value_mode: &declaration_value_mode,
-            target: &target,
-            target_type_id: target.type_id,
+            target,
+            target_type_id,
             operator: continuation.operator,
             rhs,
             context: self.context,
             type_interner: self.type_interner,
+            expression_builder: self.expression_builder,
+            const_values: self.const_values,
             string_table: self.string_table,
             path_fork: self.path_fork,
         })?;
         Ok(vec![AstNode {
-            kind: NodeKind::Assignment { target, value },
+            kind: NodeKind::Assignment {
+                target,
+                value: value.id(),
+            },
             span: continuation.span,
             scope: continuation.scope,
         }])
@@ -1072,9 +1166,9 @@ impl Completion<'_, '_> {
         continuation: ExpressionStatementContinuation,
     ) -> Result<Vec<AstNode>, ExpressionParseError> {
         let expression = self.complete_statement_expression(continuation.expression)?;
-        validate_resumed_statement_expression(&expression)?;
+        validate_resumed_statement_expression(self.expression_builder.view_owned(expression)?)?;
         Ok(vec![AstNode {
-            kind: NodeKind::ExpressionStatement(expression),
+            kind: NodeKind::ExpressionStatement(expression.id()),
             span: continuation.span,
             scope: continuation.scope,
         }])
@@ -1181,7 +1275,7 @@ impl Completion<'_, '_> {
                     .into());
                 }
                 crate::compiler_frontend::ast::statements::fallible_handling::complete_deferred_catch_handler(
-                    handler,
+                    *handler,
                     self,
                 )?
             }
@@ -1193,13 +1287,13 @@ impl Completion<'_, '_> {
                     span: _,
                     suffix: _,
                 } = *deferred;
-                if items.len() != 1 {
+                let Some(deferred_item) = single_operand_mut(&mut items) else {
                     return Err(CompilerError::compiler_error(
                         "a retained multi-bind value block lost its single deferred value item",
                     )
                     .into());
-                }
-                let ExpressionRpnItem::PendingNumericExpression { expression, .. } = &mut items[0]
+                };
+                let ExpressionRpnItem::PendingNumericExpression { expression, .. } = deferred_item
                 else {
                     return Err(CompilerError::compiler_error(
                         "a retained multi-bind value block lost its deferred expression",
@@ -1220,9 +1314,12 @@ impl Completion<'_, '_> {
             }
         };
         self.validate_multi_bind_slot_types(&targets, &value)?;
-        validate_completed_typed_errors(&value)?;
+        validate_completed_typed_errors(self.expression_builder.view_owned(value)?)?;
         Ok(vec![AstNode {
-            kind: NodeKind::MultiBind { targets, value },
+            kind: NodeKind::MultiBind {
+                targets,
+                value: value.id(),
+            },
             span,
             scope,
         }])
@@ -1231,24 +1328,15 @@ impl Completion<'_, '_> {
     /// Check that each completed multi-bind slot still matches its target's type.
     ///
     /// WHAT: a target bound to a generic call's declared result took that slot's shape before the
-    ///       call completed. The completed tuple's slots must agree with the target types.
+    ///       call completed. The completed success slots must agree with the target types.
     /// WHY: the shape links carry numeric classes only, so a completed slot with a different type
     ///      would otherwise reach codegen silently.
     fn validate_multi_bind_slot_types(
         &self,
         targets: &[MultiBindTarget],
-        value: &Expression,
+        value: &OwnedExpr,
     ) -> Result<(), ExpressionParseError> {
-        let Some(slot_types) = self
-            .type_interner
-            .environment()
-            .tuple_field_ids(value.type_id)
-        else {
-            return Err(CompilerError::compiler_error(
-                "a completed multi-bind value lost its tuple slot types",
-            )
-            .into());
-        };
+        let slot_types = self.expression_builder.view_owned(*value)?.success_types();
         if slot_types.len() != targets.len() {
             return Err(CompilerError::compiler_error(
                 "a completed multi-bind value produced a different number of slots than its targets",
@@ -1271,12 +1359,10 @@ impl Completion<'_, '_> {
 
     /// Resume one retained `assert` statement whose arguments resolved.
     ///
-    /// WHAT: completes each retained argument, then runs the assertion finisher with the
-    ///       statement's own generic-request provenance window.
-    /// WHY: an assertion condition/message are ordinary typed arguments with their own parameter
-    ///      receivers; the finisher is shared verbatim with the ready path, and the provenance
-    ///      taken before the argument loop lets a statically-true condition discard exactly the
-    ///      message's provisional generic requests without touching a sibling statement's.
+    /// WHAT: completes each argument and uses the shared finisher to classify the new request
+    ///       suffix, then retains the original parse range if the condition completed as true.
+    /// WHY: pending tickets publish into their original slots, outside this resume window. The
+    ///      saved exact range catches those requests without reclassifying later siblings.
     fn resume_assertion(
         &mut self,
         continuation: crate::compiler_frontend::ast::statements::asserts::AssertionContinuation,
@@ -1296,9 +1382,20 @@ impl Completion<'_, '_> {
             },
             self.context,
             self.type_interner,
+            self.expression_builder,
+            self.const_values,
             self.string_table,
             self.path_fork,
         )?;
+        if let NodeKind::Assert { condition, .. } = &node.kind
+            && assertion_condition_is_statically_true(
+                self.expression_builder.view(*condition)?,
+                self.const_values,
+            )
+        {
+            self.context
+                .retain_assertion_validation_requests_in_range(continuation.generic_request_range);
+        }
         Ok(vec![node])
     }
 
@@ -1306,9 +1403,9 @@ impl Completion<'_, '_> {
         &mut self,
         continuation: ReturnContinuation,
     ) -> Result<Vec<AstNode>, ExpressionParseError> {
-        let mut values = Vec::with_capacity(continuation.slots.len());
+        let mut values: Vec<ExprId> = Vec::with_capacity(continuation.slots.len());
         for slot in continuation.slots {
-            values.push(self.complete_statement_expression(slot)?);
+            values.push(self.complete_statement_expression(slot)?.id());
         }
         if continuation.is_error_return {
             let mut values = values.into_iter();
@@ -1319,54 +1416,72 @@ impl Completion<'_, '_> {
             })?;
             // The resumed error channel re-applies the same return-boundary coercion the
             // parse-time path applied before retention.
-            let Some(expected_error_type_id) = self.context.expected_error_type else {
+            let Some(expected_error_type_id) = self
+                .context
+                .enclosing_callable
+                .as_deref()
+                .and_then(|contract| contract.error_type)
+            else {
                 return Err(CompilerError::compiler_error(
                     "numeric construction completion resumed an error return outside an error function",
                 )
                 .into());
             };
             let error_value = coerce_expression_to_explicit_type_boundary(
-                error_value,
+                self.expression_builder.own(error_value),
                 expected_error_type_id,
                 self.type_interner.environment(),
                 TypeMismatchContext::ReturnValue,
+                self.expression_builder,
             )?;
             return Ok(vec![AstNode {
-                kind: NodeKind::ReturnError(error_value),
+                kind: NodeKind::ReturnError(error_value.id()),
                 span: continuation.span,
                 scope: continuation.scope,
             }]);
         }
-        let expected_types = self.context.current_function_return_type_ids.clone();
-        // A retained value-block return resumes as ONE value (the block's own tuple) in a function
-        // with several authored result slots: the parse-time path emits `Return(vec![block])` and
-        // lowering accepts that single value, because the block's own constructor already coerced
-        // each slot. Every other shape is checked against the authored result slots one by one.
-        let single_slot_block = values.len() == 1 && expected_types.len() > 1;
-        if !single_slot_block && values.len() != expected_types.len() {
+        let expected_types = &self
+            .context
+            .enclosing_callable
+            .as_deref()
+            .ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "numeric construction completion resumed a return without a callable contract",
+                )
+            })?
+            .success_types;
+        // One producer may forward all success slots, whether it is a call or a value block.
+        let forwarded = values.len() == 1 && expected_types.len() > 1;
+        if !forwarded && values.len() != expected_types.len() {
             return Err(CompilerError::compiler_error(
                 "numeric construction completion resumed a return with the wrong number of slots",
             )
             .into());
         }
-        if single_slot_block {
+        if forwarded {
+            crate::compiler_frontend::ast::statements::body_return::validate_forwarded_return(
+                self.expression_builder.view(values[0])?,
+                expected_types,
+                self.type_interner.environment(),
+            )?;
             return Ok(vec![AstNode {
                 kind: NodeKind::Return(values),
                 span: continuation.span,
                 scope: continuation.scope,
             }]);
         }
-        let mut coerced = Vec::with_capacity(values.len());
-        for (value, expected_type_id) in values.into_iter().zip(expected_types.iter()) {
-            coerced.push(coerce_expression_to_explicit_type_boundary(
-                value,
+        for (value, expected_type_id) in values.iter_mut().zip(expected_types.iter()) {
+            *value = coerce_expression_to_explicit_type_boundary(
+                self.expression_builder.own(*value),
                 *expected_type_id,
                 self.type_interner.environment(),
                 TypeMismatchContext::ReturnValue,
-            )?);
+                self.expression_builder,
+            )?
+            .id();
         }
         Ok(vec![AstNode {
-            kind: NodeKind::Return(coerced),
+            kind: NodeKind::Return(values),
             span: continuation.span,
             scope: continuation.scope,
         }])
@@ -1385,7 +1500,11 @@ impl Completion<'_, '_> {
 
     fn finish_if(&mut self, deferred: DeferredIf) -> Result<Vec<AstNode>, ExpressionParseError> {
         let condition = self.complete_statement_expression(deferred.condition)?;
-        ensure_boolean_condition(&condition, deferred.span, self.type_interner.environment())?;
+        ensure_boolean_condition(
+            self.expression_builder.view_owned(condition)?,
+            deferred.span,
+            self.type_interner.environment(),
+        )?;
         let then_block = self.resolve_deferred_body(deferred.then_body)?;
         let else_block = match deferred.else_body {
             Some(body) => Some(self.resolve_deferred_body(body)?),
@@ -1403,7 +1522,7 @@ impl Completion<'_, '_> {
         };
         Ok(vec![AstNode {
             kind: NodeKind::If(
-                condition,
+                condition.id(),
                 then_block,
                 else_block,
                 IfBranchMetadata::new(request_ranges, deferred.then_scope, deferred.else_scope),
@@ -1445,9 +1564,12 @@ impl Completion<'_, '_> {
         let kind = match deferred.header {
             DeferredLoopHeader::Conditional { condition } => {
                 let condition = self.complete_statement_expression(condition)?;
-                ensure_loop_condition(&condition, self.type_interner.environment())?;
+                ensure_loop_condition(
+                    self.expression_builder.view_owned(condition)?,
+                    self.type_interner.environment(),
+                )?;
                 let body = self.resolve_deferred_body(deferred.body)?;
-                NodeKind::WhileLoop(condition, body)
+                NodeKind::WhileLoop(condition.id(), body)
             }
             DeferredLoopHeader::Range(header) => {
                 // The header completes before the body: a bound header's spec was already produced
@@ -1493,6 +1615,9 @@ impl Completion<'_, '_> {
                 pending_item,
             } => {
                 let iterable = self.complete_statement_expression(iterable)?;
+                self.expression_builder
+                    .view_owned(iterable)?
+                    .require_single(ValueReceiverContext::General)?;
                 if let Some(item) = pending_item {
                     // The item's row resolved its element descriptor in the binding pass. Its
                     // completed declaration moves into the loop's item binding, as a range counter's
@@ -1507,7 +1632,7 @@ impl Completion<'_, '_> {
                 let body = self.resolve_deferred_body(deferred.body)?;
                 NodeKind::CollectionLoop {
                     bindings,
-                    iterable,
+                    iterable: iterable.id(),
                     body,
                 }
             }
@@ -1548,6 +1673,8 @@ impl Completion<'_, '_> {
             deferred.span,
             self.context,
             self.type_interner,
+            self.expression_builder,
+            self.const_values,
             self.string_table,
             self.path_fork,
         )
@@ -1672,19 +1799,11 @@ impl Completion<'_, '_> {
     fn complete_statement_expression(
         &mut self,
         expression: StatementExpression,
-    ) -> Result<Expression, ExpressionParseError> {
+    ) -> Result<OwnedExpr, ExpressionParseError> {
         match expression {
             StatementExpression::Built(built) => {
-                if crate::compiler_frontend::ast::numeric_construction::expression_contains_pending(
-                    &built,
-                ) {
-                    return Err(CompilerError::compiler_error(
-                        "a completed numeric-dependent statement still retained pending construction items",
-                    )
-                    .into());
-                }
-                validate_completed_typed_errors(&built)?;
-                Ok(built)
+                validate_completed_typed_errors(self.expression_builder.view(built)?)?;
+                Ok(self.expression_builder.own(built))
             }
             StatementExpression::Retained(deferred) => self.complete_deferred_expression(deferred),
         }
@@ -1703,7 +1822,7 @@ impl Completion<'_, '_> {
     fn resolve_protected_statement_expression(
         &mut self,
         expression: StatementExpression,
-    ) -> Result<Expression, ExpressionParseError> {
+    ) -> Result<OwnedExpr, ExpressionParseError> {
         let previous = self.protected_typed_errors;
         self.protected_typed_errors = true;
         let result = self.complete_protected_statement_expression(expression);
@@ -1714,19 +1833,11 @@ impl Completion<'_, '_> {
     fn complete_protected_statement_expression(
         &mut self,
         expression: StatementExpression,
-    ) -> Result<Expression, ExpressionParseError> {
+    ) -> Result<OwnedExpr, ExpressionParseError> {
         match expression {
             StatementExpression::Built(built) => {
-                if crate::compiler_frontend::ast::numeric_construction::expression_contains_pending(
-                    &built,
-                ) {
-                    return Err(CompilerError::compiler_error(
-                        "a completed catch-protected fragment still retained pending construction \
-                         items",
-                    )
-                    .into());
-                }
-                Ok(built)
+                self.expression_builder.view(built)?;
+                Ok(self.expression_builder.own(built))
             }
             StatementExpression::Retained(deferred) => self.complete_items_with_suffix(
                 deferred.items,
@@ -1748,19 +1859,11 @@ impl Completion<'_, '_> {
         &mut self,
         value: StatementExpression,
         destination: TypeId,
-    ) -> Result<Expression, ExpressionParseError> {
+    ) -> Result<OwnedExpr, ExpressionParseError> {
         match value {
             StatementExpression::Built(built) => {
-                if crate::compiler_frontend::ast::numeric_construction::expression_contains_pending(
-                    &built,
-                ) {
-                    return Err(CompilerError::compiler_error(
-                        "a completed mutation right-hand side still retained pending construction items",
-                    )
-                    .into());
-                }
-                validate_completed_typed_errors(&built)?;
-                Ok(built)
+                validate_completed_typed_errors(self.expression_builder.view(built)?)?;
+                Ok(self.expression_builder.own(built))
             }
             StatementExpression::Retained(deferred) => {
                 let value = self.complete_items_with_suffix(
@@ -1769,7 +1872,7 @@ impl Completion<'_, '_> {
                     &deferred.value_mode,
                     deferred.suffix,
                 )?;
-                validate_completed_typed_errors(&value)?;
+                validate_completed_typed_errors(self.expression_builder.view_owned(value)?)?;
                 Ok(value)
             }
         }
@@ -1778,7 +1881,7 @@ impl Completion<'_, '_> {
     fn complete_deferred_expression(
         &mut self,
         deferred: DeferredNumericExpression,
-    ) -> Result<Expression, ExpressionParseError> {
+    ) -> Result<OwnedExpr, ExpressionParseError> {
         let expression = self.complete_items_with_suffix(
             deferred.items,
             deferred.expected,
@@ -1791,7 +1894,7 @@ impl Completion<'_, '_> {
         // catch-protected subtree the producers stay open for the catch the enclosing handler
         // attaches, and the recovered expression is validated at its own boundary instead.
         if !self.protected_typed_errors {
-            validate_completed_typed_errors(&expression)?;
+            validate_completed_typed_errors(self.expression_builder.view_owned(expression)?)?;
         }
         Ok(expression)
     }
@@ -1827,8 +1930,14 @@ impl Completion<'_, '_> {
             &fragment.value_mode,
             fragment.suffix,
         )?;
-        // Receiving-boundary validation waits for the consuming position, as the retained path does.
+        // This witness describes a single argument/collection element. Non-single producers stay
+        // intact until that receiving owner can diagnose arity with its authored context.
+        if let [produced_type] = self
+            .expression_builder
+            .view_owned(expression)?
+            .success_types()
         {
+            let span = self.expression_builder.view_owned(expression)?.span();
             let mut state = self.state.borrow_mut();
             // The result labels the retained fragment, so it reuses that fragment's parse-time
             // provenance rather than acquiring the order of this completion demand.
@@ -1837,14 +1946,14 @@ impl Completion<'_, '_> {
                 &mut state,
                 self.type_interner.environment(),
                 shape,
-                expression.type_id,
-                expression.span,
+                *produced_type,
+                span,
                 authored_order,
             );
         }
         self.state
             .borrow_mut()
-            .complete_forward_producer(producer, expression)?;
+            .complete_forward_producer(producer, expression.id())?;
         Ok(())
     }
 
@@ -1854,7 +1963,7 @@ impl Completion<'_, '_> {
         items: Vec<ExpressionRpnItem>,
         expected: ExpectedType,
         value_mode: &ValueMode,
-    ) -> Result<Expression, ExpressionParseError> {
+    ) -> Result<OwnedExpr, ExpressionParseError> {
         self.complete_items_with_suffix(items, expected, value_mode, DeferredExpressionSuffix::None)
     }
 
@@ -1871,13 +1980,14 @@ impl Completion<'_, '_> {
         expected: ExpectedType,
         value_mode: &ValueMode,
         suffix: DeferredExpressionSuffix,
-    ) -> Result<Expression, ExpressionParseError> {
+    ) -> Result<OwnedExpr, ExpressionParseError> {
         let value = self.complete_items_inner(items, expected, value_mode)?;
         crate::compiler_frontend::ast::statements::fallible_handling::apply_completed_handling_suffix(
             value,
             suffix,
             self.context,
             self.type_interner,
+            self.expression_builder,
         )
     }
 
@@ -1886,15 +1996,17 @@ impl Completion<'_, '_> {
         items: Vec<ExpressionRpnItem>,
         expected: ExpectedType,
         value_mode: &ValueMode,
-    ) -> Result<Expression, ExpressionParseError> {
+    ) -> Result<OwnedExpr, ExpressionParseError> {
         let items = self.substitute_bindings(items)?;
         let literal_destination = expected.known_type_id();
-        let items = self.complete_nested_items(items, value_mode, literal_destination)?;
+        let items = self.complete_fragment_items(items, value_mode, literal_destination)?;
         let mut expected = expected;
         let expression = evaluate_expression(
             self.context,
             items,
             self.type_interner,
+            self.expression_builder,
+            self.const_values,
             &mut expected,
             value_mode,
             self.string_table,
@@ -1905,9 +2017,9 @@ impl Completion<'_, '_> {
 
     /// Replace pending binding references with their resolved canonical operands.
     ///
-    /// WHAT: rebuilds the ordered fragment by value, recursing into retained groups.
+    /// WHAT: rebuilds the ordered fragment by value in one flat pass over its items.
     /// WHY: the retained items belong to completion exactly once; substituting in place would
-    ///      require a placeholder item, and cloning the group wholesale would copy RPN per probe.
+    ///      require a placeholder item, and cloning the fragment wholesale would copy RPN per probe.
     fn substitute_bindings(
         &mut self,
         items: Vec<ExpressionRpnItem>,
@@ -1922,12 +2034,7 @@ impl Completion<'_, '_> {
                     is_copy,
                 } => {
                     let operand = self.binding_operand(binding, span, &value_mode, is_copy)?;
-                    substituted.push(ExpressionRpnItem::Operand(operand));
-                }
-                ExpressionRpnItem::PendingGroup { nodes, span } => {
-                    // Groups keep their authored inner order; only their items need substitution.
-                    let nodes = self.substitute_bindings(nodes)?;
-                    substituted.push(ExpressionRpnItem::PendingGroup { nodes, span });
+                    substituted.push(ExpressionRpnItem::Operand(operand.id()));
                 }
                 other => substituted.push(other),
             }
@@ -1945,7 +2052,7 @@ impl Completion<'_, '_> {
         span: Option<SourceSpan>,
         authored_mode: &ValueMode,
         is_copy: bool,
-    ) -> Result<Expression, ExpressionParseError> {
+    ) -> Result<OwnedExpr, ExpressionParseError> {
         let BindingUseFacts {
             type_id,
             declaration_id,
@@ -1953,29 +2060,34 @@ impl Completion<'_, '_> {
             const_record_state,
         } = self.binding_use_facts(binding)?;
         if is_copy {
-            let place = PlaceExpression {
-                kind: PlaceExpressionKind::Local(declaration_id),
-                type_id,
-                diagnostic_type: DataType::Inferred,
-                value_mode: source_mode,
+            let projections = self
+                .expression_builder
+                .append_place_projections(Vec::new(), span)?;
+            let place = self.expression_builder.append_place(
+                crate::compiler_frontend::ast::expressions::expression_store::PlaceRecord {
+                    root: declaration_id,
+                    root_type_id: type_id,
+                    projections,
+                    type_id,
+                    value_mode: source_mode,
+                    span,
+                },
                 span,
-            };
-            return Ok(Expression::copy_with_type_id(
+            )?;
+            return Ok(self.expression_builder.copy_with_type_id(
                 place,
-                DataType::Inferred,
                 type_id,
                 span,
-                authored_mode.to_owned(),
-            ));
+                *authored_mode,
+            )?);
         }
-        Ok(Expression::reference_with_type_id(
+        Ok(self.expression_builder.reference_with_type_id(
             declaration_id,
-            DataType::Inferred,
             type_id,
             span,
             source_mode,
             const_record_state,
-        ))
+        )?)
     }
 
     /// The facts one use of a numeric binding reads from its owner.
@@ -2174,7 +2286,7 @@ impl Completion<'_, '_> {
     ///       it names one. It reaches only this fragment's literal operands, and only through their
     ///       optional entry check, which admits optional wraps at each raw nesting level; calls and casts complete
     ///       from their own expectations.
-    fn complete_nested_items(
+    fn complete_fragment_items(
         &mut self,
         items: Vec<ExpressionRpnItem>,
         value_mode: &ValueMode,
@@ -2182,28 +2294,14 @@ impl Completion<'_, '_> {
     ) -> Result<Vec<ExpressionRpnItem>, ExpressionParseError> {
         let mut completed = Vec::with_capacity(items.len());
         for item in items {
-            match item {
-                ExpressionRpnItem::PendingGroup { nodes, span } => {
-                    let nodes =
-                        self.complete_nested_items(nodes, value_mode, literal_destination)?;
-                    completed.push(ExpressionRpnItem::PendingGroup { nodes, span });
-                }
-                other => {
-                    self.complete_non_group_item(
-                        other,
-                        value_mode,
-                        literal_destination,
-                        &mut completed,
-                    )?;
-                }
-            }
+            self.complete_fragment_item(item, value_mode, literal_destination, &mut completed)?;
         }
         Ok(completed)
     }
 
-    // Keep cast, call and value-block scratch out of the recursive grouping frame.
+    // Keep cast, call and value-block scratch out of the completion loop frame.
     #[inline(never)]
-    fn complete_non_group_item(
+    fn complete_fragment_item(
         &mut self,
         item: ExpressionRpnItem,
         value_mode: &ValueMode,
@@ -2230,16 +2328,17 @@ impl Completion<'_, '_> {
                     trait_environment: self.context.trait_environment(),
                     trait_evidence_environment: self.context.trait_evidence_environment(),
                     type_interner: &mut *self.type_interner,
+                    expression_builder: &mut *self.expression_builder,
                     string_table: &mut *self.string_table,
                     path_fork: &mut *self.path_fork,
                     active_generic_type_context: self.context.active_generic_type_context(),
                     span,
                 })?;
-                completed.push(ExpressionRpnItem::Operand(cast));
+                completed.push(ExpressionRpnItem::Operand(cast.id()));
             }
             ExpressionRpnItem::PendingNumericCall { call, .. } => {
                 let expression = self.finish_deferred_call(*call)?;
-                completed.push(ExpressionRpnItem::Operand(expression));
+                completed.push(ExpressionRpnItem::Operand(expression.id()));
             }
             ExpressionRpnItem::PendingNumericExpression { expression, .. } => {
                 // Rebuild the exact authored value-block/catch constructor through its owning
@@ -2249,7 +2348,7 @@ impl Completion<'_, '_> {
                         crate::compiler_frontend::ast::statements::value_production::complete_deferred_value_block(block, self)?
                     }
                     DeferredExpression::CatchHandler(handler) => {
-                        crate::compiler_frontend::ast::statements::fallible_handling::complete_deferred_catch_handler(handler, self)?
+                        crate::compiler_frontend::ast::statements::fallible_handling::complete_deferred_catch_handler(*handler, self)?
                     }
                     DeferredExpression::OperandContinuation(payload) => {
                         crate::compiler_frontend::ast::field_access::complete_retained_operand_continuation(*payload, self)?
@@ -2261,7 +2360,7 @@ impl Completion<'_, '_> {
                         crate::compiler_frontend::ast::statements::collections::complete_deferred_map(*literal, literal_destination, self)?
                     }
                 };
-                completed.push(ExpressionRpnItem::Operand(value));
+                completed.push(ExpressionRpnItem::Operand(value.id()));
             }
             other => completed.push(other),
         }
@@ -2271,7 +2370,7 @@ impl Completion<'_, '_> {
     fn finish_deferred_call(
         &mut self,
         call: DeferredCall,
-    ) -> Result<Expression, ExpressionParseError> {
+    ) -> Result<OwnedExpr, ExpressionParseError> {
         match call {
             DeferredCall::Source(deferred) => self.finish_source_call(*deferred),
             // The concrete-receiver producer owns the method constructor and its slot routing;
@@ -2321,7 +2420,7 @@ impl Completion<'_, '_> {
     fn finish_source_call(
         &mut self,
         deferred: DeferredSourceCall,
-    ) -> Result<Expression, ExpressionParseError> {
+    ) -> Result<OwnedExpr, ExpressionParseError> {
         let mut arguments = Vec::with_capacity(deferred.arguments.len());
         for argument in deferred.arguments {
             arguments.push(self.complete_call_argument(argument)?);
@@ -2333,6 +2432,8 @@ impl Completion<'_, '_> {
             deferred.call_span,
             self.string_table,
             self.type_interner,
+            self.expression_builder,
+            self.const_values,
             self.path_fork,
         )?;
         let call = HandledFallibleCall {
@@ -2350,11 +2451,17 @@ impl Completion<'_, '_> {
                 // uses; the retention site already validated the callee's error slot and the
                 // authored value requirement, so no second decision exists here.
                 let propagation_span = span.or(deferred.call_span);
-                Ok(call.into_expression(
+                let error_type = deferred.signature.error_return_type_id().ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "retained propagated call lost its declared error slot",
+                    )
+                })?;
+                call.into_expression(
                     FallibleHandling::Propagate,
                     propagation_span,
-                    self.type_interner.environment_mut_for_derived_types(),
-                ))
+                    error_type,
+                    self.expression_builder,
+                )
             }
         }
     }
@@ -2362,9 +2469,11 @@ impl Completion<'_, '_> {
     fn complete_call_argument(
         &mut self,
         argument: DeferredCallArgument,
-    ) -> Result<CallArgument, ExpressionParseError> {
+    ) -> Result<CallArgument<OwnedExpr>, ExpressionParseError> {
         let (argument_shape, value) = match argument {
-            DeferredCallArgument::Ready(ready) => return Ok(ready),
+            DeferredCallArgument::Ready(ready) => {
+                return Ok(ready.map_value(|id| self.expression_builder.own(id)));
+            }
             DeferredCallArgument::Retained { shape, expression } => {
                 (shape, self.complete_deferred_expression(expression)?)
             }
@@ -2375,12 +2484,14 @@ impl Completion<'_, '_> {
                 // The forward fragment deferred its receiving-boundary validation to here,
                 // exactly as the retained path does through `complete_deferred_expression`.
                 if !self.protected_typed_errors {
-                    validate_completed_typed_errors(&value)?;
+                    validate_completed_typed_errors(self.expression_builder.view_owned(value)?)?;
                 }
                 (shape, value)
             }
         };
-        let value_span = argument_shape.value_span.or(value.span);
+        let value_span = argument_shape
+            .value_span
+            .or(self.expression_builder.view_owned(value)?.span());
         let argument = match argument_shape.target_param {
             Some(name) => CallArgument::named(
                 value,
@@ -2403,52 +2514,61 @@ impl Completion<'_, '_> {
         &mut self,
         call: HandledFallibleCall,
         error_return_type_id: Option<TypeId>,
-    ) -> Result<Expression, ExpressionParseError> {
+    ) -> Result<OwnedExpr, ExpressionParseError> {
         let Some(error_return_type_id) = error_return_type_id else {
             let call_path = call.name;
-            let expression =
-                call.into_plain_expression(self.type_interner.environment_mut_for_derived_types());
-            return Ok(
-                if self.context.source_call_has_private_failure_lane(call_path) {
-                    expression.with_private_call_failure_candidate(call_path)
-                } else {
-                    expression
-                },
-            );
+            let expression = call.into_plain_expression(self.expression_builder)?;
+            return if self.context.source_call_has_private_failure_lane(call_path) {
+                Ok(self
+                    .expression_builder
+                    .with_private_call_failure_candidate(expression, call_path)?)
+            } else {
+                Ok(expression)
+            };
         };
         // A retained call resumes in the authored position without a suffix: `!` propagation is
         // decided from the token stream at parse time and a resumed fragment cannot apply it, so
-        // the call keeps the ordinary unhandled-typed-producer shape that whole-expression catch
-        // completion owns.
-        Ok(
-            Expression::handled_fallible_function_call_with_typed_arguments(
+        // the call keeps the handled Recover shape that whole-expression catch completion owns.
+        let expression = self
+            .expression_builder
+            .handled_fallible_function_call_with_typed_arguments(
                 call.name,
                 call.args,
                 call.result_type_ids,
+                error_return_type_id,
                 FallibleExpressionHandling::Recover,
-                self.type_interner.environment_mut_for_derived_types(),
                 call.call_span,
-            )
-            .with_typed_error_producer(error_return_type_id, None),
-        )
+            )?;
+        Ok(self.expression_builder.with_typed_error_producer(
+            expression,
+            error_return_type_id,
+            None,
+        )?)
     }
 
     fn pending_place(
         &mut self,
         target: &crate::compiler_frontend::ast::numeric_construction::PendingPlaceTarget,
-    ) -> Result<PlaceExpression, ExpressionParseError> {
+    ) -> Result<PlaceId, ExpressionParseError> {
         let type_id = self.resolved_type(target.binding)?;
         let (declaration_id, value_mode) = {
             let resolved = self.resolved_entry(target.binding)?;
             (resolved.declaration_id, resolved.value_mode.to_owned())
         };
-        Ok(PlaceExpression {
-            kind: PlaceExpressionKind::Local(declaration_id),
-            type_id,
-            diagnostic_type: diagnostic_type_spelling(type_id, self.type_interner.environment()),
-            value_mode,
-            span: target.span,
-        })
+        let projections = self
+            .expression_builder
+            .append_place_projections(Vec::new(), target.span)?;
+        Ok(self.expression_builder.append_place(
+            crate::compiler_frontend::ast::expressions::expression_store::PlaceRecord {
+                root: declaration_id,
+                root_type_id: type_id,
+                projections,
+                type_id,
+                value_mode,
+                span: target.span,
+            },
+            target.span,
+        )?)
     }
 }
 
@@ -2468,6 +2588,8 @@ impl<'a, 'env> DeferredExpressionCompletion<'env> for Completion<'a, 'env> {
         DeferredExpressionServices {
             context: self.context,
             type_interner: &mut *self.type_interner,
+            expression_builder: &mut *self.expression_builder,
+            const_values: &mut *self.const_values,
             string_table: &mut *self.string_table,
             path_fork: &mut *self.path_fork,
         }
@@ -2525,14 +2647,14 @@ impl<'a, 'env> DeferredExpressionCompletion<'env> for Completion<'a, 'env> {
     fn resolve_statement_expression(
         &mut self,
         expression: StatementExpression,
-    ) -> Result<Expression, ExpressionParseError> {
+    ) -> Result<OwnedExpr, ExpressionParseError> {
         self.complete_statement_expression(expression)
     }
 
     fn resolve_protected_statement_expression(
         &mut self,
         expression: StatementExpression,
-    ) -> Result<Expression, ExpressionParseError> {
+    ) -> Result<OwnedExpr, ExpressionParseError> {
         // Fully qualified: the inherent method owns the construction and the protected-fragment
         // rule, and this impl must not resolve back to the ordinary entry point.
         Completion::resolve_protected_statement_expression(self, expression)
@@ -2543,14 +2665,14 @@ impl<'a, 'env> DeferredExpressionCompletion<'env> for Completion<'a, 'env> {
         items: Vec<ExpressionRpnItem>,
         expected: ExpectedType,
         value_mode: &ValueMode,
-    ) -> Result<Expression, ExpressionParseError> {
+    ) -> Result<OwnedExpr, ExpressionParseError> {
         self.complete_items(items, expected, value_mode)
     }
 
     fn complete_call_argument(
         &mut self,
         argument: DeferredCallArgument,
-    ) -> Result<CallArgument, ExpressionParseError> {
+    ) -> Result<CallArgument<OwnedExpr>, ExpressionParseError> {
         // Fully qualified: the inherent method owns the placement, and this impl must not recurse
         // back into the trait method.
         Completion::complete_call_argument(self, argument)
@@ -2580,66 +2702,75 @@ impl<'a, 'env> DeferredExpressionCompletion<'env> for Completion<'a, 'env> {
         &mut self,
         producer: ForwardProducerId,
         expected: Option<ExpectedType>,
-    ) -> Result<Expression, ExpressionParseError> {
+    ) -> Result<OwnedExpr, ExpressionParseError> {
         let completed = self
             .state
             .borrow_mut()
             .take_completed_forward_producer(producer)?;
         if let Some(expression) = completed {
-            return Ok(expression);
+            return Ok(self.expression_builder.own(expression));
         }
         self.pull_forward_producer(producer, expected)?;
         let taken = self
             .state
             .borrow_mut()
             .take_completed_forward_producer(producer)?;
-        taken.ok_or_else(|| {
+        let expression = taken.ok_or_else(|| {
             CompilerError::compiler_error(
                 "a forward producer was read while still resolving or after it was taken",
             )
-            .into()
-        })
+        })?;
+        Ok(self.expression_builder.own(expression))
     }
 }
 
 /// A pending declaration whose value is owned by a different authored position.
 ///
-/// WHAT: a real `NoValue` expression at the resolved binding type, using the construction row's
-///       name, path, mode and span.
+/// WHAT: an absent initializer with the resolved binding type and authored binding metadata.
 /// WHY: range counters and inferred multi-bind targets are visible before their owning
 ///      continuation is emitted, but their values are either implicit or installed at another
 ///      authored position; neither needs a fabricated initializer.
-fn no_value_declaration(
+fn absent_declaration(
     row: &PendingBindingRow,
     type_id: TypeId,
     environment: &crate::compiler_frontend::datatypes::environment::TypeEnvironment,
 ) -> Declaration {
     Declaration {
         id: row.path,
-        value: Expression::new(
-            ExpressionKind::NoValue,
-            row.binding_span,
-            type_id,
-            diagnostic_type_spelling(type_id, environment),
-            row.value_mode.to_owned(),
-        ),
+        type_id,
+        diagnostic_type: diagnostic_type_spelling(type_id, environment),
+        value_mode: row.value_mode,
+        value: DeclarationValue::Absent,
         binding_span: row.binding_span,
         config_qualifier: None,
     }
 }
 
-fn declaration_for(row: &PendingBindingRow, mut value: Expression) -> Declaration {
-    // The authored `=`/`~=` marker owns the binding's mode: the completed initializer inherits
-    // neither its own parse-time requirement nor a copy source's mode, exactly like the ordinary
-    // declaration path, so a mutable alias of an immutable source (and the reverse) resumes with
-    // the target's authored mutability.
-    value.value_mode = row.value_mode.to_owned();
-    Declaration {
+fn declaration_for(
+    row: &PendingBindingRow,
+    value: OwnedExpr,
+    expressions: &mut AstExpressionBuilder,
+    environment: &crate::compiler_frontend::datatypes::environment::TypeEnvironment,
+) -> Result<Declaration, ExpressionParseError> {
+    // Reuse unchanged occurrence metadata; changed access belongs to an isolated replacement.
+    let expression = expressions.view_owned(value)?;
+    let type_id = expression.value_type_id()?;
+    let value = if expression.value_mode() == row.value_mode {
+        value
+    } else {
+        let mut input = expression.to_completed_input(expressions)?;
+        input.value_mode = row.value_mode;
+        expressions.commit_replacement(input)?
+    };
+    Ok(Declaration {
         id: row.path,
-        value,
+        type_id,
+        diagnostic_type: diagnostic_type_spelling(type_id, environment),
+        value_mode: row.value_mode,
+        value: DeclarationValue::Initializer(value.id()),
         binding_span: row.binding_span,
         config_qualifier: None,
-    }
+    })
 }
 
 /// Build the completed initializer of a copy or plain reference to another binding.
@@ -2656,33 +2787,30 @@ fn alias_value(
     source_const_record_state: ConstRecordState,
     type_id: TypeId,
     is_copy: bool,
-    environment: &crate::compiler_frontend::datatypes::environment::TypeEnvironment,
-) -> Expression {
-    let diagnostic_type = diagnostic_type_spelling(type_id, environment);
+    expressions: &mut AstExpressionBuilder,
+) -> Result<OwnedExpr, ExpressionParseError> {
     if is_copy {
-        let place = PlaceExpression {
-            kind: PlaceExpressionKind::Local(source_path),
-            type_id,
-            diagnostic_type: diagnostic_type.to_owned(),
-            value_mode: source_mode.to_owned(),
-            span: row.binding_span,
-        };
-        Expression::copy_with_type_id(
-            place,
-            diagnostic_type,
-            type_id,
-            row.span,
-            row.value_mode.to_owned(),
-        )
+        let projections = expressions.append_place_projections(Vec::new(), row.binding_span)?;
+        let place = expressions.append_place(
+            crate::compiler_frontend::ast::expressions::expression_store::PlaceRecord {
+                root: source_path,
+                root_type_id: type_id,
+                projections,
+                type_id,
+                value_mode: *source_mode,
+                span: row.binding_span,
+            },
+            row.binding_span,
+        )?;
+        Ok(expressions.copy_with_type_id(place, type_id, row.span, row.value_mode)?)
     } else {
-        Expression::reference_with_type_id(
+        Ok(expressions.reference_with_type_id(
             source_path,
-            diagnostic_type,
             type_id,
             row.span,
-            source_mode.to_owned(),
+            *source_mode,
             source_const_record_state,
-        )
+        )?)
     }
 }
 

@@ -11,8 +11,11 @@ use crate::ast_log;
 use crate::compiler_frontend::ast::ast_nodes::{
     AstNode, IfBranchMetadata, MatchExhaustiveness, NodeKind,
 };
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, OwnedExpr,
+};
 use crate::compiler_frontend::ast::generic_functions::{
     GenericRequestRange, IfGenericRequestRanges,
 };
@@ -46,6 +49,7 @@ use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidControlFlowStatementReason, InvalidMatchArmReason,
+    ValueReceiverContext,
 };
 #[cfg(feature = "benchmark_counters")]
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
@@ -195,7 +199,7 @@ pub(crate) enum ParsedMatchBlock {
 
 /// One fully materialised match block.
 pub(crate) struct ReadyMatchBlock {
-    pub scrutinee: Expression,
+    pub scrutinee: ExprId,
     pub arms: Vec<MatchArm>,
     pub default: Option<Vec<AstNode>>,
     pub exhaustiveness: MatchExhaustiveness,
@@ -209,7 +213,7 @@ pub(crate) struct ReadyMatchBlock {
 /// WHY: the statement drain and the value-producing match lane must not each re-derive pattern
 /// materialisation, guard validation and body resolution.
 pub(crate) struct ResumedMatchBlock {
-    pub(crate) scrutinee: Expression,
+    pub(crate) scrutinee: ExprId,
     pub(crate) arms: Vec<MatchArm>,
     pub(crate) default: Option<Vec<AstNode>>,
     pub(crate) exhaustiveness: MatchExhaustiveness,
@@ -273,10 +277,16 @@ fn reject_same_line_else_if(token_stream: &AstCursor) -> BranchingResult<()> {
 /// WHY: the single-predicate and statement-match shapes share the `if` keyword, so this entry
 /// point disambiguates them early based on token lookahead; a retained condition, body or nested
 /// statement keeps the authored pieces until the body root completes them.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "if statement construction keeps the token stream, scope, mutable interner/builder/constant/warning/string/path state and the caller's body draft as separate borrows"
+)]
 pub fn create_branch(
     token_stream: &mut AstCursor,
     context: ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
@@ -289,6 +299,8 @@ pub fn create_branch(
         token_stream,
         &context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     )?;
@@ -309,6 +321,8 @@ pub fn create_branch(
                 token_stream,
                 &context,
                 type_interner,
+                expression_builder,
+                const_values,
                 warnings,
                 string_table,
                 path_fork,
@@ -322,6 +336,8 @@ pub fn create_branch(
                 token_stream,
                 &context,
                 type_interner,
+                expression_builder,
+                const_values,
                 warnings,
                 string_table,
                 path_fork,
@@ -352,6 +368,8 @@ pub fn create_branch(
             token_stream,
             then_context,
             type_interner,
+            expression_builder,
+            const_values,
             warnings,
             string_table,
             path_fork,
@@ -371,6 +389,8 @@ pub fn create_branch(
                 token_stream,
                 else_context,
                 type_interner,
+                expression_builder,
+                const_values,
                 warnings,
                 string_table,
                 path_fork,
@@ -444,13 +464,15 @@ pub fn create_branch(
 
 #[allow(
     clippy::too_many_arguments,
-    reason = "single-predicate capture construction keeps the parsed header, token stream, scope, mutable interner/warning/string/path state and the caller's body draft as separate borrows"
+    reason = "single-predicate capture construction keeps the parsed header, token stream, scope, mutable interner/builder/constant/warning/string/path state and the caller's body draft as separate borrows"
 )]
 fn create_option_present_capture_branch(
     parsed_header: OptionPresentCaptureBranch,
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
@@ -480,6 +502,8 @@ fn create_option_present_capture_branch(
             token_stream,
             body_context,
             type_interner,
+            expression_builder,
+            const_values,
             warnings,
             string_table,
             path_fork,
@@ -498,6 +522,8 @@ fn create_option_present_capture_branch(
                 token_stream,
                 else_context,
                 type_interner,
+                expression_builder,
+                const_values,
                 warnings,
                 string_table,
                 path_fork,
@@ -592,7 +618,7 @@ fn push_deferred_option_capture(
 /// the authored pieces instead of publishing nodes with unresolved numeric origins.
 #[allow(
     clippy::too_many_arguments,
-    reason = "match node construction keeps the subject, header span, token stream, scope, mutable interner/warning/string/path state and the caller's body draft as separate borrows"
+    reason = "match node construction keeps the subject, header span, token stream, scope, mutable interner/builder/constant/warning/string/path state and the caller's body draft as separate borrows"
 )]
 fn create_match_node(
     scrutinee: StatementExpression,
@@ -600,6 +626,8 @@ fn create_match_node(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
@@ -610,6 +638,8 @@ fn create_match_node(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         warnings,
         None,
         string_table,
@@ -650,13 +680,15 @@ fn create_match_node(
 /// arm bodies.
 #[allow(
     clippy::too_many_arguments,
-    reason = "match block parsing keeps the subject, token stream, scope, mutable interner/warning/string/path state, and optional value target as separate borrows"
+    reason = "match block parsing keeps the subject, token stream, scope, mutable interner/builder/constant/warning/string/path state, and optional value target as separate borrows"
 )]
 pub(crate) fn parse_match_block(
     scrutinee: StatementExpression,
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     warnings: &mut Vec<CompilerDiagnostic>,
     active_value_target: Option<ActiveValueProductionTarget>,
     string_table: &mut StringTable,
@@ -685,10 +717,17 @@ pub(crate) fn parse_match_block(
     // owner so its arms parse before the subject resolves. Any other pending numeric subject
     // materialises its patterns once the selected type exists.
     let subject = match &scrutinee {
-        StatementExpression::Built(scrutinee) => MatchSubject::Known(scrutinee.type_id),
-        StatementExpression::Retained(retained) => {
-            retained_match_subject(&match_context, type_interner.environment(), &retained.items)
-        }
+        StatementExpression::Built(scrutinee) => MatchSubject::Known(
+            expression_builder
+                .view(*scrutinee)?
+                .require_single(ValueReceiverContext::MatchScrutinee)?,
+        ),
+        StatementExpression::Retained(retained) => retained_match_subject(
+            &match_context,
+            type_interner.environment(),
+            &retained.items,
+            expression_builder,
+        ),
     };
 
     let mut arms: Vec<ParsedMatchArm> = Vec::new();
@@ -758,6 +797,8 @@ pub(crate) fn parse_match_block(
                     token_stream,
                     &match_context,
                     type_interner,
+                    expression_builder,
+                    const_values,
                     warnings,
                     string_table,
                     path_fork,
@@ -774,6 +815,8 @@ pub(crate) fn parse_match_block(
                         token_stream,
                         &match_context,
                         type_interner,
+                        expression_builder,
+                        const_values,
                         warnings,
                         string_table,
                         path_fork,
@@ -786,8 +829,9 @@ pub(crate) fn parse_match_block(
                     } else {
                         let coverage = coverage_tracker.record_deferred_arm(
                             &parsed.pattern,
-                            parsed.guard.as_ref(),
+                            parsed.guard.is_some(),
                             parsed.matched_choice_variant,
+                            const_values,
                         );
 
                         if coverage.unreachable {
@@ -820,10 +864,13 @@ pub(crate) fn parse_match_block(
     //  Enforce exhaustiveness and build the payload
     // ----------------------------
     let exhaustiveness_subject = match (&scrutinee, subject) {
-        (StatementExpression::Built(scrutinee), _) => MatchExhaustivenessSubject::Known {
-            type_id: scrutinee.type_id,
-            span: scrutinee.span,
-        },
+        (StatementExpression::Built(scrutinee), _) => {
+            let scrutinee_view = expression_builder.view(*scrutinee)?;
+            MatchExhaustivenessSubject::Known {
+                type_id: scrutinee_view.value_type_id()?,
+                span: scrutinee_view.span(),
+            }
+        }
         (StatementExpression::Retained(fragment), MatchSubject::Known(type_id)) => {
             MatchExhaustivenessSubject::Known {
                 type_id,
@@ -955,7 +1002,11 @@ pub(crate) fn resume_deferred_match<'env>(
     } = deferred;
 
     let scrutinee = completion.resolve_statement_expression(scrutinee)?;
-    let subject_type = scrutinee.type_id;
+    let subject_type = {
+        let services = completion.session_services();
+        let subject_view = services.expression_builder.view_owned(scrutinee)?;
+        subject_view.require_single(ValueReceiverContext::MatchScrutinee)?
+    };
 
     // Parse-time coverage already reported every pattern whose value existed then. A retained
     // pattern's exact scalar only exists after the subject selection above, so the duplicate rule
@@ -1007,7 +1058,9 @@ pub(crate) fn resume_deferred_match<'env>(
                     ExpectedType::NumericLiteral(subject_type),
                     &retained.value.value_mode,
                 )?;
-                finish_retained_pattern(retained.relational, value)
+                let services = completion.session_services();
+                let value_view = services.expression_builder.view_owned(value)?;
+                finish_retained_pattern(retained.relational, value_view)?
             }
         };
 
@@ -1015,7 +1068,8 @@ pub(crate) fn resume_deferred_match<'env>(
             Some(guard) => {
                 let guard = completion.resolve_statement_expression(guard)?;
                 let services = completion.session_services();
-                ensure_match_guard_condition(&guard, services.type_interner.environment())?;
+                let guard_view = services.expression_builder.view_owned(guard)?;
+                ensure_match_guard_condition(guard_view, services.type_interner.environment())?;
                 Some(guard)
             }
             None => None,
@@ -1024,7 +1078,9 @@ pub(crate) fn resume_deferred_match<'env>(
         if pattern_was_retained && else_arm_index.is_none_or(|else_index| arm_index < else_index) {
             // Choice-variant dedupe and option facts were decided at parse; only the literal
             // duplicate rule needs the materialised value.
-            let coverage = resumed_coverage.record_arm(&pattern, guard.as_ref(), None);
+            let services = completion.session_services();
+            let coverage =
+                resumed_coverage.record_arm(&pattern, guard.is_some(), None, services.const_values);
             if coverage.unreachable {
                 let services = completion.session_services();
                 services
@@ -1041,7 +1097,7 @@ pub(crate) fn resume_deferred_match<'env>(
         };
         resolved_arms.push(MatchArm {
             pattern,
-            guard,
+            guard: guard.map(OwnedExpr::id),
             body,
         });
     }
@@ -1057,7 +1113,7 @@ pub(crate) fn resume_deferred_match<'env>(
     };
 
     Ok(ResumedMatchBlock {
-        scrutinee,
+        scrutinee: scrutinee.id(),
         arms: resolved_arms,
         default,
         exhaustiveness,
@@ -1065,10 +1121,16 @@ pub(crate) fn resume_deferred_match<'env>(
     })
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "else arm parsing keeps the token stream, scope, mutable interner/builder/constant/warning/string/path state as separate borrows"
+)]
 fn parse_else_arm(
     token_stream: &mut AstCursor,
     match_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
@@ -1107,6 +1169,8 @@ fn parse_else_arm(
             token_stream,
             arm_context,
             type_interner,
+            expression_builder,
+            const_values,
             warnings,
             string_table,
             path_fork,
@@ -1124,11 +1188,17 @@ fn parse_else_arm(
 ///
 /// ENTRY INVARIANT: the token stream is already positioned at the first token of the
 /// pattern; this function does not advance before parsing.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "match arm parsing keeps the subject, token stream, scope, mutable interner/builder/constant/warning/string/path state as separate borrows"
+)]
 fn parse_match_arm(
     subject: &MatchSubject,
     token_stream: &mut AstCursor,
     match_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
@@ -1144,6 +1214,8 @@ fn parse_match_arm(
         token_stream,
         match_context,
         type_interner,
+        expression_builder,
+        const_values,
         &[TokenTag::FAT_ARROW],
         string_table,
         path_fork,
@@ -1166,6 +1238,8 @@ fn parse_match_arm(
             token_stream,
             arm_body_context,
             type_interner,
+            expression_builder,
+            const_values,
             warnings,
             string_table,
             path_fork,

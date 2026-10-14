@@ -231,8 +231,7 @@ fn transfer_assign_target(
     let stats = &mut *context.stats;
 
     let value_expression = transfer_context.expressions.expression(value);
-    // A transparent unwrap or tuple projection may load from a place internally while the
-    // resulting expression is still an RValue. Binding role belongs to this incoming value.
+    // Binding role belongs to the incoming value, including native call-result loads.
     let rhs_is_place = value_expression.value_kind == ValueKind::Place;
     let is_direct_self_update = !is_definition
         && HirWriteTarget::AssignPlace(*target).is_direct_self_update_of(value_expression);
@@ -607,20 +606,12 @@ fn mutable_argument_roots(
     Ok(roots)
 }
 
-// WHAT: identifies a call argument that still denotes one direct HIR place after a transparent
-//      result projection.
-// WHY: optional transfer must decide move-versus-borrow on the place itself. A fallible success
-//      unwrap around a load must not first register an independent shared read of that same place.
-//      Computed and aggregate expressions intentionally stay on the recursive read path.
-fn transparent_place_from_expression(
+fn direct_place_from_expression(
     expressions: &HirExpressionStore,
     expression_id: HirValueId,
 ) -> Option<HirPlace> {
     match &expressions.expression(expression_id).kind {
         HirExpressionKind::Load(place) => Some(*place),
-        HirExpressionKind::FallibleUnwrapSuccess { result } => {
-            transparent_place_from_expression(expressions, *result)
-        }
         _ => None,
     }
 }
@@ -635,45 +626,6 @@ fn direct_value_roots_from_expression(
     diagnostics: &BorrowDiagnostics<'_>,
 ) -> Result<Option<RootSet>, BorrowCheckError> {
     let expression = expressions.expression(expression_id);
-
-    // WHAT: a fallible success unwrap carries the success payload's alias roots through the
-    //      carrier local, so a map `get` result keeps aliasing the map across the catch join.
-    // WHY: without this, the shared alias established at `get` is dropped at the unwrap and
-    //      never reaches the user binding, so a later mutation is not blocked.
-    match &expression.kind {
-        HirExpressionKind::FallibleUnwrapSuccess { result }
-        | HirExpressionKind::TupleGet { tuple: result, .. } => {
-            return direct_value_roots_from_expression(
-                layout,
-                state,
-                expressions,
-                *result,
-                location,
-                _span,
-                diagnostics,
-            );
-        }
-        HirExpressionKind::TupleConstruct { elements } => {
-            let mut roots = RootSet::empty(layout.local_count());
-            for element in expressions.values(*elements) {
-                let element_expression = expressions.expression(*element);
-                if let Some(provenance) = direct_value_roots_from_expression(
-                    layout,
-                    state,
-                    expressions,
-                    *element,
-                    location,
-                    element_expression.span,
-                    diagnostics,
-                )? {
-                    roots.union_with(&provenance);
-                }
-            }
-
-            return Ok(Some(roots));
-        }
-        _ => {}
-    }
 
     let HirExpressionKind::Load(place) = &expression.kind else {
         return Ok(None);
@@ -757,18 +709,33 @@ fn roots_for_place(
     Ok(state.effective_roots(local_index))
 }
 
+/// Pending step for the shared-read walk over one expression tree.
+///
+/// WHAT: `Visit` enters an expression. `Finish` runs the work that follows its children, which is
+/// a place access check for `Load`/`Copy` or the shared-read classification for other nodes.
+/// WHY: children must be processed before a parent's own check. The shared root accumulator
+/// is read after those children finish. An explicit stack keeps that order.
+#[derive(Clone, Copy)]
+enum SharedReadStep {
+    Visit {
+        expression_id: HirValueId,
+        location: Option<SourceSpan>,
+    },
+    Finish {
+        expression_id: HirValueId,
+        value_span: Option<SourceSpan>,
+    },
+}
+
 fn record_shared_reads_in_place_indices(
     env: &mut SharedReadEnv<'_, '_>,
     place: &HirPlace,
     location: Option<SourceSpan>,
     roots: &mut RootSet,
 ) -> Result<(), BorrowCheckError> {
-    for projection in env.context.expressions.projections(place.projections) {
-        if let HirProjection::Index(index) = projection {
-            record_shared_reads_in_expression(env, *index, location, roots)?;
-        }
-    }
-    Ok(())
+    let mut steps = Vec::new();
+    push_place_index_visits(env.context.expressions, place, location, &mut steps);
+    run_shared_read_steps(env, &mut steps, roots)
 }
 
 fn record_shared_reads_in_expression(
@@ -777,139 +744,261 @@ fn record_shared_reads_in_expression(
     location: Option<SourceSpan>,
     roots: &mut RootSet,
 ) -> Result<(), BorrowCheckError> {
-    let expression = env.context.expressions.expression(expression_id);
-    match &expression.kind {
-        HirExpressionKind::Number(_)
-        | HirExpressionKind::FixedScalar(_)
-        | HirExpressionKind::Bool(_)
-        | HirExpressionKind::Char(_)
-        | HirExpressionKind::StringLiteral(_)
-        | HirExpressionKind::StructuralString { .. } => {}
+    let mut steps = vec![SharedReadStep::Visit {
+        expression_id,
+        location,
+    }];
+    run_shared_read_steps(env, &mut steps, roots)
+}
 
-        HirExpressionKind::VariantConstruct { fields, .. } => {
-            for field in env.context.expressions.variant_fields(*fields) {
-                record_shared_reads_in_expression(env, field.value, location, roots)?;
-            }
+/// WHAT: schedules the dynamic index expressions of a place, in source order.
+/// WHY: index reads are recorded before the place access that uses them.
+fn push_place_index_visits(
+    expressions: &HirExpressionStore,
+    place: &HirPlace,
+    location: Option<SourceSpan>,
+    steps: &mut Vec<SharedReadStep>,
+) {
+    for projection in expressions.projections(place.projections).iter().rev() {
+        if let HirProjection::Index(index) = projection {
+            steps.push(SharedReadStep::Visit {
+                expression_id: *index,
+                location,
+            });
         }
+    }
+}
 
-        HirExpressionKind::Load(place) => {
-            let value_span = env
-                .context
-                .diagnostics
-                .value_error_span(expression_id, expression.span.or(location));
-            record_shared_reads_in_place_indices(env, place, value_span, roots)?;
+/// WHAT: drains the shared-read stack, visiting children in source order.
+/// WHY: the single `roots` accumulator is shared across the whole walk, so each post-children
+/// classification sees all roots accumulated up to that point.
+fn run_shared_read_steps(
+    env: &mut SharedReadEnv<'_, '_>,
+    steps: &mut Vec<SharedReadStep>,
+    roots: &mut RootSet,
+) -> Result<(), BorrowCheckError> {
+    let expressions = env.context.expressions;
 
-            let place_roots = roots_for_place(
-                env.layout,
-                env.state,
-                place,
-                value_span,
-                value_span,
-                &env.context.diagnostics,
-            )?;
-            let actor_index_hint = place_root_local_index(env.layout, place);
-            let mut check = AccessCheckContext {
-                context: env.context,
-                layout: env.layout,
-                state: env.state,
-                block_id: env.block_id,
-                tracker: env.tracker,
-                location: value_span,
-                span: value_span,
-                stats: env.stats,
-                actor_index_hint,
-                current_order: env.current_order,
-            };
-            check_shared_access(&mut check, &place_roots)?;
-            roots.union_with(&place_roots);
-        }
-
-        HirExpressionKind::Copy(place) => {
-            let value_span = env
-                .context
-                .diagnostics
-                .value_error_span(expression_id, expression.span.or(location));
-            record_shared_reads_in_place_indices(env, place, value_span, roots)?;
-
-            let place_roots = roots_for_place(
-                env.layout,
-                env.state,
-                place,
-                value_span,
-                value_span,
-                &env.context.diagnostics,
-            )?;
-            let actor_index_hint = place_root_local_index(env.layout, place);
-            let mut check = AccessCheckContext {
-                context: env.context,
-                layout: env.layout,
-                state: env.state,
-                block_id: env.block_id,
-                tracker: env.tracker,
-                location: value_span,
-                span: value_span,
-                stats: env.stats,
-                actor_index_hint,
-                current_order: env.current_order,
-            };
-            check_shared_access(&mut check, &place_roots)?;
-            roots.union_with(&place_roots);
-
-            env.value_fact_buffer.record(
+    while let Some(step) = steps.pop() {
+        match step {
+            SharedReadStep::Visit {
                 expression_id,
-                ValueAccessClassification::SharedRead,
-                &place_roots,
-            );
-            return Ok(());
-        }
+                location,
+            } => {
+                let expression = expressions.expression(expression_id);
+                match &expression.kind {
+                    HirExpressionKind::Number(_)
+                    | HirExpressionKind::FixedScalar(_)
+                    | HirExpressionKind::Bool(_)
+                    | HirExpressionKind::Char(_)
+                    | HirExpressionKind::StringLiteral(_)
+                    | HirExpressionKind::StructuralString { .. } => {
+                        record_shared_read_classification(env, expression_id, roots);
+                    }
 
-        HirExpressionKind::BinOp { left, right, .. } => {
-            record_shared_reads_in_expression(env, *left, location, roots)?;
-            record_shared_reads_in_expression(env, *right, location, roots)?;
-        }
+                    HirExpressionKind::Load(place) | HirExpressionKind::Copy(place) => {
+                        let value_span = env
+                            .context
+                            .diagnostics
+                            .value_error_span(expression_id, expression.span.or(location));
+                        steps.push(SharedReadStep::Finish {
+                            expression_id,
+                            value_span,
+                        });
+                        push_place_index_visits(expressions, place, value_span, steps);
+                    }
 
-        HirExpressionKind::UnaryOp { operand, .. } => {
-            record_shared_reads_in_expression(env, *operand, location, roots)?;
-        }
+                    HirExpressionKind::VariantConstruct { fields, .. } => {
+                        steps.push(SharedReadStep::Finish {
+                            expression_id,
+                            value_span: None,
+                        });
+                        for field in expressions.variant_fields(*fields).iter().rev() {
+                            steps.push(SharedReadStep::Visit {
+                                expression_id: field.value,
+                                location,
+                            });
+                        }
+                    }
 
-        HirExpressionKind::StructConstruct { fields, .. } => {
-            for (_, value) in env.context.expressions.struct_fields(*fields) {
-                record_shared_reads_in_expression(env, *value, location, roots)?;
+                    HirExpressionKind::BinOp { left, right, .. } => {
+                        steps.push(SharedReadStep::Finish {
+                            expression_id,
+                            value_span: None,
+                        });
+                        steps.push(SharedReadStep::Visit {
+                            expression_id: *right,
+                            location,
+                        });
+                        steps.push(SharedReadStep::Visit {
+                            expression_id: *left,
+                            location,
+                        });
+                    }
+
+                    HirExpressionKind::UnaryOp { operand, .. } => {
+                        steps.push(SharedReadStep::Finish {
+                            expression_id,
+                            value_span: None,
+                        });
+                        steps.push(SharedReadStep::Visit {
+                            expression_id: *operand,
+                            location,
+                        });
+                    }
+
+                    HirExpressionKind::StructConstruct { fields, .. } => {
+                        steps.push(SharedReadStep::Finish {
+                            expression_id,
+                            value_span: None,
+                        });
+                        for (_, value) in expressions.struct_fields(*fields).iter().rev() {
+                            steps.push(SharedReadStep::Visit {
+                                expression_id: *value,
+                                location,
+                            });
+                        }
+                    }
+
+                    HirExpressionKind::Collection(elements) => {
+                        steps.push(SharedReadStep::Finish {
+                            expression_id,
+                            value_span: None,
+                        });
+                        for element in expressions.values(*elements).iter().rev() {
+                            steps.push(SharedReadStep::Visit {
+                                expression_id: *element,
+                                location,
+                            });
+                        }
+                    }
+
+                    HirExpressionKind::MapLiteral(entries) => {
+                        steps.push(SharedReadStep::Finish {
+                            expression_id,
+                            value_span: None,
+                        });
+                        for entry in expressions.map_entries(*entries).iter().rev() {
+                            steps.push(SharedReadStep::Visit {
+                                expression_id: entry.value,
+                                location,
+                            });
+                            steps.push(SharedReadStep::Visit {
+                                expression_id: entry.key,
+                                location,
+                            });
+                        }
+                    }
+
+                    HirExpressionKind::Range { start, end } => {
+                        steps.push(SharedReadStep::Finish {
+                            expression_id,
+                            value_span: None,
+                        });
+                        steps.push(SharedReadStep::Visit {
+                            expression_id: *end,
+                            location,
+                        });
+                        steps.push(SharedReadStep::Visit {
+                            expression_id: *start,
+                            location,
+                        });
+                    }
+
+                    HirExpressionKind::Cast { source: result, .. } => {
+                        steps.push(SharedReadStep::Finish {
+                            expression_id,
+                            value_span: None,
+                        });
+                        steps.push(SharedReadStep::Visit {
+                            expression_id: *result,
+                            location,
+                        });
+                    }
+
+                    HirExpressionKind::VariantPayloadGet { source, .. } => {
+                        steps.push(SharedReadStep::Finish {
+                            expression_id,
+                            value_span: None,
+                        });
+                        steps.push(SharedReadStep::Visit {
+                            expression_id: *source,
+                            location,
+                        });
+                    }
+                }
             }
-        }
 
-        HirExpressionKind::Collection(elements)
-        | HirExpressionKind::TupleConstruct { elements } => {
-            for element in env.context.expressions.values(*elements) {
-                record_shared_reads_in_expression(env, *element, location, roots)?;
-            }
-        }
-        HirExpressionKind::MapLiteral(entries) => {
-            for entry in env.context.expressions.map_entries(*entries) {
-                record_shared_reads_in_expression(env, entry.key, location, roots)?;
-                record_shared_reads_in_expression(env, entry.value, location, roots)?;
-            }
-        }
-        HirExpressionKind::TupleGet { tuple, .. } => {
-            record_shared_reads_in_expression(env, *tuple, location, roots)?;
-        }
+            SharedReadStep::Finish {
+                expression_id,
+                value_span,
+            } => match &expressions.expression(expression_id).kind {
+                HirExpressionKind::Load(place) => {
+                    let place_roots = check_shared_place_read(env, place, value_span)?;
+                    roots.union_with(&place_roots);
+                    record_shared_read_classification(env, expression_id, roots);
+                }
 
-        HirExpressionKind::Range { start, end } => {
-            record_shared_reads_in_expression(env, *start, location, roots)?;
-            record_shared_reads_in_expression(env, *end, location, roots)?;
-        }
+                HirExpressionKind::Copy(place) => {
+                    let place_roots = check_shared_place_read(env, place, value_span)?;
+                    roots.union_with(&place_roots);
+                    // WHY: a direct copy records only its own roots and skips classification
+                    // from the accumulated roots.
+                    env.value_fact_buffer.record(
+                        expression_id,
+                        ValueAccessClassification::SharedRead,
+                        &place_roots,
+                    );
+                }
 
-        HirExpressionKind::FallibleUnwrapSuccess { result }
-        | HirExpressionKind::FallibleUnwrapError { result }
-        | HirExpressionKind::Cast { source: result, .. } => {
-            record_shared_reads_in_expression(env, *result, location, roots)?;
-        }
-
-        HirExpressionKind::VariantPayloadGet { source, .. } => {
-            record_shared_reads_in_expression(env, *source, location, roots)?;
+                _ => record_shared_read_classification(env, expression_id, roots),
+            },
         }
     }
 
+    Ok(())
+}
+
+/// WHAT: checks one direct place read against live borrows and returns the roots it touches.
+/// WHY: `Load` and `Copy` share this access check, so the walk keeps one copy of it.
+fn check_shared_place_read(
+    env: &mut SharedReadEnv<'_, '_>,
+    place: &HirPlace,
+    value_span: Option<SourceSpan>,
+) -> Result<RootSet, BorrowCheckError> {
+    let place_roots = roots_for_place(
+        env.layout,
+        env.state,
+        place,
+        value_span,
+        value_span,
+        &env.context.diagnostics,
+    )?;
+    let actor_index_hint = place_root_local_index(env.layout, place);
+    let mut check = AccessCheckContext {
+        context: env.context,
+        layout: env.layout,
+        state: env.state,
+        block_id: env.block_id,
+        tracker: env.tracker,
+        location: value_span,
+        span: value_span,
+        stats: env.stats,
+        actor_index_hint,
+        current_order: env.current_order,
+    };
+    check_shared_access(&mut check, &place_roots)?;
+    Ok(place_roots)
+}
+
+/// WHAT: records the shared-read classification of an expression from the accumulated roots.
+/// WHY: every non-copy node reports the roots gathered so far, so a leaf after a shared read
+/// also reports those roots.
+fn record_shared_read_classification(
+    env: &mut SharedReadEnv<'_, '_>,
+    expression_id: HirValueId,
+    roots: &RootSet,
+) {
     let classification = if roots.is_empty() {
         ValueAccessClassification::None
     } else {
@@ -917,8 +1006,16 @@ fn record_shared_reads_in_expression(
     };
     env.value_fact_buffer
         .record(expression_id, classification, roots);
+}
 
-    Ok(())
+/// Pending expression for root collection.
+///
+/// WHAT: one expression still to visit, with the span fallback for its root collection.
+/// WHY: the walk runs on an explicit stack, so deep expression chains do not consume native stack.
+#[derive(Clone, Copy)]
+struct RootCollectStep {
+    expression_id: HirValueId,
+    span: Option<SourceSpan>,
 }
 
 fn collect_expression_roots(
@@ -931,152 +1028,139 @@ fn collect_expression_roots(
     span: Option<SourceSpan>,
 ) -> Result<(), BorrowCheckError> {
     let expressions = context.expressions;
-    let expression = expressions.expression(expression_id);
-    match &expression.kind {
-        HirExpressionKind::Load(place) => {
-            let roots = roots_for_place(
-                layout,
-                state,
-                place,
-                location,
-                span.or(expression.span),
-                &context.diagnostics,
-            )?;
-            out.union_with(&roots);
+    let mut pending = vec![RootCollectStep {
+        expression_id,
+        span,
+    }];
 
-            for projection in expressions.projections(place.projections) {
-                if let HirProjection::Index(index) = projection {
-                    let index_span = expressions.expression(*index).span;
-                    collect_expression_roots(
-                        context, layout, state, *index, out, location, index_span,
-                    )?;
-                }
-            }
-        }
-
-        HirExpressionKind::Copy(place) => {
-            for projection in expressions.projections(place.projections) {
-                if let HirProjection::Index(index) = projection {
-                    let index_span = expressions.expression(*index).span;
-                    collect_expression_roots(
-                        context, layout, state, *index, out, location, index_span,
-                    )?;
-                }
-            }
-        }
-
-        HirExpressionKind::BinOp { left, right, .. } => {
-            for child in [left, right] {
-                let child_span = expressions.expression(*child).span;
-                collect_expression_roots(
-                    context, layout, state, *child, out, location, child_span,
-                )?;
-            }
-        }
-
-        HirExpressionKind::UnaryOp { operand, .. } => {
-            let child_span = expressions.expression(*operand).span;
-            collect_expression_roots(context, layout, state, *operand, out, location, child_span)?;
-        }
-
-        HirExpressionKind::StructConstruct { fields, .. } => {
-            for (_, value) in expressions.struct_fields(*fields) {
-                let child_span = expressions.expression(*value).span;
-                collect_expression_roots(
-                    context, layout, state, *value, out, location, child_span,
-                )?;
-            }
-        }
-
-        HirExpressionKind::Collection(elements)
-        | HirExpressionKind::TupleConstruct { elements } => {
-            for element in expressions.values(*elements) {
-                let child_span = expressions.expression(*element).span;
-                collect_expression_roots(
-                    context, layout, state, *element, out, location, child_span,
-                )?;
-            }
-        }
-        HirExpressionKind::MapLiteral(entries) => {
-            for entry in expressions.map_entries(*entries) {
-                let key_span = expressions.expression(entry.key).span;
-                collect_expression_roots(
-                    context, layout, state, entry.key, out, location, key_span,
-                )?;
-                let value_span = expressions.expression(entry.value).span;
-                collect_expression_roots(
-                    context,
+    while let Some(step) = pending.pop() {
+        let expression = expressions.expression(step.expression_id);
+        match &expression.kind {
+            HirExpressionKind::Load(place) => {
+                let roots = roots_for_place(
                     layout,
                     state,
-                    entry.value,
-                    out,
+                    place,
                     location,
-                    value_span,
+                    step.span.or(expression.span),
+                    &context.diagnostics,
                 )?;
+                out.union_with(&roots);
+                push_place_index_root_steps(expressions, place, &mut pending);
             }
-        }
-        HirExpressionKind::TupleGet { tuple, .. } => {
-            let child_span = expressions.expression(*tuple).span;
-            collect_expression_roots(context, layout, state, *tuple, out, location, child_span)?;
-        }
 
-        HirExpressionKind::Range { start, end } => {
-            for child in [start, end] {
-                let child_span = expressions.expression(*child).span;
-                collect_expression_roots(
-                    context, layout, state, *child, out, location, child_span,
-                )?;
+            HirExpressionKind::Copy(place) => {
+                push_place_index_root_steps(expressions, place, &mut pending);
             }
-        }
 
-        HirExpressionKind::FallibleUnwrapSuccess { result }
-        | HirExpressionKind::FallibleUnwrapError { result }
-        | HirExpressionKind::Cast { source: result, .. } => {
-            let child_span = expressions.expression(*result).span;
-            collect_expression_roots(context, layout, state, *result, out, location, child_span)?;
-        }
-
-        HirExpressionKind::Number(_)
-        | HirExpressionKind::FixedScalar(_)
-        | HirExpressionKind::Bool(_)
-        | HirExpressionKind::Char(_)
-        | HirExpressionKind::StringLiteral(_)
-        | HirExpressionKind::StructuralString { .. } => {}
-
-        HirExpressionKind::VariantConstruct { fields, .. } => {
-            for field in expressions.variant_fields(*fields) {
-                let child_span = expressions.expression(field.value).span;
-                collect_expression_roots(
-                    context,
-                    layout,
-                    state,
-                    field.value,
-                    out,
-                    location,
-                    child_span,
-                )?;
+            HirExpressionKind::BinOp { left, right, .. } => {
+                push_root_step(expressions, &mut pending, *right);
+                push_root_step(expressions, &mut pending, *left);
             }
-        }
 
-        HirExpressionKind::VariantPayloadGet { source, .. } => {
-            let child_span = expressions.expression(*source).span;
-            collect_expression_roots(context, layout, state, *source, out, location, child_span)?;
+            HirExpressionKind::UnaryOp { operand, .. } => {
+                push_root_step(expressions, &mut pending, *operand);
+            }
+
+            HirExpressionKind::StructConstruct { fields, .. } => {
+                for (_, value) in expressions.struct_fields(*fields).iter().rev() {
+                    push_root_step(expressions, &mut pending, *value);
+                }
+            }
+
+            HirExpressionKind::Collection(elements) => {
+                for element in expressions.values(*elements).iter().rev() {
+                    push_root_step(expressions, &mut pending, *element);
+                }
+            }
+
+            HirExpressionKind::MapLiteral(entries) => {
+                for entry in expressions.map_entries(*entries).iter().rev() {
+                    push_root_step(expressions, &mut pending, entry.value);
+                    push_root_step(expressions, &mut pending, entry.key);
+                }
+            }
+
+            HirExpressionKind::Range { start, end } => {
+                push_root_step(expressions, &mut pending, *end);
+                push_root_step(expressions, &mut pending, *start);
+            }
+
+            HirExpressionKind::Cast { source: result, .. } => {
+                push_root_step(expressions, &mut pending, *result);
+            }
+
+            HirExpressionKind::Number(_)
+            | HirExpressionKind::FixedScalar(_)
+            | HirExpressionKind::Bool(_)
+            | HirExpressionKind::Char(_)
+            | HirExpressionKind::StringLiteral(_)
+            | HirExpressionKind::StructuralString { .. } => {}
+
+            HirExpressionKind::VariantConstruct { fields, .. } => {
+                for field in expressions.variant_fields(*fields).iter().rev() {
+                    push_root_step(expressions, &mut pending, field.value);
+                }
+            }
+
+            HirExpressionKind::VariantPayloadGet { source, .. } => {
+                push_root_step(expressions, &mut pending, *source);
+            }
         }
     }
 
     Ok(())
 }
 
+/// WHAT: schedules one child expression for root collection, using its own span as fallback.
+/// WHY: root collection needs the child's source location when no more specific span is available.
+fn push_root_step(
+    expressions: &HirExpressionStore,
+    pending: &mut Vec<RootCollectStep>,
+    expression_id: HirValueId,
+) {
+    pending.push(RootCollectStep {
+        expression_id,
+        span: expressions.expression(expression_id).span,
+    });
+}
+
+/// WHAT: schedules the dynamic index expressions of a place for root collection, in source order.
+/// WHY: index expressions contribute roots to the same accumulator as the place they index.
+fn push_place_index_root_steps(
+    expressions: &HirExpressionStore,
+    place: &HirPlace,
+    pending: &mut Vec<RootCollectStep>,
+) {
+    for projection in expressions.projections(place.projections).iter().rev() {
+        if let HirProjection::Index(index) = projection {
+            push_root_step(expressions, pending, *index);
+        }
+    }
+}
+
 /// Shared inputs for aggregate-literal optional transfer analysis.
 ///
 /// WHAT: keeps diagnostic lookup and advisory fact emission together while aggregate traversal
-/// recurses through nested expressions.
+/// visits nested expressions on an explicit work stack.
 /// WHY: optional transfer facts must be emitted without threading a wide argument list through
 /// every aggregate child.
 pub(super) struct AggregateTransferContext<'a, 'module> {
     pub(super) diagnostics: &'a BorrowDiagnostics<'module>,
     pub(super) expressions: &'a HirExpressionStore,
     pub(super) value_fact_buffer: &'a mut ValueFactBuffer,
+}
+
+/// Pending step for aggregate optional-transfer analysis.
+///
+/// WHAT: `Visit` traverses an expression. `AggregateChild` handles only direct children of map
+/// and collection literals, recording optional transfer advice for their place reads.
+/// WHY: the explicit stack preserves traversal order without adding transfer checks for direct
+/// loads in struct and variant fields.
+#[derive(Clone, Copy)]
+enum AggregateOwnershipStep {
+    Visit(HirValueId),
+    AggregateChild(HirValueId),
 }
 
 /// WHAT: records optional transfer outcomes for children of aggregate literals.
@@ -1091,198 +1175,103 @@ pub(super) fn transfer_aggregate_expression_ownership(
     location: Option<SourceSpan>,
     aggregate_context: &mut AggregateTransferContext<'_, '_>,
 ) -> Result<(), BorrowCheckError> {
-    let expression = aggregate_context.expressions.expression(expression_id);
-    match &expression.kind {
-        HirExpressionKind::MapLiteral(entries) => {
-            for entry in aggregate_context.expressions.map_entries(*entries) {
-                transfer_aggregate_child(
-                    layout,
-                    state,
-                    entry.key,
-                    block_id,
-                    current_order,
-                    location,
-                    aggregate_context,
-                )?;
-                transfer_aggregate_child(
-                    layout,
-                    state,
-                    entry.value,
-                    block_id,
-                    current_order,
-                    location,
-                    aggregate_context,
-                )?;
+    let expressions = aggregate_context.expressions;
+    let mut pending = vec![AggregateOwnershipStep::Visit(expression_id)];
+
+    while let Some(step) = pending.pop() {
+        match step {
+            AggregateOwnershipStep::Visit(expression_id) => {
+                match &expressions.expression(expression_id).kind {
+                    HirExpressionKind::MapLiteral(entries) => {
+                        for entry in expressions.map_entries(*entries).iter().rev() {
+                            pending.push(AggregateOwnershipStep::AggregateChild(entry.value));
+                            pending.push(AggregateOwnershipStep::AggregateChild(entry.key));
+                        }
+                    }
+
+                    HirExpressionKind::Collection(elements) => {
+                        for element in expressions.values(*elements).iter().rev() {
+                            pending.push(AggregateOwnershipStep::AggregateChild(*element));
+                        }
+                    }
+
+                    // Struct and variant fields are traversed without recording optional transfer
+                    // for their direct loads, unlike map and collection children.
+                    HirExpressionKind::StructConstruct { fields, .. } => {
+                        for (_, value) in expressions.struct_fields(*fields).iter().rev() {
+                            pending.push(AggregateOwnershipStep::Visit(*value));
+                        }
+                    }
+
+                    HirExpressionKind::VariantConstruct { fields, .. } => {
+                        for field in expressions.variant_fields(*fields).iter().rev() {
+                            pending.push(AggregateOwnershipStep::Visit(field.value));
+                        }
+                    }
+
+                    HirExpressionKind::BinOp { left, right, .. } => {
+                        pending.push(AggregateOwnershipStep::Visit(*right));
+                        pending.push(AggregateOwnershipStep::Visit(*left));
+                    }
+
+                    HirExpressionKind::UnaryOp { operand, .. } => {
+                        pending.push(AggregateOwnershipStep::Visit(*operand));
+                    }
+
+                    HirExpressionKind::Range { start, end } => {
+                        pending.push(AggregateOwnershipStep::Visit(*end));
+                        pending.push(AggregateOwnershipStep::Visit(*start));
+                    }
+
+                    HirExpressionKind::Cast { source: result, .. } => {
+                        pending.push(AggregateOwnershipStep::Visit(*result));
+                    }
+
+                    HirExpressionKind::VariantPayloadGet { source, .. } => {
+                        pending.push(AggregateOwnershipStep::Visit(*source));
+                    }
+
+                    HirExpressionKind::Number(_)
+                    | HirExpressionKind::FixedScalar(_)
+                    | HirExpressionKind::Bool(_)
+                    | HirExpressionKind::Char(_)
+                    | HirExpressionKind::StringLiteral(_)
+                    | HirExpressionKind::StructuralString { .. }
+                    | HirExpressionKind::Copy(_)
+                    | HirExpressionKind::Load(_) => {}
+                }
+            }
+
+            AggregateOwnershipStep::AggregateChild(expression_id) => {
+                if matches!(
+                    &expressions.expression(expression_id).kind,
+                    HirExpressionKind::Load(_)
+                ) {
+                    record_aggregate_load_transfer(
+                        layout,
+                        state,
+                        expression_id,
+                        block_id,
+                        current_order,
+                        location,
+                        aggregate_context,
+                    )?;
+                } else {
+                    pending.push(AggregateOwnershipStep::Visit(expression_id));
+                }
             }
         }
-
-        HirExpressionKind::Collection(elements) => {
-            for element in aggregate_context.expressions.values(*elements) {
-                transfer_aggregate_child(
-                    layout,
-                    state,
-                    *element,
-                    block_id,
-                    current_order,
-                    location,
-                    aggregate_context,
-                )?;
-            }
-        }
-
-        HirExpressionKind::BinOp { left, right, .. } => {
-            transfer_aggregate_expression_ownership(
-                layout,
-                state,
-                *left,
-                block_id,
-                current_order,
-                location,
-                aggregate_context,
-            )?;
-            transfer_aggregate_expression_ownership(
-                layout,
-                state,
-                *right,
-                block_id,
-                current_order,
-                location,
-                aggregate_context,
-            )?;
-        }
-
-        HirExpressionKind::UnaryOp { operand, .. } => {
-            transfer_aggregate_expression_ownership(
-                layout,
-                state,
-                *operand,
-                block_id,
-                current_order,
-                location,
-                aggregate_context,
-            )?;
-        }
-
-        HirExpressionKind::TupleGet { tuple, .. } => {
-            transfer_aggregate_expression_ownership(
-                layout,
-                state,
-                *tuple,
-                block_id,
-                current_order,
-                location,
-                aggregate_context,
-            )?;
-        }
-
-        HirExpressionKind::Range { start, end } => {
-            transfer_aggregate_expression_ownership(
-                layout,
-                state,
-                *start,
-                block_id,
-                current_order,
-                location,
-                aggregate_context,
-            )?;
-            transfer_aggregate_expression_ownership(
-                layout,
-                state,
-                *end,
-                block_id,
-                current_order,
-                location,
-                aggregate_context,
-            )?;
-        }
-
-        HirExpressionKind::FallibleUnwrapSuccess { result }
-        | HirExpressionKind::FallibleUnwrapError { result }
-        | HirExpressionKind::Cast { source: result, .. } => {
-            transfer_aggregate_expression_ownership(
-                layout,
-                state,
-                *result,
-                block_id,
-                current_order,
-                location,
-                aggregate_context,
-            )?;
-        }
-
-        HirExpressionKind::VariantPayloadGet { source, .. } => {
-            transfer_aggregate_expression_ownership(
-                layout,
-                state,
-                *source,
-                block_id,
-                current_order,
-                location,
-                aggregate_context,
-            )?;
-        }
-
-        HirExpressionKind::StructConstruct { fields, .. } => {
-            for (_, value) in aggregate_context.expressions.struct_fields(*fields) {
-                transfer_aggregate_expression_ownership(
-                    layout,
-                    state,
-                    *value,
-                    block_id,
-                    current_order,
-                    location,
-                    aggregate_context,
-                )?;
-            }
-        }
-
-        HirExpressionKind::TupleConstruct { elements } => {
-            for element in aggregate_context.expressions.values(*elements) {
-                transfer_aggregate_expression_ownership(
-                    layout,
-                    state,
-                    *element,
-                    block_id,
-                    current_order,
-                    location,
-                    aggregate_context,
-                )?;
-            }
-        }
-
-        HirExpressionKind::VariantConstruct { fields, .. } => {
-            for field in aggregate_context.expressions.variant_fields(*fields) {
-                transfer_aggregate_expression_ownership(
-                    layout,
-                    state,
-                    field.value,
-                    block_id,
-                    current_order,
-                    location,
-                    aggregate_context,
-                )?;
-            }
-        }
-
-        HirExpressionKind::Number(_)
-        | HirExpressionKind::FixedScalar(_)
-        | HirExpressionKind::Bool(_)
-        | HirExpressionKind::Char(_)
-        | HirExpressionKind::StringLiteral(_)
-        | HirExpressionKind::StructuralString { .. }
-        | HirExpressionKind::Copy(_)
-        | HirExpressionKind::Load(_) => {}
     }
 
     Ok(())
 }
 
-/// WHAT: classifies one direct child of an aggregate literal for optional transfer.
-/// WHY: direct place children can receive destruction responsibility, while computed children
-///      still need recursive analysis before the outer aggregate stores the fresh result.
-fn transfer_aggregate_child(
+/// WHAT: records optional transfer for a direct place child of a map or collection literal.
+/// WHY: these children can receive destruction responsibility without changing mandatory source
+///      state. Computed children are visited by the walk instead.
+fn record_aggregate_load_transfer(
     layout: &FunctionLayout,
-    state: &mut BorrowState,
+    state: &BorrowState,
     expression_id: HirValueId,
     block_id: BlockId,
     current_order: i32,
@@ -1291,59 +1280,39 @@ fn transfer_aggregate_child(
 ) -> Result<(), BorrowCheckError> {
     let diagnostics = aggregate_context.diagnostics;
     let expression = aggregate_context.expressions.expression(expression_id);
+    let HirExpressionKind::Load(place) = &expression.kind else {
+        return Ok(());
+    };
 
-    // Nested aggregate literals are traversed before the outer aggregate stores the resulting
-    // fresh value. This keeps `{ "outer" = { "inner" = value } }` aligned with the direct
-    // `{ "inner" = value }` case while preserving shared storage on failed transfer proofs.
-    transfer_aggregate_expression_ownership(
-        layout,
-        state,
-        expression_id,
-        block_id,
-        current_order,
-        location,
-        aggregate_context,
-    )?;
+    let roots = roots_for_place(layout, state, place, location, expression.span, diagnostics)?;
+    if roots.is_empty() {
+        return Ok(());
+    }
 
-    if let HirExpressionKind::Load(place) = &expression.kind {
-        let roots = roots_for_place(layout, state, place, location, expression.span, diagnostics)?;
-        if roots.is_empty() {
-            return Ok(());
+    // Scalar builtins are implicitly copied into aggregate literals. Non-scalar values keep
+    // shared storage unless this site has a proven optional transfer opportunity. The implicitly
+    // copied numeric scalars are `I32`, `U32` and `F64`. Other fixed widths keep their ordinary
+    // transfer decision.
+    if expression.ty == builtin_type_ids::BOOL
+        || expression.ty == builtin_type_ids::fixed_scalar(FixedScalar::I32)
+        || expression.ty == builtin_type_ids::fixed_scalar(FixedScalar::U32)
+        || expression.ty == builtin_type_ids::fixed_scalar(FixedScalar::F64)
+        || expression.ty == builtin_type_ids::CHAR
+        || expression.ty == builtin_type_ids::NONE
+    {
+        return Ok(());
+    }
+
+    match classify_move_decision(layout, block_id, &roots, current_order) {
+        MoveDecision::Move => {
+            aggregate_context
+                .value_fact_buffer
+                .record_optional_transfer(expression_id, OptionalTransferStatus::Transfer, &roots);
         }
-
-        // Scalar builtins are implicitly copied into aggregate literals. Non-scalar values keep
-        // shared storage unless this site has a proven optional transfer opportunity. The implicitly
-        // copied numeric scalars are `I32`, `U32` and `F64`; other fixed widths keep their ordinary
-        // transfer decision.
-        if expression.ty == builtin_type_ids::BOOL
-            || expression.ty == builtin_type_ids::fixed_scalar(FixedScalar::I32)
-            || expression.ty == builtin_type_ids::fixed_scalar(FixedScalar::U32)
-            || expression.ty == builtin_type_ids::fixed_scalar(FixedScalar::F64)
-            || expression.ty == builtin_type_ids::CHAR
-            || expression.ty == builtin_type_ids::NONE
-        {
-            return Ok(());
-        }
-
-        match classify_move_decision(layout, block_id, &roots, current_order) {
-            MoveDecision::Move => {
-                aggregate_context
-                    .value_fact_buffer
-                    .record_optional_transfer(
-                        expression_id,
-                        OptionalTransferStatus::Transfer,
-                        &roots,
-                    );
-            }
-            MoveDecision::Borrow => {
-                aggregate_context
-                    .value_fact_buffer
-                    .record_optional_transfer(
-                        expression_id,
-                        OptionalTransferStatus::Borrow,
-                        &roots,
-                    );
-            }
+        MoveDecision::Borrow => {
+            aggregate_context
+                .value_fact_buffer
+                .record_optional_transfer(expression_id, OptionalTransferStatus::Borrow, &roots);
         }
     }
 

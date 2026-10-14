@@ -15,7 +15,7 @@ use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 pub(crate) use crate::compiler_frontend::tests::hir_fixture_support::{
-    bool_expression, expression, local, statement, string_expression, unit_expression,
+    bool_expression, expression, local, statement, string_expression,
 };
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
@@ -28,9 +28,9 @@ pub(crate) struct TypeIds {
 
 /// Registers the type surface this backend's tests exercise.
 ///
-/// Deliberately local to each backend: the JS lane registers option, choice, collection, map,
-/// fallible-carrier and IO-input-handle types that the Wasm lane does not support, so the two
-/// `TypeIds` shapes are not equivalent and must not be merged.
+/// Deliberately local to each backend: the JS lane registers aggregate and IO-input-handle
+/// types beyond this Wasm fixture's scalar surface, so the two `TypeIds` shapes are not
+/// equivalent and must not be merged.
 pub(crate) fn build_type_environment() -> (TypeEnvironment, TypeIds) {
     let env = TypeEnvironment::new();
     let builtins = env.builtins();

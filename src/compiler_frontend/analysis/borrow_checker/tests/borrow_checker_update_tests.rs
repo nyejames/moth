@@ -42,9 +42,9 @@ target = \"replacement\"\n\
 sentinel = 0\n\
 ;";
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let (module, _) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("the update fixture should lower");
     let registry = default_external_package_registry(&mut string_table);
+    let (module, _) = lower_ast(ast, &mut string_table, &mut path_fork, &registry)
+        .expect("the update fixture should lower");
     let function = module
         .functions
         .iter()
@@ -108,9 +108,9 @@ unused = identity(argument)\n\
 sentinel = 0\n\
 ;";
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let (mut module, _) = lower_ast(ast, &mut string_table, &mut path_fork)
-        .expect("the dedicated update fixture should lower");
     let registry = default_external_package_registry(&mut string_table);
+    let (mut module, _) = lower_ast(ast, &mut string_table, &mut path_fork, &registry)
+        .expect("the dedicated update fixture should lower");
     let target = local_named(&module, &path_fork, &string_table, "target");
     let argument = local_named(&module, &path_fork, &string_table, "argument");
     let (call_block_id, call_statement_id, call_result) = module
@@ -121,11 +121,14 @@ sentinel = 0\n\
                 .statements
                 .iter()
                 .find_map(|statement| match &statement.kind {
-                    HirStatementKind::Call {
-                        args,
-                        result: Some(HirLocalDestination::Define(result)),
-                        ..
-                    } if args.len() == 1 => Some((block.id, statement.id, *result)),
+                    HirStatementKind::Call { args, results, .. } if args.len() == 1 => {
+                        match results.as_slice() {
+                            [HirLocalDestination::Define(result)] => {
+                                Some((block.id, statement.id, *result))
+                            }
+                            _ => None,
+                        }
+                    }
                     _ => None,
                 })
         })
@@ -141,10 +144,10 @@ sentinel = 0\n\
                 .find(|statement| statement.id == call_statement_id)
         })
         .expect("the identity call should remain present");
-    let HirStatementKind::Call { result, .. } = &mut call_statement.kind else {
+    let HirStatementKind::Call { results, .. } = &mut call_statement.kind else {
         unreachable!("the selected statement is a call")
     };
-    *result = Some(HirLocalDestination::Update(target));
+    *results = vec![HirLocalDestination::Update(target)];
 
     let function = module
         .functions
@@ -220,9 +223,9 @@ unused = identity(argument)\n\
 sentinel = 0\n\
 ;";
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let (mut module, _) = lower_ast(ast, &mut string_table, &mut path_fork)
-        .expect("the immutable update fixture should lower");
     let registry = default_external_package_registry(&mut string_table);
+    let (mut module, _) = lower_ast(ast, &mut string_table, &mut path_fork, &registry)
+        .expect("the immutable update fixture should lower");
     let target = local_named(&module, &path_fork, &string_table, "target");
     let argument = local_named(&module, &path_fork, &string_table, "argument");
     let mutable_root = local_named(&module, &path_fork, &string_table, "mutable_root");
@@ -235,9 +238,10 @@ sentinel = 0\n\
                     &statement.kind,
                     HirStatementKind::Call {
                         args,
-                        result: Some(HirLocalDestination::Define(_)),
+                        results,
                         ..
                     } if args.len() == 1
+                        && matches!(results.as_slice(), [HirLocalDestination::Define(_)])
                 )
                 .then_some((block.id, statement.id))
             })
@@ -254,10 +258,10 @@ sentinel = 0\n\
                 .find(|statement| statement.id == call_statement_id)
         })
         .expect("the identity call should remain present");
-    let HirStatementKind::Call { result, .. } = &mut call_statement.kind else {
+    let HirStatementKind::Call { results, .. } = &mut call_statement.kind else {
         unreachable!("the selected statement is a call")
     };
-    *result = Some(HirLocalDestination::Update(target));
+    *results = vec![HirLocalDestination::Update(target)];
 
     let function = module
         .functions
@@ -328,9 +332,9 @@ target ~= \"old\"\n\
 sentinel = 0\n\
 ;";
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let (module, _) = lower_ast(ast, &mut string_table, &mut path_fork)
-        .expect("the definition fixture should lower");
     let registry = default_external_package_registry(&mut string_table);
+    let (module, _) = lower_ast(ast, &mut string_table, &mut path_fork, &registry)
+        .expect("the definition fixture should lower");
     let function = module
         .functions
         .iter()
@@ -404,9 +408,9 @@ immutable_target = \"old\"\n\
 sentinel = 0\n\
 ;";
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let (mut module, _) = lower_ast(ast, &mut string_table, &mut path_fork)
-        .expect("the immutable update fixture should lower");
     let registry = default_external_package_registry(&mut string_table);
+    let (mut module, _) = lower_ast(ast, &mut string_table, &mut path_fork, &registry)
+        .expect("the immutable update fixture should lower");
     let mutable = local_named(&module, &path_fork, &string_table, "mutable_target");
     let immutable = local_named(&module, &path_fork, &string_table, "immutable_target");
     let mutable_root = local_named(&module, &path_fork, &string_table, "mutable_root");
@@ -511,11 +515,11 @@ sentinel = 0\n\
 observed = copy observer\n\
 ;";
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let (module, type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("fixture source should lower");
-    validate_hir_module(&module, &type_environment)
-        .expect("the complete fixture should be structurally valid HIR");
     let registry = default_external_package_registry(&mut string_table);
+    let (module, type_environment) = lower_ast(ast, &mut string_table, &mut path_fork, &registry)
+        .expect("fixture source should lower");
+    validate_hir_module(&module, &type_environment, &registry)
+        .expect("the complete fixture should be structurally valid HIR");
     let function = module
         .functions
         .iter()
@@ -601,9 +605,10 @@ sentinel = 0\n\
 observed = copy observer\n\
 ;";
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let (mut module, type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("fixture source should lower");
     let registry = default_external_package_registry(&mut string_table);
+    let (mut module, type_environment) =
+        lower_ast(ast, &mut string_table, &mut path_fork, &registry)
+            .expect("fixture source should lower");
     let target = local_named(&module, &path_fork, &string_table, "target");
     let (call_result, call_region) = module
         .blocks
@@ -613,11 +618,12 @@ observed = copy observer\n\
                 .statements
                 .iter()
                 .find_map(|statement| match &statement.kind {
-                    HirStatementKind::Call {
-                        args,
-                        result: Some(HirLocalDestination::Define(local)),
-                        ..
-                    } if args.len() == 1 => Some((*local, block.region)),
+                    HirStatementKind::Call { args, results, .. } if args.len() == 1 => {
+                        match results.as_slice() {
+                            [HirLocalDestination::Define(local)] => Some((*local, block.region)),
+                            _ => None,
+                        }
+                    }
                     _ => None,
                 })
         })
@@ -644,17 +650,14 @@ observed = copy observer\n\
     for block in &mut module.blocks {
         for statement in &mut block.statements {
             match &mut statement.kind {
-                HirStatementKind::Call {
-                    args,
-                    result: Some(destination),
-                    ..
-                } if args.len() == 1
-                    && matches!(
-                        &*destination,
-                        HirLocalDestination::Define(local) if *local == call_result
-                    ) =>
+                HirStatementKind::Call { args, results, .. }
+                    if args.len() == 1
+                        && matches!(
+                            results.as_slice(),
+                            [HirLocalDestination::Define(local)] if *local == call_result
+                        ) =>
                 {
-                    *destination = HirLocalDestination::Update(target);
+                    results[0] = HirLocalDestination::Update(target);
                     updated_call_id = Some(statement.id);
                 }
                 HirStatementKind::Write { value, .. }
@@ -675,7 +678,7 @@ observed = copy observer\n\
         retargeted_consumer,
         "the consumer should read the updated target"
     );
-    validate_hir_module(&module, &type_environment)
+    validate_hir_module(&module, &type_environment, &registry)
         .expect("the retargeted call result should remain structurally valid HIR");
 
     let function = module

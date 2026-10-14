@@ -7,7 +7,8 @@
 
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
 use crate::compiler_frontend::ast::ast_nodes::MatchExhaustiveness;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, FallibleHandling};
+use crate::compiler_frontend::ast::expressions::expression::FallibleHandling;
+use crate::compiler_frontend::ast::expressions::expression_store::{ExprId, OwnedExpr, PlaceId};
 use crate::compiler_frontend::ast::generic_functions::IfGenericRequestRanges;
 use crate::compiler_frontend::ast::numeric_construction::StatementExpression;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchArm;
@@ -26,7 +27,7 @@ use super::receiver::RetainedValueBlock;
 /// expression statements.
 #[derive(Clone, Debug)]
 pub struct ProducedValues {
-    pub expressions: Vec<Expression>,
+    pub expressions: Vec<ExprId>,
     pub span: Option<SourceSpan>,
 }
 
@@ -158,7 +159,7 @@ pub enum ValueReceiverKind {
 pub enum ThenValueSlot {
     Pending(StatementExpression),
     Taken,
-    Completed(Expression),
+    Completed(ExprId),
 }
 
 /// Continuation for a `then` statement whose fallback values still hold numeric origins.
@@ -200,6 +201,162 @@ pub enum ValueBlock {
     Catch(ValueCatchBlock),
 }
 
+impl ValueBlock {
+    pub(crate) fn visit_place_ids(&self, visitor: &mut dyn FnMut(PlaceId)) {
+        match self {
+            Self::If(block) => {
+                for node in block.then_body.iter().chain(&block.else_body) {
+                    node.visit_place_ids(visitor);
+                }
+            }
+            Self::LexicalScope(block) => {
+                for node in &block.body {
+                    node.visit_place_ids(visitor);
+                }
+            }
+            Self::Match(block) => {
+                for arm in &block.arms {
+                    for node in &arm.body {
+                        node.visit_place_ids(visitor);
+                    }
+                }
+                if let Some(body) = &block.default {
+                    for node in body {
+                        node.visit_place_ids(visitor);
+                    }
+                }
+            }
+            Self::Catch(block) => {
+                if let FallibleHandling::Handler { body, .. } = &block.handler {
+                    for node in body {
+                        node.visit_place_ids(visitor);
+                    }
+                }
+            }
+        }
+    }
+
+    pub(crate) fn visit_place_ids_mut(&mut self, visitor: &mut dyn FnMut(&mut PlaceId)) {
+        match self {
+            Self::If(block) => {
+                for node in block.then_body.iter_mut().chain(&mut block.else_body) {
+                    node.visit_place_ids_mut(visitor);
+                }
+            }
+            Self::LexicalScope(block) => {
+                for node in &mut block.body {
+                    node.visit_place_ids_mut(visitor);
+                }
+            }
+            Self::Match(block) => {
+                for arm in &mut block.arms {
+                    for node in &mut arm.body {
+                        node.visit_place_ids_mut(visitor);
+                    }
+                }
+                if let Some(body) = &mut block.default {
+                    for node in body {
+                        node.visit_place_ids_mut(visitor);
+                    }
+                }
+            }
+            Self::Catch(block) => {
+                if let FallibleHandling::Handler { body, .. } = &mut block.handler {
+                    for node in body {
+                        node.visit_place_ids_mut(visitor);
+                    }
+                }
+            }
+        }
+    }
+
+    pub(crate) fn visit_expression_ids_mut(&mut self, visitor: &mut dyn FnMut(&mut ExprId)) {
+        match self {
+            Self::If(block) => {
+                visitor(&mut block.condition);
+                for node in block.then_body.iter_mut().chain(&mut block.else_body) {
+                    node.visit_expression_ids_mut(visitor);
+                }
+            }
+            Self::LexicalScope(block) => {
+                for node in &mut block.body {
+                    node.visit_expression_ids_mut(visitor);
+                }
+            }
+            Self::Match(block) => {
+                visitor(&mut block.scrutinee);
+                for arm in &mut block.arms {
+                    arm.pattern.visit_expression_ids_mut(visitor);
+                    if let Some(guard) = &mut arm.guard {
+                        visitor(guard);
+                    }
+                    for node in &mut arm.body {
+                        node.visit_expression_ids_mut(visitor);
+                    }
+                }
+                if let Some(body) = &mut block.default {
+                    for node in body {
+                        node.visit_expression_ids_mut(visitor);
+                    }
+                }
+            }
+            Self::Catch(block) => {
+                visitor(&mut block.handled_value);
+                if let FallibleHandling::Handler { body, .. } = &mut block.handler {
+                    for node in body {
+                        node.visit_expression_ids_mut(visitor);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Enumerate retained leaves without expanding the expression graph.
+    ///
+    /// The store validates each leaf in its own domain before accepting the control-flow
+    /// payload. Both branches remain graph-valid even when static selection later removes one.
+    pub(crate) fn visit_expression_ids(&self, visitor: &mut dyn FnMut(ExprId)) {
+        match self {
+            Self::If(block) => {
+                visitor(block.condition);
+                for node in block.then_body.iter().chain(&block.else_body) {
+                    node.visit_expression_ids(visitor);
+                }
+            }
+            Self::LexicalScope(block) => {
+                for node in &block.body {
+                    node.visit_expression_ids(visitor);
+                }
+            }
+            Self::Match(block) => {
+                visitor(block.scrutinee);
+                for arm in &block.arms {
+                    arm.pattern.visit_expression_ids(visitor);
+                    if let Some(guard) = arm.guard {
+                        visitor(guard);
+                    }
+                    for node in &arm.body {
+                        node.visit_expression_ids(visitor);
+                    }
+                }
+                if let Some(body) = &block.default {
+                    for node in body {
+                        node.visit_expression_ids(visitor);
+                    }
+                }
+            }
+            Self::Catch(block) => {
+                visitor(block.handled_value);
+                if let FallibleHandling::Handler { body, .. } = &block.handler {
+                    for node in body {
+                        node.visit_expression_ids(visitor);
+                    }
+                }
+            }
+        }
+    }
+}
+
 /// Shared receiver parse result.
 ///
 /// WHAT: known and single-inferred receivers wrap a finished expression.
@@ -211,7 +368,8 @@ pub enum ValueBlock {
 /// may observe an unresolved origin or a fabricated block.
 #[derive(Debug)]
 pub enum ParsedReceiverValue {
-    Complete(Expression),
+    /// A transient completed result; durable AST nodes store only its expression ID.
+    Complete(OwnedExpr),
     NeedsSlotInference {
         block: ValueBlock,
         span: Option<SourceSpan>,
@@ -227,7 +385,7 @@ pub enum ParsedReceiverValue {
 /// earlier in the same branch.
 #[derive(Clone, Debug)]
 pub struct ValueIfBlock {
-    pub condition: Expression,
+    pub condition: ExprId,
     pub then_body: Vec<AstNode>,
     pub else_body: Vec<AstNode>,
     pub then_scope: PathId,
@@ -238,7 +396,7 @@ pub struct ValueIfBlock {
     ///
     /// WHAT: one type per value produced by `then` in each branch.
     /// WHY: HIR lowering needs the individual slot types to allocate result locals,
-    ///      and the AST expression type is derived from these (single type or tuple).
+    ///      and the AST expression success shape is derived from these slots.
     pub result_type_ids: Vec<TypeId>,
 }
 
@@ -263,7 +421,7 @@ pub struct ValueLexicalScope {
 /// value-block result slots explicit for hidden result-local allocation.
 #[derive(Clone, Debug)]
 pub struct ValueMatchBlock {
-    pub scrutinee: Expression,
+    pub scrutinee: ExprId,
     pub arms: Vec<MatchArm>,
     pub default: Option<Vec<AstNode>>,
     pub exhaustiveness: MatchExhaustiveness,
@@ -279,7 +437,7 @@ pub struct ValueMatchBlock {
 /// and match blocks, instead of carrying catch-specific terminal fallback values.
 #[derive(Clone, Debug)]
 pub struct ValueCatchBlock {
-    pub handled_value: Box<Expression>,
+    pub handled_value: ExprId,
     pub handler: FallibleHandling,
     pub result_type_ids: Vec<TypeId>,
 }

@@ -1,0 +1,8 @@
+take_u8 |value U8|:
+    io.line([: [value]])
+;
+
+x = 3
+s = [loop (x) < 3: a]
+io.line(s)
+take_u8(x)

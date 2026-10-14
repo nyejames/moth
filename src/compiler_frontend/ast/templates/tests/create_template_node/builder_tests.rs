@@ -54,6 +54,8 @@ fn template_head_fallback_unknown_directive_uses_standard_metadata() {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let file_tokens = template_tokens_from_source_with_style_directives(
         "[$brand: body]",
         &tokenization_registry,
@@ -79,6 +81,8 @@ fn template_head_fallback_unknown_directive_uses_standard_metadata() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -105,6 +109,8 @@ fn builder_registered_style_directive_parses_as_noop_scaffold() {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let directives = vec![StyleDirectiveSpec::handler_no_op(
         "brand",
         TemplateBodyMode::Normal,
@@ -136,6 +142,8 @@ fn builder_registered_style_directive_parses_as_noop_scaffold() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -154,6 +162,8 @@ fn builder_effects_only_handler_updates_style_without_formatter() {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let directives = vec![StyleDirectiveSpec::handler(
         "brand",
         TemplateBodyMode::Normal,
@@ -194,6 +204,8 @@ fn builder_effects_only_handler_updates_style_without_formatter() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -210,6 +222,8 @@ fn builder_registered_noop_directive_rejects_parenthesized_arguments_by_default(
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let directives = vec![StyleDirectiveSpec::handler_no_op(
         "brand",
         TemplateBodyMode::Normal,
@@ -241,6 +255,8 @@ fn builder_registered_noop_directive_rejects_parenthesized_arguments_by_default(
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -262,6 +278,8 @@ fn builder_registered_handler_directive_accepts_declared_optional_argument_type(
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let directives = vec![StyleDirectiveSpec::handler(
         "brand",
         TemplateBodyMode::Normal,
@@ -299,6 +317,8 @@ fn builder_registered_handler_directive_accepts_declared_optional_argument_type(
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -316,6 +336,8 @@ fn builder_registered_handler_directive_rejects_multiple_arguments() {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let directives = vec![StyleDirectiveSpec::handler(
         "brand",
         TemplateBodyMode::Normal,
@@ -353,6 +375,8 @@ fn builder_registered_handler_directive_rejects_multiple_arguments() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -371,6 +395,8 @@ fn builder_registered_handler_directive_rejects_runtime_argument_values() {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let directives = vec![StyleDirectiveSpec::handler(
         "brand",
         TemplateBodyMode::Normal,
@@ -405,6 +431,8 @@ fn builder_registered_handler_directive_rejects_runtime_argument_values() {
     let context = runtime_template_context_with_style_directives(
         &source_path,
         &registry,
+        &mut expression_builder,
+        &mut const_values,
         &mut string_table,
         &mut path_fork,
     );
@@ -413,6 +441,8 @@ fn builder_registered_handler_directive_rejects_runtime_argument_values() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -433,6 +463,8 @@ fn builder_registered_style_directive_preserves_raw_body_whitespace() {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let directives = vec![StyleDirectiveSpec::handler_no_op(
         "brand",
         TemplateBodyMode::Normal,
@@ -464,12 +496,20 @@ fn builder_registered_style_directive_preserves_raw_body_whitespace() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
     )
     .expect("builder-registered directives should parse in scaffold mode");
-    let folded = fold_template_in_context(&template, &context, &mut string_table);
+    let folded = fold_template_in_context(
+        &template,
+        &context,
+        &mut string_table,
+        &mut expression_builder,
+        &mut const_values,
+    );
 
     assert_eq!(string_table.resolve(folded), "\n    Hello\n    World\n");
 }

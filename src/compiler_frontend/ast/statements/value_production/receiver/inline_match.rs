@@ -10,11 +10,16 @@ use super::inline_then_else::{
     InlineThenElseInput, InlineThenElseOutcome, parse_inline_then_else, same_logical_line,
 };
 use super::retained::{DeferredValueBlock, DeferredValueBlockForm, RetainedValueBlock};
-use super::single_predicate::{SinglePredicateHeaderInput, try_parse_single_predicate_header};
+use super::single_predicate::{
+    ClassifiedSinglePredicateHeader, SinglePredicateHeaderInput, SinglePredicateParseOutcome,
+    classify_single_predicate_header,
+};
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::MatchExhaustiveness;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::numeric_construction::{
     DeferredArmPattern, StatementExpression,
 };
@@ -42,6 +47,8 @@ pub(super) struct InlineSinglePredicateParseInput<'a, 'b, 'tokens> {
     pub(super) token_stream: &'a mut AstCursor<'tokens>,
     pub(super) context: &'a ScopeContext,
     pub(super) type_interner: &'a mut AstTypeInterner<'b>,
+    pub(super) expression_builder: &'a mut AstExpressionBuilder,
+    pub(super) const_values: &'a mut ConstValueStore,
     pub(super) target: ActiveValueProductionTarget,
     pub(super) string_table: &'a mut StringTable,
     pub(super) header_index: usize,
@@ -55,11 +62,13 @@ pub(super) struct InlineSinglePredicateParseInput<'a, 'b, 'tokens> {
 /// WHAT: consumes the shared header parser, then requires same-line `then`.
 pub(super) fn try_parse_inline_single_predicate_value_match(
     input: InlineSinglePredicateParseInput<'_, '_, '_>,
-) -> Option<Result<ParsedReceiverValue, ExpressionParseError>> {
+) -> SinglePredicateParseOutcome {
     let InlineSinglePredicateParseInput {
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         target,
         string_table,
         header_index,
@@ -68,42 +77,53 @@ pub(super) fn try_parse_inline_single_predicate_value_match(
         path_fork,
     } = input;
 
-    let header = match try_parse_single_predicate_header(SinglePredicateHeaderInput {
+    let header = match classify_single_predicate_header(SinglePredicateHeaderInput {
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         classification,
         path_fork,
     }) {
-        Some(Ok(header)) => header,
-        Some(Err(error)) => return Some(Err(error)),
-        None => return None,
+        Some(Ok(ClassifiedSinglePredicateHeader::Predicate(header))) => *header,
+        Some(Ok(ClassifiedSinglePredicateHeader::OrdinarySubject(seed))) => {
+            return SinglePredicateParseOutcome::OrdinarySubject(seed);
+        }
+        Some(Err(error)) => return SinglePredicateParseOutcome::Decided(Err(error)),
+        None => return SinglePredicateParseOutcome::Absent,
     };
 
     if header.body_delimiter != IfHeaderDelimiter::InlineThen
         || token_stream.current_tag() != TokenTag::THEN
     {
-        return Some(Err(CompilerDiagnostic::invalid_control_flow_statement(
-            InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
-            Some(token_stream.current_span()),
-        )
-        .into()));
+        return SinglePredicateParseOutcome::Decided(Err(
+            CompilerDiagnostic::invalid_control_flow_statement(
+                InvalidControlFlowStatementReason::ExpectedColonAfterCondition,
+                Some(token_stream.current_span()),
+            )
+            .into(),
+        ));
     }
 
     if !same_logical_line(token_stream, header_index, token_stream.position()) {
-        return Some(Err(CompilerDiagnostic::invalid_control_flow_statement(
-            InvalidControlFlowStatementReason::InlineValueIfMultiline,
-            Some(token_stream.current_span()),
-        )
-        .into()));
+        return SinglePredicateParseOutcome::Decided(Err(
+            CompilerDiagnostic::invalid_control_flow_statement(
+                InvalidControlFlowStatementReason::InlineValueIfMultiline,
+                Some(token_stream.current_span()),
+            )
+            .into(),
+        ));
     }
 
-    Some(parse_inline_value_match(InlineValueMatchParseInput {
+    SinglePredicateParseOutcome::Decided(parse_inline_value_match(InlineValueMatchParseInput {
         token_stream,
         context,
         then_context: &header.then_context,
         type_interner,
+        expression_builder,
+        const_values,
         target,
         string_table,
         scrutinee: header.scrutinee,
@@ -118,6 +138,8 @@ struct InlineValueMatchParseInput<'a, 'b, 'tokens> {
     context: &'a ScopeContext,
     then_context: &'a ScopeContext,
     type_interner: &'a mut AstTypeInterner<'b>,
+    expression_builder: &'a mut AstExpressionBuilder,
+    const_values: &'a mut ConstValueStore,
     target: ActiveValueProductionTarget,
     string_table: &'a mut StringTable,
     scrutinee: StatementExpression,
@@ -138,6 +160,8 @@ fn parse_inline_value_match(
         context,
         then_context,
         type_interner,
+        expression_builder,
+        const_values,
         target,
         string_table,
         scrutinee,
@@ -151,6 +175,8 @@ fn parse_inline_value_match(
         then_context,
         else_context: context,
         type_interner,
+        expression_builder,
+        const_values,
         // The target still rides on the retained form when the subject or pattern has to resolve,
         // so the authored inline bodies parse against a copy of the same receiving context.
         target: target.clone(),
@@ -241,14 +267,13 @@ fn parse_inline_value_match(
         result_type_ids: output.result_type_ids,
     };
 
-    Ok(match output.result_type_id {
-        Some(result_type_id) => ParsedReceiverValue::Complete(build_value_match_expression(
+    Ok(match output.needs_slot_inference {
+        false => ParsedReceiverValue::Complete(build_value_match_expression(
             value_match,
             span,
-            result_type_id,
-            type_interner.environment(),
-        )),
-        None => ParsedReceiverValue::NeedsSlotInference {
+            expression_builder,
+        )?),
+        true => ParsedReceiverValue::NeedsSlotInference {
             block: ValueBlock::Match(value_match),
             span,
         },

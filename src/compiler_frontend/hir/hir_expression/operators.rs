@@ -8,9 +8,7 @@
 //! `CompilerError` / `return_hir_transformation_error!` in this module means an internal
 //! HIR transformation or lowering invariant failure only.
 
-use crate::compiler_frontend::ast::expressions::expression::Operator;
-use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
 use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::operators::{HirBinOp, HirUnaryOp};
@@ -79,24 +77,6 @@ impl<'a> HirBuilder<'a> {
                     self.hir_error_location(span)
                 )
             }
-        }
-    }
-
-    // WHAT: Infers result kinds for the plain binary operators that remain in runtime HIR.
-    // WHY: checked numeric arithmetic gets its result type from the shared NumericOp domain.
-    pub(super) fn infer_binop_result_type(&self, op: HirBinOp) -> TypeId {
-        match op {
-            HirBinOp::Eq
-            | HirBinOp::Ne
-            | HirBinOp::Lt
-            | HirBinOp::Le
-            | HirBinOp::Gt
-            | HirBinOp::Ge
-            | HirBinOp::And
-            | HirBinOp::Or => builtin_type_ids::BOOL,
-
-            // Runtime template appends use a distinct compiler-owned operator.
-            HirBinOp::StringAppend => self.type_environment.builtins().string,
         }
     }
 }

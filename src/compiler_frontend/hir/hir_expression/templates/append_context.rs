@@ -6,6 +6,7 @@
 //! wrapping all share this state, but `render_append.rs` should remain focused on appending
 //! owned runtime-template nodes.
 
+use crate::compiler_frontend::ast::expressions::expression_store::ExpressionView;
 use crate::compiler_frontend::ast::templates::OwnedRuntimeSlotSite;
 use crate::compiler_frontend::ast::templates::template_slots::RuntimeSlotContributionSourceId;
 use crate::compiler_frontend::hir::ids::LocalId;
@@ -73,9 +74,11 @@ pub(super) enum RuntimeSlotPlaceholderPolicy {
     RejectUnresolvedSlot,
 }
 
-/// Append target plus optional runtime-slot state for owned-node lowering.
+/// Append target and bound expression owner plus optional runtime-slot state.
 #[derive(Clone, Copy)]
 pub(super) struct RuntimeTemplateAppendContext<'a> {
+    // Nested handoffs share the root's validated domain without retaining AST IDs in HIR.
+    pub(super) anchor: ExpressionView<'a>,
     pub(super) target_accumulator: LocalId,
     pub(super) emitted_output: Option<LocalId>,
     pub(super) source_accumulators: Option<&'a RuntimeSlotSourceAccumulatorContext>,
@@ -84,9 +87,10 @@ pub(super) struct RuntimeTemplateAppendContext<'a> {
 }
 
 impl<'a> RuntimeTemplateAppendContext<'a> {
-    pub(super) fn new(target_accumulator: LocalId) -> Self {
+    pub(super) fn new(target_accumulator: LocalId, anchor: ExpressionView<'a>) -> Self {
         Self {
             target_accumulator,
+            anchor,
             emitted_output: None,
             source_accumulators: None,
             slot_sites: None,

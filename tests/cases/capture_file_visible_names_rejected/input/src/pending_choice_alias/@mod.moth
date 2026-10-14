@@ -1,0 +1,18 @@
+@types RemoteId as LocalId
+
+Outcome type T ::
+    Some |value T|,
+    Empty,
+;
+
+read_u64 |value U64| -> U64:
+    return value
+;
+
+capture_binding || -> U64:
+    origin = Outcome::Some(1)
+    return if origin is:
+        Some(value as LocalId) => then read_u64(LocalId)
+        Empty => then 0
+    ;
+;

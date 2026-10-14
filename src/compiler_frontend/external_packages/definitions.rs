@@ -110,21 +110,32 @@ impl ExternalFunctionDef {
         self.error_return_type.is_some()
     }
 
-    /// Alias behavior for the HIR call result local.
+    /// Borrow-analysis projection for ordered HIR success destinations.
     ///
-    /// Fallible external calls return a backend-boundary carrier object. The carrier is
-    /// always fresh; any aliasing metadata belongs to the success payload after the
-    /// fallible branch unwraps it.
-    pub(crate) fn hir_return_alias(&self) -> ExternalReturnAlias {
-        if self.is_fallible() {
-            return ExternalReturnAlias::Fresh;
-        }
-
+    /// The compact boundary summary has no per-slot result graph contract, so multiple
+    /// results remain Unknown even when their individual metadata says Fresh. Calls,
+    /// Invoke edges and wrapper summaries consume this same conservative projection.
+    /// This does not alter the registry's ordered slots or fuse them into a value.
+    pub(crate) fn hir_return_alias(&self) -> ExternalHirReturnAlias<'_> {
         match self.returns.as_slice() {
-            [single] => single.alias.clone(),
-            _ => ExternalReturnAlias::Fresh,
+            [] => ExternalHirReturnAlias::Fresh,
+            [single] => match &single.alias {
+                ExternalReturnAlias::Fresh => ExternalHirReturnAlias::Fresh,
+                ExternalReturnAlias::AliasArgs(indices) => {
+                    ExternalHirReturnAlias::AliasArgs(indices)
+                }
+            },
+            _ => ExternalHirReturnAlias::Unknown,
         }
     }
+}
+
+/// Derived borrow-analysis policy, not source-language or registry slot metadata.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ExternalHirReturnAlias<'a> {
+    Fresh,
+    AliasArgs(&'a [usize]),
+    Unknown,
 }
 
 /// One success-channel return slot for an external function.

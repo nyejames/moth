@@ -58,18 +58,15 @@ fn explicit_copy_emits_clone_value_wrapped_read() {
             local(1, types.string, RegionId(0)),
         ],
         statements: vec![assign_source, assign_copy],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -139,18 +136,15 @@ fn lowers_option_construct_expression() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![option_statement],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -214,18 +208,15 @@ fn growable_collection_expression_lowers_to_array() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![collection_statement],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -291,18 +282,15 @@ fn fixed_collection_expression_lowers_to_wrapper() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![collection_statement],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -358,18 +346,15 @@ fn fixed_collection_empty_expression_lowers_to_wrapper() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![collection_statement],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -433,18 +418,15 @@ fn map_literal_with_entries_lowers_to_map_new() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![map_statement],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -498,18 +480,15 @@ fn empty_map_literal_lowers_to_map_new_with_empty_array() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![map_statement],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -570,13 +549,17 @@ fn lowers_structural_string_with_url_map_as_escaped_literal() {
         region,
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(structural_expression),
+        terminator: HirTerminator::Return(append_values(
+            &[structural_expression],
+            &mut expressions,
+        )),
     };
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.string,
+        returns: (vec![types.string]).into_boxed_slice(),
+        error_return: None,
     };
     let module = build_module(
         expressions,

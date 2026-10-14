@@ -9,7 +9,7 @@
 //! AST binding concern only. HIR extraction uses `field_index` and `binding_path`; the alias
 //! spelling never reaches HIR and does not affect variant layout or payload extraction.
 
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression_store::ExpressionView;
 use crate::compiler_frontend::ast::statements::match_patterns::{MatchArm, MatchPattern};
 use crate::compiler_frontend::datatypes::generic_identity_bridge::TypeIdentityKey;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -39,7 +39,7 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn register_match_arm_capture_locals(
         &mut self,
         arm: &MatchArm,
-        scrutinee_ast: &Expression,
+        scrutinee_ast: ExpressionView<'_>,
         span: &Option<SourceSpan>,
     ) -> Result<Vec<LocalId>, HirConstructionFailure> {
         match &arm.pattern {
@@ -52,8 +52,11 @@ impl<'a> HirBuilder<'a> {
                     return Ok(Vec::new());
                 }
 
-                let _choice_id =
-                    self.choice_id_for_scrutinee_type(nominal_path, scrutinee_ast.type_id, span)?;
+                let _choice_id = self.choice_id_for_scrutinee_type(
+                    nominal_path,
+                    scrutinee_ast.value_type_id()?,
+                    span,
+                )?;
                 let region = self.current_region_or_error(span)?;
 
                 let mut local_ids = Vec::with_capacity(captures.len());
@@ -123,7 +126,7 @@ impl<'a> HirBuilder<'a> {
         guard: HirValueId,
         arm: &MatchArm,
         capture_locals: &[LocalId],
-        scrutinee_ast: &Expression,
+        scrutinee_ast: ExpressionView<'_>,
         scrutinee_hir: HirValueId,
         span: &Option<SourceSpan>,
     ) -> Result<HirValueId, HirConstructionFailure> {
@@ -149,7 +152,7 @@ impl<'a> HirBuilder<'a> {
         arm: &MatchArm,
         capture_locals: &[LocalId],
         scrutinee_hir: HirValueId,
-        scrutinee_ast: &Expression,
+        scrutinee_ast: ExpressionView<'_>,
         span: &Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
         match &arm.pattern {
@@ -248,7 +251,7 @@ impl<'a> HirBuilder<'a> {
     fn match_capture_context(
         &mut self,
         arm: &MatchArm,
-        scrutinee_ast: &Expression,
+        scrutinee_ast: ExpressionView<'_>,
         scrutinee_hir: HirValueId,
         span: &Option<SourceSpan>,
     ) -> Result<MatchCaptureLoweringContext, HirConstructionFailure> {
@@ -260,7 +263,7 @@ impl<'a> HirBuilder<'a> {
         };
 
         let choice_id =
-            self.choice_id_for_scrutinee_type(nominal_path, scrutinee_ast.type_id, span)?;
+            self.choice_id_for_scrutinee_type(nominal_path, scrutinee_ast.value_type_id()?, span)?;
         let parent_region = self.current_region_or_error(span)?;
 
         Ok(MatchCaptureLoweringContext {

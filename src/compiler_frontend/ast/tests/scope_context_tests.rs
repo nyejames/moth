@@ -2,11 +2,16 @@
 //!
 //! WHAT: validates builder-pattern behaviour, context-kind transitions, and
 //! visibility-gate synchronisation for the most commonly misused paths.
-//! WHY: these properties are refactor seams — subtle mismatches (e.g. dropping
-//! `expected_error_type` on context clone) silently corrupt later passes.
+//! WHY: dropping an inherited callable contract silently changes nested exit semantics.
 
 use super::environment::TopLevelDeclarationTable;
-use super::scope_context::{ContextKind, ScopeContext};
+use super::scope_context::{
+    ContextKind, EnclosingCallableContract, EnclosingCallableOwner, ScopeContext,
+};
+use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
+use crate::compiler_frontend::ast::statements::value_production::{
+    ActiveValueProductionTarget, ValueReceiverKind,
+};
 use std::sync::Arc;
 
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -57,7 +62,6 @@ fn scope_context_new_leaves_no_visibility_gate() {
 #[test]
 fn add_var_extends_visibility_gate_when_gate_is_set() {
     use crate::compiler_frontend::ast::ast_nodes::Declaration;
-    use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 
     use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -83,13 +87,10 @@ fn add_var_extends_visibility_gate_when_gate_is_set() {
         .expect("test path fits");
     let declaration = Declaration {
         id: variable_path.to_owned(),
-        value: Expression::new(
-            ExpressionKind::NoValue,
-            None,
-            builtin_type_ids::fixed_scalar(FixedScalar::I32),
-            DataType::FixedScalar(FixedScalar::I32),
-            ValueMode::ImmutableOwned,
-        ),
+        type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+        value_mode: ValueMode::ImmutableOwned,
+        value: DeclarationValue::Absent,
         binding_span: None,
         config_qualifier: None,
     };
@@ -113,7 +114,6 @@ fn add_var_extends_visibility_gate_when_gate_is_set() {
 #[test]
 fn add_compile_time_var_extends_visibility_gate_when_gate_is_set() {
     use crate::compiler_frontend::ast::ast_nodes::Declaration;
-    use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 
     use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -138,13 +138,10 @@ fn add_compile_time_var_extends_visibility_gate_when_gate_is_set() {
         .expect("test path fits");
     let declaration = Declaration {
         id: constant_path.to_owned(),
-        value: Expression::new(
-            ExpressionKind::NoValue,
-            None,
-            builtin_type_ids::fixed_scalar(FixedScalar::I32),
-            DataType::FixedScalar(FixedScalar::I32),
-            ValueMode::ImmutableOwned,
-        ),
+        type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+        value_mode: ValueMode::ImmutableOwned,
+        value: DeclarationValue::Absent,
         binding_span: None,
         config_qualifier: None,
     };
@@ -222,29 +219,106 @@ fn new_template_parsing_context_converts_function_kind_to_template() {
 }
 
 #[test]
-fn new_template_parsing_context_propagates_expected_error_type() {
+fn child_contexts_preserve_callable_identity_independently_of_scope_kind() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let scope = empty_scope(&mut path_fork, &mut string_table);
-    let mut context = ScopeContext::new_for_tests(
-        ContextKind::Function,
-        scope,
-        Rc::new(TopLevelDeclarationTable::new(
-            vec![],
-            &PathInternerFork::empty(),
-        )),
-        Arc::new(ExternalPackageRegistry::new()),
-        0,
-    );
     let string_type_id = TypeEnvironment::new().builtins().string;
-    context.expected_error_type = Some(string_type_id);
+    for owner in [
+        EnclosingCallableOwner::Function,
+        EnclosingCallableOwner::EntryStart,
+    ] {
+        let mut context = ScopeContext::new_for_tests(
+            ContextKind::Module,
+            scope,
+            Rc::new(TopLevelDeclarationTable::new(vec![], &path_fork)),
+            Arc::new(ExternalPackageRegistry::new()),
+            0,
+        );
+        let contract = Rc::new(EnclosingCallableContract {
+            owner,
+            success_types: vec![string_type_id],
+            authored_success_slot_count: 1,
+            error_type: Some(string_type_id),
+        });
+        context.enclosing_callable = Some(Rc::clone(&contract));
+        context.expected_result_type_ids = vec![builtin_type_ids::BOOL];
+        let branch =
+            context.new_child_control_flow(ContextKind::Branch, &mut string_table, &mut path_fork);
+        let loop_context =
+            branch.new_child_control_flow(ContextKind::Loop, &mut string_table, &mut path_fork);
+        let catch = loop_context.new_child_control_flow(
+            ContextKind::CatchHandler,
+            &mut string_table,
+            &mut path_fork,
+        );
+        let expression = catch.new_child_expression(vec![builtin_type_ids::BOOL]);
+        let mut value_block = expression.new_child_control_flow(
+            ContextKind::Branch,
+            &mut string_table,
+            &mut path_fork,
+        );
+        value_block.active_value_target = Some(ActiveValueProductionTarget::known(
+            vec![builtin_type_ids::BOOL],
+            ValueReceiverKind::Declaration,
+        ));
+        let template = value_block.new_template_parsing_context();
+        let constant = ScopeContext::new_constant(scope, &template);
+        for child in [
+            context.clone(),
+            branch,
+            loop_context,
+            catch,
+            expression,
+            value_block,
+            template,
+            constant,
+        ] {
+            let inherited = child
+                .enclosing_callable
+                .as_ref()
+                .expect("installed body contract");
+            assert!(Rc::ptr_eq(inherited, &contract));
+            assert_eq!(inherited.owner, owner);
+            assert_eq!(inherited.success_types, vec![string_type_id]);
+            assert_eq!(inherited.authored_success_slot_count, 1);
+            assert_eq!(inherited.error_type, Some(string_type_id));
+        }
+    }
+}
 
-    let template = context.new_template_parsing_context();
-    assert_eq!(
-        template.expected_error_type,
-        Some(string_type_id),
-        "new_template_parsing_context must propagate expected_error_type"
-    );
+#[test]
+fn context_kind_does_not_install_a_callable_contract() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let scope = empty_scope(&mut path_fork, &mut string_table);
+    for kind in [
+        ContextKind::Function,
+        ContextKind::Module,
+        ContextKind::CatchHandler,
+    ] {
+        let context = ScopeContext::new_for_tests(
+            kind,
+            scope,
+            Rc::new(TopLevelDeclarationTable::new(vec![], &path_fork)),
+            Arc::new(ExternalPackageRegistry::new()),
+            0,
+        );
+        assert!(context.enclosing_callable.is_none());
+        assert!(context.clone().enclosing_callable.is_none());
+        assert!(
+            context
+                .new_child_expression(vec![])
+                .enclosing_callable
+                .is_none()
+        );
+        assert!(
+            context
+                .new_template_parsing_context()
+                .enclosing_callable
+                .is_none()
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -332,7 +406,6 @@ fn new_constant_inherits_parent_visibility_gate() {
 #[test]
 fn parent_frame_lookup_finds_ancestor_declaration() {
     use crate::compiler_frontend::ast::ast_nodes::Declaration;
-    use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 
     use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -357,13 +430,10 @@ fn parent_frame_lookup_finds_ancestor_declaration() {
     context.add_var(
         Declaration {
             id: variable_path.to_owned(),
-            value: Expression::new(
-                ExpressionKind::NoValue,
-                None,
-                builtin_type_ids::fixed_scalar(FixedScalar::I32),
-                DataType::FixedScalar(FixedScalar::I32),
-                ValueMode::ImmutableOwned,
-            ),
+            type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+            value_mode: ValueMode::ImmutableOwned,
+            value: DeclarationValue::Absent,
             binding_span: None,
             config_qualifier: None,
         },
@@ -387,7 +457,6 @@ fn parent_frame_lookup_finds_ancestor_declaration() {
 #[test]
 fn child_frame_declaration_is_not_visible_to_parent() {
     use crate::compiler_frontend::ast::ast_nodes::Declaration;
-    use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 
     use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -414,13 +483,10 @@ fn child_frame_declaration_is_not_visible_to_parent() {
     child.add_var(
         Declaration {
             id: variable_path.to_owned(),
-            value: Expression::new(
-                ExpressionKind::NoValue,
-                None,
-                builtin_type_ids::fixed_scalar(FixedScalar::I32),
-                DataType::FixedScalar(FixedScalar::I32),
-                ValueMode::ImmutableOwned,
-            ),
+            type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+            value_mode: ValueMode::ImmutableOwned,
+            value: DeclarationValue::Absent,
             binding_span: None,
             config_qualifier: None,
         },
@@ -445,70 +511,8 @@ fn child_frame_declaration_is_not_visible_to_parent() {
 }
 
 #[test]
-fn child_function_frame_does_not_capture_parent_locals() {
-    use crate::compiler_frontend::ast::ast_nodes::Declaration;
-    use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-    use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
-
-    use crate::compiler_frontend::value_mode::ValueMode;
-
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let scope = empty_scope(&mut path_fork, &mut string_table);
-    let mut context = ScopeContext::new_for_tests(
-        ContextKind::Function,
-        scope,
-        Rc::new(TopLevelDeclarationTable::new(
-            vec![],
-            &PathInternerFork::empty(),
-        )),
-        Arc::new(ExternalPackageRegistry::new()),
-        0,
-    );
-
-    let parent_name = string_table.intern("outer_local");
-    let parent_path = path_fork
-        .try_intern_components(&[parent_name])
-        .expect("test path fits");
-    context.add_var(
-        Declaration {
-            id: parent_path,
-            value: Expression::new(
-                ExpressionKind::NoValue,
-                None,
-                builtin_type_ids::fixed_scalar(FixedScalar::I32),
-                DataType::FixedScalar(FixedScalar::I32),
-                ValueMode::ImmutableOwned,
-            ),
-            binding_span: None,
-            config_qualifier: None,
-        },
-        None,
-        &path_fork,
-    );
-
-    let function_name = string_table.intern("inner_function");
-    let child = context.new_child_function(
-        function_name,
-        FunctionSignature::default(),
-        &mut string_table,
-        &mut path_fork,
-    );
-    assert!(
-        child.get_reference(&parent_name).is_none(),
-        "body-local functions must not capture outer local declarations"
-    );
-    assert_eq!(
-        child.total_declaration_count(),
-        0,
-        "function child frame should start with only its parameters"
-    );
-}
-
-#[test]
 fn same_frame_duplicate_lookup_returns_latest_declaration() {
     use crate::compiler_frontend::ast::ast_nodes::Declaration;
-    use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 
     use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -537,13 +541,10 @@ fn same_frame_duplicate_lookup_returns_latest_declaration() {
     context.add_var(
         Declaration {
             id: first_path.to_owned(),
-            value: Expression::new(
-                ExpressionKind::NoValue,
-                None,
-                builtin_type_ids::fixed_scalar(FixedScalar::I32),
-                DataType::FixedScalar(FixedScalar::I32),
-                ValueMode::ImmutableOwned,
-            ),
+            type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+            value_mode: ValueMode::ImmutableOwned,
+            value: DeclarationValue::Absent,
             binding_span: None,
             config_qualifier: None,
         },
@@ -553,13 +554,10 @@ fn same_frame_duplicate_lookup_returns_latest_declaration() {
     context.add_var(
         Declaration {
             id: second_path.to_owned(),
-            value: Expression::new(
-                ExpressionKind::NoValue,
-                None,
-                builtin_type_ids::fixed_scalar(FixedScalar::I32),
-                DataType::FixedScalar(FixedScalar::I32),
-                ValueMode::ImmutableOwned,
-            ),
+            type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+            value_mode: ValueMode::ImmutableOwned,
+            value: DeclarationValue::Absent,
             binding_span: None,
             config_qualifier: None,
         },
@@ -583,7 +581,6 @@ fn same_frame_duplicate_lookup_returns_latest_declaration() {
 #[test]
 fn no_shadowing_across_ancestor_frames() {
     use crate::compiler_frontend::ast::ast_nodes::Declaration;
-    use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 
     use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -608,13 +605,10 @@ fn no_shadowing_across_ancestor_frames() {
     context.add_var(
         Declaration {
             id: parent_path.to_owned(),
-            value: Expression::new(
-                ExpressionKind::NoValue,
-                None,
-                builtin_type_ids::fixed_scalar(FixedScalar::I32),
-                DataType::FixedScalar(FixedScalar::I32),
-                ValueMode::ImmutableOwned,
-            ),
+            type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+            value_mode: ValueMode::ImmutableOwned,
+            value: DeclarationValue::Absent,
             binding_span: None,
             config_qualifier: None,
         },
@@ -625,11 +619,11 @@ fn no_shadowing_across_ancestor_frames() {
     let child =
         context.new_child_control_flow(ContextKind::Branch, &mut string_table, &mut path_fork);
     assert!(
-        child.has_visible_local_declaration(&name),
+        child.has_visible_declaration(&name),
         "ancestor declaration must be visible to child so redeclaration can be rejected"
     );
     assert!(
-        context.has_visible_local_declaration(&name),
+        context.has_visible_declaration(&name),
         "declaration must be visible in the frame that owns it"
     );
 }
@@ -672,7 +666,6 @@ fn new_child_control_flow_inherits_visibility_gate() {
 #[test]
 fn child_scope_local_does_not_leak_into_the_shared_visibility_gate() {
     use crate::compiler_frontend::ast::ast_nodes::Declaration;
-    use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 
     use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -701,13 +694,10 @@ fn child_scope_local_does_not_leak_into_the_shared_visibility_gate() {
         .expect("test path fits");
     let declaration = Declaration {
         id: local_path.to_owned(),
-        value: Expression::new(
-            ExpressionKind::NoValue,
-            None,
-            builtin_type_ids::fixed_scalar(FixedScalar::I32),
-            DataType::FixedScalar(FixedScalar::I32),
-            ValueMode::ImmutableOwned,
-        ),
+        type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+        value_mode: ValueMode::ImmutableOwned,
+        value: DeclarationValue::Absent,
         binding_span: None,
         config_qualifier: None,
     };
@@ -776,7 +766,6 @@ fn new_child_expression_propagates_expected_result_type_ids() {
 #[test]
 fn cloned_context_does_not_share_current_frame() {
     use crate::compiler_frontend::ast::ast_nodes::Declaration;
-    use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 
     use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -803,13 +792,10 @@ fn cloned_context_does_not_share_current_frame() {
     clone.add_var(
         Declaration {
             id: path.to_owned(),
-            value: Expression::new(
-                ExpressionKind::NoValue,
-                None,
-                builtin_type_ids::fixed_scalar(FixedScalar::I32),
-                DataType::FixedScalar(FixedScalar::I32),
-                ValueMode::ImmutableOwned,
-            ),
+            type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+            value_mode: ValueMode::ImmutableOwned,
+            value: DeclarationValue::Absent,
             binding_span: None,
             config_qualifier: None,
         },
@@ -830,7 +816,6 @@ fn cloned_context_does_not_share_current_frame() {
 #[test]
 fn child_frame_shares_ancestors_but_not_current_frame() {
     use crate::compiler_frontend::ast::ast_nodes::Declaration;
-    use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 
     use crate::compiler_frontend::value_mode::ValueMode;
 
@@ -855,13 +840,10 @@ fn child_frame_shares_ancestors_but_not_current_frame() {
     context.add_var(
         Declaration {
             id: parent_path,
-            value: Expression::new(
-                ExpressionKind::NoValue,
-                None,
-                builtin_type_ids::fixed_scalar(FixedScalar::I32),
-                DataType::FixedScalar(FixedScalar::I32),
-                ValueMode::ImmutableOwned,
-            ),
+            type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+            value_mode: ValueMode::ImmutableOwned,
+            value: DeclarationValue::Absent,
             binding_span: None,
             config_qualifier: None,
         },
@@ -878,13 +860,10 @@ fn child_frame_shares_ancestors_but_not_current_frame() {
     child.add_var(
         Declaration {
             id: child_path,
-            value: Expression::new(
-                ExpressionKind::NoValue,
-                None,
-                builtin_type_ids::fixed_scalar(FixedScalar::I32),
-                DataType::FixedScalar(FixedScalar::I32),
-                ValueMode::ImmutableOwned,
-            ),
+            type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+            value_mode: ValueMode::ImmutableOwned,
+            value: DeclarationValue::Absent,
             binding_span: None,
             config_qualifier: None,
         },
@@ -1039,7 +1018,6 @@ fn pending_numeric_binding_is_visible_without_a_ready_declaration() {
 #[test]
 fn pending_numeric_binding_upgrades_in_place_and_keeps_its_name() {
     use crate::compiler_frontend::ast::ast_nodes::Declaration;
-    use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
     use crate::compiler_frontend::value_mode::ValueMode;
 
     let mut string_table = StringTable::new();
@@ -1064,13 +1042,10 @@ fn pending_numeric_binding_upgrades_in_place_and_keeps_its_name() {
         .to_owned();
     let declaration = Declaration {
         id: binding_path.to_owned(),
-        value: Expression::new(
-            ExpressionKind::NoValue,
-            None,
-            builtin_type_ids::fixed_scalar(FixedScalar::I32),
-            DataType::FixedScalar(FixedScalar::I32),
-            ValueMode::ImmutableOwned,
-        ),
+        type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+        value_mode: ValueMode::ImmutableOwned,
+        value: DeclarationValue::Absent,
         binding_span: None,
         config_qualifier: None,
     };
@@ -1098,5 +1073,62 @@ fn pending_numeric_binding_upgrades_in_place_and_keeps_its_name() {
         context.local_declarations().len(),
         1,
         "upgrade must replace the slot without adding a second name entry"
+    );
+}
+
+#[test]
+fn explicit_constant_lookup_uses_content_owner_and_authored_binding_role() {
+    use crate::compiler_frontend::ast::ast_nodes::Declaration;
+    use crate::compiler_frontend::ast::const_values::store::{ConstValuePayload, ConstValueStore};
+    use crate::compiler_frontend::value_mode::ValueMode;
+
+    let mut strings = StringTable::new();
+    let mut paths = PathInternerFork::empty();
+    let scope = empty_scope(&mut paths, &mut strings);
+    let mut context = ScopeContext::new_for_tests(
+        ContextKind::Function,
+        scope,
+        Rc::new(TopLevelDeclarationTable::new(vec![], &paths)),
+        Arc::new(ExternalPackageRegistry::new()),
+        0,
+    );
+    let mut constants = ConstValueStore::default();
+    let content = constants
+        .insert_resolved(builtin_type_ids::BOOL, ConstValuePayload::Bool(true), None)
+        .expect("fixture constant belongs to this content owner");
+    let constant_path = paths
+        .try_intern_child(scope, strings.intern("constant"))
+        .expect("fixture path fits");
+    let runtime_path = paths
+        .try_intern_child(scope, strings.intern("runtime"))
+        .expect("fixture path fits");
+
+    for (path, is_constant) in [(constant_path, true), (runtime_path, false)] {
+        constants
+            .bind_body_local(path, content)
+            .expect("fixture binding fits");
+        let declaration = Declaration {
+            id: path,
+            type_id: builtin_type_ids::BOOL,
+            diagnostic_type: DataType::Bool,
+            value_mode: ValueMode::ImmutableOwned,
+            value: DeclarationValue::Absent,
+            binding_span: None,
+            config_qualifier: None,
+        };
+        if is_constant {
+            context.add_compile_time_var(declaration, None, &paths);
+        } else {
+            context.add_var(declaration, None, &paths);
+        }
+    }
+
+    assert_eq!(
+        context.explicit_constant_value(&constant_path, &paths, &constants),
+        Some(content)
+    );
+    assert_eq!(
+        context.explicit_constant_value(&runtime_path, &paths, &constants),
+        None
     );
 }

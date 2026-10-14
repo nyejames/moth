@@ -226,10 +226,11 @@ pub(crate) fn generated_problem(seed: u32, cyclic: bool) -> GeneratedProblem {
         EventKind::CallEffect(CallEffect {
             call: CallId::new(0),
             arguments: vec![call_argument].into_boxed_slice(),
-            result: Some(CallResult {
+            results: vec![CallResult {
                 destination: BindingDestination::Define(PlaceId::new(4)),
                 origin: call_result_origin,
-            }),
+            }]
+            .into_boxed_slice(),
         }),
     );
     builder.access(BlockId::new(0), PlaceId::new(4), UseKind::Write, true);
@@ -323,15 +324,10 @@ pub(crate) fn generated_problem(seed: u32, cyclic: bool) -> GeneratedProblem {
         },
     );
 
-    let block_two_terminator = if digits.back_edge_shape == 0 {
-        TerminatorEventKind::Return
-    } else {
-        TerminatorEventKind::ReturnSuccess
-    };
     builder.event(
         BlockId::new(2),
         EventKind::Terminator {
-            kind: block_two_terminator,
+            kind: TerminatorEventKind::Return,
         },
     );
 

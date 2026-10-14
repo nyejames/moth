@@ -6,13 +6,15 @@
 use super::anonymous_const_record::parse_parenthesized_anonymous_const_record_expression;
 use super::call_arguments::{ParenthesizedExpressionKind, classify_parenthesized_expression};
 use super::error::ExpressionParseError;
-use super::eval_expression::{evaluate_expression, extract_expression_span};
-use super::expression::{Expression, ExpressionKind, Operator};
-use super::expression_rpn::ExpressionRpnItem;
+use super::eval_expression::evaluate_expression;
+use super::expression_kind::Operator;
+use super::expression_rpn::{ExpressionRpnItem, trailing_operand_start};
+use super::expression_store::{
+    AstExpressionBuilder, ExpressionOperationView, ExpressionView, OwnedExpr,
+};
 use super::option_propagation::parse_option_propagation_suffix_for_expression;
 use super::parse_expression::{
-    ExpressionFragment, collect_expression_fragment, create_expression_until,
-    create_expression_with_trailing_newline_policy,
+    create_expression_until, create_expression_with_trailing_newline_policy,
 };
 use super::parse_expression_identifiers::parse_identifier_or_call;
 use super::parse_expression_input::{ExpressionParseInput, ExpressionParseResources};
@@ -23,13 +25,14 @@ use super::parse_expression_places::{
     ParsedCopyPlace, parse_copy_place_expression, parse_mutable_receiver_expression,
 };
 use super::parse_expression_templates::parse_template_expression;
+use crate::compiler_frontend::ast::const_values::ConstValueStore;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 use crate::ast_log;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression_types::CastHandling;
 use crate::compiler_frontend::ast::field_access::{
-    ParsedPostfixExpression, PostfixChainAccess, RetainedOperandInput,
+    ParsedPostfixExpression, PostfixChainAccess, RetainedOperandInput, grouped_evaluation_expected,
     parse_postfix_chain_expression, retain_operand_call_propagation,
     retain_operand_handling_suffix, retain_pending_operand_member_access,
 };
@@ -53,11 +56,10 @@ use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
     reserved_trait_keyword_error, reserved_trait_keyword_or_dispatch_mismatch_for_tag,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DeferredFeatureReason, DiagnosticToken, InvalidBuiltinCallReason,
-    InvalidCastReason, InvalidControlFlowStatementReason, InvalidExpressionReason,
-    InvalidFallibleHandlingReason,
+    AstCapacityResource, CompilerDiagnostic, DeferredFeatureReason, DiagnosticToken,
+    InvalidBuiltinCallReason, InvalidCastReason, InvalidControlFlowStatementReason,
+    InvalidExpressionReason, InvalidFallibleHandlingReason,
 };
-use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::declaration_syntax::type_syntax::builtin_scalar_type_name_for_tag;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -70,8 +72,32 @@ use crate::compiler_frontend::value_mode::ValueMode;
 pub(super) enum ExpressionTokenStep {
     Continue,
     Advance,
+    /// The current token closes the innermost group. The caller pops that group's frame.
+    CloseGroup,
     Break,
-    Return(Box<Expression>),
+    Return(OwnedExpr),
+}
+
+/// One open parenthesised group in the flat expression stream.
+///
+/// WHAT: records where the group's `GroupOpen` marker sits and the parent's inference state. The
+///       close restores that state in place, so no group needs its own copy of the stream.
+pub(super) struct GroupFrame {
+    /// Index of the `GroupOpen` marker. The group's items start one slot after it.
+    pub(super) open_index: usize,
+    pub(super) opening_span: SourceSpan,
+    pub(super) parent_expected_type: ExpectedType,
+    pub(super) parent_cast_target_context: CastTargetContext,
+    pub(super) parent_next_number_negative: bool,
+    /// Set when a closed child group in this frame holds a construction-only numeric item. Each
+    /// child close records it here, so this group's own close never rescans nested interiors.
+    pub(super) child_unresolvable: bool,
+}
+
+impl GroupFrame {
+    pub(super) fn item_start(&self) -> usize {
+        self.open_index + 1
+    }
 }
 
 pub(super) struct ExpressionDispatchState<'a> {
@@ -84,10 +110,48 @@ pub(super) struct ExpressionDispatchState<'a> {
     pub(super) expression: &'a mut Vec<ExpressionRpnItem>,
     pub(super) next_number_negative: &'a mut bool,
     pub(super) retain_pending_numeric_fragment: bool,
+    pub(super) group_frames: &'a mut Vec<GroupFrame>,
+    pub(super) expression_builder: &'a mut AstExpressionBuilder,
+    pub(super) const_values: &'a mut ConstValueStore,
+}
+
+impl ExpressionDispatchState<'_> {
+    /// Whether the parser is inside a parenthesised group.
+    pub(super) fn in_group(&self) -> bool {
+        !self.group_frames.is_empty()
+    }
+}
+
+/// Items of the innermost group, or the whole fragment at the root. These take the two fields
+/// rather than the whole state, so a caller can hold a disjoint mutable borrow of the builder.
+fn frame_items<'a>(
+    expression: &'a [ExpressionRpnItem],
+    group_frames: &[GroupFrame],
+) -> &'a [ExpressionRpnItem] {
+    let start = group_frames.last().map_or(0, GroupFrame::item_start);
+    expression.get(start..).unwrap_or_default()
+}
+
+/// Whether the innermost group, or the fragment at the root, has no items yet.
+fn frame_is_empty(expression: &[ExpressionRpnItem], group_frames: &[GroupFrame]) -> bool {
+    frame_items(expression, group_frames).is_empty()
+}
+
+/// Whether no operand or operator follows the innermost open group, or the root stream is empty.
+///
+/// WHAT: a group's `GroupOpen` is the last item exactly while the group's frame has no items,
+///       because the group's items are appended after its `GroupOpen`.
+/// WHY: identifier and namespace leaf resolution receive the flat stream without the frame stack.
+///      For the same stream this gives the same answer as `frame_is_empty`.
+pub(super) fn stream_is_boundary_leading(expression: &[ExpressionRpnItem]) -> bool {
+    matches!(
+        expression.last(),
+        None | Some(ExpressionRpnItem::GroupOpen { .. })
+    )
 }
 
 pub(super) struct ExpressionOperandInput {
-    pub(super) operand: Expression,
+    pub(super) operand: OwnedExpr,
     pub(super) wrapper_span: Option<SourceSpan>,
 }
 
@@ -144,8 +208,7 @@ fn reject_second_operand_after_value_template(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
-    consume_closing_parenthesis: bool,
-    value_mode: &ValueMode,
+    state: &mut ExpressionDispatchState<'_>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
@@ -155,8 +218,10 @@ fn reject_second_operand_after_value_template(
             token_stream,
             context,
             type_interner,
-            consume_closing_parenthesis,
-            value_mode,
+            state.expression_builder,
+            state.const_values,
+            state.consume_closing_parenthesis,
+            state.value_mode,
             string_table,
             path_fork,
         )?;
@@ -189,10 +254,12 @@ fn push_expression_after_suffixes(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     expression: &mut Vec<ExpressionRpnItem>,
     allow_boundary_catch: bool,
-    expression_after_postfix: Expression,
+    expression_after_postfix: OwnedExpr,
     path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
     // ----------------------------
@@ -222,11 +289,16 @@ fn push_expression_after_suffixes(
             || (token_stream.current_tag() == TokenTag::SYMBOL
                 && token_stream.peek_next_tag() == Some(TokenTag::BANG)))
     {
-        let value_required = expression_after_postfix.type_id != builtin_type_ids::NONE;
+        let value_required = !expression_builder
+            .view_owned(expression_after_postfix)?
+            .success_types()
+            .is_empty();
         parse_fallible_handling_suffix_for_expression(
             token_stream,
             context,
             type_interner,
+            expression_builder,
+            const_values,
             expression_after_postfix,
             value_required,
             allow_boundary_catch
@@ -249,6 +321,7 @@ fn push_expression_after_suffixes(
             token_stream,
             context,
             type_interner,
+            expression_builder,
             expression_after_fallible,
         )?
     } else {
@@ -263,22 +336,26 @@ fn push_expression_after_suffixes(
     // runtime context. Identifier-level parsing already catches bare names; this
     // catches field chains whose final step is itself a const record.
     if !context.kind.is_constant_context()
-        && expression_after_option_propagation.is_const_record_value()
+        && expression_builder
+            .view_owned(expression_after_option_propagation)?
+            .is_const_record_value()
     {
         let record_name = const_record_expression_name(
-            &expression_after_option_propagation,
+            expression_builder.view_owned(expression_after_option_propagation)?,
             string_table,
             path_fork,
         );
         return Err(CompilerDiagnostic::const_record_used_as_value(
             record_name,
-            expression_after_option_propagation.span,
+            expression_builder
+                .view_owned(expression_after_option_propagation)?
+                .span(),
         )
         .into());
     }
 
     expression.push(ExpressionRpnItem::Operand(
-        expression_after_option_propagation,
+        expression_after_option_propagation.id(),
     ));
     Ok(())
 }
@@ -291,17 +368,21 @@ pub(super) fn push_expression_operand(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     expression: &mut Vec<ExpressionRpnItem>,
     allow_boundary_catch: bool,
-    operand: Expression,
+    operand: OwnedExpr,
     path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
-    let wrapper_span = operand.span;
+    let wrapper_span = expression_builder.view_owned(operand)?.span();
     push_expression_operand_with_span(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         expression,
         allow_boundary_catch,
@@ -326,12 +407,15 @@ pub(super) fn push_expression_operand_with_span(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     expression: &mut Vec<ExpressionRpnItem>,
     allow_boundary_catch: bool,
     operand_input: ExpressionOperandInput,
     path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
+    expression_builder.view_owned(operand_input.operand)?;
     let expression_after_postfix = if token_stream.position() < token_stream.length()
         && token_stream.current_tag() == TokenTag::DOT
     {
@@ -343,6 +427,8 @@ pub(super) fn push_expression_operand_with_span(
             allow_boundary_catch,
             context,
             type_interner,
+            expression_builder,
+            const_values,
             string_table,
             path_fork,
         )?
@@ -365,6 +451,8 @@ pub(super) fn push_expression_operand_with_span(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         expression,
         allow_boundary_catch,
@@ -378,17 +466,17 @@ pub(super) fn push_expression_operand_with_span(
 /// WHAT: walks field-access chains back to the root identifier so the
 /// diagnostic example points at the record, not an intermediate field.
 fn const_record_expression_name(
-    expression: &Expression,
+    expression: ExpressionView<'_>,
     string_table: &mut StringTable,
     path_fork: &PathInternerFork,
 ) -> StringId {
-    match &expression.kind {
-        ExpressionKind::FieldAccess { base, .. } => {
+    match expression.operation() {
+        ExpressionOperationView::FieldAccess { base, .. } => {
             const_record_expression_name(base, string_table, path_fork)
         }
 
-        ExpressionKind::Reference(path) => path_fork
-            .component(*path)
+        ExpressionOperationView::Reference(path) => path_fork
+            .component(path)
             .unwrap_or_else(|| string_table.intern("record")),
 
         _ => string_table.intern("record"),
@@ -464,7 +552,7 @@ pub(super) fn dispatch_expression_token(
         reject_adjacent_operand(state.expression, Some(token_stream.current_span()))?;
     }
 
-    // Group recursion must not retain the large scratch frame for unrelated token paths.
+    // Opening a group only pushes a marker and a frame, so it never recurses.
     if token == TokenTag::OPEN_PARENTHESIS {
         return dispatch_parenthesized_expression(
             token_stream,
@@ -497,6 +585,8 @@ fn dispatch_non_group_expression_token(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<ExpressionTokenStep, ExpressionParseError> {
+    let expression_builder = &mut *state.expression_builder;
+    let const_values = &mut *state.const_values;
     // This state machine is intentionally flat: each token either appends one AST node, advances
     // past a nested parse, or signals the caller that the surrounding grammar owns the delimiter.
     match token {
@@ -538,9 +628,10 @@ fn dispatch_non_group_expression_token(
                 .into());
             }
 
-            if let Some(error) =
-                check_expression_common_mistake(token_stream, state.expression.is_empty())
-            {
+            if let Some(error) = check_expression_common_mistake(
+                token_stream,
+                frame_is_empty(state.expression, state.group_frames),
+            ) {
                 return Err(error.into());
             }
 
@@ -552,6 +643,8 @@ fn dispatch_non_group_expression_token(
                 token_stream,
                 context,
                 type_interner,
+                expression_builder,
+                const_values,
                 state.expected_type,
                 state.value_mode,
                 state.retain_pending_numeric_fragment,
@@ -569,6 +662,8 @@ fn dispatch_non_group_expression_token(
                 token_stream,
                 context,
                 type_interner,
+                expression_builder,
+                const_values,
                 state.expression,
                 state.allow_boundary_catch,
                 state.allow_expected_result_evidence,
@@ -583,6 +678,8 @@ fn dispatch_non_group_expression_token(
                 token_stream,
                 context,
                 type_interner,
+                expression_builder,
+                const_values,
                 state.expression,
                 state.allow_boundary_catch,
                 string_table,
@@ -607,6 +704,8 @@ fn dispatch_non_group_expression_token(
                 token_stream,
                 context,
                 type_interner,
+                expression_builder,
+                const_values,
                 &mut literal_state,
                 string_table,
                 path_fork,
@@ -628,6 +727,8 @@ fn dispatch_non_group_expression_token(
                 token_stream,
                 context,
                 type_interner,
+                expression_builder,
+                const_values,
                 state.value_mode,
                 string_table,
                 path_fork,
@@ -637,6 +738,8 @@ fn dispatch_non_group_expression_token(
                 token_stream,
                 context,
                 type_interner,
+                expression_builder,
+                const_values,
                 string_table,
                 state.expression,
                 state.allow_boundary_catch,
@@ -654,6 +757,8 @@ fn dispatch_non_group_expression_token(
                 token_stream,
                 context,
                 type_interner,
+                expression_builder,
+                const_values,
                 state.consume_closing_parenthesis,
                 state.value_mode,
                 string_table,
@@ -669,13 +774,12 @@ fn dispatch_non_group_expression_token(
                 token_stream,
                 context,
                 type_interner,
-                state.consume_closing_parenthesis,
-                state.value_mode,
+                state,
                 string_table,
                 path_fork,
             )?;
 
-            Ok(ExpressionTokenStep::Return(Box::new(template_expression)))
+            Ok(ExpressionTokenStep::Return(template_expression))
         }
 
         TokenTag::COPY => {
@@ -686,25 +790,22 @@ fn dispatch_non_group_expression_token(
                 token_stream,
                 context,
                 type_interner,
+                expression_builder,
+                const_values,
                 string_table,
                 path_fork,
             )? {
-                ParsedCopyPlace::Ready {
-                    place,
-                    diagnostic_type,
-                    type_id,
-                } => {
-                    let copy_expression = Expression::copy_with_type_id(
+                ParsedCopyPlace::Ready { place, type_id } => {
+                    let copy_expression = expression_builder.copy_with_type_id(
                         place,
-                        diagnostic_type,
                         type_id,
                         copy_span,
-                        state.value_mode.to_owned(),
-                    );
+                        *state.value_mode,
+                    )?;
 
                     state
                         .expression
-                        .push(ExpressionRpnItem::Operand(copy_expression));
+                        .push(ExpressionRpnItem::Operand(copy_expression.id()));
                 }
 
                 ParsedCopyPlace::PendingNumeric { binding, span } => {
@@ -845,17 +946,20 @@ fn dispatch_non_group_expression_token(
                 .is_some_and(ExpressionRpnItem::is_operand_shape)
             {
                 if !context.kind.is_constant_context()
-                    && let Some(error) =
-                        check_expression_common_mistake(token_stream, state.expression.is_empty())
+                    && let Some(error) = check_expression_common_mistake(
+                        token_stream,
+                        frame_is_empty(state.expression, state.group_frames),
+                    )
                 {
                     return Err(error.into());
                 }
                 return Ok(ExpressionTokenStep::Break);
             }
 
-            if let Some(error) =
-                check_expression_common_mistake(token_stream, state.expression.is_empty())
-            {
+            if let Some(error) = check_expression_common_mistake(
+                token_stream,
+                frame_is_empty(state.expression, state.group_frames),
+            ) {
                 return Err(error.into());
             }
 
@@ -873,11 +977,15 @@ fn dispatch_non_group_expression_token(
             // collecting its authored operators), and member access resolves against known
             // receiver structure or records its delayed scalar-member occurrence. Any other
             // continuation stops the fragment and the entry that raises the deferral records it.
-            if items_contain_unresolvable_numeric(state.expression) {
+            if items_contain_unresolvable_numeric(frame_items(state.expression, state.group_frames))
+            {
                 match token {
                     TokenTag::BANG
                         if token_stream.peek_next_tag() != Some(TokenTag::ASSIGN)
-                            && last_item_is_retained_numeric_operand(state.expression) =>
+                            && last_item_is_retained_numeric_operand(frame_items(
+                                state.expression,
+                                state.group_frames,
+                            ))? =>
                     {
                         // A `!` whose operand is exactly one retained call belongs to that call's
                         // declared failure: the shared fragment entry validates and consumes it
@@ -889,6 +997,8 @@ fn dispatch_non_group_expression_token(
                             &mut state.expression[..],
                             context,
                             type_interner,
+                            expression_builder,
+                            const_values,
                             string_table,
                             path_fork,
                             state.allow_boundary_catch,
@@ -902,11 +1012,15 @@ fn dispatch_non_group_expression_token(
                             DeferredExpressionSuffix::Propagate { span },
                             *state.expected_type,
                             state.value_mode,
+                            expression_builder,
                         )?;
                         return Ok(ExpressionTokenStep::Continue);
                     }
                     TokenTag::QUESTION_MARK
-                        if last_item_is_retained_numeric_operand(state.expression) =>
+                        if last_item_is_retained_numeric_operand(frame_items(
+                            state.expression,
+                            state.group_frames,
+                        ))? =>
                     {
                         // `?` immediately followed by an authored catch is the completed path's
                         // recovery-conflict mistake; the suffix itself applies through the shared
@@ -927,6 +1041,7 @@ fn dispatch_non_group_expression_token(
                             DeferredExpressionSuffix::OptionalPropagate { span },
                             *state.expected_type,
                             state.value_mode,
+                            expression_builder,
                         )?;
                         return Ok(ExpressionTokenStep::Continue);
                     }
@@ -934,7 +1049,12 @@ fn dispatch_non_group_expression_token(
                         return Ok(ExpressionTokenStep::Break);
                     }
                     TokenTag::QUESTION_MARK => return Ok(ExpressionTokenStep::Break),
-                    TokenTag::DOT if last_item_is_retained_numeric_operand(state.expression) => {
+                    TokenTag::DOT
+                        if last_item_is_retained_numeric_operand(frame_items(
+                            state.expression,
+                            state.group_frames,
+                        ))? =>
+                    {
                         retain_pending_operand_member_access(
                             token_stream,
                             state.expression,
@@ -945,6 +1065,8 @@ fn dispatch_non_group_expression_token(
                             },
                             context,
                             type_interner,
+                            expression_builder,
+                            const_values,
                             string_table,
                             path_fork,
                         )?;
@@ -954,9 +1076,10 @@ fn dispatch_non_group_expression_token(
                 }
             }
 
-            if let Some(error) =
-                check_expression_common_mistake(token_stream, state.expression.is_empty())
-            {
+            if let Some(error) = check_expression_common_mistake(
+                token_stream,
+                frame_is_empty(state.expression, state.group_frames),
+            ) {
                 return Err(error.into());
             }
 
@@ -965,8 +1088,8 @@ fn dispatch_non_group_expression_token(
     }
 }
 
-// Only parsing state survives grouped recursion; record construction and completed operands
-// use separate frames so their large scratch values do not multiply with nesting depth.
+// A group opens with one `GroupOpen` marker and a frame that saves the parent's inference state.
+// Its items stay in the flat stream until the matching `)` closes the frame.
 fn dispatch_parenthesized_expression(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
@@ -987,44 +1110,25 @@ fn dispatch_parenthesized_expression(
             parenthesized_kind,
         );
     }
-    let group_span = Some(token_stream.current_postfix_operator_span());
 
-    token_stream.advance();
-    // A group is not a receiving boundary. Retain its raw syntax for the outer
-    // evaluator, while typed completion boundaries use their own natural context.
-    let mut grouped_expected_type = match *state.expected_type {
-        ExpectedType::NumericLiteral(_) => ExpectedType::Infer,
-        other => other,
-    };
-    let mut grouped_cast_target_context = CastTargetContext::None;
-    let mut grouped_input =
-        ExpressionParseInput::grouped_without_cast_target(ExpressionParseResources {
-            token_stream,
-            scope_context: context,
-            type_interner,
-            expected_type: &mut grouped_expected_type,
-            cast_target_context: &mut grouped_cast_target_context,
-            value_mode: state.value_mode,
-            path_fork,
-            string_table,
-        });
-    // Parentheses preserve the enclosing origin's retention policy: collection and map
-    // leaves must not default before a later exact receiver reaches the outer fragment.
-    grouped_input.retain_pending_numeric_fragment = state.retain_pending_numeric_fragment;
-    let fragment = collect_expression_fragment(&mut grouped_input)?;
-    finish_grouped_expression(
-        token_stream,
-        context,
-        type_interner,
-        state,
-        string_table,
-        path_fork,
-        ParsedExpressionGroup {
-            fragment,
-            expected_type: grouped_expected_type,
-            span: group_span,
-        },
-    )
+    // A group is not a receiving boundary. Its items see the parent's expected type, with a
+    // numeric literal widened to `Infer`, and the parent's state returns when the frame closes.
+    state.group_frames.push(GroupFrame {
+        open_index: state.expression.len(),
+        opening_span: token_stream.current_postfix_operator_span(),
+        parent_expected_type: *state.expected_type,
+        parent_cast_target_context: std::mem::replace(
+            state.cast_target_context,
+            CastTargetContext::None,
+        ),
+        parent_next_number_negative: std::mem::replace(state.next_number_negative, false),
+        child_unresolvable: false,
+    });
+    state
+        .expression
+        .push(ExpressionRpnItem::GroupOpen { anchor_span: None });
+    *state.expected_type = grouped_evaluation_expected(*state.expected_type);
+    Ok(ExpressionTokenStep::Advance)
 }
 
 #[inline(never)]
@@ -1037,6 +1141,8 @@ fn dispatch_parenthesized_record(
     path_fork: &mut PathInternerFork,
     parenthesized_kind: ParenthesizedExpressionKind,
 ) -> Result<ExpressionTokenStep, ExpressionParseError> {
+    let expression_builder = &mut *state.expression_builder;
+    let const_values = &mut *state.const_values;
     let group_span = Some(token_stream.current_postfix_operator_span());
     if !context.kind.is_constant_context() {
         if matches!(parenthesized_kind, ParenthesizedExpressionKind::Empty) {
@@ -1058,6 +1164,8 @@ fn dispatch_parenthesized_record(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     )?;
@@ -1065,6 +1173,8 @@ fn dispatch_parenthesized_record(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         state.expression,
         state.allow_boundary_catch,
@@ -1077,78 +1187,152 @@ fn dispatch_parenthesized_record(
     Ok(ExpressionTokenStep::Continue)
 }
 
-/// Parsed group state passed to operand completion only after its recursive parse returns.
-struct ParsedExpressionGroup {
-    fragment: ExpressionFragment,
-    expected_type: ExpectedType,
-    span: Option<SourceSpan>,
-}
-
-#[inline(never)]
-fn finish_grouped_expression(
+/// Closes the innermost group at its `)`, at a break that ends the group, or at a value-template
+/// return that stands for the whole group.
+///
+/// WHAT: a deferred group keeps its items in the flat stream between its markers. Its anchor span
+///       is written into the `GroupOpen` and mirrored on the `GroupClose`. Any other group is
+///       split off the stream, evaluated now, and replaced by one operand. Either way the parent's
+///       inference state returns.
+/// WHY: the close reads only its direct items. A nested group is jumped over through its
+///      `open_distance`, and its unresolved flag was carried up by its own close, so each item
+///      is read by one close only.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the close needs the cursor, scope, type and string state, plus the early value and root policy"
+)]
+pub(super) fn close_innermost_group(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     state: &mut ExpressionDispatchState<'_>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-    group: ParsedExpressionGroup,
-) -> Result<ExpressionTokenStep, ExpressionParseError> {
-    let ParsedExpressionGroup {
-        fragment,
-        expected_type: mut grouped_expected_type,
-        span: group_span,
-    } = group;
-    let value = match fragment {
-        ExpressionFragment::Value(value) => *value,
-
-        // Typed suffixes need a completed operand. Plain `catch` is not one:
-        // dispatch stops the whole outer fragment and its receiving owner completes
-        // recovery after evaluation. Well-formed groups defer so receivers and decimal/unsigned
-        // peers reach their leaves; malformed groups evaluate eagerly so the
-        // diagnostic stays anchored at the group's own operator.
-        //
-        // A group whose own nodes contain construction-only numeric items can never be
-        // evaluated at parse time, so it defers even when a typed suffix follows or its
-        // shape is malformed: the suffix travels with the outer deferral and body
-        // completion re-runs ordering and typing once the origins are substituted.
-        ExpressionFragment::Nodes(nodes)
-            if (!typed_suffix_follows(token_stream, 0)
-                && group_nodes_have_balanced_operands(&nodes))
-                || items_contain_unresolvable_numeric(&nodes) =>
-        {
-            let span = extract_expression_span(&nodes)?;
-            state
-                .expression
-                .push(ExpressionRpnItem::PendingGroup { nodes, span });
-            return Ok(ExpressionTokenStep::Continue);
-        }
-        ExpressionFragment::Nodes(nodes) => evaluate_expression(
-            context,
-            nodes,
-            type_interner,
-            &mut grouped_expected_type,
-            state.value_mode,
-            string_table,
-            path_fork,
-        )?,
+    early_value: Option<OwnedExpr>,
+    root_allow_boundary_catch: bool,
+) -> Result<(), ExpressionParseError> {
+    let Some(frame) = state.group_frames.pop() else {
+        return Err(CompilerError::compiler_error(
+            "grouped expression closed without an open group frame",
+        )
+        .into());
     };
+    let mut group_expected_type = *state.expected_type;
+    *state.expected_type = frame.parent_expected_type;
+    *state.cast_target_context = frame.parent_cast_target_context;
+    *state.next_number_negative = frame.parent_next_number_negative;
+    // A group nested inside another group never keeps a boundary catch, because the enclosing
+    // group already has none. Only a group that closes at the root takes the root's policy.
+    let parent_allow_boundary_catch = root_allow_boundary_catch && !state.in_group();
+    let item_start = frame.item_start();
 
+    if let Some(value) = early_value {
+        // A value-template return stands for the whole group and has already consumed the group's
+        // `)`. The partial items are dropped and the returned value replaces the group.
+        state.expression.truncate(frame.open_index);
+        push_expression_operand_with_span(
+            token_stream,
+            context,
+            type_interner,
+            &mut *state.expression_builder,
+            &mut *state.const_values,
+            string_table,
+            state.expression,
+            parent_allow_boundary_catch,
+            ExpressionOperandInput {
+                operand: value,
+                wrapper_span: Some(frame.opening_span),
+            },
+            path_fork,
+        )?;
+        return Ok(());
+    }
+
+    // Nested unresolved items were recorded by their own closes, so only direct items are read.
+    let facts = group_content_facts(state.expression, item_start)?;
+    let subtree_unresolvable = facts.unresolvable || frame.child_unresolvable;
+    if let Some(parent) = state.group_frames.last_mut() {
+        parent.child_unresolvable |= subtree_unresolvable;
+    }
+    // Typed suffixes need a completed operand. Plain `catch` is not one: dispatch stops the whole
+    // outer fragment and its receiving owner completes recovery after evaluation. Well-formed groups
+    // defer so receivers and decimal/unsigned peers reach their leaves. Malformed groups evaluate
+    // eagerly so the diagnostic stays anchored at the group's own operator.
+    //
+    // A group whose own items contain construction-only numeric items can never be evaluated at
+    // parse time, so it defers even when a typed suffix follows or its shape is malformed.
+    let deferred = (!typed_suffix_follows(token_stream, 0) && facts.has_balanced_operands())
+        || subtree_unresolvable;
+    if deferred {
+        let anchor_index = facts.first_operand.unwrap_or(item_start);
+        let anchor_span = match state.expression.get(anchor_index) {
+            Some(item) => item.source_span(&*state.expression_builder)?,
+            None => {
+                return Err(CompilerError::compiler_error(
+                    "No nodes found in expression. This should never happen.",
+                )
+                .into());
+            }
+        };
+        let close_index = state.expression.len();
+        let open_distance = group_open_distance(close_index, frame.open_index, anchor_span)?;
+        state.expression[frame.open_index] = ExpressionRpnItem::GroupOpen { anchor_span };
+        state.expression.push(ExpressionRpnItem::GroupClose {
+            open_distance,
+            anchor_span,
+        });
+        return Ok(());
+    }
+
+    let content = state.expression.split_off(item_start);
+    state.expression.truncate(frame.open_index);
+    let value = evaluate_expression(
+        context,
+        content,
+        type_interner,
+        &mut *state.expression_builder,
+        &mut *state.const_values,
+        &mut group_expected_type,
+        state.value_mode,
+        string_table,
+        path_fork,
+    )?;
     push_expression_operand_with_span(
         token_stream,
         context,
         type_interner,
+        &mut *state.expression_builder,
+        &mut *state.const_values,
         string_table,
         state.expression,
-        state.allow_boundary_catch,
+        parent_allow_boundary_catch,
         ExpressionOperandInput {
             operand: value,
-            wrapper_span: group_span,
+            wrapper_span: Some(frame.opening_span),
         },
         path_fork,
     )?;
+    Ok(())
+}
 
-    Ok(ExpressionTokenStep::Continue)
+/// Encode a marker distance, distinguishing exhausted capacity from an invalid stream.
+fn group_open_distance(
+    close_index: usize,
+    open_index: usize,
+    span: Option<SourceSpan>,
+) -> Result<u32, ExpressionParseError> {
+    let distance = close_index
+        .checked_sub(open_index)
+        .filter(|distance| *distance > 0)
+        .ok_or_else(|| {
+            CompilerError::compiler_error(
+                "grouped expression close does not follow its open marker",
+            )
+        })?;
+    u32::try_from(distance).map_err(|_| {
+        CompilerDiagnostic::compiler_capacity_exceeded(AstCapacityResource::GroupDistances, span)
+            .into()
+    })
 }
 
 /// True when the last item is an operand whose construction only body completion can finish.
@@ -1158,19 +1342,22 @@ fn finish_grouped_expression(
 /// WHY: a member step on such a receiver cannot resolve before the body root selects its type, so
 ///      the ordinary member diagnostic replaces a field, method or trait search against a type
 ///      that does not exist yet. Literal-only operands keep their existing diagnostics.
-fn last_item_is_retained_numeric_operand(items: &[ExpressionRpnItem]) -> bool {
-    match items.last() {
+fn last_item_is_retained_numeric_operand(
+    items: &[ExpressionRpnItem],
+) -> Result<bool, CompilerError> {
+    Ok(match items.last() {
         Some(ExpressionRpnItem::PendingNumericBinding { .. })
         | Some(ExpressionRpnItem::PendingNumericCast { .. })
         | Some(ExpressionRpnItem::PendingNumericCall { .. })
         | Some(ExpressionRpnItem::PendingNumericExpression { .. }) => true,
 
-        Some(ExpressionRpnItem::PendingGroup { nodes, .. }) => {
-            items_contain_unresolvable_numeric(nodes)
-        }
+        // A closed group keeps its items in the flat stream, so its own items run from the
+        // `GroupOpen` marker through the `GroupClose`.
+        Some(ExpressionRpnItem::GroupClose { .. }) => trailing_operand_start(items)?
+            .is_some_and(|start| items_contain_unresolvable_numeric(&items[start..])),
 
         _ => false,
-    }
+    })
 }
 
 /// Push one pending numeric binding reference as a construction-only operand item.
@@ -1211,7 +1398,7 @@ fn dispatch_delimiter_token(
     state: &mut ExpressionDispatchState<'_>,
     string_table: &mut StringTable,
 ) -> Result<ExpressionTokenStep, ExpressionParseError> {
-    if state.expression.is_empty() {
+    if frame_is_empty(state.expression, state.group_frames) {
         match token_tag {
             TokenTag::COMMA | TokenTag::ARROW => {
                 return Err(
@@ -1245,6 +1432,15 @@ fn dispatch_close_parenthesis(
 ) -> Result<ExpressionTokenStep, ExpressionParseError> {
     if state.consume_closing_parenthesis {
         token_stream.advance();
+    }
+
+    // Inside a group the `)` closes its innermost frame. The loop performs the close, so the group
+    // becomes one operand of its parent, which then continues from the next token.
+    if state.in_group() {
+        if frame_is_empty(state.expression, state.group_frames) {
+            return Err(unexpected_token_at_current(token_stream, token, string_table)?.into());
+        }
+        return Ok(ExpressionTokenStep::CloseGroup);
     }
 
     if state.expression.is_empty() {
@@ -1346,22 +1542,37 @@ fn dispatch_is_token(
             advance_with_operator(state.expression, context, token_stream, Operator::NotEqual)
         }
 
-        // `is:` → type guard in a match arm. The left-hand side must be a single expression.
+        // `is:` → type guard in a match arm. The left side must be one operand: the whole fragment
+        // at the root, or the innermost group's single operand.
         Some(TokenTag::COLON) => {
-            if state.expression.len() > 1 {
+            let items = frame_items(state.expression, state.group_frames);
+            let single_item_or_group = items.len() <= 1
+                || (items
+                    .last()
+                    .is_some_and(ExpressionRpnItem::is_operand_shape)
+                    && trailing_operand_start(items)? == Some(0));
+            if !single_item_or_group {
                 return Err(unexpected_token_at_current(token_stream, token, string_table)?.into());
+            }
+
+            // Inside a group the `is` belongs to the enclosing expression. The group closes as one
+            // operand, and the parent's `is:` return evaluates it.
+            if state.in_group() {
+                return Ok(ExpressionTokenStep::Break);
             }
 
             let value = evaluate_expression(
                 context,
                 std::mem::take(state.expression),
                 type_interner,
+                &mut *state.expression_builder,
+                &mut *state.const_values,
                 state.expected_type,
                 state.value_mode,
                 string_table,
                 path_fork,
             )?;
-            Ok(ExpressionTokenStep::Return(Box::new(value)))
+            Ok(ExpressionTokenStep::Return(value))
         }
 
         // Bare `is` → equality operator.
@@ -1373,7 +1584,7 @@ fn dispatch_is_token(
 ///
 /// WHAT: validates that `cast` starts the expression and that an explicit builtin target was
 ///      supplied by the boundary, parses the operand and any handling suffix, resolves evidence,
-///      and pushes a resolved `ExpressionKind::Cast` node onto the expression stack.
+///      and pushes the resolved cast's ID onto the transient expression stack.
 /// WHY: cast is a prefix keyword whose meaning depends on the receiver type, so it is handled
 ///      directly by the dispatcher rather than the general operator or call machinery.
 fn parse_cast_expression(
@@ -1385,8 +1596,10 @@ fn parse_cast_expression(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<ExpressionTokenStep, ExpressionParseError> {
+    let expression_builder = &mut *state.expression_builder;
+    let const_values = &mut *state.const_values;
     // `cast` is only valid as the leading token of an expression at an explicit boundary.
-    if !state.expression.is_empty() {
+    if !frame_is_empty(state.expression, state.group_frames) {
         return Err(unexpected_token_at_current(token_stream, token, string_table)?.into());
     }
 
@@ -1451,6 +1664,8 @@ fn parse_cast_expression(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         &mut operand_expected_type,
         state.value_mode,
         state.consume_closing_parenthesis,
@@ -1494,6 +1709,7 @@ fn parse_cast_expression(
         trait_environment: context.trait_environment(),
         trait_evidence_environment: context.trait_evidence_environment(),
         type_interner: &mut *type_interner,
+        expression_builder: &mut *expression_builder,
         string_table: &mut *string_table,
         path_fork: &mut *path_fork,
         active_generic_type_context: context.active_generic_type_context(),
@@ -1503,19 +1719,23 @@ fn parse_cast_expression(
     if has_catch {
         let error_type_id = compatible_expression_error_type(
             &mut cast_expression,
+            expression_builder,
             context,
             type_interner.environment(),
             string_table,
             Some(token_stream.current_span()),
         )?;
+        let value_required_span = expression_builder.view_owned(cast_expression)?.span();
         cast_expression = parse_cast_catch_handling_suffix(
             token_stream,
             context,
             type_interner,
+            expression_builder,
+            const_values,
             CastCatchSite {
                 success_type_id: target_type_id,
                 error_type_id,
-                value_required_span: cast_expression.span,
+                value_required_span,
                 // Explicit constant/default receivers retain cast recovery; const evaluation
                 // owns whether the handler's value-producing shape can actually fold.
                 allow_boundary_catch: state.allow_boundary_catch
@@ -1533,7 +1753,7 @@ fn parse_cast_expression(
 
     state
         .expression
-        .push(ExpressionRpnItem::Operand(cast_expression));
+        .push(ExpressionRpnItem::Operand(cast_expression.id()));
 
     Ok(ExpressionTokenStep::Continue)
 }
@@ -1546,12 +1766,14 @@ fn parse_cast_operand_expression(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     expected_type: &mut ExpectedType,
     value_mode: &ValueMode,
     consume_closing_parenthesis: bool,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<Expression, ExpressionParseError> {
+) -> Result<OwnedExpr, ExpressionParseError> {
     // The pre-scan walks the live cursor and restores the entry position:
     // indexed reads re-scan segment prefixes on every step.
     let resume = token_stream.position();
@@ -1617,6 +1839,8 @@ fn parse_cast_operand_expression(
                 token_stream,
                 scope_context: context,
                 type_interner,
+                expression_builder,
+                const_values,
                 expected_type,
                 cast_target_context: &mut cast_target_context,
                 value_mode,
@@ -1636,6 +1860,8 @@ fn parse_cast_operand_expression(
             token_stream,
             scope_context: context,
             type_interner,
+            expression_builder,
+            const_values,
             expected_type,
             cast_target_context: &mut cast_target_context,
             value_mode,
@@ -1652,30 +1878,94 @@ fn parse_cast_operand_expression(
     create_expression_with_trailing_newline_policy(input.with_numeric_deferral_owner())
 }
 
-/// Check a group's own operand balance before deferring it into a pending group.
+/// A group's direct-level shape. A nested group is seen only through its `GroupClose`.
+struct GroupContentFacts {
+    /// Operand-shaped direct items. A nested group counts once, through its `GroupClose`.
+    operands: usize,
+    /// Direct binary operators.
+    binary_operators: usize,
+    /// A construction-only numeric item sits directly in this group.
+    unresolvable: bool,
+    /// The earliest operand-shaped direct item. Its span is the group's anchor.
+    first_operand: Option<usize>,
+    /// A resolved operator reached this group, which an infix group never holds.
+    resolved_operator: bool,
+}
+
+impl GroupContentFacts {
+    /// Shunting-yard diagnostics belong to the malformed group when its operand shape says so.
+    /// A dangling inner operator placed in the outer stream would report at the wrong anchor.
+    fn has_balanced_operands(&self) -> bool {
+        !self.resolved_operator && self.operands == self.binary_operators + 1
+    }
+}
+
+/// Reads a group's direct items from right to left, without entering any nested group.
 ///
-/// Shunting-yard diagnostics belong to the malformed group when its operand shape says so.
-/// A dangling inner operator placed in the outer stream would report at the wrong anchor.
-fn group_nodes_have_balanced_operands(nodes: &[ExpressionRpnItem]) -> bool {
-    let mut operands = 0;
-    let mut binary_operators = 0;
-    for node in nodes {
-        match node {
+/// WHAT: a nested `GroupClose` is one operand here. Its `open_distance` jumps the walk back
+///       to the nested `GroupOpen`, so none of the nested items are visited.
+/// WHY: each item is read only by its direct parent's close, so the walk is linear in the
+///      group's direct width. A nested unresolved flag reaches this group via `child_unresolvable`.
+fn group_content_facts(
+    expression: &[ExpressionRpnItem],
+    item_start: usize,
+) -> Result<GroupContentFacts, CompilerError> {
+    let mut facts = GroupContentFacts {
+        operands: 0,
+        binary_operators: 0,
+        unresolvable: false,
+        first_operand: None,
+        resolved_operator: false,
+    };
+    let mut index = expression.len();
+    while index > item_start {
+        index -= 1;
+        let item = &expression[index];
+        facts.unresolvable |= items_contain_unresolvable_numeric(std::slice::from_ref(item));
+        match item {
+            ExpressionRpnItem::GroupClose { open_distance, .. } => {
+                let open_index = usize::try_from(*open_distance)
+                    .ok()
+                    .and_then(|distance| index.checked_sub(distance))
+                    .filter(|open| {
+                        *open >= item_start
+                            && matches!(expression[*open], ExpressionRpnItem::GroupOpen { .. })
+                    })
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "grouped expression close does not match its open marker",
+                        )
+                    })?;
+                facts.operands += 1;
+                facts.first_operand = Some(index);
+                index = open_index;
+            }
+            ExpressionRpnItem::GroupOpen { .. } => {
+                return Err(CompilerError::compiler_error(
+                    "grouped expression open marker has no matching close",
+                ));
+            }
             ExpressionRpnItem::Operand(_)
             | ExpressionRpnItem::PendingNumericLiteral { .. }
-            | ExpressionRpnItem::PendingGroup { .. }
             | ExpressionRpnItem::PendingNumericBinding { .. }
             | ExpressionRpnItem::PendingNumericCall { .. }
             | ExpressionRpnItem::PendingNumericCast { .. }
-            | ExpressionRpnItem::PendingNumericExpression { .. } => operands += 1,
+            | ExpressionRpnItem::PendingNumericExpression { .. } => {
+                facts.operands += 1;
+                facts.first_operand = Some(index);
+            }
             ExpressionRpnItem::Operator { operator, .. } => {
                 if operator.required_values() == 2 {
-                    binary_operators += 1;
+                    facts.binary_operators += 1;
                 }
+            }
+            ExpressionRpnItem::ResolvedOperator(_) => {
+                debug_assert!(false, "resolved operation reached an infix group");
+                facts.resolved_operator = true;
             }
         }
     }
-    operands == binary_operators + 1
+    Ok(facts)
 }
 
 #[cfg(test)]

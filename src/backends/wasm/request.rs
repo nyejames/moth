@@ -105,7 +105,8 @@ pub(crate) struct WasmTargetFeatures {
     pub enable_runtime_ownership: bool,
     /// Reserved for user-facing memory/data-segment feature gating if needed.
     pub enable_bulk_memory: bool,
-    /// Reserved for future multi-result function signature and call lowering.
+    /// Reserved feature toggle, currently rejected. Native scalar multi-result lowering
+    /// works without this flag and fallible channels remain target-gated.
     pub enable_multi_value: bool,
     /// Reserved for reference-type-capable host/runtime ABIs.
     pub enable_reference_types: bool,

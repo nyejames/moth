@@ -33,6 +33,7 @@
 //!   generic declaration owners; receiver methods reuse their receiver nominal's parameters and
 //!   must not become owners.
 
+use super::direct_projection::FoldedValueJoinContext;
 use super::model::{
     PublicChoiceVariantSurface, PublicFieldTypeSlot, PublicFunctionCategory,
     PublicFunctionSemantics, PublicGenericParameterSurface, PublicGenericTemplateDescriptor,
@@ -41,10 +42,10 @@ use super::model::{
 use crate::compiler_frontend::ast::ReceiverMethodEntry;
 use crate::compiler_frontend::ast::ResolvedTraitSourceFact;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValueStore};
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
 use crate::compiler_frontend::ast::statements::functions::{
-    FunctionSignature, ReturnChannel, ReturnSlot,
+    FunctionParameter, FunctionSignature, ReturnChannel, ReturnSlot,
 };
 use crate::compiler_frontend::ast::{
     ResolvedPublicTypeRoot, ResolvedPublicTypeRootKind, ResolvedPublicTypeRootTable,
@@ -64,7 +65,7 @@ use crate::compiler_frontend::datatypes::ids::{
     GenericParameterId, GenericParameterListId, NominalTypeId, TypeId,
 };
 use crate::compiler_frontend::folded_value::{
-    FoldedValueProjectionContext, PublicFoldedValue, convert_expression_to_folded_value,
+    PublicFoldedValue, convert_const_value_to_folded_value,
 };
 use crate::compiler_frontend::public_call_summary::PublicCallParameterAccess;
 use crate::compiler_frontend::semantic_identity::{
@@ -776,7 +777,10 @@ fn project_exported_generic_parameter_surfaces(
 /// success/error return slots. The callable category is derived from whether the function has
 /// exported generic parameters: a non-generic function is `ConcreteLocal`, a generic function
 /// carries a [`PublicGenericTemplateDescriptor`].
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "function projection keeps function origin and generic-list identity, signature, shared type and canonical projection contexts, trait fact and origin tables, string/path tables and folded-value join context separate"
+)]
 pub(super) fn project_free_function_semantics(
     function_origin: OriginFunctionId,
     generic_parameter_list_id: Option<GenericParameterListId>,
@@ -787,7 +791,7 @@ pub(super) fn project_free_function_semantics(
     public_source_trait_origins: &FxHashMap<PathId, OriginTraitId>,
     string_table: &StringTable,
     path_fork: &PathInternerFork,
-    folded_value_context: &FoldedValueProjectionContext<'_>,
+    folded_value_context: &FoldedValueJoinContext<'_>,
 ) -> Result<PublicFunctionSemantics, CompilerError> {
     let expected_origin = GenericDeclarationOrigin::free_function(function_origin.clone())?;
 
@@ -808,11 +812,11 @@ pub(super) fn project_free_function_semantics(
                 .component(declaration.id)
                 .map(|name| string_table.resolve(name).to_owned());
             let type_identity = project_type_id_to_canonical_identity(
-                declaration.value.type_id,
+                declaration.type_id,
                 type_environment,
                 context,
             )?;
-            let folded_default = project_folded_default(&declaration.value, folded_value_context)?;
+            let folded_default = project_folded_default(declaration.default, folded_value_context)?;
             let access = project_parameter_access(declaration);
             Ok(PublicParameterTypeSlot {
                 name,
@@ -848,7 +852,10 @@ pub(super) fn project_free_function_semantics(
 /// generic parameter surfaces and joins the retained field declarations against the canonical
 /// `StructTypeDefinition` fields. Returns the parts the declaration join assembles into a
 /// [`super::model::PublicStructSemantics`] after attaching receiver methods.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "struct projection keeps nominal origin and runtime type identity, retained fields, shared type and canonical projection contexts, trait fact and origin tables, string/path tables and folded-value join context separate"
+)]
 pub(super) fn project_struct_parts(
     type_origin: OriginTypeId,
     type_id: TypeId,
@@ -859,7 +866,7 @@ pub(super) fn project_struct_parts(
     public_source_trait_origins: &FxHashMap<PathId, OriginTraitId>,
     string_table: &StringTable,
     path_fork: &PathInternerFork,
-    folded_value_context: &FoldedValueProjectionContext<'_>,
+    folded_value_context: &FoldedValueJoinContext<'_>,
 ) -> Result<(Vec<PublicGenericParameterSurface>, Vec<PublicFieldTypeSlot>), CompilerError> {
     let definition = type_environment.get(type_id).ok_or_else(|| {
         CompilerError::compiler_error(format!(
@@ -1074,7 +1081,7 @@ fn project_fields_with_defaults(
     context: &CanonicalTypeProjectionContext,
     string_table: &StringTable,
     path_fork: &PathInternerFork,
-    folded_value_context: &FoldedValueProjectionContext<'_>,
+    folded_value_context: &FoldedValueJoinContext<'_>,
 ) -> Result<Vec<PublicFieldTypeSlot>, CompilerError> {
     if struct_definition.fields.len() != field_declarations.len() {
         return Err(CompilerError::compiler_error(format!(
@@ -1123,13 +1130,13 @@ fn project_fields_with_defaults(
                 ))
             })?;
 
-        if canonical_field.type_id != declaration.value.type_id {
+        if canonical_field.type_id != declaration.type_id {
             return Err(CompilerError::compiler_error(format!(
                 "defined public type-surface projection: struct root TypeId({}) field {:?} has a TypeId mismatch: canonical TypeId({}) vs retained declaration TypeId({}); the retained declaration must agree with the canonical struct definition",
                 root_type_id.0,
                 canonical_field.name,
                 canonical_field.type_id.0,
-                declaration.value.type_id.0,
+                declaration.type_id.0,
             )));
         }
 
@@ -1139,7 +1146,8 @@ fn project_fields_with_defaults(
             context,
         )?;
 
-        let folded_default = project_folded_default(&declaration.value, folded_value_context)?;
+        let folded_default =
+            project_folded_default(declaration.value.default(), folded_value_context)?;
         projected_fields.push(PublicFieldTypeSlot {
             name,
             type_identity,
@@ -1201,47 +1209,50 @@ fn project_choice_variants(
     Ok(variants)
 }
 
-/// Project one parameter or field default expression to an owned [`PublicFoldedValue`].
+/// Project one parameter or field default to an owned [`PublicFoldedValue`].
 ///
-/// WHAT: a NoValue expression means the slot has no default and returns None. Any other
-/// expression kind is converted through the shared folded-value converter, which expects the
-/// expression to be already normalized. A Template or Reference reaching this boundary
-/// is an internal CompilerError naming the invariant violation.
+/// A default is a resolved constant handle owned by the module-local constant store, so its
+/// folded value is read from that store. The shared folded-value converter expects normalized
+/// values and rejects unresolved templates or references at this boundary.
 pub(super) fn project_folded_default(
-    expression: &Expression,
-    folded_value_context: &FoldedValueProjectionContext<'_>,
+    default: Option<ConstValueId>,
+    folded_value_context: &FoldedValueJoinContext<'_>,
 ) -> Result<Option<PublicFoldedValue>, CompilerError> {
-    if matches!(expression.kind, ExpressionKind::NoValue) {
-        return Ok(None);
-    }
-    convert_expression_to_folded_value(expression, folded_value_context).map(Some)
+    default
+        .map(|value_id| {
+            convert_const_value_to_folded_value(
+                folded_value_context.const_values,
+                value_id,
+                folded_value_context.folded_value_projection_context,
+            )
+        })
+        .transpose()
 }
-/// Return the aggregate provenance carried by one default expression.
+/// Return the aggregate provenance carried by a parameter or field list's folded defaults.
 ///
-/// `NoValue` is the explicit no-default marker and contributes nothing even if malformed test
-/// fixtures attach metadata to it. Every other normalized default expression already carries the
-/// union of its nested expression values in its root metadata.
-pub(super) fn project_default_provenance(expression: &Expression) -> SyntheticInterfaceProvenance {
-    if matches!(expression.kind, ExpressionKind::NoValue) {
-        SyntheticInterfaceProvenance::empty()
-    } else {
-        expression.synthetic_interface_provenance.clone()
-    }
-}
-/// Return the aggregate provenance carried by a declaration slice's default expressions.
+/// Each folded default's metadata already carries the union of its nested value provenance.
 pub(super) fn project_defaults_provenance(
-    declarations: &[Declaration],
-) -> SyntheticInterfaceProvenance {
+    defaults: impl IntoIterator<Item = Option<ConstValueId>>,
+    const_values: &ConstValueStore,
+) -> Result<SyntheticInterfaceProvenance, CompilerError> {
     let mut provenance = SyntheticInterfaceProvenance::empty();
-    for declaration in declarations {
-        provenance.merge(&project_default_provenance(&declaration.value));
+    for default in defaults {
+        let Some(value_id) = default else {
+            continue;
+        };
+        let metadata = const_values.metadata(value_id).ok_or_else(|| {
+            CompilerError::compiler_error(
+                "public-interface default provenance: a folded default is outside its constant owner",
+            )
+        })?;
+        provenance.merge(&metadata.synthetic_interface_provenance);
     }
-    provenance
+    Ok(provenance)
 }
 
-/// Projects declaration-owned access without consulting HIR or borrow-analysis side tables.
-pub(super) fn project_parameter_access(declaration: &Declaration) -> PublicCallParameterAccess {
-    if declaration.value.value_mode.is_mutable() {
+/// Projects parameter-owned access without consulting HIR or borrow-analysis side tables.
+pub(super) fn project_parameter_access(parameter: &FunctionParameter) -> PublicCallParameterAccess {
+    if parameter.value_mode.is_mutable() {
         PublicCallParameterAccess::Mutable
     } else {
         PublicCallParameterAccess::Shared

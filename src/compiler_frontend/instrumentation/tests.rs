@@ -201,6 +201,64 @@ fn ast_counters_record_stable_metrics_when_stdout_is_suppressed() {
 
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
 #[test]
+fn expression_storage_census_records_issuing_owner_buffers() {
+    use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
+    use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
+    use crate::compiler_frontend::datatypes::builtin_type_ids;
+    use crate::compiler_frontend::symbols::path_interner::PathId;
+    use crate::compiler_frontend::value_mode::ValueMode;
+
+    let _guard = super::lock_counter_test();
+    let _capture = capture_counters_for_test();
+    reset_ast_counters();
+    let session = start_benchmark_collection(true).expect("timing session should start");
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    builder
+        .reference_with_type_id(
+            PathId::ROOT,
+            builtin_type_ids::BOOL,
+            None,
+            ValueMode::ImmutableReference,
+            ConstRecordState::RuntimeValue,
+        )
+        .expect("single fixture reference fits store");
+    let statistics = builder.storage_statistics();
+    let expected = [
+        ("ast_census_expression_rows", statistics.rows),
+        (
+            "ast_census_expression_row_capacity",
+            statistics.row_capacity,
+        ),
+        ("ast_census_expression_row_bytes", statistics.row_bytes),
+        (
+            "ast_census_expression_row_capacity_bytes",
+            statistics.row_capacity_bytes,
+        ),
+        (
+            "ast_census_expression_side_entries",
+            statistics.side_entries,
+        ),
+        (
+            "ast_census_expression_side_capacity",
+            statistics.side_capacity,
+        ),
+        ("ast_census_expression_side_bytes", statistics.side_bytes),
+        (
+            "ast_census_expression_side_capacity_bytes",
+            statistics.side_capacity_bytes,
+        ),
+    ];
+    with_expression_census_counters(|| {
+        super::ast_counters::record_expression_storage_census(statistics);
+    });
+    let observations = session.finish();
+    for (name, value) in expected {
+        assert_counter_value(&observations.counters, name, value as f64);
+    }
+}
+
+#[cfg(all(feature = "timers", feature = "benchmark_counters"))]
+#[test]
 fn ast_counters_are_isolated_per_thread() {
     let _guard = super::lock_counter_test();
 
@@ -486,8 +544,8 @@ fn expression_census_snapshots_preserve_main_and_sidecar_without_overlay_contami
 
     // Main-module snapshot.
     with_expression_census_counters(|| {
-        add_ast_counter(AstCounter::CensusExpressions, 4);
-        record_ast_counter_max(AstCounter::CensusCallArgsLengthMax, 10);
+        add_ast_counter(AstCounter::CensusExpressionRows, 4);
+        record_ast_counter_max(AstCounter::CensusExpressionRowCapacity, 10);
         // Observer read performed while collecting.
         add_ast_counter(AstCounter::TirOverlayLookups, 100);
     });
@@ -503,8 +561,8 @@ fn expression_census_snapshots_preserve_main_and_sidecar_without_overlay_contami
     // maximum (a stale gauge left over from the main snapshot would surface
     // here as 10 instead of 6).
     with_expression_census_counters(|| {
-        add_ast_counter(AstCounter::CensusExpressions, 9);
-        record_ast_counter_max(AstCounter::CensusCallArgsLengthMax, 6);
+        add_ast_counter(AstCounter::CensusExpressionRows, 9);
+        record_ast_counter_max(AstCounter::CensusExpressionRowCapacity, 6);
         add_ast_counter(AstCounter::TirOverlayLookups, 50);
     });
 
@@ -526,12 +584,12 @@ fn expression_census_snapshots_preserve_main_and_sidecar_without_overlay_contami
     // module-only logger would either lose the sidecar (single row) or
     // duplicate rows from the between/after logs (four rows).
     assert_eq!(
-        values_for("ast_census_expressions"),
+        values_for("ast_census_expression_rows"),
         vec![4.0, 9.0],
         "main and sidecar expression snapshots must both publish"
     );
     assert_eq!(
-        values_for("ast_census_call_args_length_max"),
+        values_for("ast_census_expression_row_capacity"),
         vec![10.0, 6.0],
         "each snapshot must emit its own maximum without stale carryover"
     );

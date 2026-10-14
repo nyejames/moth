@@ -7,9 +7,11 @@
 
 use super::{MemberStepContext, ReceiverAccessMode};
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
+use crate::compiler_frontend::ast::const_values::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -20,7 +22,7 @@ mod generic_bound_methods;
 mod shared;
 mod source_methods;
 
-pub(super) use shared::{finish_pending_receiver_call_expression, recover_unhandled_carrier};
+pub(super) use shared::{finish_pending_receiver_call_expression, recover_pending_producer};
 pub(in crate::compiler_frontend::ast::field_access) use source_methods::lookup_receiver_method;
 pub(crate) use source_methods::{
     DeferredCallReceiver, DeferredReceiverCall, DeferredReceiverCallee, ReservedGenericRequest,
@@ -58,11 +60,17 @@ pub(super) enum ParsedReceiverMethodCall {
 ///
 /// `allow_boundary_catch` is the chain entry's boundary permission, carried to a retained call so
 /// its authored `catch` is decided at the site that still owns the token stream.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "receiver method call parsing keeps the token stream, member step, catch policy, type interner, expression builder, const store, string table, and path fork as separate borrows"
+)]
 pub(super) fn parse_receiver_method_call_typed(
     token_stream: &mut AstCursor<'_>,
     member_step_context: MemberStepContext<'_>,
     allow_boundary_catch: bool,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<Option<ParsedReceiverMethodCall>, ExpressionParseError> {
@@ -95,6 +103,8 @@ pub(super) fn parse_receiver_method_call_typed(
                 scope_context,
                 source_method: source_methods::SourceReceiverMethodTarget::Declared(method_entry),
                 type_interner,
+                expression_builder,
+                const_values,
                 string_table,
                 path_fork,
             },
@@ -106,6 +116,7 @@ pub(super) fn parse_receiver_method_call_typed(
     if let Some(generic_bound_method) = generic_bound_methods::lookup_generic_bound_receiver_method(
         scope_context,
         receiver_node,
+        expression_builder,
         receiver_type_id,
         member_name,
         member_span,
@@ -127,6 +138,8 @@ pub(super) fn parse_receiver_method_call_typed(
                     generic_bound_method,
                 ),
                 type_interner,
+                expression_builder,
+                const_values,
                 string_table,
                 path_fork,
             },

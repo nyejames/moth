@@ -4,14 +4,27 @@
 //! WHY: function syntax has enough dedicated parsing and type-shape rules to live outside the general statement parser.
 
 use crate::compiler_frontend::ast::ScopeContext;
-use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::ast_nodes::{Declaration, DeclarationValue};
+use crate::compiler_frontend::ast::const_eval::{
+    ConstantFoldError, ConstantFoldOutcome, fold_constant_content,
+};
+use crate::compiler_frontend::ast::const_values::binding::resolve_const_expression_content;
+use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
+use crate::compiler_frontend::ast::const_values::store::{
+    ConstValueId, ConstValueStore, ConstValueStoreError,
+};
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExpressionConstructionFailure, ExpressionOperationView, ExpressionView,
+    OwnedExpr,
+};
 use crate::compiler_frontend::ast::expressions::parse_expression::create_expression_with_trailing_newline_policy;
 use crate::compiler_frontend::ast::expressions::parse_expression_input::{
     ExpressionParseInput, ExpressionParseResources, ExpressionTrailingPolicy,
 };
+use crate::compiler_frontend::ast::templates::error::TemplateError;
+use crate::compiler_frontend::ast::templates::template::TemplateConstValueKind;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::type_resolution::{
     ResolvedTypeAnnotation, TypeResolutionContext, TypeResolutionContextInputs,
@@ -19,8 +32,9 @@ use crate::compiler_frontend::ast::type_resolution::{
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticLabel, DiagnosticPayload, InvalidCollectionTypeReason,
-    NameNamespace, TypeMismatchContext,
+    CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticLabel, DiagnosticPayload,
+    InvalidCollectionTypeReason, InvalidTemplateStructureReason, NameNamespace,
+    TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -28,16 +42,17 @@ use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::signature_members::{
     FunctionSignatureSyntax, ReturnChannelSyntax, ReturnSlotSyntax, SignatureMemberSyntax,
-    parse_function_signature_syntax,
 };
 use crate::compiler_frontend::declaration_syntax::type_syntax::parsed_ref_to_data_type;
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
+use crate::compiler_frontend::symbols::path_interner::PathId;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_explicit_type_boundary;
 use crate::compiler_frontend::type_coercion::parse_context::{
     cast_target_context_for_type_id, parse_expectation_for_type_id,
 };
+use crate::compiler_frontend::value_mode::ValueMode;
 
 /// Signature parsing shares the AST error lane because default values nest an explicit
 /// cursor over the frozen file-owned source owner.
@@ -74,10 +89,43 @@ impl ReturnSlot {
     }
 }
 
-/// Parsed function signature with parameter declarations and return slots.
+/// Canonical callable parameter contract. Defaults retain content, not executable roots.
+#[derive(Clone, Debug)]
+pub struct FunctionParameter {
+    pub id: PathId,
+    pub type_id: TypeId,
+    pub diagnostic_type: DataType,
+    pub value_mode: ValueMode,
+    pub default: Option<ConstValueId>,
+    pub binding_span: Option<SourceSpan>,
+}
+
+impl FunctionParameter {
+    /// Body-scope binding row for this parameter.
+    ///
+    /// WHAT: rebuilds the `Declaration` that a function or start body frame stores for the parameter.
+    /// WHY: the callable contract keeps the folded default as a `ConstValueId`; body frames use the
+    ///      same `DeclarationValue::Default` / `Absent` shape that `signature_member_to_declaration`
+    ///      produces, so scope lookups classify parameters as they did before the contract split.
+    pub(crate) fn to_local_declaration(&self) -> Declaration {
+        Declaration {
+            id: self.id,
+            type_id: self.type_id,
+            diagnostic_type: self.diagnostic_type.clone(),
+            value_mode: self.value_mode,
+            value: match self.default {
+                Some(default) => DeclarationValue::Default(default),
+                None => DeclarationValue::Absent,
+            },
+            binding_span: self.binding_span,
+            config_qualifier: None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct FunctionSignature {
-    pub parameters: Vec<Declaration>,
+    pub parameters: Vec<FunctionParameter>,
     pub returns: Vec<ReturnSlot>,
 }
 
@@ -87,46 +135,18 @@ pub(crate) enum SignatureTypeFallbackPolicy {
     AllowUnresolvedCapacity,
 }
 
+/// Whether a member default stays as authored expression content or folds to canonical content now.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SignatureDefaultMode {
+    /// Keep the authored default unfolded as `DeclarationValue::Initializer`. Used for struct
+    /// shells, whose defaults can name module constants that are not published yet; the strict
+    /// struct pass folds them.
+    KeepAuthored,
+    /// Parse and fold the default now to `DeclarationValue::Default`.
+    FoldNow,
+}
+
 impl FunctionSignature {
-    pub(crate) fn new(
-        token_stream: &mut AstCursor,
-        warnings: &mut Vec<CompilerDiagnostic>,
-        string_table: &mut StringTable,
-        function_path: &PathId,
-        parent_context: &ScopeContext,
-        type_interner: &mut AstTypeInterner<'_>,
-        path_fork: &mut PathInternerFork,
-    ) -> SignatureResult<Self> {
-        let signature_syntax = {
-            let (syntax, next_index) = {
-                let mut declaration_cursor = token_stream.declaration_cursor()?;
-                let syntax = parse_function_signature_syntax(
-                    &mut declaration_cursor,
-                    warnings,
-                    string_table,
-                    *function_path,
-                    path_fork,
-                )?;
-                (syntax, declaration_cursor.position())
-            };
-            token_stream.set_position(next_index)?;
-            syntax
-        };
-
-        let signature_context =
-            ScopeContext::new_constant(function_path.to_owned(), parent_context);
-
-        function_signature_from_syntax_with_unresolved_types(
-            &signature_syntax,
-            token_stream,
-            &signature_context,
-            type_interner,
-            string_table,
-            SignatureTypeFallbackPolicy::StrictCapacity,
-            path_fork,
-        )
-    }
-
     pub fn success_returns(&self) -> Vec<&DataType> {
         self.returns
             .iter()
@@ -190,13 +210,20 @@ impl FunctionSignature {
     }
 }
 
-/// Build a `FunctionSignature` from raw syntax, leaving parameter types unresolved.
+/// Build a signature from retained syntax under the caller's type-resolution policy.
 ///
+/// Declaration shells defer names or capacities only when their policy permits later resolution.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "signature lowering keeps the syntax, owner, scope, fallback policy and mutable state separate"
+)]
 pub(crate) fn function_signature_from_syntax_with_unresolved_types(
     syntax: &FunctionSignatureSyntax,
     source_owner: &AstCursor,
     expression_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     fallback_policy: SignatureTypeFallbackPolicy,
     path_fork: &mut PathInternerFork,
@@ -208,12 +235,22 @@ pub(crate) fn function_signature_from_syntax_with_unresolved_types(
             source_owner,
             expression_context,
             type_interner,
+            expression_builder,
+            const_values,
             string_table,
             fallback_policy,
+            SignatureDefaultMode::FoldNow,
             path_fork,
             TypeMismatchContext::Declaration,
         )?;
-        parameters.push(declaration);
+        parameters.push(FunctionParameter {
+            id: declaration.id,
+            type_id: declaration.type_id,
+            diagnostic_type: declaration.diagnostic_type,
+            value_mode: declaration.value_mode,
+            default: declaration.value.default(),
+            binding_span: declaration.binding_span,
+        });
     }
 
     let mut returns = Vec::with_capacity(syntax.returns.len());
@@ -222,6 +259,7 @@ pub(crate) fn function_signature_from_syntax_with_unresolved_types(
             return_slot,
             expression_context,
             type_interner,
+            const_values,
             string_table,
             fallback_policy,
         )?);
@@ -242,8 +280,11 @@ pub(crate) fn signature_member_to_declaration(
     source_owner: &AstCursor,
     expression_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     fallback_policy: SignatureTypeFallbackPolicy,
+    default_mode: SignatureDefaultMode,
     path_fork: &mut PathInternerFork,
     mismatch_context: TypeMismatchContext,
 ) -> SignatureResult<Declaration> {
@@ -252,6 +293,7 @@ pub(crate) fn signature_member_to_declaration(
         member.span,
         expression_context,
         type_interner,
+        const_values,
         string_table,
     )
     .map_err(|error| signature_member_error_with_span(error, member));
@@ -289,13 +331,7 @@ pub(crate) fn signature_member_to_declaration(
 
     let member_span = member.span;
     let value = if member.default_range.is_none() {
-        Expression::new(
-            ExpressionKind::NoValue,
-            member_span,
-            type_id,
-            data_type,
-            member.value_mode.clone(),
-        )
+        DeclarationValue::Absent
     } else {
         let parsed = parse_signature_default_expression(
             member,
@@ -303,60 +339,191 @@ pub(crate) fn signature_member_to_declaration(
             type_id,
             expression_context,
             type_interner,
+            expression_builder,
+            const_values,
             string_table,
             path_fork,
         )
         .map_err(|error| signature_member_error_with_span(error, member))?;
-        if destination_resolved {
-            // Defaults are normalised to the declared member boundary before the
-            // expression becomes the declaration's type carrier. Later resolution
-            // still re-derives TypeId from diagnostic_type, and a coercion node
-            // stores Inferred spelling, so the declared spelling has to stay
-            // aligned with the selected type. It is not a second type authority.
+        let default = if destination_resolved {
+            // Defaults receive the declared boundary; the declaration retains its
+            // annotation independently of the resulting coercion expression.
             normalise_resolved_signature_default(
                 parsed,
                 type_id,
-                data_type,
+                expression_builder,
                 type_interner,
                 member,
                 mismatch_context,
             )?
         } else {
             parsed
+        };
+        if default_mode == SignatureDefaultMode::KeepAuthored {
+            DeclarationValue::Initializer(default.id())
+        } else {
+            let default = fold_signature_default(
+                default,
+                expression_context,
+                type_interner,
+                expression_builder,
+                const_values,
+                string_table,
+            )
+            .map_err(|error| signature_member_error_with_span(error, member))?;
+            DeclarationValue::Default(default)
         }
     };
 
     Ok(Declaration {
         id: member.id,
+        type_id,
+        diagnostic_type: data_type,
+        value_mode: member.value_mode,
         value,
         binding_span: member_span,
         config_qualifier: None,
     })
 }
 
-/// Coerce a parsed default to its resolved declared type and keep that spelling.
+/// Coerce a default at its declared boundary; access belongs to the parameter contract.
 fn normalise_resolved_signature_default(
-    expression: Expression,
+    expression: OwnedExpr,
     declared_type_id: TypeId,
-    declared_spelling: DataType,
+    expression_builder: &mut AstExpressionBuilder,
     type_interner: &AstTypeInterner<'_>,
     member: &SignatureMemberSyntax,
     mismatch_context: TypeMismatchContext,
-) -> SignatureResult<Expression> {
-    let mut value = coerce_expression_to_explicit_type_boundary(
+) -> SignatureResult<OwnedExpr> {
+    let value = coerce_expression_to_explicit_type_boundary(
         expression,
         declared_type_id,
         type_interner.environment(),
         mismatch_context,
+        expression_builder,
     )
-    .map_err(|diagnostic| {
-        signature_member_error_with_span(ExpressionParseError::Diagnostic(diagnostic), member)
+    .map_err(|error| {
+        let error = match error {
+            ExpressionConstructionFailure::Diagnostic(diagnostic) => diagnostic.into(),
+            ExpressionConstructionFailure::Invariant(error) => error.into(),
+        };
+        signature_member_error_with_span(error, member)
     })?;
-    value.diagnostic_type = declared_spelling;
-    // The member marker owns access mode. Numeric literal coercion rebuilds the
-    // node as immutable, so the authored mode has to be restored after that rewrite.
-    value.value_mode = member.value_mode.to_owned();
     Ok(value)
+}
+
+/// Complete compile-time defaults before a callable or constructor contract retains them.
+fn fold_signature_default(
+    expression: OwnedExpr,
+    scope: &ScopeContext,
+    type_interner: &AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    string_table: &mut StringTable,
+) -> SignatureResult<ConstValueId> {
+    let folded = fold_constant_content(
+        expression.id(),
+        expression_builder,
+        const_values,
+        string_table,
+        Some(scope),
+        type_interner.environment(),
+    )
+    .map_err(|error| match error {
+        ConstantFoldError::Diagnostic(diagnostic) => ExpressionParseError::Diagnostic(diagnostic),
+        ConstantFoldError::Infrastructure(error) => ExpressionParseError::Infrastructure(error),
+    })?;
+    let expression = match folded {
+        ConstantFoldOutcome::Folded(root) | ConstantFoldOutcome::NotConstant(root) => root,
+        ConstantFoldOutcome::TextUnavailable { diagnostic, .. } => return Err(diagnostic.into()),
+    };
+    fn validate_default(
+        expression: ExpressionView<'_>,
+        scope: &ScopeContext,
+        expressions: &AstExpressionBuilder,
+        constants: &ConstValueStore,
+    ) -> SignatureResult<()> {
+        if let ExpressionOperationView::Reference(path) = expression.operation() {
+            if constants.value_for_path(&path).is_none() {
+                return Err(CompilerDiagnostic::compile_time_evaluation_error(
+                    CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,
+                    None,
+                    expression.span(),
+                )
+                .into());
+            }
+        } else {
+            match expression.operation() {
+                ExpressionOperationView::Template(template) => {
+                    // WHY: a slot-insert helper is valid only inside the wrapper slot it fills.
+                    // Defaults fold before normalization runs, so the helper rejection that
+                    // normalization applies to an unfolded default must happen here.
+                    let kind = classify_template_from_effective_tir(
+                        template,
+                        &scope.template_ir_store,
+                        expressions,
+                        constants,
+                    )
+                    .map_err(|error| match error {
+                        TemplateError::Diagnostic(diagnostic) => {
+                            ExpressionParseError::Diagnostic(diagnostic)
+                        }
+                        TemplateError::Infrastructure(error) => {
+                            ExpressionParseError::Infrastructure(error)
+                        }
+                    })?;
+                    if matches!(kind, TemplateConstValueKind::SlotInsertHelper) {
+                        return Err(CompilerDiagnostic::invalid_template_structure(
+                            InvalidTemplateStructureReason::HelperOutsideWrapperSlot,
+                            template.span,
+                        )
+                        .into());
+                    }
+                }
+                ExpressionOperationView::Constant(_)
+                | ExpressionOperationView::Collection(_)
+                | ExpressionOperationView::Struct { .. }
+                | ExpressionOperationView::Choice { .. }
+                | ExpressionOperationView::Range { .. }
+                | ExpressionOperationView::Coerce { .. } => {}
+                _ => {
+                    return Err(CompilerDiagnostic::compile_time_evaluation_error(
+                        CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,
+                        None,
+                        expression.span(),
+                    )
+                    .into());
+                }
+            }
+        }
+        let mut result = Ok(());
+        expression.visit_children(|child| {
+            if result.is_ok() {
+                result = validate_default(child, scope, expressions, constants);
+            }
+        });
+        result
+    }
+    validate_default(
+        expression_builder.view(expression)?,
+        scope,
+        expression_builder,
+        const_values,
+    )?;
+    resolve_const_expression_content(
+        expression,
+        expression_builder,
+        const_values,
+        type_interner.environment(),
+        scope,
+        string_table,
+    )
+    .map_err(|error| match error {
+        ConstValueStoreError::Diagnostic(diagnostic) => {
+            ExpressionParseError::Diagnostic(diagnostic)
+        }
+        ConstValueStoreError::Infrastructure(error) => ExpressionParseError::Infrastructure(error),
+    })
 }
 
 /// Attach the authored member-name anchor to an AST diagnostic while its declaring source
@@ -397,12 +564,12 @@ fn resolve_signature_type_annotation(
     span: Option<SourceSpan>,
     expression_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    const_values: &ConstValueStore,
     string_table: &mut StringTable,
 ) -> SignatureResult<ResolvedTypeAnnotation> {
     let mut type_resolution_context =
         TypeResolutionContext::from_inputs(TypeResolutionContextInputs {
             declaration_table: &expression_context.top_level_declarations,
-            declaring_file_id: expression_context.shared.declaring_file_id,
             visible_declaration_ids: expression_context.visible_declaration_ids.as_ref(),
             visible_external_symbols: expression_context
                 .file_visibility
@@ -424,6 +591,7 @@ fn resolve_signature_type_annotation(
                 .resolved_struct_fields_by_path
                 .as_deref(),
             type_environment: type_interner.environment_mut_for_derived_types(),
+            const_values,
             visible_namespace_records: expression_context
                 .file_visibility
                 .as_ref()
@@ -467,15 +635,21 @@ fn should_fallback_signature_type(
 }
 
 /// Parse the default-value expression for a single signature parameter.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "default parsing keeps the member, owner, type, scope and mutable state as separate inputs"
+)]
 fn parse_signature_default_expression(
     member: &SignatureMemberSyntax,
     source_owner: &AstCursor,
     type_id: TypeId,
     expression_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> SignatureResult<Expression> {
+) -> SignatureResult<OwnedExpr> {
     let mut parameter_context = expression_context.to_owned();
     parameter_context.expected_result_type_ids = vec![type_id];
 
@@ -503,6 +677,8 @@ fn parse_signature_default_expression(
             token_stream: &mut expression_stream,
             scope_context: &parameter_context,
             type_interner,
+            expression_builder,
+            const_values,
             expected_type: &mut expected_type,
             cast_target_context: &mut cast_target_context,
             value_mode: &member.value_mode,
@@ -524,6 +700,7 @@ fn return_slot_from_syntax(
     return_slot: &ReturnSlotSyntax,
     expression_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    const_values: &ConstValueStore,
     string_table: &mut StringTable,
     fallback_policy: SignatureTypeFallbackPolicy,
 ) -> SignatureResult<ReturnSlot> {
@@ -537,24 +714,28 @@ fn return_slot_from_syntax(
         return_slot.value.span,
         expression_context,
         type_interner,
+        const_values,
         string_table,
     );
 
-    let data_type = match resolved {
-        Ok(annotation) => annotation.diagnostic_type,
+    let (data_type, type_id) = match resolved {
+        Ok(annotation) => (annotation.diagnostic_type, annotation.type_id),
         Err(ExpressionParseError::Diagnostic(diagnostic))
             if should_fallback_signature_type(&diagnostic, fallback_policy) =>
         {
             // Generic return types may be resolved later once the function's
             // declaration-site generic parameter scope is active.
-            parsed_ref_to_data_type(&return_slot.value.type_annotation)
+            (
+                parsed_ref_to_data_type(&return_slot.value.type_annotation),
+                None,
+            )
         }
         Err(diagnostic) => return Err(diagnostic),
     };
 
     Ok(ReturnSlot {
         value: data_type,
-        type_id: None,
+        type_id,
         channel,
     })
 }

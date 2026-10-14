@@ -982,7 +982,10 @@ fn nested_numeric_width_fixtures() -> Vec<super::support::ParityFixture> {
 }
 
 /// One nested exact-width receiver pair inside a nominal struct.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the parity fixture keeps its name, integer type/schema/source spelling/value and floating type/schema/value explicit so authored syntax and expected exact-width values remain independently specified"
+)]
 fn nested_width_fixture(
     name: &str,
     int_type: &str,

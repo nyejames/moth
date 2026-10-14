@@ -1,0 +1,11 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0053"]
+message_contains = ["'Local' resolves to a non-constant value."]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+path = "input/@page.moth"
+line = 5
+column = 10

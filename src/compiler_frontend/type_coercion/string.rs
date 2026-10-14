@@ -6,56 +6,72 @@
 //! were inlined directly into `template_folding.rs`. Moving them here makes
 //! the policy explicit and reusable without touching template mechanics.
 
-use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
+use crate::compiler_frontend::ast::const_values::store::{
+    ConstStringValue, ConstValueId, ConstValuePayload, ConstValueStore,
+};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    ExpressionOperationView, ExpressionView,
+};
 use crate::compiler_frontend::builtins::casts::policies::{
     BuiltinCastLiteral, apply_builtin_cast_policy,
 };
 use crate::compiler_frontend::builtins::casts::targets::{BuiltinCastPolicyId, BuiltinCastTarget};
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
-/// Attempts to coerce a constant expression kind to its string representation
-/// for use in template folding.
+/// Format completed scalar content through the existing numeric text policy.
 ///
-/// WHAT: converts compile-time scalar expression kinds to their string content.
-/// Returns `None` for expression kinds that cannot be folded into a string at
-/// compile time. Template values are handled by the TIR fold owner because
-/// their classification requires the module-local store.
-/// WHY: centralises the "what can fold to a string" decision that was
-/// previously inlined in `template_folding::fold_plan`, and sends fixed numeric scalars through
-/// the shared numeric text policy while `Dec` uses its canonical value Display so template
-/// content and explicit casts cannot disagree.
-pub(crate) fn fold_expression_kind_to_string(
-    kind: &ExpressionKind,
+/// Templates stay with their exact TIR fold owner. Structural anchors cannot be observed as text
+/// until the owning output boundary supplies their characters.
+pub(crate) fn fold_expression_to_string(
+    expression: ExpressionView<'_>,
+    const_values: &ConstValueStore,
     string_table: &StringTable,
-) -> Option<String> {
-    match kind {
-        ExpressionKind::StringSlice(string) => Some(string_table.resolve(*string).to_owned()),
-        ExpressionKind::Number(value) => Some(value.to_string()),
-        ExpressionKind::FixedScalar(value) => {
-            // `Byte` is outside the numeric vocabulary, so it has no text policy and folds away
-            // here; the template renderability check reports it before this point.
-            let scalar = BuiltinCastTarget::Fixed(value.scalar()).numeric_scalar()?;
-            let BuiltinCastLiteral::String(text) = apply_builtin_cast_policy(
+) -> Result<Option<String>, CompilerError> {
+    match expression.operation() {
+        ExpressionOperationView::Constant(value) => {
+            fold_constant_to_string(value, const_values, string_table)
+        }
+        ExpressionOperationView::Coerce { value, .. } => {
+            fold_expression_to_string(value, const_values, string_table)
+        }
+        _ => Ok(None),
+    }
+}
+
+fn fold_constant_to_string(
+    value: ConstValueId,
+    const_values: &ConstValueStore,
+    string_table: &StringTable,
+) -> Result<Option<String>, CompilerError> {
+    let payload = const_values.payload(value).ok_or_else(|| {
+        CompilerError::compiler_error("String folding received a foreign constant value ID.")
+    })?;
+    let text = match payload {
+        ConstValuePayload::String(ConstStringValue::Text(string)) => {
+            Some(string_table.resolve(*string).to_owned())
+        }
+        ConstValuePayload::Number(value) => Some(value.to_string()),
+        ConstValuePayload::FixedScalar(value) => {
+            let Some(scalar) = BuiltinCastTarget::Fixed(value.scalar()).numeric_scalar() else {
+                return Ok(None);
+            };
+            let Ok(BuiltinCastLiteral::String(text)) = apply_builtin_cast_policy(
                 BuiltinCastPolicyId::NumericToString(scalar),
                 &BuiltinCastLiteral::Fixed(*value),
-            )
-            .ok()?
-            else {
-                return None;
+            ) else {
+                return Ok(None);
             };
-
             Some(text)
         }
-        ExpressionKind::Bool(value) => Some(value.to_string()),
-        ExpressionKind::Char(value) => Some(value.to_string()),
-        ExpressionKind::Coerced { value, .. } => {
-            // Contextual coercion nodes do not change the rendered scalar value;
-            // delegate to the inner expression so coerced literals fold the same
-            // way as their unwrapped counterparts.
-            fold_expression_kind_to_string(&value.kind, string_table)
+        ConstValuePayload::Bool(value) => Some(value.to_string()),
+        ConstValuePayload::Char(value) => Some(value.to_string()),
+        ConstValuePayload::Coerced(inner) | ConstValuePayload::OptionSome(inner) => {
+            return fold_constant_to_string(*inner, const_values, string_table);
         }
         _ => None,
-    }
+    };
+    Ok(text)
 }
 
 #[cfg(test)]

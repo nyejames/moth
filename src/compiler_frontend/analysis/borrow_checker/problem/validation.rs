@@ -305,7 +305,6 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                     targets.iter().map(|target| target.raw()).collect()
                 }
                 TerminatorEventKind::Return
-                | TerminatorEventKind::ReturnSuccess
                 | TerminatorEventKind::ReturnError
                 | TerminatorEventKind::RuntimeFailure
                 | TerminatorEventKind::AssertFailure => BTreeSet::new(),
@@ -322,7 +321,6 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                 &event.kind,
                 EventKind::Terminator {
                     kind: TerminatorEventKind::Return
-                        | TerminatorEventKind::ReturnSuccess
                         | TerminatorEventKind::ReturnError
                         | TerminatorEventKind::RuntimeFailure
                         | TerminatorEventKind::AssertFailure
@@ -376,14 +374,14 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
 
     let mut call_result_owners = BTreeMap::<ValueOriginId, Vec<(EventId, CallId, PlaceId)>>::new();
     for event in events {
-        if let EventKind::CallEffect(effect) = &event.kind
-            && let Some(result) = effect.result
-        {
-            call_result_owners.entry(result.origin).or_default().push((
-                event.id,
-                effect.call,
-                result.destination.place(),
-            ));
+        if let EventKind::CallEffect(effect) = &event.kind {
+            for result in &effect.results {
+                call_result_owners.entry(result.origin).or_default().push((
+                    event.id,
+                    effect.call,
+                    result.destination.place(),
+                ));
+            }
         }
     }
 
@@ -409,7 +407,11 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                         origin.id
                     ))
                 })?;
-                if owners.len() != 1 || owners[0].1 != *call {
+                if owners.is_empty()
+                    || owners
+                        .iter()
+                        .any(|owner| owner.1 != *call || owner.0 != owners[0].0)
+                {
                     return Err(compiler_error(format!(
                         "call-result origin {:?} has inconsistent call ownership",
                         origin.id
@@ -743,7 +745,11 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                         use_owners[use_index] += 1;
                     }
                 }
-                if let Some(result) = effect.result {
+                let mut destinations = BTreeSet::new();
+                for result in &effect.results {
+                    if !destinations.insert(result.destination.place()) {
+                        return Err(compiler_error("call has duplicate result destinations"));
+                    }
                     validate_binding_destination(result.destination, places, "call result")?;
                     validate_origin(result.origin, origins.len(), "call result origin")?;
                     let origin = &origins[result.origin.index()];
@@ -847,7 +853,6 @@ pub(super) fn validate(problem: &BorrowProblem) -> Result<(), CompilerError> {
                     }
                 }
                 TerminatorEventKind::Return
-                | TerminatorEventKind::ReturnSuccess
                 | TerminatorEventKind::ReturnError
                 | TerminatorEventKind::RuntimeFailure
                 | TerminatorEventKind::AssertFailure => {}
@@ -1017,17 +1022,26 @@ fn validate_binding_write_accesses(
                 .and_then(|next_id| events.get(next_id.index()))
                 .and_then(event_binding_destination)
                 == Some(destination);
-            let previous_call_matches = index
-                .checked_sub(1)
-                .and_then(|previous| block.events.get(previous))
-                .and_then(|previous_id| events.get(previous_id.index()))
-                .is_some_and(|previous| {
+            let previous_call_matches = block.events[..index]
+                .iter()
+                .rev()
+                .map(|previous_id| &events[previous_id.index()])
+                .take_while(|previous| {
                     matches!(
-                        &previous.kind,
-                        EventKind::CallEffect(effect)
-                            if effect.result.is_some_and(|result| result.destination == destination)
+                        previous.kind,
+                        EventKind::Access { .. } | EventKind::CallEffect(_)
                     )
-                });
+                })
+                .find_map(|previous| match &previous.kind {
+                    EventKind::CallEffect(effect) => Some(
+                        effect
+                            .results
+                            .iter()
+                            .any(|result| result.destination == destination),
+                    ),
+                    _ => None,
+                })
+                .unwrap_or(false);
             let jump_matches = jump_write_start.is_some_and(|start| index >= start);
             if usize::from(next_matches)
                 + usize::from(previous_call_matches)

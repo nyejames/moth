@@ -4,7 +4,7 @@
 //! WHY: plain expression vectors cannot represent named-target routing or explicit call-site
 //! mutable access markers, and mutable-place vs fresh-rvalue passing semantics.
 
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression_store::ExprId;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringId;
@@ -40,9 +40,9 @@ pub enum CallPassingMode {
 }
 
 #[derive(Debug, Clone)]
-pub struct CallArgument {
-    /// The expression value being passed as this argument.
-    pub value: Expression,
+pub(crate) struct CallArgument<E = ExprId> {
+    /// Raw in retained records and owner-checked while construction is in flight.
+    pub value: E,
 
     /// For named arguments, the interned parameter name this argument routes to.
     pub target_param: Option<StringId>,
@@ -89,7 +89,7 @@ pub struct CallArgument {
     pub(crate) parameter_slot: Option<ParameterSlot>,
 }
 
-impl CallArgument {
+impl<E> CallArgument<E> {
     /// Map the parse-time access marker to its default passing-mode classification.
     ///
     /// WHAT: `Shared` stays shared; `Mutable` starts as `MutablePlace` pending validation.
@@ -103,11 +103,7 @@ impl CallArgument {
     }
 
     /// Build a positional call argument with the default passing mode derived from `access_mode`.
-    pub fn positional(
-        value: Expression,
-        access_mode: CallAccessMode,
-        span: Option<SourceSpan>,
-    ) -> Self {
+    pub fn positional(value: E, access_mode: CallAccessMode, span: Option<SourceSpan>) -> Self {
         Self {
             value,
             target_param: None,
@@ -122,7 +118,7 @@ impl CallArgument {
     }
     /// Build a named call argument with the default passing mode derived from `access_mode`.
     pub fn named(
-        value: Expression,
+        value: E,
         name: StringId,
         access_mode: CallAccessMode,
         span: Option<SourceSpan>,
@@ -170,16 +166,31 @@ impl CallArgument {
         self.parameter_slot = Some(parameter_slot);
         self
     }
+
+    /// Change only the expression edge when entering or leaving construction.
+    pub(crate) fn map_value<T>(self, map: impl FnOnce(E) -> T) -> CallArgument<T> {
+        CallArgument {
+            value: map(self.value),
+            target_param: self.target_param,
+            access_mode: self.access_mode,
+            passing_mode: self.passing_mode,
+            span: self.span,
+            target_span: self.target_span,
+            marker_span: self.marker_span,
+            following_separator_span: self.following_separator_span,
+            parameter_slot: self.parameter_slot,
+        }
+    }
 }
 
 /// Arrange parsed arguments by their retained declaration-order slots.
 ///
 /// WHAT: consumes parser-owned slot metadata without inspecting named targets or positional order.
 /// WHY: a missing, duplicate or out-of-range slot is an internal compiler invariant failure after the shared router has assigned every slot, so ordering must fail loudly instead of silently misrouting arguments.
-pub(crate) fn order_call_arguments_by_retained_slot(
-    arguments: &[CallArgument],
+pub(crate) fn order_call_arguments_by_retained_slot<E: Clone>(
+    arguments: &[CallArgument<E>],
     expected_slot_count: usize,
-) -> Result<Vec<Option<CallArgument>>, CompilerError> {
+) -> Result<Vec<Option<CallArgument<E>>>, CompilerError> {
     let mut ordered = vec![None; expected_slot_count];
 
     for argument in arguments {
@@ -199,8 +210,8 @@ pub(crate) fn order_call_arguments_by_retained_slot(
 }
 
 /// Resolve and validate one parser-assigned call-argument slot with its hidden-slot offset.
-fn retained_call_argument_slot_index(
-    argument: &CallArgument,
+fn retained_call_argument_slot_index<E>(
+    argument: &CallArgument<E>,
     slot_offset: usize,
     expected_slot_count: usize,
 ) -> Result<usize, CompilerError> {
@@ -237,11 +248,11 @@ fn retained_call_argument_slot_index(
 ///       receiver without cloning their expressions.
 /// WHY: generic receiver inference needs declaration-order evidence while the original arguments
 ///      remain owned by the call site for validation and emission.
-pub(crate) fn order_call_argument_refs_by_retained_slot(
-    arguments: &[CallArgument],
+pub(crate) fn order_call_argument_refs_by_retained_slot<E>(
+    arguments: &[CallArgument<E>],
     expected_slot_count: usize,
     slot_offset: usize,
-) -> Result<Vec<Option<&CallArgument>>, CompilerError> {
+) -> Result<Vec<Option<&CallArgument<E>>>, CompilerError> {
     let mut ordered = vec![None; expected_slot_count];
 
     for argument in arguments {

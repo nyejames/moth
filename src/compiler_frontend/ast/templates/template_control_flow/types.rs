@@ -7,7 +7,7 @@
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{LoopBindings, RangeLoopSpec};
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression_store::ExprId;
 use crate::compiler_frontend::ast::numeric_construction::{
     DeferredArmPattern, DeferredNumericExpression, DeferredRangeHeader, NumericBindingId,
     NumericConstructionDomainId,
@@ -17,19 +17,19 @@ use crate::compiler_frontend::source::SourceSpan;
 /// Supported template branch selectors.
 #[derive(Clone, Debug)]
 pub(crate) enum TemplateBranchSelector {
-    Bool(Expression),
+    Bool(ExprId),
     OptionPresentCapture {
-        scrutinee: Expression,
+        scrutinee: ExprId,
         pattern: Box<MatchPattern>,
     },
 }
 
 impl TemplateBranchSelector {
     /// Returns the expression used to determine whether this selector matches.
-    pub(crate) fn condition_expression(&self) -> &Expression {
+    pub(crate) fn condition_expression(&self) -> ExprId {
         match self {
-            Self::Bool(expression) => expression,
-            Self::OptionPresentCapture { scrutinee, .. } => scrutinee,
+            Self::Bool(expression) => *expression,
+            Self::OptionPresentCapture { scrutinee, .. } => *scrutinee,
         }
     }
 }
@@ -38,7 +38,7 @@ impl TemplateBranchSelector {
 #[derive(Clone, Debug)]
 pub(crate) enum TemplateLoopHeader {
     Conditional {
-        condition: Box<Expression>,
+        condition: ExprId,
     },
     Range {
         bindings: Box<LoopBindings>,
@@ -46,7 +46,7 @@ pub(crate) enum TemplateLoopHeader {
     },
     Collection {
         bindings: Box<LoopBindings>,
-        iterable: Box<Expression>,
+        iterable: ExprId,
     },
 }
 

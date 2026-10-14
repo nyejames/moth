@@ -1,17 +1,18 @@
 //! Structured and dispatcher-based JavaScript control-flow lowering tests.
 
 use super::support::*;
-use crate::compiler_frontend::datatypes::ids::{BuiltinTypeConstructor, TypeConstructor};
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{
     HirExpressionKind, HirVariantCarrier, HirVariantField, ValueKind,
 };
-use crate::compiler_frontend::hir::functions::HirFunction;
-use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId};
+use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
+use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, LocalId, RegionId};
 use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern};
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirStatementKind, HirWriteTarget};
-use crate::compiler_frontend::hir::terminators::{HirJumpArgument, HirTerminator};
+use crate::compiler_frontend::hir::terminators::{
+    HirFallibleOperation, HirJumpArgument, HirTerminator,
+};
 
 // CFG lowering tests [cfg]
 // ---------------------------------------------------------------------------
@@ -83,11 +84,7 @@ fn emits_structured_if_without_dispatcher() {
             region: RegionId(0),
             locals: vec![local(2, types.i32, RegionId(0))],
             statements: vec![],
-            terminator: HirTerminator::Return(unit_expression(
-                types.unit,
-                RegionId(0),
-                &mut expressions,
-            )),
+            terminator: HirTerminator::Return(append_values(&[], &mut expressions)),
         },
     ];
 
@@ -95,7 +92,8 @@ fn emits_structured_if_without_dispatcher() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: vec![].into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -160,27 +158,51 @@ fn nested_diamond_preserves_transport_and_dispatcher_fallback() {
             },
             NestedBranch::Fallible
             | NestedBranch::SharedError
-            | NestedBranch::SharedContinuationError => HirTerminator::FallibleBranch {
-                result: load(&mut expressions, LocalId(1), types.fallible_i32_string),
-                success_block: BlockId(3),
-                error_block: BlockId(4),
+            | NestedBranch::SharedContinuationError => HirTerminator::Invoke {
+                id: HirNodeId(6),
+                span: None,
+                operation: HirFallibleOperation::Call {
+                    target: CallTarget::Local(FunctionId(1)),
+                    args: append_values(
+                        &[
+                            load(&mut expressions, LocalId(1), types.i32),
+                            load(&mut expressions, LocalId(7), types.boolean),
+                            load(&mut expressions, LocalId(9), types.string),
+                        ],
+                        &mut expressions,
+                    ),
+                },
+                success: BlockId(3),
+                success_results: vec![LocalId(14)],
+                failure: BlockId(4),
+                error_result: LocalId(10),
             },
         };
         let shared_error = matches!(branch, NestedBranch::SharedError);
         let shared_continuation_error = matches!(branch, NestedBranch::SharedContinuationError);
-        let blocks = vec![
+        let mut blocks = vec![
             HirBlock {
                 id: BlockId(0),
                 region,
                 locals: vec![
                     local(0, types.boolean, region),
-                    local(1, types.fallible_i32_string, region),
+                    local(1, types.i32, region),
                     local(3, types.i32, region),
                     local(4, types.i32, region),
                     local(5, types.i32, region),
                     local(7, types.boolean, region),
+                    local(9, types.string, region),
+                    local(10, types.string, region),
+                    local(14, types.i32, region),
                 ],
                 statements: vec![
+                    statement(
+                        7,
+                        HirStatementKind::Write {
+                            target: HirWriteTarget::DefineLocal(LocalId(10)),
+                            value: load(&mut expressions, LocalId(9), types.string),
+                        },
+                    ),
                     statement(
                         1,
                         HirStatementKind::Write {
@@ -242,18 +264,14 @@ fn nested_diamond_preserves_transport_and_dispatcher_fallback() {
                     4,
                     HirStatementKind::Write {
                         target: HirWriteTarget::AssignPlace(HirPlace::local(LocalId(5))),
-                        value: expression(
-                            HirExpressionKind::FallibleUnwrapSuccess {
-                                result: load(
-                                    &mut expressions,
-                                    LocalId(1),
-                                    types.fallible_i32_string,
-                                ),
+                        value: load(
+                            &mut expressions,
+                            if matches!(branch, NestedBranch::If) {
+                                LocalId(1)
+                            } else {
+                                LocalId(14)
                             },
                             types.i32,
-                            region,
-                            ValueKind::RValue,
-                            &mut expressions,
                         ),
                     },
                 )],
@@ -276,14 +294,10 @@ fn nested_diamond_preserves_transport_and_dispatcher_fallback() {
                 region,
                 locals: vec![],
                 statements: vec![],
-                terminator: HirTerminator::ReturnError(expression(
-                    HirExpressionKind::FallibleUnwrapError {
-                        result: load(&mut expressions, LocalId(1), types.fallible_i32_string),
-                    },
-                    types.string,
-                    region,
-                    ValueKind::RValue,
+                terminator: HirTerminator::ReturnError(load(
                     &mut expressions,
+                    LocalId(10),
+                    types.string,
                 )),
             },
             HirBlock {
@@ -298,13 +312,30 @@ fn nested_diamond_preserves_transport_and_dispatcher_fallback() {
                     },
                 )],
                 terminator: if shared_continuation_error {
-                    HirTerminator::FallibleBranch {
-                        result: load(&mut expressions, LocalId(1), types.fallible_i32_string),
-                        success_block: BlockId(6),
-                        error_block: BlockId(4),
+                    HirTerminator::Invoke {
+                        id: HirNodeId(8),
+                        span: None,
+                        operation: HirFallibleOperation::Call {
+                            target: CallTarget::Local(FunctionId(1)),
+                            args: append_values(
+                                &[
+                                    load(&mut expressions, LocalId(1), types.i32),
+                                    load(&mut expressions, LocalId(7), types.boolean),
+                                    load(&mut expressions, LocalId(9), types.string),
+                                ],
+                                &mut expressions,
+                            ),
+                        },
+                        success: BlockId(6),
+                        success_results: vec![LocalId(14)],
+                        failure: BlockId(4),
+                        error_result: LocalId(10),
                     }
                 } else {
-                    HirTerminator::ReturnSuccess(load(&mut expressions, LocalId(6), types.i32))
+                    HirTerminator::Return(append_values(
+                        &[load(&mut expressions, LocalId(6), types.i32)],
+                        &mut expressions,
+                    ))
                 },
             },
             HirBlock {
@@ -312,20 +343,66 @@ fn nested_diamond_preserves_transport_and_dispatcher_fallback() {
                 region,
                 locals: vec![],
                 statements: vec![],
-                terminator: HirTerminator::ReturnSuccess(load(
+                terminator: HirTerminator::Return(append_values(
+                    &[load(&mut expressions, LocalId(6), types.i32)],
                     &mut expressions,
-                    LocalId(6),
-                    types.i32,
                 )),
             },
         ];
+        // The backend ABI supplies envelopes; HIR transports success and error slots separately.
+        blocks.extend([
+            HirBlock {
+                id: BlockId(7),
+                region,
+                locals: vec![
+                    local(11, types.i32, region),
+                    local(12, types.boolean, region),
+                    local(13, types.string, region),
+                ],
+                statements: vec![],
+                terminator: HirTerminator::If {
+                    condition: load(&mut expressions, LocalId(12), types.boolean),
+                    then_block: BlockId(8),
+                    else_block: BlockId(9),
+                },
+            },
+            HirBlock {
+                id: BlockId(8),
+                region,
+                locals: vec![],
+                statements: vec![],
+                terminator: HirTerminator::Return(append_values(
+                    &[load(&mut expressions, LocalId(11), types.i32)],
+                    &mut expressions,
+                )),
+            },
+            HirBlock {
+                id: BlockId(9),
+                region,
+                locals: vec![],
+                statements: vec![],
+                terminator: HirTerminator::ReturnError(load(
+                    &mut expressions,
+                    LocalId(13),
+                    types.string,
+                )),
+            },
+        ]);
         let function = HirFunction {
             id: FunctionId(0),
             entry: BlockId(0),
-            params: vec![LocalId(0), LocalId(1), LocalId(2), LocalId(3), LocalId(7)],
-            return_type: types.fallible_i32_string,
+            params: vec![
+                LocalId(0),
+                LocalId(1),
+                LocalId(2),
+                LocalId(3),
+                LocalId(7),
+                LocalId(9),
+            ],
+            returns: vec![types.i32].into_boxed_slice(),
+            error_return: Some(types.string),
         };
-        let module = build_module(
+        let mut module = build_module(
             expressions,
             &mut path_fork,
             &mut string_table,
@@ -343,6 +420,22 @@ fn nested_diamond_preserves_transport_and_dispatcher_fallback() {
                 (LocalId(7), "result_ok"),
                 (LocalId(8), "second"),
             ],
+        );
+        module.functions.push(HirFunction {
+            id: FunctionId(1),
+            entry: BlockId(7),
+            params: vec![LocalId(11), LocalId(12), LocalId(13)],
+            returns: vec![types.i32].into_boxed_slice(),
+            error_return: Some(types.string),
+        });
+        module
+            .function_origins
+            .insert(FunctionId(1), HirFunctionOrigin::Normal);
+        module.side_table.bind_function_name(
+            FunctionId(1),
+            path_fork
+                .try_intern_portable_path("select_result", &mut string_table)
+                .expect("test path fits"),
         );
         let output = lower_hir_to_js(
             &module,
@@ -402,7 +495,7 @@ const rows = [[false, {{tag: "err", value: "boom"}}, false],
               [true, {{tag: "err", value: "boom"}}, false]].map(([lhs, result, ok]) => {{
     const rhs = __moth_binding(0);
     const join = __moth_binding(0);
-    const outcome = {function_name}(lhs, result, rhs, join, ok);
+    const outcome = {function_name}(lhs, ok ? result.value : 0, rhs, join, ok, "boom");
     return [outcome.tag, outcome.value, __moth_read(rhs), __moth_read(join)];
 }});
 console.log(JSON.stringify(rows));"#,
@@ -515,11 +608,7 @@ fn emits_structured_match_without_inlining_synthetic_merge_arm() {
             region: RegionId(0),
             locals: vec![],
             statements: vec![],
-            terminator: HirTerminator::Return(unit_expression(
-                types.unit,
-                RegionId(0),
-                &mut expressions,
-            )),
+            terminator: HirTerminator::Return(append_values(&[], &mut expressions)),
         },
     ];
 
@@ -527,7 +616,8 @@ fn emits_structured_match_without_inlining_synthetic_merge_arm() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: vec![].into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -637,11 +727,7 @@ fn literal_match_uses_structured_lowering_when_cfg_is_acyclic() {
             region: RegionId(0),
             locals: vec![],
             statements: vec![],
-            terminator: HirTerminator::Return(unit_expression(
-                types.unit,
-                RegionId(0),
-                &mut expressions,
-            )),
+            terminator: HirTerminator::Return(append_values(&[], &mut expressions)),
         },
     ];
 
@@ -649,7 +735,8 @@ fn literal_match_uses_structured_lowering_when_cfg_is_acyclic() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: vec![].into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -777,11 +864,7 @@ fn option_present_match_checks_some_tag_without_payload_comparison() {
             region: RegionId(0),
             locals: vec![],
             statements: vec![],
-            terminator: HirTerminator::Return(unit_expression(
-                types.unit,
-                RegionId(0),
-                &mut expressions,
-            )),
+            terminator: HirTerminator::Return(append_values(&[], &mut expressions)),
         },
     ];
 
@@ -789,7 +872,8 @@ fn option_present_match_checks_some_tag_without_payload_comparison() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: vec![].into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -899,11 +983,7 @@ fn literal_match_uses_dispatcher_when_cfg_contains_cycle() {
             region: RegionId(0),
             locals: vec![],
             statements: vec![],
-            terminator: HirTerminator::Return(unit_expression(
-                types.unit,
-                RegionId(0),
-                &mut expressions,
-            )),
+            terminator: HirTerminator::Return(append_values(&[], &mut expressions)),
         },
     ];
 
@@ -911,7 +991,8 @@ fn literal_match_uses_dispatcher_when_cfg_contains_cycle() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: vec![].into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -1075,11 +1156,7 @@ fn structured_match_merge_convergence_lowers_jump_arguments() {
             region: RegionId(0),
             locals: vec![local(4, types.i32, RegionId(0))],
             statements: vec![],
-            terminator: HirTerminator::Return(unit_expression(
-                types.unit,
-                RegionId(0),
-                &mut expressions,
-            )),
+            terminator: HirTerminator::Return(append_values(&[], &mut expressions)),
         },
     ];
 
@@ -1087,7 +1164,8 @@ fn structured_match_merge_convergence_lowers_jump_arguments() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: vec![].into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -1276,7 +1354,8 @@ fn dispatcher_match_merge_convergence_lowers_jump_arguments() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: vec![].into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -1404,11 +1483,7 @@ fn match_guard_condition_emits_pattern_and_guard_conjunction() {
             region: RegionId(0),
             locals: vec![],
             statements: vec![],
-            terminator: HirTerminator::Return(unit_expression(
-                types.unit,
-                RegionId(0),
-                &mut expressions,
-            )),
+            terminator: HirTerminator::Return(append_values(&[], &mut expressions)),
         },
     ];
 
@@ -1416,7 +1491,8 @@ fn match_guard_condition_emits_pattern_and_guard_conjunction() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: vec![].into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -1520,7 +1596,8 @@ fn dispatcher_match_without_selected_arm_emits_no_arm_selected_fallback() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: vec![].into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -1608,11 +1685,7 @@ fn falls_back_to_dispatcher_for_cfg_cycle() {
             region: RegionId(0),
             locals: vec![],
             statements: vec![],
-            terminator: HirTerminator::Return(unit_expression(
-                types.unit,
-                RegionId(0),
-                &mut expressions,
-            )),
+            terminator: HirTerminator::Return(append_values(&[], &mut expressions)),
         },
     ];
 
@@ -1620,7 +1693,8 @@ fn falls_back_to_dispatcher_for_cfg_cycle() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: vec![].into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -1695,11 +1769,7 @@ fn lowers_break_and_continue_terminators_with_dispatcher() {
             region: RegionId(0),
             locals: vec![],
             statements: vec![],
-            terminator: HirTerminator::Return(unit_expression(
-                types.unit,
-                RegionId(0),
-                &mut expressions,
-            )),
+            terminator: HirTerminator::Return(append_values(&[], &mut expressions)),
         },
     ];
 
@@ -1707,7 +1777,8 @@ fn lowers_break_and_continue_terminators_with_dispatcher() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: vec![].into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -1770,11 +1841,7 @@ fn jump_args_lower_block_to_block_value_transfer() {
             region: RegionId(0),
             locals: vec![local(1, types.i32, RegionId(0))],
             statements: vec![],
-            terminator: HirTerminator::Return(unit_expression(
-                types.unit,
-                RegionId(0),
-                &mut expressions,
-            )),
+            terminator: HirTerminator::Return(append_values(&[], &mut expressions)),
         },
     ];
 
@@ -1782,7 +1849,8 @@ fn jump_args_lower_block_to_block_value_transfer() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: vec![].into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -1896,11 +1964,7 @@ fn structured_branch_merge_lowers_jump_arguments() {
             region: RegionId(0),
             locals: vec![local(2, types.i32, RegionId(0))],
             statements: vec![],
-            terminator: HirTerminator::Return(unit_expression(
-                types.unit,
-                RegionId(0),
-                &mut expressions,
-            )),
+            terminator: HirTerminator::Return(append_values(&[], &mut expressions)),
         },
     ];
 
@@ -1908,7 +1972,8 @@ fn structured_branch_merge_lowers_jump_arguments() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: vec![].into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -2022,11 +2087,7 @@ fn dispatcher_loop_back_edge_lowers_jump_arguments() {
             region: RegionId(0),
             locals: vec![],
             statements: vec![],
-            terminator: HirTerminator::Return(unit_expression(
-                types.unit,
-                RegionId(0),
-                &mut expressions,
-            )),
+            terminator: HirTerminator::Return(append_values(&[], &mut expressions)),
         },
     ];
 
@@ -2034,7 +2095,8 @@ fn dispatcher_loop_back_edge_lowers_jump_arguments() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: vec![].into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -2115,11 +2177,7 @@ fn jump_args_define_explicit_destination_binding() {
             region: RegionId(0),
             locals: vec![local(1, types.i32, RegionId(0))],
             statements: vec![],
-            terminator: HirTerminator::Return(unit_expression(
-                types.unit,
-                RegionId(0),
-                &mut expressions,
-            )),
+            terminator: HirTerminator::Return(append_values(&[], &mut expressions)),
         },
     ];
 
@@ -2127,7 +2185,8 @@ fn jump_args_define_explicit_destination_binding() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: vec![].into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -2164,19 +2223,13 @@ fn jump_args_define_explicit_destination_binding() {
 // Dispatcher / structured lowering regression tests [cfg]
 // ---------------------------------------------------------------------------
 
-/// Verifies that a fallible-returning function with a cyclic CFG wraps the dispatcher
-/// in a try/catch, not just a structured body. [cfg] [result]
+/// Cyclic native fallible functions retain dispatcher lowering and pack success at the ABI.
 #[test]
-fn dispatcher_with_fallible_return_wraps_dispatcher_in_try_catch() {
+fn dispatcher_with_native_fallible_return_packs_success_at_abi() {
     let mut expressions = HirExpressionStore::default();
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (mut type_environment, types) = build_type_environment();
-
-    let fallible_return_type = type_environment.intern_constructed(
-        TypeConstructor::Builtin(BuiltinTypeConstructor::FallibleCarrier),
-        Box::new([types.string, types.string]),
-    );
+    let (type_environment, types) = build_type_environment();
 
     let loop_assign = statement(
         1,
@@ -2223,26 +2276,13 @@ fn dispatcher_with_fallible_return_wraps_dispatcher_in_try_catch() {
             region: RegionId(0),
             locals: vec![],
             statements: vec![],
-            terminator: HirTerminator::Return(expression(
-                HirExpressionKind::VariantConstruct {
-                    carrier: HirVariantCarrier::Fallible,
-                    variant_index: 0,
-                    fields: append_variant_fields(
-                        &[HirVariantField {
-                            name: Some(string_table.intern("value")),
-                            value: string_expression(
-                                "done",
-                                types.string,
-                                RegionId(0),
-                                &mut expressions,
-                            ),
-                        }],
-                        &mut expressions,
-                    ),
-                },
-                fallible_return_type,
-                RegionId(0),
-                ValueKind::RValue,
+            terminator: HirTerminator::Return(append_values(
+                &[string_expression(
+                    "done",
+                    types.string,
+                    RegionId(0),
+                    &mut expressions,
+                )],
                 &mut expressions,
             )),
         },
@@ -2252,7 +2292,8 @@ fn dispatcher_with_fallible_return_wraps_dispatcher_in_try_catch() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: fallible_return_type,
+        returns: vec![types.string].into_boxed_slice(),
+        error_return: Some(types.string),
     };
 
     let module = build_module(
@@ -2280,28 +2321,14 @@ fn dispatcher_with_fallible_return_wraps_dispatcher_in_try_catch() {
         "cyclic CFG must use dispatcher"
     );
 
-    let try_pos = output
-        .source
-        .find("try {")
-        .expect("Fallible function must emit try/catch wrapper");
-    let while_pos = output
-        .source
-        .find("while (true)")
-        .expect("dispatcher must emit while (true)");
+    let body = helper_source(&output.source, &expected_dev_function_name("main", 0));
     assert!(
-        try_pos < while_pos,
-        "try/catch must wrap the dispatcher, not the other way around"
-    );
-
-    assert!(
-        output.source.contains("} catch (__moth_err) {"),
-        "Fallible function must emit catch block for propagation sentinel"
+        body.contains("return { tag: \"ok\", value: \"done\" };"),
+        "native success slots must retain the JS fallible return ABI"
     );
     assert!(
-        output
-            .source
-            .contains("return { tag: \"err\", value: __moth_err.value };"),
-        "catch block must re-wrap propagated errors into a fallible carrier"
+        !body.contains("catch (__moth_err)"),
+        "native failure edges do not require a propagation sentinel wrapper"
     );
 }
 
@@ -2516,11 +2543,7 @@ fn multiple_acyclic_if_blocks_stay_structured() {
             region: RegionId(0),
             locals: vec![],
             statements: vec![],
-            terminator: HirTerminator::Return(unit_expression(
-                types.unit,
-                RegionId(0),
-                &mut expressions,
-            )),
+            terminator: HirTerminator::Return(append_values(&[], &mut expressions)),
         },
     ];
 
@@ -2528,7 +2551,8 @@ fn multiple_acyclic_if_blocks_stay_structured() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: vec![].into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(

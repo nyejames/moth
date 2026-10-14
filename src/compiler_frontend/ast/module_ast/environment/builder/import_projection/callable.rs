@@ -9,6 +9,10 @@
 use super::*;
 
 use crate::compiler_frontend::ast::module_ast::environment::builder::import_projection::nominal::imported_nominal_path;
+use crate::compiler_frontend::ast::statements::functions::{
+    FunctionParameter, FunctionSignature, ReturnChannel, ReturnSlot,
+};
+use crate::compiler_frontend::ast::type_resolution::intern_resolved_function_signature;
 use crate::compiler_frontend::canonical_type_identity::GenericDeclarationOrigin;
 use crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget;
 use crate::compiler_frontend::semantic_identity::{GeneratedDeclarationIdentity, OriginFunctionId};
@@ -49,7 +53,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?,
             };
 
-            let (signature, function_type_id, fallible_carrier_type_id) = self
+            let (signature, function_type_id, returns, error_return) = self
                 .project_imported_callable_signature(
                     &local_path,
                     &function.parameters,
@@ -58,16 +62,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     string_table,
                 )
                 .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-            let diagnostic_type = DataType::Function(Box::new(None), signature.clone());
             let declaration = Declaration {
                 id: local_path,
-                value: Expression::new(
-                    ExpressionKind::NoValue,
-                    None,
-                    function_type_id,
-                    diagnostic_type,
-                    ValueMode::ImmutableReference,
-                ),
+                type_id: function_type_id,
+                diagnostic_type: DataType::Inferred,
+                value_mode: ValueMode::ImmutableReference,
+                value: DeclarationValue::Shell(DeclarationShell::Function { receiver: None }),
                 binding_span: None,
                 config_qualifier: None,
             };
@@ -120,7 +120,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         ),
                         generic_parameter_owner: Some(generic_parameter_owner),
                         generic_parameter_list_id,
-                        signature,
+                        signature: signature.clone(),
                         body_tokens: None,
                         declaration_span: None,
                     },
@@ -159,7 +159,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                                 string_table,
                             )
                         })?,
-                    fallible_carrier_type_id,
+                    returns,
+                    error_return,
                 },
             );
         }
@@ -279,7 +280,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     .path_fork
                     .try_intern_child(imported_type_path, method_name)
                     .expect("imported receiver method path table exhausted");
-                let (signature, _, fallible_carrier_type_id) = self
+                let (signature, _, returns, error_return) = self
                     .project_imported_callable_signature(
                         &method_path,
                         &method.parameters,
@@ -343,7 +344,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             )),
                             generic_parameter_owner: Some(generic_parameter_owner),
                             generic_parameter_list_id,
-                            signature,
+                            signature: signature.clone(),
                             body_tokens: None,
                             declaration_span: None,
                         },
@@ -376,7 +377,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     .projected_imported_receiver_method_contract(
                         method_path,
                         &method.method_origin,
-                        fallible_carrier_type_id,
+                        returns,
+                        error_return,
                     )
                     .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
                 if self
@@ -417,7 +419,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         &self,
         method_path: PathId,
         method_origin: &OriginFunctionId,
-        fallible_carrier_type_id: Option<TypeId>,
+        returns: Vec<TypeId>,
+        error_return: Option<TypeId>,
     ) -> Result<AstImportedFunctionContract, CompilerError> {
         let header_contract = self
             .binding_environment
@@ -444,7 +447,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         Ok(AstImportedFunctionContract {
             target,
             summary,
-            fallible_carrier_type_id,
+            returns,
+            error_return,
         })
     }
 
@@ -477,20 +481,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         return_surfaces: &[PublicReturnTypeSlot],
         error_surface: Option<&CanonicalTypeIdentity>,
         string_table: &mut StringTable,
-    ) -> Result<
-        (
-            crate::compiler_frontend::ast::statements::functions::FunctionSignature,
-            TypeId,
-            Option<TypeId>,
-        ),
-        CompilerError,
-    > {
-        use crate::compiler_frontend::ast::statements::functions::{
-            FunctionSignature, ReturnChannel, ReturnSlot,
-        };
-
+    ) -> Result<(FunctionSignature, TypeId, Vec<TypeId>, Option<TypeId>), CompilerError> {
         let mut parameters = Vec::with_capacity(parameter_surfaces.len());
-        let mut parameter_type_ids = Vec::with_capacity(parameter_surfaces.len());
         for (index, parameter) in parameter_surfaces.iter().enumerate() {
             let type_id = self.intern_imported_canonical_type(&parameter.type_identity)?;
             let diagnostic_type = diagnostic_type_spelling(type_id, &self.type_environment);
@@ -503,27 +495,23 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 PublicCallParameterAccess::Shared => ValueMode::ImmutableReference,
                 PublicCallParameterAccess::Mutable => ValueMode::MutableReference,
             };
-            let mut value = Expression::new(
-                ExpressionKind::NoValue,
-                None,
-                type_id,
-                diagnostic_type,
-                value_mode.clone(),
-            );
-            if let Some(default) = &parameter.folded_default {
-                value = self.project_imported_folded_value(default, type_id, string_table)?;
-                value.value_mode = value_mode;
-            }
-            parameters.push(Declaration {
+            let default = match &parameter.folded_default {
+                Some(default) => {
+                    Some(self.project_imported_folded_value(default, type_id, string_table)?)
+                }
+                None => None,
+            };
+            parameters.push(FunctionParameter {
                 id: self
                     .path_fork
                     .try_intern_child(*function_path, name)
                     .expect("imported callable parameter path table exhausted"),
-                value,
+                type_id,
+                diagnostic_type,
+                value_mode,
+                default,
                 binding_span: None,
-                config_qualifier: None,
             });
-            parameter_type_ids.push(type_id);
         }
 
         let mut returns = Vec::new();
@@ -550,28 +538,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             None
         };
 
-        let fallible_carrier_type_id = error_return.map(|error_type_id| {
-            let success_type_id = match return_type_ids.as_slice() {
-                [] => builtin_type_ids::NONE,
-                [single] => *single,
-                many => self.type_environment.intern_tuple(many.to_vec()),
-            };
-            self.type_environment
-                .intern_fallible_carrier(success_type_id, error_type_id)
-        });
-        let function_type_id = self.type_environment.intern_function(FunctionTypeKey {
-            parameters: parameter_type_ids.into_boxed_slice(),
-            returns: return_type_ids.into_boxed_slice(),
-            error_return,
-        });
-        Ok((
-            FunctionSignature {
-                parameters,
-                returns,
-            },
-            function_type_id,
-            fallible_carrier_type_id,
-        ))
+        let signature = FunctionSignature {
+            parameters,
+            returns,
+        };
+        let function_type_id =
+            intern_resolved_function_signature(&signature, &mut self.type_environment);
+        Ok((signature, function_type_id, return_type_ids, error_return))
     }
 }
 

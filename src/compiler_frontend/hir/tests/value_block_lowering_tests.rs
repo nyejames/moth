@@ -6,15 +6,20 @@
 //!      allocation, merge-block targeting, and active-value-block-target protocol.
 
 use crate::compiler_frontend::ast::ast_nodes::{MatchExhaustiveness, NodeKind};
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::const_values::store::{ConstValuePayload, ConstValueStore};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, ExpressionOp,
+};
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
-use crate::compiler_frontend::ast::statements::match_patterns::{MatchArm, MatchPattern};
+use crate::compiler_frontend::ast::statements::match_patterns::{
+    MatchArm, MatchPattern, PatternValue, PatternValueKind,
+};
 use crate::compiler_frontend::ast::statements::value_production::{
     ProducedValues,
     types::{ValueBlock, ValueMatchBlock},
 };
 use crate::compiler_frontend::compiler_errors::ErrorType;
-use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::hir::expressions::HirExpression;
 use crate::compiler_frontend::hir::ids::{BlockId, LocalId};
@@ -37,18 +42,24 @@ use crate::compiler_frontend::hir::hir_builder::{
 ///
 /// WHY: these fixtures pin the exact `I32` width explicitly at the scalar carrier.
 fn i32_literal(
+    builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     value: i64,
     span: Option<crate::compiler_frontend::source::SourceSpan>,
     value_mode: ValueMode,
-) -> Expression {
-    Expression::fixed_scalar(
-        FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32"),
-        span,
-        value_mode,
-    )
+) -> ExprId {
+    builder
+        .fixed_scalar(
+            const_values,
+            FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32"),
+            span,
+            value_mode,
+        )
+        .expect("fixture literal must be valid")
+        .id()
 }
 
-/// Extracts the result-local definition and merge target from a value-block arm block.
+/// Extracts an arm's produced value, merge destination and target.
 fn value_block_result_definition(
     module: &HirModule,
     block_id: BlockId,
@@ -66,16 +77,20 @@ fn value_block_result_definition(
         })
         .expect("value-block branch should define a hidden result local");
 
-    super::assert_block_has_jump_args(module, block_id, 0);
+    let args = super::assert_block_has_jump_args(module, block_id, 1);
+    assert_eq!(
+        args[0].source, result_local,
+        "the edge reads the branch result before defining the merge slot"
+    );
     let HirTerminator::Jump { target, .. } = block.terminator else {
         panic!("value-block branch should jump to the merge block");
     };
 
-    (result_local, value_kind, target)
+    (args[0].destination, value_kind, target)
 }
 
 #[test]
-fn value_match_lowering_uses_shared_result_local_and_merge_block() {
+fn value_match_lowering_joins_ordered_slot_at_shared_merge_block() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (entry_path, start_name) =
@@ -83,12 +98,42 @@ fn value_match_lowering_uses_shared_result_local_and_merge_block() {
     let x = super::symbol("x", &mut path_fork, &mut string_table);
     let result_name = super::symbol("result", &mut path_fork, &mut string_table);
 
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let pattern_a = const_values
+        .insert_resolved(
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            ConstValuePayload::FixedScalar(
+                FixedScalarValue::signed(FixedScalar::I32, 1).expect("test literal fits I32"),
+            ),
+            None,
+        )
+        .expect("fixture pattern must be valid");
+    let pattern_b = const_values
+        .insert_resolved(
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            ConstValuePayload::FixedScalar(
+                FixedScalarValue::signed(FixedScalar::I32, 2).expect("test literal fits I32"),
+            ),
+            None,
+        )
+        .expect("fixture pattern must be valid");
     let arm_a = MatchArm {
-        pattern: MatchPattern::Literal(i32_literal(1, None, ValueMode::ImmutableOwned)),
+        pattern: MatchPattern::Literal(PatternValue {
+            kind: PatternValueKind::Constant(pattern_a),
+            type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            span: None,
+        }),
         guard: None,
         body: vec![node(
             NodeKind::ThenValue(ProducedValues {
-                expressions: vec![i32_literal(10, None, ValueMode::ImmutableOwned)],
+                expressions: vec![i32_literal(
+                    &mut expressions,
+                    &mut const_values,
+                    10,
+                    None,
+                    ValueMode::ImmutableOwned,
+                )],
                 span: None,
             }),
             None,
@@ -96,11 +141,21 @@ fn value_match_lowering_uses_shared_result_local_and_merge_block() {
     };
 
     let arm_b = MatchArm {
-        pattern: MatchPattern::Literal(i32_literal(2, None, ValueMode::ImmutableOwned)),
+        pattern: MatchPattern::Literal(PatternValue {
+            kind: PatternValueKind::Constant(pattern_b),
+            type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            span: None,
+        }),
         guard: None,
         body: vec![node(
             NodeKind::ThenValue(ProducedValues {
-                expressions: vec![i32_literal(20, None, ValueMode::ImmutableOwned)],
+                expressions: vec![i32_literal(
+                    &mut expressions,
+                    &mut const_values,
+                    20,
+                    None,
+                    ValueMode::ImmutableOwned,
+                )],
                 span: None,
             }),
             None,
@@ -109,33 +164,47 @@ fn value_match_lowering_uses_shared_result_local_and_merge_block() {
 
     let default_body = vec![node(
         NodeKind::ThenValue(ProducedValues {
-            expressions: vec![i32_literal(0, None, ValueMode::ImmutableOwned)],
+            expressions: vec![i32_literal(
+                &mut expressions,
+                &mut const_values,
+                0,
+                None,
+                ValueMode::ImmutableOwned,
+            )],
             span: None,
         }),
         None,
     )];
 
-    let value_match_expr = Expression::new(
-        ExpressionKind::ValueBlock {
-            block: Box::new(ValueBlock::Match(ValueMatchBlock {
-                scrutinee: reference_expr_with_type_id(
-                    x,
-                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
-                    None,
-                    ValueMode::ImmutableReference,
-                ),
+    let scrutinee = reference_expr_with_type_id(
+        &mut expressions,
+        x,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        None,
+        ValueMode::ImmutableReference,
+    );
+    let block = expressions
+        .append_value_block(
+            ValueBlock::Match(ValueMatchBlock {
+                scrutinee,
                 arms: vec![arm_a, arm_b],
                 default: Some(default_body),
                 exhaustiveness: MatchExhaustiveness::HasDefault,
                 span: None,
                 result_type_ids: vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
-            })),
-        },
-        None,
-        builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        DataType::Inferred,
-        ValueMode::ImmutableOwned,
-    );
+            }),
+            None,
+        )
+        .expect("fixture value block must have valid edges");
+    let value_match_expr = expressions
+        .append_expression(
+            ExpressionOp::ValueBlock(block),
+            None,
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture value block occurrence must be valid")
+        .id();
 
     let start_fn = function_node(
         start_name,
@@ -149,16 +218,27 @@ fn value_match_lowering_uses_shared_result_local_and_merge_block() {
             returns: vec![],
         },
         vec![node(
-            NodeKind::VariableDeclaration(make_test_variable(result_name, value_match_expr)),
+            NodeKind::VariableDeclaration(make_test_variable(
+                result_name,
+                value_match_expr,
+                &expressions,
+            )),
             None,
         )],
         None,
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast_with_registered_types(vec![start_fn], entry_path),
+        build_ast_with_registered_types(
+            vec![start_fn],
+            entry_path,
+            expressions,
+            const_values,
+            TypeEnvironment::new(),
+        ),
         &mut string_table,
         &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
     )
     .expect("value-match lowering should succeed");
 
@@ -187,11 +267,11 @@ fn value_match_lowering_uses_shared_result_local_and_merge_block() {
 
     assert_eq!(
         result_local_1, result_local_2,
-        "all match arms should assign to the same shared result local"
+        "all match arms should transfer to the same merge destination"
     );
     assert_eq!(
         result_local_2, result_local_3,
-        "all match arms should assign to the same shared result local"
+        "all match arms should transfer to the same merge destination"
     );
     assert_eq!(
         merge_1, merge_2,
@@ -212,6 +292,8 @@ fn then_value_without_active_target_is_hir_invariant_failure() {
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
 
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let start_fn = function_node(
         start_name,
         FunctionSignature {
@@ -220,7 +302,13 @@ fn then_value_without_active_target_is_hir_invariant_failure() {
         },
         vec![node(
             NodeKind::ThenValue(ProducedValues {
-                expressions: vec![i32_literal(1, None, ValueMode::ImmutableOwned)],
+                expressions: vec![i32_literal(
+                    &mut expressions,
+                    &mut const_values,
+                    1,
+                    None,
+                    ValueMode::ImmutableOwned,
+                )],
                 span: None,
             }),
             None,
@@ -229,9 +317,16 @@ fn then_value_without_active_target_is_hir_invariant_failure() {
     );
 
     let err = lower_ast(
-        build_ast_with_registered_types(vec![start_fn], entry_path),
+        build_ast_with_registered_types(
+            vec![start_fn],
+            entry_path,
+            expressions,
+            const_values,
+            TypeEnvironment::new(),
+        ),
         &mut string_table,
         &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
     )
     .expect_err("ThenValue outside active value-block target should fail HIR lowering");
 

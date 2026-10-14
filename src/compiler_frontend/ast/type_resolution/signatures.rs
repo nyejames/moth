@@ -1,7 +1,9 @@
 //! Function signature resolution for AST type resolution.
 
 use super::{ResolvedFunctionSignature, resolve_named_signature_type};
-use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ReturnSlot};
+use crate::compiler_frontend::ast::statements::functions::{
+    FunctionSignature, ReturnChannel, ReturnSlot,
+};
 use crate::compiler_frontend::ast::type_resolution::{
     TypeResolutionContext, TypeResolutionResult, resolve_diagnostic_type_to_type_id_checked,
 };
@@ -10,11 +12,40 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::ids::{GenericParameterListId, TypeId};
+use crate::compiler_frontend::datatypes::ids::{FunctionTypeKey, GenericParameterListId, TypeId};
 use crate::compiler_frontend::datatypes::{ReceiverKey, diagnostic_type_spelling};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+
+/// Intern the callable contract from its resolved slots, without copying diagnostic syntax.
+pub(crate) fn intern_resolved_function_signature(
+    signature: &FunctionSignature,
+    type_environment: &mut TypeEnvironment,
+) -> TypeId {
+    let parameters = signature
+        .parameters
+        .iter()
+        .map(|parameter| parameter.type_id)
+        .collect();
+    let mut returns = Vec::with_capacity(signature.success_return_slot_count());
+    let mut error_return = None;
+    for return_slot in &signature.returns {
+        // Signature resolution populates every slot before the callable contract is interned.
+        let type_id = return_slot
+            .type_id
+            .expect("resolved callable return slot has no type ID");
+        match return_slot.channel {
+            ReturnChannel::Success => returns.push(type_id),
+            ReturnChannel::Error => error_return = Some(type_id),
+        }
+    }
+    type_environment.intern_function(FunctionTypeKey {
+        parameters,
+        returns: returns.into_boxed_slice(),
+        error_return,
+    })
+}
 
 // -------------------------------
 //  Function signature resolution
@@ -37,7 +68,7 @@ pub(crate) fn resolve_function_signature(
     let function_span = type_resolution_context
         .declaration_table
         .get_by_path(function_path)
-        .and_then(|declaration| declaration.value.span);
+        .and_then(|declaration| declaration.binding_span);
 
     let mut resolved_parameters = Vec::with_capacity(signature.parameters.len());
     let mut receiver = None;
@@ -49,20 +80,18 @@ pub(crate) fn resolve_function_signature(
     for (parameter_index, parameter) in signature.parameters.iter().enumerate() {
         let mut resolved_parameter = parameter.to_owned();
 
-        resolved_parameter.value.diagnostic_type = resolve_named_signature_type(
-            &parameter.value.diagnostic_type,
-            parameter.value.span,
+        resolved_parameter.diagnostic_type = resolve_named_signature_type(
+            &parameter.diagnostic_type,
+            parameter.binding_span,
             type_resolution_context,
             string_table,
         )?;
 
-        // Resolve the canonical TypeId for the parameter's data type so that
-        // HIR lowering sees the correct type identity (not TypeId(0) from
-        // Expression::new's builtin-only mapping).
-        resolved_parameter.value.type_id = resolve_diagnostic_type_to_type_id_checked(
-            &resolved_parameter.value.diagnostic_type,
+        // Callable contracts own parameter types independently of folded default content.
+        resolved_parameter.type_id = resolve_diagnostic_type_to_type_id_checked(
+            &resolved_parameter.diagnostic_type,
             type_resolution_context.type_environment,
-            resolved_parameter.value.span,
+            resolved_parameter.binding_span,
         )?;
         if path_fork.component(resolved_parameter.id) == Some(this_name) {
             if receiver.is_some() {
@@ -70,7 +99,7 @@ pub(crate) fn resolve_function_signature(
                     InvalidThisUsageReason::DuplicateThis {
                         function_name: function_name_id,
                     },
-                    parameter.value.span,
+                    parameter.binding_span,
                 ));
             }
 
@@ -79,16 +108,16 @@ pub(crate) fn resolve_function_signature(
                     InvalidThisUsageReason::NotFirstParameter {
                         function_name: function_name_id,
                     },
-                    parameter.value.span,
+                    parameter.binding_span,
                 ));
             }
 
             let receiver_key = receiver_key_for_resolved_parameter(
                 function_name_id,
-                resolved_parameter.value.type_id,
+                resolved_parameter.type_id,
                 generic_parameter_list_id,
                 type_resolution_context.type_environment,
-                parameter.value.span,
+                parameter.binding_span,
                 path_fork,
                 string_table,
             )?;

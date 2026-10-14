@@ -1,6 +1,6 @@
 use super::*;
 use crate::compiler_frontend::ast::cursor::AstCursor;
-use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
+use crate::compiler_frontend::ast::expressions::expression_store::ExpressionOperationView;
 use crate::compiler_frontend::ast::templates::template::TemplateType;
 use crate::compiler_frontend::compiler_messages::{DiagnosticKind, SyntaxDiagnosticKind};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -17,6 +17,8 @@ fn html_directive_rejects_arguments() {
 
 #[test]
 fn html_directive_sets_formatter_via_handler_behavior() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let style_directives = html_project_test_style_directives();
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -47,6 +49,8 @@ fn html_directive_sets_formatter_via_handler_behavior() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -60,6 +64,8 @@ fn html_directive_sets_formatter_via_handler_behavior() {
 
 #[test]
 fn css_directive_sets_style_and_formatter_identity() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let style_directives = html_project_test_style_directives();
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -90,6 +96,8 @@ fn css_directive_sets_style_and_formatter_identity() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -102,6 +110,8 @@ fn css_directive_sets_style_and_formatter_identity() {
 }
 #[test]
 fn markdown_directive_sets_style_and_formatter_identity() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
@@ -129,6 +139,8 @@ fn markdown_directive_sets_style_and_formatter_identity() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -142,6 +154,8 @@ fn markdown_directive_sets_style_and_formatter_identity() {
 
 #[test]
 fn code_directive_sets_style_and_formatter_identity() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
@@ -169,6 +183,8 @@ fn code_directive_sets_style_and_formatter_identity() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -182,6 +198,8 @@ fn code_directive_sets_style_and_formatter_identity() {
 
 #[test]
 fn escape_html_directive_sets_style_and_formatter_identity() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let style_directives = html_project_test_style_directives();
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -212,6 +230,8 @@ fn escape_html_directive_sets_style_and_formatter_identity() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -288,6 +308,8 @@ fn runtime_html_templates_emit_warnings_for_static_body_segments() {
 
 #[test]
 fn runtime_templates_format_static_body_strings_only() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
@@ -309,12 +331,20 @@ fn runtime_templates_format_static_body_strings_only() {
     token_stream
         .set_position(file_tokens.opener_index)
         .expect("test token stream position must remain in canonical range");
-    let context = runtime_template_context(&source_path, &mut string_table, &mut path_fork);
+    let context = runtime_template_context(
+        &source_path,
+        &mut expression_builder,
+        &mut const_values,
+        &mut string_table,
+        &mut path_fork,
+    );
 
     let template = Template::new(
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -329,7 +359,11 @@ fn runtime_templates_format_static_body_strings_only() {
     assert!(tir_root_has_head_dynamic_expression(
         &template,
         &store,
-        |expression| matches!(expression.kind, ExpressionKind::Reference(_))
+        &expression_builder,
+        |expression| matches!(
+            expression.operation(),
+            ExpressionOperationView::Reference(_)
+        )
     ));
 
     // Formatted body text is authoritative in the TIR root.

@@ -331,7 +331,7 @@ fn lower_number_operation_source(scale: NumberScale) -> String {
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (mut type_environment, types) = build_type_environment();
+    let (mut type_environment, _) = build_type_environment();
     let number_type = type_environment.intern_number(scale);
     let region = RegionId(0);
     let number_value = NumberValue::from_integer(1, scale);
@@ -365,13 +365,14 @@ fn lower_number_operation_source(scale: NumberScale) -> String {
                 result: HirLocalDestination::Define(LocalId(0)),
             },
         )],
-        terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
     let module = build_module(
         expressions,

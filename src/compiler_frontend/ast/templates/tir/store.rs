@@ -24,6 +24,7 @@ mod slot_plans;
 mod store_support;
 
 use crate::compiler_frontend::arena::capacity::FrontendArenaCapacityEstimate;
+use crate::compiler_frontend::ast::const_values::ConstValueId;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{SlotPlaceholder, TemplateType};
 use crate::compiler_frontend::ast::templates::template_control_flow::TemplateLoopHeader;
@@ -49,6 +50,7 @@ use crate::compiler_frontend::ast::templates::tir::summary::{
 use crate::compiler_frontend::ast::templates::tir::wrapper_sets::wrapper_sets_are_equivalent;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
+use rustc_hash::FxHashMap;
 
 pub(crate) use control_flow::ControlFlowBodyKind;
 #[cfg(test)]
@@ -117,6 +119,11 @@ pub(crate) struct TemplateIrStore {
     /// WHY: the bindings are final at parse time but only the completed iterable makes the `Loop`
     ///      node buildable, so the row waits beside the position instead of inside it.
     pub(super) retained_collection_headers: Vec<RetainedCollectionHeaderRecord>,
+    /// Rebuilt TIR roots for imported const-template constants, keyed by their stable value.
+    ///
+    /// WHY: every reference to one constant must share one TIR root, so the rebuild runs once per
+    ///      `ConstValueId` per module build instead of once per reference.
+    rebuilt_const_template_roots: FxHashMap<ConstValueId, TemplateIrId>,
 }
 
 impl TemplateIrStore {
@@ -138,6 +145,7 @@ impl TemplateIrStore {
             retained_range_headers: Vec::new(),
             retained_selector_patterns: Vec::new(),
             retained_collection_headers: Vec::new(),
+            rebuilt_const_template_roots: FxHashMap::default(),
         }
     }
 
@@ -166,7 +174,22 @@ impl TemplateIrStore {
             retained_range_headers: Vec::new(),
             retained_selector_patterns: Vec::new(),
             retained_collection_headers: Vec::new(),
+            rebuilt_const_template_roots: FxHashMap::default(),
         }
+    }
+
+    /// Returns the TIR root already rebuilt for one imported const-template constant.
+    pub(crate) fn rebuilt_const_template_root(&self, value: ConstValueId) -> Option<TemplateIrId> {
+        self.rebuilt_const_template_roots.get(&value).copied()
+    }
+
+    /// Records the TIR root rebuilt for one imported const-template constant.
+    pub(crate) fn remember_rebuilt_const_template_root(
+        &mut self,
+        value: ConstValueId,
+        root: TemplateIrId,
+    ) {
+        self.rebuilt_const_template_roots.insert(value, root);
     }
 
     pub(crate) fn next_slot_occurrence_id(&mut self) -> SlotOccurrenceId {

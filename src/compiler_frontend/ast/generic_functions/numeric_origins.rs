@@ -15,6 +15,7 @@ use crate::compiler_frontend::ast::expressions::call_argument::ParameterSlot;
 use crate::compiler_frontend::ast::expressions::call_arguments::expected_type_for_resolved_parameter;
 use crate::compiler_frontend::ast::expressions::constructor_views::ConstructorField;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
 use crate::compiler_frontend::ast::generic_functions::calls::GenericCallExpectedContext;
 use crate::compiler_frontend::ast::generic_functions::diagnostics::cannot_infer_generic_function_arguments;
@@ -29,7 +30,7 @@ use crate::compiler_frontend::ast::numeric_known_shape::{
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidGenericInstantiationReason,
+    CompilerDiagnostic, InvalidGenericInstantiationReason, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceVariantPayloadDefinition, TypeDefinition,
@@ -54,6 +55,7 @@ pub(crate) struct GenericNumericSignatureInput<'a, 'b> {
     pub(crate) expected_context: GenericCallExpectedContext<'a>,
     pub(crate) context: &'a ScopeContext,
     pub(crate) type_interner: &'a mut AstTypeInterner<'b>,
+    pub(crate) expression_builder: &'a AstExpressionBuilder,
     pub(crate) path_fork: &'a PathInternerFork,
     pub(crate) call_span: Option<SourceSpan>,
     /// Forward producers registered while this call's own argument text parsed. Only these pending
@@ -107,6 +109,7 @@ pub(crate) fn link_generic_numeric_signature(
         expected_context,
         context,
         type_interner,
+        expression_builder,
         path_fork,
         call_span,
         owned_producers,
@@ -151,7 +154,10 @@ pub(crate) fn link_generic_numeric_signature(
                     continue;
                 };
                 let declared = declared_parameter_type(template, slot, receiver_slot_offset)?;
-                linker.bind_type(declared, call.value.type_id);
+                let type_id = expression_builder
+                    .view(call.value)?
+                    .require_single(ValueReceiverContext::FunctionArgument)?;
+                linker.bind_type(declared, type_id);
             }
             DeferredCallArgument::Retained { shape, .. }
             | DeferredCallArgument::Forward { shape, .. } => {
@@ -210,6 +216,7 @@ pub(crate) struct GenericNominalShapeInput<'a, 'b> {
     pub(crate) seeded_bindings: &'a GenericTypeBindings,
     pub(crate) context: &'a ScopeContext,
     pub(crate) type_interner: &'a mut AstTypeInterner<'b>,
+    pub(crate) expression_builder: &'a AstExpressionBuilder,
     pub(crate) string_table: &'a mut StringTable,
     pub(crate) call_span: Option<SourceSpan>,
 }
@@ -233,6 +240,7 @@ pub(crate) fn link_generic_nominal_result_shape(
         seeded_bindings,
         context,
         type_interner,
+        expression_builder,
         string_table,
         call_span,
     } = input;
@@ -297,7 +305,10 @@ pub(crate) fn link_generic_nominal_result_shape(
                 let Some(field) = declared_fields.get(slot.index()) else {
                     continue;
                 };
-                linker.bind_type(field.type_id, call.value.type_id);
+                let type_id = expression_builder
+                    .view(call.value)?
+                    .require_single(ValueReceiverContext::ConstructorArgument)?;
+                linker.bind_type(field.type_id, type_id);
             }
             DeferredCallArgument::Retained { shape, .. }
             | DeferredCallArgument::Forward { shape, .. } => {
@@ -1091,7 +1102,7 @@ fn declared_parameter_type(
     slot.index()
         .checked_add(receiver_slot_offset)
         .and_then(|index| template.signature.parameters.get(index))
-        .map(|parameter| parameter.value.type_id)
+        .map(|parameter| parameter.type_id)
         .ok_or_else(|| {
             infrastructure("generic call argument routed outside the template signature")
         })

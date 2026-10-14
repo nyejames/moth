@@ -10,10 +10,10 @@ use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::external_packages::{
     CanonicalBindingSymbolIdentity, ExternalAbiType, ExternalAccessKind, ExternalConstantDef,
     ExternalConstantId, ExternalConstantRawValue, ExternalConstantValue, ExternalFunctionDef,
-    ExternalFunctionId, ExternalFunctionLowerings, ExternalJsLowering, ExternalPackageRegistry,
-    ExternalParameter, ExternalReturnAlias, ExternalReturnSlot, ExternalSignatureType,
-    ExternalSymbolCategory, ExternalSymbolId, ExternalSymbolPath, ExternalTypeDef, ExternalTypeId,
-    IO_INPUT_EXTERNAL_TYPE_ID, external_success_returns,
+    ExternalFunctionId, ExternalFunctionLowerings, ExternalHirReturnAlias, ExternalJsLowering,
+    ExternalPackageRegistry, ExternalParameter, ExternalReturnAlias, ExternalReturnSlot,
+    ExternalSignatureType, ExternalSymbolCategory, ExternalSymbolId, ExternalSymbolPath,
+    ExternalTypeDef, ExternalTypeId, IO_INPUT_EXTERNAL_TYPE_ID, external_success_returns,
 };
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -37,7 +37,7 @@ fn import_path(
 
 #[test]
 fn return_slots_preserve_alias_metadata() {
-    let host_function = ExternalFunctionDef {
+    let mut host_function = ExternalFunctionDef {
         name: "concat_like".to_owned(),
         parameters: vec![
             ExternalParameter {
@@ -67,6 +67,45 @@ fn return_slots_preserve_alias_metadata() {
         &returns[0].alias,
         ExternalReturnAlias::AliasArgs(parameter_indices) if parameter_indices == &[1usize]
     ));
+    assert_eq!(
+        host_function.hir_return_alias(),
+        ExternalHirReturnAlias::AliasArgs(&[1]),
+    );
+    host_function.error_return_type = Some(ExternalSignatureType::BuiltinError);
+    assert_eq!(
+        host_function.hir_return_alias(),
+        ExternalHirReturnAlias::AliasArgs(&[1]),
+    );
+    host_function.returns.extend([
+        ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str),
+        ExternalReturnSlot::alias_args(ExternalAbiType::Utf8Str, vec![0, 1]),
+    ]);
+    assert_eq!(
+        host_function.hir_return_alias(),
+        ExternalHirReturnAlias::Unknown,
+    );
+    assert_eq!(
+        host_function.returns[2].alias,
+        ExternalReturnAlias::AliasArgs(vec![0, 1]),
+    );
+    host_function.returns = vec![
+        ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str),
+        ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str),
+    ];
+    assert_eq!(
+        host_function.hir_return_alias(),
+        ExternalHirReturnAlias::Unknown,
+    );
+    host_function.returns.truncate(1);
+    assert_eq!(
+        host_function.hir_return_alias(),
+        ExternalHirReturnAlias::Fresh,
+    );
+    host_function.returns.clear();
+    assert_eq!(
+        host_function.hir_return_alias(),
+        ExternalHirReturnAlias::Fresh,
+    );
 }
 
 #[test]

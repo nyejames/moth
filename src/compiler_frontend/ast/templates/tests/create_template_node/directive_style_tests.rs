@@ -1,6 +1,8 @@
 use super::*;
 use crate::compiler_frontend::ast::cursor::AstCursor;
-use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    ExprId, ExpressionOperationView,
+};
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{
     CommentDirectiveKind, SlotKey, TemplateType,
@@ -71,11 +73,15 @@ fn parse_optional_slot_target_for_test(
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     parse_optional_slot_target_argument(
         directive_name,
         tokens,
         &context,
         &mut type_interner,
+        &mut expression_builder,
+        &mut const_values,
         string_table,
         path_fork,
     )
@@ -93,11 +99,15 @@ fn parse_required_slot_name_for_test(
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     parse_required_slot_name_argument(
         directive_name,
         tokens,
         &context,
         &mut type_interner,
+        &mut expression_builder,
+        &mut const_values,
         string_table,
         path_fork,
     )
@@ -107,11 +117,11 @@ fn parse_required_slot_name_for_test(
 fn parse_optional_parenthesized_expression_for_test(
     tokens: &mut AstCursor,
     context: &ScopeContext,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> DirectiveStyleTestResult<
-    Option<crate::compiler_frontend::ast::expressions::expression::Expression>,
-> {
+) -> DirectiveStyleTestResult<Option<ExprId>> {
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
@@ -121,6 +131,8 @@ fn parse_optional_parenthesized_expression_for_test(
         tokens,
         context,
         &mut type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     )
@@ -130,9 +142,11 @@ fn parse_optional_parenthesized_expression_for_test(
 fn parse_required_parenthesized_expression_for_test(
     tokens: &mut AstCursor,
     context: &ScopeContext,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> DirectiveStyleTestResult<crate::compiler_frontend::ast::expressions::expression::Expression> {
+) -> DirectiveStyleTestResult<ExprId> {
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
@@ -142,20 +156,20 @@ fn parse_required_parenthesized_expression_for_test(
         tokens,
         context,
         &mut type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     )
     .map_err(directive_diagnostic)
 }
 
-fn parse_optional_expression_source(
-    source: &str,
-) -> DirectiveStyleTestResult<
-    Option<crate::compiler_frontend::ast::expressions::expression::Expression>,
-> {
+fn parse_optional_expression_source(source: &str) -> DirectiveStyleTestResult<Option<ExprId>> {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let file_tokens =
         directive_tokens(source, &mut string_table, &mut span_builder, &mut path_fork);
     let context = test_context(file_tokens.source_path, &path_fork);
@@ -173,6 +187,8 @@ fn parse_optional_expression_source(
     parse_optional_parenthesized_expression_for_test(
         &mut cursor,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         &mut string_table,
         &mut path_fork,
     )
@@ -709,6 +725,8 @@ fn optional_expression_no_parens_returns_none() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let file_tokens = directive_tokens(
         "[$css]",
         &mut string_table,
@@ -730,6 +748,8 @@ fn optional_expression_no_parens_returns_none() {
     let result = parse_optional_parenthesized_expression_for_test(
         &mut cursor,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         &mut string_table,
         &mut path_fork,
     );
@@ -741,6 +761,8 @@ fn optional_expression_with_parens_and_one_trailing_comma_returns_some() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let file_tokens = directive_tokens(
         "[$children(\n\"wrap\"\n,)]",
         &mut string_table,
@@ -762,6 +784,8 @@ fn optional_expression_with_parens_and_one_trailing_comma_returns_some() {
     let result = parse_optional_parenthesized_expression_for_test(
         &mut cursor,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         &mut string_table,
         &mut path_fork,
     );
@@ -778,6 +802,8 @@ fn optional_expression_empty_parens_errors() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let file_tokens = directive_tokens(
         "[$code()]",
         &mut string_table,
@@ -799,6 +825,8 @@ fn optional_expression_empty_parens_errors() {
     let result = parse_optional_parenthesized_expression_for_test(
         &mut cursor,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         &mut string_table,
         &mut path_fork,
     );
@@ -813,6 +841,8 @@ fn optional_expression_whitespace_only_parens_use_generic_empty_arguments() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let file_tokens = directive_tokens(
         "[$code(\n)]",
         &mut string_table,
@@ -834,6 +864,8 @@ fn optional_expression_whitespace_only_parens_use_generic_empty_arguments() {
     let result = parse_optional_parenthesized_expression_for_test(
         &mut cursor,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         &mut string_table,
         &mut path_fork,
     );
@@ -852,6 +884,8 @@ fn optional_expression_extra_comma_errors() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let source = "[$children(\"a\", \"b\")]";
     let file_tokens =
         directive_tokens(source, &mut string_table, &mut span_builder, &mut path_fork);
@@ -870,6 +904,8 @@ fn optional_expression_extra_comma_errors() {
     let result = parse_optional_parenthesized_expression_for_test(
         &mut cursor,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         &mut string_table,
         &mut path_fork,
     );
@@ -947,6 +983,8 @@ fn required_expression_missing_parens_errors() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let file_tokens = directive_tokens(
         "[$children]",
         &mut string_table,
@@ -968,6 +1006,8 @@ fn required_expression_missing_parens_errors() {
     let result = parse_required_parenthesized_expression_for_test(
         &mut cursor,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         &mut string_table,
         &mut path_fork,
     );
@@ -985,6 +1025,8 @@ fn required_expression_compile_time_constant_ok() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let file_tokens = directive_tokens(
         "[$children(\"wrap\")]",
         &mut string_table,
@@ -1006,12 +1048,20 @@ fn required_expression_compile_time_constant_ok() {
     let result = parse_required_parenthesized_expression_for_test(
         &mut cursor,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         &mut string_table,
         &mut path_fork,
     );
     assert!(result.is_ok());
     let expr = result.unwrap();
-    assert!(matches!(expr.kind, ExpressionKind::StringSlice(_)));
+    let view = expression_builder
+        .view(expr)
+        .expect("directive expression should be owned by the test builder");
+    assert!(matches!(
+        view.operation(),
+        ExpressionOperationView::Constant(id) if const_values.string_value(id).is_some()
+    ));
 }
 
 #[test]
@@ -1065,6 +1115,8 @@ fn insert_directive_can_coexist_with_other_meaningful_head_items() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let file_tokens = template_tokens_from_source(
         "[\"prefix\", $insert(\"style\"): body]",
         &mut string_table,
@@ -1088,6 +1140,8 @@ fn insert_directive_can_coexist_with_other_meaningful_head_items() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -1125,6 +1179,8 @@ fn non_formatter_and_formatter_directives_can_coexist() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let file_tokens = template_tokens_from_source(
         "[1, $md:\n# Hello\n]",
         &mut string_table,
@@ -1148,6 +1204,8 @@ fn non_formatter_and_formatter_directives_can_coexist() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -1162,6 +1220,8 @@ fn doc_templates_treat_brackets_as_literal_text() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let file_tokens = template_tokens_from_source(
         "[$doc:\n[value]\n]",
         &mut string_table,
@@ -1169,7 +1229,13 @@ fn doc_templates_treat_brackets_as_literal_text() {
         &mut path_fork,
     );
     let source_path = file_tokens.source_path;
-    let context = runtime_template_context(&source_path, &mut string_table, &mut path_fork);
+    let context = runtime_template_context(
+        &source_path,
+        &mut expression_builder,
+        &mut const_values,
+        &mut string_table,
+        &mut path_fork,
+    );
     let canonical_owner = file_tokens
         .canonical_owner()
         .expect("test token stream must expose canonical source tokens");
@@ -1187,13 +1253,21 @@ fn doc_templates_treat_brackets_as_literal_text() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
     )
     .expect("doc template should parse brackets as literal text");
 
-    let folded = fold_template_in_context(&template, &context, &mut string_table);
+    let folded = fold_template_in_context(
+        &template,
+        &context,
+        &mut string_table,
+        &mut expression_builder,
+        &mut const_values,
+    );
     let result = string_table.resolve(folded);
     // Each bracket and the symbol become separate atoms, each markdown-formatted
     // as individual paragraphs. The key assertion is that all three appear in the output.
@@ -1216,6 +1290,8 @@ fn doc_templates_are_markdown_formatted_by_default() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let file_tokens = template_tokens_from_source(
         "[$doc:\n# Heading\n]",
         &mut string_table,
@@ -1239,6 +1315,8 @@ fn doc_templates_are_markdown_formatted_by_default() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -1249,7 +1327,13 @@ fn doc_templates_are_markdown_formatted_by_default() {
         TemplateType::Comment(CommentDirectiveKind::Doc)
     ));
 
-    let folded = fold_template_in_context(&template, &context, &mut string_table);
+    let folded = fold_template_in_context(
+        &template,
+        &context,
+        &mut string_table,
+        &mut expression_builder,
+        &mut const_values,
+    );
     assert!(
         string_table
             .resolve(folded)
@@ -1262,6 +1346,8 @@ fn doc_brackets_remain_literal_text() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let file_tokens = template_tokens_from_source(
         "[$doc:\n[else][break][continue]\n]",
         &mut string_table,
@@ -1285,13 +1371,21 @@ fn doc_brackets_remain_literal_text() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
     )
     .expect("doc template should parse");
 
-    let folded = fold_template_in_context(&template, &context, &mut string_table);
+    let folded = fold_template_in_context(
+        &template,
+        &context,
+        &mut string_table,
+        &mut expression_builder,
+        &mut const_values,
+    );
     let result = string_table.resolve(folded);
     // Direct source markers remain intact when `$doc` suppresses child-template parsing.
     for marker in ["[else]", "[break]", "[continue]"] {
@@ -1308,6 +1402,8 @@ fn css_without_argument_uses_css_formatter() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let file_tokens = template_tokens_from_source_with_style_directives(
         "[$css:\n.button { color: red; }\n]",
         &style_directives,
@@ -1333,6 +1429,8 @@ fn css_without_argument_uses_css_formatter() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -1350,6 +1448,8 @@ fn css_inline_argument_parses_correctly() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let file_tokens = template_tokens_from_source_with_style_directives(
         "[$css(\"inline\"):\ncolor: blue;\n]",
         &style_directives,
@@ -1375,6 +1475,8 @@ fn css_inline_argument_parses_correctly() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -1556,6 +1658,8 @@ fn runtime_templates_with_code_format_only_static_body_strings() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let file_tokens = template_tokens_from_source(
         "[value, $code(\"moth\"):\nloop x\n]",
         &mut string_table,
@@ -1563,7 +1667,13 @@ fn runtime_templates_with_code_format_only_static_body_strings() {
         &mut path_fork,
     );
     let source_path = file_tokens.source_path;
-    let context = runtime_template_context(&source_path, &mut string_table, &mut path_fork);
+    let context = runtime_template_context(
+        &source_path,
+        &mut expression_builder,
+        &mut const_values,
+        &mut string_table,
+        &mut path_fork,
+    );
     let canonical_owner = file_tokens
         .canonical_owner()
         .expect("test token stream must expose canonical source tokens");
@@ -1579,6 +1689,8 @@ fn runtime_templates_with_code_format_only_static_body_strings() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -1589,10 +1701,12 @@ fn runtime_templates_with_code_format_only_static_body_strings() {
     assert!(tir_root_has_head_dynamic_expression(
         &template,
         &store,
-        |expression| matches!(
-            expression.kind,
-            ExpressionKind::Reference(_) | ExpressionKind::StringSlice(_)
-        )
+        &expression_builder,
+        |expression| match expression.operation() {
+            ExpressionOperationView::Reference(_) => true,
+            ExpressionOperationView::Constant(id) => const_values.string_value(id).is_some(),
+            _ => false,
+        },
     ));
 
     // Formatted body text is authoritative in the TIR root.

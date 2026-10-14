@@ -263,22 +263,6 @@ impl GenericFunctionBody {
         }
     }
 
-    pub(crate) fn source_identity_tables(
-        &self,
-    ) -> Option<(
-        &Arc<crate::compiler_frontend::symbols::path_interner::PathTable>,
-        &Arc<crate::compiler_frontend::symbols::string_interning::FrozenStringTable>,
-    )> {
-        match self {
-            Self::Materialised {
-                source_path_table: Some(path_table),
-                source_string_table: Some(string_table),
-                ..
-            } => Some((path_table, string_table)),
-            Self::Source { .. } | Self::Materialised { .. } => None,
-        }
-    }
-
     /// Resolve the exact frozen string domain needed while capturing this body.
     ///
     /// Source bodies use the shared declaring owner; a materialised body uses its retained donor

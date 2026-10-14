@@ -6,7 +6,7 @@
 //!      ensures consistent error messages and stable diagnostic codes across all operator policies.
 
 use crate::compiler_frontend::ast::expressions::eval_expression::typing_error::ExpressionTypingError;
-use crate::compiler_frontend::ast::expressions::expression::Operator;
+use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticOperator};
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;

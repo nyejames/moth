@@ -6,6 +6,7 @@
 //! `CompilerError`; only the surrounding AST boundary still needs that old return shape.
 
 use crate::compiler_frontend::ast::const_eval::ConstantFoldError;
+use crate::compiler_frontend::ast::expressions::expression_store::ExpressionConstructionFailure;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 
@@ -42,6 +43,15 @@ impl From<ConstantFoldError> for ExpressionTypingError {
             ConstantFoldError::Infrastructure(error) => {
                 ExpressionTypingError::Infrastructure(error)
             }
+        }
+    }
+}
+
+impl From<ExpressionConstructionFailure> for ExpressionTypingError {
+    fn from(error: ExpressionConstructionFailure) -> Self {
+        match error {
+            ExpressionConstructionFailure::Diagnostic(diagnostic) => Self::Diagnostic(diagnostic),
+            ExpressionConstructionFailure::Invariant(error) => error.into(),
         }
     }
 }

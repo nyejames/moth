@@ -184,11 +184,10 @@ fn boracle_source_differential_replays_boolean_mutated_binding() {
 }
 
 #[test]
-fn boracle_source_differential_marks_checked_numeric_reassignment_inconclusive() {
+fn boracle_source_differential_replays_checked_numeric_reassignment() {
     let source = "value ~= 1\nvalue = value + 1\nresult = value\n";
     assert_mutable_reassignment_access_order(source);
-    let differential =
-        assert_source_differential_replay(source, &["OracleInconclusive", "OracleInconclusive"]);
+    let differential = assert_source_differential_replay(source, &["Agreement", "Agreement"]);
     let oracle_outcomes = differential
         .lines()
         .filter_map(|line| line.strip_prefix("oracle-outcome = "))
@@ -200,14 +199,13 @@ fn boracle_source_differential_marks_checked_numeric_reassignment_inconclusive()
     );
     assert!(
         oracle_outcomes.iter().all(|outcome| {
-            outcome.starts_with("Inconclusive {")
-                && outcome.contains("reason: UndecidableOverlap {")
-                && outcome.contains("path: [DynamicIndex]")
-                && outcome.contains("path: []")
-                && outcome.contains("completed_executions: 0")
+            outcome
+                .strip_prefix("CompleteSafe { executions: ")
+                .and_then(|execution_count| execution_count.strip_suffix(" }"))
+                .and_then(|execution_count| execution_count.parse::<usize>().ok())
+                .is_some_and(|execution_count| execution_count > 0)
         }),
-        "computed numeric reassignment should preserve the oracle's undecidable-overlap refusal \
-         and zero complete executions:\n{differential}"
+        "native checked numeric reassignment should complete conflict-free bounded replay:\n{differential}"
     );
 }
 
@@ -282,16 +280,89 @@ fn assert_mutable_reassignment_access_order(source: &str) {
         .map(|use_row| use_row.point)
         .collect::<Vec<_>>();
     read_points.sort_unstable();
-    assert_eq!(
-        read_points.len(),
-        2,
-        "mutable-reassignment source should retain the reassignment read and later value read: {read_points:?}"
-    );
+    // Native Invoke operands are normalized once on each mutually exclusive outcome edge.
+    // Check executable paths, not the flattened event count or cross-block PointId order.
+    let graph = function.problem.control_flow();
+    let mut pending = vec![(graph.entry, Vec::new(), Vec::new())];
+    let mut observed_reads = BTreeSet::new();
+    let mut successful_paths = 0;
+    while let Some((block_id, mut visited, mut accesses)) = pending.pop() {
+        assert!(
+            !visited.contains(&block_id),
+            "reassignment fixture must be acyclic"
+        );
+        visited.push(block_id);
+        let block = graph
+            .blocks
+            .iter()
+            .find(|block| block.id == block_id)
+            .expect("validated CFG should retain each traversed block");
+        for event_id in &block.events {
+            let event = &function.problem.events()[event_id.index()];
+            for use_row in
+                function.problem.uses().iter().filter(|use_row| {
+                    use_row.point == event.point && use_row.place == value_place.id
+                })
+            {
+                if let Some(destination) = use_row.kind.binding_destination() {
+                    accesses.push(Some(destination));
+                } else if !use_row.definition && use_row.kind.access_kind() == AccessKind::Shared {
+                    observed_reads.insert(use_row.point);
+                    accesses.push(None);
+                }
+            }
+        }
+        let successors = graph
+            .edges
+            .iter()
+            .filter(|edge| edge.from == block_id)
+            .map(|edge| edge.to)
+            .collect::<Vec<_>>();
+        if successors.is_empty() {
+            let terminal = &function.problem.events()[block
+                .events
+                .last()
+                .expect("exit block should retain its terminator")
+                .index()]
+            .kind;
+            if matches!(
+                terminal,
+                EventKind::Terminator {
+                    kind: TerminatorEventKind::ReturnError | TerminatorEventKind::RuntimeFailure
+                }
+            ) {
+                assert_eq!(
+                    accesses,
+                    vec![Some(BindingDestination::Define(value_place.id)), None],
+                    "failure must read the initial value without committing reassignment",
+                );
+            } else {
+                assert_eq!(
+                    accesses,
+                    vec![
+                        Some(BindingDestination::Define(value_place.id)),
+                        None,
+                        Some(BindingDestination::Update(value_place.id)),
+                        None,
+                    ],
+                    "success must define, read before updating, update, then read the assigned value",
+                );
+                successful_paths += 1;
+            }
+        } else {
+            for successor in successors {
+                pending.push((successor, visited.clone(), accesses.clone()));
+            }
+        }
+    }
     assert!(
-        defining_write_points[0] < read_points[0]
-            && read_points[0] < defining_write_points[1]
-            && defining_write_points[1] < read_points[1],
-        "mutable-reassignment source should write, read before reassignment, write again, then read the assigned value: writes={defining_write_points:?} reads={read_points:?}"
+        successful_paths > 0,
+        "reassignment must retain a successful path"
+    );
+    assert_eq!(
+        observed_reads.into_iter().collect::<Vec<_>>(),
+        read_points,
+        "every normalized read must participate in an executable outcome path",
     );
 }
 
@@ -393,7 +464,7 @@ measure |items ~{I32}| -> I32:
                 matches!(
                     &event.kind,
                     EventKind::CallEffect(effect)
-                        if !effect.arguments.is_empty() && effect.result.is_some()
+                        if !effect.arguments.is_empty() && !effect.results.is_empty()
                 )
             })
         }),
@@ -405,7 +476,7 @@ measure |items ~{I32}| -> I32:
                 let EventKind::CallEffect(effect) = &event.kind else {
                     return false;
                 };
-                let Some(result) = effect.result else {
+                let Some(result) = effect.results.first() else {
                     return false;
                 };
                 function.problem.uses().iter().any(|use_row| {
@@ -1593,7 +1664,7 @@ result = writer
         .iter()
         .find(|function| {
             function.problem.events().iter().any(|event| {
-                matches!(&event.kind, EventKind::CallEffect(effect) if effect.result.is_some())
+                matches!(&event.kind, EventKind::CallEffect(effect) if !effect.results.is_empty())
             })
         })
         .expect("call-result write-through should produce a typed report");
@@ -1615,7 +1686,7 @@ result = writer
             };
             Some((
                 event.id,
-                effect.result?.destination,
+                effect.results.first().copied()?.destination,
                 effect.arguments.first()?.place,
             ))
         })
@@ -1824,7 +1895,10 @@ result = shared
             let EventKind::CallEffect(effect) = &event.kind else {
                 return None;
             };
-            Some((effect.result?, effect.arguments.first()?.place))
+            Some((
+                effect.results.first().copied()?,
+                effect.arguments.first()?.place,
+            ))
         })
         .expect("unknown call should retain its result row");
     assert!(
@@ -1897,8 +1971,8 @@ result = wrap(value = item)
         [argument] if argument.access == AccessKind::Shared
     ));
     let result = effect
-        .result
-        .as_ref()
+        .results
+        .first()
         .expect("generic call should retain its result row");
     assert!(
         matches!(
@@ -1946,7 +2020,7 @@ observed = loaded
                                 .arguments
                                 .iter()
                                 .all(|argument| argument.access == AccessKind::Shared)
-                            && effect.result.is_some()
+                            && !effect.results.is_empty()
                 )
             })
         })
@@ -1963,7 +2037,7 @@ observed = loaded
                         .iter()
                         .all(|argument| argument.access == AccessKind::Shared) =>
             {
-                effect.result.as_ref().map(|result| {
+                effect.results.first().map(|result| {
                     (
                         event.id,
                         effect.call,
@@ -2678,7 +2752,7 @@ result = removed
         .events()
         .iter()
         .find_map(|event| match &event.kind {
-            EventKind::CallEffect(effect) => effect.result,
+            EventKind::CallEffect(effect) => effect.results.first().copied(),
             _ => None,
         })
         .expect("map remove should retain its result row");

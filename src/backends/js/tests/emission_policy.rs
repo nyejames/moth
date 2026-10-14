@@ -21,9 +21,8 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 fn all_functions_is_default_for_direct_js_lowering() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (type_environment, types) = build_type_environment();
-    let module =
-        module_with_unreachable_function(&mut path_fork, &mut string_table, types.unit, None);
+    let (type_environment, _) = build_type_environment();
+    let module = module_with_unreachable_function(&mut path_fork, &mut string_table, None);
 
     let output = lower_hir_to_js(
         &module,
@@ -48,12 +47,11 @@ fn all_functions_is_default_for_direct_js_lowering() {
 fn selected_functions_skip_unselected_functions_and_external_references() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (type_environment, types) = build_type_environment();
+    let (type_environment, _) = build_type_environment();
     let external_function = ExternalFunctionId::Synthetic(77);
     let module = module_with_unreachable_function(
         &mut path_fork,
         &mut string_table,
-        types.unit,
         Some(external_function),
     );
 
@@ -112,19 +110,12 @@ fn selected_functions_skip_unselected_functions_and_external_references() {
 }
 
 #[test]
-fn start_fallibility_metadata_uses_only_the_emitted_hir_return_type() {
+fn start_fallibility_metadata_uses_only_the_emitted_hir_error_channel() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (mut type_environment, types) = build_type_environment();
-    let carrier = type_environment.intern_fallible_carrier(types.unit, types.string);
-    let mut module =
-        module_with_unreachable_function(&mut path_fork, &mut string_table, types.unit, None);
-    let start_unit = match &module.blocks[0].terminator {
-        HirTerminator::Return(value) => *value,
-        _ => panic!("start fixture should begin with its module-owned unit return"),
-    };
-    module.functions[0].return_type = carrier;
-    module.blocks[0].terminator = HirTerminator::ReturnSuccess(start_unit);
+    let (type_environment, types) = build_type_environment();
+    let mut module = module_with_unreachable_function(&mut path_fork, &mut string_table, None);
+    module.functions[0].error_return = Some(types.string);
     let lower = |module: &crate::compiler_frontend::hir::module::HirModule, config| {
         lower_hir_to_js(
             module,
@@ -138,7 +129,7 @@ fn start_fallibility_metadata_uses_only_the_emitted_hir_return_type() {
     };
     assert!(
         lower(&module, default_config()).start_is_fallible,
-        "the HIR carrier type owns fallibility, not the absence of an error return in this fixture"
+        "the HIR error channel owns fallibility, not the absence of an error return in this fixture"
     );
 
     let facts =
@@ -156,24 +147,20 @@ fn start_fallibility_metadata_uses_only_the_emitted_hir_return_type() {
     assert!(!lower(&module, default_config()).start_is_fallible);
 
     module.start_function = Some(FunctionId(0));
-    module.functions[0].return_type = types.unit;
-    module.blocks[0].terminator = HirTerminator::Return(start_unit);
+    module.functions[0].error_return = None;
     assert!(!lower(&module, default_config()).start_is_fallible);
 }
 
 fn module_with_unreachable_function(
     path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
-    unit_type: crate::compiler_frontend::datatypes::ids::TypeId,
     unreachable_external_call: Option<ExternalFunctionId>,
 ) -> crate::compiler_frontend::hir::module::HirModule {
     let mut expressions = HirExpressionStore::default();
-    let start_block = return_block(0, unit_type, &mut expressions);
+    let start_block = return_block(0);
     let unreachable_block = match unreachable_external_call {
-        Some(external_function) => {
-            external_call_block(1, unit_type, external_function, &mut expressions)
-        }
-        None => return_block(1, unit_type, &mut expressions),
+        Some(external_function) => external_call_block(1, external_function, &mut expressions),
+        None => return_block(1),
     };
     let mut module = build_module(
         expressions,
@@ -181,11 +168,11 @@ fn module_with_unreachable_function(
         string_table,
         "start_main",
         vec![start_block, unreachable_block],
-        function(0, 0, unit_type),
+        function(0, 0),
         &[],
     );
 
-    module.functions.push(function(1, 1, unit_type));
+    module.functions.push(function(1, 1));
     module
         .function_provenance
         .insert(FunctionId(1), Default::default());
@@ -201,40 +188,28 @@ fn module_with_unreachable_function(
     module
 }
 
-fn function(
-    function_id: u32,
-    entry_block_id: u32,
-    return_type: crate::compiler_frontend::datatypes::ids::TypeId,
-) -> HirFunction {
+fn function(function_id: u32, entry_block_id: u32) -> HirFunction {
     HirFunction {
         id: FunctionId(function_id),
         entry: BlockId(entry_block_id),
         params: vec![],
-        return_type,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     }
 }
 
-fn return_block(
-    block_id: u32,
-    unit_type: crate::compiler_frontend::datatypes::ids::TypeId,
-    expressions: &mut HirExpressionStore,
-) -> HirBlock {
+fn return_block(block_id: u32) -> HirBlock {
     HirBlock {
         id: BlockId(block_id),
         region: RegionId(block_id),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(unit_expression(
-            unit_type,
-            RegionId(block_id),
-            expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     }
 }
 
 fn external_call_block(
     block_id: u32,
-    unit_type: crate::compiler_frontend::datatypes::ids::TypeId,
     external_function: ExternalFunctionId,
     expressions: &mut HirExpressionStore,
 ) -> HirBlock {
@@ -247,13 +222,9 @@ fn external_call_block(
             HirStatementKind::Call {
                 target: CallTarget::External(external_function),
                 args: append_values(&[], expressions),
-                result: None,
+                results: vec![],
             },
         )],
-        terminator: HirTerminator::Return(unit_expression(
-            unit_type,
-            RegionId(block_id),
-            expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     }
 }

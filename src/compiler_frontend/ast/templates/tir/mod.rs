@@ -84,6 +84,7 @@ mod handoff_materialization;
 mod node;
 mod overlays;
 mod preparation;
+pub(crate) mod public_const_rebuild;
 pub(crate) mod refs;
 mod render_unit;
 mod slot_composition;
@@ -119,7 +120,7 @@ pub(crate) use expression_sites::{
 pub(crate) use node::TemplateLoopHeaderExpressionSites;
 pub(crate) use node::{
     RetainedControlFlowRenderUnit, RetainedNumericIntakeRole, TemplateIr, TemplateIrNode,
-    TemplateIrNodeKind, TirSlotPlaceholder,
+    TemplateIrNodeKind,
 };
 #[cfg(test)]
 pub(crate) use store::MalformedTirStore;
@@ -128,7 +129,6 @@ pub(crate) use store::{
 };
 #[cfg(test)]
 pub(crate) use summary::TemplateIrSummary;
-pub(crate) use summary::summarize_existing_root;
 
 pub(crate) use refs::{TemplateTirReference, TemplateWrapperReference};
 pub(crate) use view::{TirView, TirViewIdentity};

@@ -194,10 +194,11 @@ series that cannot answer the question must not look like one that answered it f
 ### Numeric inference workloads
 
 `numeric-scaling/` separates body-local inference and selected-width operation costs from the
-existing concrete workloads. Each pattern has committed sources at sizes 32, 128 and 512, except
-the alias receiver chain at 256, 1024 and 4096, where per-query cost stays below constant
-overhead at smaller sizes. Every pattern has CLI `check` cases and frontend cases. Regenerate every
-point with `python3 benchmarks/numeric-scaling/generate.py`.
+existing concrete workloads. Each numeric pattern has committed sources at sizes 32, 128 and 512,
+except the alias receiver chain at 256, 1024 and 4096, where per-query cost stays below constant
+overhead at smaller sizes. The runtime grouped-not pattern uses depths 128, 512 and 2048.
+Every pattern has CLI `check` cases and dev frontend cases. Regenerate every point with
+`python3 benchmarks/numeric-scaling/generate.py`.
 
 The manifest declares ten `numeric_*` scaling series against `frontend.ast.total`, each with
 an `n^1.25` budget for linear construction. The size counts copies, uses, grouped operations,
@@ -205,12 +206,19 @@ independent regions, aggregate pairs, catches, mutable cycles, operations per ty
 private calls in a failure chain.
 These budgets state the intended bound, not an observed fit.
 
+The separate `grouped_not_runtime` series measures the Basic `frontend.hir` metric with its own
+`n^1.25` budget. Each source wraps one runtime `Bool` parameter in exactly `depth` repetitions of
+`not (` and matching closing parentheses, so the frontend cannot fold the chain to a constant.
+Only depth varies. The larger depths target the scaling gate's 1.0 ms measurement floor.
+These benchmarks provide performance evidence, not correctness coverage.
+
 | Required shape | Case or series | What the source exercises |
 |---|---|---|
 | Long numeric copy chain with one late receiver | `numeric_copy_chain_{32,128,512}` | A whole-number origin passes through explicit copies to a final `U64` return receiver. |
 | One origin with many independent uses | `numeric_origin_fanout_{32,128,512}` | Independent copies and `U64` parameter receivers share one whole-number origin. |
 | Deep alias chain with a receiver at every link | `numeric_alias_receiver_chain_{256,1024,4096}` | Each new copy of the previous alias is passed to a `U64` receiver, so origin queries run at every chain depth. |
 | Deep grouped literal arithmetic with a late receiver | `numeric_grouped_arithmetic_{32,128,512}` | Nested literal additions receive `U64` through the final return. |
+| Deep grouped runtime logical-not chain | `grouped_not_runtime_{128,512,2048}` | Nested `not` operations around one runtime `Bool` parameter reach HIR without constant folding. |
 | Many independent numeric regions | `numeric_independent_regions_{32,128,512}` | Separate literal-arithmetic origins meet separate exact receivers in one body. |
 | Numeric collections/maps and generic forwarding | `numeric_aggregate_forwarding_{32,128,512}` | Non-empty numeric collections and maps pass through an identity signature before exact aggregate receivers. |
 | Many safety catches with unreachable handlers | `numeric_safety_pruning_{32,128,512}` | Foldable arithmetic protects handlers with error bindings, captures and generic calls. |

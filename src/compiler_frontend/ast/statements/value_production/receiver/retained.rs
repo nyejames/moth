@@ -9,9 +9,14 @@
 //!      the existing constructor, slot inference and closure checks exactly once at the root.
 
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::error::{ExpressionParseError, NumericDeferral};
-use crate::compiler_frontend::ast::expressions::expression::Expression;
-use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::expressions::expression_rpn::{
+    ExpressionRpnItem, single_operand,
+};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, OwnedExpr,
+};
 use crate::compiler_frontend::ast::generic_functions::IfGenericRequestRanges;
 use crate::compiler_frontend::ast::numeric_construction::{
     BodyEntry, DeferredArmPattern, DeferredBody, DeferredConstruct, DeferredExpression,
@@ -35,6 +40,7 @@ use crate::compiler_frontend::ast::statements::value_production::types::{
     ThenValueSlot,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::ValueReceiverContext;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
@@ -108,6 +114,8 @@ impl DeferredValueBlock {
     pub(crate) fn multi_bind_producer_facts(
         &self,
         state: &NumericConstructionState,
+        expressions: &AstExpressionBuilder,
+        constants: &ConstValueStore,
     ) -> Result<Vec<Vec<MultiBindProducerFact>>, ExpressionParseError> {
         let mut slots = (0..self.target.expected_value_count())
             .map(|_| Vec::new())
@@ -123,11 +131,11 @@ impl DeferredValueBlock {
                 else_body,
                 ..
             } => {
-                collect_branch_producers(then_body, state, &mut slots)?;
-                collect_branch_producers(else_body, state, &mut slots)?;
+                collect_branch_producers(then_body, state, expressions, constants, &mut slots)?;
+                collect_branch_producers(else_body, state, expressions, constants, &mut slots)?;
             }
             DeferredValueBlockForm::FullMatch { match_block } => {
-                collect_match_producers(match_block, state, &mut slots)?;
+                collect_match_producers(match_block, state, expressions, constants, &mut slots)?;
             }
         }
         Ok(slots)
@@ -137,25 +145,35 @@ impl DeferredValueBlock {
 fn collect_branch_producers(
     body: &ValueBlockBranchBody,
     state: &NumericConstructionState,
+    expressions: &AstExpressionBuilder,
+    constants: &ConstValueStore,
     slots: &mut [Vec<MultiBindProducerFact>],
 ) -> Result<(), ExpressionParseError> {
     match body {
-        ValueBlockBranchBody::Nodes { nodes, .. } => {
-            visit_reachable_then_values(nodes, &mut |values| collect_ready_producers(values, slots))
-        }
+        ValueBlockBranchBody::Nodes { nodes, .. } => visit_reachable_then_values(
+            nodes,
+            &mut |values| collect_ready_producers(values, expressions, slots),
+            expressions,
+            constants,
+        ),
         ValueBlockBranchBody::Draft(body) => {
-            collect_deferred_body_producers(body, state, slots).map(|_| ())
+            collect_deferred_body_producers(body, state, expressions, constants, slots).map(|_| ())
         }
     }
 }
 
 fn collect_ready_producers(
     values: &ProducedValues,
+    expressions: &AstExpressionBuilder,
     slots: &mut [Vec<MultiBindProducerFact>],
 ) -> Result<(), ExpressionParseError> {
     for (index, expression) in values.expressions.iter().enumerate() {
         if let Some(slot) = slots.get_mut(index) {
-            slot.push(MultiBindProducerFact::Known(expression.type_id));
+            slot.push(MultiBindProducerFact::Known(
+                expressions
+                    .view(*expression)?
+                    .require_single(ValueReceiverContext::Then)?,
+            ));
         }
     }
     Ok(())
@@ -164,6 +182,7 @@ fn collect_ready_producers(
 fn collect_retained_then_producers(
     continuation_id: crate::compiler_frontend::ast::numeric_construction::NumericContinuationId,
     continuation: &crate::compiler_frontend::ast::statements::value_production::ThenValueContinuation,
+    expressions: &AstExpressionBuilder,
     slots: &mut [Vec<MultiBindProducerFact>],
 ) -> Result<(), ExpressionParseError> {
     for (index, value) in continuation.values.iter().enumerate() {
@@ -173,10 +192,14 @@ fn collect_retained_then_producers(
         match value {
             ThenValueSlot::Pending(StatementExpression::Built(expression))
             | ThenValueSlot::Completed(expression) => {
-                slot.push(MultiBindProducerFact::Known(expression.type_id));
+                slot.push(MultiBindProducerFact::Known(
+                    expressions
+                        .view(*expression)?
+                        .require_single(ValueReceiverContext::Then)?,
+                ));
             }
             ThenValueSlot::Pending(StatementExpression::Retained(deferred)) => {
-                if let Some(type_id) = retained_single_result_type(&deferred.items) {
+                if let Some(type_id) = retained_single_result_type(&deferred.items, expressions)? {
                     slot.push(MultiBindProducerFact::Known(type_id));
                 } else {
                     slot.push(MultiBindProducerFact::Pending(PendingMultiBindProducer {
@@ -199,21 +222,30 @@ fn collect_retained_then_producers(
     Ok(())
 }
 
-fn retained_single_result_type(items: &[ExpressionRpnItem]) -> Option<TypeId> {
-    match items {
-        [ExpressionRpnItem::Operand(expression)] => Some(expression.type_id),
-        [ExpressionRpnItem::PendingNumericCall { call, .. }] => {
+fn retained_single_result_type(
+    items: &[ExpressionRpnItem],
+    expressions: &AstExpressionBuilder,
+) -> Result<Option<TypeId>, ExpressionParseError> {
+    let result = match single_operand(items) {
+        Some(ExpressionRpnItem::Operand(expression)) => Some(
+            expressions
+                .view(*expression)?
+                .require_single(ValueReceiverContext::Then)?,
+        ),
+        Some(ExpressionRpnItem::PendingNumericCall { call, .. }) => {
             call.single_success_return_type_id()
         }
-        [ExpressionRpnItem::PendingNumericCast { target_type_id, .. }] => Some(*target_type_id),
-        [ExpressionRpnItem::PendingGroup { nodes, .. }] => retained_single_result_type(nodes),
+        Some(ExpressionRpnItem::PendingNumericCast { target_type_id, .. }) => Some(*target_type_id),
         _ => None,
-    }
+    };
+    Ok(result)
 }
 
 fn collect_deferred_body_producers(
     body: &DeferredBody,
     state: &NumericConstructionState,
+    expressions: &AstExpressionBuilder,
+    constants: &ConstValueStore,
     slots: &mut [Vec<MultiBindProducerFact>],
 ) -> Result<BranchExitSummary, ExpressionParseError> {
     let mut exits = BranchExitSummary::FALLS_THROUGH;
@@ -223,12 +255,17 @@ fn collect_deferred_body_producers(
         }
         let statement_exits = match entry {
             BodyEntry::Node(node) => {
-                visit_reachable_then_values(std::slice::from_ref(node), &mut |values| {
-                    collect_ready_producers(values, slots)
-                })?;
-                analyze_branch_exits(std::slice::from_ref(node))
+                visit_reachable_then_values(
+                    std::slice::from_ref(node),
+                    &mut |values| collect_ready_producers(values, expressions, slots),
+                    expressions,
+                    constants,
+                )?;
+                analyze_branch_exits(std::slice::from_ref(node), expressions, constants)
             }
-            BodyEntry::Pending(id) => collect_pending_continuation_producers(*id, state, slots)?,
+            BodyEntry::Pending(id) => {
+                collect_pending_continuation_producers(*id, state, expressions, constants, slots)?
+            }
         };
         exits = exits.then_sequence(statement_exits);
     }
@@ -238,10 +275,12 @@ fn collect_deferred_body_producers(
 fn collect_pending_continuation_producers(
     id: crate::compiler_frontend::ast::numeric_construction::NumericContinuationId,
     state: &NumericConstructionState,
+    expressions: &AstExpressionBuilder,
+    constants: &ConstValueStore,
     slots: &mut [Vec<MultiBindProducerFact>],
 ) -> Result<BranchExitSummary, ExpressionParseError> {
     if let Some(continuation) = state.continuation_then_values(id) {
-        collect_retained_then_producers(id, continuation, slots)?;
+        collect_retained_then_producers(id, continuation, expressions, slots)?;
         return Ok(BranchExitSummary::PRODUCES);
     }
     let continuation = state.continuation(id).ok_or_else(|| {
@@ -256,7 +295,7 @@ fn collect_pending_continuation_producers(
         .into()),
         NumericContinuation::Return(_) => Ok(BranchExitSummary::TERMINATES),
         NumericContinuation::Construct(construct) => {
-            collect_construct_producers(construct, state, slots)
+            collect_construct_producers(construct, state, expressions, constants, slots)
         }
         _ => Ok(BranchExitSummary::FALLS_THROUGH),
     }
@@ -265,12 +304,16 @@ fn collect_pending_continuation_producers(
 fn collect_construct_producers(
     construct: &DeferredConstruct,
     state: &NumericConstructionState,
+    expressions: &AstExpressionBuilder,
+    constants: &ConstValueStore,
     slots: &mut [Vec<MultiBindProducerFact>],
 ) -> Result<BranchExitSummary, ExpressionParseError> {
     match construct {
-        DeferredConstruct::If(deferred) => collect_if_producers(deferred, state, slots),
+        DeferredConstruct::If(deferred) => {
+            collect_if_producers(deferred, state, expressions, constants, slots)
+        }
         DeferredConstruct::Match(deferred) => {
-            collect_match_exits_and_producers(deferred, state, slots)
+            collect_match_exits_and_producers(deferred, state, expressions, constants, slots)
         }
         DeferredConstruct::Loop(_) => Ok(BranchExitSummary::FALLS_THROUGH),
     }
@@ -279,11 +322,14 @@ fn collect_construct_producers(
 fn collect_if_producers(
     deferred: &DeferredIf,
     state: &NumericConstructionState,
+    expressions: &AstExpressionBuilder,
+    constants: &ConstValueStore,
     slots: &mut [Vec<MultiBindProducerFact>],
 ) -> Result<BranchExitSummary, ExpressionParseError> {
-    let then_exits = collect_deferred_body_producers(&deferred.then_body, state, slots)?;
+    let then_exits =
+        collect_deferred_body_producers(&deferred.then_body, state, expressions, constants, slots)?;
     let else_exits = match &deferred.else_body {
-        Some(body) => collect_deferred_body_producers(body, state, slots)?,
+        Some(body) => collect_deferred_body_producers(body, state, expressions, constants, slots)?,
         None => BranchExitSummary::FALLS_THROUGH,
     };
     Ok(then_exits.union(else_exits))
@@ -292,17 +338,21 @@ fn collect_if_producers(
 fn collect_match_exits_and_producers(
     deferred: &DeferredMatch,
     state: &NumericConstructionState,
+    expressions: &AstExpressionBuilder,
+    constants: &ConstValueStore,
     slots: &mut [Vec<MultiBindProducerFact>],
 ) -> Result<BranchExitSummary, ExpressionParseError> {
     let mut exits = None;
     for arm in &deferred.arms {
-        let arm_exits = collect_deferred_body_producers(&arm.body, state, slots)?;
+        let arm_exits =
+            collect_deferred_body_producers(&arm.body, state, expressions, constants, slots)?;
         exits = Some(exits.map_or(arm_exits, |existing: BranchExitSummary| {
             existing.union(arm_exits)
         }));
     }
     if let Some(default) = &deferred.default {
-        let default_exits = collect_deferred_body_producers(default, state, slots)?;
+        let default_exits =
+            collect_deferred_body_producers(default, state, expressions, constants, slots)?;
         exits = Some(exits.map_or(default_exits, |existing| existing.union(default_exits)));
     }
     Ok(exits.unwrap_or(BranchExitSummary::FALLS_THROUGH))
@@ -311,13 +361,15 @@ fn collect_match_exits_and_producers(
 fn collect_match_producers(
     deferred: &DeferredMatch,
     state: &NumericConstructionState,
+    expressions: &AstExpressionBuilder,
+    constants: &ConstValueStore,
     slots: &mut [Vec<MultiBindProducerFact>],
 ) -> Result<(), ExpressionParseError> {
     for arm in &deferred.arms {
-        collect_deferred_body_producers(&arm.body, state, slots)?;
+        collect_deferred_body_producers(&arm.body, state, expressions, constants, slots)?;
     }
     if let Some(default) = &deferred.default {
-        collect_deferred_body_producers(default, state, slots)?;
+        collect_deferred_body_producers(default, state, expressions, constants, slots)?;
     }
     Ok(())
 }
@@ -375,7 +427,7 @@ impl RetainedValueBlock {
 pub(crate) fn complete_deferred_value_block<'env>(
     block: Box<DeferredValueBlock>,
     completion: &mut impl DeferredExpressionCompletion<'env>,
-) -> Result<Expression, ExpressionParseError> {
+) -> Result<OwnedExpr, ExpressionParseError> {
     let DeferredValueBlock {
         form,
         span,
@@ -407,7 +459,7 @@ pub(crate) fn complete_deferred_value_block<'env>(
             let else_body = resolve_branch_body(else_body, own_contract, completion)?;
             let services = completion.session_services();
             finish_block_value_if(BlockValueIfFinishInput {
-                condition,
+                condition: condition.id(),
                 then_body,
                 else_body,
                 then_scope,
@@ -417,7 +469,8 @@ pub(crate) fn complete_deferred_value_block<'env>(
                 expected_result_type_ids,
                 receiver_kind,
                 needs_slot_inference,
-                type_interner: services.type_interner,
+                expression_builder: services.expression_builder,
+                const_values: services.const_values,
             })?
         }
         DeferredValueBlockForm::SinglePredicate {
@@ -427,7 +480,11 @@ pub(crate) fn complete_deferred_value_block<'env>(
             else_body,
         } => {
             let scrutinee = completion.resolve_statement_expression(scrutinee)?;
-            let subject_type_id = scrutinee.type_id;
+            let subject_type_id = completion
+                .session_services()
+                .expression_builder
+                .view_owned(scrutinee)?
+                .require_single(ValueReceiverContext::MatchScrutinee)?;
 
             // The pattern materialises at the selected subject type: a retained draft resolves its
             // fragment there, a ready pattern was parsed before a pending subject's type existed,
@@ -454,7 +511,11 @@ pub(crate) fn complete_deferred_value_block<'env>(
                         ExpectedType::NumericLiteral(subject_type_id),
                         &draft.value.value_mode,
                     )?;
-                    finish_retained_pattern(draft.relational, value)
+                    let services = completion.session_services();
+                    finish_retained_pattern(
+                        draft.relational,
+                        services.expression_builder.view_owned(value)?,
+                    )?
                 }
             };
 
@@ -469,7 +530,7 @@ pub(crate) fn complete_deferred_value_block<'env>(
             let else_body = resolve_branch_body(else_body, own_contract, completion)?;
             let services = completion.session_services();
             finish_block_value_match(BlockValueMatchFinishInput {
-                scrutinee,
+                scrutinee: scrutinee.id(),
                 pattern,
                 then_body,
                 else_body,
@@ -477,7 +538,8 @@ pub(crate) fn complete_deferred_value_block<'env>(
                 expected_result_type_ids,
                 receiver_kind,
                 needs_slot_inference,
-                type_interner: services.type_interner,
+                expression_builder: services.expression_builder,
+                const_values: services.const_values,
             })?
         }
         DeferredValueBlockForm::FullMatch { match_block } => {
@@ -496,7 +558,8 @@ pub(crate) fn complete_deferred_value_block<'env>(
                 expected_result_type_ids,
                 receiver_kind,
                 needs_slot_inference,
-                type_interner: services.type_interner,
+                expression_builder: services.expression_builder,
+                const_values: services.const_values,
             })?
         }
     };
@@ -516,6 +579,8 @@ pub(crate) fn complete_deferred_value_block<'env>(
                 &target.known_slot_types,
                 target_count,
                 services.type_interner,
+                services.expression_builder,
+                services.const_values,
             )
         }
         ParsedReceiverValue::Retained(_) => Err(CompilerError::compiler_error(

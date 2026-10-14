@@ -1,31 +1,27 @@
-//! Expression evaluation and AST-side constant folding implementation.
+//! Resolves transient expression syntax into phase-owned semantic operation nodes.
 //!
-//! WHAT: resolves parsed infix expression fragments into typed AST expressions.
-//! WHY: AST is the stage that owns operator typing, constant folding, and the decision about
-//!      whether an expression can stay compile-time or must survive as runtime RPN.
+//! Literal and operator typing precede constant substitution and folding. Completed results
+//! retain canonical operation facts and occurrence metadata, never an RPN payload.
+//! Construction and returned roots carry owner-bound handles while RPN buffers and the
+//! operation stack retain compact raw IDs attached only at constructor boundaries.
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::const_eval::{
     ConstantFoldOutcome, constant_fold, fold_compile_time_expression,
 };
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-use crate::compiler_frontend::ast::expressions::expression_rpn::{
-    ExpressionRpn, ExpressionRpnItem, PlaceExpressionKind,
+use crate::compiler_frontend::ast::const_values::store::{ConstValuePayload, ConstValueStore};
+use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, ExpressionOp, OwnedExpr,
 };
 use crate::compiler_frontend::ast::field_access::project_explicit_const_record_field;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidExpressionReason, TypeMismatchContext,
-};
-use crate::compiler_frontend::datatypes::DataType;
-use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
+use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, TypeMismatchContext};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
-use crate::compiler_frontend::instrumentation::{
-    AstCounter, FrontendCounter, increment_ast_counter, increment_frontend_counter,
-};
+use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::numeric_text::parse::{materialize_fixed_scalar, materialize_number};
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::source::SourceSpan;
@@ -34,33 +30,37 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::type_coercion::compatibility::is_type_compatible;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
-use crate::eval_log;
 use moth_lexical::numeric::decimal::NumberScale;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use moth_lexical::numeric::grammar::NumericLiteralKind;
 use moth_lexical::numeric::parse::literal_kind_initialises;
-use rustc_hash::FxHashSet;
 
 use super::ordering;
 use super::result_type::resolve_expression_result_type;
 use super::typing_error::ExpressionTypingError;
 
-/// Resolve a parsed expression fragment into a fully typed AST `Expression`.
+/// Resolve a parsed expression fragment into one fully typed, owner-bound expression handle.
 ///
 /// WHAT: orders unresolved syntax, selects literal contexts and resolves operator types before
 ///       folding and final receiving validation.
 /// WHY: Exact numeric receivers and local peers choose literal domains before arithmetic, while the
 ///      canonical operator policy remains the sole source of result types.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "expression evaluation keeps scope, RPN nodes, type interner, expression builder, const store, expected type, value mode, string table, and path fork as separate borrows at the shared operator-folding entry point"
+)]
 pub fn evaluate_expression(
     context: &ScopeContext,
     nodes: Vec<ExpressionRpnItem>,
     type_interner: &mut AstTypeInterner<'_>,
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     expected_type: &mut ExpectedType,
     value_mode: &ValueMode,
     string_table: &mut StringTable,
     path_fork: &PathInternerFork,
-) -> Result<Expression, ExpressionTypingError> {
-    let (mut ordered_nodes, span) = ordering::order_expression_nodes(nodes)?;
+) -> Result<OwnedExpr, ExpressionTypingError> {
+    let (mut ordered_nodes, span) = ordering::order_expression_nodes(nodes, expressions)?;
     let literal_destination =
         numeric_literal_destination(type_interner.environment(), expected_type);
 
@@ -70,7 +70,14 @@ pub fn evaluate_expression(
             &ordered_nodes[0],
             ExpressionRpnItem::PendingNumericLiteral { .. }
         ) {
-            materialize_pending_literal(&mut ordered_nodes, 0, literal_destination, string_table)?;
+            materialize_pending_literal(
+                &mut ordered_nodes,
+                0,
+                literal_destination,
+                expressions,
+                const_values,
+                string_table,
+            )?;
         }
 
         let ExpressionRpnItem::Operand(expression) = &ordered_nodes[0] else {
@@ -81,30 +88,39 @@ pub fn evaluate_expression(
         };
 
         let only_expression = fold_compile_time_expression(
-            expression,
+            *expression,
+            expressions,
+            const_values,
             string_table,
             context.kind.is_constant_context(),
         )?;
+        // A standalone producer retains its slots for multi-bind, return and handling owners.
+        // Only scalar results participate in natural expected-type inference here.
+        let Some(value_type_id) = expressions.view(only_expression)?.success_shape().single()
+        else {
+            return Ok(expressions.own(only_expression));
+        };
 
         validate_expression_result_type(
             expected_type,
-            only_expression.type_id,
-            ordered_nodes[0].source_span(),
+            value_type_id,
+            ordered_nodes[0].source_span(expressions)?,
             type_interner.environment_mut_for_derived_types(),
         )?;
 
         // References tighten the expected type so later fragments in the same statement
         // can resolve against the inferred target type.
-        if let ExpressionKind::Reference(..) = only_expression.kind {
-            *expected_type = ExpectedType::Known(only_expression.type_id);
-        } else if matches!(
+        if matches!(
+            expressions.view(only_expression)?.operation_id(),
+            ExpressionOp::Reference(_)
+        ) || matches!(
             expected_type,
             ExpectedType::Infer | ExpectedType::NumericLiteral(_)
         ) {
-            *expected_type = ExpectedType::Known(only_expression.type_id);
+            *expected_type = ExpectedType::Known(value_type_id);
         }
 
-        return Ok(only_expression);
+        return Ok(expressions.own(only_expression));
     }
 
     // General path: resolve operator types across the full RPN shape, then attempt folding.
@@ -112,6 +128,8 @@ pub fn evaluate_expression(
         &mut ordered_nodes,
         span,
         literal_destination,
+        expressions,
+        const_values,
         string_table,
         type_interner.environment(),
         path_fork,
@@ -132,121 +150,81 @@ pub fn evaluate_expression(
         *expected_type = ExpectedType::Known(resolved_type);
     }
 
-    // A multi-item expression has completed semantic typing. Resolve explicit # numeric
-    // operands, including copied numeric places, only at this consumption boundary so standalone
-    // copies and ordinary runtime bindings keep their place identity.
+    // Preserve standalone place identity: only a typed multi-item consumption substitutes
+    // explicit numeric constants, after every authored operand domain has been selected.
     substitute_explicit_numeric_constants(
         &mut ordered_nodes,
         context,
         path_fork,
         type_interner.environment(),
-    );
-
-    let stack_span = ordered_nodes.iter().find_map(|item| match item {
-        ExpressionRpnItem::Operand(expression) => expression.span,
-        ExpressionRpnItem::Operator { .. } => None,
-        // Evaluation and body completion remove every pending form before folding; the arms
-        // exist so a leaked item is still span-safe, while constant folding owns the
-        // broken-invariant report for any pending item that reaches it.
-        ExpressionRpnItem::PendingNumericLiteral { .. }
-        | ExpressionRpnItem::PendingGroup { .. }
-        | ExpressionRpnItem::PendingNumericBinding { .. }
-        | ExpressionRpnItem::PendingNumericCall { .. }
-        | ExpressionRpnItem::PendingNumericCast { .. }
-        | ExpressionRpnItem::PendingNumericExpression { .. } => None,
-    });
-    // Runtime RPN needs an owned value mode for the final expression node.
-    let value_mode = value_mode.as_owned();
-    eval_log!("Attempting to Fold: ", Pretty ordered_nodes);
+        expressions,
+        const_values,
+    )?;
+    let root = expression_from_resolved_items(
+        ordered_nodes,
+        expressions,
+        const_values,
+        string_table,
+        Some(context),
+        value_mode.as_owned(),
+    )?;
+    // The occurrence anchors at its first operand; operator facts keep the exact operator span.
+    let root = if expressions.view_owned(root)?.span() != span {
+        let mut input = expressions
+            .view_owned(root)?
+            .to_completed_input(expressions)?;
+        input.span = span;
+        expressions.commit_replacement(input)?
+    } else {
+        root
+    };
     increment_frontend_counter(FrontendCounter::ConstantFoldAttemptCount);
-    let fold_outcome = constant_fold(ordered_nodes, string_table, Some(context))?;
-
-    increment_frontend_counter(FrontendCounter::ConstantFoldSuccessCount);
-    eval_log!("Stack after folding: ", Pretty fold_outcome);
-
-    let stack = match fold_outcome {
-        ConstantFoldOutcome::Folded(stack) | ConstantFoldOutcome::NotConstant(stack) => stack,
-        ConstantFoldOutcome::TextUnavailable {
-            items: _,
-            diagnostic,
-            ..
-        } if context.kind.is_constant_context() => {
-            return Err(ExpressionTypingError::Diagnostic(diagnostic));
+    let outcome = constant_fold(
+        root.id(),
+        expressions,
+        const_values,
+        string_table,
+        Some(context),
+    )?;
+    let folded = match outcome {
+        ConstantFoldOutcome::Folded(root) => {
+            increment_frontend_counter(FrontendCounter::ConstantFoldSuccessCount);
+            root
         }
-        ConstantFoldOutcome::TextUnavailable { items, .. } => items,
+        ConstantFoldOutcome::NotConstant(root) => root,
+        ConstantFoldOutcome::TextUnavailable { diagnostic, .. }
+            if context.kind.is_constant_context() =>
+        {
+            return Err(diagnostic.into());
+        }
+        ConstantFoldOutcome::TextUnavailable { root, .. } => root,
     };
 
-    // Folding owns discharge. Only checked operators still present in its reduced stack can
-    // escape at runtime, while authored checked work remains eligible for expression recovery.
-    if !operation_failure_facts.implicit.is_empty() {
-        let remaining_operator_spans: FxHashSet<_> = stack
-            .iter()
-            .filter_map(|item| match item {
-                ExpressionRpnItem::Operator { operator, span }
-                    if operator.numeric_operator().is_some() =>
-                {
-                    Some(*span)
-                }
-                _ => None,
-            })
-            .collect();
-        operation_failure_facts.retain_implicit_contributors(|contributor| {
-            remaining_operator_spans.contains(&contributor.span)
-        });
+    // Surviving operation rows own their contributors. The outer occurrence adds only the
+    // pending authored eligibility, even when folding removed the introducing operation.
+    operation_failure_facts.summary = Default::default();
+    let mut failure = expressions
+        .view(folded)?
+        .failure_facts()
+        .cloned()
+        .unwrap_or_default();
+    failure.merge_pending_from(&operation_failure_facts);
+    if expressions.view(folded)?.failure_facts().is_none() && failure == Default::default() {
+        return Ok(expressions.own(folded));
     }
-
-    // Fully folded to a single compile-time value: hand the folded operand back by move.
-    if stack.len() == 1 {
-        let mut stack = stack;
-        let Some(ExpressionRpnItem::Operand(mut expression)) = stack.pop() else {
-            return Err(CompilerError::compiler_error(
-                "Constant folding produced a non-operand item as the single result.",
-            )
-            .into());
-        };
-        expression
-            .failure_facts
-            .take_origin_work_from(operation_failure_facts);
-        return Ok(expression);
-    }
-
-    // Folding consumed every node but produced no result (e.g. empty input).
-    if stack.is_empty() {
-        return Err(CompilerDiagnostic::invalid_expression(
-            InvalidExpressionReason::UnresolvedStackShape,
-            span,
-        )
-        .into());
-    }
-
-    // Partial fold: assemble the reduced stack into runtime RPN.
-    // The only DataType spelling a successful expression evaluation builds: the partial-fold
-    // result needs one for its runtime node. Fully folded expressions never reach here.
-    increment_ast_counter(AstCounter::DiagnosticDataTypeMaterialisations);
-    let diagnostic_type = diagnostic_type_spelling(resolved_type, type_interner.environment());
-
-    let mut expression = runtime_expression_from_items(
-        stack,
-        diagnostic_type,
-        resolved_type,
-        value_mode,
-        stack_span.or(span),
-    )?;
-    expression
-        .failure_facts
-        .take_origin_work_from(operation_failure_facts);
-    Ok(expression)
+    Ok(expressions.with_failure_facts(expressions.own(folded), failure)?)
 }
 
 fn is_matching_materialized_numeric_value(
-    expression: &Expression,
+    expression: OwnedExpr,
     expected_type_id: TypeId,
-) -> bool {
-    expression.type_id == expected_type_id
-        && matches!(
-            &expression.kind,
-            ExpressionKind::FixedScalar(_) | ExpressionKind::Number(_)
-        )
+    expressions: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
+) -> Result<bool, CompilerError> {
+    let view = expressions.view_owned(expression)?;
+    Ok(view.success_shape().single() == Some(expected_type_id)
+        && matches!(view.operation_id(), ExpressionOp::Constant(id)
+            if matches!(const_values.payload(id), Some(ConstValuePayload::FixedScalar(_) | ConstValuePayload::Number(_)))))
 }
 
 fn substitute_explicit_numeric_constants(
@@ -254,47 +232,78 @@ fn substitute_explicit_numeric_constants(
     context: &ScopeContext,
     path_fork: &PathInternerFork,
     type_environment: &TypeEnvironment,
-) {
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+) -> Result<(), ExpressionTypingError> {
     for item in nodes {
         let ExpressionRpnItem::Operand(expression) = item else {
             continue;
         };
-        if NumericScalar::from_type_id(expression.type_id, type_environment).is_none() {
+        let view = expressions.view(*expression)?;
+        let type_id = view.value_type_id()?;
+        if NumericScalar::from_type_id(type_id, type_environment).is_none() {
             continue;
         }
-
-        let replacement = match &expression.kind {
-            ExpressionKind::Reference(path) => context
-                .with_explicit_constant_expression(path, path_fork, |value| {
-                    // Avoid cloning unless both the canonical type and scalar value shape match.
-                    is_matching_materialized_numeric_value(value, expression.type_id)
-                        .then(|| value.clone())
+        let span = view.span();
+        let mode = view.value_mode();
+        let replacement = match view.operation_id() {
+            ExpressionOp::Reference(path) => context
+                .explicit_constant_value(&path, path_fork, const_values)
+                .filter(|&value| {
+                    const_values
+                        .metadata(value)
+                        .is_some_and(|metadata| metadata.type_id == type_id)
+                        && matches!(
+                            const_values.payload(value),
+                            Some(ConstValuePayload::FixedScalar(_) | ConstValuePayload::Number(_))
+                        )
                 })
-                .flatten(),
-            ExpressionKind::FieldAccess { .. } => project_explicit_const_record_field(
-                expression, context, path_fork,
-            )
-            .filter(|value| is_matching_materialized_numeric_value(value, expression.type_id)),
-            ExpressionKind::Copy(place) => match &place.kind {
-                PlaceExpressionKind::Local(path) => context
-                    .with_explicit_constant_expression(path, path_fork, |value| {
-                        is_matching_materialized_numeric_value(value, expression.type_id)
-                            .then(|| value.clone())
+                .map(|value| expressions.constant(value, type_id, span, mode))
+                .transpose()?,
+            ExpressionOp::Copy(place) if expressions.place(place)?.projections().len() == 0 => {
+                let path = expressions.place(place)?.metadata().root;
+                context
+                    .explicit_constant_value(&path, path_fork, const_values)
+                    .filter(|&value| {
+                        const_values
+                            .metadata(value)
+                            .is_some_and(|metadata| metadata.type_id == type_id)
+                            && matches!(
+                                const_values.payload(value),
+                                Some(
+                                    ConstValuePayload::FixedScalar(_)
+                                        | ConstValuePayload::Number(_)
+                                )
+                            )
                     })
-                    .flatten(),
-                PlaceExpressionKind::Field { .. } => project_explicit_const_record_field(
-                    expression, context, path_fork,
-                )
-                .filter(|value| is_matching_materialized_numeric_value(value, expression.type_id)),
-            },
+                    .map(|value| expressions.constant(value, type_id, span, mode))
+                    .transpose()?
+            }
+            ExpressionOp::FieldAccess { .. } | ExpressionOp::Copy(_) => {
+                project_explicit_const_record_field(
+                    expressions.own(*expression),
+                    context,
+                    path_fork,
+                    expressions,
+                    const_values,
+                )?
+            }
             _ => None,
         };
-
-        if let Some(mut replacement) = replacement {
-            replacement.preserve_authored_metadata(expression);
-            *expression = replacement;
+        if let Some(replacement) = replacement
+            && is_matching_materialized_numeric_value(
+                replacement,
+                type_id,
+                expressions,
+                const_values,
+            )?
+        {
+            *expression = expressions
+                .preserve_authored_metadata(replacement, expressions.own(*expression))?
+                .id();
         }
     }
+    Ok(())
 }
 
 /// Materialise one pending literal at its selected destination or natural value mode.
@@ -306,6 +315,8 @@ pub(super) fn materialize_pending_literal(
     nodes: &mut [ExpressionRpnItem],
     index: usize,
     destination: Option<PendingLiteralDestination>,
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
 ) -> Result<TypeId, ExpressionTypingError> {
     let expression = {
@@ -340,7 +351,7 @@ pub(super) fn materialize_pending_literal(
                     .map_err(|reason| {
                         CompilerDiagnostic::invalid_number_literal(token.source_text, reason, *span)
                     })?;
-                Expression::fixed_scalar(value, *span, value_mode.clone())
+                expressions.fixed_scalar(const_values, value, *span, *value_mode)?
             }
             Some(PendingLiteralDestination::Number { scale, type_id }) => {
                 let value = materialize_number(token, token.sign, scale, string_table).map_err(
@@ -348,19 +359,26 @@ pub(super) fn materialize_pending_literal(
                         CompilerDiagnostic::invalid_number_literal(token.source_text, reason, *span)
                     },
                 )?;
-                Expression::number(value, type_id, *span, value_mode.clone())
+                expressions.number(const_values, value, type_id, *span, *value_mode)?
             }
-            None => default_materialised_literal(token, *span, value_mode.clone(), string_table)?,
+            None => default_materialised_literal(
+                token,
+                *span,
+                *value_mode,
+                expressions,
+                const_values,
+                string_table,
+            )?,
         }
     };
-    let type_id = expression.type_id;
+    let type_id = expressions.view_owned(expression)?.value_type_id()?;
     let Some(item) = nodes.get_mut(index) else {
         return Err(CompilerError::compiler_error(
             "Pending literal resolution could not retrieve its RPN item.",
         )
         .into());
     };
-    *item = ExpressionRpnItem::Operand(expression);
+    *item = ExpressionRpnItem::Operand(expression.id());
 
     Ok(type_id)
 }
@@ -383,7 +401,7 @@ fn numeric_literal_destination(
 
 /// A semantic numeric or `Byte` destination eligible for pending-literal materialisation.
 #[derive(Clone, Copy)]
-pub(super) enum PendingLiteralDestination {
+pub(crate) enum PendingLiteralDestination {
     /// One exact fixed-width destination, including the non-arithmetic `Byte` octet.
     FixedScalar(FixedScalar),
     /// One exact-decimal destination carrying its already-resolved local identity.
@@ -413,15 +431,17 @@ fn default_materialised_literal(
     token: &NumericLiteralToken,
     span: Option<SourceSpan>,
     value_mode: ValueMode,
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
-) -> Result<Expression, ExpressionTypingError> {
+) -> Result<OwnedExpr, ExpressionTypingError> {
     if token.kind == NumericLiteralKind::WholeNumber {
         let value = materialize_fixed_scalar(token, token.sign, FixedScalar::I32, string_table)
             .map_err(|reason| {
                 CompilerDiagnostic::invalid_number_literal(token.source_text, reason, span)
             })?;
 
-        return Ok(Expression::fixed_scalar(value, span, value_mode));
+        return Ok(expressions.fixed_scalar(const_values, value, span, value_mode)?);
     }
 
     // The retained token carries one effective sign, so the shared binary-float materialiser
@@ -432,12 +452,12 @@ fn default_materialised_literal(
             CompilerDiagnostic::invalid_number_literal(token.source_text, reason, span)
         })?;
 
-    Ok(Expression::fixed_scalar(value, span, value_mode))
+    Ok(expressions.fixed_scalar(const_values, value, span, value_mode)?)
 }
 
 /// Compiler-bug error for pending expression syntax that escaped evaluation.
 ///
-/// Pending groups disappear during ordering and pending literals during typing. Every later
+/// Group markers disappear during ordering and pending literals during typing. Every later
 /// consumer handles their presence as a broken compiler invariant, not a source diagnostic.
 pub(crate) fn pending_expression_item_bug(function: &'static str) -> CompilerError {
     CompilerError::compiler_error(format!(
@@ -445,24 +465,99 @@ pub(crate) fn pending_expression_item_bug(function: &'static str) -> CompilerErr
     ))
 }
 
-/// Assemble a runtime RPN `Expression` from an ordered expression-owned stack.
+/// Complete resolved transient postfix syntax as fixed-edge semantic operations.
 ///
-/// WHAT: wraps the narrowed RPN stack in `Expression::runtime_with_type_id`.
-/// WHY: `evaluate_expression` is the boundary where broad parser nodes are
-///      replaced by expression-owned runtime payloads.
-fn runtime_expression_from_items(
+/// WHAT: folds each operand and operator as soon as it is complete, so every constant
+/// sub-expression is committed as a `Constant` child of its runtime parents.
+/// WHY: folding only the completed root would leave constant operands under a runtime operator.
+/// Operands are folded when pushed, so an operator only folds when all of its direct children are
+/// already constant; runtime children are never walked again.
+pub(crate) fn expression_from_resolved_items(
     items: Vec<ExpressionRpnItem>,
-    diagnostic_type: DataType,
-    type_id: TypeId,
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    string_table: &mut StringTable,
+    scope: Option<&ScopeContext>,
     value_mode: ValueMode,
-    span: Option<SourceSpan>,
-) -> Result<Expression, CompilerError> {
-    Ok(Expression::runtime_with_type_id(
-        ExpressionRpn { items },
-        diagnostic_type,
-        type_id,
-        span,
-        value_mode,
+) -> Result<OwnedExpr, ExpressionTypingError> {
+    let mut stack: Vec<ExprId> = Vec::with_capacity(items.len());
+    for item in items {
+        match item {
+            ExpressionRpnItem::Operand(id) => {
+                expressions.view(id)?;
+                let folded =
+                    fold_completed_node(id, expressions, const_values, string_table, scope)?;
+                stack.push(folded);
+            }
+            ExpressionRpnItem::ResolvedOperator(facts) => {
+                let right = if facts.operator.required_values() == 2 {
+                    Some(stack.pop().ok_or_else(|| {
+                        CompilerError::compiler_error("Resolved operation lost its right operand.")
+                    })?)
+                } else {
+                    None
+                };
+                let left = stack.pop().ok_or_else(|| {
+                    CompilerError::compiler_error("Resolved operation lost its left operand.")
+                })?;
+                let right_constant = match right {
+                    Some(right) => is_constant_node(expressions, right)?,
+                    None => true,
+                };
+                let operands_constant = is_constant_node(expressions, left)? && right_constant;
+                let node = expressions.resolved_operation(
+                    expressions.own(left),
+                    right.map(|id| expressions.own(id)),
+                    facts,
+                    value_mode,
+                )?;
+                let node = if operands_constant {
+                    fold_completed_node(node.id(), expressions, const_values, string_table, scope)?
+                } else {
+                    node.id()
+                };
+                stack.push(node);
+            }
+            _ => return Err(pending_expression_item_bug("resolved operation construction").into()),
+        }
+    }
+    let [root] = stack.as_slice() else {
+        return Err(CompilerError::compiler_error(
+            "Resolved expression construction did not produce one root.",
+        )
+        .into());
+    };
+    Ok(expressions.own(*root))
+}
+
+/// Fold one completed node in place; a runtime or text-unavailable outcome keeps the node.
+///
+/// WHAT: `constant_fold` is the single folding owner. A text-unavailable node stays runtime
+/// here; the root pass reports its diagnostic for constant contexts.
+fn fold_completed_node(
+    node: ExprId,
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    string_table: &mut StringTable,
+    scope: Option<&ScopeContext>,
+) -> Result<ExprId, ExpressionTypingError> {
+    Ok(
+        match constant_fold(node, expressions, const_values, string_table, scope)? {
+            ConstantFoldOutcome::Folded(folded) => folded,
+            ConstantFoldOutcome::NotConstant(id)
+            | ConstantFoldOutcome::TextUnavailable { root: id, .. } => id,
+        },
+    )
+}
+
+/// Whether a completed node is already a folded `Constant`.
+fn is_constant_node(
+    expressions: &mut AstExpressionBuilder,
+    id: ExprId,
+) -> Result<bool, ExpressionTypingError> {
+    Ok(matches!(
+        expressions.view(id)?.operation_id(),
+        ExpressionOp::Constant(_)
     ))
 }
 

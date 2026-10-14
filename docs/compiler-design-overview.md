@@ -75,9 +75,13 @@ The typed expression store uses safe array-of-structures rows with an operation 
 
 The rule includes retained typed semantic expressions in the AST stage. Parsing and receiving-context resolution may use short-lived scratch forms, but completed expression graphs do not retain recursive owning trees or unresolved parse states. Stage 4 defines their semantic ownership and HIR's concrete contract is in Stage 5. Source/token/diagnostic sizes and exceptions remain under the data-layout authority.
 
+Completed-expression walkers keep depth-dependent traversal state on explicit heap stacks. Constant folding, failure classification, finalisation, HIR operator lowering and borrow extraction preserve authored evaluation and diagnostic order without a native frame for each expression level.
+
 Each store names its issuing owner and the consumers that determine its lifetime. An index is meaningful only with that owner, not as a global identity or a persistent key. Typed ranges address entries in their owning side store, not an assumed contiguous run of child-node IDs. Range construction checks the `u32` start, length and end before allocation or mutation; empty ranges are valid, while multiple-result ranges contain at least two entries. Shared nodes are immutable. A transformation reuses an unchanged node or produces a replacement root and isolated changed data, without mutating another candidate's view.
 
 Expression IDs are one-based, owner-local `NonZeroU32` values, allowing a four-byte ID and a four-byte `Option<ExprId>`. Their checked capacity does not change the zero-valid `TypeId` domain or existing zero-based HIR IDs. An expression view borrows its issuing store and carries its ID; child views keep that owner, and consumers do not pass detached ID/store pairs.
+
+Construction uses transient `OwnedExpr` handles or token-bound `OwnedExprs` slices. Each edge-install boundary checks the issuing token before index access or mutation. Durable rows and AST roots retain four-byte `ExprId`s. The builder's `own` and `own_slice` methods provide the only raw-ID re-entry points. Callers must pair these conversions with the original builder, because a raw ID carries no token. Freeze issues a fresh token, so pre-freeze handles cannot enter the frozen store or a fresh builder.
 
 Expression candidates use producer-local scratch with distinct new-node and existing-node edge types. Validate scratch IDs and the borrowed existing-store owner before mutation, then promote only reachable scratch nodes in postorder and move their typed side data. A scratch ID never enters TIR or a retained AST root. Reuse an unchanged root, isolate a changed root until commit and drop failed candidate scratch. General suffix rollback is not the reclamation contract: an escaped root defeats a non-escape proof, and truncation does not return grown capacity. Append-only retention of complete discarded candidates is also avoided.
 
@@ -173,7 +177,11 @@ The normal root's implicit `start` is compiler-synthesised, non-exported and una
 
 `start` owns dormant root runtime work and produces runtime fragment strings in source order. Entry assembly activates it at most once for that entry after compilation. Dependency binding and compilation never activate it.
 
-Every executable normal-root `start`, including a synthetic single-file root, has built-in `Error!` alongside the existing fragment-collection success slots. Implicit checked failure materialises as `Error`. Typed `Error!` propagates with `!`; custom errors require explicit recovery.
+Frontend semantics gives every normal-root `start`, including a synthetic single-file root, built-in `Error!` alongside the existing fragment-collection success slots. Implicit checked failure materialises as `Error`. Typed `Error!` propagates with `!`; custom errors require explicit recovery.
+
+After failure-summary convergence and private-lane installation, HIR drops `start`'s error channel
+when no reachable `ReturnError` remains. This narrows only the executable contract. Its ordered
+fragment-collection success slots and source propagation rules stay unchanged.
 
 Builders consume this typed outcome. They add no error-fragment channel and never execute `start` during compilation. Assertions and fatal runtime resource exhaustion remain outside recoverable failure.
 
@@ -561,7 +569,14 @@ The shared `moth-lexical` owner supplies spelling classification and destination
 
 Canonical numeric references own the full operator matrix. D15 checks each result in its selected semantic type: equal fixed-type operands keep that type and an out-of-range result fails there rather than widening. Mixed types use the smallest supported common operand domain, with no 32-bit floor. Binary-float operations complete at their selected precision; every `F16` result is rounded and checked for finiteness before a later operation consumes it, even where an `F32` carrier performs the computation. Storage size and carrier width do not widen the semantic result. Comparison, explicit casts, assignment compatibility and operator selection remain separate decisions.
 
-Groups retain their infix syntax as pending fragments until ordering flattens them into one RPN stream. Destination selection resolves permitted numeric leaves before materialisation, which precedes operator typing, named-constant substitution and folding. Completed AST and HIR retain canonical exact values and types only; no pending unknown, constraint recipe or numeric construction state survives body finalisation or publication.
+Result-type resolution retains each completed operator's canonical result, source operand domains,
+conversion boundaries and failure decision. Folding and HIR consume those facts rather than
+selecting domains again. Decimal power retains its separate `I32` exponent edge. Exact
+mixed-signedness comparisons retain both integer operand domains, even where arithmetic has no
+common type. Numeric failure origins belong to the operation that introduces them. Ancestor
+expressions retain summaries and authored recovery eligibility, not duplicate contributor lists.
+
+Parenthesised groups use flat transient `GroupOpen` and `GroupClose` markers in one fragment stream. Parser frames and ordering floors keep nesting on heap stacks. Ordering consumes the markers before expression construction, so no group marker or group ID reaches completed AST, TIR expressions or HIR. Destination selection resolves permitted numeric leaves before materialisation, which precedes operator typing, named-constant substitution and folding. Completed AST and HIR retain canonical exact values and types only. No pending unknown, constraint recipe or numeric construction state survives body finalisation or publication.
 
 `NumericConstructionState` owns dense origin/equality, binding and known-shape tables for one independent body domain. `numeric_known_shape.rs` preserves fixed collection/map/optional and declared generic structure while only numeric leaves remain open. `statements/numeric_body_completion.rs` materialises retained fragments once, upgrades pending scope slots and resumes statement continuations in authored order without reparsing or rerouting arguments. Independently nested functions use separate domains. Template TIR retains payload-free intake positions and per-domain intake queues in `templates/tir/numeric_intake.rs`, so body completion drains only its own work and installs completed expressions without scanning sibling templates.
 
@@ -605,7 +620,7 @@ These expectations create no importable, shadowable or first-class function. Sha
 
 A handled fallible expression retains its ordinary call/value location separately from the authored propagation-operator location. Call side-table mapping remains call-owned while escape diagnostics identify the operator.
 
-The completed assertion carries a typed condition and typed optional message. Omission uses ordinary typed `none`. Even for a compile-time `true` condition, the message is parsed, type-checked, generic-inferred, evidence-checked and fully normalised, including nested templates. Finalisation then replaces it with typed `none` and discards provisional message requests. No inactive TIR, runtime payload, Wiring capture, generated sidecar or link/target fact survives from that message.
+The completed assertion carries a typed condition and typed optional message. Omission uses ordinary typed `none`. Even for a compile-time `true` condition, the message is parsed, type-checked, generic-inferred, evidence-checked and fully normalised, including nested templates. Finalisation replaces it with typed `none` and removes executable message demand. Retained private generic witnesses keep canonical validation-only requests until concrete failure-summary convergence. They use the ordinary provider materialisation route, then executable reachability removes validation-only sidecars before publication. No inactive TIR, runtime payload, Wiring capture or executable link/target fact survives from that message.
 
 A compile-time `false` or dynamic assertion retains message work only on the failure edge. Stage 5 defines its lazy lowering and target validation checks capability without silently discarding evaluation.
 
@@ -648,6 +663,8 @@ Structural references were already graph-active before selection. Frontend error
 The declaring module validates immutable generic templates. At a call, AST infers concrete arguments through the declared signature and eligible immediate receivers, resolves visible trait evidence and diagnoses failures at that call site. An existing numeric origin may remain linked through a signature parameter/result equality or a direct generic constructor until body-local receivers resolve it. This does not add result-only inference, callee-body inspection, trait search or outer expected-type forwarding into a nested generic call.
 
 `ModuleMaterialisationPreparation` is retained separately from the executable `Ast` and its expression store. Before HIR lowering consumes the `Ast` or that store is released, project the generic body to stable owned syntax and capture canonical owned callable signatures, receiver/type facts, folded defaults and module constants. The preparation contains no expression IDs, expression views or borrows into the completed expression store. Keep it through same-module generated requests and summary convergence. Freeze the stable generic context after those readers finish, then release preparation.
+
+Retain local folded constants and aliases only for the union of the generic artefacts' installed local declarations. The existing nominal/default closure supplies their type dependencies. Inherited contexts keep their original authority, while shared donor source and identity domains retain their own lifetimes. A module without generic templates or an inherited context needs no local folded semantic closure.
 
 Active calls emit requests under `Generated concrete functions`. HIR and backends receive concrete targets, never unresolved generic inference or evidence work. Generic materialisation preserves result-slot, exact numeric, source-identity and Wiring contracts.
 
@@ -759,7 +776,7 @@ Direct content constants use retained local ordering edges. Actual content-depen
 
 A structural string is an ordinary `String` whose ordered pieces include Text, Resource or SiteRoot. The anchor pieces preserve identity until the builder supplies final characters. Such strings remain legal mutable values, parameters, returns, optionals, collection elements and exported constants. Their presence alone causes no rejection.
 
-One module-local folded-value owner supports the plain-text fast path and structural pieces. Its postorder visitor is the sole recursive conversion route into public values, HIR constants and direct-template results. Consumers never reconstruct the string from AST expressions or TIR.
+One module-local folded-value owner supports the plain-text fast path and structural pieces. Its postorder visitor uses an explicit heap stack as the sole conversion route into public values, HIR constants and direct-template results. Public values retain independently owned outputs. Consumers never reconstruct the string from AST expressions or TIR.
 
 Composition preserves pieces through assignment, copying, storage, interpolation, concatenation, slots/wrappers, export/re-export and calls/returns. Observation needs concrete characters: equality, length, search/prefix/suffix tests, parsing, String casts, hashing, compile-time map keys/duplicate checks and character-inspecting formatters or host operations.
 
@@ -845,6 +862,8 @@ HIR preserves ordered success slots and an optional single error channel. A call
 
 An infallible `Call` statement carries its ordered arguments and zero, one or multiple success destination locals. A fallible `Invoke` terminator carries the resolved target and arguments, a success successor with ordered destination locals, and a failure successor with one error local. Success and failure edges define their own destinations without a semantic carrier local or tuple extraction. Destinations are unique within each edge, and the success/error destination sets are disjoint. Before selecting an edge, transfer kills both successor destination sets, then defines only the selected edge's locals, so reused locals cannot expose stale values across loops or repeated calls. Ordinary `Jump` argument transfer reads all sources before writing destinations.
 
+`Invoke` also carries fallible builtin casts, checked numeric operations, range-step failures, float formatting, boundary float validation and already error-typed map get/set/remove operations. Its operation retains the exact policy, numeric domain and operands, while the terminator owns failure delivery. The original HIR node identity and source span follow the operation into the terminator so numeric proofs remain paired with that operation. Infallible map operations remain statements.
+
 Successful returns carry ordered values. Error returns carry one error value. Zero success results remain valid for both infallible and fallible functions. There is no semantic `Result<Tuple<...>, Error>` carrier or hidden tuple/payload extraction path.
 
 Value-producing branches and catch recovery join individual slots through ordinary block/value targets. Propagation transfers the error channel without constructing an aggregate. Result-slot identity survives analysis, generated artefacts and public summaries. Backends may pack physical results only at the ABI boundary while preserving order, references and exactly-once evaluation.
@@ -853,7 +872,7 @@ HIR makes implicit-failure edges, handler joins and built-in `Error` materialisa
 
 The private same-module failure lane uses the same explicit success/error control-flow contract. Any shared physical carrier belongs to the target ABI only. The lane adds no public or foreign result contract, global last-error variable, semantic aggregate or fabricated payload extraction. Pruning waits until all relevant source/generated failure summaries converge and the private lane is installed; a missing provisional summary is not evidence of infallibility. It removes unreachable handler HIR and dead executable contributions, calls, captures, generated requests, link facts and capability requirements. The rewritten HIR is revalidated and affected borrow, numeric-proof and link analyses are refreshed before publication.
 
-JavaScript may pack results into a private array/object and external wrappers may translate their success/error envelope at the ABI boundary. Supported Wasm result types use native ordered results through function types, calls and returns. Unsupported aggregate, handle or fallible ABI capabilities receive the normal target diagnostic until their lowering contract exists. ABI storage alone creates no source allocation family and merges no result lifetimes.
+JavaScript may pack results into a private array/object and external wrappers may translate their success/error envelope at the ABI boundary. Supported Wasm scalar results, including mixed I32/F32/I64/F64 slots, use native ordered function types, calls and returns independently of the reserved multi-value request toggle. Unsupported aggregate, handle, fallible and optional-alias/variant capabilities retain their normal target diagnostics until their lowering contracts exist. ABI storage alone creates no source allocation family and merges no result lifetimes.
 
 #### Lazy assertion failure messages
 
@@ -869,21 +888,29 @@ Validation completes before borrow or target validation. It checks definition/ty
 
 Call validation also checks result count, slot types, channel compatibility and edge-specific definitions. Finite binary-float values remain an invariant. `NaN`, infinity, a missing trusted local or malformed completed control flow are compiler bugs.
 
+Local functions own their result contracts in HIR. Ordinary external targets keep their registry
+signature owner, which HIR validation receives explicitly. Polymorphic collection registry entries
+are erased ABI metadata, not semantic signatures: AST and HIR share the collection/map builtin
+rule owner instantiated with construction shapes or concrete receiver types. Imported and generated
+source targets whose defining function isn't present retain only the native result contract needed
+by the consuming module, with success and error types remapped into its paired type environment.
+This projection mirrors neither local functions nor registry-owned signatures.
+
 The module artefact validator, not HIR validation, checks folded fragments and their insertion indexes. A structured HIR view may be derived and validated for a structured lowerer. It remains cached derived data, never another semantic authority.
 
 #### Numeric ownership
 
 - `moth-lexical` owns shared numeric leaf facts: spelling grammar and category, token-free direct materialisation into an explicit destination, precision-aware formatting, exact fixed scalar identities and borrowed decimal scale/text facts. It owns neither compiler type lookup nor a general numeric runtime.
 - `moth` owns semantic numeric typing, body-local receiving rules, promotion, constant evaluation and cast evidence. Its immutable Dec coefficients and exact arithmetic retain the compiler's `num-bigint`, `num-integer` and `num-traits` dependencies rather than moving them into either extracted crate.
-- HIR records the canonical exact numeric domain, operator and actual failure mode, not backend helper names or one statement family per target. `NumericFailureMode` selects failure delivery required by the enclosing handler or function contract. A backend never infers it from a name or catch-eligibility marker.
+- HIR records the canonical exact numeric domain and operator. `NumericFailureMode` distinguishes trapping statements from semantically infallible statements. Recoverable operations use `Invoke` with an explicit failure edge selected by the enclosing handler or function contract. A backend never reconstructs delivery from a name or catch-eligibility marker.
 - Compile-time and runtime operations preserve the same selected-width checks and rounding boundaries. `Dec` applies its exact scale rule at each operation result. Each `F16` operation rounds and checks finiteness before its result feeds another operation, even if an `F32` carrier computes it.
 - D15's mixed integer domain contains the complete operand ranges, not every possible mathematical result. Equal integer types retain their width, so `U8 + U8 -> U8` may overflow; a mixed signed/unsigned pair uses the smallest signed width containing both ranges, with no 32-bit floor. The canonical operator reference owns the full table and its explicit exceptions.
 - Safety catch eligibility remains separate from actual operation failure. Proving an operation infallible does not remove authored eligibility, but adds no failure contributor or recoverable capability. Statically invalid selected-width work remains a diagnostic in every handler context.
 - Semantic discharge is separate from check elision. The pure predicate `numeric_operation_cannot_fail`, beside the promotion table, proves fixed-width integer `Add`/`Subtract`/`Multiply`/`Negate` infallible only after applying the particular operation to the complete canonical operand ranges and proving every mathematical result lies within the selected result domain. D15's mixed-domain selection contains the complete input ranges, not every operation result: `U8 + U8 -> U8` may reach 510, and negating the minimum `I8` value may produce 128, so both can fail at their selected widths. By contrast, adding the complete `I8` and `U8` ranges yields `[-128, 382]`, which lies inside `I16` for `I8 + U8 -> I16`. The predicate reads exact types, never a semantic or build profile. AST failure facts and HIR emission use the same exact operation, operand and result predicate. Only an operation proven safe gets `NumericFailureMode::Infallible` on its `NumericOp`; backends implement it without a recoverable numeric failure edge or Wasm capability.
-- `NumericProofs` is an optional sparse side table of proven-safe integer operations and fallible integer narrowings, keyed by HIR statement id and paired with that executable's exact validated HIR. Each base executable and generated sidecar computes its own table from final validated HIR before publication. It carries no semantic-profile stamp and is never detached into a public or cross-executable proof identity. Summary convergence alone does not alter numeric operations; if private-lane installation or handler pruning rewrites HIR, affected proof analysis is refreshed.
-- An absent or empty table or a missing statement fact retains runtime checks; statement ids need no remap. The analysis reads HIR without mutating it and changes neither source acceptance, AST evidence nor target gates.
+- `NumericProofs` is an optional sparse side table of proven-safe integer operations and fallible integer narrowings, keyed by the operation's HIR node identity and paired with that executable's exact validated HIR. Statement-to-`Invoke` rewrites preserve that identity. Each base executable and generated sidecar computes its own table from final validated HIR before publication. It carries no semantic-profile stamp and never becomes a public or cross-executable proof identity. Summary convergence alone does not alter numeric operations. Private-lane installation or handler pruning refreshes affected proof analysis when it rewrites HIR.
+- An absent or empty table or a missing operation fact retains runtime checks. Operation node identities need no remap. The analysis reads HIR without mutating it and changes neither source acceptance, AST evidence nor target gates.
 - The analysis derives closed `i128` intervals from canonical integer bounds, including the complete `U64` range, fixed integer literals and infallible integer casts. It walks each block independently with a single last-written-local cache. Every write invalidates the earlier fact: a direct-local assignment replaces it with its new interval, while projected writes clear the cache; calls and unknown statements also clear it. If checked endpoint arithmetic cannot represent an intermediate in `i128`, the analysis declines proof.
-- `Power`, real division, `Byte`, `F16`, `F32`, `F64` and the language `Dec` domain never prove. Lowerers elide only a proven predicate they support; source validity, evaluation and failure order, and required recovery or narrowing carriers remain unchanged.
+- `Power`, real division, `Byte`, `F16`, `F32`, `F64` and the language `Dec` domain never prove. Lowerers elide only a proven predicate they support. They preserve source validity, evaluation and failure order, ordered success results and explicit failure continuations.
 - Target validation checks reachable exact operations and target capabilities. Lowerers consume canonical HIR numeric domains and the physical plan rather than parallel width tables or semantic profile inputs.
 - Binary-float and Dec formatting use the common value-to-string boundary for templates and runtime lowering.
 

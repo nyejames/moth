@@ -29,15 +29,6 @@ enum OptionComparisonSide {
 }
 
 impl<'hir> JsEmitter<'hir> {
-    pub(crate) fn lower_fallible_success_condition(
-        &mut self,
-        result: HirValueId,
-    ) -> Result<String, CompilerError> {
-        let lowered_result = self.lower_expr(result)?;
-
-        Ok(format!("(({lowered_result}).tag === \"ok\")"))
-    }
-
     pub(crate) fn lower_expr(
         &mut self,
         expression_id: HirValueId,
@@ -141,34 +132,6 @@ impl<'hir> JsEmitter<'hir> {
                 let start = self.lower_expr(*start)?;
                 let end = self.lower_expr(*end)?;
                 Ok(format!("{{ start: {start}, end: {end} }}"))
-            }
-
-            HirExpressionKind::TupleConstruct { elements } => {
-                let elements = hir.expressions.values(*elements);
-                if elements.is_empty() {
-                    Ok("undefined".to_owned())
-                } else {
-                    let lowered = elements
-                        .iter()
-                        .map(|element| self.lower_expr(*element))
-                        .collect::<Result<Vec<_>, _>>()?;
-                    Ok(format!("[{}]", lowered.join(", ")))
-                }
-            }
-
-            HirExpressionKind::TupleGet { tuple, index } => {
-                let tuple = self.lower_expr(*tuple)?;
-                Ok(format!("({tuple})[{index}]"))
-            }
-
-            HirExpressionKind::FallibleUnwrapSuccess { result } => {
-                let lowered_result = self.lower_expr(*result)?;
-                Ok(format!("(({lowered_result}).value)"))
-            }
-
-            HirExpressionKind::FallibleUnwrapError { result } => {
-                let lowered_result = self.lower_expr(*result)?;
-                Ok(format!("(({lowered_result}).value)"))
             }
 
             HirExpressionKind::Cast { source, policy } => {
@@ -279,11 +242,6 @@ impl<'hir> JsEmitter<'hir> {
                 let tag = if variant_index == 0 { "none" } else { "some" };
                 format!("tag: \"{tag}\"")
             }
-            #[cfg(test)]
-            HirVariantCarrier::Fallible => {
-                let tag = if variant_index == 0 { "ok" } else { "err" };
-                format!("tag: \"{tag}\"")
-            }
         };
 
         let mut all_entries = vec![tag_entry];
@@ -321,23 +279,8 @@ impl<'hir> JsEmitter<'hir> {
                 escape_js_string(self.string_table.resolve(field.name))
             }
             HirVariantCarrier::Option => "\"value\"".to_owned(),
-            #[cfg(test)]
-            HirVariantCarrier::Fallible => "\"value\"".to_owned(),
         };
         Ok(format!("({source_js})[{field_name_js}]"))
-    }
-
-    pub(crate) fn is_unit_expression(&self, expression_id: HirValueId) -> bool {
-        let expression = self.hir.expressions.expression(expression_id);
-        if matches!(
-            &expression.kind,
-            HirExpressionKind::TupleConstruct { elements }
-                if self.hir.expressions.values(*elements).is_empty()
-        ) {
-            return true;
-        }
-
-        expression.ty == self.type_environment.builtins().none
     }
 
     /// Whether a resolved type is a nominal choice type.
@@ -556,23 +499,45 @@ impl<'hir> JsEmitter<'hir> {
     //  Unary operator lowering
     // ---------------------------
 
-    /// Lower a unary operator expression to JS.
+    /// Lower consecutive unary operators without recursive lowering or repeated child copies.
     ///
-    /// WHAT: maps `HirUnaryOp::Neg` to `-` and `HirUnaryOp::Not` to `!`, wrapping the
-    /// operand in parentheses for correct precedence.
-    /// WHY: JS unary operators have the same semantics as Moth for these cases.
+    /// Each operator keeps its parenthesized layer. Other expression kinds remain owned by
+    /// `lower_expr`, so their conversions, precedence and lowering effects are unchanged.
     fn lower_unary_op(
         &mut self,
-        operator: HirUnaryOp,
-        operand: HirValueId,
+        mut operator: HirUnaryOp,
+        mut operand: HirValueId,
     ) -> Result<String, CompilerError> {
-        let operand = self.lower_expr(operand)?;
-        let js_operator = match operator {
-            HirUnaryOp::Neg => "-",
-            HirUnaryOp::Not => "!",
-        };
+        let mut rendered = String::new();
+        let mut closing_parentheses = 0;
 
-        Ok(format!("({js_operator}{operand})"))
+        loop {
+            rendered.push_str(match operator {
+                HirUnaryOp::Neg => "(-",
+                HirUnaryOp::Not => "(!",
+            });
+            closing_parentheses += 1;
+
+            let expression = self.hir.expressions.expression(operand);
+            let HirExpressionKind::UnaryOp {
+                op,
+                operand: next_operand,
+            } = &expression.kind
+            else {
+                break;
+            };
+            operator = *op;
+            operand = *next_operand;
+        }
+
+        let terminal_operand = self.lower_expr(operand)?;
+        rendered.reserve(terminal_operand.len() + closing_parentheses);
+        rendered.push_str(&terminal_operand);
+        for _ in 0..closing_parentheses {
+            rendered.push(')');
+        }
+
+        Ok(rendered)
     }
 
     // -----------------------

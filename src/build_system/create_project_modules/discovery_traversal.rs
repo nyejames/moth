@@ -204,7 +204,10 @@ pub(crate) struct ReachableTraversalOutcome {
     pub(super) source_package_dependencies: Vec<ResolvedSourcePackageDependency>,
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "reachable traversal keeps entry paths, namespace, resolver, directives and source-kind registry, mutable dependency policy and resource registry and mutable string/path tables separate"
+)]
 fn traverse_reachable_source_files(
     entry_paths: &[PathBuf],
     namespace_set: &ModuleNamespaceSet,

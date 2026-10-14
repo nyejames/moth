@@ -35,7 +35,7 @@ use moth_lexical::numeric::precision::BinaryFloatPrecision;
 ///      parser, AST, HIR, or runtime representation. Later phases will convert
 ///      their native expressions into this shape before calling the policy.
 /// WHY: keeping policies pure and side-effect free allows sharing between the
-///      constant folder and later backends without depending on `Expression`
+///      constant folder and later backends without depending on the AST expression store
 ///      or backend-specific types.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum BuiltinCastLiteral {

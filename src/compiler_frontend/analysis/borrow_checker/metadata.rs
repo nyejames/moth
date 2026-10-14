@@ -14,14 +14,14 @@ use crate::compiler_frontend::hir::expression_store::{HirExpressionStore, HirPro
 use crate::compiler_frontend::hir::expressions::HirExpressionKind;
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::hir_side_table::{HirLocalOriginKind, HirLocation};
-use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId};
+use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirValueId, LocalId, RegionId};
 use crate::compiler_frontend::hir::numeric::HirNumericOperands;
 use crate::compiler_frontend::hir::patterns::HirPattern;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{
     HirLocalDestination, HirStatement, HirStatementKind, HirWriteTarget,
 };
-use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
 use crate::compiler_frontend::hir::utils::terminator_targets;
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallMutationEffect, PublicCallParameterAccess,
@@ -265,6 +265,17 @@ impl<'a> BorrowChecker<'a> {
                     };
                     callees.push(*callee);
                 }
+                if let HirTerminator::Invoke {
+                    operation:
+                        HirFallibleOperation::Call {
+                            target: CallTarget::Local(callee),
+                            ..
+                        },
+                    ..
+                } = &block.terminator
+                {
+                    callees.push(*callee);
+                }
             }
             callees.sort_unstable_by_key(|callee| callee.0);
             callees.dedup();
@@ -323,7 +334,11 @@ impl<'a> BorrowChecker<'a> {
                         for (argument_index, argument) in
                             self.module.expressions.values(*args).iter().enumerate()
                         {
-                            if !self.call_argument_writes(target, argument_index, statement)? {
+                            if !self.call_argument_writes(
+                                target,
+                                argument_index,
+                                self.diagnostics.statement_error_span(statement),
+                            )? {
                                 continue;
                             }
 
@@ -362,6 +377,50 @@ impl<'a> BorrowChecker<'a> {
                     _ => {}
                 }
             }
+            if let HirTerminator::Invoke {
+                operation: HirFallibleOperation::Call { target, args },
+                ..
+            } = &block.terminator
+            {
+                for (index, argument) in self.module.expressions.values(*args).iter().enumerate() {
+                    if self.call_argument_writes(
+                        target,
+                        index,
+                        self.diagnostics.terminator_error_span(*block_id),
+                    )? {
+                        let Some(fact) = report.analysis.value_facts.get(argument) else {
+                            return Err(self.diagnostics.internal_error(
+                                "Missing Invoke argument borrow fact during call-summary publication",
+                                self.diagnostics.terminator_error_span(*block_id),
+                            ));
+                        };
+                        for root in &fact.roots {
+                            if let Some(position) = parameter_positions.get(root) {
+                                mutation_positions.insert(*position);
+                            }
+                        }
+                    }
+                }
+            }
+            if let HirTerminator::Invoke {
+                operation: HirFallibleOperation::MapOp { op, receiver, .. },
+                ..
+            } = &block.terminator
+                && op.requires_mutable_receiver()
+            {
+                let Some(fact) = report.analysis.value_facts.get(receiver) else {
+                    return Err(self.diagnostics.internal_error(
+                        "Missing Invoke map receiver borrow fact during call-summary publication",
+                        self.diagnostics.terminator_error_span(*block_id),
+                    ));
+                };
+                // Map keys and stored values are borrowed inputs, not mutated parameters.
+                for root in &fact.roots {
+                    if let Some(position) = parameter_positions.get(root) {
+                        mutation_positions.insert(*position);
+                    }
+                }
+            }
         }
 
         let Some(summary) = self.public_call_summaries.get_mut(&function.id) else {
@@ -391,7 +450,7 @@ impl<'a> BorrowChecker<'a> {
         &self,
         target: &CallTarget,
         argument_index: usize,
-        statement: &HirStatement,
+        span: Option<crate::compiler_frontend::source::SourceSpan>,
     ) -> Result<bool, BorrowCheckError> {
         match target {
             CallTarget::Local(function_id) => {
@@ -422,7 +481,7 @@ impl<'a> BorrowChecker<'a> {
                         format!(
                             "Borrow checker is missing the provider call summary for imported function {origin:?}"
                         ),
-                        self.diagnostics.statement_error_span(statement),
+                        span,
                     ));
                 };
                 let Some(parameter) = summary.parameters.get(argument_index) else {
@@ -430,7 +489,7 @@ impl<'a> BorrowChecker<'a> {
                         format!(
                             "Borrow checker found out-of-range argument {argument_index} while finalizing imported call summary for {origin:?}"
                         ),
-                        self.diagnostics.statement_error_span(statement),
+                        span,
                     ));
                 };
                 Ok(parameter.mutation == PublicCallMutationEffect::Writes)
@@ -441,7 +500,7 @@ impl<'a> BorrowChecker<'a> {
                         format!(
                             "Borrow checker is missing the call summary for module-private function {identity:?}"
                         ),
-                        self.diagnostics.statement_error_span(statement),
+                        span,
                     ));
                 };
                 let Some(parameter) = summary.parameters.get(argument_index) else {
@@ -449,18 +508,19 @@ impl<'a> BorrowChecker<'a> {
                         format!(
                             "Borrow checker found out-of-range argument {argument_index} while finalizing module-private call summary for {identity:?}"
                         ),
-                        self.diagnostics.statement_error_span(statement),
+                        span,
                     ));
                 };
                 Ok(parameter.mutation == PublicCallMutationEffect::Writes)
             }
             CallTarget::Generated(identity) => {
-                let Some(summary) = self.module.generated_call_summaries.get(identity) else {
+                let Some(summary) = self.module.generated_call_summaries.get(identity.as_ref())
+                else {
                     return Err(self.diagnostics.internal_error(
                         format!(
                             "Borrow checker is missing the call summary for generated function {identity:?}"
                         ),
-                        self.diagnostics.statement_error_span(statement),
+                        span,
                     ));
                 };
                 let Some(parameter) = summary.parameters.get(argument_index) else {
@@ -468,7 +528,7 @@ impl<'a> BorrowChecker<'a> {
                         format!(
                             "Borrow checker found out-of-range argument {argument_index} while finalizing generated call summary for {identity:?}"
                         ),
-                        self.diagnostics.statement_error_span(statement),
+                        span,
                     ));
                 };
                 Ok(parameter.mutation == PublicCallMutationEffect::Writes)
@@ -483,7 +543,7 @@ impl<'a> BorrowChecker<'a> {
                             "Borrow checker could not resolve host call target '{}' while finalizing public call summary",
                             function_id.name()
                         ),
-                        self.diagnostics.statement_error_span(statement),
+                        span,
                     ));
                 };
                 let Some(parameter) = definition.parameters.get(argument_index) else {
@@ -492,7 +552,7 @@ impl<'a> BorrowChecker<'a> {
                             "Borrow checker found out-of-range argument {} while finalizing host call summary for '{}'",
                             argument_index, definition.name
                         ),
-                        self.diagnostics.statement_error_span(statement),
+                        span,
                     ));
                 };
                 Ok(parameter.access_kind == ExternalAccessKind::Mutable)
@@ -643,6 +703,42 @@ impl<'a> BorrowChecker<'a> {
                     }
                 },
             );
+            if let HirTerminator::Jump { args, .. } = &block.terminator {
+                // Transport reads the old source occurrences before defining the merge slots.
+                // These are liveness dependencies, not additional source-semantic access facts.
+                for argument in args {
+                    if let Some(index) = local_index_by_id.get(&argument.source).copied() {
+                        liveness.record_read(index);
+                        local_last_use_order[index] =
+                            local_last_use_order[index].max(terminator_order);
+                        max_use_order[index] = max_use_order[index].max(terminator_order);
+                    }
+                }
+                for argument in args {
+                    if let Some(index) = local_index_by_id.get(&argument.destination).copied() {
+                        liveness.record_definition(index);
+                        if local_first_write_order[index] < 0 {
+                            local_first_write_order[index] = terminator_order;
+                        }
+                    }
+                }
+            }
+            if let HirTerminator::Invoke {
+                success_results,
+                error_result,
+                ..
+            } = &block.terminator
+            {
+                // Both outcomes replace the preceding iteration's values, after operand reads.
+                for local in success_results.iter().chain(std::iter::once(error_result)) {
+                    if let Some(index) = local_index_by_id.get(local).copied() {
+                        liveness.record_definition(index);
+                        if local_first_write_order[index] < 0 {
+                            local_first_write_order[index] = terminator_order;
+                        }
+                    }
+                }
+            }
 
             // A read of a direct alias carrier is a read of the roots it carries. Union the source
             // roots in unconditionally: an in-block definition of a source root cannot be proven to
@@ -1020,8 +1116,6 @@ fn record_statement_liveness(
     local_index_by_id: &FxHashMap<LocalId, usize>,
     liveness: &mut BlockLiveness,
 ) {
-    let defined_locals = statement_defined_locals(statement);
-
     if let HirStatementKind::Write { target, .. } = &statement.kind {
         let local = match target {
             HirWriteTarget::DefineLocal(local) => Some(*local),
@@ -1046,7 +1140,11 @@ fn record_statement_liveness(
     // A write through a projection updates part of the base and leaves the rest observable, so the
     // base counts as a read and never kills.
     collect_statement_written_locals(statement, &mut |local_id| {
-        if defined_locals.contains(&Some(local_id)) {
+        let mut is_definition = false;
+        collect_statement_defined_locals(statement, &mut |defined| {
+            is_definition |= defined == local_id
+        });
+        if is_definition {
             return;
         }
         if let Some(index) = local_index_by_id.get(&local_id).copied() {
@@ -1054,47 +1152,53 @@ fn record_statement_liveness(
         }
     });
 
-    for local_id in defined_locals.into_iter().flatten() {
+    collect_statement_defined_locals(statement, &mut |local_id| {
         if let Some(index) = local_index_by_id.get(&local_id).copied() {
             liveness.record_definition(index);
         }
-    }
+    });
 }
 
 // WHAT: reports every local this statement redefines outright.
 // WHY: only whole-local writes end the previous value's life; projected writes leave the
 //      surrounding value observable.
-fn statement_defined_locals(statement: &HirStatement) -> [Option<LocalId>; 2] {
-    let defined_local = |destination: &HirLocalDestination| {
-        matches!(destination, HirLocalDestination::Define(_)).then(|| destination.local())
+fn collect_statement_defined_locals(statement: &HirStatement, visitor: &mut impl FnMut(LocalId)) {
+    let mut visit_destination = |destination: &HirLocalDestination| {
+        if matches!(destination, HirLocalDestination::Define(_)) {
+            visitor(destination.local());
+        }
     };
     match &statement.kind {
         HirStatementKind::Write {
             target: HirWriteTarget::DefineLocal(local),
             ..
-        } => [Some(*local), None],
-        HirStatementKind::Call { result, .. }
-        | HirStatementKind::MapOp { result, .. }
-        | HirStatementKind::CastOp { result, .. } => {
-            [result.as_ref().and_then(defined_local), None]
+        } => visitor(*local),
+        HirStatementKind::Call { results, .. } => {
+            for result in results {
+                visit_destination(result);
+            }
+        }
+        HirStatementKind::MapOp { result, .. } => {
+            if let Some(result) = result {
+                visit_destination(result);
+            }
         }
         HirStatementKind::NumericOp { result, .. }
         | HirStatementKind::RangeStepFailure { result, .. }
         | HirStatementKind::FormatFloat { result, .. }
-        | HirStatementKind::ValidateFloat { result, .. } => [defined_local(result), None],
+        | HirStatementKind::ValidateFloat { result, .. } => visit_destination(result),
         HirStatementKind::FloatRangeCandidate {
             candidate_result,
             in_range_result,
             ..
-        } => [
-            defined_local(candidate_result),
-            defined_local(in_range_result),
-        ],
-
+        } => {
+            visit_destination(candidate_result);
+            visit_destination(in_range_result);
+        }
         HirStatementKind::Write { .. }
         | HirStatementKind::Expr(_)
         | HirStatementKind::Drop(_)
-        | HirStatementKind::PushRuntimeFragment { .. } => [None, None],
+        | HirStatementKind::PushRuntimeFragment { .. } => {}
     }
 }
 
@@ -1143,9 +1247,6 @@ fn collect_statement_loaded_locals(
                 collect_expression_loaded_locals(expressions, *arg, visitor);
             }
         }
-        HirStatementKind::CastOp { source, .. } => {
-            collect_expression_loaded_locals(expressions, *source, visitor);
-        }
         HirStatementKind::NumericOp { operands, .. } => match operands {
             HirNumericOperands::Unary { operand } => {
                 collect_expression_loaded_locals(expressions, *operand, visitor);
@@ -1189,15 +1290,12 @@ fn collect_statement_written_locals(statement: &HirStatement, visitor: &mut impl
             HirWriteTarget::DefineLocal(local) => visitor(*local),
             HirWriteTarget::AssignPlace(place) => collect_place_written_local(place, visitor),
         },
-        HirStatementKind::Call {
-            result: Some(local),
-            ..
-        } => visitor(local.local()),
-        HirStatementKind::MapOp {
-            result: Some(local),
-            ..
+        HirStatementKind::Call { results, .. } => {
+            for result in results {
+                visitor(result.local());
+            }
         }
-        | HirStatementKind::CastOp {
+        HirStatementKind::MapOp {
             result: Some(local),
             ..
         } => visitor(local.local()),
@@ -1213,9 +1311,7 @@ fn collect_statement_written_locals(statement: &HirStatement, visitor: &mut impl
         }
         HirStatementKind::FormatFloat { result, .. }
         | HirStatementKind::ValidateFloat { result, .. } => visitor(result.local()),
-        HirStatementKind::Call { result: None, .. }
-        | HirStatementKind::MapOp { result: None, .. }
-        | HirStatementKind::CastOp { result: None, .. }
+        HirStatementKind::MapOp { result: None, .. }
         | HirStatementKind::Expr(_)
         | HirStatementKind::Drop(_)
         | HirStatementKind::PushRuntimeFragment { .. } => {}
@@ -1249,8 +1345,10 @@ fn collect_terminator_loaded_locals(
         HirTerminator::If { condition, .. } => {
             collect_expression_loaded_locals(expressions, *condition, visitor);
         }
-        HirTerminator::FallibleBranch { result, .. } => {
-            collect_expression_loaded_locals(expressions, *result, visitor);
+        HirTerminator::Invoke { operation, .. } => {
+            for value in operation.operands(expressions) {
+                collect_expression_loaded_locals(expressions, value, visitor);
+            }
         }
         HirTerminator::Match { scrutinee, arms } => {
             collect_expression_loaded_locals(expressions, *scrutinee, visitor);
@@ -1268,9 +1366,12 @@ fn collect_terminator_loaded_locals(
                 }
             }
         }
-        HirTerminator::Return(value)
-        | HirTerminator::ReturnSuccess(value)
-        | HirTerminator::ReturnError(value) => {
+        HirTerminator::Return(values) => {
+            for value in expressions.values(*values) {
+                collect_expression_loaded_locals(expressions, *value, visitor);
+            }
+        }
+        HirTerminator::ReturnError(value) => {
             collect_expression_loaded_locals(expressions, *value, visitor);
         }
         HirTerminator::AssertFailure { message, .. } => {
@@ -1288,78 +1389,66 @@ fn collect_terminator_loaded_locals(
     }
 }
 
+/// Visits every local read by one expression tree, in evaluation order.
+///
+/// WHAT: walks the tree with an explicit stack. Children are pushed in reverse,
+/// so nodes are visited in evaluation pre-order.
+/// WHY: nested arithmetic can be deeper than the thread stack allows, so the
+/// walk must not recurse once per nesting level.
 fn collect_expression_loaded_locals(
     expressions: &HirExpressionStore,
-    expression_id: crate::compiler_frontend::hir::ids::HirValueId,
+    expression_id: HirValueId,
     visitor: &mut impl FnMut(LocalId),
 ) {
-    match &expressions.expression(expression_id).kind {
-        HirExpressionKind::Load(place) | HirExpressionKind::Copy(place) => {
-            collect_place_loaded_locals(expressions, place, visitor)
-        }
-        HirExpressionKind::BinOp { left, right, .. } => {
-            collect_expression_loaded_locals(expressions, *left, visitor);
-            collect_expression_loaded_locals(expressions, *right, visitor);
-        }
-        HirExpressionKind::UnaryOp { operand, .. } => {
-            collect_expression_loaded_locals(expressions, *operand, visitor);
-        }
-        HirExpressionKind::StructConstruct { fields, .. } => {
-            for (_, value) in expressions.struct_fields(*fields) {
-                collect_expression_loaded_locals(expressions, *value, visitor);
+    let mut pending = vec![expression_id];
+    while let Some(expression_id) = pending.pop() {
+        match &expressions.expression(expression_id).kind {
+            HirExpressionKind::Load(place) | HirExpressionKind::Copy(place) => {
+                visitor(place.root);
+                for projection in expressions.projections(place.projections).iter().rev() {
+                    if let HirProjection::Index(index) = projection {
+                        pending.push(*index);
+                    }
+                }
             }
-        }
-        HirExpressionKind::Collection(elements)
-        | HirExpressionKind::TupleConstruct { elements } => {
-            for element in expressions.values(*elements) {
-                collect_expression_loaded_locals(expressions, *element, visitor);
+            HirExpressionKind::BinOp { left, right, .. } => {
+                pending.push(*right);
+                pending.push(*left);
             }
-        }
-        HirExpressionKind::MapLiteral(entries) => {
-            for entry in expressions.map_entries(*entries) {
-                collect_expression_loaded_locals(expressions, entry.key, visitor);
-                collect_expression_loaded_locals(expressions, entry.value, visitor);
+            HirExpressionKind::UnaryOp { operand, .. } => pending.push(*operand),
+            HirExpressionKind::StructConstruct { fields, .. } => {
+                for (_, value) in expressions.struct_fields(*fields).iter().rev() {
+                    pending.push(*value);
+                }
             }
-        }
-        HirExpressionKind::TupleGet { tuple, .. } => {
-            collect_expression_loaded_locals(expressions, *tuple, visitor);
-        }
-        HirExpressionKind::Range { start, end } => {
-            collect_expression_loaded_locals(expressions, *start, visitor);
-            collect_expression_loaded_locals(expressions, *end, visitor);
-        }
-        HirExpressionKind::VariantConstruct { fields, .. } => {
-            for field in expressions.variant_fields(*fields) {
-                collect_expression_loaded_locals(expressions, field.value, visitor);
+            HirExpressionKind::Collection(elements) => {
+                for element in expressions.values(*elements).iter().rev() {
+                    pending.push(*element);
+                }
             }
-        }
-        HirExpressionKind::FallibleUnwrapSuccess { result }
-        | HirExpressionKind::FallibleUnwrapError { result }
-        | HirExpressionKind::Cast { source: result, .. } => {
-            collect_expression_loaded_locals(expressions, *result, visitor);
-        }
-        HirExpressionKind::Number(_)
-        | HirExpressionKind::FixedScalar(_)
-        | HirExpressionKind::Bool(_)
-        | HirExpressionKind::Char(_)
-        | HirExpressionKind::StringLiteral(_)
-        | HirExpressionKind::StructuralString { .. } => {}
-
-        HirExpressionKind::VariantPayloadGet { source, .. } => {
-            collect_expression_loaded_locals(expressions, *source, visitor);
-        }
-    }
-}
-
-fn collect_place_loaded_locals(
-    expressions: &HirExpressionStore,
-    place: &HirPlace,
-    visitor: &mut impl FnMut(LocalId),
-) {
-    visitor(place.root);
-    for projection in expressions.projections(place.projections) {
-        if let HirProjection::Index(index) = projection {
-            collect_expression_loaded_locals(expressions, *index, visitor);
+            HirExpressionKind::MapLiteral(entries) => {
+                for entry in expressions.map_entries(*entries).iter().rev() {
+                    pending.push(entry.value);
+                    pending.push(entry.key);
+                }
+            }
+            HirExpressionKind::Range { start, end } => {
+                pending.push(*end);
+                pending.push(*start);
+            }
+            HirExpressionKind::VariantConstruct { fields, .. } => {
+                for field in expressions.variant_fields(*fields).iter().rev() {
+                    pending.push(field.value);
+                }
+            }
+            HirExpressionKind::Cast { source: result, .. } => pending.push(*result),
+            HirExpressionKind::VariantPayloadGet { source, .. } => pending.push(*source),
+            HirExpressionKind::Number(_)
+            | HirExpressionKind::FixedScalar(_)
+            | HirExpressionKind::Bool(_)
+            | HirExpressionKind::Char(_)
+            | HirExpressionKind::StringLiteral(_)
+            | HirExpressionKind::StructuralString { .. } => {}
         }
     }
 }

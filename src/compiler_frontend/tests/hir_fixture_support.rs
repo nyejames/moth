@@ -7,7 +7,7 @@
 //!      target-owned and both backends consume these constructors instead of copying them.
 
 use crate::compiler_frontend::ast::Ast;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template::{Style, TemplateType};
 use crate::compiler_frontend::ast::templates::tir::{
@@ -15,8 +15,9 @@ use crate::compiler_frontend::ast::templates::tir::{
     TemplateViewContext,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::blocks::HirLocal;
-use crate::compiler_frontend::hir::expression_store::{HirExpressionStore, HirValueRange};
+use crate::compiler_frontend::hir::expression_store::HirExpressionStore;
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::functions::HirFunctionOriginLookup;
 use crate::compiler_frontend::hir::hir_builder::lower_module;
@@ -50,6 +51,7 @@ pub(crate) fn lower_hir(
     ast: Ast,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
+    external_packages: &ExternalPackageRegistry,
 ) -> HirModule {
     let lowering = lower_module(
         ast,
@@ -58,6 +60,7 @@ pub(crate) fn lower_hir(
         HirFunctionOriginLookup::default(),
         None,
         Default::default(),
+        external_packages,
     )
     .expect("HIR lowering should succeed");
     lowering.hir_module
@@ -68,10 +71,11 @@ pub(crate) fn lower_hir(
 /// AST finalization should replace this shape with an owned runtime handoff. The
 /// returned shared store keeps the deliberately unnormalized template's TIR identity valid.
 pub(crate) fn raw_template_expression_for_hir_invariant(
+    expression_builder: &mut AstExpressionBuilder,
     kind: TemplateType,
     span: Option<SourceSpan>,
     value_mode: ValueMode,
-) -> (Expression, Rc<RefCell<TemplateIrStore>>) {
+) -> (ExprId, Rc<RefCell<TemplateIrStore>>) {
     let store_handle = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
     let template_id = {
@@ -95,7 +99,10 @@ pub(crate) fn raw_template_expression_for_hir_invariant(
         span,
     };
 
-    (Expression::template(template, value_mode), store_handle)
+    let expression = expression_builder
+        .template(template, value_mode)
+        .expect("raw template invariant fixture must have a valid build-time row");
+    (expression.id(), store_handle)
 }
 
 // ---------------------------------------------------------------------------
@@ -121,22 +128,6 @@ pub(crate) fn expression(
             span: None,
         })
         .expect("test expression should fit the HIR expression store")
-}
-
-pub(crate) fn unit_expression(
-    ty: TypeId,
-    region: RegionId,
-    expressions: &mut HirExpressionStore,
-) -> HirValueId {
-    expression(
-        HirExpressionKind::TupleConstruct {
-            elements: HirValueRange::empty(),
-        },
-        ty,
-        region,
-        ValueKind::Const,
-        expressions,
-    )
 }
 
 pub(crate) fn fixed_scalar_expression(

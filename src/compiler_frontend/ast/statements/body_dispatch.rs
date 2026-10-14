@@ -6,10 +6,12 @@
 
 use crate::ast_log;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::const_values::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::expressions::failure_classification::pending_function_failure_facts;
+use crate::compiler_frontend::ast::module_ast::scope_context::EnclosingCallableOwner;
 use crate::compiler_frontend::ast::numeric_construction::{
     BodyDraft, NumericContinuation, StatementExpression,
 };
@@ -127,10 +129,16 @@ fn deferred_block_error(
     CompilerDiagnostic::deferred_feature_reason(reason, span)
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "function body keeps stream, scope, warnings and mutable parse resources apart"
+)]
 pub(crate) fn parse_function_body_statements(
     token_stream: &mut AstCursor,
     mut context: ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
@@ -180,7 +188,8 @@ pub(crate) fn parse_function_body_statements(
                 &mut draft,
                 &mut context,
                 type_interner,
-                warnings,
+                expression_builder,
+                const_values,
                 string_table,
                 path_fork,
             )?,
@@ -190,6 +199,8 @@ pub(crate) fn parse_function_body_statements(
                 &mut draft,
                 &mut context,
                 type_interner,
+                expression_builder,
+                const_values,
                 string_table,
                 path_fork,
             )?,
@@ -221,6 +232,8 @@ pub(crate) fn parse_function_body_statements(
                     token_stream,
                     context.new_child_control_flow(ContextKind::Loop, string_table, path_fork),
                     type_interner,
+                    expression_builder,
+                    const_values,
                     warnings,
                     string_table,
                     path_fork,
@@ -235,6 +248,8 @@ pub(crate) fn parse_function_body_statements(
                     token_stream,
                     context.new_child_control_flow(ContextKind::Branch, string_table, path_fork),
                     type_interner,
+                    expression_builder,
+                    const_values,
                     warnings,
                     string_table,
                     path_fork,
@@ -267,6 +282,8 @@ pub(crate) fn parse_function_body_statements(
                     &mut draft,
                     &context,
                     type_interner,
+                    expression_builder,
+                    const_values,
                     string_table,
                     path_fork,
                 )?;
@@ -278,6 +295,8 @@ pub(crate) fn parse_function_body_statements(
                     &mut draft,
                     &context,
                     type_interner,
+                    expression_builder,
+                    const_values,
                     string_table,
                     path_fork,
                 )?;
@@ -368,6 +387,8 @@ pub(crate) fn parse_function_body_statements(
                     token_stream,
                     context: &context,
                     type_interner,
+                    expression_builder,
+                    const_values,
                     target: active_target,
                     string_table,
                     path_fork,
@@ -457,14 +478,16 @@ pub(crate) fn parse_function_body_statements(
                     context.scope,
                     &context,
                     type_interner,
+                    expression_builder,
+                    const_values,
                     vec![],
                     string_table,
                     path_fork,
                 )?;
-                let expression = Expression::template(template, ValueMode::MutableOwned);
+                let expression = expression_builder.template(template, ValueMode::MutableOwned)?;
 
                 draft.push_node(AstNode {
-                    kind: NodeKind::PushStartRuntimeFragment(expression),
+                    kind: NodeKind::PushStartRuntimeFragment(expression.id()),
                     span: fragment_span,
                     scope: context.scope,
                 })
@@ -490,6 +513,8 @@ pub(crate) fn parse_function_body_statements(
                     &mut draft,
                     &context,
                     type_interner,
+                    expression_builder,
+                    const_values,
                     string_table,
                     path_fork,
                 )?;
@@ -520,7 +545,15 @@ pub(crate) fn parse_function_body_statements(
         return Ok(ParsedBody::Draft(draft));
     }
 
-    let completed = complete_numeric_body(draft, &context, type_interner, string_table, path_fork);
+    let completed = complete_numeric_body(
+        draft,
+        &context,
+        type_interner,
+        expression_builder,
+        const_values,
+        string_table,
+        path_fork,
+    );
 
     // Completion may emit trailing diagnostics from resumed positions (for example a retained
     // match arm whose duplicate value only existed after the subject type was selected). They
@@ -532,13 +565,20 @@ pub(crate) fn parse_function_body_statements(
 
     // Only completed callable bodies prove infallibility. Branch/loop bodies and unresolved
     // recursive edges cannot close the callee's failure contract on their own.
-    if context.kind == ContextKind::Function
-        && context.expected_error_type.is_none()
+    if context
+        .enclosing_callable
+        .as_deref()
+        .is_some_and(|contract| {
+            contract.owner == EnclosingCallableOwner::Function && contract.error_type.is_none()
+        })
         && context.active_generic_type_context().is_none()
         && let Some(functions) = &context.known_infallible_functions
     {
-        let facts =
-            pending_function_failure_facts(&body_nodes, &context.template_ir_store.borrow())?;
+        let facts = pending_function_failure_facts(
+            &body_nodes,
+            &context.template_ir_store.borrow(),
+            &*expression_builder,
+        )?;
         if !facts.body.summary.has_pending_implicit()
             && facts.body.summary.summary.first_typed.is_none()
             && facts.assertion_message_calls.is_empty()

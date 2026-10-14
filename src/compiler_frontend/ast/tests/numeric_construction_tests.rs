@@ -4,16 +4,21 @@
 //! construction APIs and production counters expose consumption, release and bounded query work.
 
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
+use crate::compiler_frontend::ast::const_values::store::{ConstValuePayload, ConstValueStore};
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-use crate::compiler_frontend::ast::module_ast::scope_context::AuthoredBindingFacts;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExpressionOperationView,
+};
+use crate::compiler_frontend::ast::module_ast::scope_context::{
+    AuthoredBindingFacts, EnclosingCallableContract, EnclosingCallableOwner,
+};
 use crate::compiler_frontend::ast::numeric_construction::{
     DeferredExpressionSuffix, DirectPendingReference, NumericBindingId, NumericConstructionState,
     NumericContinuation, NumericFamily, NumericRecipe, ReturnContinuation,
     accept_forward_binding_result, binding_annotation_type, binding_known_shape,
-    binding_reference_shape, deferred_numeric_expression, expression_contains_pending,
-    merged_receiver_type, register_binding_annotation, register_direct_reference_witness,
+    binding_reference_shape, deferred_numeric_expression, merged_receiver_type,
+    register_binding_annotation, register_direct_reference_witness,
     register_pending_reference_view, resolve_raw_binding, union_alias_classes,
 };
 use crate::compiler_frontend::ast::numeric_known_shape::KnownShape;
@@ -41,13 +46,20 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 fn body_context(scope: PathId, paths: &PathInternerFork) -> ScopeContext {
-    ScopeContext::new_for_tests(
+    let mut context = ScopeContext::new_for_tests(
         ContextKind::Function,
         scope,
         Rc::new(TopLevelDeclarationTable::new(vec![], paths)),
         Arc::new(ExternalPackageRegistry::new()),
         0,
-    )
+    );
+    context.enclosing_callable = Some(Rc::new(EnclosingCallableContract {
+        owner: EnclosingCallableOwner::Function,
+        success_types: Vec::new(),
+        authored_success_slot_count: 0,
+        error_type: None,
+    }));
+    context
 }
 
 fn empty_return(scope: PathId) -> NumericContinuation {
@@ -171,17 +183,39 @@ fn recipes_continuations_and_forward_results_are_consumed_once() {
             .expect("resolving lookup"),
         None
     );
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let scalar = FixedScalarValue::signed(FixedScalar::I32, 7).expect("test value fits I32");
-    let value = Expression::fixed_scalar(scalar, None, ValueMode::ImmutableOwned);
+    let value = expressions
+        .fixed_scalar(&mut constants, scalar, None, ValueMode::ImmutableOwned)
+        .expect("test value should construct");
     state
-        .complete_forward_producer(producer, value)
+        .complete_forward_producer(producer, value.id())
         .expect("claimed result should complete");
     let completed = state
         .take_completed_forward_producer(producer)
         .expect("completed result lookup")
         .expect("completed result should be available once");
-    assert!(matches!(completed.kind, ExpressionKind::FixedScalar(value)
-        if value.scalar() == FixedScalar::I32 && value.as_i64() == Some(7)));
+    let ExpressionOperationView::Constant(payload) = expressions
+        .view(completed)
+        .expect("completed view")
+        .operation()
+    else {
+        panic!("completed fixed scalar must be a constant");
+    };
+    assert!(matches!(
+        constants.payload(payload),
+        Some(ConstValuePayload::FixedScalar(stored))
+            if stored.scalar() == FixedScalar::I32 && stored.as_i64() == Some(7)
+    ));
+    assert_eq!(
+        expressions
+            .view(completed)
+            .expect("completed view")
+            .value_type_id()
+            .expect("completed type"),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
+    );
     assert!(
         state
             .take_completed_forward_producer(producer)
@@ -967,10 +1001,14 @@ fn complete_folded_body(binding_count: usize, conflicting: bool) {
     let mut environment = TypeEnvironment::new();
     let mut compatibility = TypeCompatibilityCache::new();
     let mut interner = AstTypeInterner::new(&mut environment, &mut compatibility);
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let parsed = function_body_to_ast(
         &mut cursor,
         root.clone(),
         &mut interner,
+        &mut expressions,
+        &mut constants,
         &mut vec![],
         strings,
         &mut paths,
@@ -986,7 +1024,15 @@ fn complete_folded_body(binding_count: usize, conflicting: bool) {
         assert!(state.continuation_count() <= binding_count * 2 + usize::from(conflicting));
         assert!(state.continuation_count() >= binding_count);
     }
-    let result = complete_numeric_body(draft, &root, &mut interner, strings, &mut paths);
+    let result = complete_numeric_body(
+        draft,
+        &root,
+        &mut interner,
+        &mut expressions,
+        &mut constants,
+        strings,
+        &mut paths,
+    );
     assert_released(&mut handle.borrow_mut());
     if conflicting {
         assert!(
@@ -1006,19 +1052,42 @@ fn complete_folded_body(binding_count: usize, conflicting: bool) {
             panic!("the body contains only declarations");
         };
         assert_eq!(
-            declaration.value.type_id,
+            declaration.type_id,
             builtin_type_ids::fixed_scalar(FixedScalar::I64)
         );
-        assert!(!expression_contains_pending(&declaration.value));
+        let initializer = declaration
+            .value
+            .initializer()
+            .expect("fixture initializer");
+        assert_eq!(
+            expressions
+                .view(initializer)
+                .expect("fixture view")
+                .value_type_id()
+                .expect("fixture type"),
+            builtin_type_ids::fixed_scalar(FixedScalar::I64)
+        );
     }
     for node in &nodes[..binding_count] {
         let NodeKind::VariableDeclaration(declaration) = &node.kind else {
             unreachable!()
         };
-        assert!(
-            matches!(declaration.value.kind, ExpressionKind::FixedScalar(value)
-            if value.scalar() == FixedScalar::I64 && value.as_i64() == Some(3))
-        );
+        let initializer = declaration
+            .value
+            .initializer()
+            .expect("fixture initializer");
+        let ExpressionOperationView::Constant(value) = expressions
+            .view(initializer)
+            .expect("fixture view")
+            .operation()
+        else {
+            panic!("folded origin must be a constant");
+        };
+        assert!(matches!(
+            constants.payload(value),
+            Some(ConstValuePayload::FixedScalar(scalar))
+                if scalar.scalar() == FixedScalar::I64 && scalar.as_i64() == Some(3)
+        ));
     }
 }
 

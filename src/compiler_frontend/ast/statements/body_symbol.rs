@@ -11,12 +11,14 @@
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::const_values::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::{
-    Expression, ExpressionKind, Operator,
-};
+use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExpressionOperationView, OwnedExpr,
+};
 use crate::compiler_frontend::ast::expressions::mutation::{
     MutationOutcome, compound_assignment_operator_for_tag, handle_mutation, handle_mutation_target,
 };
@@ -62,7 +64,7 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidAssignmentTargetReason, InvalidDeclarationReason,
     InvalidFieldAccessReason, InvalidMultiBindReason, InvalidStandaloneStatementReason,
-    InvalidThisUsageReason, ReservedNameOwner,
+    InvalidThisUsageReason, ReservedNameOwner, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -92,35 +94,42 @@ fn push_mutation_outcome(outcome: MutationOutcome, draft: &mut BodyDraft) {
 }
 
 fn push_accessed_symbol_statement(
-    accessed_expression: Expression,
+    accessed_expression: OwnedExpr,
     draft: &mut BodyDraft,
     context: &ScopeContext,
     token_stream: &AstCursor,
     _symbol_id: StringId,
     _string_table: &StringTable,
-) -> Result<(), CompilerDiagnostic> {
-    if is_expression_statement(&accessed_expression) {
+    expressions: &AstExpressionBuilder,
+) -> Result<(), ExpressionParseError> {
+    let view = expressions.view_owned(accessed_expression)?;
+    if is_expression_statement(view) {
         draft.push_node(AstNode {
-            span: accessed_expression.span,
-            kind: NodeKind::ExpressionStatement(accessed_expression),
+            span: view.span(),
+            kind: NodeKind::ExpressionStatement(accessed_expression.id()),
             scope: context.scope,
         });
         return Ok(());
     }
 
     // A bare field read (e.g., `obj.field`) does nothing, so it is rejected.
-    if matches!(accessed_expression.kind, ExpressionKind::FieldAccess { .. }) {
+    if matches!(
+        view.operation(),
+        ExpressionOperationView::FieldAccess { .. }
+    ) {
         return Err(CompilerDiagnostic::invalid_standalone_statement(
             InvalidStandaloneStatementReason::FieldRead,
             Some(token_stream.current_span()),
-        ));
+        )
+        .into());
     }
 
     // Any other accessed expression is also not a valid standalone statement.
     Err(CompilerDiagnostic::invalid_standalone_statement(
         InvalidStandaloneStatementReason::Expression,
         Some(token_stream.current_span()),
-    ))
+    )
+    .into())
 }
 
 /// Route one retained postfix expression at its authored position.
@@ -134,6 +143,7 @@ fn push_retained_accessed_symbol_statement(
     draft: &mut BodyDraft,
     context: &ScopeContext,
     token_stream: &AstCursor,
+    expressions: &AstExpressionBuilder,
 ) -> Result<(), ExpressionParseError> {
     if token_stream.current_tag().is_assignment_operator() {
         return Err(CompilerDiagnostic::invalid_assignment_target(
@@ -148,7 +158,7 @@ fn push_retained_accessed_symbol_statement(
         .into());
     }
 
-    let span = item.source_span();
+    let span = item.source_span(expressions)?;
     let expression = StatementExpression::Retained(deferred_numeric_expression(
         vec![item],
         ExpectedType::Infer,
@@ -171,11 +181,17 @@ fn push_retained_accessed_symbol_statement(
 //  `this` statement parsing
 // --------------------------
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "this statement keeps stream, body draft, scope and mutable parse resources apart"
+)]
 pub(crate) fn parse_this_statement(
     token_stream: &mut AstCursor,
     draft: &mut BodyDraft,
     context: &mut ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
@@ -208,6 +224,8 @@ pub(crate) fn parse_this_statement(
                 &this_declaration,
                 context,
                 type_interner,
+                expression_builder,
+                const_values,
                 string_table,
                 path_fork,
             )?;
@@ -219,16 +237,23 @@ pub(crate) fn parse_this_statement(
                         draft,
                         context,
                         token_stream,
+                        expression_builder,
                     );
                 }
             };
 
             if token_stream.current_tag().is_assignment_operator() {
-                let Some(target) = place_expression_from_expression(&accessed_node) else {
+                let Some(target) =
+                    place_expression_from_expression(expression_builder, accessed_node)?
+                else {
                     return Err(CompilerDiagnostic::invalid_assignment_target(
                         InvalidAssignmentTargetReason::TemporaryNotAssignable,
                         None,
-                        Some(accessed_node.type_id),
+                        Some(
+                            expression_builder
+                                .view_owned(accessed_node)?
+                                .require_single(ValueReceiverContext::ReceiverBase)?,
+                        ),
                         None,
                         None,
                         None,
@@ -244,6 +269,8 @@ pub(crate) fn parse_this_statement(
                     this_reference.binding_span(),
                     context,
                     type_interner,
+                    expression_builder,
+                    const_values,
                     string_table,
                     path_fork,
                 )?;
@@ -259,6 +286,7 @@ pub(crate) fn parse_this_statement(
                 token_stream,
                 this_id,
                 string_table,
+                expression_builder,
             )?;
             Ok(())
         }
@@ -269,6 +297,8 @@ pub(crate) fn parse_this_statement(
             draft,
             context,
             type_interner,
+            expression_builder,
+            const_values,
             string_table,
             path_fork,
         ),
@@ -342,10 +372,16 @@ fn pending_binding_reference_item(
 ///       type) parses under that type's ordinary receiving contract.
 /// WHY: materialising a raw literal at the language default before the target's receiving context
 ///      is known would select the wrong domain; a selected type already is that receiving context.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "pending rhs keeps stream, scope, value mode, selected target and mutable parse resources apart"
+)]
 fn parse_pending_mutation_rhs(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     value_mode: &ValueMode,
     selected_target: Option<TypeId>,
     string_table: &mut StringTable,
@@ -360,13 +396,15 @@ fn parse_pending_mutation_rhs(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         ActiveValueProductionTarget::mixed(&[selected_target], ValueReceiverKind::Assignment),
         string_table,
         path_fork,
     ) {
         return match value_block_result {
             Ok(ParsedReceiverValue::Complete(expression)) => {
-                Ok(StatementExpression::Built(expression))
+                Ok(StatementExpression::Built(expression.id()))
             }
             // The block's authored values still hold the pending numeric origins (or its bodies
             // hold continuations), so the assignment keeps the whole block and the body root
@@ -387,9 +425,16 @@ fn parse_pending_mutation_rhs(
             // through the value-production owner's finalizer; the target's pending type is never
             // used as a slot stand-in.
             Ok(ParsedReceiverValue::NeedsSlotInference { block, span }) => {
-                let expression =
-                    finalize_inferred_value_block(block, span, &[None], 1, type_interner)?;
-                Ok(StatementExpression::Built(expression))
+                let expression = finalize_inferred_value_block(
+                    block,
+                    span,
+                    &[None],
+                    1,
+                    type_interner,
+                    expression_builder,
+                    const_values,
+                )?;
+                Ok(StatementExpression::Built(expression.id()))
             }
             // A nested retained construct inside the block keeps the ordinary deferral
             // conversion this right-hand side already owns; every authored diagnostic (the
@@ -427,6 +472,8 @@ fn parse_pending_mutation_rhs(
             token_stream,
             scope_context: context,
             type_interner,
+            expression_builder,
+            const_values,
             expected_type: &mut expected,
             cast_target_context: &mut cast_target,
             value_mode,
@@ -438,7 +485,7 @@ fn parse_pending_mutation_rhs(
     .with_numeric_deferral_owner()
     .with_retained_pending_numeric_fragment();
     match create_expression_with_trailing_newline_policy(input) {
-        Ok(expression) => Ok(StatementExpression::Built(expression)),
+        Ok(expression) => Ok(StatementExpression::Built(expression.id())),
         Err(error) => {
             let deferral = error.take_numeric_deferral(
                 "the value of a mutation whose target has no selected numeric type",
@@ -472,11 +519,17 @@ struct PendingMutationTarget {
 /// WHY: the mutation node needs the target's place, which does not exist until the body root has
 ///      selected the binding's single static type; the write-back conversion re-runs there with
 ///      the exact type. Mutability is a binding fact, so it is checked here in authored order.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "pending mutation keeps stream, body draft, scope, target and mutable parse resources apart"
+)]
 fn retain_pending_mutation(
     token_stream: &mut AstCursor,
     draft: &mut BodyDraft,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
     target: PendingMutationTarget,
@@ -521,6 +574,8 @@ fn retain_pending_mutation(
             token_stream,
             &rhs_context,
             type_interner,
+            expression_builder,
+            const_values,
             &value_mode,
             None,
             string_table,
@@ -536,7 +591,9 @@ fn retain_pending_mutation(
                     &mut state,
                     type_interner.environment(),
                     binding,
-                    expression.type_id,
+                    expression_builder
+                        .view(*expression)?
+                        .require_single(ValueReceiverContext::Assignment)?,
                     span,
                 );
             }
@@ -570,13 +627,20 @@ fn retain_pending_mutation(
         token_stream,
         &rhs_context,
         type_interner,
+        expression_builder,
+        const_values,
         &value_mode,
         None,
         string_table,
         path_fork,
     )?;
     if let StatementExpression::Built(expression) = &value
-        && let Some(type_id) = numeric_witness_type(expression.type_id, type_interner.environment())
+        && let Some(type_id) = numeric_witness_type(
+            expression_builder
+                .view(*expression)?
+                .require_single(ValueReceiverContext::Assignment)?,
+            type_interner.environment(),
+        )
     {
         // A concrete right-hand side fixes the target's single static type: the compound update
         // is an assignment boundary like any other mutation.
@@ -623,11 +687,17 @@ struct PendingMemberMutation {
 /// WHY: the member's declared shape and the root's single static type are known only at body
 ///      completion, where the place resolves exactly like an ordinary field place; the root's
 ///      mutability and declaration span still gate the write there.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "member mutation keeps stream, body draft, scope, mutation and mutable parse resources apart"
+)]
 fn retain_pending_member_mutation(
     token_stream: &mut AstCursor,
     draft: &mut BodyDraft,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
     mutation: PendingMemberMutation,
@@ -689,6 +759,8 @@ fn retain_pending_member_mutation(
         token_stream,
         &rhs_context,
         type_interner,
+        expression_builder,
+        const_values,
         &value_mode,
         selected_target,
         string_table,
@@ -697,12 +769,13 @@ fn retain_pending_member_mutation(
     register_member_mutation_witness(
         context,
         type_interner,
+        expression_builder,
         member,
         &value,
         span,
         operator.as_ref(),
     )?;
-    let target_span = item.source_span();
+    let target_span = item.source_span(expression_builder)?;
     let target = DeferredAssignmentTarget::Retained {
         target: deferred_numeric_expression(
             vec![item],
@@ -771,6 +844,7 @@ fn member_selected_type(
 fn register_member_mutation_witness(
     context: &ScopeContext,
     type_interner: &AstTypeInterner<'_>,
+    expression_builder: &AstExpressionBuilder,
     member: RetainedMemberTarget,
     value: &StatementExpression,
     span: Option<SourceSpan>,
@@ -786,7 +860,9 @@ fn register_member_mutation_witness(
             &mut state,
             environment,
             declared_shape,
-            expression.type_id,
+            expression_builder
+                .view(*expression)?
+                .require_single(ValueReceiverContext::Assignment)?,
             span,
         ),
         (StatementExpression::Retained(deferred), None) => {
@@ -820,7 +896,7 @@ fn reject_numeric_dependency_in_multi_bind(error: ExpressionParseError) -> Expre
                 deferral
                     .items
                     .first()
-                    .and_then(ExpressionRpnItem::source_span)
+                    .and_then(ExpressionRpnItem::authored_span)
             });
             CompilerDiagnostic::invalid_multi_bind(
                 InvalidMultiBindReason::UnsupportedRhs,
@@ -833,12 +909,17 @@ fn reject_numeric_dependency_in_multi_bind(error: ExpressionParseError) -> Expre
     }
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "symbol statement keeps stream, body draft, scope and mutable parse resources apart"
+)]
 pub(crate) fn parse_symbol_statement(
     token_stream: &mut AstCursor,
     draft: &mut BodyDraft,
     context: &mut ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
@@ -848,6 +929,26 @@ pub(crate) fn parse_symbol_statement(
         ))
         .into());
     };
+    // Declaration shape takes precedence over visible-name expression dispatch.
+    if matches!(
+        token_stream.peek_next_tag(),
+        Some(TokenTag::TYPE_PARAMETER_BRACKET | TokenTag::TYPE)
+    ) {
+        new_declaration(
+            token_stream,
+            symbol_id,
+            context,
+            type_interner,
+            expression_builder,
+            const_values,
+            string_table,
+            path_fork,
+        )?;
+        return Err(CompilerError::compiler_error(
+            "a module-only declaration header escaped executable-body placement validation",
+        )
+        .into());
+    }
 
     // Reject symbols that look like keywords in statement position.
     if let Some(error) = check_mistaken_keyword_symbol(symbol_id, token_stream, string_table) {
@@ -882,6 +983,8 @@ pub(crate) fn parse_symbol_statement(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     )
@@ -908,6 +1011,8 @@ pub(crate) fn parse_symbol_statement(
                         draft,
                         context,
                         type_interner,
+                        expression_builder,
+                        const_values,
                         string_table,
                         path_fork,
                         PendingMutationTarget {
@@ -932,6 +1037,8 @@ pub(crate) fn parse_symbol_statement(
                     existing_reference.binding_span(),
                     context,
                     type_interner,
+                    expression_builder,
+                    const_values,
                     string_table,
                     path_fork,
                 )?;
@@ -963,6 +1070,8 @@ pub(crate) fn parse_symbol_statement(
                         },
                         context,
                         type_interner,
+                        expression_builder,
+                        const_values,
                         string_table,
                         path_fork,
                     )?;
@@ -977,6 +1086,8 @@ pub(crate) fn parse_symbol_statement(
                             draft,
                             context,
                             type_interner,
+                            expression_builder,
+                            const_values,
                             string_table,
                             path_fork,
                             PendingMemberMutation {
@@ -993,6 +1104,7 @@ pub(crate) fn parse_symbol_statement(
                         draft,
                         context,
                         token_stream,
+                        expression_builder,
                     );
                 }
 
@@ -1010,6 +1122,8 @@ pub(crate) fn parse_symbol_statement(
                     &declaration,
                     context,
                     type_interner,
+                    expression_builder,
+                    const_values,
                     string_table,
                     path_fork,
                 )?;
@@ -1021,16 +1135,23 @@ pub(crate) fn parse_symbol_statement(
                             draft,
                             context,
                             token_stream,
+                            expression_builder,
                         );
                     }
                 };
 
                 if token_stream.current_tag().is_assignment_operator() {
-                    let Some(target) = place_expression_from_expression(&accessed_node) else {
+                    let Some(target) =
+                        place_expression_from_expression(expression_builder, accessed_node)?
+                    else {
                         return Err(CompilerDiagnostic::invalid_assignment_target(
                             InvalidAssignmentTargetReason::TemporaryNotAssignable,
                             None,
-                            Some(accessed_node.type_id),
+                            Some(
+                                expression_builder
+                                    .view_owned(accessed_node)?
+                                    .require_single(ValueReceiverContext::ReceiverBase)?,
+                            ),
                             None,
                             None,
                             None,
@@ -1046,6 +1167,8 @@ pub(crate) fn parse_symbol_statement(
                         existing_reference.binding_span(),
                         context,
                         type_interner,
+                        expression_builder,
+                        const_values,
                         string_table,
                         path_fork,
                     )?;
@@ -1061,6 +1184,7 @@ pub(crate) fn parse_symbol_statement(
                     token_stream,
                     symbol_id,
                     string_table,
+                    expression_builder,
                 )?;
                 return Ok(());
             }
@@ -1068,12 +1192,11 @@ pub(crate) fn parse_symbol_statement(
             // A type keyword after an existing symbol means the user is trying to
             // redeclare it with an explicit type, which is a shadowing error.
             Some(tag) if tag.is_builtin_scalar_type_name() || tag == TokenTag::MUTABLE => {
-                let mut diagnostic = CompilerDiagnostic::shadowed_name(
+                let diagnostic = CompilerDiagnostic::shadowed_name(
                     symbol_id,
                     existing_reference.binding_span(),
                     Some(token_stream.current_span()),
                 );
-                diagnostic.primary_span = Some(token_stream.current_span());
                 return Err(diagnostic.into());
             }
 
@@ -1084,6 +1207,8 @@ pub(crate) fn parse_symbol_statement(
                     draft,
                     context,
                     type_interner,
+                    expression_builder,
+                    const_values,
                     string_table,
                     path_fork,
                 )?;
@@ -1092,28 +1217,24 @@ pub(crate) fn parse_symbol_statement(
         }
     }
 
-    // External (host) function calls have no local declaration; resolve by name.
-    if context
-        .lookup_visible_external_function(symbol_id)
-        .is_some()
-    {
-        if token_stream.peek_next_tag() == Some(TokenTag::TYPE_PARAMETER_BRACKET) {
-            // Explicit external imports retain the authored dependency span; prelude-injected
-            // symbols intentionally have no source span to attach.
-            let previous_span = context
-                .shared
-                .file_visibility
-                .as_ref()
-                .and_then(|visibility| visibility.visible_external_symbol_spans.get(&symbol_id))
-                .copied();
-            return Err(CompilerDiagnostic::duplicate_declaration(
-                symbol_id,
-                previous_span,
-                Some(token_stream.current_span()),
+    // Declaration shapes must reach the binding owner, which diagnoses a collision at the name
+    // token. Other host uses keep call parsing, including its malformed-call diagnostics.
+    let starts_declaration = token_stream.peek_next_tag().is_some_and(|tag| {
+        tag.is_builtin_scalar_type_name()
+            || matches!(
+                tag,
+                TokenTag::ASSIGN
+                    | TokenTag::MUTABLE
+                    | TokenTag::HASH
+                    | TokenTag::SYMBOL
+                    | TokenTag::OPEN_CURLY
             )
-            .into());
-        }
-
+    });
+    if !starts_declaration
+        && context
+            .lookup_visible_external_function(symbol_id)
+            .is_some()
+    {
         // Host calls share the receiving expression owner with source calls, so a catch protects
         // the whole call and its operands rather than completing at this statement dispatcher.
         push_statement_expression(
@@ -1121,6 +1242,8 @@ pub(crate) fn parse_symbol_statement(
             draft,
             context,
             type_interner,
+            expression_builder,
+            const_values,
             string_table,
             path_fork,
         )?;
@@ -1168,6 +1291,8 @@ pub(crate) fn parse_symbol_statement(
             draft,
             context,
             type_interner,
+            expression_builder,
+            const_values,
             string_table,
             path_fork,
         )?;
@@ -1180,7 +1305,8 @@ pub(crate) fn parse_symbol_statement(
         symbol_id,
         context,
         type_interner,
-        warnings,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     )?;
@@ -1200,24 +1326,11 @@ pub(crate) fn parse_symbol_statement(
     let is_compile_time_binding = resolved_declaration.is_compile_time_binding;
     let declaration_span = resolved_declaration.binding_span;
 
-    // Lift struct definitions and functions to the AST statement level;
-    // everything else becomes a local variable declaration.
-    match &statement_kind {
+    // Lift struct definitions to the statement level; ordinary bindings remain variables.
+    match statement_kind {
         ResolvedDeclarationStatementKind::StructDefinition(params) => {
             draft.push_node(AstNode {
-                kind: NodeKind::StructDefinition(declaration.id.to_owned(), params.to_owned()),
-                span: declaration_span,
-                scope: context.scope,
-            });
-        }
-
-        ResolvedDeclarationStatementKind::Function { signature, body } => {
-            draft.push_node(AstNode {
-                kind: NodeKind::Function(
-                    declaration.id.to_owned(),
-                    signature.to_owned(),
-                    body.to_owned(),
-                ),
+                kind: NodeKind::StructDefinition(declaration.id, params),
                 span: declaration_span,
                 scope: context.scope,
             });

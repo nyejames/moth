@@ -1,7 +1,5 @@
 use super::*;
-use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::cursor::AstCursor;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::templates::template::TemplateSegmentOrigin;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrNodeKind;
 use crate::compiler_frontend::compiler_messages::{
@@ -12,6 +10,8 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 #[test]
 fn fresh_marks_template_to_skip_parent_child_wrappers() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -38,6 +38,8 @@ fn fresh_marks_template_to_skip_parent_child_wrappers() {
         &mut wrapper_tokens,
         wrapper_source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -72,6 +74,8 @@ fn fresh_marks_template_to_skip_parent_child_wrappers() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![inherited_wrapper],
         &mut string_table,
         &mut path_fork,
@@ -91,6 +95,8 @@ fn fresh_marks_template_to_skip_parent_child_wrappers() {
 
 #[test]
 fn children_directive_attaches_wrapper_context_to_direct_child() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -118,6 +124,8 @@ fn children_directive_attaches_wrapper_context_to_direct_child() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -144,6 +152,8 @@ fn children_directive_attaches_wrapper_context_to_direct_child() {
 
 #[test]
 fn children_directive_accepts_const_string_reference() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -151,18 +161,22 @@ fn children_directive_accepts_const_string_reference() {
         .try_intern_portable_path("main.moth/#const_template0", &mut string_table)
         .expect("test path fits");
     let prefix_name = string_table.intern("prefix");
-    let declarations = vec![Declaration {
-        id: path_fork
-            .try_intern_child(scope, prefix_name)
-            .expect("prefix declaration path should intern"),
-        value: Expression::string_slice(
+    let prefix_value = expression_builder
+        .string_slice(
+            &mut const_values,
             string_table.intern("prefix: "),
             None,
             ValueMode::ImmutableOwned,
-        ),
-        binding_span: None,
-        config_qualifier: None,
-    }];
+        )
+        .expect("prefix string expression should construct")
+        .id();
+    let declarations = vec![make_test_variable(
+        path_fork
+            .try_intern_child(scope, prefix_name)
+            .expect("prefix declaration path should intern"),
+        prefix_value,
+        &expression_builder,
+    )];
 
     let file_tokens = template_tokens_from_source(
         "[$children(prefix): [: child]]",
@@ -188,6 +202,8 @@ fn children_directive_accepts_const_string_reference() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -244,6 +260,8 @@ fn children_directive_accepts_const_string_reference() {
 
 #[test]
 fn children_directive_rejects_runtime_values() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -265,12 +283,20 @@ fn children_directive_rejects_runtime_values() {
     token_stream
         .set_position(file_tokens.opener_index)
         .expect("test token stream position must remain in canonical range");
-    let context = runtime_template_context(&source_path, &mut string_table, &mut path_fork);
+    let context = runtime_template_context(
+        &source_path,
+        &mut expression_builder,
+        &mut const_values,
+        &mut string_table,
+        &mut path_fork,
+    );
 
     let error = Template::new(
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -363,6 +389,8 @@ fn nested_inline_templates_inside_table_cells_do_not_become_extra_cells() {
 
 #[test]
 fn children_directive_argument_ending_at_template_boundary_uses_children_reason() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     // The `]` closes the outer template before any argument expression is
     // authored. This stays on the directive owner (`InvalidChildrenArgument`),
     // not true file EOF, which header balancing owns as `MOTH-SYNTAX-0017`.
@@ -393,6 +421,8 @@ fn children_directive_argument_ending_at_template_boundary_uses_children_reason(
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,

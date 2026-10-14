@@ -11,9 +11,14 @@
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::const_values::store::{ConstStringValue, ConstValuePayload};
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    ExpressionOperationView, ExpressionView, OwnedExpr,
+};
 use crate::compiler_frontend::ast::file_value_resolution::resolve_file_value;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::Template;
@@ -21,8 +26,9 @@ use crate::compiler_frontend::ast::templates::template::{TemplateSegmentOrigin, 
 use crate::compiler_frontend::ast::templates::template_renderability::is_template_renderable_type;
 use crate::compiler_frontend::ast::templates::tir::TemplateConstructionContext;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidTemplateStructureReason,
+    CompilerDiagnostic, InvalidTemplateStructureReason, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::paths::path_syntax::PathSyntaxId;
@@ -34,6 +40,8 @@ use crate::compiler_frontend::value_mode::ValueMode;
 pub(super) struct TemplateHeadExpressionContext<'a> {
     pub(super) context: &'a ScopeContext,
     pub(super) type_environment: &'a TypeEnvironment,
+    pub(super) expression_builder: &'a AstExpressionBuilder,
+    pub(super) const_values: &'a ConstValueStore,
     pub(super) construction_context: &'a mut TemplateConstructionContext,
     pub(super) path_fork: &'a PathInternerFork,
     /// Value mode the head intake parsed this expression with.
@@ -47,16 +55,16 @@ pub(super) struct TemplateHeadExpressionContext<'a> {
 type HeadExpressionResult<T> = Result<T, TemplateError>;
 
 fn is_unresolved_constant_placeholder_reference(
-    expression: &Expression,
+    expression: ExpressionView<'_>,
     context: &ScopeContext,
     path_fork: &PathInternerFork,
 ) -> bool {
-    let ExpressionKind::Reference(path) = &expression.kind else {
+    let ExpressionOperationView::Reference(path) = expression.operation() else {
         return false;
     };
 
     path_fork
-        .component(*path)
+        .component(path)
         .and_then(|name| context.get_reference(&name))
         .is_some_and(|reference| {
             // A pending numeric binding is a runtime body-local value with no declaration,
@@ -68,11 +76,12 @@ fn is_unresolved_constant_placeholder_reference(
 }
 
 pub(crate) fn validate_template_head_value_type(
-    expression: &Expression,
+    expression: ExpressionView<'_>,
     span: Option<SourceSpan>,
     type_environment: &TypeEnvironment,
 ) -> HeadExpressionResult<()> {
-    if type_environment.is_fallible_carrier(expression.type_id) {
+    let type_id = expression.require_single(ValueReceiverContext::TemplateInterpolation)?;
+    if expression.error_type().is_some() {
         return Err(with_source_span(
             CompilerDiagnostic::invalid_template_structure(
                 InvalidTemplateStructureReason::FallibleValueInTemplateHead,
@@ -89,15 +98,13 @@ pub(crate) fn validate_template_head_value_type(
     //
     // Use the shared renderability classifier so the policy lives in one
     // AST-template-owned place and uses semantic TypeId identity.
-    if is_template_renderable_type(expression.type_id, type_environment) {
+    if is_template_renderable_type(type_id, type_environment) {
         return Ok(());
     }
 
     Err(with_source_span(
         CompilerDiagnostic::invalid_template_structure(
-            InvalidTemplateStructureReason::UnsupportedTypeInTemplateHead {
-                type_id: expression.type_id,
-            },
+            InvalidTemplateStructureReason::UnsupportedTypeInTemplateHead { type_id },
             span,
         ),
         span,
@@ -191,7 +198,7 @@ pub(super) fn handle_template_value_in_template_head(
 ///      deferral is the producer's actual retained result, and only the position (routing) and
 ///      the intake metadata stay behind until completion.
 pub(super) fn push_parsed_template_head_expression(
-    result: Result<Expression, ExpressionParseError>,
+    result: Result<OwnedExpr, ExpressionParseError>,
     target: TemplateHeadExpressionContext<'_>,
     span: Option<SourceSpan>,
     string_table: &StringTable,
@@ -220,7 +227,7 @@ fn retain_template_head_numeric_deferral(
         target.context.numeric_domain_id(),
         deferral.items,
         deferral.expected,
-        target.value_mode.clone(),
+        target.value_mode,
         // The authored trailing handling travels with the fragment, so completion applies the
         // exact `!` the author wrote instead of re-reading tokens.
         deferral.suffix,
@@ -232,12 +239,13 @@ fn retain_template_head_numeric_deferral(
 
 /// Pushes a non-template expression into the head content after validation.
 pub(super) fn push_template_head_expression(
-    expression: Expression,
+    expression: OwnedExpr,
     target: TemplateHeadExpressionContext<'_>,
     span: Option<SourceSpan>,
     string_table: &StringTable,
 ) -> HeadExpressionResult<()> {
-    if let ExpressionKind::Template(template_value) = &expression.kind {
+    let expression = target.expression_builder.view_owned(expression)?;
+    if let ExpressionOperationView::Template(template_value) = expression.operation() {
         return handle_template_value_in_template_head(
             template_value,
             target.context,
@@ -247,28 +255,27 @@ pub(super) fn push_template_head_expression(
     }
 
     let defer_inferred_type_validation =
-        is_unresolved_constant_placeholder_reference(&expression, target.context, target.path_fork);
+        is_unresolved_constant_placeholder_reference(expression, target.context, target.path_fork);
 
     if !defer_inferred_type_validation {
-        validate_template_head_value_type(&expression, span, target.type_environment)?;
+        validate_template_head_value_type(expression, span, target.type_environment)?;
     }
 
-    let expression_needs_constness =
-        target.context.kind.is_constant_context() || !expression.kind.is_foldable();
-    let expression_is_compile_time_constant = if expression_needs_constness {
-        expression
-            .const_value_kind_with_template_classifier(&mut |template| {
-                classify_template_from_effective_tir(template, &target.context.template_ir_store)
-            })?
-            .is_compile_time_value()
-    } else {
-        false
-    };
+    let expression_is_compile_time_constant = expression
+        .const_value_kind_with_template_classifier(target.const_values, &mut |template| {
+            classify_template_from_effective_tir(
+                template,
+                &target.context.template_ir_store,
+                target.expression_builder,
+                target.const_values,
+            )
+        })?
+        .is_compile_time_value();
 
     if target.context.kind.is_constant_context()
         && !expression_is_compile_time_constant
         && !is_unresolved_constant_placeholder_reference(
-            &expression,
+            expression,
             target.context,
             target.path_fork,
         )
@@ -289,11 +296,20 @@ pub(super) fn push_template_head_expression(
     // `StringSlice` must stay a dynamic expression when it bears provenance. The dynamic
     // fold path merges the selected payload's provenance into the template output, while
     // ordinary provenance-free literals keep the text fast path.
-    let plain_text = match &expression.kind {
-        ExpressionKind::StringSlice(text)
-            if expression.synthetic_interface_provenance.is_empty() =>
+    let plain_text = match expression.operation() {
+        ExpressionOperationView::Constant(value)
+            if expression
+                .occurrence_facts()
+                .is_none_or(|facts| facts.provenance.is_empty()) =>
         {
-            Some(*text)
+            match target.const_values.payload(value).ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "template expression references an absent constant value",
+                )
+            })? {
+                ConstValuePayload::String(ConstStringValue::Text(text)) => Some(*text),
+                _ => None,
+            }
         }
         _ => None,
     };
@@ -305,7 +321,7 @@ pub(super) fn push_template_head_expression(
     } else {
         target
             .construction_context
-            .record_head_dynamic_expression(expression, span);
+            .record_head_dynamic_expression(expression.id(), span);
     }
 
     Ok(())
@@ -316,11 +332,17 @@ pub(super) fn push_template_head_expression(
 /// Stage 0 owns physical resolution for every authored path occurrence. Reusing the ordinary
 /// file-value resolver keeps resource and site-root values structural while preserving the shared
 /// extensionless and source-kind diagnostics.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the path syntax and construction context are extra inputs beside the parser borrows"
+)]
 pub(super) fn push_template_head_path_expression(
     path_syntax: PathSyntaxId,
     token_stream: &AstCursor,
     context: &ScopeContext,
     type_interner: &AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     construction_context: &mut TemplateConstructionContext,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
@@ -332,6 +354,8 @@ pub(super) fn push_template_head_path_expression(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         &value_mode,
         string_table,
         path_fork,
@@ -343,6 +367,8 @@ pub(super) fn push_template_head_path_expression(
         TemplateHeadExpressionContext {
             context,
             type_environment: type_interner.environment(),
+            expression_builder,
+            const_values,
             construction_context,
             path_fork: &*path_fork,
             value_mode,

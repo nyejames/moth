@@ -119,11 +119,18 @@ fn test_file_value_resolution_services(
 pub(crate) fn parse_single_file_ast_build_result(
     source: &str,
 ) -> Result<(AstBuildResult, PathInternerFork, StringTable), CompilerDiagnostic> {
+    parse_single_file_ast_build_result_with_registry(source, ExternalPackageRegistry::new())
+}
+
+pub(crate) fn parse_single_file_ast_build_result_with_registry(
+    source: &str,
+    registry: ExternalPackageRegistry,
+) -> Result<(AstBuildResult, PathInternerFork, StringTable), CompilerDiagnostic> {
     let mut source_context = TestSourceContext::new("@page.moth");
 
     let mut path_fork = PathInternerFork::empty();
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let external_package_registry = Arc::new(ExternalPackageRegistry::new());
+    let external_package_registry = Arc::new(registry);
     let file_path = source_context.path().to_path_buf();
     let project_path_resolver = test_project_path_resolver();
 

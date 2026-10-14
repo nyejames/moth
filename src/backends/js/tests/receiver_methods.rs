@@ -32,13 +32,17 @@ fn receiver_method_call_emits_receiver_as_first_arg() {
         region,
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(i32_expression(42, types.i32, region, &mut expressions)),
+        terminator: HirTerminator::Return(append_values(
+            &[i32_expression(42, types.i32, region, &mut expressions)],
+            &mut expressions,
+        )),
     };
     let callee = HirFunction {
         id: FunctionId(1),
         entry: BlockId(0),
         params: vec![LocalId(0)],
-        return_type: types.i32,
+        returns: (vec![types.i32]).into_boxed_slice(),
+        error_return: None,
     };
 
     // Caller: let receiver = 7; let result = bump(receiver); return result
@@ -63,7 +67,7 @@ fn receiver_method_call_emits_receiver_as_first_arg() {
                 )],
                 &mut expressions,
             ),
-            result: Some(HirLocalDestination::Define(LocalId(1))),
+            results: vec![HirLocalDestination::Define(LocalId(1))],
         },
     );
     let caller_block = HirBlock {
@@ -71,11 +75,14 @@ fn receiver_method_call_emits_receiver_as_first_arg() {
         region,
         locals: vec![local(0, types.i32, region), local(1, types.i32, region)],
         statements: vec![assign_receiver, call_bump],
-        terminator: HirTerminator::Return(expression(
-            HirExpressionKind::Load(HirPlace::local(LocalId(1))),
-            types.i32,
-            region,
-            ValueKind::RValue,
+        terminator: HirTerminator::Return(append_values(
+            &[expression(
+                HirExpressionKind::Load(HirPlace::local(LocalId(1))),
+                types.i32,
+                region,
+                ValueKind::RValue,
+                &mut expressions,
+            )],
             &mut expressions,
         )),
     };
@@ -83,7 +90,8 @@ fn receiver_method_call_emits_receiver_as_first_arg() {
         id: FunctionId(0),
         entry: BlockId(1),
         params: vec![],
-        return_type: types.i32,
+        returns: (vec![types.i32]).into_boxed_slice(),
+        error_return: None,
     };
 
     let mut module = HirModule::new();
@@ -159,13 +167,17 @@ fn receiver_method_call_assigns_value_for_return() {
         region,
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(i32_expression(42, types.i32, region, &mut expressions)),
+        terminator: HirTerminator::Return(append_values(
+            &[i32_expression(42, types.i32, region, &mut expressions)],
+            &mut expressions,
+        )),
     };
     let callee = HirFunction {
         id: FunctionId(1),
         entry: BlockId(0),
         params: vec![LocalId(0)],
-        return_type: types.i32,
+        returns: (vec![types.i32]).into_boxed_slice(),
+        error_return: None,
     };
 
     let call_bump = statement(
@@ -182,7 +194,7 @@ fn receiver_method_call_assigns_value_for_return() {
                 )],
                 &mut expressions,
             ),
-            result: Some(HirLocalDestination::Define(LocalId(1))),
+            results: vec![HirLocalDestination::Define(LocalId(1))],
         },
     );
     let caller_block = HirBlock {
@@ -190,13 +202,17 @@ fn receiver_method_call_assigns_value_for_return() {
         region,
         locals: vec![local(0, types.i32, region), local(1, types.i32, region)],
         statements: vec![call_bump],
-        terminator: HirTerminator::Return(i32_expression(0, types.i32, region, &mut expressions)),
+        terminator: HirTerminator::Return(append_values(
+            &[i32_expression(0, types.i32, region, &mut expressions)],
+            &mut expressions,
+        )),
     };
     let caller = HirFunction {
         id: FunctionId(0),
         entry: BlockId(1),
         params: vec![],
-        return_type: types.i32,
+        returns: (vec![types.i32]).into_boxed_slice(),
+        error_return: None,
     };
 
     let mut module = HirModule::new();

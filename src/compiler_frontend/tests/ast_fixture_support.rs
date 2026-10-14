@@ -5,15 +5,19 @@
 //!      HIR lowering and borrow-checker ownership.
 
 use crate::compiler_frontend::ast::Ast;
+use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, IfBranchMetadata, NodeKind};
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-use crate::compiler_frontend::ast::expressions::expression_rpn::{
-    PlaceExpression, PlaceExpressionKind,
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, ExpressionOp, PlaceId, PlaceRecord, SuccessShape,
 };
 use crate::compiler_frontend::ast::generic_functions::IfGenericRequestRanges;
 use crate::compiler_frontend::ast::statements::functions::{
-    FunctionSignature, ReturnChannel, ReturnSlot,
+    FunctionParameter, FunctionSignature, ReturnChannel, ReturnSlot,
 };
+use crate::compiler_frontend::ast::templates::runtime_handoff::{
+    OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeTemplateHandoff,
+};
+use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::{DataType, TypeId};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -43,10 +47,22 @@ pub(crate) fn test_if_branch_metadata(has_else: bool) -> IfBranchMetadata {
     IfBranchMetadata::new(IfGenericRequestRanges::default(), then_scope, else_scope)
 }
 
-pub(crate) fn make_test_variable(name: PathId, value: Expression) -> Declaration {
+pub(crate) fn make_test_variable(
+    name: PathId,
+    value: ExprId,
+    builder: &AstExpressionBuilder,
+) -> Declaration {
+    let expression = builder
+        .view(value)
+        .expect("fixture initializer belongs to builder");
     Declaration {
         id: name,
-        value,
+        type_id: expression
+            .value_type_id()
+            .expect("fixture initializer is single-valued"),
+        diagnostic_type: DataType::Inferred,
+        value_mode: expression.value_mode(),
+        value: DeclarationValue::Initializer(value),
         binding_span: None,
         config_qualifier: None,
     }
@@ -57,25 +73,21 @@ fn parameter(
     data_type: DataType,
     type_id: TypeId,
     mutable: bool,
-    span: Option<SourceSpan>,
-) -> Declaration {
+    binding_span: Option<SourceSpan>,
+) -> FunctionParameter {
     let value_mode = if mutable {
         ValueMode::MutableOwned
     } else {
         ValueMode::ImmutableOwned
     };
 
-    Declaration {
+    FunctionParameter {
         id: name,
-        value: Expression::new(
-            ExpressionKind::NoValue,
-            span,
-            type_id,
-            data_type,
-            value_mode,
-        ),
-        binding_span: None,
-        config_qualifier: None,
+        type_id,
+        diagnostic_type: data_type,
+        value_mode,
+        default: None,
+        binding_span,
     }
 }
 
@@ -88,7 +100,7 @@ pub(crate) fn param_with_datatype(
     type_id: TypeId,
     mutable: bool,
     span: Option<SourceSpan>,
-) -> Declaration {
+) -> FunctionParameter {
     parameter(name, data_type, type_id, mutable, span)
 }
 
@@ -97,7 +109,7 @@ pub(crate) fn param_with_type_id(
     type_id: TypeId,
     mutable: bool,
     span: Option<SourceSpan>,
-) -> Declaration {
+) -> FunctionParameter {
     parameter(name, DataType::Inferred, type_id, mutable, span)
 }
 
@@ -136,63 +148,62 @@ pub(crate) fn symbol(
 }
 
 fn reference_expr(
+    builder: &mut AstExpressionBuilder,
     name: PathId,
-    data_type: DataType,
     type_id: TypeId,
     span: Option<SourceSpan>,
     value_mode: ValueMode,
-) -> Expression {
-    Expression::reference_with_type_id(
-        name,
-        data_type,
-        type_id,
-        span,
-        value_mode,
+) -> ExprId {
+    builder.reference_with_type_id(
+        name, type_id, span, value_mode,
         crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
-    )
+    ).expect("fixture reference fits expression store").id()
 }
 
-/// Reference-expression fixture entry points: use `reference_expr_with_datatype`
-/// when the diagnostic type is part of the fixture (and the reference is
-/// immutable), or `reference_expr_with_type_id` when the canonical `TypeId` is
-/// known and the value mode must be chosen by the caller.
+/// The declaration's diagnostic spelling is independent of the completed expression row.
 pub(crate) fn reference_expr_with_datatype(
+    builder: &mut AstExpressionBuilder,
     name: PathId,
-    data_type: DataType,
+    _data_type: DataType,
     type_id: TypeId,
     span: Option<SourceSpan>,
-) -> Expression {
-    reference_expr(
-        name,
-        data_type,
-        type_id,
-        span,
-        ValueMode::ImmutableReference,
-    )
+) -> ExprId {
+    reference_expr(builder, name, type_id, span, ValueMode::ImmutableReference)
 }
 
 pub(crate) fn reference_expr_with_type_id(
+    builder: &mut AstExpressionBuilder,
     name: PathId,
     type_id: TypeId,
     span: Option<SourceSpan>,
     value_mode: ValueMode,
-) -> Expression {
-    reference_expr(name, DataType::Inferred, type_id, span, value_mode)
+) -> ExprId {
+    reference_expr(builder, name, type_id, span, value_mode)
 }
 
 pub(crate) fn assignment_target(
+    builder: &mut AstExpressionBuilder,
     name: PathId,
-    data_type: DataType,
-    id: TypeId,
+    _data_type: DataType,
+    type_id: TypeId,
     span: Option<SourceSpan>,
-) -> PlaceExpression {
-    PlaceExpression {
-        kind: PlaceExpressionKind::Local(name),
-        type_id: id,
-        diagnostic_type: data_type,
-        value_mode: ValueMode::MutableReference,
-        span,
-    }
+) -> PlaceId {
+    let projections = builder
+        .append_place_projections(vec![], span)
+        .expect("fixture place projections fit store");
+    builder
+        .append_place(
+            PlaceRecord {
+                root: name,
+                root_type_id: type_id,
+                projections,
+                type_id,
+                value_mode: ValueMode::MutableReference,
+                span,
+            },
+            span,
+        )
+        .expect("fixture place fits expression store")
 }
 
 pub(crate) fn function_node_by_name<'a>(
@@ -244,4 +255,53 @@ pub(crate) fn start_function_body<'a>(
     string_table: &StringTable,
 ) -> &'a [AstNode] {
     function_body_by_name(ast, path_fork, string_table, IMPLICIT_START_FUNC_NAME)
+}
+
+/// Builds a runtime template handoff expression through the live append and success-shape path.
+///
+/// The handoff row is appended to the builder's side table and wrapped as a single-`STRING`
+/// expression carrying the caller-supplied `span`. Test fixtures use this instead of a
+/// handoff constructor.
+pub(crate) fn runtime_template_handoff_expr(
+    builder: &mut AstExpressionBuilder,
+    handoff: OwnedRuntimeTemplateHandoff,
+    span: Option<SourceSpan>,
+    value_mode: ValueMode,
+) -> ExprId {
+    let operation = builder
+        .append_runtime_template(handoff, span)
+        .map(ExpressionOp::RuntimeTemplate)
+        .expect("fixture runtime template handoff must append to the expression store");
+    builder
+        .append_with_success_shape(
+            operation,
+            span,
+            SuccessShape::One(builtin_type_ids::STRING),
+            value_mode,
+        )
+        .expect("fixture runtime template handoff must be a valid expression")
+        .id()
+}
+
+/// Builds a runtime slot application handoff expression through the live append and
+/// success-shape path. Slot-application counterpart of [`runtime_template_handoff_expr`].
+pub(crate) fn runtime_slot_application_handoff_expr(
+    builder: &mut AstExpressionBuilder,
+    handoff: OwnedRuntimeSlotApplicationHandoff,
+    span: Option<SourceSpan>,
+    value_mode: ValueMode,
+) -> ExprId {
+    let operation = builder
+        .append_runtime_slot_application(handoff, span)
+        .map(ExpressionOp::RuntimeSlotApplication)
+        .expect("fixture runtime slot handoff must append to the expression store");
+    builder
+        .append_with_success_shape(
+            operation,
+            span,
+            SuccessShape::One(builtin_type_ids::STRING),
+            value_mode,
+        )
+        .expect("fixture runtime slot handoff must be a valid expression")
+        .id()
 }

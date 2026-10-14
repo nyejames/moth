@@ -1,7 +1,6 @@
 use super::*;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::cursor::AstCursor;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -11,6 +10,8 @@ use std::rc::Rc;
 
 #[test]
 fn docs_style_data_wrapper_keeps_tir_node_count_bounded_for_many_rows() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let shared_store = Rc::new(RefCell::new(TemplateIrStore::new()));
@@ -19,6 +20,8 @@ fn docs_style_data_wrapper_keeps_tir_node_count_bounded_for_many_rows() {
         &mut string_table,
         &shared_store,
         &mut span_builder,
+        &mut expression_builder,
+        &mut const_values,
         &mut path_fork,
     );
 
@@ -57,6 +60,8 @@ fn docs_style_data_wrapper_keeps_tir_node_count_bounded_for_many_rows() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -89,6 +94,8 @@ fn docs_style_table_and_data_declarations(
     string_table: &mut StringTable,
     shared_store: &Rc<RefCell<TemplateIrStore>>,
     span_builder: &mut ExtendedSpanBuilder,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     path_fork: &mut PathInternerFork,
 ) -> Vec<Declaration> {
     let wrapper_scope = path_fork
@@ -119,6 +126,8 @@ fn docs_style_table_and_data_declarations(
         &mut header_row_stream,
         header_row_path,
         &header_row_context,
+        expression_builder,
+        const_values,
         vec![],
         string_table,
         path_fork,
@@ -149,6 +158,8 @@ fn docs_style_table_and_data_declarations(
         &mut table_stream,
         table_path,
         &table_context,
+        expression_builder,
+        const_values,
         vec![],
         string_table,
         path_fork,
@@ -179,42 +190,56 @@ fn docs_style_table_and_data_declarations(
         &mut data_stream,
         data_path,
         &data_context,
+        expression_builder,
+        const_values,
         vec![],
         string_table,
         path_fork,
     )
     .expect("docs-style data wrapper should parse");
 
+    let header_row_value = expression_builder
+        .template(header_row, ValueMode::ImmutableOwned)
+        .expect("header row template expression should construct")
+        .id();
+    let table_value = expression_builder
+        .template(table, ValueMode::ImmutableOwned)
+        .expect("table template expression should construct")
+        .id();
+    let data_value = expression_builder
+        .template(data, ValueMode::ImmutableOwned)
+        .expect("data template expression should construct")
+        .id();
+
     vec![
-        Declaration {
-            id: path_fork
+        make_test_variable(
+            path_fork
                 .try_intern_child(wrapper_scope, string_table.intern("header_row"))
                 .expect("test path fits"),
-            value: Expression::template(header_row, ValueMode::ImmutableOwned),
-            binding_span: None,
-            config_qualifier: None,
-        },
-        Declaration {
-            id: path_fork
+            header_row_value,
+            expression_builder,
+        ),
+        make_test_variable(
+            path_fork
                 .try_intern_child(wrapper_scope, string_table.intern("table"))
                 .expect("test path fits"),
-            value: Expression::template(table, ValueMode::ImmutableOwned),
-            binding_span: None,
-            config_qualifier: None,
-        },
-        Declaration {
-            id: path_fork
+            table_value,
+            expression_builder,
+        ),
+        make_test_variable(
+            path_fork
                 .try_intern_child(wrapper_scope, string_table.intern("data"))
                 .expect("test path fits"),
-            value: Expression::template(data, ValueMode::ImmutableOwned),
-            binding_span: None,
-            config_qualifier: None,
-        },
+            data_value,
+            expression_builder,
+        ),
     ]
 }
 
 #[test]
 fn child_wrapper_composition_marks_template_tir_reference_composed() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -242,6 +267,8 @@ fn child_wrapper_composition_marks_template_tir_reference_composed() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,

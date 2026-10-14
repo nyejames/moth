@@ -7,6 +7,8 @@
 //! behavior across all normalization contexts.
 
 use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::module_ast::finalization::normalize_ast::TemplateNormalizationError;
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template_folding::{
@@ -61,7 +63,12 @@ pub(super) fn finalize_template_value(
 
     // Preparation validates and classifies the exact view before reducer
     // folding. Its compact result is the sole final-value decision source.
-    let preparation = prepare_tir_view(&view, preparation_mode)?;
+    let preparation = prepare_tir_view(
+        &view,
+        fold_inputs.expression_builder,
+        fold_inputs.const_values,
+        preparation_mode,
+    )?;
     let fold_preparation = match preparation.outcome {
         TemplatePreparationOutcome::SlotInsertHelper => {
             increment_ast_counter(AstCounter::TirFinalizationFoldSuccesses);
@@ -73,8 +80,10 @@ pub(super) fn finalize_template_value(
         TemplatePreparationOutcome::Foldable => preparation,
     };
 
-    let mut fold_context = make_fold_context(
+    let mut fold_context = TirFoldContext::new(
         fold_inputs.string_table,
+        fold_inputs.expression_builder,
+        fold_inputs.const_values,
         fold_inputs.template_const_loop_iteration_limit,
     );
     let result = fold_prepared_template(&fold_preparation, view, &mut fold_context)?;
@@ -98,18 +107,6 @@ pub(super) struct TemplateValueFinalizationInputs<'store, 'strings> {
     pub(super) string_table: &'strings mut StringTable,
     pub(super) template_const_loop_iteration_limit: usize,
     pub(super) template_ir_store: &'store Rc<RefCell<TemplateIrStore>>,
-}
-
-/// Creates a narrow TIR fold context from finalization parameters.
-///
-pub(super) fn make_fold_context<'a>(
-    string_table: &'a mut StringTable,
-    template_const_loop_iteration_limit: usize,
-) -> TirFoldContext<'a> {
-    TirFoldContext {
-        string_table,
-        template_const_loop_iteration_limit,
-        bindings: Vec::new(),
-        source_scope: None,
-    }
+    pub(super) expression_builder: &'strings mut AstExpressionBuilder,
+    pub(super) const_values: &'strings mut ConstValueStore,
 }

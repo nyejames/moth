@@ -278,7 +278,6 @@ fn ensure_terminal_events(parts: &mut BorrowProblemParts) {
                     event.kind,
                     EventKind::Terminator {
                         kind: TerminatorEventKind::Return
-                            | TerminatorEventKind::ReturnSuccess
                             | TerminatorEventKind::ReturnError
                             | TerminatorEventKind::RuntimeFailure
                             | TerminatorEventKind::AssertFailure

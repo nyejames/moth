@@ -1,0 +1,8 @@
+run || -> I32:
+    Local = |
+        n I32 = 1,
+    |
+    v #= Local()
+    return 1
+;
+z = run()

@@ -386,18 +386,19 @@ pub(crate) fn build_proof_fixture_hir() -> ProofFixture {
             local(9, i32_type, region),
         ],
         statements,
-        terminator: HirTerminator::Return(load_local(
-            &mut expressions,
-            fixture_locals::R,
-            i32_type,
-            region,
-        )),
+        terminator: HirTerminator::Return({
+            let value = load_local(&mut expressions, fixture_locals::R, i32_type, region);
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     };
     let start_function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![fixture_locals::A, fixture_locals::B, fixture_locals::D],
-        return_type: i32_type,
+        returns: vec![i32_type].into_boxed_slice(),
+        error_return: None,
     };
 
     // Isolated-width exports: each width's proven alias chain must be consumer-visible exactly,
@@ -425,18 +426,19 @@ pub(crate) fn build_proof_fixture_hir() -> ProofFixture {
                 i64_type,
             ),
         ],
-        terminator: HirTerminator::Return(load_local(
-            &mut expressions,
-            fixture_locals::WIDE_I64,
-            i64_type,
-            region,
-        )),
+        terminator: HirTerminator::Return({
+            let value = load_local(&mut expressions, fixture_locals::WIDE_I64, i64_type, region);
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     };
     let isolated_i64_function = HirFunction {
         id: FunctionId(1),
         entry: BlockId(1),
         params: vec![],
-        return_type: i64_type,
+        returns: vec![i64_type].into_boxed_slice(),
+        error_return: None,
     };
     let isolated_u64_block = HirBlock {
         id: BlockId(2),
@@ -460,18 +462,19 @@ pub(crate) fn build_proof_fixture_hir() -> ProofFixture {
                 u64_type,
             ),
         ],
-        terminator: HirTerminator::Return(load_local(
-            &mut expressions,
-            fixture_locals::WIDE_U64,
-            u64_type,
-            region,
-        )),
+        terminator: HirTerminator::Return({
+            let value = load_local(&mut expressions, fixture_locals::WIDE_U64, u64_type, region);
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     };
     let isolated_u64_function = HirFunction {
         id: FunctionId(2),
         entry: BlockId(2),
         params: vec![],
-        return_type: u64_type,
+        returns: vec![u64_type].into_boxed_slice(),
+        error_return: None,
     };
 
     let isolated_i64_path = intern_path(&mut path_fork, &mut string_table, "run_i64");

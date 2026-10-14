@@ -682,7 +682,7 @@ fn remap_expression_overlay(
             identity_remap
                 .expression_sites
                 .get(site_id)
-                .map(|copied_site_id| (*copied_site_id, expression.clone()))
+                .map(|copied_site_id| (*copied_site_id, *expression))
         })
         .collect();
 

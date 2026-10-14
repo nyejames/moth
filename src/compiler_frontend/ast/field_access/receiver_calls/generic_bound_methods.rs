@@ -13,7 +13,9 @@ use super::shared::{
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression_kind::ExpressionKind;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExpressionOperationView,
+};
 use crate::compiler_frontend::ast::generic_bounds::{BoundEvidenceSelection, evidence_for_type};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidReceiverCallReason};
@@ -66,22 +68,27 @@ fn generic_parameter_ids_for_concrete_receiver(
 
 fn generic_parameter_id_for_receiver_reference(
     receiver_node: &AstNode,
+    expression_builder: &AstExpressionBuilder,
     scope_context: &ScopeContext,
-) -> Option<GenericParameterId> {
-    let active_context = scope_context.active_generic_type_context()?;
+) -> Result<Option<GenericParameterId>, ExpressionParseError> {
+    let Some(active_context) = scope_context.active_generic_type_context() else {
+        return Ok(None);
+    };
 
     let NodeKind::ExpressionStatement(expression) = &receiver_node.kind else {
-        return None;
+        return Ok(None);
     };
 
-    let ExpressionKind::Reference(reference_path) = &expression.kind else {
-        return None;
+    let ExpressionOperationView::Reference(reference_path) =
+        expression_builder.view(*expression)?.operation()
+    else {
+        return Ok(None);
     };
 
-    active_context
+    Ok(active_context
         .source_parameter_by_rebased_path
-        .get(reference_path)
-        .copied()
+        .get(&reference_path)
+        .copied())
 }
 
 fn generic_bound_requirement_candidates<'a>(
@@ -150,6 +157,7 @@ fn evidence_for_bound_method<'a>(
 pub(super) fn lookup_generic_bound_receiver_method(
     scope_context: &ScopeContext,
     receiver_node: &AstNode,
+    expression_builder: &AstExpressionBuilder,
     receiver_type_id: TypeId,
     member_name: StringId,
     member_span: Option<SourceSpan>,
@@ -163,9 +171,11 @@ pub(super) fn lookup_generic_bound_receiver_method(
     {
         parameter_ids.push(parameter_id);
         true
-    } else if let Some(parameter_id) =
-        generic_parameter_id_for_receiver_reference(receiver_node, scope_context)
-    {
+    } else if let Some(parameter_id) = generic_parameter_id_for_receiver_reference(
+        receiver_node,
+        expression_builder,
+        scope_context,
+    )? {
         parameter_ids.push(parameter_id);
         false
     } else {

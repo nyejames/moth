@@ -143,18 +143,6 @@ pub(crate) fn lower_expression(
                         prefer_move: false,
                     })
                 }
-                #[cfg(test)]
-                crate::compiler_frontend::hir::expressions::HirVariantCarrier::Fallible => {
-                    let dst = context.alloc_temp(WasmAbiType::I64);
-                    statements.push(WasmLirStmt::ConstI64 {
-                        dst,
-                        value: *variant_index as i64,
-                    });
-                    Ok(ExprLoweringOutput {
-                        value: dst,
-                        prefer_move: false,
-                    })
-                }
             }
         }
         HirExpressionKind::Bool(value) => {
@@ -282,10 +270,6 @@ pub(crate) fn lower_expression(
         )),
         HirExpressionKind::StructConstruct { .. }
         | HirExpressionKind::Range { .. }
-        | HirExpressionKind::TupleConstruct { .. }
-        | HirExpressionKind::TupleGet { .. }
-        | HirExpressionKind::FallibleUnwrapSuccess { .. }
-        | HirExpressionKind::FallibleUnwrapError { .. }
         | HirExpressionKind::VariantPayloadGet { .. } => Err(lir_transformation_error(
             "Wasm lowering does not yet support this HIR expression",
         )),

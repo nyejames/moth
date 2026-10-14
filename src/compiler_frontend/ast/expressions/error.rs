@@ -6,9 +6,11 @@
 //! caller decide whether typed source diagnostics or infrastructure failures fit its own stage
 //! boundary without routing normal diagnostics through `CompilerError`.
 
+use crate::compiler_frontend::ast::const_values::ConstValueStoreError;
 use crate::compiler_frontend::ast::expressions::call_validation::CallValidationError;
 use crate::compiler_frontend::ast::expressions::eval_expression::ExpressionTypingError;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::expressions::expression_store::ExpressionConstructionFailure;
 use crate::compiler_frontend::ast::numeric_construction::DeferredExpressionSuffix;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::compiler_errors::CompilerError;
@@ -48,6 +50,26 @@ pub(crate) enum ExpressionParseError {
 impl From<CompilerDiagnostic> for ExpressionParseError {
     fn from(diagnostic: CompilerDiagnostic) -> Self {
         ExpressionParseError::Diagnostic(diagnostic)
+    }
+}
+
+impl From<ExpressionConstructionFailure> for ExpressionParseError {
+    fn from(failure: ExpressionConstructionFailure) -> Self {
+        match failure {
+            ExpressionConstructionFailure::Diagnostic(diagnostic) => Self::Diagnostic(diagnostic),
+            ExpressionConstructionFailure::Invariant(error) => {
+                Self::Infrastructure(Box::new(error))
+            }
+        }
+    }
+}
+
+impl From<ConstValueStoreError> for ExpressionParseError {
+    fn from(failure: ConstValueStoreError) -> Self {
+        match failure {
+            ConstValueStoreError::Diagnostic(diagnostic) => Self::Diagnostic(diagnostic),
+            ConstValueStoreError::Infrastructure(error) => Self::Infrastructure(error),
+        }
     }
 }
 

@@ -5,10 +5,13 @@
 //! WHY: statement, template, full match and value single-predicate forms share
 //! pattern and capture construction. This file does not own `if` header scanning.
 
-use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::ast_nodes::{Declaration, DeclarationValue};
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::expressions::expression_rpn::{
+    ExpressionRpnItem, single_operand,
+};
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::expressions::parse_expression::create_expression_until;
 use crate::compiler_frontend::ast::expressions::parse_expression_input::{
     ExpressionParseInput, ExpressionParseResources,
@@ -40,6 +43,7 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::deferred_feature_diagnostics::deferred_feature_reason_diagnostic;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DeferredFeatureReason, InvalidMatchArmReason, InvalidMatchPatternReason,
+    ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::definitions::ChoiceVariantPayloadDefinition;
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
@@ -105,6 +109,8 @@ pub(crate) fn parse_scrutinee_until_is(
     token_stream: &mut AstCursor,
     scope_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> MatchHeaderResult<StatementExpression> {
@@ -114,6 +120,8 @@ pub(crate) fn parse_scrutinee_until_is(
         token_stream,
         scope_context,
         type_interner,
+        expression_builder,
+        const_values,
         expected_type: &mut scrutinee_type,
         cast_target_context: &mut cast_target_context,
         value_mode: &ValueMode::ImmutableOwned,
@@ -122,8 +130,13 @@ pub(crate) fn parse_scrutinee_until_is(
     })
     .with_numeric_deferral_owner();
 
-    match create_expression_until(input, &[TokenTag::IS]) {
-        Ok(expression) => Ok(StatementExpression::Built(expression)),
+    match create_expression_until(input, &[TokenTag::IS]).map(|expression| expression.id()) {
+        Ok(expression) => {
+            expression_builder
+                .view(expression)?
+                .require_single(ValueReceiverContext::MatchScrutinee)?;
+            Ok(StatementExpression::Built(expression))
+        }
         Err(error @ ExpressionParseError::NumericDeferral(_)) => {
             // The scrutinee position owns its deferral, so the fragment is the whole authored
             // syntax and keeps its own `Infer` expectation: the subject type is whatever the
@@ -158,7 +171,7 @@ pub(crate) fn build_option_present_capture_scope_and_pattern(
     inner_type_id: TypeId,
     pattern_span: Option<SourceSpan>,
     type_interner: &mut AstTypeInterner<'_>,
-    _string_table: &mut StringTable,
+    string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> MatchHeaderResult<(ScopeContext, MatchPattern)> {
     let mut arm_scope = match_context.clone();
@@ -173,6 +186,12 @@ pub(crate) fn build_option_present_capture_scope_and_pattern(
         .into());
     }
 
+    if let Some(diagnostic) =
+        arm_scope.check_body_binding_visibility(capture_name, binding_span, string_table)
+    {
+        return Err(diagnostic.into());
+    }
+
     let binding_path = path_fork
         .try_intern_child(arm_scope.scope, capture_name)
         .expect("path table exhausted while creating match capture scope");
@@ -180,18 +199,15 @@ pub(crate) fn build_option_present_capture_scope_and_pattern(
     let capture_data_type = diagnostic_type_spelling(inner_type_id, type_interner.environment());
     let declaration = Declaration {
         id: binding_path,
-        value: Expression::new(
-            ExpressionKind::NoValue,
-            binding_span,
-            inner_type_id,
-            capture_data_type,
-            ValueMode::ImmutableOwned,
-        ),
+        type_id: inner_type_id,
+        diagnostic_type: capture_data_type,
+        value_mode: ValueMode::ImmutableOwned,
+        value: DeclarationValue::Absent,
         binding_span,
         config_qualifier: None,
     };
 
-    let declaration_span = declaration.value.span;
+    let declaration_span = declaration.binding_span;
     arm_scope.add_var(declaration, declaration_span, path_fork);
 
     let pattern = MatchPattern::OptionPresentCapture {
@@ -210,11 +226,17 @@ pub(crate) fn build_option_present_capture_scope_and_pattern(
 /// The caller supplies the subject (already typed, or pending numeric construction) and the
 /// tokens that terminate a guard expression so the pattern parser stays independent from the body
 /// grammar that follows it.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "arm header parsing keeps the subject, token stream, match scope, mutable interner/builder/constant/string/path state, and guard terminators as separate borrows"
+)]
 pub(crate) fn parse_match_arm_header(
     subject: &MatchSubject,
     token_stream: &mut AstCursor,
     match_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     guard_end_tokens: &[TokenTag],
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
@@ -229,6 +251,8 @@ pub(crate) fn parse_match_arm_header(
         token_stream,
         match_context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     )?;
@@ -239,6 +263,8 @@ pub(crate) fn parse_match_arm_header(
         token_stream,
         &arm_scope,
         type_interner,
+        expression_builder,
+        const_values,
         guard_end_tokens,
         string_table,
         path_fork,
@@ -262,11 +288,17 @@ pub(crate) fn parse_match_arm_header(
 /// names as ordinary values; full match parsing is the owner of that semantics. A pending numeric
 /// subject returns its authored pattern draft (`Retained`) so the value-block owner can
 /// materialise it at the selected subject.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "single-predicate header parsing threads the subject, token stream, match scope, mutable interner/builder/constant/string/path state as separate borrows"
+)]
 pub(crate) fn parse_single_predicate_match_pattern(
     subject: &MatchSubject,
     token_stream: &mut AstCursor,
     match_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> MatchHeaderResult<ParsedSinglePredicatePattern> {
@@ -275,6 +307,8 @@ pub(crate) fn parse_single_predicate_match_pattern(
         token_stream,
         match_context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     )?;
@@ -296,10 +330,16 @@ pub(crate) fn parse_single_predicate_match_pattern(
 ///       numeric origin keeps its complete fragment with a `Bool` receiving expectation.
 /// WHY: the guard position is a boolean predicate, so completion evaluates the retained fragment
 ///      in that exact receiver and re-applies the same guard validation.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "guard parsing keeps the token stream, match scope, mutable interner/builder/constant/string/path state, and guard terminators as separate borrows"
+)]
 fn parse_match_guard(
     token_stream: &mut AstCursor,
     match_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     guard_end_tokens: &[TokenTag],
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
@@ -319,6 +359,8 @@ fn parse_match_guard(
         token_stream,
         scope_context: &guard_context,
         type_interner,
+        expression_builder,
+        const_values,
         expected_type: &mut guard_type,
         cast_target_context: &mut cast_target_context,
         value_mode: &ValueMode::ImmutableOwned,
@@ -327,10 +369,12 @@ fn parse_match_guard(
     })
     .with_numeric_deferral_owner();
 
-    match create_expression_until(input, guard_end_tokens) {
+    match create_expression_until(input, guard_end_tokens).map(|expression| expression.id()) {
         Ok(guard_expression) => {
-            let type_environment = type_interner.environment();
-            ensure_match_guard_condition(&guard_expression, type_environment)?;
+            ensure_match_guard_condition(
+                expression_builder.view(guard_expression)?,
+                type_interner.environment(),
+            )?;
             Ok(Some(StatementExpression::Built(guard_expression)))
         }
         Err(error @ ExpressionParseError::NumericDeferral(_)) => {
@@ -349,11 +393,17 @@ fn parse_match_guard(
     }
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "pattern header parsing threads the subject, token stream, match scope, mutable interner/builder/constant/string/path state as separate borrows"
+)]
 fn parse_match_pattern_header(
     subject: &MatchSubject,
     token_stream: &mut AstCursor,
     match_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> MatchHeaderResult<ParsedMatchPatternHeader> {
@@ -375,6 +425,8 @@ fn parse_match_pattern_header(
                 token_stream,
                 match_context,
                 type_interner,
+                expression_builder,
+                const_values,
                 string_table,
                 path_fork,
             );
@@ -387,6 +439,8 @@ fn parse_match_pattern_header(
                 MatchSubject::Pending,
                 string_table,
                 type_interner.environment(),
+                expression_builder,
+                const_values,
             )?;
             return Ok(ParsedMatchPatternHeader {
                 pattern_span: deferred_pattern_span(&pattern),
@@ -456,8 +510,14 @@ fn parse_match_pattern_header(
                 .into());
             }
 
-            let pattern =
-                parse_option_pattern(token_stream, inner_type_id, string_table, type_environment)?;
+            let pattern = parse_option_pattern(
+                token_stream,
+                inner_type_id,
+                string_table,
+                type_environment,
+                expression_builder,
+                const_values,
+            )?;
             let pattern_span = pattern.span();
 
             let (arm_scope, pattern) = if let MatchPattern::OptionPresentCapture {
@@ -494,6 +554,8 @@ fn parse_match_pattern_header(
                 MatchSubject::Known(subject_type_id),
                 string_table,
                 type_environment,
+                expression_builder,
+                const_values,
             )?;
             let pattern_span = deferred_pattern_span(&pattern);
             (pattern, None, pattern_span, match_context.clone())
@@ -581,7 +643,7 @@ fn build_arm_scope_with_choice_captures(
     match_context: &ScopeContext,
     parsed_pattern: ParsedChoicePattern,
     type_environment: &TypeEnvironment,
-    _string_table: &mut StringTable,
+    string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> MatchHeaderResult<(ScopeContext, MatchPattern)> {
     let mut arm_scope = match_context.clone();
@@ -601,24 +663,29 @@ fn build_arm_scope_with_choice_captures(
             .into());
         }
 
+        if let Some(diagnostic) = arm_scope.check_body_binding_visibility(
+            binding_name,
+            capture.binding_span,
+            string_table,
+        ) {
+            return Err(diagnostic.into());
+        }
+
         let binding_path = path_fork
             .try_intern_child(arm_scope.scope, binding_name)
             .expect("path table exhausted while creating choice capture scope");
 
         let declaration = Declaration {
             id: binding_path,
-            value: Expression::new(
-                ExpressionKind::NoValue,
-                capture.binding_span,
-                capture.type_id,
-                diagnostic_type_spelling(capture.type_id, type_environment),
-                ValueMode::ImmutableOwned,
-            ),
+            type_id: capture.type_id,
+            diagnostic_type: diagnostic_type_spelling(capture.type_id, type_environment),
+            value_mode: ValueMode::ImmutableOwned,
+            value: DeclarationValue::Absent,
             binding_span: capture.binding_span,
             config_qualifier: None,
         };
 
-        let declaration_span = declaration.value.span;
+        let declaration_span = declaration.binding_span;
         arm_scope.add_var(declaration, declaration_span, path_fork);
         captures.push(ChoicePayloadCapture {
             field_index: capture.field_index,
@@ -653,11 +720,12 @@ pub(crate) fn retained_match_subject(
     scope_context: &ScopeContext,
     environment: &TypeEnvironment,
     items: &[ExpressionRpnItem],
+    expression_builder: &AstExpressionBuilder,
 ) -> MatchSubject {
-    let [item] = items else {
+    let Some(item) = single_operand(items) else {
         return MatchSubject::Pending;
     };
-    match retained_operand_result(item, scope_context, environment, false) {
+    match retained_operand_result(item, scope_context, environment, false, expression_builder) {
         Some(RetainedOperandResult::Type(type_id)) => MatchSubject::Known(type_id),
         Some(RetainedOperandResult::Shape(shape)) => {
             match concrete_shape_type(scope_context, shape) {
@@ -711,8 +779,14 @@ fn parse_pending_choice_pattern_header(
     )?;
     let matched_choice_variant = Some(parsed.variant);
     let pattern_span = parsed.span;
-    let (arm_scope, pending) =
-        build_pending_choice_arm_scope(match_context, declared, parsed, type_interner, path_fork)?;
+    let (arm_scope, pending) = build_pending_choice_arm_scope(
+        match_context,
+        declared,
+        parsed,
+        type_interner,
+        string_table,
+        path_fork,
+    )?;
 
     Ok(ParsedMatchPatternHeader {
         pattern: DeferredArmPattern::PendingChoice(pending),
@@ -736,6 +810,7 @@ fn build_pending_choice_arm_scope(
     subject: DeclaredChoiceSubject,
     parsed_pattern: ParsedChoicePattern,
     type_interner: &mut AstTypeInterner<'_>,
+    string_table: &StringTable,
     path_fork: &mut PathInternerFork,
 ) -> MatchHeaderResult<(ScopeContext, PendingChoicePattern)> {
     let arm_scope = match_context.clone();
@@ -752,6 +827,14 @@ fn build_pending_choice_arm_scope(
                 capture.binding_span,
             )
             .into());
+        }
+
+        if let Some(diagnostic) = arm_scope.check_body_binding_visibility(
+            binding_name,
+            capture.binding_span,
+            string_table,
+        ) {
+            return Err(diagnostic.into());
         }
 
         let binding_path = path_fork
@@ -806,11 +889,17 @@ fn build_pending_choice_arm_scope(
 ///       finished at the body root.
 /// WHY: the optional's inner shape is known at parse time, so a capture can be named before the
 ///      subject's concrete optional type is selected.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "optional pending header parsing threads the subject, token stream, match scope, mutable interner/builder/constant/string/path state as separate borrows"
+)]
 fn parse_pending_option_pattern_header(
     inner: KnownShapeId,
     token_stream: &mut AstCursor,
     match_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> MatchHeaderResult<ParsedMatchPatternHeader> {
@@ -827,8 +916,13 @@ fn parse_pending_option_pattern_header(
 
     if token_stream.current_tag() == TokenTag::TYPE_PARAMETER_BRACKET {
         let binding = parse_option_capture_binding(token_stream, string_table)?;
-        let (arm_scope, capture) =
-            build_pending_option_capture_scope(match_context, inner, binding, path_fork)?;
+        let (arm_scope, capture) = build_pending_option_capture_scope(
+            match_context,
+            inner,
+            binding,
+            string_table,
+            path_fork,
+        )?;
         let pending = PendingOptionPattern::PresentCapture(capture);
         return Ok(ParsedMatchPatternHeader {
             pattern_span: pending.span(),
@@ -856,6 +950,8 @@ fn parse_pending_option_pattern_header(
         MatchSubject::Pending,
         string_table,
         type_interner.environment(),
+        expression_builder,
+        const_values,
     )? {
         DeferredArmPattern::Ready(pattern) => PendingOptionPattern::PresentValue(pattern),
         DeferredArmPattern::Retained(retained) => PendingOptionPattern::RetainedValue(retained),
@@ -888,6 +984,7 @@ fn build_pending_option_capture_scope(
     match_context: &ScopeContext,
     inner: KnownShapeId,
     binding: OptionCaptureBinding,
+    string_table: &StringTable,
     path_fork: &mut PathInternerFork,
 ) -> MatchHeaderResult<(ScopeContext, PendingOptionCapture)> {
     let arm_scope = match_context.clone();
@@ -900,6 +997,12 @@ fn build_pending_option_capture_scope(
             binding.binding_span,
         )
         .into());
+    }
+
+    if let Some(diagnostic) =
+        arm_scope.check_body_binding_visibility(binding.name, binding.binding_span, string_table)
+    {
+        return Err(diagnostic.into());
     }
 
     let binding_path = path_fork
@@ -963,13 +1066,10 @@ fn convert_choice_payload(
                 .iter()
                 .map(|field| Declaration {
                     id: field.name,
-                    value: Expression::new(
-                        ExpressionKind::NoValue,
-                        field.span,
-                        field.type_id,
-                        diagnostic_type_spelling(field.type_id, type_environment),
-                        ValueMode::ImmutableOwned,
-                    ),
+                    type_id: field.type_id,
+                    diagnostic_type: diagnostic_type_spelling(field.type_id, type_environment),
+                    value_mode: ValueMode::ImmutableOwned,
+                    value: DeclarationValue::Absent,
                     binding_span: field.span,
                     config_qualifier: None,
                 })

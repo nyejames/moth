@@ -4,6 +4,8 @@
 //! remains only for transforms that need a store-local owned wrapper tree,
 //! such as explicit slot expansion.
 
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{Style, TemplateType};
 use crate::compiler_frontend::ast::templates::tir::refs::TemplateWrapperReference;
@@ -15,6 +17,7 @@ use crate::compiler_frontend::ast::templates::tir::{
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
+use super::head_chain::HeadChainResolutionInputs;
 use super::helpers::{compose_wrapper_application, internal_compiler_error};
 
 type ChildWrapperResult<T> = Result<T, TemplateError>;
@@ -26,6 +29,8 @@ type ChildWrapperResult<T> = Result<T, TemplateError>;
 /// reference so phase and contextual authority are preserved at the boundary.
 pub(crate) fn wrap_tir_node_in_wrappers_into(
     store: &mut TemplateIrStore,
+    expressions: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
     child_node_id: TemplateIrNodeId,
     wrapper_references: &[TemplateWrapperReference],
     string_table: &StringTable,
@@ -47,12 +52,16 @@ pub(crate) fn wrap_tir_node_in_wrappers_into(
         if layout.schema.has_any_slots() {
             let resolved = compose_wrapper_application(
                 store,
+                &HeadChainResolutionInputs {
+                    string_table,
+                    expressions,
+                    const_values,
+                    allow_runtime_plans: false,
+                },
                 *wrapper_reference,
                 &layout,
                 vec![current_child_node_id],
                 child_span,
-                string_table,
-                false,
             )?;
 
             let occurrence_id = store.next_child_template_occurrence_id();

@@ -680,11 +680,6 @@ fn remap_type_identity_key(key: &mut TypeIdentityKey, remap: &StringIdRemap) {
             remap_type_identity_key(value, remap);
         }
 
-        TypeIdentityKey::FallibleCarrier { success, error } => {
-            remap_type_identity_key(success, remap);
-            remap_type_identity_key(error, remap);
-        }
-
         TypeIdentityKey::GenericInstance(instance) => {
             remap_generic_instantiation_key(instance, remap);
         }

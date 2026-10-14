@@ -16,7 +16,6 @@ use crate::backends::wasm::tests::lowering::test_support::{
     bool_expression, borrow_facts_with_drop_site, build_module, build_type_environment,
     default_borrow_facts, default_numeric_proofs, expression, fixed_scalar_expression,
     fixed_scalar_type, i32_expression, load_local, local, statement, string_expression,
-    unit_expression,
 };
 use crate::compiler_frontend::analysis::borrow_checker::BorrowDropSiteKind;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
@@ -57,7 +56,6 @@ fn assertion_failure_module(
     message_evaluation: HirAssertionMessageEvaluation,
 ) -> crate::compiler_frontend::hir::module::HirModule {
     let string_type = type_environment.builtins().string;
-    let unit_type = type_environment.builtins().none;
     let option_string = type_environment.intern_option(string_type);
     let path = path_fork
         .try_intern_portable_path("assertion_failure", string_table)
@@ -143,7 +141,8 @@ fn assertion_failure_module(
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: unit_type,
+        returns: vec![].into_boxed_slice(),
+        error_return: None,
     };
     let block = HirBlock {
         id: BlockId(0),
@@ -212,10 +211,10 @@ fn wasm_assertion_lowering_calls_host_before_trap_and_rejects_runtime_messages()
         assert!(matches!(
             function.blocks[0].statements.last(),
             Some(WasmLirStmt::Call {
-                dst: None,
+                results,
                 callee: WasmCalleeRef::Import(id),
                 args,
-            }) if *id == import.id && args.len() == 1
+            }) if *id == import.id && args.len() == 1 && results.is_empty()
         ));
     }
 
@@ -251,7 +250,7 @@ fn wasm_write_definition_and_update_have_the_same_physical_lowering() {
         let mut string_table = StringTable::new();
         let mut path_fork = PathInternerFork::empty();
         let mut expressions = HirExpressionStore::default();
-        let (type_environment, types) = build_type_environment();
+        let (type_environment, _) = build_type_environment();
         let int_type = fixed_scalar_type(FixedScalar::I32);
         let function_path = path_fork
             .try_intern_portable_path("write_equivalence", &mut string_table)
@@ -269,17 +268,14 @@ fn wasm_write_definition_and_update_have_the_same_physical_lowering() {
             region: RegionId(0),
             locals: vec![local(0, int_type, RegionId(0))],
             statements: vec![write],
-            terminator: HirTerminator::Return(unit_expression(
-                types.unit,
-                RegionId(0),
-                &mut expressions,
-            )),
+            terminator: HirTerminator::Return(HirValueRange::empty()),
         };
         let function = HirFunction {
             id: FunctionId(0),
             entry: BlockId(0),
             params: if is_update { vec![LocalId(0)] } else { vec![] },
-            return_type: types.unit,
+            returns: vec![].into_boxed_slice(),
+            error_return: None,
         };
         let module = build_module(
             &mut path_fork,
@@ -320,7 +316,7 @@ fn wasm_parallel_jump_cycle_uses_explicit_destinations() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut expressions = HirExpressionStore::default();
-    let (type_environment, types) = build_type_environment();
+    let (type_environment, _) = build_type_environment();
     let int_type = fixed_scalar_type(FixedScalar::I32);
     let function_path = path_fork
         .try_intern_portable_path("parallel_jump_cycle", &mut string_table)
@@ -329,7 +325,8 @@ fn wasm_parallel_jump_cycle_uses_explicit_destinations() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: vec![].into_boxed_slice(),
+        error_return: None,
     };
     let source_block = HirBlock {
         id: BlockId(0),
@@ -433,6 +430,186 @@ fn wasm_parallel_jump_cycle_uses_explicit_destinations() {
 }
 
 #[test]
+fn native_multiple_call_results_preserve_types_and_destinations_through_lowering() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut expressions = HirExpressionStore::default();
+    let (type_environment, _) = build_type_environment();
+    let region = RegionId(0);
+    let scalars = [
+        FixedScalar::I32,
+        FixedScalar::F32,
+        FixedScalar::I64,
+        FixedScalar::F64,
+    ];
+    let types = scalars.map(fixed_scalar_type);
+    let expected_abi = [
+        WasmAbiType::I32,
+        WasmAbiType::F32,
+        WasmAbiType::I64,
+        WasmAbiType::F64,
+    ];
+    let callee_path = path_fork
+        .try_intern_portable_path("mixed_results", &mut string_table)
+        .expect("test path fits");
+    let caller_path = path_fork
+        .try_intern_portable_path("main", &mut string_table)
+        .expect("test path fits");
+    let values = [
+        FixedScalarValue::signed(FixedScalar::I32, 7).expect("test integer fits"),
+        FixedScalarValue::binary_float(FixedScalar::F32, 1.25).expect("test float fits"),
+        FixedScalarValue::signed(FixedScalar::I64, 9_007_199_254_740_993)
+            .expect("test integer fits"),
+        FixedScalarValue::binary_float(FixedScalar::F64, -9.5).expect("test float fits"),
+    ]
+    .map(|value| fixed_scalar_expression(value, region, &mut expressions));
+    let callee_block = HirBlock {
+        id: BlockId(0),
+        region,
+        locals: vec![],
+        statements: vec![],
+        terminator: HirTerminator::Return(
+            expressions
+                .append_values(&values, None)
+                .expect("test values fit"),
+        ),
+    };
+    // Deliberately permuted source locals make slot order independent of local allocation order.
+    let destinations = [LocalId(2), LocalId(0), LocalId(3), LocalId(1)];
+    let returned_values = destinations
+        .iter()
+        .zip(types)
+        .map(|(destination, ty)| load_local(&mut expressions, *destination, ty, region))
+        .collect::<Vec<_>>();
+    let caller_block = HirBlock {
+        id: BlockId(1),
+        region,
+        locals: vec![
+            local(0, types[1], region),
+            local(1, types[3], region),
+            local(2, types[0], region),
+            local(3, types[2], region),
+        ],
+        statements: vec![statement(
+            0,
+            HirStatementKind::Call {
+                target: CallTarget::Local(FunctionId(0)),
+                args: HirValueRange::empty(),
+                results: destinations.map(HirLocalDestination::Define).to_vec(),
+            },
+            0,
+        )],
+        terminator: HirTerminator::Return(
+            expressions
+                .append_values(&returned_values, None)
+                .expect("test return values fit"),
+        ),
+    };
+    let functions = vec![
+        (
+            HirFunction {
+                id: FunctionId(0),
+                entry: BlockId(0),
+                params: vec![],
+                returns: types.to_vec().into_boxed_slice(),
+                error_return: None,
+            },
+            callee_path,
+            HirFunctionOrigin::Normal,
+        ),
+        (
+            HirFunction {
+                id: FunctionId(1),
+                entry: BlockId(1),
+                params: vec![],
+                returns: types.to_vec().into_boxed_slice(),
+                error_return: None,
+            },
+            caller_path,
+            HirFunctionOrigin::EntryStart,
+        ),
+    ];
+    let module = build_module(
+        &mut path_fork,
+        &mut string_table,
+        expressions,
+        functions,
+        vec![callee_block, caller_block],
+        FunctionId(1),
+    );
+    let request = WasmBackendRequest::default();
+    assert!(!request.target_features.enable_multi_value);
+    let lowered = lower_hir_to_wasm_lir(
+        &module,
+        &default_borrow_facts(),
+        &default_numeric_proofs(),
+        &request,
+        &string_table,
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
+    .expect("native mixed scalar results should lower with default target features");
+    let callee = &lowered.lir_module.functions[0];
+    let caller = &lowered.lir_module.functions[1];
+    assert_eq!(callee.signature.params, []);
+    assert_eq!(callee.signature.results, expected_abi);
+    assert_eq!(caller.signature, callee.signature);
+    let native_calls = caller
+        .blocks
+        .iter()
+        .flat_map(|block| &block.statements)
+        .filter(|statement| {
+            matches!(
+                statement,
+                WasmLirStmt::Call {
+                    callee: WasmCalleeRef::Function(WasmLirFunctionId(0)),
+                    ..
+                }
+            )
+        })
+        .count();
+    assert_eq!(
+        native_calls, 1,
+        "capturing four slots must invoke the producer once"
+    );
+    let block = &caller.blocks[0];
+    let WasmLirStmt::Call {
+        results,
+        callee,
+        args,
+    } = &block.statements[0]
+    else {
+        panic!("caller should lower to a native call");
+    };
+    assert_eq!(*callee, WasmCalleeRef::Function(WasmLirFunctionId(0)));
+    assert!(args.is_empty());
+    let expected_destinations = destinations.map(|destination| {
+        let name = format!("local_{}", destination.0);
+        caller
+            .locals
+            .iter()
+            .find(|local| {
+                local.role == WasmLocalRole::UserLocal && local.name.as_deref() == Some(&name)
+            })
+            .expect("each source destination should have a user local")
+            .id
+    });
+    assert_eq!(results, &expected_destinations);
+    for (destination, expected_type) in results.iter().zip(expected_abi) {
+        let local = caller
+            .locals
+            .iter()
+            .find(|local| local.id == *destination)
+            .expect("call destination should exist");
+        assert_eq!(local.ty, expected_type);
+    }
+    let WasmLirTerminator::Return { values } = &block.terminator else {
+        panic!("caller should return the captured slots");
+    };
+    assert_eq!(values, results);
+}
+
+#[test]
 fn lowers_calls_and_cfg_with_resolvable_branch_targets() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -452,7 +629,12 @@ fn lowers_calls_and_cfg_with_resolvable_branch_targets() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(i32_expression(7, RegionId(0), &mut expressions)),
+        terminator: HirTerminator::Return({
+            let value = i32_expression(7, RegionId(0), &mut expressions);
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     };
 
     let main_entry = HirBlock {
@@ -476,7 +658,7 @@ fn lowers_calls_and_cfg_with_resolvable_branch_targets() {
                 HirStatementKind::Call {
                     target: CallTarget::Local(FunctionId(0)),
                     args: HirValueRange::empty(),
-                    result: Some(HirLocalDestination::Define(LocalId(1))),
+                    results: vec![HirLocalDestination::Define(LocalId(1))],
                 },
                 2,
             ),
@@ -493,12 +675,12 @@ fn lowers_calls_and_cfg_with_resolvable_branch_targets() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(load_local(
-            &mut expressions,
-            LocalId(1),
-            int_type,
-            RegionId(0),
-        )),
+        terminator: HirTerminator::Return({
+            let value = load_local(&mut expressions, LocalId(1), int_type, RegionId(0));
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     };
 
     let else_block = HirBlock {
@@ -506,20 +688,27 @@ fn lowers_calls_and_cfg_with_resolvable_branch_targets() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(i32_expression(0, RegionId(0), &mut expressions)),
+        terminator: HirTerminator::Return({
+            let value = i32_expression(0, RegionId(0), &mut expressions);
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     };
 
     let callee = HirFunction {
         id: FunctionId(0),
         entry: BlockId(10),
         params: vec![],
-        return_type: int_type,
+        returns: vec![int_type].into_boxed_slice(),
+        error_return: None,
     };
     let main = HirFunction {
         id: FunctionId(1),
         entry: BlockId(30),
         params: vec![],
-        return_type: int_type,
+        returns: vec![int_type].into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -640,14 +829,20 @@ fn lowers_runtime_template_with_literal_and_handle_chunks_in_order() {
         region: RegionId(0),
         locals: vec![local(0, types.string, RegionId(0))],
         statements: vec![],
-        terminator: HirTerminator::Return(concat),
+        terminator: HirTerminator::Return({
+            let value = concat;
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     };
 
     let runtime_function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![LocalId(0)],
-        return_type: types.string,
+        returns: vec![types.string].into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -779,14 +974,20 @@ fn lowers_runtime_template_with_cfg_before_final_return() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(return_value),
+        terminator: HirTerminator::Return({
+            let value = return_value;
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     };
 
     let runtime_function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.string,
+        returns: vec![types.string].into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -826,8 +1027,8 @@ fn lowers_runtime_template_with_cfg_before_final_return() {
         WasmLirTerminator::Branch { .. }
     ));
     assert!(matches!(
-        runtime_lir.blocks[3].terminator,
-        WasmLirTerminator::Return { value: Some(_) }
+        &runtime_lir.blocks[3].terminator,
+        WasmLirTerminator::Return { values } if values.len() == 1
     ));
 }
 
@@ -860,13 +1061,19 @@ fn lowers_internal_string_append_as_buffer_concat() {
         region: RegionId(0),
         locals: vec![local(0, types.string, RegionId(0))],
         statements: vec![],
-        terminator: HirTerminator::Return(concat),
+        terminator: HirTerminator::Return({
+            let value = concat;
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     };
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![LocalId(0)],
-        return_type: types.string,
+        returns: vec![types.string].into_boxed_slice(),
+        error_return: None,
     };
     let module = build_module(
         &mut path_fork,
@@ -937,13 +1144,19 @@ fn lowers_internal_string_append_with_i64_chunk_via_string_from_i64() {
         region: RegionId(0),
         locals: vec![local(0, int64_type, RegionId(0))],
         statements: vec![],
-        terminator: HirTerminator::Return(concat),
+        terminator: HirTerminator::Return({
+            let value = concat;
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     };
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![LocalId(0)],
-        return_type: types.string,
+        returns: vec![types.string].into_boxed_slice(),
+        error_return: None,
     };
     let module = build_module(
         &mut path_fork,
@@ -1043,18 +1256,19 @@ fn lowers_string_equality_by_content_comparison_operations() {
                 1327,
             ),
         ],
-        terminator: HirTerminator::Return(load_local(
-            &mut expressions,
-            LocalId(3),
-            types.boolean,
-            RegionId(0),
-        )),
+        terminator: HirTerminator::Return({
+            let value = load_local(&mut expressions, LocalId(3), types.boolean, RegionId(0));
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     };
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![LocalId(0), LocalId(1)],
-        return_type: types.boolean,
+        returns: vec![types.boolean].into_boxed_slice(),
+        error_return: None,
     };
     let module = build_module(
         &mut path_fork,
@@ -1152,25 +1366,31 @@ fn lowers_ordered_comparison_and_control_flow() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(load_local(
-            &mut expressions,
-            LocalId(0),
-            int_type,
-            RegionId(0),
-        )),
+        terminator: HirTerminator::Return({
+            let value = load_local(&mut expressions, LocalId(0), int_type, RegionId(0));
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     };
     let else_block = HirBlock {
         id: BlockId(2),
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(i32_expression(0, RegionId(0), &mut expressions)),
+        terminator: HirTerminator::Return({
+            let value = i32_expression(0, RegionId(0), &mut expressions);
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     };
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: int_type,
+        returns: vec![int_type].into_boxed_slice(),
+        error_return: None,
     };
     let module = build_module(
         &mut path_fork,
@@ -1258,18 +1478,15 @@ fn deduplicates_static_utf8_segments() {
                 2,
             ),
         ],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let start_function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: vec![].into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -1298,7 +1515,7 @@ fn deduplicates_static_utf8_segments() {
 fn maps_advisory_drop_sites_to_drop_if_owned_statements() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut expressions = HirExpressionStore::default();
+    let expressions = HirExpressionStore::default();
     let (type_environment, types) = build_type_environment();
     let start_path = path_fork
         .try_intern_portable_path("main", &mut string_table)
@@ -1309,17 +1526,14 @@ fn maps_advisory_drop_sites_to_drop_if_owned_statements() {
         region: RegionId(0),
         locals: vec![local(0, types.string, RegionId(0))],
         statements: vec![],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
     let start_function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: vec![].into_boxed_slice(),
+        error_return: None,
     };
     let module = build_module(
         &mut path_fork,
@@ -1384,13 +1598,19 @@ fn synthesizes_export_wrappers_with_stable_names() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(i32_expression(123, RegionId(0), &mut expressions)),
+        terminator: HirTerminator::Return({
+            let value = i32_expression(123, RegionId(0), &mut expressions);
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     };
     let start_function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: int_type,
+        returns: vec![int_type].into_boxed_slice(),
+        error_return: None,
     };
     let module = build_module(
         &mut path_fork,
@@ -1483,16 +1703,24 @@ fn exported_f16_parameters_are_rounded_before_the_internal_call() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: int_type,
+        returns: vec![int_type].into_boxed_slice(),
+        error_return: None,
     };
     let exported_function = HirFunction {
         id: FunctionId(1),
         entry: BlockId(1),
         params: vec![LocalId(10)],
-        return_type: f16_type,
+        returns: vec![f16_type].into_boxed_slice(),
+        error_return: None,
     };
     let start_value = i32_expression(0, RegionId(0), &mut expressions);
     let exported_value = load_local(&mut expressions, LocalId(10), f16_type, RegionId(0));
+    let start_values = expressions
+        .append_values(&[start_value], None)
+        .expect("fixture return values should fit");
+    let exported_values = expressions
+        .append_values(&[exported_value], None)
+        .expect("fixture return values should fit");
     let module = build_module(
         &mut path_fork,
         &mut string_table,
@@ -1507,14 +1735,14 @@ fn exported_f16_parameters_are_rounded_before_the_internal_call() {
                 region: RegionId(0),
                 locals: vec![],
                 statements: vec![],
-                terminator: HirTerminator::Return(start_value),
+                terminator: HirTerminator::Return(start_values),
             },
             HirBlock {
                 id: BlockId(1),
                 region: RegionId(0),
                 locals: vec![local(10, f16_type, RegionId(0))],
                 statements: vec![],
-                terminator: HirTerminator::Return(exported_value),
+                terminator: HirTerminator::Return(exported_values),
             },
         ],
         FunctionId(0),
@@ -1567,7 +1795,7 @@ fn exported_f16_parameters_are_rounded_before_the_internal_call() {
     };
     assert_eq!(*source, WasmLirLocalId(0));
     let WasmLirStmt::Call {
-        dst: Some(call_result),
+        results: call_results,
         args,
         ..
     } = &statements[call_index]
@@ -1578,7 +1806,7 @@ fn exported_f16_parameters_are_rounded_before_the_internal_call() {
     assert!(
         matches!(
             &wrapper.blocks[0].terminator,
-            WasmLirTerminator::Return { value: Some(value) } if *value == *call_result
+            WasmLirTerminator::Return { values } if values == call_results && values.len() == 1
         ),
         "the wrapper should return the callee's canonical F32 carrier unchanged"
     );
@@ -1600,13 +1828,19 @@ fn rejects_invalid_export_request_with_structured_diagnostic() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(i32_expression(1, RegionId(0), &mut expressions)),
+        terminator: HirTerminator::Return({
+            let value = i32_expression(1, RegionId(0), &mut expressions);
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     };
     let start_function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: int_type,
+        returns: vec![int_type].into_boxed_slice(),
+        error_return: None,
     };
     let module = build_module(
         &mut path_fork,
@@ -1662,6 +1896,12 @@ fn validate_float_test_module(
     let start_value = i32_expression(0, RegionId(0), &mut expressions);
     let source = load_local(&mut expressions, LocalId(10), validated_type, RegionId(0));
     let result = load_local(&mut expressions, LocalId(20), validated_type, RegionId(0));
+    let start_values = expressions
+        .append_values(&[start_value], None)
+        .expect("fixture return values should fit");
+    let result_values = expressions
+        .append_values(&[result], None)
+        .expect("fixture return values should fit");
 
     build_module(
         path_fork,
@@ -1673,7 +1913,8 @@ fn validate_float_test_module(
                     id: FunctionId(0),
                     entry: BlockId(0),
                     params: vec![],
-                    return_type: int_type,
+                    returns: vec![int_type].into_boxed_slice(),
+                    error_return: None,
                 },
                 start_path,
                 HirFunctionOrigin::EntryStart,
@@ -1683,7 +1924,8 @@ fn validate_float_test_module(
                     id: FunctionId(1),
                     entry: BlockId(1),
                     params: vec![LocalId(10)],
-                    return_type: validated_type,
+                    returns: vec![validated_type].into_boxed_slice(),
+                    error_return: None,
                 },
                 validator_path,
                 HirFunctionOrigin::Normal,
@@ -1695,7 +1937,7 @@ fn validate_float_test_module(
                 region: RegionId(0),
                 locals: vec![],
                 statements: vec![],
-                terminator: HirTerminator::Return(start_value),
+                terminator: HirTerminator::Return(start_values),
             },
             HirBlock {
                 id: BlockId(1),
@@ -1713,7 +1955,7 @@ fn validate_float_test_module(
                     },
                     2,
                 )],
-                terminator: HirTerminator::Return(result),
+                terminator: HirTerminator::Return(result_values),
             },
         ],
         FunctionId(0),
@@ -1828,7 +2070,7 @@ fn lowers_validate_float_with_exact_source_precision_and_local_value_path() {
         assert!(
             matches!(
                 &validation_block.terminator,
-                WasmLirTerminator::Return { value: Some(value) } if *value == *dst
+                WasmLirTerminator::Return { values } if values.as_slice() == [*dst]
             ),
             "{scalar:?} should return the validated destination unchanged"
         );
@@ -2018,6 +2260,12 @@ fn format_float_test_module(
         &mut expressions,
     );
     let formatted_value = load_local(&mut expressions, LocalId(20), string_type, RegionId(0));
+    let start_values = expressions
+        .append_values(&[start_value], None)
+        .expect("fixture return values should fit");
+    let formatted_values = expressions
+        .append_values(&[formatted_value], None)
+        .expect("fixture return values should fit");
 
     build_module(
         path_fork,
@@ -2029,7 +2277,8 @@ fn format_float_test_module(
                     id: FunctionId(0),
                     entry: BlockId(0),
                     params: vec![],
-                    return_type: int_type,
+                    returns: vec![int_type].into_boxed_slice(),
+                    error_return: None,
                 },
                 start_path,
                 HirFunctionOrigin::EntryStart,
@@ -2039,7 +2288,8 @@ fn format_float_test_module(
                     id: FunctionId(1),
                     entry: BlockId(1),
                     params: vec![],
-                    return_type: string_type,
+                    returns: vec![string_type].into_boxed_slice(),
+                    error_return: None,
                 },
                 formatter_path,
                 HirFunctionOrigin::Normal,
@@ -2051,7 +2301,7 @@ fn format_float_test_module(
                 region: RegionId(0),
                 locals: vec![],
                 statements: vec![],
-                terminator: HirTerminator::Return(start_value),
+                terminator: HirTerminator::Return(start_values),
             },
             HirBlock {
                 id: BlockId(1),
@@ -2066,7 +2316,7 @@ fn format_float_test_module(
                     },
                     2,
                 )],
-                terminator: HirTerminator::Return(formatted_value),
+                terminator: HirTerminator::Return(formatted_values),
             },
         ],
         FunctionId(0),
@@ -2219,6 +2469,12 @@ fn lowers_fixed_float_to_string_with_source_precision_and_single_evaluation() {
             &mut expressions,
         );
         let start_value = i32_expression(0, RegionId(0), &mut expressions);
+        let start_values = expressions
+            .append_values(&[start_value], None)
+            .expect("fixture return values should fit");
+        let cast_values = expressions
+            .append_values(&[cast], None)
+            .expect("fixture return values should fit");
         let module = build_module(
             &mut path_fork,
             &mut string_table,
@@ -2229,7 +2485,8 @@ fn lowers_fixed_float_to_string_with_source_precision_and_single_evaluation() {
                         id: FunctionId(0),
                         entry: BlockId(0),
                         params: vec![],
-                        return_type: fixed_scalar_type(FixedScalar::I32),
+                        returns: vec![fixed_scalar_type(FixedScalar::I32)].into_boxed_slice(),
+                        error_return: None,
                     },
                     start_path,
                     HirFunctionOrigin::EntryStart,
@@ -2239,7 +2496,8 @@ fn lowers_fixed_float_to_string_with_source_precision_and_single_evaluation() {
                         id: FunctionId(1),
                         entry: BlockId(1),
                         params: vec![],
-                        return_type: types.string,
+                        returns: vec![types.string].into_boxed_slice(),
+                        error_return: None,
                     },
                     formatter_path,
                     HirFunctionOrigin::Normal,
@@ -2251,14 +2509,14 @@ fn lowers_fixed_float_to_string_with_source_precision_and_single_evaluation() {
                     region: RegionId(0),
                     locals: vec![],
                     statements: vec![],
-                    terminator: HirTerminator::Return(start_value),
+                    terminator: HirTerminator::Return(start_values),
                 },
                 HirBlock {
                     id: BlockId(1),
                     region: RegionId(0),
                     locals: vec![],
                     statements: vec![],
-                    terminator: HirTerminator::Return(cast),
+                    terminator: HirTerminator::Return(cast_values),
                 },
             ],
             FunctionId(0),
@@ -2360,17 +2618,23 @@ fn lowers_every_exact_integer_scalar_with_its_own_carrier() {
             region: RegionId(0),
             locals: vec![],
             statements: vec![],
-            terminator: HirTerminator::Return(fixed_scalar_expression(
-                FixedScalarValue::signed(scalar, 123).expect("valid test value"),
-                RegionId(0),
-                &mut expressions,
-            )),
+            terminator: HirTerminator::Return({
+                let value = fixed_scalar_expression(
+                    FixedScalarValue::signed(scalar, 123).expect("valid test value"),
+                    RegionId(0),
+                    &mut expressions,
+                );
+                expressions
+                    .append_values(&[value], None)
+                    .expect("fixture return values should fit")
+            }),
         };
         let start_function = HirFunction {
             id: FunctionId(0),
             entry: BlockId(0),
             params: vec![],
-            return_type: int_type,
+            returns: vec![int_type].into_boxed_slice(),
+            error_return: None,
         };
         let module = build_module(
             &mut path_fork,
@@ -2414,8 +2678,8 @@ fn lowers_every_exact_integer_scalar_with_its_own_carrier() {
 fn rejects_unsupported_host_call_with_diagnostic() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut expressions = HirExpressionStore::default();
-    let (type_environment, types) = build_type_environment();
+    let expressions = HirExpressionStore::default();
+    let (type_environment, _) = build_type_environment();
     let start_path = path_fork
         .try_intern_portable_path("main", &mut string_table)
         .expect("test path fits");
@@ -2431,22 +2695,19 @@ fn rejects_unsupported_host_call_with_diagnostic() {
             HirStatementKind::Call {
                 target: CallTarget::External(unknown_id),
                 args: HirValueRange::empty(),
-                result: None,
+                results: vec![],
             },
             1,
         )],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let start_function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: vec![].into_boxed_slice(),
+        error_return: None,
     };
     let module = build_module(
         &mut path_fork,
@@ -2492,11 +2753,7 @@ fn selected_function_policy_ignores_unselected_host_calls_and_assertions() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let unsupported_id =
@@ -2510,7 +2767,7 @@ fn selected_function_policy_ignores_unselected_host_calls_and_assertions() {
             HirStatementKind::Call {
                 target: CallTarget::External(unsupported_id),
                 args: HirValueRange::empty(),
-                result: None,
+                results: vec![],
             },
             1,
         )],
@@ -2534,13 +2791,15 @@ fn selected_function_policy_ignores_unselected_host_calls_and_assertions() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: vec![].into_boxed_slice(),
+        error_return: None,
     };
     let unused_function = HirFunction {
         id: FunctionId(1),
         entry: BlockId(10),
         params: vec![],
-        return_type: types.unit,
+        returns: vec![].into_boxed_slice(),
+        error_return: None,
     };
     let module = build_module(
         &mut path_fork,
@@ -2638,13 +2897,19 @@ fn lower_type_to_abi_maps_all_hir_types_correctly() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(i32_expression(0, RegionId(0), &mut expressions)),
+        terminator: HirTerminator::Return({
+            let value = i32_expression(0, RegionId(0), &mut expressions);
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     };
     let start_function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: fixed_scalar_type(FixedScalar::I32),
+        returns: vec![fixed_scalar_type(FixedScalar::I32)].into_boxed_slice(),
+        error_return: None,
     };
     let module = build_module(
         &mut path_fork,
@@ -2784,14 +3049,20 @@ fn multi_fragment_template_produces_all_push_operations() {
             local(1, types.string, RegionId(0)),
         ],
         statements: vec![],
-        terminator: HirTerminator::Return(full_concat),
+        terminator: HirTerminator::Return({
+            let value = full_concat;
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     };
 
     let runtime_function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![LocalId(0), LocalId(1)],
-        return_type: types.string,
+        returns: vec![types.string].into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -2852,13 +3123,19 @@ fn debug_name_uses_source_name_when_available() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(i32_expression(0, RegionId(0), &mut expressions)),
+        terminator: HirTerminator::Return({
+            let value = i32_expression(0, RegionId(0), &mut expressions);
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     };
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: int_type,
+        returns: vec![int_type].into_boxed_slice(),
+        error_return: None,
     };
     let module = build_module(
         &mut path_fork,
@@ -2922,7 +3199,7 @@ fn io_console_functions_are_unsupported_in_wasm() {
                 crate::compiler_frontend::external_packages::ExternalFunctionId::IoLine,
             ),
             args: arguments,
-            result: None,
+            results: vec![],
         },
         1,
     );
@@ -2932,18 +3209,15 @@ fn io_console_functions_are_unsupported_in_wasm() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![io_call],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: vec![].into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(

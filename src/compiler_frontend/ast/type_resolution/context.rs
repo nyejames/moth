@@ -13,6 +13,7 @@
 
 use crate::compiler_frontend::ast::TopLevelDeclarationTable;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_parameters::{
@@ -24,7 +25,7 @@ use crate::compiler_frontend::headers::binding_environment::{
     NamespaceRecord, SourceDeclarationTarget,
 };
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
-use crate::compiler_frontend::source::{SourceId, SourceSpan};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
@@ -41,8 +42,6 @@ use std::sync::Arc;
 ///      make every helper signature noisy and error-prone.
 pub(crate) struct TypeResolutionContext<'a> {
     pub declaration_table: &'a Rc<TopLevelDeclarationTable>,
-    /// Authored source identity used when nested semantic scopes resolve file-owned references.
-    pub declaring_file_id: SourceId,
     pub visible_declaration_ids: Option<&'a Arc<FxHashSet<PathId>>>,
     pub visible_external_symbols: Option<&'a FxHashMap<StringId, ExternalSymbolId>>,
     pub visible_source_bindings: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
@@ -62,6 +61,7 @@ pub(crate) struct TypeResolutionContext<'a> {
     /// WHY: enables resolution directly to TypeId instead of going through DataType.
     ///      All production type resolution must have access to the canonical environment.
     pub type_environment: &'a mut TypeEnvironment,
+    pub const_values: &'a ConstValueStore,
     /// Visible namespace records for resolving namespace-qualified type names.
     pub visible_namespace_records: Option<&'a FxHashMap<StringId, NamespaceRecord>>,
     pub trait_environment: Option<&'a TraitEnvironment>,
@@ -75,7 +75,6 @@ pub(crate) struct TypeResolutionContext<'a> {
 ///       have to remember the field order of the context constructor.
 pub(crate) struct TypeResolutionContextInputs<'a> {
     pub declaration_table: &'a Rc<TopLevelDeclarationTable>,
-    pub declaring_file_id: SourceId,
     pub visible_declaration_ids: Option<&'a Arc<FxHashSet<PathId>>>,
     pub visible_external_symbols: Option<&'a FxHashMap<StringId, ExternalSymbolId>>,
     pub visible_source_bindings: Option<&'a FxHashMap<StringId, SourceDeclarationTarget>>,
@@ -84,6 +83,7 @@ pub(crate) struct TypeResolutionContextInputs<'a> {
     pub generic_declarations_by_path: Option<&'a FxHashMap<PathId, GenericDeclarationKind>>,
     pub resolved_struct_fields_by_path: Option<&'a FxHashMap<PathId, Vec<Declaration>>>,
     pub type_environment: &'a mut TypeEnvironment,
+    pub const_values: &'a ConstValueStore,
     /// Visible namespace records for resolving namespace-qualified type names.
     pub visible_namespace_records: Option<&'a FxHashMap<StringId, NamespaceRecord>>,
     pub trait_environment: Option<&'a TraitEnvironment>,
@@ -99,10 +99,10 @@ impl<'a> TypeResolutionContext<'a> {
     pub(crate) fn from_declaration_table(
         declaration_table: &'a Rc<TopLevelDeclarationTable>,
         type_environment: &'a mut TypeEnvironment,
+        const_values: &'a ConstValueStore,
     ) -> Self {
         Self {
             declaration_table,
-            declaring_file_id: SourceId::COMPILATION_ROOT,
             visible_declaration_ids: None,
             visible_external_symbols: None,
             visible_source_bindings: None,
@@ -113,6 +113,7 @@ impl<'a> TypeResolutionContext<'a> {
             generic_substitutions: None,
             resolved_struct_fields_by_path: None,
             type_environment,
+            const_values,
             visible_namespace_records: None,
             trait_environment: None,
             trait_evidence_environment: None,
@@ -123,7 +124,6 @@ impl<'a> TypeResolutionContext<'a> {
     pub(crate) fn from_inputs(inputs: TypeResolutionContextInputs<'a>) -> Self {
         Self {
             declaration_table: inputs.declaration_table,
-            declaring_file_id: inputs.declaring_file_id,
             visible_declaration_ids: inputs.visible_declaration_ids,
             visible_external_symbols: inputs.visible_external_symbols,
             visible_source_bindings: inputs.visible_source_bindings,
@@ -134,6 +134,7 @@ impl<'a> TypeResolutionContext<'a> {
             generic_substitutions: None,
             resolved_struct_fields_by_path: inputs.resolved_struct_fields_by_path,
             type_environment: inputs.type_environment,
+            const_values: inputs.const_values,
             visible_namespace_records: inputs.visible_namespace_records,
             trait_environment: inputs.trait_environment,
             trait_evidence_environment: inputs.trait_evidence_environment,

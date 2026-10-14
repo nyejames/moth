@@ -1,14 +1,12 @@
 //! Input bundle for the AST expression parser.
 //!
-//! WHAT: groups the token stream, scope context, type interner, expected-type
-//!      hint, explicit cast target, value mode, trailing-token policy, and
-//!      string table into one context struct.
-//! WHY: the expression parser was threading eight or more individual arguments
-//!      through every entry point. A single named input struct removes the
-//!      long-argument noise, lets callers set only the fields that differ, and
-//!      makes the parser's dependencies explicit.
+//! Parsing explicitly reborrows the phase expression and constant owners alongside lexical,
+//! canonical type and source services. Recursive entries share that domain; scopes never retain
+//! a builder handle. Receiving hints and cast targets remain separate from trailing-token policy.
 
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::const_values::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
@@ -35,14 +33,14 @@ pub(crate) struct ExpressionTrailingPolicy {
 
 /// References shared by every expression parse mode.
 ///
-/// WHAT: keeps the parser's required handles together before a mode-specific
-///      trailing policy is selected.
-/// WHY: callers should choose the parse mode, not thread a long positional
-///      argument list through every expression boundary.
+/// Each entry borrows construction owners for its parsing interval. Nested parses reborrow these
+/// resources and complete any expression escaping into TIR before installing its retained ID.
 pub(crate) struct ExpressionParseResources<'a, 'env, 'tokens> {
     pub(crate) token_stream: &'a mut AstCursor<'tokens>,
     pub(crate) scope_context: &'a ScopeContext,
     pub(crate) type_interner: &'a mut AstTypeInterner<'env>,
+    pub(crate) expression_builder: &'a mut AstExpressionBuilder,
+    pub(crate) const_values: &'a mut ConstValueStore,
     pub(crate) expected_type: &'a mut ExpectedType,
     pub(crate) cast_target_context: &'a mut CastTargetContext,
     pub(crate) value_mode: &'a ValueMode,
@@ -65,6 +63,8 @@ pub(crate) struct ExpressionParseInput<'a, 'env, 'tokens> {
     pub(crate) token_stream: &'a mut AstCursor<'tokens>,
     pub(crate) scope_context: &'a ScopeContext,
     pub(crate) type_interner: &'a mut AstTypeInterner<'env>,
+    pub(crate) expression_builder: &'a mut AstExpressionBuilder,
+    pub(crate) const_values: &'a mut ConstValueStore,
     pub(crate) expected_type: &'a mut ExpectedType,
     pub(crate) cast_target_context: &'a mut CastTargetContext,
     pub(crate) value_mode: &'a ValueMode,
@@ -108,6 +108,8 @@ impl<'a, 'env, 'tokens> ExpressionParseInput<'a, 'env, 'tokens> {
             token_stream: resources.token_stream,
             scope_context: resources.scope_context,
             type_interner: resources.type_interner,
+            expression_builder: resources.expression_builder,
+            const_values: resources.const_values,
             expected_type: resources.expected_type,
             cast_target_context: resources.cast_target_context,
             value_mode: resources.value_mode,
@@ -213,32 +215,6 @@ impl<'a, 'env, 'tokens> ExpressionParseInput<'a, 'env, 'tokens> {
                 consume_closing_parenthesis: false,
                 skip_trailing_newlines: true,
                 allow_boundary_catch: true,
-                allow_expected_result_evidence: true,
-            },
-        )
-    }
-
-    /// Grouped subexpression input: cast target context is deliberately erased
-    /// so `(cast value)` is invalid as an operator operand, while expected-type
-    /// evidence from the surrounding boundary is preserved.
-    ///
-    /// WHAT: replaces the inline policy construction previously duplicated in
-    ///      the open-parenthesis dispatch arm.
-    ///
-    /// The caller must supply a `CastTargetContext` reference; passing
-    /// `&mut CastTargetContext::None` is the intended usage. Newlines after the
-    /// closing delimiter stay on the outer expression: the inner fragment stops
-    /// at `)` and leaves the terminator for its own newline dispatch, so a
-    /// trailing group ends the enclosing expression like a trailing literal.
-    pub(crate) fn grouped_without_cast_target(
-        resources: ExpressionParseResources<'a, 'env, 'tokens>,
-    ) -> Self {
-        Self::new(
-            resources,
-            ExpressionTrailingPolicy {
-                consume_closing_parenthesis: true,
-                skip_trailing_newlines: false,
-                allow_boundary_catch: false,
                 allow_expected_result_evidence: true,
             },
         )

@@ -5,17 +5,17 @@
 //! WHY: explicit propagation stays at the postfix owner, while pending receiver calls expose success
 //!      types until whole-expression catch completion chooses their error delivery.
 
-use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::{
-    Expression, FallibleExpressionHandling,
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, OwnedExpr,
 };
-use crate::compiler_frontend::ast::expressions::expression_kind::ExpressionKind;
+use crate::compiler_frontend::ast::expressions::expression_types::FallibleExpressionHandling;
 use crate::compiler_frontend::ast::statements::fallible_handling::{
     call_success_is_optional, non_fallible_handler_reason,
     token_stream_starts_typed_propagation_suffix,
 };
+use crate::compiler_frontend::ast::statements::functions::FunctionParameter;
 use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ReturnSlot};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
@@ -66,53 +66,47 @@ pub(super) fn receiver_result_type_ids_for_call(
 }
 
 /// Retains typed receiver producers until the whole selected expression completes.
-///
-/// The existing carrier stays inside the handled node for HIR's error-channel lowering. The outer
-/// node exposes only success types, so receiver and argument typing never sees a first-class result.
 pub(in crate::compiler_frontend::ast::field_access) fn finish_pending_receiver_call_expression(
-    expression: Expression,
+    expression: OwnedExpr,
     builtin_name: StringId,
     token_stream: &AstCursor<'_>,
     type_interner: &mut AstTypeInterner<'_>,
-) -> Expression {
+    expression_builder: &mut AstExpressionBuilder,
+) -> Result<OwnedExpr, ExpressionParseError> {
     if token_stream_starts_typed_propagation_suffix(token_stream) {
-        return expression;
+        return Ok(expression);
     }
-    recover_unhandled_carrier(expression, builtin_name, type_interner)
+    recover_pending_producer(expression, builtin_name, type_interner, expression_builder)
 }
 
-/// Recovers an unhandled fallible carrier so its success slot is the value a further step consumes.
-///
-/// WHAT: wraps a fallible carrier in the `Recover` handled node, exposing only its success type and
-///       keeping the error producer typed. Expressions that are not fallible carriers are returned
-///       unchanged.
-/// WHY: the carrier type is already fixed by the call's own signature. This only moves the carrier
-///      behind the handled node, so a later member step or the completed value sees success types
-///      only. Retained completion uses this same owner, so no authored token is reparsed for it.
-pub(in crate::compiler_frontend::ast::field_access) fn recover_unhandled_carrier(
-    mut expression: Expression,
+/// Exposes a pending producer's success slots while preserving its typed error fact.
+pub(in crate::compiler_frontend::ast::field_access) fn recover_pending_producer(
+    expression: OwnedExpr,
     builtin_name: StringId,
-    type_interner: &mut AstTypeInterner<'_>,
-) -> Expression {
-    let Some((success_type_id, error_type_id)) = type_interner
-        .environment()
-        .fallible_carrier_slots(expression.type_id)
-    else {
-        return expression;
+    _type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+) -> Result<OwnedExpr, ExpressionParseError> {
+    let (error_type_id, span, pending_facts) = {
+        let view = expression_builder.view_owned(expression)?;
+        (
+            view.error_type(),
+            view.span(),
+            view.failure_facts().cloned(),
+        )
     };
-
-    let span = expression.span;
-    let pending_facts = std::mem::take(&mut expression.failure_facts);
-    let diagnostic_type = diagnostic_type_spelling(success_type_id, type_interner.environment());
-    let mut expression = Expression::handled_result_with_type_id(
+    let Some(error_type_id) = error_type_id else {
+        return Ok(expression);
+    };
+    let mut expression =
+        expression_builder.handled_result(expression, FallibleExpressionHandling::Recover, span)?;
+    if let Some(facts) = pending_facts {
+        expression = expression_builder.with_failure_facts(expression, facts)?;
+    }
+    Ok(expression_builder.with_typed_error_producer(
         expression,
-        FallibleExpressionHandling::Recover,
-        success_type_id,
-        diagnostic_type,
-        span,
-    );
-    expression.failure_facts = pending_facts;
-    expression.with_typed_error_producer(error_type_id, Some(builtin_name))
+        error_type_id,
+        Some(builtin_name),
+    )?)
 }
 
 pub(super) fn replace_trait_this_type(
@@ -152,18 +146,14 @@ fn declaration_for_trait_bound_parameter(
     value_mode: ValueMode,
     span: Option<SourceSpan>,
     binding_span: Option<SourceSpan>,
-) -> Declaration {
-    Declaration {
+) -> FunctionParameter {
+    FunctionParameter {
         id,
-        value: Expression::new(
-            ExpressionKind::NoValue,
-            span,
-            type_id,
-            diagnostic_type,
-            value_mode,
-        ),
-        binding_span,
-        config_qualifier: None,
+        type_id,
+        diagnostic_type,
+        value_mode,
+        default: None,
+        binding_span: binding_span.or(span),
     }
 }
 
@@ -206,7 +196,7 @@ pub(super) fn signature_from_trait_requirement(
             parameter.name,
             type_id,
             diagnostic_type_spelling(type_id, type_environment),
-            parameter.value_mode.clone(),
+            parameter.value_mode,
             parameter.span,
             parameter.span,
         ));

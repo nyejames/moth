@@ -8,6 +8,8 @@
 //! site planning so repeated placeholders can replay the same source safely.
 
 use super::types::{RuntimeSlotContributionSourceDraft, RuntimeSlotContributionSourceId};
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrStore, TemplateSlotContributionSourcePlan, TirCopyState, TirSlotContributions,
@@ -20,6 +22,8 @@ pub(in crate::compiler_frontend::ast::templates) fn tir_contributions_need_runti
     contributions: &TirSlotContributions,
     string_table: &StringTable,
     store: &TemplateIrStore,
+    expressions: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
 ) -> Result<bool, TemplateError> {
     for target in schema.ordered_slot_keys(string_table) {
         let nodes = contributions.nodes_for_slot(&target);
@@ -29,7 +33,13 @@ pub(in crate::compiler_frontend::ast::templates) fn tir_contributions_need_runti
         }
 
         for node_id in nodes {
-            if !tir_node_is_const_evaluable_value(store, *node_id, string_table)? {
+            if !tir_node_is_const_evaluable_value(
+                store,
+                expressions,
+                const_values,
+                *node_id,
+                string_table,
+            )? {
                 return Ok(true);
             }
         }
@@ -54,6 +64,8 @@ pub(in crate::compiler_frontend::ast::templates) fn build_tir_native_contributio
     contributions: &TirSlotContributions,
     string_table: &StringTable,
     store: &mut TemplateIrStore,
+    expressions: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
     copy_state: &mut TirCopyState,
 ) -> Result<Vec<RuntimeSlotContributionSourceDraft>, TemplateError> {
     let mut sources = Vec::new();
@@ -77,8 +89,13 @@ pub(in crate::compiler_frontend::ast::templates) fn build_tir_native_contributio
             let render_root =
                 copy_tir_subtree_with_active_slot_plan(*node_id, None, store, copy_state)?;
 
-            let renders_wrapper_unconditionally =
-                tir_node_is_const_evaluable_value(store, render_root, string_table)?;
+            let renders_wrapper_unconditionally = tir_node_is_const_evaluable_value(
+                store,
+                expressions,
+                const_values,
+                render_root,
+                string_table,
+            )?;
 
             let shape = classify_tir_contribution_node(store, *node_id)?;
 

@@ -5,8 +5,11 @@
 //! WHY: relational patterns share literal parsing but have distinct validation
 //! rules, so they live in a dedicated submodule.
 
+use super::types::PatternValue;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::numeric_construction::RetainedPattern;
 use crate::compiler_frontend::ast::statements::match_patterns::{
     MatchPattern, RelationalPatternOp,
@@ -32,6 +35,8 @@ pub(super) fn parse_relational_pattern(
     subject_type_id: TypeId,
     string_table: &mut StringTable,
     type_environment: &TypeEnvironment,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
 ) -> RelationalPatternResult<MatchPattern> {
     let span = Some(token_stream.current_span());
 
@@ -56,7 +61,10 @@ pub(super) fn parse_relational_pattern(
         subject_type_id,
         string_table,
         type_environment,
+        expression_builder,
+        const_values,
     )?;
+    let value = PatternValue::from_expression(expression_builder.view(value)?)?;
 
     Ok(MatchPattern::Relational { op, value, span })
 }

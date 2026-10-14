@@ -1,0 +1,15 @@
+decorate |value String?| -> String?:
+    return value?
+;
+
+render |value String?| -> String:
+    if decorate(value) is |text|:
+        return [:received [text]]
+    else
+        return "missing"
+    ;
+;
+
+present String? = "Priya"
+absent String? = none
+[:optional contract: [render(present)]|[render(absent)]]

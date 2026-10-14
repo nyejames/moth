@@ -15,7 +15,10 @@ mod types;
 // --------------------------
 //
 // Public types consumed by AST statement parsing, HIR lowering, and tests.
-pub use types::{ChoicePayloadCapture, MatchArm, MatchPattern, RelationalPatternOp};
+pub use types::{
+    ChoicePayloadCapture, MatchArm, MatchPattern, PatternValue, PatternValueKind,
+    RelationalPatternOp,
+};
 
 // pub(super) surface re-exported to the `statements` parent module.
 pub(super) use types::ParsedChoicePattern;

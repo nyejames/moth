@@ -1,6 +1,7 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
+rendered_output_exact = " counter=-4;value=6;message=updated;flag=true;unchanged=7"
 
 [[backends.html.artifact_assertions]]
 path = "index.html"

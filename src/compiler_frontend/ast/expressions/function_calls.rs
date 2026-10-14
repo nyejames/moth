@@ -12,7 +12,7 @@
 //! cursor. A `catch` is never consumed by a retained call: it protects the whole selected
 //! expression, so the enclosing fragment owner retains it with the pending operand in place.
 use crate::compiler_frontend::ast::ScopeContext;
-use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
 use crate::compiler_frontend::ast::expressions::call_arguments::{
@@ -23,11 +23,14 @@ use crate::compiler_frontend::ast::expressions::call_validation::{
     expectations_from_host_function, expectations_from_user_parameters, resolve_call_arguments,
 };
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::{
-    Expression, FallibleExpressionHandling, HandledFallibleHostFunctionCallInput,
-};
+use crate::compiler_frontend::ast::expressions::expression::HandledFallibleHostFunctionCallInput;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
-use crate::compiler_frontend::ast::expressions::expression_types::FallibleHandling;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, OwnedExpr,
+};
+use crate::compiler_frontend::ast::expressions::expression_types::{
+    FallibleExpressionHandling, FallibleHandling,
+};
 use crate::compiler_frontend::ast::generic_functions::numeric_origins::GenericErrorReturn;
 use crate::compiler_frontend::ast::numeric_construction::{
     DeferredCall, DeferredCallArgument, DeferredCallHandling, DeferredExpressionCompletion,
@@ -40,6 +43,7 @@ use crate::compiler_frontend::ast::statements::fallible_handling::{
     parse_fallible_handling_suffix_for_host_call_expression, parse_fragment_handling_suffix,
     token_stream_starts_typed_propagation_suffix,
 };
+use crate::compiler_frontend::ast::statements::functions::FunctionParameter;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::builtins::error_type::resolve_builtin_error_type_typed;
@@ -68,6 +72,8 @@ pub struct FunctionCallParseInput<'a, 'b, 'tokens> {
     pub allow_boundary_catch: bool,
     pub warnings: Option<&'a mut Vec<CompilerDiagnostic>>,
     pub type_interner: &'a mut AstTypeInterner<'b>,
+    pub expression_builder: &'a mut AstExpressionBuilder,
+    pub const_values: &'a mut ConstValueStore,
     pub string_table: &'a mut StringTable,
     pub path_fork: &'a mut PathInternerFork,
 }
@@ -80,7 +86,7 @@ pub struct FunctionCallParseInput<'a, 'b, 'tokens> {
 ///      one operand position and must never be represented by a fabricated value.
 pub(crate) enum ParsedFunctionCallExpression {
     /// The call completed with its validated argument list.
-    Value(Expression),
+    Value(OwnedExpr),
     /// A retained operand item: the pending call itself, with its authored operand `!` when one
     /// was consumed. A `catch` is never consumed here; it stays with the enclosing fragment.
     RetainedOperand(ExpressionRpnItem),
@@ -97,13 +103,15 @@ pub struct ExternalFunctionCallParseInput<'a, 'b, 'tokens> {
     pub allow_boundary_catch: bool,
     pub warnings: Option<&'a mut Vec<CompilerDiagnostic>>,
     pub type_interner: &'a mut AstTypeInterner<'b>,
+    pub expression_builder: &'a mut AstExpressionBuilder,
+    pub const_values: &'a mut ConstValueStore,
     pub string_table: &'a mut StringTable,
     pub path_fork: &'a mut PathInternerFork,
 }
 
 struct ParsedExternalFunctionCall {
     id: ExternalFunctionId,
-    args: Vec<CallArgument>,
+    args: Vec<CallArgument<OwnedExpr>>,
     result_type_ids: Vec<TypeId>,
     requires_external_float_validation: bool,
     error_return_type_id: Option<TypeId>,
@@ -140,6 +148,8 @@ pub(crate) struct CallFinishContext<'a, 'b, 'tokens> {
     pub(crate) allow_boundary_catch: bool,
     pub(crate) warnings: Option<&'a mut Vec<CompilerDiagnostic>>,
     pub(crate) type_interner: &'a mut AstTypeInterner<'b>,
+    pub(crate) expression_builder: &'a mut AstExpressionBuilder,
+    pub(crate) const_values: &'a mut ConstValueStore,
     pub(crate) string_table: &'a mut StringTable,
     pub(crate) path_fork: &'a mut PathInternerFork,
 }
@@ -164,6 +174,8 @@ pub(crate) fn parse_function_call_expression(
         allow_boundary_catch,
         warnings,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     } = input;
@@ -187,6 +199,8 @@ pub(crate) fn parse_function_call_expression(
             allow_boundary_catch,
             warnings,
             type_interner,
+            expression_builder,
+            const_values,
             string_table,
             path_fork,
         });
@@ -203,6 +217,8 @@ pub(crate) fn parse_function_call_expression(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         &parameter_expectations,
         CallArgumentSyntax::Supported {
@@ -218,6 +234,8 @@ pub(crate) fn parse_function_call_expression(
                 token_stream,
                 context,
                 type_interner,
+                expression_builder,
+                const_values,
                 warnings,
                 string_table,
                 path_fork,
@@ -241,6 +259,8 @@ pub(crate) fn parse_function_call_expression(
         call_span,
         string_table,
         type_interner,
+        expression_builder,
+        const_values,
         path_fork,
     )?;
 
@@ -261,6 +281,8 @@ pub(crate) fn parse_function_call_expression(
             allow_boundary_catch,
             warnings,
             type_interner,
+            expression_builder,
+            const_values,
             string_table,
             path_fork,
         },
@@ -276,6 +298,8 @@ struct RetainedSourceCallInput<'a, 'b, 'tokens> {
     token_stream: &'a mut AstCursor<'tokens>,
     context: &'a ScopeContext,
     type_interner: &'a mut AstTypeInterner<'b>,
+    expression_builder: &'a mut AstExpressionBuilder,
+    const_values: &'a mut ConstValueStore,
     warnings: Option<&'a mut Vec<CompilerDiagnostic>>,
     string_table: &'a mut StringTable,
     path_fork: &'a mut PathInternerFork,
@@ -305,6 +329,8 @@ fn retain_numeric_source_call(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         warnings,
         string_table,
         path_fork,
@@ -333,6 +359,8 @@ fn retain_numeric_source_call(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         success_result_type_ids: &success_result_type_ids,
         error_return,
         authored_failure_lane: context.source_call_has_private_failure_lane(*function_path),
@@ -361,6 +389,8 @@ pub(crate) struct RetainedCallHandlingInput<'a, 'b, 'tokens> {
     pub(crate) token_stream: &'a mut AstCursor<'tokens>,
     pub(crate) context: &'a ScopeContext,
     pub(crate) type_interner: &'a mut AstTypeInterner<'b>,
+    pub(crate) expression_builder: &'a mut AstExpressionBuilder,
+    pub(crate) const_values: &'a mut ConstValueStore,
     pub(crate) success_result_type_ids: &'a [TypeId],
     pub(crate) error_return: Option<GenericErrorReturn>,
     pub(crate) authored_failure_lane: bool,
@@ -386,6 +416,8 @@ pub(crate) fn parse_retained_call_authored_handling(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         success_result_type_ids,
         error_return,
         authored_failure_lane,
@@ -406,6 +438,8 @@ pub(crate) fn parse_retained_call_authored_handling(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         FallibleSuccessContract::Known(success_result_type_ids),
         error_return,
         authored_failure_lane,
@@ -461,7 +495,7 @@ pub(crate) fn finish_function_call_expression(
     call: HandledFallibleCall,
     error_return_type_id: Option<TypeId>,
     finish: CallFinishContext<'_, '_, '_>,
-) -> Result<Expression, ExpressionParseError> {
+) -> Result<OwnedExpr, ExpressionParseError> {
     let CallFinishContext {
         token_stream,
         context,
@@ -469,6 +503,8 @@ pub(crate) fn finish_function_call_expression(
         allow_boundary_catch,
         warnings,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork: _path_fork,
     } = finish;
@@ -485,10 +521,9 @@ pub(crate) fn finish_function_call_expression(
         }
 
         let call_path = call.name;
-        let expression =
-            call.into_plain_expression(type_interner.environment_mut_for_derived_types());
+        let expression = call.into_plain_expression(expression_builder)?;
         return Ok(if context.source_call_has_private_failure_lane(call_path) {
-            expression.with_private_call_failure_candidate(call_path)
+            expression_builder.with_private_call_failure_candidate(expression, call_path)?
         } else {
             expression
         });
@@ -505,33 +540,39 @@ pub(crate) fn finish_function_call_expression(
             },
             warnings,
             type_interner,
+            expression_builder,
+            const_values,
             string_table,
             _path_fork,
         );
     }
 
-    Ok(
-        Expression::handled_fallible_function_call_with_typed_arguments(
-            call.name,
-            call.args,
-            call.result_type_ids,
-            FallibleExpressionHandling::Recover,
-            type_interner.environment_mut_for_derived_types(),
-            call.call_span,
-        )
-        .with_typed_error_producer(error_return_type_id, None),
-    )
+    let call = expression_builder.handled_fallible_function_call_with_typed_arguments(
+        call.name,
+        call.args,
+        call.result_type_ids,
+        error_return_type_id,
+        FallibleExpressionHandling::Recover,
+        call.call_span,
+    )?;
+    Ok(expression_builder.with_typed_error_producer(call, error_return_type_id, None)?)
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "user call argument resolution keeps the function name, raw arguments, parameters, span, string table, type interner, expression builder, const store, and path fork as separate borrows"
+)]
 pub(crate) fn resolve_user_function_call_arguments(
     function_name: &PathId,
-    raw_args: &[CallArgument],
-    parameters: &[Declaration],
+    raw_args: &[CallArgument<OwnedExpr>],
+    parameters: &[FunctionParameter],
     span: Option<SourceSpan>,
     string_table: &mut StringTable,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     path_fork: &PathInternerFork,
-) -> Result<Vec<CallArgument>, ExpressionParseError> {
+) -> Result<Vec<CallArgument<OwnedExpr>>, ExpressionParseError> {
     let callee_name = path_fork
         .component(*function_name)
         .map(|name| string_table.resolve(name).to_owned())
@@ -545,6 +586,8 @@ pub(crate) fn resolve_user_function_call_arguments(
         &expectations,
         span,
         CallArgumentResolutionContext {
+            expression_builder,
+            const_values,
             string_table,
             type_environment: type_check_context.type_environment,
             path_fork,
@@ -577,6 +620,8 @@ pub(crate) fn parse_external_function_call_expression(
         allow_boundary_catch,
         warnings,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     } = input;
@@ -597,6 +642,8 @@ pub(crate) fn parse_external_function_call_expression(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         &expectations,
         CallArgumentSyntax::UnsupportedCall {
@@ -622,6 +669,8 @@ pub(crate) fn parse_external_function_call_expression(
                 token_stream,
                 context,
                 type_interner,
+                expression_builder,
+                const_values,
                 warnings,
                 string_table,
                 path_fork,
@@ -647,6 +696,8 @@ pub(crate) fn parse_external_function_call_expression(
         &expectations,
         call_span,
         CallArgumentResolutionContext {
+            expression_builder,
+            const_values,
             string_table,
             type_environment: type_check_context.type_environment,
             path_fork,
@@ -683,6 +734,8 @@ pub(crate) fn parse_external_function_call_expression(
             allow_boundary_catch,
             warnings,
             type_interner,
+            expression_builder,
+            const_values,
             string_table,
             path_fork,
         },
@@ -706,10 +759,6 @@ struct ParsedExternalCallFacts {
 }
 
 /// Settles one external call's signature, result and guard facts from its registered definition.
-#[allow(
-    clippy::too_many_arguments,
-    reason = "external call parsing keeps the external identity and definition, call span, scope, and mutable interner/string state as separate borrows"
-)]
 fn settle_external_call_facts(
     external_function_id: ExternalFunctionId,
     external_function: &ExternalFunctionDef,
@@ -772,7 +821,7 @@ fn settle_external_call_facts(
 fn finish_external_function_call_expression(
     parsed_call: ParsedExternalFunctionCall,
     finish: CallFinishContext<'_, '_, '_>,
-) -> Result<Expression, ExpressionParseError> {
+) -> Result<OwnedExpr, ExpressionParseError> {
     let CallFinishContext {
         token_stream,
         context,
@@ -780,6 +829,8 @@ fn finish_external_function_call_expression(
         allow_boundary_catch,
         warnings,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork: _path_fork,
     } = finish;
@@ -813,26 +864,25 @@ fn finish_external_function_call_expression(
                 },
                 warnings,
                 type_interner,
+                expression_builder,
+                const_values,
                 string_table,
                 _path_fork,
             );
         }
 
-        return Ok(
-            Expression::handled_fallible_host_function_call_with_typed_arguments(
-                HandledFallibleHostFunctionCallInput {
-                    id: call.name,
-                    args: call.args,
-                    result_type_ids: call.result_type_ids,
-                    requires_external_float_validation: call.requires_external_float_validation,
-                    error_type_id: call.error_type_id,
-                    handling: FallibleExpressionHandling::Recover,
-                    span: call.call_span,
-                },
-                type_interner.environment_mut_for_derived_types(),
-            )
-            .with_typed_error_producer(error_type_id, None),
-        );
+        let handled = expression_builder.handled_fallible_host_function_call_with_typed_arguments(
+            HandledFallibleHostFunctionCallInput {
+                id: call.name,
+                args: call.args,
+                result_type_ids: call.result_type_ids,
+                requires_external_float_validation: call.requires_external_float_validation,
+                error_type_id,
+                handling: FallibleExpressionHandling::Recover,
+                span: call.call_span,
+            },
+        )?;
+        return Ok(expression_builder.with_typed_error_producer(handled, error_type_id, None)?);
     }
 
     if token_stream.current_tag() == TokenTag::BANG {
@@ -845,14 +895,13 @@ fn finish_external_function_call_expression(
         .into());
     }
 
-    Ok(Expression::host_function_call_with_typed_arguments(
+    Ok(expression_builder.host_function_call_with_typed_arguments(
         id,
         args,
         result_type_ids,
         requires_external_float_validation,
-        type_interner.environment_mut_for_derived_types(),
         span,
-    ))
+    )?)
 }
 
 /// Everything the retained external-call builder needs at one authored call site.
@@ -863,6 +912,8 @@ struct RetainedExternalCallInput<'a, 'b, 'tokens> {
     token_stream: &'a mut AstCursor<'tokens>,
     context: &'a ScopeContext,
     type_interner: &'a mut AstTypeInterner<'b>,
+    expression_builder: &'a mut AstExpressionBuilder,
+    const_values: &'a mut ConstValueStore,
     warnings: Option<&'a mut Vec<CompilerDiagnostic>>,
     string_table: &'a mut StringTable,
     path_fork: &'a mut PathInternerFork,
@@ -894,6 +945,8 @@ fn retain_numeric_external_call(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         warnings,
         string_table,
         path_fork,
@@ -922,6 +975,8 @@ fn retain_numeric_external_call(
             token_stream,
             context,
             type_interner,
+            expression_builder,
+            const_values,
             FallibleSuccessContract::Known(&facts.result_type_ids),
             facts.error_return_type_id.map(GenericErrorReturn::Concrete),
             false,
@@ -988,9 +1043,8 @@ fn retained_external_call_record(
 ///
 /// WHAT: completes every retained argument through the session's shared argument placement,
 ///       revalidates the whole list against the retained parameter expectations, and
-///       rebuilds the exact host call the completed path builds: the handled fallible carrier for
-///       an unhandled call, the propagating carrier for an authored operand `!`, or the plain
-///       host call for an infallible callee.
+///       rebuilds the exact host call the completed path builds, preserving its separate
+///       success/error channels and authored propagation handling.
 /// WHY: the host identity, expectations, result slots, float-integrity fact and authored operand `!`
 ///      were settled at the call site and must not be re-derived, re-parsed or dropped. The body root
 ///      only supplies concrete argument values, so completion needs neither the host definition nor
@@ -1001,7 +1055,7 @@ pub(crate) fn complete_deferred_external_call<
 >(
     deferred: DeferredExternalCall,
     session: &mut S,
-) -> Result<Expression, ExpressionParseError> {
+) -> Result<OwnedExpr, ExpressionParseError> {
     let DeferredExternalCall {
         function_id,
         callee_name,
@@ -1022,6 +1076,8 @@ pub(crate) fn complete_deferred_external_call<
 
     let DeferredExpressionServices {
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
         ..
@@ -1036,6 +1092,8 @@ pub(crate) fn complete_deferred_external_call<
         &expectations,
         call_span,
         CallArgumentResolutionContext {
+            expression_builder,
+            const_values,
             string_table,
             type_environment: type_check_context.type_environment,
             compatibility_cache: type_check_context.compatibility_cache,
@@ -1048,14 +1106,13 @@ pub(crate) fn complete_deferred_external_call<
         // The retention site already reported the authored operand `!` on an infallible callee,
         // and a `catch` was never the call site's to consume, so an infallible retained call
         // resumes as the plain host call.
-        return Ok(Expression::host_function_call_with_typed_arguments(
+        return Ok(expression_builder.host_function_call_with_typed_arguments(
             function_id,
             args,
             result_type_ids,
             requires_external_float_validation,
-            type_interner.environment_mut_for_derived_types(),
             call_span,
-        ));
+        )?);
     };
 
     let call = HandledFallibleHostCall {
@@ -1067,31 +1124,31 @@ pub(crate) fn complete_deferred_external_call<
         call_span,
     };
     match authored_handling {
-        // A resumed call keeps the ordinary unhandled typed-producer shape: whole-expression catch
-        // completion owns the delivery decision, exactly as the completed call path leaves it.
-        DeferredCallHandling::Unhandled => Ok(
-            Expression::handled_fallible_host_function_call_with_typed_arguments(
-                HandledFallibleHostFunctionCallInput {
-                    id: call.name,
-                    args: call.args,
-                    result_type_ids: call.result_type_ids,
-                    requires_external_float_validation: call.requires_external_float_validation,
-                    error_type_id: call.error_type_id,
-                    handling: FallibleExpressionHandling::Recover,
-                    span: call.call_span,
-                },
-                type_interner.environment_mut_for_derived_types(),
-            )
-            .with_typed_error_producer(error_type_id, None),
-        ),
+        // A resumed call uses the same handled Recover shape as the completed call path;
+        // whole-expression catch completion owns the delivery decision.
+        DeferredCallHandling::Unhandled => {
+            let handled = expression_builder
+                .handled_fallible_host_function_call_with_typed_arguments(
+                    HandledFallibleHostFunctionCallInput {
+                        id: call.name,
+                        args: call.args,
+                        result_type_ids: call.result_type_ids,
+                        requires_external_float_validation: call.requires_external_float_validation,
+                        error_type_id,
+                        handling: FallibleExpressionHandling::Recover,
+                        span: call.call_span,
+                    },
+                )?;
+            Ok(expression_builder.with_typed_error_producer(handled, error_type_id, None)?)
+        }
         // Replay the authored `!` through the same constructor the completed call path uses; the
         // retention site already validated the callee's error slot and the authored value
         // requirement, so no second decision exists here.
         DeferredCallHandling::Propagate { span } => Ok(call.into_expression(
             FallibleHandling::Propagate,
             span.or(call_span),
-            type_interner.environment_mut_for_derived_types(),
-        )),
+            expression_builder,
+        )?),
     }
 }
 

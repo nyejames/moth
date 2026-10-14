@@ -1,17 +1,19 @@
 //! Struct constructor expression parsing.
 //!
-//! WHAT: parses `StructName(...)` call-like syntax and lowers it to a typed
-//! `Expression::struct_instance` with definition-order fields, generic inference,
-//! default filling, and const-context coercion. A constructor whose arguments depend on pending
-//! numeric origins suspends as one retained call; a generic one also links its declared self shape
-//! then, and every retained call resumes through the same finisher at the body root.
+//! WHAT: parses `StructName(...)` call-like syntax into a completed expression-store struct row
+//! with definition-order fields, generic inference, default filling and const-context folding. A
+//! constructor whose arguments depend on pending numeric origins suspends as one retained call; a
+//! generic one also links its declared self shape then, and every retained call resumes through
+//! the same finisher at the body root.
 //! WHY: struct constructors share the same argument-resolution pipeline as function
 //! calls, so keeping the struct-specific wrapper close to the generic nominal
 //! inference and call-validation modules makes the shared machinery easy to follow.
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::const_values::binding::resolve_const_expression_content;
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
 use crate::compiler_frontend::ast::expressions::call_arguments::{
@@ -25,8 +27,11 @@ use crate::compiler_frontend::ast::expressions::constructor_views::{
     ConstructorField, ParsedConstructorExpression,
 };
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ConstructorField as CompletedConstructorField, ExpressionOperationView,
+    OwnedExpr,
+};
 use crate::compiler_frontend::ast::expressions::generic_nominal_inference::{
     GenericNominalConstructorContext, GenericNominalConstructorInput,
     GenericNominalConstructorSeed, GenericNominalTemplate, infer_generic_nominal_constructor,
@@ -46,7 +51,6 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic,
 };
-use crate::compiler_frontend::datatypes::generic_identity_bridge::GenericInstantiationKey;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::source::SourceSpan;
@@ -75,7 +79,7 @@ pub(crate) struct StructConstructorParseInput<'a> {
 /// - Validates arity, named-target lookup, duplicate detection, positional-before-named ordering,
 ///   default filling, missing required-field detection, and per-field type compatibility.
 /// - Fills trailing fields from struct defaults when arguments are omitted.
-/// - Produces a canonical `Expression::struct_instance` with definition-order fields.
+/// - Produces a canonical expression-store struct row with definition-order fields.
 /// - Retains the whole constructor as one pending call when a concrete field argument depends on
 ///   an unresolved numeric origin, so the body root resumes this same construction exactly once.
 ///
@@ -86,12 +90,18 @@ pub(crate) struct StructConstructorParseInput<'a> {
 /// - Argument compatibility cannot run before the arguments' numeric types are selected, and a
 ///   concrete field type is already resolved, so the constructor keeps its identity instead of
 ///   bubbling a fragment its statement position cannot finish.
-/// - Const-record coercion for top-level compile-time constants is applied after resolution.
+/// - Const-record folding for top-level compile-time constants is applied after resolution.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "struct constructor parsing keeps the token stream, input, scope, type interner, expression builder, const store, path fork, and string table as separate borrows"
+)]
 pub(super) fn parse_struct_constructor_expression(
     token_stream: &mut AstCursor,
     input: StructConstructorParseInput<'_>,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
 ) -> Result<ParsedConstructorExpression, ExpressionParseError> {
@@ -161,9 +171,11 @@ pub(super) fn parse_struct_constructor_expression(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         &field_expectations,
-        CallArgumentSyntax::Supported {
+        CallArgumentSyntax::Constructor {
             callee_name: Some(struct_name),
         },
         path_fork,
@@ -186,6 +198,7 @@ pub(super) fn parse_struct_constructor_expression(
                             seeded_bindings: seed.bindings(),
                             context,
                             type_interner,
+                            expression_builder,
                             string_table,
                             call_span: constructor_span,
                         })?;
@@ -242,6 +255,8 @@ pub(super) fn parse_struct_constructor_expression(
             },
             context,
             type_interner,
+            expression_builder,
+            const_values,
             path_fork,
             string_table,
         )?;
@@ -250,18 +265,18 @@ pub(super) fn parse_struct_constructor_expression(
 
     let struct_expr = finish_struct_instance(
         StructInstanceInput {
-            struct_path,
             struct_name_display: &struct_name_display,
             fields: &constructor_field_views,
             constructor_span,
             struct_value_mode,
             enforce_const_record: context.kind.allows_const_record_coercion(),
-            generic_instance_key: None,
             instance_type_id: type_id,
         },
         &raw_args,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         path_fork,
         string_table,
     )?;
@@ -271,13 +286,11 @@ pub(super) fn parse_struct_constructor_expression(
 
 /// Resolved constructor facts shared by the direct and retained completion paths.
 struct StructInstanceInput<'a> {
-    struct_path: &'a PathId,
     struct_name_display: &'a str,
     fields: &'a [ConstructorField],
     constructor_span: Option<SourceSpan>,
     struct_value_mode: &'a ValueMode,
     enforce_const_record: bool,
-    generic_instance_key: Option<GenericInstantiationKey>,
     instance_type_id: TypeId,
 }
 
@@ -288,22 +301,26 @@ struct StructInstanceInput<'a> {
 ///       call validator and definition-order field building.
 /// WHY: a retained constructor must resume through the exact ordinary construction rules, so the
 ///      two lanes share one finisher instead of a second validator that could drift.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "struct instance finishing keeps the input, arguments, scope, type interner, expression builder, const store, path fork, and string table as separate borrows"
+)]
 fn finish_struct_instance(
     input: StructInstanceInput<'_>,
-    arguments: &[CallArgument],
+    arguments: &[CallArgument<OwnedExpr>],
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
-) -> Result<Expression, ExpressionParseError> {
+) -> Result<OwnedExpr, ExpressionParseError> {
     let StructInstanceInput {
-        struct_path,
         struct_name_display,
         fields,
         constructor_span,
         struct_value_mode,
         enforce_const_record,
-        generic_instance_key,
         instance_type_id,
     } = input;
 
@@ -321,6 +338,8 @@ fn finish_struct_instance(
             string_table,
             path_fork,
             type_environment: type_check_context.type_environment,
+            expression_builder,
+            const_values,
             compatibility_cache: type_check_context.compatibility_cache,
         },
     )?;
@@ -330,32 +349,41 @@ fn finish_struct_instance(
     // ------------------------
     let mut struct_fields = Vec::with_capacity(fields.len());
 
-    for (field, arg) in fields.iter().zip(resolved_args) {
+    for (slot, (field, arg)) in fields.iter().zip(resolved_args).enumerate() {
         let mut value = arg.value;
 
         if enforce_const_record {
-            // Header-stage struct shells may carry placeholder references until AST environment
-            // construction resolves constants in graph order.
-            let is_placeholder_reference = if let ExpressionKind::Reference(path) = &value.kind {
-                path_fork.component(*path).is_some_and(|name| {
-                    context.get_reference(&name).is_some_and(|reference| {
-                        reference.ready_declaration().is_some_and(|declaration| {
-                            context.is_unresolved_constant_placeholder(declaration)
+            // Header placeholders remain references until graph-ordered constant resolution.
+            let is_placeholder_reference = {
+                let view = expression_builder.view_owned(value)?;
+                if let ExpressionOperationView::Reference(path) = view.operation() {
+                    path_fork.component(path).is_some_and(|name| {
+                        context.get_reference(&name).is_some_and(|reference| {
+                            reference.ready_declaration().is_some_and(|declaration| {
+                                context.is_unresolved_constant_placeholder(declaration)
+                            })
                         })
                     })
-                })
-            } else {
-                false
+                } else {
+                    false
+                }
             };
-
-            let value_is_compile_time_constant = if is_placeholder_reference {
-                true
-            } else {
-                value
-                    .const_value_kind_with_template_classifier(&mut |template| {
-                        classify_template_from_effective_tir(template, &context.template_ir_store)
+            let (field_span, value_is_compile_time_constant) = {
+                let view = expression_builder.view_owned(value)?;
+                let value_is_compile_time_constant = if is_placeholder_reference {
+                    true
+                } else {
+                    view.const_value_kind_with_template_classifier(const_values, &mut |template| {
+                        classify_template_from_effective_tir(
+                            template,
+                            &context.template_ir_store,
+                            expression_builder,
+                            const_values,
+                        )
                     })?
                     .is_compile_time_value()
+                };
+                (view.span(), value_is_compile_time_constant)
             };
 
             if !value_is_compile_time_constant {
@@ -365,21 +393,36 @@ fn finish_struct_instance(
                 return Err(CompilerDiagnostic::compile_time_evaluation_error(
                     CompileTimeEvaluationErrorReason::NonCompileTimeFieldInConstantContext,
                     Some(field_name),
-                    value.span,
+                    field_span,
                 )
                 .into());
             }
 
-            // Const records are data-only exports, so mutable ownership is removed to keep
-            // constant semantics explicit in later stages.
-            value.value_mode = ValueMode::ImmutableOwned;
+            // A placeholder stays a reference until graph-ordered constant resolution publishes it.
+            if !is_placeholder_reference {
+                let folded_type_id = expression_builder.view_owned(value)?.value_type_id()?;
+                let folded_value = resolve_const_expression_content(
+                    value.id(),
+                    expression_builder,
+                    const_values,
+                    type_interner.environment(),
+                    context,
+                    string_table,
+                )?;
+                value = expression_builder.constant(
+                    folded_value,
+                    folded_type_id,
+                    field_span,
+                    ValueMode::ImmutableOwned,
+                )?;
+            }
         }
 
-        struct_fields.push(Declaration {
-            id: field.name,
+        struct_fields.push(CompletedConstructorField {
+            name: field.name,
+            slot: u32::try_from(slot)
+                .map_err(|_| CompilerError::compiler_error("constructor field slot exceeds u32"))?,
             value,
-            binding_span: None,
-            config_qualifier: None,
         });
     }
 
@@ -390,15 +433,13 @@ fn finish_struct_instance(
         struct_value_mode.as_owned()
     };
 
-    Ok(Expression::struct_instance(
-        struct_path.to_owned(),
+    Ok(expression_builder.struct_instance(
         struct_fields,
+        instance_type_id,
         constructor_span,
         instance_ownership,
         enforce_const_record,
-        generic_instance_key,
-        instance_type_id,
-    ))
+    )?)
 }
 
 /// Generic struct constructor facts shared by the immediate and retained completion paths.
@@ -415,7 +456,7 @@ pub(crate) struct GenericStructCompletion<'a> {
     pub(crate) enforce_const_record: bool,
     pub(crate) constructor_span: Option<SourceSpan>,
     pub(crate) seed: GenericNominalConstructorSeed,
-    pub(crate) arguments: &'a [CallArgument],
+    pub(crate) arguments: &'a [CallArgument<OwnedExpr>],
 }
 
 /// Infer one generic struct instance from completed arguments and build its value.
@@ -428,9 +469,11 @@ pub(crate) fn complete_generic_struct_instance(
     completion: GenericStructCompletion<'_>,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
-) -> Result<Expression, ExpressionParseError> {
+) -> Result<OwnedExpr, ExpressionParseError> {
     let GenericStructCompletion {
         nominal_path,
         display_name,
@@ -453,6 +496,7 @@ pub(crate) fn complete_generic_struct_instance(
             constructor_fields: Some(template_fields),
             raw_args: Some(arguments),
             path_fork,
+            expression_builder,
         },
         seed,
         context,
@@ -477,18 +521,18 @@ pub(crate) fn complete_generic_struct_instance(
 
     finish_struct_instance(
         StructInstanceInput {
-            struct_path: nominal_path,
             struct_name_display: display_name,
             fields: &resolved_fields,
             constructor_span,
             struct_value_mode,
             enforce_const_record,
-            generic_instance_key: inference.instance_key,
             instance_type_id: inference.instance_type_id,
         },
         arguments,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         path_fork,
         string_table,
     )
@@ -529,9 +573,9 @@ pub(crate) fn complete_deferred_struct_call<
 >(
     deferred: DeferredStructCall,
     session: &mut S,
-) -> Result<Expression, ExpressionParseError> {
+) -> Result<OwnedExpr, ExpressionParseError> {
     let DeferredStructCall {
-        struct_path,
+        struct_path: _struct_path,
         struct_name,
         type_id,
         fields,
@@ -550,24 +594,26 @@ pub(crate) fn complete_deferred_struct_call<
     let DeferredExpressionServices {
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     } = session.session_services();
     let struct_name_display = string_table.resolve(struct_name).to_owned();
     finish_struct_instance(
         StructInstanceInput {
-            struct_path: &struct_path,
             struct_name_display: &struct_name_display,
             fields: &fields,
             constructor_span: call_span,
             struct_value_mode: &struct_value_mode,
             enforce_const_record,
-            generic_instance_key: None,
             instance_type_id: type_id,
         },
         &completed_arguments,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         path_fork,
         string_table,
     )

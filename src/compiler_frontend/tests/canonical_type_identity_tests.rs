@@ -15,8 +15,8 @@ use crate::compiler_frontend::builtins::casts::targets::{
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalCoreTraitIdentity, CanonicalTraitIdentity,
     CanonicalTypeIdentity, CanonicalTypeProjectionContext, ExportedGenericParameterIdentity,
-    ExternalOpaqueTypeIdentity, FallibleCarrierTypeIdentity, GenericDeclarationOrigin,
-    GenericParameterOriginResolver, NominalOriginResolver, project_type_id_to_canonical_identity,
+    ExternalOpaqueTypeIdentity, GenericDeclarationOrigin, GenericParameterOriginResolver,
+    NominalOriginResolver, project_type_id_to_canonical_identity,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::datatypes::builtin_type_ids;
@@ -590,7 +590,7 @@ fn projects_external_opaque_from_test_registry() {
 }
 
 // ---------------------------------------------------------------------------
-//  Option, collection, map and fallible carrier projection
+//  Option, collection and map projection
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -704,41 +704,6 @@ fn projects_ordered_map_preserving_key_value_order() {
     assert_ne!(
         identity, swapped_identity,
         "swapping map key and value must change identity"
-    );
-}
-
-#[test]
-fn projects_fallible_carrier_preserving_success_error_order() {
-    let mut env = TypeEnvironment::new();
-    let success_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
-    let error_id = env.builtins().string;
-    let carrier_id = env.intern_fallible_carrier(success_id, error_id);
-
-    let resolver = MapNominalOriginResolver::new();
-    let generic_resolver = MapGenericParameterOriginResolver::new();
-    let registry = ExternalPackageRegistry::new();
-    let context = projection_context(&resolver, &generic_resolver, &registry);
-
-    let identity = project_type_id_to_canonical_identity(carrier_id, &env, &context)
-        .expect("fallible carrier projection should succeed");
-
-    let expected = CanonicalTypeIdentity::FallibleCarrier(FallibleCarrierTypeIdentity::new(
-        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::FixedScalar(FixedScalar::I32)),
-        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
-    ));
-    assert_eq!(
-        identity, expected,
-        "I32!String must preserve success/error order"
-    );
-
-    // Swapping success and error must produce a distinct identity.
-    let swapped_carrier_id = env.intern_fallible_carrier(error_id, success_id);
-    let swapped_identity =
-        project_type_id_to_canonical_identity(swapped_carrier_id, &env, &context)
-            .expect("swapped carrier projection should succeed");
-    assert_ne!(
-        identity, swapped_identity,
-        "swapping success and error channels must change identity"
     );
 }
 
@@ -927,28 +892,6 @@ fn function_type_returns_compiler_error() {
     assert!(
         error.msg.contains("function"),
         "error should name the function type state: {}",
-        error.msg
-    );
-}
-
-#[test]
-fn tuple_type_returns_compiler_error() {
-    let mut env = TypeEnvironment::new();
-    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
-    let tuple_id = env.intern_tuple(vec![int_id, int_id]);
-
-    let resolver = MapNominalOriginResolver::new();
-    let generic_resolver = MapGenericParameterOriginResolver::new();
-    let registry = ExternalPackageRegistry::new();
-    let context = projection_context(&resolver, &generic_resolver, &registry);
-
-    let error = project_type_id_to_canonical_identity(tuple_id, &env, &context)
-        .expect_err("tuple type must return an error");
-
-    assert_eq!(error.error_type, ErrorType::Compiler);
-    assert!(
-        error.msg.contains("tuple"),
-        "error should name the tuple state: {}",
         error.msg
     );
 }

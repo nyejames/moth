@@ -7,7 +7,9 @@
 //! subject shares the same capture and value syntax, and its arm is finished once the
 //! body root selects the subject's inner type.
 
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::numeric_construction::{
     DeferredArmPattern, DeferredExpressionCompletion, PendingOptionPattern,
 };
@@ -56,6 +58,8 @@ pub fn parse_option_pattern(
     option_inner_type_id: TypeId,
     string_table: &mut StringTable,
     type_environment: &TypeEnvironment,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
 ) -> OptionPatternResult<MatchPattern> {
     if token_stream.current_tag() == TokenTag::NONE_LITERAL {
         let span = Some(token_stream.current_span());
@@ -75,6 +79,8 @@ pub fn parse_option_pattern(
         MatchSubject::Known(option_inner_type_id),
         string_table,
         type_environment,
+        expression_builder,
+        const_values,
     )?;
 
     match pattern {
@@ -230,16 +236,21 @@ pub(in crate::compiler_frontend::ast::statements) fn finish_pending_option_patte
     subject_type_id: TypeId,
     completion: &mut impl DeferredExpressionCompletion<'env>,
 ) -> OptionPatternResult<MatchPattern> {
-    let inner_type_id = completion
-        .session_services()
-        .type_interner
-        .environment()
-        .option_inner_type(subject_type_id)
-        .ok_or_else(|| {
-            CompilerError::compiler_error(
+    let inner_type_id = {
+        if let Some(inner) = completion
+            .session_services()
+            .type_interner
+            .environment()
+            .option_inner_type(subject_type_id)
+        {
+            inner
+        } else {
+            return Err(CompilerError::compiler_error(
                 "pending option arm finished against a non-option subject",
             )
-        })?;
+            .into());
+        }
+    };
 
     match pending {
         PendingOptionPattern::PresentCapture(capture) => Ok(MatchPattern::OptionPresentCapture {
@@ -262,7 +273,13 @@ pub(in crate::compiler_frontend::ast::statements) fn finish_pending_option_patte
                 ExpectedType::NumericLiteral(inner_type_id),
                 &retained.value.value_mode,
             )?;
-            let pattern = finish_retained_pattern(retained.relational, value);
+            let pattern = {
+                let services = completion.session_services();
+                finish_retained_pattern(
+                    retained.relational,
+                    services.expression_builder.view_owned(value)?,
+                )?
+            };
             let environment = completion.session_services().type_interner.environment();
             wrap_option_present_value(pattern, inner_type_id, environment)
         }

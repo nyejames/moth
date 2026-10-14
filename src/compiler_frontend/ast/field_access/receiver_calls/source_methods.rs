@@ -14,6 +14,7 @@ use super::ReceiverAccessMode;
 use super::shared::{TraitSurfaceReceiverMethod, receiver_result_type_ids_for_call};
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::const_values::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::call_argument::{
     CallAccessMode, CallArgument, ParameterSlot,
@@ -27,8 +28,10 @@ use crate::compiler_frontend::ast::expressions::call_validation::{
     expectations_from_receiver_method_signature, resolve_call_arguments,
 };
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, OwnedExpr,
+};
 use crate::compiler_frontend::ast::expressions::expression_types::{
     FallibleExpressionHandling, FallibleHandling,
 };
@@ -61,10 +64,11 @@ use crate::compiler_frontend::ast::statements::fallible_handling::{
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidReceiverCallReason};
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, InvalidReceiverCallReason, ValueReceiverContext,
+};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -118,7 +122,8 @@ fn receiver_hidden_call_argument(
     receiver_node: &AstNode,
     receiver_mutable: bool,
     member_span: Option<SourceSpan>,
-) -> Result<CallArgument, ExpressionParseError> {
+    expression_builder: &AstExpressionBuilder,
+) -> Result<CallArgument<OwnedExpr>, ExpressionParseError> {
     let receiver_access = if receiver_mutable {
         CallAccessMode::Mutable
     } else {
@@ -126,7 +131,7 @@ fn receiver_hidden_call_argument(
     };
 
     Ok(CallArgument::positional(
-        expression_from_postfix_node(receiver_node)?,
+        expression_builder.own(expression_from_postfix_node(receiver_node)?),
         receiver_access,
         member_span,
     )
@@ -145,6 +150,8 @@ pub(super) struct SourceReceiverMethodCallInput<'a, 'interner, 'tokens> {
     pub(super) scope_context: &'a ScopeContext,
     pub(super) source_method: SourceReceiverMethodTarget<'a>,
     pub(super) type_interner: &'a mut AstTypeInterner<'interner>,
+    pub(super) expression_builder: &'a mut AstExpressionBuilder,
+    pub(super) const_values: &'a mut ConstValueStore,
     pub(super) string_table: &'a mut StringTable,
     pub(super) path_fork: &'a mut PathInternerFork,
 }
@@ -169,11 +176,13 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
         scope_context,
         source_method,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     } = input;
 
-    if receiver_node.expression_is_const_record_value()? {
+    if receiver_node.expression_is_const_record_value(&*expression_builder)? {
         return Err(CompilerDiagnostic::invalid_receiver_call(
             InvalidReceiverCallReason::ConstRecordNoRuntimeCalls,
             None,
@@ -203,6 +212,7 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
     let method_name = string_table.resolve(member_name).to_owned();
     validate_receiver_access(
         receiver_node,
+        &*expression_builder,
         path_fork,
         receiver_access_mode,
         member_span,
@@ -233,6 +243,8 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
             token_stream,
             scope_context,
             type_interner,
+            expression_builder,
+            const_values,
             string_table,
             &initial_expectations,
             argument_syntax,
@@ -243,6 +255,8 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
             token_stream,
             scope_context,
             type_interner,
+            expression_builder,
+            const_values,
             string_table,
             &initial_expectations,
             argument_syntax,
@@ -256,6 +270,8 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
                 token_stream,
                 scope_context,
                 type_interner,
+                expression_builder,
+                const_values,
                 string_table,
                 path_fork,
                 receiver_node,
@@ -275,6 +291,7 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
                 receiver_node,
                 method_entry.receiver_mutable,
                 member_span,
+                expression_builder,
             )?;
             match scope_context.lookup_generic_function_template(&method_entry.function_path) {
                 Some(template) => {
@@ -285,9 +302,10 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
                             authored_arguments: &raw_args,
                             call_span: member_span,
                             scope_context,
-                            type_interner,
-                            string_table,
-                            path_fork,
+                            type_interner: &mut *type_interner,
+                            expression_builder: &*expression_builder,
+                            string_table: &mut *string_table,
+                            path_fork: &mut *path_fork,
                         },
                     )?;
                     let receiver_argument = instantiation.receiver_argument.ok_or_else(|| {
@@ -312,8 +330,12 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
         }
 
         SourceReceiverMethodTarget::TraitSurface(method) => {
-            let receiver_argument =
-                receiver_hidden_call_argument(receiver_node, method.receiver_mutable, member_span)?;
+            let receiver_argument = receiver_hidden_call_argument(
+                receiver_node,
+                method.receiver_mutable,
+                member_span,
+                expression_builder,
+            )?;
             match scope_context.lookup_generic_function_template(&method.method_path) {
                 Some(template) => {
                     let instantiation = instantiate_generic_receiver_method(
@@ -323,9 +345,10 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
                             authored_arguments: &raw_args,
                             call_span: member_span,
                             scope_context,
-                            type_interner,
-                            string_table,
-                            path_fork,
+                            type_interner: &mut *type_interner,
+                            expression_builder: &*expression_builder,
+                            string_table: &mut *string_table,
+                            path_fork: &mut *path_fork,
                         },
                     )?;
                     let receiver_argument = instantiation.receiver_argument.ok_or_else(|| {
@@ -360,26 +383,20 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
         member_span,
         CallArgumentResolutionContext {
             string_table,
+            expression_builder,
+            const_values,
             type_environment: type_check_context.type_environment,
             compatibility_cache: type_check_context.compatibility_cache,
             path_fork,
         },
     )?;
 
-    if !scope_context.generic_template_validation
-        && let Some(request) = generic_request
-    {
-        scope_context.record_generic_function_instantiation_request(request);
-    }
-
-    increment_ast_counter(AstCounter::PostfixReceiverNodesCopied);
-
     let method_call_expression = if let Some(error_return_type_id) =
         call_signature.error_return_type_id()
     {
         // Typed methods use the established handled-call shape, with their receiver in slot zero.
         // A raw MethodCall inside a carrier would bypass HIR's explicit error-channel call lowering.
-        let receiver_span = receiver_expression.span;
+        let receiver_span = expression_builder.view_owned(receiver_expression)?.span();
         let receiver_access = if source_method.receiver_mutable() {
             CallAccessMode::Mutable
         } else {
@@ -418,6 +435,8 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
                 allow_boundary_catch: false,
                 warnings: None,
                 type_interner,
+                expression_builder,
+                const_values,
                 string_table,
                 path_fork,
             },
@@ -428,35 +447,40 @@ pub(super) fn parse_source_receiver_method_target_call_typed(
             token_stream,
             type_interner,
         )?;
-        let method_call_expression = Expression::method_call_with_typed_arguments(
+        let method_call_expression = expression_builder.method_call_with_typed_arguments(
             receiver_expression,
             method_path,
             args,
             result_type_ids,
-            type_interner.environment_mut_for_derived_types(),
             member_span,
-        );
+        )?;
         let declared_requirement = matches!(
             &source_method,
             SourceReceiverMethodTarget::TraitSurface(method)
                 if matches!(method.origin, super::shared::TraitSurfaceMethodOrigin::DeclaredRequirement)
         );
-        if !declared_requirement
-            && scope_context.source_call_has_private_failure_lane(source_method.method_path())
-        {
-            let failure_path = if scope_context.generic_template_validation {
-                source_method.method_path()
-            } else {
-                method_path
-            };
-            method_call_expression.with_private_call_failure_candidate(failure_path)
+        let has_private_lane = !declared_requirement
+            && scope_context.source_call_has_private_failure_lane(source_method.method_path());
+        let failure_path = if scope_context.generic_template_validation {
+            source_method.method_path()
+        } else {
+            method_path
+        };
+        if has_private_lane {
+            expression_builder
+                .with_private_call_failure_candidate(method_call_expression, failure_path)?
         } else {
             method_call_expression
         }
     };
 
+    if !scope_context.generic_template_validation
+        && let Some(request) = generic_request
+    {
+        scope_context.record_generic_function_instantiation_request(request);
+    }
     Ok(ParsedReceiverMethodCall::Value(AstNode {
-        kind: NodeKind::ExpressionStatement(method_call_expression),
+        kind: NodeKind::ExpressionStatement(method_call_expression.id()),
         scope: scope_context.scope.to_owned(),
         span: member_span,
     }))
@@ -473,6 +497,8 @@ struct RetainedReceiverCallInput<'a, 'interner, 'tokens> {
     token_stream: &'a mut AstCursor<'tokens>,
     scope_context: &'a ScopeContext,
     type_interner: &'a mut AstTypeInterner<'interner>,
+    expression_builder: &'a mut AstExpressionBuilder,
+    const_values: &'a mut ConstValueStore,
     string_table: &'a mut StringTable,
     path_fork: &'a mut PathInternerFork,
     receiver_node: &'a AstNode,
@@ -490,14 +516,10 @@ struct RetainedReceiverCallInput<'a, 'interner, 'tokens> {
 ///       preceding retained postfix step of the same chain.
 /// WHY: a chained call's receiver value does not exist where the call is retained, so the step
 ///      completion supplies it; the record never fabricates a receiver expression.
-// `Ready` keeps the materialised receiver inline. The enum only lives in `DeferredReceiverCall`,
-// which `DeferredCall::Receiver` and `RetainedPostfixStep::Method` already box, so boxing `Ready`
-// as well would add a second heap allocation to every retained receiver call.
-#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub(crate) enum DeferredCallReceiver {
     /// The receiver value was materialised once at the authored call site.
-    Ready(Expression),
+    Ready(ExprId),
     /// The receiver is the completed value of the preceding retained postfix step.
     Chained,
 }
@@ -712,6 +734,8 @@ fn retain_numeric_receiver_call(
         token_stream,
         scope_context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
         receiver_node,
@@ -751,6 +775,8 @@ fn retain_numeric_receiver_call(
                     token_stream,
                     scope_context,
                     type_interner,
+                    expression_builder,
+                    const_values,
                     FallibleSuccessContract::Known(success_result_type_ids.as_slice()),
                     signature
                         .error_return_type_id()
@@ -785,9 +811,10 @@ fn retain_numeric_receiver_call(
         receiver_node,
         source_method.receiver_mutable(),
         member_span,
+        expression_builder,
     )?
-    .value;
-    increment_ast_counter(AstCounter::PostfixReceiverNodesCopied);
+    .value
+    .id();
 
     // A fallible method owns its error channel: only the plain call carries the private lane.
     let private_failure_candidate = (private_failure_lane
@@ -795,6 +822,10 @@ fn retain_numeric_receiver_call(
     .then(|| source_method.method_path());
     let method_path = source_method.method_path();
     let receiver_mutable = source_method.receiver_mutable();
+    let signature = match source_method {
+        SourceReceiverMethodTarget::Declared(method) => method.signature.clone(),
+        SourceReceiverMethodTarget::TraitSurface(method) => method.signature.clone(),
+    };
 
     Ok(retained_receiver_call_operand(
         retained_receiver_call_record(
@@ -821,8 +852,8 @@ fn retain_numeric_receiver_call(
 fn retained_receiver_call_record(
     method_path: PathId,
     method_name: StringId,
-    signature: &FunctionSignature,
-    receiver_expression: Expression,
+    signature: FunctionSignature,
+    receiver_expression: ExprId,
     receiver_mutable: bool,
     authored_marker_span: Option<SourceSpan>,
     arguments: Vec<DeferredCallArgument>,
@@ -833,7 +864,7 @@ fn retained_receiver_call_record(
     DeferredCall::Receiver(Box::new(DeferredReceiverCall {
         method_path,
         method_name,
-        callee: DeferredReceiverCallee::Concrete(signature.clone()),
+        callee: DeferredReceiverCallee::Concrete(signature),
         receiver: DeferredCallReceiver::Ready(receiver_expression),
         receiver_mutable,
         authored_marker_span,
@@ -869,7 +900,7 @@ pub(crate) fn complete_deferred_receiver_call<
 >(
     deferred: DeferredReceiverCall,
     session: &mut S,
-) -> Result<Expression, ExpressionParseError> {
+) -> Result<OwnedExpr, ExpressionParseError> {
     // A generic method's ticket was reserved at the authored site, whether declared-owner or
     // concrete. Any failure before publication must release that slot so the ordered ledger never
     // keeps a pending request.
@@ -898,7 +929,7 @@ pub(crate) fn complete_deferred_receiver_call<
 fn complete_reserved_receiver_call<'env, S: DeferredExpressionCompletion<'env> + ?Sized>(
     deferred: DeferredReceiverCall,
     session: &mut S,
-) -> Result<Expression, ExpressionParseError> {
+) -> Result<OwnedExpr, ExpressionParseError> {
     let DeferredReceiverCall {
         method_path,
         method_name,
@@ -939,9 +970,12 @@ fn complete_reserved_receiver_call<'env, S: DeferredExpressionCompletion<'env> +
     let DeferredExpressionServices {
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     } = session.session_services();
+    let receiver_expression = expression_builder.own(receiver_expression);
 
     let (method_path, signature, publication, private_failure_candidate) = match callee {
         DeferredReceiverCallee::Generic(generic) => {
@@ -951,16 +985,20 @@ fn complete_reserved_receiver_call<'env, S: DeferredExpressionCompletion<'env> +
                 error_return,
                 ticket,
             } = generic;
+            let receiver_type_id = expression_builder
+                .view_owned(receiver_expression)?
+                .require_single(ValueReceiverContext::ReceiverBase)?;
             let instantiation =
                 instantiate_generic_receiver_method(GenericReceiverMethodInstantiationInput {
                     template: &template,
-                    receiver: GenericReceiverMethodReceiver::KnownType(receiver_expression.type_id),
+                    receiver: GenericReceiverMethodReceiver::KnownType(receiver_type_id),
                     authored_arguments: &completed_arguments,
                     call_span,
                     scope_context: context,
-                    type_interner,
-                    string_table,
-                    path_fork,
+                    type_interner: &mut *type_interner,
+                    expression_builder: &*expression_builder,
+                    string_table: &mut *string_table,
+                    path_fork: &mut *path_fork,
                 })?;
             let completed_error = instantiation.signature.error_return_type_id();
             verify_completed_error_return(error_return, completed_error, context, type_interner)?;
@@ -1000,16 +1038,16 @@ fn complete_reserved_receiver_call<'env, S: DeferredExpressionCompletion<'env> +
     };
 
     let callee_name = string_table.resolve(method_name).to_owned();
-    let expectations =
-        expectations_from_receiver_method_signature(&signature.parameters[1..], path_fork);
     let type_check_context = type_interner.type_check_context();
     let args = resolve_call_arguments(
         CallDiagnosticContext::receiver_method(&callee_name),
         &completed_arguments,
-        &expectations,
+        &expectations_from_receiver_method_signature(&signature.parameters[1..], path_fork),
         call_span,
         CallArgumentResolutionContext {
             string_table,
+            expression_builder,
+            const_values,
             type_environment: type_check_context.type_environment,
             compatibility_cache: type_check_context.compatibility_cache,
             path_fork,
@@ -1026,7 +1064,7 @@ fn complete_reserved_receiver_call<'env, S: DeferredExpressionCompletion<'env> +
         call_span,
         private_failure_candidate,
         authored_handling,
-        type_interner,
+        expression_builder,
     )?;
     // The reserved slot publishes only after every fallible completion step has succeeded.
     if let Some(ReservedGenericRequest { ticket, request }) = publication {
@@ -1046,38 +1084,39 @@ fn complete_reserved_receiver_call<'env, S: DeferredExpressionCompletion<'env> +
     reason = "each resolved call fact is a separate argument so the constructor stays flat"
 )]
 fn receiver_call_expression(
-    receiver_expression: Expression,
+    receiver_expression: OwnedExpr,
     method_path: PathId,
     signature: &FunctionSignature,
-    args: Vec<CallArgument>,
+    args: Vec<CallArgument<OwnedExpr>>,
     receiver_mutable: bool,
     authored_marker_span: Option<SourceSpan>,
     call_span: Option<SourceSpan>,
     private_failure_candidate: Option<PathId>,
     authored_handling: DeferredCallHandling,
-    type_interner: &mut AstTypeInterner<'_>,
-) -> Result<Expression, ExpressionParseError> {
+    expression_builder: &mut AstExpressionBuilder,
+) -> Result<OwnedExpr, ExpressionParseError> {
     let result_type_ids = signature.success_return_type_ids();
     let Some(error_return_type_id) = signature.error_return_type_id() else {
         // Every receiver call here was resolved at its site without a `!`, so the success types are
         // the declared ones and the plain method call is the completed shape.
-        let expression = Expression::method_call_with_typed_arguments(
+        let expression = expression_builder.method_call_with_typed_arguments(
             receiver_expression,
             method_path,
             args,
             result_type_ids,
-            type_interner.environment_mut_for_derived_types(),
             call_span,
-        );
+        )?;
         return Ok(match private_failure_candidate {
-            Some(candidate) => expression.with_private_call_failure_candidate(candidate),
+            Some(candidate) => {
+                expression_builder.with_private_call_failure_candidate(expression, candidate)?
+            }
             None => expression,
         });
     };
 
     // The handled carrier keeps the receiver in implicit slot zero and shifts every authored
     // argument by one declaration-order slot, exactly as the completed typed-method path does.
-    let receiver_span = receiver_expression.span;
+    let receiver_span = expression_builder.view_owned(receiver_expression)?.span();
     let receiver_access = if receiver_mutable {
         CallAccessMode::Mutable
     } else {
@@ -1109,23 +1148,29 @@ fn receiver_call_expression(
     match authored_handling {
         // A resumed call keeps the ordinary unhandled-typed-producer shape: whole-expression catch
         // completion owns the delivery decision, exactly as the completed call path leaves it.
-        DeferredCallHandling::Unhandled => Ok(
-            Expression::handled_fallible_function_call_with_typed_arguments(
-                call.name,
-                call.args,
-                call.result_type_ids,
-                FallibleExpressionHandling::Recover,
-                type_interner.environment_mut_for_derived_types(),
-                call.call_span,
-            )
-            .with_typed_error_producer(error_return_type_id, None),
-        ),
+        DeferredCallHandling::Unhandled => {
+            let expression = expression_builder
+                .handled_fallible_function_call_with_typed_arguments(
+                    call.name,
+                    call.args,
+                    call.result_type_ids,
+                    error_return_type_id,
+                    FallibleExpressionHandling::Recover,
+                    call.call_span,
+                )?;
+            Ok(expression_builder.with_typed_error_producer(
+                expression,
+                error_return_type_id,
+                None,
+            )?)
+        }
         // Replay the authored `!` through the same constructor the completed call path uses; the
         // retention site already validated the callee's error slot against the authored boundary.
-        DeferredCallHandling::Propagate { span } => Ok(call.into_expression(
+        DeferredCallHandling::Propagate { span } => call.into_expression(
             FallibleHandling::Propagate,
             span.or(call_span),
-            type_interner.environment_mut_for_derived_types(),
-        )),
+            error_return_type_id,
+            expression_builder,
+        ),
     }
 }

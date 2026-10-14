@@ -239,6 +239,11 @@ fn rule_descriptor(kind: RuleDiagnosticKind) -> DiagnosticDescriptor {
         RuleDiagnosticKind::UnknownName => {
             DiagnosticDescriptor::new("MOTH-RULE-0001", "Unknown name", DiagnosticSeverity::Error)
         }
+        RuleDiagnosticKind::InvalidValueReceiver => DiagnosticDescriptor::new(
+            "MOTH-RULE-0087",
+            "Invalid value receiver",
+            DiagnosticSeverity::Error,
+        ),
         RuleDiagnosticKind::DuplicateDeclaration => DiagnosticDescriptor::new(
             "MOTH-RULE-0002",
             "Duplicate declaration",

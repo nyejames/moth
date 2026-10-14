@@ -16,8 +16,10 @@ use super::environment::{
 use super::scope_context::{ReceiverMethodCatalog, ReceiverMethodEntry};
 use crate::compiler_frontend::ast::ResolvedTraitSourceFact;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
-use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ReturnSlot};
+use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
+use crate::compiler_frontend::ast::statements::functions::{
+    FunctionParameter, FunctionSignature, ReturnSlot,
+};
 use crate::compiler_frontend::ast::type_resolution::{
     ResolvedFunctionSignature, ResolvedTypeAlias,
 };
@@ -122,16 +124,13 @@ fn constant_kind() -> HeaderKind {
 }
 
 fn resolved_free_signature(int_type_id: TypeId) -> ResolvedFunctionSignature {
-    let parameter = Declaration {
+    let parameter = FunctionParameter {
         id: PathId::ROOT,
-        value: Expression::no_value_with_type_id(
-            None,
-            DataType::FixedScalar(FixedScalar::I32),
-            int_type_id,
-            ValueMode::default(),
-        ),
+        type_id: int_type_id,
+        diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+        value_mode: ValueMode::default(),
+        default: None,
         binding_span: None,
-        config_qualifier: None,
     };
     let mut return_slot = ReturnSlot::success(DataType::FixedScalar(FixedScalar::I32));
     return_slot.type_id = Some(int_type_id);
@@ -145,16 +144,13 @@ fn resolved_free_signature(int_type_id: TypeId) -> ResolvedFunctionSignature {
 }
 
 fn receiver_signature(int_type_id: TypeId) -> FunctionSignature {
-    let parameter = Declaration {
+    let parameter = FunctionParameter {
         id: PathId::ROOT,
-        value: Expression::no_value_with_type_id(
-            None,
-            DataType::FixedScalar(FixedScalar::I32),
-            int_type_id,
-            ValueMode::default(),
-        ),
+        type_id: int_type_id,
+        diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+        value_mode: ValueMode::default(),
+        default: None,
         binding_span: None,
-        config_qualifier: None,
     };
     FunctionSignature {
         parameters: vec![parameter],
@@ -173,12 +169,10 @@ fn resolved_alias(target_type_id: TypeId) -> ResolvedTypeAlias {
 fn constant_declaration(type_id: TypeId, decl_path: PathId) -> Declaration {
     Declaration {
         id: decl_path,
-        value: Expression::no_value_with_type_id(
-            None,
-            DataType::FixedScalar(FixedScalar::I32),
-            type_id,
-            ValueMode::default(),
-        ),
+        type_id,
+        diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+        value_mode: ValueMode::default(),
+        value: DeclarationValue::PendingConstant,
         binding_span: None,
         config_qualifier: None,
     }
@@ -202,7 +196,10 @@ fn receiver_entry(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the root-table fixture keeps owned headers, signatures, nominal ids, aliases, declarations, struct fields and receiver catalog separate from shared type/trait environments and string/path tables"
+)]
 fn build_table(
     headers: Vec<Header>,
     signatures: FxHashMap<PathId, ResolvedFunctionSignature>,
@@ -354,7 +351,7 @@ fn retains_every_public_root_category_in_sorted_header_order() {
         panic!("expected Function root");
     };
     assert_eq!(signature.parameters.len(), 1);
-    assert_eq!(signature.parameters[0].value.type_id, int_type_id);
+    assert_eq!(signature.parameters[0].type_id, int_type_id);
     assert_eq!(signature.returns.len(), 1);
     assert_eq!(signature.returns[0].type_id, Some(int_type_id));
 

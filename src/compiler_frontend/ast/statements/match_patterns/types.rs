@@ -5,9 +5,13 @@
 //! and prevents circular imports between parser submodules.
 
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::const_values::store::ConstValueId;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    ExprId, ExpressionOperationView, ExpressionView,
+};
 use crate::compiler_frontend::ast::generic_functions::numeric_origins::DeclaredChoiceSubject;
 use crate::compiler_frontend::ast::numeric_known_shape::KnownShapeId;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -18,7 +22,7 @@ use crate::compiler_frontend::symbols::string_interning::StringId;
 #[derive(Debug, Clone)]
 pub struct MatchArm {
     pub pattern: MatchPattern,
-    pub guard: Option<Expression>,
+    pub guard: Option<ExprId>,
     pub body: Vec<AstNode>,
 }
 
@@ -76,9 +80,37 @@ pub struct ChoicePayloadCapture {
     pub binding_span: Option<SourceSpan>,
 }
 
+/// A pattern value keeps constant content separate from occurrence metadata.
+/// Runtime values remain executable expressions when completion does not fold them.
+#[derive(Debug, Clone, Copy)]
+pub enum PatternValueKind {
+    Constant(ConstValueId),
+    Runtime(ExprId),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct PatternValue {
+    pub kind: PatternValueKind,
+    pub type_id: TypeId,
+    pub span: Option<SourceSpan>,
+}
+
+impl PatternValue {
+    pub(crate) fn from_expression(value: ExpressionView<'_>) -> Result<Self, CompilerError> {
+        Ok(Self {
+            kind: match value.operation() {
+                ExpressionOperationView::Constant(id) => PatternValueKind::Constant(id),
+                _ => PatternValueKind::Runtime(value.id()),
+            },
+            type_id: value.value_type_id()?,
+            span: value.span(),
+        })
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum MatchPattern {
-    Literal(Expression),
+    Literal(PatternValue),
 
     /// Presence check for compiler-owned option values.
     ///
@@ -96,7 +128,7 @@ pub enum MatchPattern {
     /// WHY: option matches use explicit option-aware pattern forms rather than
     /// exposing public `Option` constructors in source code.
     OptionValue {
-        value: Expression,
+        value: PatternValue,
         span: Option<SourceSpan>,
     },
 
@@ -116,7 +148,7 @@ pub enum MatchPattern {
 
     Relational {
         op: RelationalPatternOp,
-        value: Expression,
+        value: PatternValue,
         span: Option<SourceSpan>,
     },
 
@@ -138,6 +170,30 @@ impl MatchPattern {
             | MatchPattern::OptionPresentCapture { span, .. }
             | MatchPattern::Relational { span, .. }
             | MatchPattern::ChoiceVariant { span, .. } => *span,
+        }
+    }
+
+    pub(crate) fn visit_expression_ids(&self, visit: &mut dyn FnMut(ExprId)) {
+        let value = match self {
+            Self::Literal(value)
+            | Self::OptionValue { value, .. }
+            | Self::Relational { value, .. } => value,
+            _ => return,
+        };
+        if let PatternValueKind::Runtime(id) = value.kind {
+            visit(id);
+        }
+    }
+
+    pub(crate) fn visit_expression_ids_mut(&mut self, visit: &mut dyn FnMut(&mut ExprId)) {
+        let value = match self {
+            Self::Literal(value)
+            | Self::OptionValue { value, .. }
+            | Self::Relational { value, .. } => value,
+            _ => return,
+        };
+        if let PatternValueKind::Runtime(id) = &mut value.kind {
+            visit(id);
         }
     }
 }

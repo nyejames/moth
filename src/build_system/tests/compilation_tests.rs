@@ -91,7 +91,10 @@ fn resource_association(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "test publication mirrors the production boundary with mutable module/generated/materialisation/resource owners, module identity and expected origin, artifact, generated delta and resource associations kept separate"
+)]
 fn publish_module_and_generated(
     modules: &mut ModuleArtifactStore,
     generated: &mut BoundaryGeneratedFunctionStore,
@@ -229,7 +232,8 @@ fn generated_sidecar(
         id: FunctionId(0),
         entry: BlockId(0),
         params: Vec::new(),
-        return_type: crate::compiler_frontend::datatypes::ids::TypeId(0),
+        returns: Box::new([]),
+        error_return: None,
     });
     module
         .executable

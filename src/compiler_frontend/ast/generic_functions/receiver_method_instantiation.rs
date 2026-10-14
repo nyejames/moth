@@ -12,7 +12,9 @@ use crate::compiler_frontend::ast::expressions::call_argument::{
     CallAccessMode, CallArgument, ParameterSlot,
 };
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, OwnedExpr,
+};
 use crate::compiler_frontend::ast::generic_functions::{
     GenericCallExpectedContext, GenericFunctionInferenceInput, GenericFunctionInstantiationRequest,
     GenericFunctionTemplate, infer_generic_function_call, recursive_generic_function_instantiation,
@@ -21,6 +23,7 @@ use crate::compiler_frontend::ast::generic_functions::{
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::ValueReceiverContext;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -36,9 +39,8 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 // `instantiate_generic_receiver_method` and returned as `receiver_argument`. It is never stored in
 // a collection or held across a body root, so it stays inline. Boxing it would add a heap
 // allocation to every ready generic receiver call.
-#[allow(clippy::large_enum_variant)]
 pub(crate) enum GenericReceiverMethodReceiver {
-    Argument(CallArgument),
+    Argument(CallArgument<OwnedExpr>),
     KnownType(TypeId),
 }
 
@@ -54,10 +56,11 @@ pub(crate) struct GenericReceiverMethodInstantiationInput<'a, 'interner> {
     /// Authored arguments retaining their parser-assigned slots; inference accounts for hidden
     /// receiver slot zero without cloning or shifting these arguments.
     /// Empty for hidden call shapes such as cast evidence, where the receiver is the only fact.
-    pub(crate) authored_arguments: &'a [CallArgument],
+    pub(crate) authored_arguments: &'a [CallArgument<OwnedExpr>],
     pub(crate) call_span: Option<SourceSpan>,
     pub(crate) scope_context: &'a ScopeContext,
     pub(crate) type_interner: &'a mut AstTypeInterner<'interner>,
+    pub(crate) expression_builder: &'a AstExpressionBuilder,
     pub(crate) string_table: &'a mut StringTable,
     pub(crate) path_fork: &'a mut PathInternerFork,
 }
@@ -68,7 +71,7 @@ pub(crate) struct GenericReceiverMethodInstantiation {
     pub(crate) signature: FunctionSignature,
     pub(crate) request: GenericFunctionInstantiationRequest,
     /// Present only when inference received the actual hidden receiver argument.
-    pub(crate) receiver_argument: Option<CallArgument>,
+    pub(crate) receiver_argument: Option<CallArgument<OwnedExpr>>,
 }
 
 /// Infers and validates one generic receiver-method instance.
@@ -88,13 +91,16 @@ pub(crate) fn instantiate_generic_receiver_method(
         call_span,
         scope_context,
         type_interner,
+        expression_builder,
         string_table,
         path_fork,
     } = input;
 
     let (receiver_argument, receiver_type_id, receiver_span) = match receiver {
         GenericReceiverMethodReceiver::Argument(receiver_argument) => {
-            let receiver_type_id = receiver_argument.value.type_id;
+            let receiver_type_id = expression_builder
+                .view_owned(receiver_argument.value)?
+                .require_single(ValueReceiverContext::ReceiverBase)?;
             let receiver_span = receiver_argument.span;
             (Some(receiver_argument), receiver_type_id, receiver_span)
         }
@@ -112,6 +118,7 @@ pub(crate) fn instantiate_generic_receiver_method(
             call_span,
             scope_context,
             type_interner,
+            expression_builder,
             string_table,
             path_fork,
         })?;
@@ -127,17 +134,18 @@ pub(crate) fn instantiate_generic_receiver_method(
 /// Inference facts for one receiver-method instance.
 ///
 /// WHAT: borrows authored arguments with parser-owned parameter slots and carries the hidden
-///       receiver type/span separately from any receiver Expression.
+///       receiver type/span separately from its completed expression.
 /// WHY: ready and retained call sites need identical receiver-first generic inference without
-///      allocating shifted argument vectors or cloning expression trees.
+///      allocating shifted argument vectors or cloning argument payloads.
 struct ReceiverMethodInferenceInput<'a, 'interner> {
     template: &'a GenericFunctionTemplate,
-    authored_arguments: &'a [CallArgument],
+    authored_arguments: &'a [CallArgument<OwnedExpr>],
     receiver_type_id: TypeId,
     receiver_span: Option<SourceSpan>,
     call_span: Option<SourceSpan>,
     scope_context: &'a ScopeContext,
     type_interner: &'a mut AstTypeInterner<'interner>,
+    expression_builder: &'a AstExpressionBuilder,
     string_table: &'a mut StringTable,
     path_fork: &'a mut PathInternerFork,
 }
@@ -167,6 +175,7 @@ fn infer_receiver_method_instance(
         call_span,
         scope_context,
         type_interner,
+        expression_builder,
         string_table,
         path_fork,
     } = input;
@@ -174,6 +183,7 @@ fn infer_receiver_method_instance(
     let inference = infer_generic_function_call(GenericFunctionInferenceInput {
         template,
         raw_arguments: authored_arguments,
+        expression_builder,
         known_receiver_type_id: Some(receiver_type_id),
         known_receiver_span: receiver_span,
         expected_context: GenericCallExpectedContext::None,
@@ -216,20 +226,24 @@ fn infer_receiver_method_instance(
 ///
 /// WHAT: treats the cast operand as the evidence method's receiver, infers the concrete instance
 ///       through the shared receiver-method owner, records its materialisation request, and
-///       returns the generated instance path with the operand expression back for the cast node.
+///       returns the generated instance path and the unchanged operand ID for the cast node.
 /// WHY: a cast's evidence method is a hidden receiver call whose operand must keep its single
-///      authored evaluation and whose template origin must never reach HIR. The operand becomes
-///      one stack-owned inference argument that is borrowed for inference and moves straight back
-///      into the cast node, so no argument list or receiver AST copy is allocated.
+///      authored evaluation and whose template origin must never reach HIR. Inference borrows the
+///      operand through its issuing builder and retains no expression view or detached graph.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "cast evidence keeps the template, source, span, scope and mutable state as separate inputs"
+)]
 pub(crate) fn instantiate_generic_cast_evidence_method(
     template: &GenericFunctionTemplate,
-    source: Expression,
+    source: OwnedExpr,
     call_span: Option<SourceSpan>,
     scope_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &AstExpressionBuilder,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<(PathId, Expression), ExpressionParseError> {
+) -> Result<(PathId, OwnedExpr), ExpressionParseError> {
     let receiver_argument = CallArgument::positional(source, CallAccessMode::Shared, call_span)
         .with_parameter_slot(ParameterSlot::new(0));
     let instantiation =
@@ -240,6 +254,7 @@ pub(crate) fn instantiate_generic_cast_evidence_method(
             call_span,
             scope_context,
             type_interner,
+            expression_builder,
             string_table,
             path_fork,
         })?;

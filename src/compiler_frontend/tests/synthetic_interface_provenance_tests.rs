@@ -7,22 +7,22 @@
 //!      `compiler_frontend::synthetic_interface_provenance`, so they own a focused test beside
 //!      the module rather than an end-to-end case.
 
-use crate::compiler_frontend::ast::ast_nodes::Declaration;
-use crate::compiler_frontend::ast::const_eval::ConstantFoldOutcome;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression::{
-    ChoiceConstructInput, CollectionExpressionType, Expression, MapLiteralEntry,
-    MapLiteralExpressionType,
+    ChoiceConstructInput, CollectionExpressionType, MapLiteralExpressionType,
 };
-use crate::compiler_frontend::ast::expressions::expression_kind::ResolvedCastExpression;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, CastFacts, ConstructorField, MapEntry,
+};
 use crate::compiler_frontend::ast::expressions::expression_types::{
     CastHandling, ResolvedCastEvidence,
 };
 use crate::compiler_frontend::builtins::casts::targets::{
-    BuiltinCastFallibility, BuiltinCastPolicyId, BuiltinCastTarget,
+    BuiltinCastFallibility, BuiltinCastPolicyId,
 };
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
@@ -126,40 +126,49 @@ fn identity_is_self_contained_and_deterministic() {
 #[test]
 fn provenance_preserved_through_cast() {
     let member_identity = member(SyntheticInterfaceClass::ProjectContext, "render", "html");
-    let source = Expression::fixed_scalar(i32_value(42), None, ValueMode::ImmutableOwned)
-        .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
-            member_identity.clone(),
-        ));
-    let type_environment = TypeEnvironment::new();
-    let cast = ResolvedCastExpression {
-        source: Box::new(source),
-        source_type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        target_type_id: builtin_type_ids::fixed_scalar(FixedScalar::F64),
-        target: BuiltinCastTarget::Fixed(FixedScalar::F64),
-        requires_optional_wrap_after_cast: false,
-        fallibility: BuiltinCastFallibility::Infallible,
-        evidence: ResolvedCastEvidence::Builtin {
-            policy: BuiltinCastPolicyId::NumericConversion {
-                source: crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Fixed(
-                    FixedScalar::I32,
-                ),
-                target: crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Fixed(
-                    FixedScalar::F64,
-                ),
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let source = builder
+        .fixed_scalar(
+            &mut constants,
+            i32_value(42),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture scalar fits builder");
+    let source = builder
+        .with_synthetic_interface_provenance(
+            source,
+            SyntheticInterfaceProvenance::single(member_identity.clone()),
+        )
+        .expect("fixture provenance fits builder");
+    let cast_expression = builder
+        .cast(
+            source,
+            CastFacts {
+                source_type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                target_type_id: builtin_type_ids::fixed_scalar(FixedScalar::F64),
+                requires_optional_wrap_after_cast: false,
+                fallibility: BuiltinCastFallibility::Infallible,
+                evidence: ResolvedCastEvidence::Builtin {
+                    policy: BuiltinCastPolicyId::NumericConversion {
+                        source: NumericScalar::Fixed(FixedScalar::I32),
+                        target: NumericScalar::Fixed(FixedScalar::F64),
+                    },
+                },
+                handling: CastHandling::Implicit,
+                span: None,
             },
-        },
-        handling: CastHandling::Implicit,
-        span: None,
-    };
-
-    let cast_expression = Expression::cast(
-        cast,
-        builtin_type_ids::fixed_scalar(FixedScalar::F64),
-        &type_environment,
-    );
-
+            builtin_type_ids::fixed_scalar(FixedScalar::F64),
+        )
+        .expect("fixture cast fits builder");
     assert_eq!(
-        cast_expression.synthetic_interface_provenance.members(),
+        builder
+            .view_owned(cast_expression)
+            .expect("fixture cast belongs to builder")
+            .occurrence_facts()
+            .map(|facts| facts.provenance.members().to_vec())
+            .unwrap_or_default(),
         &[member_identity]
     );
 }
@@ -172,109 +181,190 @@ fn aggregate_value_constructors_union_child_provenance() {
     let builder_provenance = SyntheticInterfaceProvenance::single(builder_member.clone());
     let span = None;
 
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let mut type_environment = TypeEnvironment::new();
-    let collection = Expression::collection_with_type_id(
-        vec![
-            Expression::fixed_scalar(i32_value(1), span, ValueMode::ImmutableOwned)
-                .with_synthetic_interface_provenance(project_provenance.clone()),
-            Expression::fixed_scalar(i32_value(2), span, ValueMode::ImmutableOwned)
-                .with_synthetic_interface_provenance(project_provenance.clone()),
-        ],
-        CollectionExpressionType {
-            element_type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-            element_diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
-            fixed_capacity: None,
-            collection_type_id: None,
-        },
-        &mut type_environment,
-        span,
-        ValueMode::ImmutableOwned,
-    );
+    let first = builder
+        .fixed_scalar(
+            &mut constants,
+            i32_value(1),
+            span,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture scalar fits builder");
+    let first = builder
+        .with_synthetic_interface_provenance(first, project_provenance.clone())
+        .expect("fixture provenance fits builder");
+    let second = builder
+        .fixed_scalar(
+            &mut constants,
+            i32_value(2),
+            span,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture scalar fits builder");
+    let second = builder
+        .with_synthetic_interface_provenance(second, project_provenance.clone())
+        .expect("fixture provenance fits builder");
+    let collection = builder
+        .collection_with_type_id(
+            vec![first, second],
+            CollectionExpressionType {
+                element_type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                fixed_capacity: None,
+                collection_type_id: None,
+            },
+            &mut type_environment,
+            span,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture collection fits builder");
     assert_eq!(
-        collection.synthetic_interface_provenance.members(),
+        builder
+            .view_owned(collection)
+            .expect("fixture collection belongs to builder")
+            .occurrence_facts()
+            .map(|facts| facts.provenance.members().to_vec())
+            .unwrap_or_default(),
         std::slice::from_ref(&project_member)
     );
 
-    let map = Expression::map_literal_with_type_id(
-        vec![MapLiteralEntry {
-            key: Expression::fixed_scalar(i32_value(1), span, ValueMode::ImmutableOwned)
-                .with_synthetic_interface_provenance(project_provenance.clone()),
-            value: Expression::fixed_scalar(i32_value(2), span, ValueMode::ImmutableOwned)
-                .with_synthetic_interface_provenance(builder_provenance.clone()),
-        }],
-        MapLiteralExpressionType {
-            key_type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-            value_type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-            key_diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
-            value_diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
-            map_type_id: None,
-        },
-        &mut type_environment,
-        span,
-        ValueMode::ImmutableOwned,
-    );
+    let key = builder
+        .fixed_scalar(
+            &mut constants,
+            i32_value(1),
+            span,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture scalar fits builder");
+    let key = builder
+        .with_synthetic_interface_provenance(key, project_provenance.clone())
+        .expect("fixture provenance fits builder");
+    let value = builder
+        .fixed_scalar(
+            &mut constants,
+            i32_value(2),
+            span,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture scalar fits builder");
+    let value = builder
+        .with_synthetic_interface_provenance(value, builder_provenance.clone())
+        .expect("fixture provenance fits builder");
+    let map = builder
+        .map_literal_with_type_id(
+            vec![MapEntry { key, value }],
+            MapLiteralExpressionType {
+                key_type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                value_type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                map_type_id: None,
+            },
+            &mut type_environment,
+            span,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture map fits builder");
     assert_eq!(
-        map.synthetic_interface_provenance.members(),
+        builder
+            .view_owned(map)
+            .expect("fixture map belongs to builder")
+            .occurrence_facts()
+            .map(|facts| facts.provenance.members().to_vec())
+            .unwrap_or_default(),
         &[project_member.clone(), builder_member.clone()]
     );
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let field_a = Declaration {
-        id: path_fork
-            .try_intern_portable_path("first", &mut string_table)
-            .expect("test path fits"),
-        value: Expression::fixed_scalar(i32_value(3), span, ValueMode::ImmutableOwned)
-            .with_synthetic_interface_provenance(project_provenance.clone()),
-        binding_span: None,
-        config_qualifier: None,
-    };
-    let field_b = Declaration {
-        id: path_fork
-            .try_intern_portable_path("second", &mut string_table)
-            .expect("test path fits"),
-        value: Expression::fixed_scalar(i32_value(4), span, ValueMode::ImmutableOwned)
-            .with_synthetic_interface_provenance(builder_provenance.clone()),
-        binding_span: None,
-        config_qualifier: None,
-    };
-    let struct_expression = Expression::struct_instance(
-        path_fork
-            .try_intern_portable_path("Record", &mut string_table)
-            .expect("test path fits"),
-        vec![field_a, field_b],
-        span,
-        ValueMode::ImmutableOwned,
-        false,
-        None,
-        builtin_type_ids::fixed_scalar(FixedScalar::I32),
-    );
+    let field_a = builder
+        .fixed_scalar(
+            &mut constants,
+            i32_value(3),
+            span,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture scalar fits builder");
+    let field_a = builder
+        .with_synthetic_interface_provenance(field_a, project_provenance.clone())
+        .expect("fixture provenance fits builder");
+    let field_b = builder
+        .fixed_scalar(
+            &mut constants,
+            i32_value(4),
+            span,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture scalar fits builder");
+    let field_b = builder
+        .with_synthetic_interface_provenance(field_b, builder_provenance.clone())
+        .expect("fixture provenance fits builder");
+    let struct_expression = builder
+        .struct_instance(
+            vec![
+                ConstructorField {
+                    name: path_fork
+                        .try_intern_portable_path("first", &mut string_table)
+                        .expect("test path fits"),
+                    slot: 0,
+                    value: field_a,
+                },
+                ConstructorField {
+                    name: path_fork
+                        .try_intern_portable_path("second", &mut string_table)
+                        .expect("test path fits"),
+                    slot: 1,
+                    value: field_b,
+                },
+            ],
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            span,
+            ValueMode::ImmutableOwned,
+            false,
+        )
+        .expect("fixture struct fits builder");
     assert_eq!(
-        struct_expression.synthetic_interface_provenance.members(),
+        builder
+            .view_owned(struct_expression)
+            .expect("fixture struct belongs to builder")
+            .occurrence_facts()
+            .map(|facts| facts.provenance.members().to_vec())
+            .unwrap_or_default(),
         &[project_member.clone(), builder_member.clone()]
     );
 
-    let choice_expression = Expression::choice_construct(ChoiceConstructInput {
-        nominal_path: path_fork
-            .try_intern_portable_path("Choice", &mut string_table)
-            .expect("test path fits"),
-        tag: 0,
-        fields: vec![Declaration {
-            id: path_fork
-                .try_intern_portable_path("payload", &mut string_table)
-                .expect("test path fits"),
-            value: Expression::fixed_scalar(i32_value(5), span, ValueMode::ImmutableOwned)
-                .with_synthetic_interface_provenance(project_provenance),
-            binding_span: None,
-            config_qualifier: None,
-        }],
-        diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
-        type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        span: None,
-        value_mode: ValueMode::ImmutableOwned,
-    });
+    let payload = builder
+        .fixed_scalar(
+            &mut constants,
+            i32_value(5),
+            span,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture scalar fits builder");
+    let payload = builder
+        .with_synthetic_interface_provenance(payload, project_provenance)
+        .expect("fixture provenance fits builder");
+    let choice_expression = builder
+        .choice_construct(ChoiceConstructInput {
+            tag: 0,
+            fields: vec![ConstructorField {
+                name: path_fork
+                    .try_intern_portable_path("payload", &mut string_table)
+                    .expect("test path fits"),
+                slot: 0,
+                value: payload,
+            }],
+            type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            span: None,
+            value_mode: ValueMode::ImmutableOwned,
+        })
+        .expect("fixture choice fits builder");
     assert_eq!(
-        choice_expression.synthetic_interface_provenance.members(),
+        builder
+            .view_owned(choice_expression)
+            .expect("fixture choice belongs to builder")
+            .occurrence_facts()
+            .map(|facts| facts.provenance.members().to_vec())
+            .unwrap_or_default(),
         &[project_member,]
     );
 }
@@ -283,51 +373,74 @@ fn aggregate_value_constructors_union_child_provenance() {
 fn provenance_unioned_through_constant_folding() {
     // Binary constant folding must produce a result whose provenance is the sorted, duplicate-free
     // union of both operands' provenance.
-    use crate::compiler_frontend::ast::const_eval::constant_fold;
+    use crate::compiler_frontend::ast::const_eval::{ConstantFoldOutcome, constant_fold};
     use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
-    use crate::compiler_frontend::ast::expressions::expression_rpn::{
-        ExpressionRpn, ExpressionRpnItem,
-    };
     use crate::compiler_frontend::symbols::string_interning::StringTable;
+    use crate::compiler_frontend::tests::type_id_fixture_support::{
+        runtime_expr, runtime_operand_item, runtime_operator_item,
+    };
 
     let lhs_member = member(SyntheticInterfaceClass::ProjectContext, "render", "html");
     let rhs_member = member(SyntheticInterfaceClass::Builder, "assets", "bundle");
 
-    let lhs = Expression::fixed_scalar(i32_value(3), None, ValueMode::ImmutableOwned)
-        .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(lhs_member));
-    let rhs = Expression::fixed_scalar(i32_value(4), None, ValueMode::ImmutableOwned)
-        .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(rhs_member));
-
-    let rpn = ExpressionRpn {
-        items: vec![
-            ExpressionRpnItem::Operand(lhs),
-            ExpressionRpnItem::Operand(rhs),
-            ExpressionRpnItem::Operator {
-                operator: Operator::Add,
-                span: None,
-            },
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let type_environment = TypeEnvironment::new();
+    let lhs = builder
+        .fixed_scalar(
+            &mut constants,
+            i32_value(3),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture scalar fits builder");
+    let lhs = builder
+        .with_synthetic_interface_provenance(lhs, SyntheticInterfaceProvenance::single(lhs_member))
+        .expect("fixture provenance fits builder");
+    let rhs = builder
+        .fixed_scalar(
+            &mut constants,
+            i32_value(4),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture scalar fits builder");
+    let rhs = builder
+        .with_synthetic_interface_provenance(rhs, SyntheticInterfaceProvenance::single(rhs_member))
+        .expect("fixture provenance fits builder");
+    let root = runtime_expr(
+        &mut builder,
+        &mut constants,
+        vec![
+            runtime_operand_item(lhs.id()),
+            runtime_operand_item(rhs.id()),
+            runtime_operator_item(Operator::Add, None),
         ],
-    };
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        None,
+        ValueMode::ImmutableOwned,
+        &type_environment,
+    );
 
     let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    let folded =
-        match constant_fold(rpn.items, &mut string_table, None).expect("folding should succeed") {
-            ConstantFoldOutcome::Folded(stack) => stack,
-            ConstantFoldOutcome::NotConstant(_) => panic!("expected a fully folded stack"),
-            ConstantFoldOutcome::TextUnavailable { .. } => {
-                panic!("expected folded text to remain available")
-            }
-        };
-
-    assert_eq!(folded.len(), 1);
-    let ExpressionRpnItem::Operand(result) = &folded[0] else {
-        panic!("expected a single folded operand");
+    let folded = match constant_fold(root, &mut builder, &mut constants, &mut string_table, None)
+        .expect("folding should succeed")
+    {
+        ConstantFoldOutcome::Folded(root) => root,
+        ConstantFoldOutcome::NotConstant(_) => panic!("expected a fully folded stack"),
+        ConstantFoldOutcome::TextUnavailable { .. } => {
+            panic!("expected folded text to remain available")
+        }
     };
 
     assert_eq!(
-        result.synthetic_interface_provenance.members(),
-        &[
+        builder
+            .view(folded)
+            .expect("folded root belongs to builder")
+            .occurrence_facts()
+            .map(|facts| facts.provenance.members().to_vec())
+            .unwrap_or_default(),
+        [
             member(SyntheticInterfaceClass::ProjectContext, "render", "html"),
             member(SyntheticInterfaceClass::Builder, "assets", "bundle"),
         ]
@@ -336,15 +449,21 @@ fn provenance_unioned_through_constant_folding() {
 
 #[test]
 fn empty_expression_has_empty_provenance() {
-    let expr = Expression::new(
-        crate::compiler_frontend::ast::expressions::expression_kind::ExpressionKind::FixedScalar(
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let expr = builder
+        .fixed_scalar(
+            &mut constants,
             i32_value(1),
-        ),
-        None,
-        builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        DataType::FixedScalar(FixedScalar::I32),
-        ValueMode::ImmutableOwned,
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture scalar fits builder");
+    assert!(
+        builder
+            .view_owned(expr)
+            .expect("fixture scalar belongs to builder")
+            .occurrence_facts()
+            .is_none_or(|facts| facts.provenance.is_empty())
     );
-
-    assert!(expr.synthetic_interface_provenance.is_empty());
 }

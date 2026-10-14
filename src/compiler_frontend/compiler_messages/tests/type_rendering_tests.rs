@@ -289,10 +289,6 @@ fn diagnostic_render_context_renders_constructed_type_names() {
         TypeConstructor::Builtin(BuiltinTypeConstructor::Option),
         Box::new([builtins.string]),
     );
-    let result = type_environment.intern_constructed(
-        TypeConstructor::Builtin(BuiltinTypeConstructor::FallibleCarrier),
-        Box::new([i32_id, builtins.string]),
-    );
 
     let path_table = path_fork.snapshot_table();
     let context = DiagnosticRenderContext::new(&string_table)
@@ -301,7 +297,6 @@ fn diagnostic_render_context_renders_constructed_type_names() {
 
     assert_eq!(diagnostic_type_name(collection, context), "{I32}");
     assert_eq!(diagnostic_type_name(option, context), "String?");
-    assert_eq!(diagnostic_type_name(result, context), "I32, String!");
 }
 
 #[test]

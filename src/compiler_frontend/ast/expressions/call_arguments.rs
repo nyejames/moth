@@ -17,6 +17,7 @@
 use crate::ast_log;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::call_argument::{
     CallAccessMode, CallArgument, ParameterSlot,
@@ -25,7 +26,9 @@ use crate::compiler_frontend::ast::expressions::call_validation::{
     ExpectedParameterType, ParameterExpectation,
 };
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, ExpressionOperationView, ExpressionView, OwnedExpr,
+};
 use crate::compiler_frontend::ast::expressions::parse_expression::{
     create_expression_with_trailing_newline_policy, fragment_typed_error_summary,
     register_direct_receiver_witness,
@@ -44,7 +47,7 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticToken,
     InvalidBuiltinCallReason, InvalidCallShapeReason, InvalidExpressionReason,
-    InvalidGenericInstantiationReason,
+    InvalidGenericInstantiationReason, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -132,6 +135,12 @@ pub(crate) enum CallArgumentSyntax {
     Supported {
         callee_name: Option<StringId>,
     },
+    Constructor {
+        callee_name: Option<StringId>,
+    },
+    Assertion {
+        callee_name: Option<StringId>,
+    },
     UnsupportedCall {
         callee_name: Option<StringId>,
     },
@@ -165,6 +174,8 @@ impl CallArgumentDiagnosticContext {
     pub(crate) fn from_syntax(syntax: CallArgumentSyntax) -> Self {
         let const_operation = match syntax {
             CallArgumentSyntax::Supported { callee_name }
+            | CallArgumentSyntax::Constructor { callee_name }
+            | CallArgumentSyntax::Assertion { callee_name }
             | CallArgumentSyntax::UnsupportedCall { callee_name } => callee_name,
             CallArgumentSyntax::UnsupportedBuiltinMember { member_name, .. } => member_name,
             CallArgumentSyntax::AnonymousConstRecord => None,
@@ -213,7 +224,9 @@ pub(crate) struct CallArgumentReceivingContext {
 impl CallArgumentReceivingContext {
     pub(crate) fn existing_call(syntax: CallArgumentSyntax) -> Self {
         let naming_policy = match syntax {
-            CallArgumentSyntax::Supported { .. } => CallArgumentNamingPolicy::PositionalThenNamed,
+            CallArgumentSyntax::Supported { .. }
+            | CallArgumentSyntax::Constructor { .. }
+            | CallArgumentSyntax::Assertion { .. } => CallArgumentNamingPolicy::PositionalThenNamed,
             CallArgumentSyntax::UnsupportedCall { .. }
             | CallArgumentSyntax::UnsupportedBuiltinMember { .. } => {
                 CallArgumentNamingPolicy::PositionalOnly
@@ -259,11 +272,25 @@ impl CallArgumentReceivingContext {
 /// WHY: ready lists keep their ordinary `CallArgument` vector; only a real deferral promotes the
 ///      list to retained-argument storage.
 #[derive(Debug, Clone)]
-pub(crate) enum ParsedCallArguments {
+pub(crate) enum ParsedCallArguments<E = ExprId> {
     /// Every argument completed; the list is ready for ordinary validation.
-    Ready(Vec<CallArgument>),
+    Ready(Vec<CallArgument<E>>),
     /// At least one argument was retained; completed arguments keep their authored routing.
     Retained(Vec<DeferredCallArgument>),
+}
+
+impl<E> ParsedCallArguments<E> {
+    pub(crate) fn map_values<T>(self, mut map: impl FnMut(E) -> T) -> ParsedCallArguments<T> {
+        match self {
+            Self::Ready(arguments) => ParsedCallArguments::Ready(
+                arguments
+                    .into_iter()
+                    .map(|argument| argument.map_value(&mut map))
+                    .collect(),
+            ),
+            Self::Retained(arguments) => ParsedCallArguments::Retained(arguments),
+        }
+    }
 }
 
 /// Parses one call-shaped list through the shared receiving-context policy.
@@ -278,16 +305,20 @@ pub(crate) fn parse_call_arguments_with_receiving_context(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     receiving_context: CallArgumentReceivingContext,
     expectations: Option<&[ParameterExpectation]>,
     syntax_context: CallArgumentSyntaxContext,
     path_fork: &mut PathInternerFork,
-) -> Result<Vec<CallArgument>, ExpressionParseError> {
+) -> Result<Vec<CallArgument<OwnedExpr>>, ExpressionParseError> {
     match parse_call_arguments_inner(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         syntax_context,
         receiving_context,
@@ -313,19 +344,27 @@ pub(crate) fn parse_call_arguments_with_receiving_context(
 /// WHY: argument compatibility cannot run before numeric selection. Retained arguments preserve
 ///      authored fragments, slot routing, access modes, spans and receiving constraints so the
 ///      owner resumes the exact authored list without reparsing.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "argument parsing keeps the token stream, scope, type interner, expression builder, const store, string table, expectations, syntax, and path fork as separate borrows"
+)]
 pub(crate) fn parse_call_arguments_typed_with_numeric_retention(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     expectations: &[ParameterExpectation],
     argument_syntax: CallArgumentSyntax,
     path_fork: &mut PathInternerFork,
-) -> Result<ParsedCallArguments, ExpressionParseError> {
+) -> Result<ParsedCallArguments<OwnedExpr>, ExpressionParseError> {
     parse_call_arguments_inner(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         CallArgumentSyntaxContext::Ordinary,
         CallArgumentReceivingContext::existing_call(argument_syntax)
@@ -345,13 +384,17 @@ pub(crate) fn parse_call_arguments_without_expectations(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<ParsedCallArguments, ExpressionParseError> {
+) -> Result<ParsedCallArguments<OwnedExpr>, ExpressionParseError> {
     parse_call_arguments_inner(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         CallArgumentSyntaxContext::Ordinary,
         CallArgumentReceivingContext::existing_call(CallArgumentSyntax::Supported {
@@ -370,19 +413,27 @@ pub(crate) fn parse_call_arguments_without_expectations(
 ///      parameters and generic parameter slots can reject `cast` with `TargetIsGenericParameter`.
 /// WHY: raw call parsing used to resolve arguments before validation. Threading expectations keeps
 ///      the cast-target channel narrow and local to the argument parser.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "argument parsing keeps the token stream, scope, type interner, expression builder, const store, string table, expectations, syntax, and path fork as separate borrows"
+)]
 pub(crate) fn parse_call_arguments_typed_with_expectations(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     expectations: &[ParameterExpectation],
     argument_syntax: CallArgumentSyntax,
     path_fork: &mut PathInternerFork,
-) -> Result<Vec<CallArgument>, ExpressionParseError> {
+) -> Result<Vec<CallArgument<OwnedExpr>>, ExpressionParseError> {
     parse_call_arguments_with_receiving_context(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         CallArgumentReceivingContext::existing_call(argument_syntax),
         Some(expectations),
@@ -391,19 +442,27 @@ pub(crate) fn parse_call_arguments_typed_with_expectations(
     )
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "generic argument parsing keeps the token stream, scope, type interner, expression builder, const store, string table, generic callee name, expectations, and path fork as separate borrows"
+)]
 pub(crate) fn parse_generic_call_arguments_typed(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     generic_function_name: Option<StringId>,
     expectations: &[ParameterExpectation],
     path_fork: &mut PathInternerFork,
-) -> Result<ParsedCallArguments, ExpressionParseError> {
+) -> Result<ParsedCallArguments<OwnedExpr>, ExpressionParseError> {
     parse_call_arguments_inner(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         CallArgumentSyntaxContext::GenericFunction {
             function_name: generic_function_name,
@@ -513,12 +572,14 @@ fn parse_call_arguments_inner(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     syntax_context: CallArgumentSyntaxContext,
     receiving_context: CallArgumentReceivingContext,
     expectations: Option<&[ParameterExpectation]>,
     path_fork: &mut PathInternerFork,
-) -> Result<ParsedCallArguments, ExpressionParseError> {
+) -> Result<ParsedCallArguments<OwnedExpr>, ExpressionParseError> {
     ast_log!("Creating function call arguments");
     let mut receiving_context = receiving_context;
     let opening_span = current_span(token_stream);
@@ -800,6 +861,8 @@ fn parse_call_arguments_inner(
                 token_stream,
                 scope_context: context,
                 type_interner,
+                expression_builder,
+                const_values,
                 expected_type: &mut inferred,
                 cast_target_context: &mut cast_target_context,
                 value_mode: &ValueMode::ImmutableOwned,
@@ -827,12 +890,18 @@ fn parse_call_arguments_inner(
         let producer_start = context.numeric_state().forward_producer_checkpoint();
         let argument = match create_expression_with_trailing_newline_policy(input) {
             Ok(value) => {
-                validate_argument_value_policy(&value, context, path_fork, receiving_context)?;
-
+                validate_argument_value_policy(
+                    const_values,
+                    expression_builder,
+                    expression_builder.view_owned(value)?,
+                    context,
+                    path_fork,
+                    receiving_context,
+                )?;
                 // Preserve the value-expression span, named-parameter span, and authored `~`
                 // marker span independently so diagnostics can point at whichever source the
                 // author must change.
-                let value_span = value.span;
+                let value_span = expression_builder.view_owned(value)?.span();
                 let argument = if let Some((name, target_span)) = named_target {
                     CallArgument::named(value, name, access_mode, value_span, target_span)
                 } else {
@@ -851,7 +920,9 @@ fn parse_call_arguments_inner(
                         &mut state,
                         type_interner.environment(),
                         shape,
-                        argument.value.type_id,
+                        expression_builder
+                            .view_owned(argument.value)?
+                            .value_type_id()?,
                         argument.span,
                     );
                 }
@@ -887,6 +958,7 @@ fn parse_call_arguments_inner(
                     register_direct_receiver_witness(
                         context,
                         type_interner.environment(),
+                        expression_builder,
                         &deferral.items,
                         receiver_type_id,
                         true,
@@ -899,6 +971,7 @@ fn parse_call_arguments_inner(
                         context,
                         type_interner.environment_mut_for_derived_types(),
                         &deferral.items,
+                        expression_builder,
                     )?;
                     let mut state = context.numeric_state_mut();
                     set_forward_destinations(
@@ -921,6 +994,7 @@ fn parse_call_arguments_inner(
                             context,
                             type_interner.environment_mut_for_derived_types(),
                             &deferral.items,
+                            expression_builder,
                         )?;
                         let mut state = context.numeric_state_mut();
                         // The forward flag is read before the union, which ORs a forward shape's
@@ -939,6 +1013,7 @@ fn parse_call_arguments_inner(
                             context,
                             type_interner.environment_mut_for_derived_types(),
                             &deferral.items,
+                            expression_builder,
                         )?;
                         let class = context.numeric_state_mut().forward_numeric_class(fragment);
                         (class.map(|class| (class, fragment)), Some(fragment))
@@ -962,7 +1037,8 @@ fn parse_call_arguments_inner(
                 };
                 match forward {
                     Some((class, fragment)) => {
-                        let typed_errors = fragment_typed_error_summary(&deferral.items);
+                        let typed_errors =
+                            fragment_typed_error_summary(expression_builder, &deferral.items)?;
                         let expression = deferred_numeric_expression(
                             deferral.items,
                             deferral.expected,
@@ -1045,12 +1121,14 @@ fn parse_call_arguments_inner(
                 | DeferredCallArgument::Forward { .. }),
             ) => {
                 let mut retained_arguments = Vec::with_capacity(ready.len() + 1);
-                retained_arguments.extend(ready.into_iter().map(DeferredCallArgument::Ready));
-                retained_arguments.push(retained);
+                retained_arguments.extend(ready.into_iter().map(|argument| {
+                    DeferredCallArgument::Ready(argument.map_value(OwnedExpr::id))
+                }));
+                retained_arguments.push(retained.map_value(OwnedExpr::id));
                 ParsedCallArguments::Retained(retained_arguments)
             }
             (ParsedCallArguments::Retained(mut retained), argument) => {
-                retained.push(argument);
+                retained.push(argument.map_value(OwnedExpr::id));
                 ParsedCallArguments::Retained(retained)
             }
         };
@@ -1066,10 +1144,10 @@ fn parse_call_arguments_inner(
 ///
 /// WHY: both argument shapes carry the separator only for diagnostics, and the retained shape
 ///      must keep it as the authored routing fact instead of a rebuilt argument.
-fn with_following_separator_span(
-    argument: DeferredCallArgument,
+fn with_following_separator_span<E>(
+    argument: DeferredCallArgument<E>,
     separator_span: Option<SourceSpan>,
-) -> DeferredCallArgument {
+) -> DeferredCallArgument<E> {
     match argument {
         DeferredCallArgument::Ready(argument) => {
             DeferredCallArgument::Ready(argument.with_following_separator_span(separator_span))
@@ -1119,11 +1197,21 @@ fn argument_is_bare_none(token_stream: &AstCursor) -> bool {
 /// WHY: expression parsing still owns grouping, casts, generic inference and contextual `none`;
 /// this check only decides whether the completed value satisfies the receiving boundary.
 fn validate_argument_value_policy(
-    value: &Expression,
+    const_values: &ConstValueStore,
+    expression_builder: &AstExpressionBuilder,
+    value: ExpressionView<'_>,
     context: &ScopeContext,
     path_fork: &PathInternerFork,
     receiving_context: CallArgumentReceivingContext,
 ) -> Result<(), ExpressionParseError> {
+    let receiver = match receiving_context.diagnostics.syntax {
+        CallArgumentSyntax::Constructor { .. } | CallArgumentSyntax::AnonymousConstRecord => {
+            ValueReceiverContext::ConstructorArgument
+        }
+        CallArgumentSyntax::Assertion { .. } => ValueReceiverContext::AssertionArgument,
+        _ => ValueReceiverContext::FunctionArgument,
+    };
+    value.require_single(receiver)?;
     if !matches!(
         receiving_context.value_policy,
         CallArgumentValuePolicy::ConstRequired
@@ -1131,22 +1219,28 @@ fn validate_argument_value_policy(
         return Ok(());
     }
 
-    let is_placeholder_reference = if let ExpressionKind::Reference(path) = &value.kind {
-        path_fork.component(*path).is_some_and(|name| {
-            context.get_reference(&name).is_some_and(|reference| {
-                reference.ready_declaration().is_some_and(|declaration| {
-                    context.is_unresolved_constant_placeholder(declaration)
+    let is_placeholder_reference =
+        if let ExpressionOperationView::Reference(path) = value.operation() {
+            path_fork.component(path).is_some_and(|name| {
+                context.get_reference(&name).is_some_and(|reference| {
+                    reference.ready_declaration().is_some_and(|declaration| {
+                        context.is_unresolved_constant_placeholder(declaration)
+                    })
                 })
             })
-        })
-    } else {
-        false
-    };
+        } else {
+            false
+        };
 
     let is_compile_time_value = is_placeholder_reference
         || value
-            .const_value_kind_with_template_classifier(&mut |template| {
-                classify_template_from_effective_tir(template, &context.template_ir_store)
+            .const_value_kind_with_template_classifier(const_values, &mut |template| {
+                classify_template_from_effective_tir(
+                    template,
+                    &context.template_ir_store,
+                    expression_builder,
+                    const_values,
+                )
             })?
             .is_compile_time_value();
 
@@ -1157,7 +1251,7 @@ fn validate_argument_value_policy(
     Err(CompilerDiagnostic::compile_time_evaluation_error(
         CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,
         receiving_context.diagnostics.const_operation,
-        value.span,
+        value.span(),
     )
     .into())
 }
@@ -1245,7 +1339,9 @@ impl<'a> ParameterSlotRouter<'a> {
                     )
                     .into());
                 }
-                CallArgumentSyntax::Supported { .. } => {
+                CallArgumentSyntax::Supported { .. }
+                | CallArgumentSyntax::Constructor { .. }
+                | CallArgumentSyntax::Assertion { .. } => {
                     return Err(CompilerDiagnostic::invalid_call_shape(
                         InvalidCallShapeReason::NamedArgumentsNotSupported,
                         self.callee_name(),
@@ -1288,7 +1384,9 @@ impl<'a> ParameterSlotRouter<'a> {
                     .into());
                 }
 
-                CallArgumentSyntax::Supported { callee_name } => {
+                CallArgumentSyntax::Supported { callee_name }
+                | CallArgumentSyntax::Constructor { callee_name }
+                | CallArgumentSyntax::Assertion { callee_name } => {
                     let Some(slot) = self.parameter_name_to_slot.get(target_name).copied() else {
                         return Err(CompilerDiagnostic::invalid_call_shape(
                             InvalidCallShapeReason::NamedArgumentNotFound {
@@ -1381,6 +1479,8 @@ impl<'a> ParameterSlotRouter<'a> {
     fn callee_name(&self) -> Option<StringId> {
         match self.receiving_context.diagnostics.syntax {
             CallArgumentSyntax::Supported { callee_name }
+            | CallArgumentSyntax::Constructor { callee_name }
+            | CallArgumentSyntax::Assertion { callee_name }
             | CallArgumentSyntax::UnsupportedCall { callee_name } => callee_name,
             CallArgumentSyntax::UnsupportedBuiltinMember { .. }
             | CallArgumentSyntax::AnonymousConstRecord => None,

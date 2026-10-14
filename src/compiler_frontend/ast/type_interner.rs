@@ -67,11 +67,6 @@ impl<'types> AstTypeInterner<'types> {
         self.type_environment.builtins()
     }
 
-    pub(crate) fn intern_fallible_carrier(&mut self, success: TypeId, error: TypeId) -> TypeId {
-        self.type_environment
-            .intern_fallible_carrier(success, error)
-    }
-
     pub(crate) fn intern_generic_instance(
         &mut self,
         base: NominalTypeId,

@@ -25,7 +25,7 @@
 //! TIR types and the production route are implemented directly without a
 //! feature flag.
 
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression_store::ExprId;
 use crate::compiler_frontend::ast::templates::template::{
     SlotKey, Style, TemplateSegmentOrigin, TemplateType,
 };
@@ -156,13 +156,9 @@ impl TemplateIrNode {
 ///
 /// - `Sequence` may use a typed range into a store-owned side vector if clone
 ///   pressure becomes measurable.
-/// - `DynamicExpression` boxes the AST `Expression` to keep enum size reasonable.
-///   TIR does not own expression resolution; it holds the AST-produced value.
+/// - `DynamicExpression` retains a committed ID in the paired phase expression
+///   owner. TIR does not own expression resolution or recursive expression data.
 #[derive(Clone, Debug)]
-#[allow(
-    clippy::large_enum_variant,
-    reason = "DynamicExpression holds an AST Expression; boxing is sufficient"
-)]
 pub(crate) enum TemplateIrNodeKind {
     /// Ordered sequence of child nodes (the common case for template bodies).
     Sequence { children: Vec<TemplateIrNodeId> },
@@ -181,7 +177,7 @@ pub(crate) enum TemplateIrNodeKind {
 
     /// Runtime or compile-time expression splice.
     DynamicExpression {
-        expression: Box<Expression>,
+        expression: ExprId,
         origin: TemplateSegmentOrigin,
         /// Document-order site ID assigned when this node is emitted.
         ///

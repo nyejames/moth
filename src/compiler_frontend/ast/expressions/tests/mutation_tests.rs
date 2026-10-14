@@ -6,13 +6,12 @@
 //!      frontend produces the right AST shapes for later analysis.
 
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
-use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
-use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::const_values::store::ConstValuePayload;
+use crate::compiler_frontend::ast::expressions::expression_store::ExpressionOperationView;
 use crate::compiler_frontend::ast::expressions::expression_types::CastHandling;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticOperator, DiagnosticPayload, InvalidAssignmentTargetReason, TypeMismatchContext,
 };
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::tests::ast_fixture_support::start_function_body;
@@ -62,8 +61,12 @@ fn allows_whole_literal_into_decimal_binding_at_f64_context() {
     };
 
     assert_eq!(
-        value.diagnostic_type,
-        DataType::FixedScalar(FixedScalar::F64)
+        ast.expressions
+            .view(*value)
+            .unwrap()
+            .value_type_id()
+            .unwrap(),
+        builtin_type_ids::fixed_scalar(FixedScalar::F64)
     );
 }
 
@@ -75,18 +78,18 @@ fn allows_i32_divide_assign_with_checked_store_conversion() {
     let NodeKind::Assignment { value, .. } = &body[1].kind else {
         panic!("expected second statement to be an assignment");
     };
-    let ExpressionKind::Cast(cast) = &value.kind else {
+    let value = ast.expressions.view(*value).unwrap();
+    let ExpressionOperationView::Cast { source, facts } = value.operation() else {
         panic!("expected the F64 division result to convert at the I32 store");
     };
-
     assert_eq!(
-        cast.source.diagnostic_type,
-        DataType::FixedScalar(FixedScalar::F64)
+        source.value_type_id().unwrap(),
+        builtin_type_ids::fixed_scalar(FixedScalar::F64)
     );
-    assert!(matches!(&cast.handling, CastHandling::StoreConversion));
+    assert!(matches!(facts.handling, CastHandling::StoreConversion));
     assert_eq!(
-        value.diagnostic_type,
-        DataType::FixedScalar(FixedScalar::I32)
+        value.value_type_id().unwrap(),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
     );
 }
 
@@ -100,14 +103,14 @@ fn allows_same_type_u8_add_assign_without_store_conversion() {
     };
     // D15: equal `U8` operands keep `U8`, so the same-type update performs one checked
     // operation and inserts no artificial promotion/narrowing conversion.
+    let value = ast.expressions.view(*value).unwrap();
     assert!(
-        !matches!(value.kind, ExpressionKind::Cast(_)),
-        "a same-type compound update must not carry a store conversion, got {:?}",
-        value.kind
+        !matches!(value.operation(), ExpressionOperationView::Cast { .. }),
+        "a same-type compound update must not carry a store conversion"
     );
     assert_eq!(
-        value.diagnostic_type,
-        DataType::FixedScalar(FixedScalar::U8)
+        value.value_type_id().unwrap(),
+        builtin_type_ids::fixed_scalar(FixedScalar::U8)
     );
 }
 
@@ -120,18 +123,18 @@ fn allows_mixed_domain_u8_add_assign_with_checked_store_conversion() {
     let NodeKind::Assignment { value, .. } = &body[2].kind else {
         panic!("expected compound assignment");
     };
-    let ExpressionKind::Cast(cast) = &value.kind else {
+    let value = ast.expressions.view(*value).unwrap();
+    let ExpressionOperationView::Cast { source, facts } = value.operation() else {
         panic!("expected the mixed-domain U64 result to convert at the U8 store");
     };
-
     assert_eq!(
-        cast.source.diagnostic_type,
-        DataType::FixedScalar(FixedScalar::U64)
+        source.value_type_id().unwrap(),
+        builtin_type_ids::fixed_scalar(FixedScalar::U64)
     );
-    assert!(matches!(&cast.handling, CastHandling::StoreConversion));
+    assert!(matches!(facts.handling, CastHandling::StoreConversion));
     assert_eq!(
-        value.diagnostic_type,
-        DataType::FixedScalar(FixedScalar::U8)
+        value.value_type_id().unwrap(),
+        builtin_type_ids::fixed_scalar(FixedScalar::U8)
     );
 }
 
@@ -145,8 +148,12 @@ fn allows_i32_integer_divide_assign() {
     };
 
     assert_eq!(
-        value.diagnostic_type,
-        DataType::FixedScalar(FixedScalar::I32)
+        ast.expressions
+            .view(*value)
+            .unwrap()
+            .value_type_id()
+            .unwrap(),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
     );
 }
 
@@ -160,8 +167,12 @@ fn allows_f64_divide_assign_whole_literal_rhs() {
     };
 
     assert_eq!(
-        value.diagnostic_type,
-        DataType::FixedScalar(FixedScalar::F64)
+        ast.expressions
+            .view(*value)
+            .unwrap()
+            .value_type_id()
+            .unwrap(),
+        builtin_type_ids::fixed_scalar(FixedScalar::F64)
     );
 }
 
@@ -188,8 +199,12 @@ fn allows_i32_modulus_assign() {
     };
 
     assert_eq!(
-        value.diagnostic_type,
-        DataType::FixedScalar(FixedScalar::I32)
+        ast.expressions
+            .view(*value)
+            .unwrap()
+            .value_type_id()
+            .unwrap(),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
     );
 }
 
@@ -203,8 +218,12 @@ fn allows_i32_exponent_assign() {
     };
 
     assert_eq!(
-        value.diagnostic_type,
-        DataType::FixedScalar(FixedScalar::I32)
+        ast.expressions
+            .view(*value)
+            .unwrap()
+            .value_type_id()
+            .unwrap(),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
     );
 }
 
@@ -217,25 +236,31 @@ fn allows_number_exponent_assign_with_i32_rhs() {
         panic!("expected Dec exponent compound assignment");
     };
 
-    assert_eq!(value.type_id, target.type_id);
-    assert!(matches!(
-        &value.diagnostic_type,
-        DataType::Number(scale) if scale.get() == 2
-    ));
-    let ExpressionKind::Runtime(rpn) = &value.kind else {
-        panic!("mutable Dec power stays a runtime expression");
+    let value = ast.expressions.view(*value).unwrap();
+    assert_eq!(
+        value.value_type_id().unwrap(),
+        ast.expressions.place(*target).unwrap().metadata().type_id
+    );
+    let ExpressionOperationView::NumericBinary { left, right, facts } = value.operation() else {
+        panic!("mutable Dec power stays a resolved numeric operation");
     };
-    assert!(rpn.items.iter().any(|item| matches!(
-        item,
-        ExpressionRpnItem::Operand(operand)
-            if operand.type_id == builtin_type_ids::fixed_scalar(FixedScalar::I32)
-                && matches!(&operand.kind, ExpressionKind::FixedScalar(_))
-    )));
-    assert!(!rpn.items.iter().any(|item| matches!(
-        item,
-        ExpressionRpnItem::Operand(operand)
-            if matches!(&operand.kind, ExpressionKind::Number(_))
-    )));
+    assert_eq!(
+        left.value_type_id().unwrap(),
+        value.value_type_id().unwrap()
+    );
+    assert_eq!(
+        right.value_type_id().unwrap(),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
+    );
+    let ExpressionOperationView::Constant(constant) = right.operation() else {
+        panic!("the exponent should be a folded fixed-width constant");
+    };
+    let ConstValuePayload::FixedScalar(exponent) = ast.const_values.payload(constant).unwrap()
+    else {
+        panic!("the exponent should be a folded fixed-width constant");
+    };
+    assert_eq!(exponent.scalar(), FixedScalar::I32);
+    assert_eq!(facts.result_type, value.value_type_id().unwrap());
 }
 
 #[test]
@@ -256,7 +281,14 @@ fn grouped_rhs_ends_at_newline_for_plain_and_compound_assignment() {
     let NodeKind::Assignment { target, value } = &body[1].kind else {
         panic!("expected grouped Dec exponent compound assignment");
     };
-    assert_eq!(value.type_id, target.type_id);
+    assert_eq!(
+        ast.expressions
+            .view(*value)
+            .unwrap()
+            .value_type_id()
+            .unwrap(),
+        ast.expressions.place(*target).unwrap().metadata().type_id
+    );
     assert!(
         matches!(&body[2].kind, NodeKind::VariableDeclaration(_)),
         "a trailing grouped compound RHS must leave the next statement intact"

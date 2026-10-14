@@ -36,11 +36,11 @@ use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::reachability::{
     HirBackendSelection, HirReachability, ReachableAssertionMessageUse,
     ReachableFloatStatementKind, ReachableFloatStatementUse, ReachableMapUse, ReachableMapUseKind,
-    ReachableNumericOpUse, ReachableRangeStepFailureUse, ReachableRuntimeCastForm,
-    ReachableRuntimeCastUse,
+    ReachableNumericDelivery, ReachableNumericOpUse, ReachableRangeStepFailureUse,
+    ReachableRuntimeCastForm, ReachableRuntimeCastUse,
 };
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind, HirWriteTarget};
-use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
@@ -159,7 +159,7 @@ pub fn validate_hir_backend_feature_support(
             )?;
             validate_wasm_fallible_control_flow(
                 input.hir,
-                reachability.backend_selection().blocks(),
+                reachability.backend_selection(),
                 input.target,
                 string_table,
             )?;
@@ -184,8 +184,8 @@ pub fn validate_hir_backend_feature_support(
 
 /// Reports a reachable fixed-width scalar form that is outside the bounded Wasm scalar step.
 ///
-/// WHAT: direct fixed scalars and compiler-internal carriers of those success values are accepted,
-///       but user aggregates containing fixed scalars remain unsupported. Canonical builtin Error
+/// WHAT: direct fixed scalars are accepted, but user aggregates containing fixed scalars remain
+///       unsupported. Canonical builtin Error
 ///       representation belongs to its own Error-value gate.
 /// WHY: Wasm lowering has no aggregate field storage yet, so reject early with a structured target
 ///      diagnostic rather than an internal lowering error.
@@ -341,24 +341,33 @@ fn validate_wasm_cross_module_calls(
     }
 
     let selected_blocks = reachability.backend_selection().blocks();
-    let statement = hir
-        .blocks
-        .iter()
+    let span = hir.blocks.iter()
         .filter(|block| selected_blocks.contains(&block.id))
-        .flat_map(|block| &block.statements)
-        .find(|statement| {
-            matches!(
-                statement.kind,
-                HirStatementKind::Call {
+        .find_map(|block| {
+            for statement in &block.statements {
+                if matches!(statement.kind, HirStatementKind::Call {
                     target: crate::compiler_frontend::external_packages::CallTarget::CrossModule(_),
                     ..
+                }) {
+                    return Some(statement.span);
                 }
-            )
+            }
+            match &block.terminator {
+                HirTerminator::Invoke {
+                    operation: HirFallibleOperation::Call {
+                        target: crate::compiler_frontend::external_packages::CallTarget::CrossModule(_),
+                        ..
+                    },
+                    span,
+                    ..
+                } => Some(*span),
+                _ => None,
+            }
         })
         .ok_or_else(|| {
             BackendFeatureValidationError::Infrastructure(Box::new(
                 CompilerError::compiler_error(
-                    "Wasm validation received cross-module reachability without a selected cross-module call statement",
+                    "Wasm validation received cross-module reachability without a selected call",
                 ),
             ))
         })?;
@@ -369,7 +378,7 @@ fn validate_wasm_cross_module_calls(
     let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
         backend_name,
         UnsupportedBackendFeatureReason::CrossModuleCalls,
-        statement.span,
+        span,
     );
 
     Err(BackendFeatureValidationError::Diagnostic(diagnostic))
@@ -537,9 +546,9 @@ fn validate_wasm_checked_numeric_ops(
 /// Classifies one reachable numeric operation for the Wasm target.
 ///
 /// WHAT: an unimplemented trap-mode domain or operator keeps the operation limit.
-///       `ReturnError` on a supported operation is a recoverable-failure rejection.
+///       Invoke on a supported operation is a recoverable-failure rejection.
 /// WHY: operation limits retain priority when both apply, such as F16 or a narrow integer
-///      domain in `ReturnError` mode. Supported trap-mode arithmetic is not reported as
+///      domain delivered by Invoke. Supported trap-mode arithmetic is not reported as
 ///      unsupported.
 fn wasm_numeric_rejection(
     numeric_op: &ReachableNumericOpUse,
@@ -547,10 +556,7 @@ fn wasm_numeric_rejection(
     if !wasm_supports_trap_numeric_op(numeric_op) {
         return Some(UnsupportedBackendFeatureReason::CheckedNumericOperations);
     }
-    if !matches!(
-        numeric_op.failure_mode,
-        NumericFailureMode::Trap | NumericFailureMode::Infallible
-    ) {
+    if numeric_op.delivery == ReachableNumericDelivery::Invoke {
         return Some(UnsupportedBackendFeatureReason::RecoverableNumericFailure);
     }
     None
@@ -587,17 +593,16 @@ fn wasm_supports_trap_numeric_op(numeric_op: &ReachableNumericOpUse) -> bool {
 ///
 /// WHAT: trap-mode binary-float formatting and boundary validation are supported, while recoverable
 ///       validation and formatting remain target-gated.
-/// WHY: target validation consumes the exact failure mode retained by HIR reachability so Wasm
-///      never substitutes a trap for a recoverable `ReturnError` contract.
+/// WHY: target validation consumes the delivery retained by HIR reachability so Wasm
+///      never substitutes a trap for a recoverable Invoke contract.
 fn validate_wasm_float_statements(
     float_statements: &[ReachableFloatStatementUse],
     target: BackendTarget,
     string_table: &mut StringTable,
 ) -> Result<(), BackendFeatureValidationError> {
-    let Some(float_statement) = float_statements
-        .iter()
-        .find(|statement| statement.failure_mode != NumericFailureMode::Trap)
-    else {
+    let Some(float_statement) = float_statements.iter().find(|statement| {
+        statement.delivery != ReachableNumericDelivery::Statement(NumericFailureMode::Trap)
+    }) else {
         return Ok(());
     };
 
@@ -627,7 +632,7 @@ fn validate_wasm_range_step_failures(
 ) -> Result<(), BackendFeatureValidationError> {
     let Some(failure) = range_step_failures
         .iter()
-        .find(|failure| failure.failure_mode == NumericFailureMode::ReturnError)
+        .find(|failure| failure.delivery == ReachableNumericDelivery::Invoke)
     else {
         return Ok(());
     };
@@ -731,12 +736,12 @@ fn validate_wasm_error_values(
 
 /// Reports reachable fallible terminators, which Wasm lowering cannot yet represent.
 ///
-/// WHAT: rejects `FallibleBranch`, `ReturnSuccess` and `ReturnError` only in selected blocks.
+/// WHAT: rejects selected Invoke, ReturnError and signatures with an error channel.
 /// WHY: exact terminator spans are the authored control-flow site; synthetic HIR remains spanless
 ///      instead of inheriting provenance from a neighboring construct.
 fn validate_wasm_fallible_control_flow(
     hir: &HirModule,
-    reachable_blocks: &FxHashSet<BlockId>,
+    selection: &HirBackendSelection,
     target: BackendTarget,
     string_table: &mut StringTable,
 ) -> Result<(), BackendFeatureValidationError> {
@@ -744,25 +749,43 @@ fn validate_wasm_fallible_control_flow(
     let mut authored_occurrence = None;
 
     for block in &hir.blocks {
-        if !reachable_blocks.contains(&block.id)
+        if !selection.blocks().contains(&block.id)
             || !matches!(
                 &block.terminator,
-                HirTerminator::FallibleBranch { .. }
-                    | HirTerminator::ReturnSuccess(_)
-                    | HirTerminator::ReturnError(_)
+                HirTerminator::Invoke { .. } | HirTerminator::ReturnError(_)
             )
         {
             continue;
         }
 
         let occurrence = ReachableTypeOccurrence {
-            span: hir.side_table.terminator_span(block.id).copied(),
+            span: match &block.terminator {
+                HirTerminator::Invoke { span, .. } => *span,
+                _ => hir.side_table.terminator_span(block.id).copied(),
+            },
         };
         if occurrence.span.is_some() {
             authored_occurrence = Some(occurrence);
             break;
         }
         spanless_fallback.get_or_insert(occurrence);
+    }
+    if authored_occurrence.is_none() {
+        for function in &hir.functions {
+            if !selection.contains_function(function.id) || function.error_return.is_none() {
+                continue;
+            }
+            let occurrence = ReachableTypeOccurrence {
+                span: hir
+                    .side_table
+                    .hir_source_span_for_hir(HirLocation::Function(function.id)),
+            };
+            if occurrence.span.is_some() {
+                authored_occurrence = Some(occurrence);
+                break;
+            }
+            spanless_fallback.get_or_insert(occurrence);
+        }
     }
 
     let Some(occurrence) = authored_occurrence.or(spanless_fallback) else {
@@ -1122,7 +1145,12 @@ where
 
     for function in &module.functions {
         if !selection.contains_function(function.id)
-            || !(search.is_unsupported)(function.return_type)
+            || !function
+                .returns
+                .iter()
+                .copied()
+                .chain(function.error_return)
+                .any(&mut *search.is_unsupported)
         {
             continue;
         }
@@ -1167,17 +1195,6 @@ where
         HirStatementKind::Expr(value) | HirStatementKind::PushRuntimeFragment { value, .. } => {
             first_unsupported_expression_occurrence(*value, module, search)
         }
-        HirStatementKind::CastOp { source, result, .. } => result
-            .as_ref()
-            .and_then(|result_local| {
-                first_unsupported_result_local_occurrence(
-                    locals,
-                    result_local.local(),
-                    statement.span,
-                    search,
-                )
-            })
-            .or_else(|| first_unsupported_expression_occurrence(*source, module, search)),
         HirStatementKind::FormatFloat { source, .. }
         | HirStatementKind::ValidateFloat { source, .. } => {
             first_unsupported_expression_occurrence(*source, module, search)
@@ -1319,10 +1336,29 @@ where
         HirTerminator::If { condition, .. } => {
             first_unsupported_expression_occurrence(*condition, module, search)
         }
-        HirTerminator::FallibleBranch { result, .. }
-        | HirTerminator::Return(result)
-        | HirTerminator::ReturnSuccess(result)
-        | HirTerminator::ReturnError(result) => {
+        HirTerminator::Return(results) => module
+            .expressions
+            .values(*results)
+            .iter()
+            .find_map(|result| first_unsupported_expression_occurrence(*result, module, search)),
+        HirTerminator::Invoke {
+            operation, span, ..
+        } => {
+            let unsupported_before = search.unsupported_count;
+            let occurrence = operation.operands(&module.expressions).find_map(|operand| {
+                first_unsupported_expression_occurrence(operand, module, search)
+            });
+            if let Some(occurrence) = occurrence {
+                return Some(ReachableTypeOccurrence {
+                    span: span.or(occurrence.span),
+                });
+            }
+            if search.unsupported_count > unsupported_before {
+                return span.map(|span| ReachableTypeOccurrence { span: Some(span) });
+            }
+            None
+        }
+        HirTerminator::ReturnError(result) => {
             first_unsupported_expression_occurrence(*result, module, search)
         }
         HirTerminator::Match { scrutinee, arms } => {
@@ -1416,9 +1452,6 @@ where
                 .or_else(|| first_unsupported_expression_occurrence(*right, module, search))
         }
         HirExpressionKind::UnaryOp { operand, .. }
-        | HirExpressionKind::TupleGet { tuple: operand, .. }
-        | HirExpressionKind::FallibleUnwrapSuccess { result: operand }
-        | HirExpressionKind::FallibleUnwrapError { result: operand }
         | HirExpressionKind::Cast {
             source: operand, ..
         }
@@ -1433,8 +1466,7 @@ where
             .struct_fields(*fields)
             .iter()
             .find_map(|(_, value)| first_unsupported_expression_occurrence(*value, module, search)),
-        HirExpressionKind::Collection(items)
-        | HirExpressionKind::TupleConstruct { elements: items } => module
+        HirExpressionKind::Collection(items) => module
             .expressions
             .values(*items)
             .iter()
@@ -1496,16 +1528,6 @@ impl<'environment> BackendTypeFacts<'environment> {
 
     fn is_unsupported_fixed_scalar_shape(&mut self, type_id: TypeId) -> bool {
         if self.type_environment.fixed_scalar(type_id).is_some() {
-            return false;
-        }
-
-        // A failure lane preserves a scalar success slot; it does not manufacture a user
-        // aggregate. Keep custom error shapes and genuine success aggregates in the walk.
-        if let Some((success_type, error_type)) =
-            self.type_environment.fallible_carrier_slots(type_id)
-            && self.error_type_id == Some(error_type)
-            && self.type_environment.fixed_scalar(success_type).is_some()
-        {
             return false;
         }
 

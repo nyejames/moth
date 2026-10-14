@@ -25,7 +25,7 @@ use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, InvalidControlFlowStatementReason, TypeMismatchContext,
+    DiagnosticPayload, InvalidControlFlowStatementReason, InvalidFallibleHandlingReason,
     UnsupportedBackendFeatureReason,
 };
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
@@ -197,9 +197,9 @@ fn start_function(module: &Module) -> Option<&HirFunction> {
 fn assert_start_result(module: &Module, fallible: bool) {
     let start = start_function(module).expect("runtime root must retain start");
     let types = &module.executable.type_environment;
-    let carrier = types.fallible_carrier_slots(start.return_type);
-    assert_eq!(carrier.is_some(), fallible);
-    let success_type = carrier.map_or(start.return_type, |(success, _)| success);
+    assert_eq!(start.error_return.is_some(), fallible);
+    assert_eq!(start.returns.len(), 1);
+    let success_type = start.returns[0];
     assert_eq!(
         types.collection_element_type(success_type),
         Some(builtin_type_ids::STRING)
@@ -218,17 +218,11 @@ fn assert_start_result(module: &Module, fallible: bool) {
         let terminator = &hir.blocks[block_id.0 as usize].terminator;
         match terminator {
             HirTerminator::ReturnError(_) => reaches_error = true,
-            HirTerminator::ReturnSuccess(_) => {
-                assert!(
-                    fallible,
-                    "narrowed start must return a plain fragment collection"
-                );
-                reaches_success = true;
-            }
-            HirTerminator::Return(_) => {
-                assert!(
-                    !fallible,
-                    "fallible start must return through the success channel"
+            HirTerminator::Return(values) => {
+                assert_eq!(
+                    hir.expressions.values(*values).len(),
+                    1,
+                    "start must return its fragment collection"
                 );
                 reaches_success = true;
             }
@@ -776,13 +770,15 @@ fn synthetic_start_custom_error_propagation_is_a_source_diagnostic() {
         assert!(!messages.has_infrastructure_error(), "{messages:?}");
         let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
         assert_eq!(diagnostics.len(), 1);
-        assert_eq!(diagnostics[0].kind.code(), "MOTH-TYPE-0001");
+        assert_eq!(diagnostics[0].kind.code(), "MOTH-RULE-0051");
         assert!(matches!(
             diagnostics[0].payload,
-            DiagnosticPayload::TypeMismatch {
-                context: TypeMismatchContext::ErrorReturn,
-                ..
-            }
+            DiagnosticPayload::InvalidFallibleHandling {
+                reason: InvalidFallibleHandlingReason::EntryHasIncompatibleError {
+                    produced_error_type,
+                    entry_error_type,
+                },
+            } if produced_error_type != entry_error_type
         ));
         assert!(diagnostics[0].primary_span.is_some());
     }

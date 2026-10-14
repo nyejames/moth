@@ -9,7 +9,6 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId};
@@ -152,7 +151,8 @@ pub(crate) fn test_sidecar(
         id: FunctionId(0),
         entry: BlockId(0),
         params: Vec::new(),
-        return_type: TypeId(0),
+        returns: Box::new([]),
+        error_return: None,
     });
     module
         .executable

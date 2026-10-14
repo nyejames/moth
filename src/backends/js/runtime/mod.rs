@@ -7,7 +7,7 @@
 //! The collection group is the compiler-owned JavaScript implementation of `@core/collections`.
 //! [`collection_javascript_helpers`] is consumed by both runtime emission and first-party
 //! dependency validation. The remaining prelude groups — binding, alias, computed-place, clone,
-//! error, result, map, string, cast, numeric, and choice — are compiler-runtime
+//! error, map, string, cast, numeric, and choice — are compiler-runtime
 //! infrastructure rather than first-party package implementations. They intentionally stay out of
 //! the first-party package inventory; new package-facing JS must not be added here without an
 //! inventory source.
@@ -30,7 +30,6 @@ mod errors;
 mod maps;
 mod numeric;
 mod places;
-mod results;
 mod strings;
 
 pub(crate) use collections::collection_javascript_helpers;
@@ -104,7 +103,6 @@ impl<'hir> JsEmitter<'hir> {
     ///   computed-place helpers  — closures capturing base reference + key for field/index access
     ///   clone helpers           — deep value copy for explicit `copy` semantics
     ///   error helpers           — normalises file paths, constructs canonical error records
-    ///   result helpers          — `?` propagation and `or` fallback helpers
     ///   collection helpers      — guarded get/push/remove/length for ordered collections
     ///   map helpers             — guarded get/set/remove and infallible contains/clear/length for ordered maps
     ///   string helpers          — generic value-to-string conversion
@@ -124,7 +122,6 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_runtime_computed_place_helpers();
         self.emit_runtime_clone_helpers(emitted_code_uses_maps);
         self.emit_runtime_error_helpers();
-        self.emit_runtime_result_helpers();
         self.emit_runtime_collection_helpers();
         if emitted_code_uses_maps {
             self.emit_runtime_map_helpers();

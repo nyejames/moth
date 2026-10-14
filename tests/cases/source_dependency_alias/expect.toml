@@ -1,4 +1,4 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains = ["3"]
+rendered_output_exact = " 3\n hidden=4;namespace=6"

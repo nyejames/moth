@@ -1,16 +1,16 @@
-//! Expression payload tests for owned runtime-template handoffs.
-//!
-//! WHAT: proves the final AST expression variants can carry the neutral owned handoff payloads.
-//! WHY: Phase 11 introduces the expression shape before HIR lowering consumes it, so these tests
-//! stay intentionally construction-focused and avoid changing runtime template behavior.
+//! Bound expression views carry neutral runtime handoff payloads without TIR identity.
 
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExpressionOperationView,
+};
 use crate::compiler_frontend::ast::templates::runtime_handoff::{
     OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff,
     OwnedRuntimeTemplateNode,
 };
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::tests::ast_fixture_support::{
+    runtime_slot_application_handoff_expr, runtime_template_handoff_expr,
+};
 use crate::compiler_frontend::value_mode::ValueMode;
 
 fn empty_runtime_template_handoff() -> OwnedRuntimeTemplateHandoff {
@@ -19,7 +19,6 @@ fn empty_runtime_template_handoff() -> OwnedRuntimeTemplateHandoff {
             children: Vec::new(),
             span: None,
         }),
-        span: None,
     }
 }
 
@@ -31,21 +30,25 @@ fn empty_runtime_slot_application_handoff() -> OwnedRuntimeSlotApplicationHandof
         },
         contribution_sources: Vec::new(),
         slot_sites: Vec::new(),
-        span: None,
     }
 }
 
 #[test]
 fn runtime_template_handoff_expression_carries_owned_payload() {
-    let expression = Expression::runtime_template_handoff(
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let expression = runtime_template_handoff_expr(
+        &mut expressions,
         empty_runtime_template_handoff(),
+        None,
         ValueMode::ImmutableOwned,
     );
+    let expression = expressions.view(expression).expect("owner-bound view");
+    assert_eq!(
+        expression.value_type_id().expect("single string"),
+        builtin_type_ids::STRING
+    );
 
-    assert_eq!(expression.type_id, builtin_type_ids::STRING);
-    assert_eq!(expression.diagnostic_type, DataType::Template);
-
-    let ExpressionKind::RuntimeTemplateHandoff(handoff) = expression.kind else {
+    let ExpressionOperationView::RuntimeTemplate(handoff) = expression.operation() else {
         panic!("expected runtime template handoff expression");
     };
 
@@ -57,15 +60,20 @@ fn runtime_template_handoff_expression_carries_owned_payload() {
 
 #[test]
 fn runtime_slot_application_handoff_expression_carries_owned_payload() {
-    let expression = Expression::runtime_slot_application_handoff(
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let expression = runtime_slot_application_handoff_expr(
+        &mut expressions,
         empty_runtime_slot_application_handoff(),
+        None,
         ValueMode::ImmutableOwned,
     );
+    let expression = expressions.view(expression).expect("owner-bound view");
+    assert_eq!(
+        expression.value_type_id().expect("single string"),
+        builtin_type_ids::STRING
+    );
 
-    assert_eq!(expression.type_id, builtin_type_ids::STRING);
-    assert_eq!(expression.diagnostic_type, DataType::Template);
-
-    let ExpressionKind::RuntimeSlotApplicationHandoff(handoff) = expression.kind else {
+    let ExpressionOperationView::RuntimeSlotApplication(handoff) = expression.operation() else {
         panic!("expected runtime slot application handoff expression");
     };
 

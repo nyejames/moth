@@ -9,8 +9,10 @@ use super::emit_collected_warnings;
 use crate::compiler_frontend::ast::ContextKind;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::generic_functions::{
     GenericRequestRange, IfGenericRequestRanges,
 };
@@ -42,6 +44,8 @@ pub(in crate::compiler_frontend::ast::statements::value_production) struct Block
     pub then_parent: &'a ScopeContext,
     pub else_parent: &'a ScopeContext,
     pub type_interner: &'a mut AstTypeInterner<'b>,
+    pub expression_builder: &'a mut AstExpressionBuilder,
+    pub const_values: &'a mut ConstValueStore,
     pub string_table: &'a mut StringTable,
     pub active_target: ActiveValueProductionTarget,
     pub path_fork: &'a mut PathInternerFork,
@@ -127,6 +131,8 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn parse_val
         then_parent,
         else_parent,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         active_target,
         path_fork,
@@ -140,6 +146,8 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn parse_val
         then_parent,
         outer_context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         active_target.clone(),
         path_fork,
@@ -160,6 +168,8 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn parse_val
         else_parent,
         outer_context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         active_target,
         path_fork,
@@ -176,11 +186,17 @@ pub(in crate::compiler_frontend::ast::statements::value_production) fn parse_val
     })
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "branch body parsing keeps the cursor, both scopes, target and mutable state separate"
+)]
 fn parse_one_value_block_body(
     token_stream: &mut AstCursor,
     parent: &ScopeContext,
     outer_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     active_target: ActiveValueProductionTarget,
     path_fork: &mut PathInternerFork,
@@ -195,6 +211,8 @@ fn parse_one_value_block_body(
         token_stream,
         branch_context,
         type_interner,
+        expression_builder,
+        const_values,
         &mut warnings,
         string_table,
         path_fork,

@@ -52,7 +52,7 @@ use crate::compiler_frontend::hir::statements::{
 #[cfg(any(test, feature = "show_hir"))]
 use crate::compiler_frontend::hir::structs::{HirField, HirStruct};
 #[cfg(any(test, feature = "show_hir"))]
-use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
 #[cfg(any(test, feature = "show_hir"))]
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 #[cfg(any(test, feature = "show_hir"))]
@@ -212,7 +212,15 @@ impl<'a> HirDisplayContext<'a> {
         let _ = write!(out, "{}({})", self.function_label(function.id), params);
 
         if self.options.include_types {
-            let _ = write!(out, " -> {}", self.type_label(function.return_type));
+            let mut slots = function
+                .returns
+                .iter()
+                .map(|ty| self.type_label(*ty))
+                .collect::<Vec<_>>();
+            if let Some(error) = function.error_return {
+                slots.push(format!("{}!", self.type_label(error)));
+            }
+            let _ = write!(out, " -> {}", slots.join(", "));
         }
 
         let _ = write!(out, " [entry: {}]", self.block_label(function.entry));
@@ -315,12 +323,17 @@ impl<'a> HirDisplayContext<'a> {
             HirStatementKind::Call {
                 target,
                 args,
-                result,
+                results,
             } => {
                 let mut out = String::new();
 
-                if let Some(local) = result {
-                    let _ = write!(out, "{} = ", self.render_local_destination(*local));
+                if !results.is_empty() {
+                    let destinations = results
+                        .iter()
+                        .map(|local| self.render_local_destination(*local))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let _ = write!(out, "{destinations} = ");
                 }
 
                 let args_rendered = expressions
@@ -347,24 +360,6 @@ impl<'a> HirDisplayContext<'a> {
                     self.local_label(*vec_local),
                     self.render_expression(expressions, *value)
                 )
-            }
-
-            HirStatementKind::CastOp {
-                policy,
-                source,
-                result,
-            } => {
-                let mut out = String::new();
-                if let Some(local) = result {
-                    let _ = write!(out, "{} = ", self.render_local_destination(*local));
-                }
-                let _ = write!(
-                    out,
-                    "cast_{:?}({})",
-                    policy,
-                    self.render_expression(expressions, *source)
-                );
-                out
             }
 
             HirStatementKind::MapOp {
@@ -413,7 +408,6 @@ impl<'a> HirDisplayContext<'a> {
                     "numeric_{}_{}(",
                     op,
                     match failure_mode {
-                        NumericFailureMode::ReturnError => "err",
                         NumericFailureMode::Trap => "trap",
                         NumericFailureMode::Infallible => "safe",
                     }
@@ -447,7 +441,6 @@ impl<'a> HirDisplayContext<'a> {
                     self.render_local_destination(*result),
                     cause,
                     match failure_mode {
-                        NumericFailureMode::ReturnError => "err",
                         NumericFailureMode::Trap => "trap",
                         NumericFailureMode::Infallible => "safe",
                     }
@@ -485,7 +478,6 @@ impl<'a> HirDisplayContext<'a> {
                     "{} = format_float_{}({})",
                     self.render_local_destination(*result),
                     match failure_mode {
-                        NumericFailureMode::ReturnError => "err",
                         NumericFailureMode::Trap => "trap",
                         NumericFailureMode::Infallible => "safe",
                     },
@@ -502,7 +494,6 @@ impl<'a> HirDisplayContext<'a> {
                     "{} = validate_float_{}({})",
                     self.render_local_destination(*result),
                     match failure_mode {
-                        NumericFailureMode::ReturnError => "err",
                         NumericFailureMode::Trap => "trap",
                         NumericFailureMode::Infallible => "safe",
                     },
@@ -548,16 +539,26 @@ impl<'a> HirDisplayContext<'a> {
                     self.block_label(*else_block)
                 )
             }
-            HirTerminator::FallibleBranch {
-                result,
-                success_block,
-                error_block,
+            HirTerminator::Invoke {
+                operation,
+                success,
+                success_results,
+                failure,
+                error_result,
+                ..
             } => {
+                let results = success_results
+                    .iter()
+                    .map(|local| format!("define {}", self.local_label(*local)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
                 format!(
-                    "fallible {} -> ok {} else err {}",
-                    self.render_expression(expressions, *result),
-                    self.block_label(*success_block),
-                    self.block_label(*error_block)
+                    "invoke {} -> ok {}({}) else err {}(define {})",
+                    self.render_fallible_operation(operation, expressions),
+                    self.block_label(*success),
+                    results,
+                    self.block_label(*failure),
+                    self.local_label(*error_result),
                 )
             }
             HirTerminator::Match { scrutinee, arms } => {
@@ -590,11 +591,18 @@ impl<'a> HirDisplayContext<'a> {
             HirTerminator::Continue { target } => {
                 format!("continue {}", self.block_label(*target))
             }
-            HirTerminator::Return(value) => {
-                format!("return {}", self.render_expression(expressions, *value))
-            }
-            HirTerminator::ReturnSuccess(value) => {
-                format!("return ok {}", self.render_expression(expressions, *value))
+            HirTerminator::Return(values) => {
+                let values = expressions
+                    .values(*values)
+                    .iter()
+                    .map(|value| self.render_expression(expressions, *value))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                if values.is_empty() {
+                    "return".to_owned()
+                } else {
+                    format!("return {values}")
+                }
             }
             HirTerminator::ReturnError(value) => {
                 format!("return! {}", self.render_expression(expressions, *value))
@@ -718,43 +726,6 @@ impl<'a> HirDisplayContext<'a> {
                     "{start}..{end}",
                     start = self.render_expression(expressions, *start),
                     end = self.render_expression(expressions, *end)
-                )
-            }
-            HirExpressionKind::TupleConstruct { elements } => {
-                let elements = expressions.values(*elements);
-                if elements.is_empty() {
-                    return "()".to_owned();
-                }
-
-                let joined = elements
-                    .iter()
-                    .map(|element| self.render_expression(expressions, *element))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-
-                if elements.len() == 1 {
-                    format!("({joined},)")
-                } else {
-                    format!("({joined})")
-                }
-            }
-            HirExpressionKind::TupleGet { tuple, index } => {
-                format!(
-                    "tuple_get({}, {})",
-                    self.render_expression(expressions, *tuple),
-                    index
-                )
-            }
-            HirExpressionKind::FallibleUnwrapSuccess { result } => {
-                format!(
-                    "result_unwrap_ok({})",
-                    self.render_expression(expressions, *result)
-                )
-            }
-            HirExpressionKind::FallibleUnwrapError { result } => {
-                format!(
-                    "result_unwrap_err({})",
-                    self.render_expression(expressions, *result)
                 )
             }
             HirExpressionKind::Cast { source, policy } => {
@@ -1014,19 +985,6 @@ impl<'a> HirDisplayContext<'a> {
                 constructor,
                 arguments,
             }) => match constructor {
-                TypeConstructor::Builtin(BuiltinTypeConstructor::Tuple) => {
-                    if arguments.is_empty() {
-                        return "()".to_owned();
-                    }
-                    let joined = arguments
-                        .iter()
-                        .map(|field| {
-                            self.render_type_with_environment(type_environment, *field, depth + 1)
-                        })
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    format!("({joined})")
-                }
                 TypeConstructor::Builtin(BuiltinTypeConstructor::Collection { fixed_capacity }) => {
                     let element = arguments.first().map_or_else(
                         || "?".to_owned(),
@@ -1054,17 +1012,6 @@ impl<'a> HirDisplayContext<'a> {
                         |arg| self.render_type_with_environment(type_environment, *arg, depth + 1),
                     );
                     format!("Option<{inner}>")
-                }
-                TypeConstructor::Builtin(BuiltinTypeConstructor::FallibleCarrier) => {
-                    let success = arguments.first().map_or_else(
-                        || "?".to_owned(),
-                        |arg| self.render_type_with_environment(type_environment, *arg, depth + 1),
-                    );
-                    let error = arguments.get(1).map_or_else(
-                        || "?".to_owned(),
-                        |arg| self.render_type_with_environment(type_environment, *arg, depth + 1),
-                    );
-                    format!("FallibleCarrier<{success}, {error}>")
                 }
             },
             TypeDefinition::External(external_def) => {
@@ -1094,6 +1041,67 @@ impl<'a> HirDisplayContext<'a> {
             // The compile-time-only anonymous const-record marker never lowers; HIR debug
             // rendering names it without implying a struct.
             TypeDefinition::AnonymousConstRecordMarker => "anonymous const record".to_owned(),
+        }
+    }
+
+    fn render_fallible_operation(
+        &self,
+        operation: &HirFallibleOperation,
+        expressions: &HirExpressionStore,
+    ) -> String {
+        match operation {
+            HirFallibleOperation::Call { target, args } => {
+                let args = expressions
+                    .values(*args)
+                    .iter()
+                    .map(|value| self.render_expression(expressions, *value))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("call {}({args})", self.render_call_target(target))
+            }
+            HirFallibleOperation::CastOp { policy, source } => format!(
+                "cast_{policy:?}({})",
+                self.render_expression(expressions, *source)
+            ),
+            HirFallibleOperation::MapOp { op, receiver, args } => {
+                let args = expressions
+                    .values(*args)
+                    .iter()
+                    .map(|value| self.render_expression(expressions, *value))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let access = if op.requires_mutable_receiver() {
+                    "~"
+                } else {
+                    ""
+                };
+                let receiver = self.render_expression(expressions, *receiver);
+                format!("map_{}({access}{receiver}, {args})", op.source_name())
+            }
+            HirFallibleOperation::NumericOp { op, operands } => {
+                let operands = match operands {
+                    HirNumericOperands::Unary { operand } => {
+                        self.render_expression(expressions, *operand)
+                    }
+                    HirNumericOperands::Binary { left, right } => format!(
+                        "{}, {}",
+                        self.render_expression(expressions, *left),
+                        self.render_expression(expressions, *right)
+                    ),
+                };
+                format!("numeric_{op}({operands})")
+            }
+            HirFallibleOperation::RangeStepFailure { cause } => {
+                format!("range_step_failure({cause:?})")
+            }
+            HirFallibleOperation::FormatFloat { source } => format!(
+                "format_float({})",
+                self.render_expression(expressions, *source)
+            ),
+            HirFallibleOperation::ValidateFloat { source } => format!(
+                "validate_float({})",
+                self.render_expression(expressions, *source)
+            ),
         }
     }
 
@@ -1182,8 +1190,6 @@ impl<'a> HirDisplayContext<'a> {
             #[cfg(not(any(test, feature = "show_hir")))]
             HirVariantCarrier::Choice { .. } => "choice".to_owned(),
             HirVariantCarrier::Option => "option".to_owned(),
-            #[cfg(test)]
-            HirVariantCarrier::Fallible => "result".to_owned(),
         }
     }
 

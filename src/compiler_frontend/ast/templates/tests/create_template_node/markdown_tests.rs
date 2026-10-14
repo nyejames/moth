@@ -8,6 +8,8 @@ fn markdown_formats_only_template_body_content() {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let file_tokens = template_tokens_from_source(
         "[\"prefix\", $md:\n# Hello\n]",
         &mut string_table,
@@ -32,6 +34,8 @@ fn markdown_formats_only_template_body_content() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -42,7 +46,13 @@ fn markdown_formats_only_template_body_content() {
         effective_tir_kind(&template, &context),
         TemplateType::String
     ));
-    let folded = fold_template_in_context(&template, &context, &mut string_table);
+    let folded = fold_template_in_context(
+        &template,
+        &context,
+        &mut string_table,
+        &mut expression_builder,
+        &mut const_values,
+    );
     let rendered = string_table.resolve(folded);
 
     assert!(rendered.starts_with("prefix"));

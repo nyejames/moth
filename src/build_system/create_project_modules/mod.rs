@@ -159,7 +159,10 @@ pub fn compile_project_frontend(
 }
 
 /// Compile all project modules with one command-owned typed input set and frontend mode.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "frontend dispatch keeps mutable configuration, build profile, optional output settings, directives, mutable builder/string/source owners, build-config inputs and mode separate"
+)]
 pub(crate) fn compile_project_frontend_with_inputs(
     config: &mut Config,
     build_profile: BuildProfile,

@@ -8,7 +8,10 @@ use crate::compiler_frontend::ast::const_values::facts::{
     AstConstDeclarationFact, AstConstFacts, ConstBindingScope, ConstBindingSource,
     ConstFactValueKind,
 };
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 
 use crate::compiler_frontend::hir::const_facts::HirConstFacts;
 use crate::compiler_frontend::hir::hir_builder::{build_ast_with_registered_types, lower_ast};
@@ -34,7 +37,13 @@ fn projects_ast_const_facts_into_hir_metadata() {
         None,
     );
 
-    let mut ast = build_ast_with_registered_types(vec![start_function], entry_path);
+    let mut ast = build_ast_with_registered_types(
+        vec![start_function],
+        entry_path,
+        AstExpressionBuilder::new().unwrap(),
+        ConstValueStore::default(),
+        TypeEnvironment::new(),
+    );
 
     let explicit_path = super::symbol("site_name", &mut path_fork, &mut string_table);
     let private_path = super::symbol("page_title", &mut path_fork, &mut string_table);
@@ -66,8 +75,13 @@ fn projects_ast_const_facts_into_hir_metadata() {
         },
     );
 
-    let (module, _type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
+    let (module, _type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
+    )
+    .expect("HIR lowering should succeed");
 
     assert_eq!(module.const_facts.declarations.len(), 2);
 
@@ -111,10 +125,21 @@ fn empty_ast_const_facts_produces_empty_hir_const_facts() {
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![start_function], entry_path);
+    let ast = build_ast_with_registered_types(
+        vec![start_function],
+        entry_path,
+        AstExpressionBuilder::new().unwrap(),
+        ConstValueStore::default(),
+        TypeEnvironment::new(),
+    );
 
-    let (module, _type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
+    let (module, _type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
+    )
+    .expect("HIR lowering should succeed");
 
     assert!(module.const_facts.declarations.is_empty());
 }

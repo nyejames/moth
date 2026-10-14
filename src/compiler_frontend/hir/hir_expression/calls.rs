@@ -2,20 +2,18 @@
 //!
 //! WHAT: lowers resolved user, external, receiver, and collection calls into explicit HIR call
 //! statements and values.
-//! WHY: ordinary calls may emit preludes, temporary bindings, tuple return shaping, and fresh
-//! mutable argument materialization. Fallible propagation and `catch` CFG joins live in
-//! `fallible.rs` so call lowering stays focused on call sequencing.
+//! WHY: ordinary calls emit preludes, ordered result bindings and fresh mutable argument
+//! materialisation. Native error continuations and recovery joins live in `fallible/`.
 //!
 //! ## Diagnostic boundary
 //!
 //! `CompilerError` / `return_hir_transformation_error!` in this module means an internal
 //! HIR transformation or lowering invariant failure only.
 
-use crate::compiler_frontend::ast::expressions::call_argument::{
-    CallAccessMode, CallArgument, CallPassingMode,
+use crate::compiler_frontend::ast::expressions::call_argument::CallPassingMode;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    ArgumentListView, ArgumentView, ExpressionView,
 };
-use crate::compiler_frontend::ast::expressions::expression::Expression;
-use crate::compiler_frontend::builtins::CollectionBuiltinOp;
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::TypeId as FrontendTypeId;
@@ -24,17 +22,34 @@ use crate::compiler_frontend::external_packages::ExternalFunctionId;
 use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirMapOp, ValueKind};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
+use crate::compiler_frontend::hir::ids::HirValueId;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{
     HirLocalDestination, HirStatement, HirStatementKind, HirWriteTarget,
 };
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::return_hir_transformation_error;
 
-use super::LoweredExpression;
+use super::{LoweredExpression, LoweredResults};
 
 impl<'a> HirBuilder<'a> {
+    pub(super) fn call_target_requires_result_projection(&self, target: &CallTarget) -> bool {
+        match target {
+            CallTarget::Local(_) | CallTarget::External(_) => false,
+            CallTarget::CrossModule(origin) => {
+                !self.module.function_ids_by_origin.contains_key(origin)
+            }
+            CallTarget::ModulePrivate(identity) => !self
+                .module
+                .function_ids_by_private_origin
+                .contains_key(identity),
+            CallTarget::Generated(identity) => !self
+                .module
+                .function_ids_by_generated
+                .contains_key(identity.as_ref()),
+        }
+    }
+
     /// Lowers an external function call whose success return is exactly one binary float, emitting
     /// the raw call and a `ValidateFloat` boundary check directly into the current block.
     ///
@@ -48,14 +63,22 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn lower_validated_external_call_expression(
         &mut self,
         id: ExternalFunctionId,
-        args: &[CallArgument],
+        args: ArgumentListView<'_>,
+        receiver: Option<ExpressionView<'_>>,
         result_type_ids: &[FrontendTypeId],
         span: &Option<SourceSpan>,
     ) -> Result<LoweredExpression, HirConstructionFailure> {
-        let mut lowered_args = Vec::with_capacity(args.len());
+        let mut lowered_args = Vec::with_capacity(args.len() + usize::from(receiver.is_some()));
+        if let Some(receiver) = receiver {
+            lowered_args.push(self.lower_expression_value_to_current_block(receiver)?);
+        }
 
         for (arg_index, argument) in args.iter().enumerate() {
-            let lowered = self.lower_call_argument_value(argument, span, arg_index)?;
+            let lowered = self.lower_call_argument_value(
+                argument,
+                span,
+                arg_index + usize::from(receiver.is_some()),
+            )?;
             for prelude_statement in lowered.prelude {
                 self.emit_statement_to_current_block(prelude_statement, span)?;
             }
@@ -74,7 +97,7 @@ impl<'a> HirBuilder<'a> {
             kind: HirStatementKind::Call {
                 target: CallTarget::External(id),
                 args,
-                result: Some(HirLocalDestination::Define(result_local)),
+                results: vec![HirLocalDestination::Define(result_local)],
             },
             span: *span,
         };
@@ -92,48 +115,6 @@ impl<'a> HirBuilder<'a> {
             value: validated_value,
         })
     }
-    pub(crate) fn lower_receiver_method_call_expression(
-        &mut self,
-        method_path: &PathId,
-        receiver: &Expression,
-        args: &[CallArgument],
-        result_type_ids: &[FrontendTypeId],
-        span: &Option<SourceSpan>,
-    ) -> Result<LoweredExpression, HirConstructionFailure> {
-        let target = self.resolve_call_target_or_error(method_path, span)?;
-        let mut full_args = Vec::with_capacity(args.len() + 1);
-        full_args.push(Self::shared_call_argument(receiver.clone(), span));
-        full_args.extend(args.iter().cloned());
-
-        self.lower_call_expression(target, &full_args, result_type_ids, span)
-    }
-    pub(crate) fn lower_collection_builtin_call_expression(
-        &mut self,
-        op: CollectionBuiltinOp,
-        receiver: &Expression,
-        args: &[CallArgument],
-        result_type_ids: &[FrontendTypeId],
-        span: &Option<SourceSpan>,
-    ) -> Result<LoweredExpression, HirConstructionFailure> {
-        let receiver_argument = if op.requires_mutable_receiver() {
-            Self::mutable_call_argument(receiver.clone(), span)
-        } else {
-            Self::shared_call_argument(receiver.clone(), span)
-        };
-        let mut full_args = Vec::with_capacity(args.len() + 1);
-        full_args.push(receiver_argument);
-        full_args.extend(args.iter().cloned());
-
-        let id = match op {
-            CollectionBuiltinOp::Get => ExternalFunctionId::CollectionGet,
-            CollectionBuiltinOp::Set => ExternalFunctionId::CollectionSet,
-            CollectionBuiltinOp::PushGrowable => ExternalFunctionId::CollectionPushGrowable,
-            CollectionBuiltinOp::PushFixed => ExternalFunctionId::CollectionPushFixed,
-            CollectionBuiltinOp::Remove => ExternalFunctionId::CollectionRemove,
-            CollectionBuiltinOp::Length => ExternalFunctionId::CollectionLength,
-        };
-        self.lower_call_expression(CallTarget::External(id), &full_args, result_type_ids, span)
-    }
 
     /// Lowers a compiler-owned map builtin call into a dedicated `MapOp` HIR statement.
     ///
@@ -141,15 +122,15 @@ impl<'a> HirBuilder<'a> {
     ///       `map.length` into explicit HIR map operations.
     /// WHY: map builtins are language constructs, not external calls. This keeps lowering,
     ///      borrow validation, and reachability explicit and backend-neutral.
-    pub(crate) fn lower_map_builtin_call_expression(
+    pub(crate) fn lower_map_builtin_call_results(
         &mut self,
         op: MapBuiltinOp,
-        receiver: &Expression,
+        receiver: ExpressionView<'_>,
         receiver_requires_mutable: bool,
-        args: &[CallArgument],
+        args: ArgumentListView<'_>,
         result_type_ids: &[FrontendTypeId],
         span: &Option<SourceSpan>,
-    ) -> Result<LoweredExpression, HirConstructionFailure> {
+    ) -> Result<LoweredResults, HirConstructionFailure> {
         let mut prelude = Vec::new();
         let hir_op = hir_map_op_from_builtin(op);
         if receiver_requires_mutable != hir_op.requires_mutable_receiver() {
@@ -166,7 +147,7 @@ impl<'a> HirBuilder<'a> {
 
         let mut lowered_args = Vec::with_capacity(args.len());
         for (arg_index, argument) in args.iter().enumerate() {
-            if self.expression_needs_current_block_lowering(&argument.value) {
+            if self.expression_needs_current_block_lowering(argument.value()) {
                 self.flush_pending_call_prelude(&mut prelude, span)?;
             }
             let lowered = self.lower_call_argument_value(argument, span, arg_index)?;
@@ -203,147 +184,101 @@ impl<'a> HirBuilder<'a> {
         prelude.push(statement);
 
         let no_span = None;
-        let value = if let Some(result_local) = result {
-            self.make_expression(
-                &no_span,
-                HirExpressionKind::Load(HirPlace::local(result_local)),
-                result_type,
-                ValueKind::RValue,
-                region,
-            )?
+        let values = if let Some(result_local) = result {
+            let value =
+                self.make_local_load_expression(result_local, result_type, &no_span, region)?;
+            self.log_call_result_binding(span, result, value);
+            vec![value]
         } else {
-            self.unit_expression(&no_span, region)?
+            vec![]
         };
-
-        self.log_call_result_binding(span, result, value);
-
-        Ok(LoweredExpression { prelude, value })
+        Ok(LoweredResults { prelude, values })
     }
 
-    // WHAT: lowers a resolved call target plus arguments into HIR call statements and values.
-    // WHY: calls may emit preludes, temporary bindings, and tuple shaping, so the lowering needs
-    //      one dedicated path instead of being duplicated across expression forms.
-    pub(crate) fn lower_call_expression(
+    pub(crate) fn lower_call_results(
         &mut self,
         target: CallTarget,
-        args: &[CallArgument],
+        args: ArgumentListView<'_>,
+        receiver: Option<ExpressionView<'_>>,
         result_type_ids: &[FrontendTypeId],
         span: &Option<SourceSpan>,
-    ) -> Result<LoweredExpression, HirConstructionFailure> {
+    ) -> Result<LoweredResults, HirConstructionFailure> {
         let mut prelude = Vec::new();
-        let mut lowered_args = Vec::with_capacity(args.len());
-
-        let result_carrying_user_call = match &target {
-            CallTarget::Local(function_id) => {
-                // Some unit tests lower isolated call expressions without registering a full
-                // function table in the module; in that mode we treat calls as plain values.
-                self.function_index_by_id
-                    .get(function_id)
-                    .copied()
-                    .and_then(|function_index| {
-                        let function_return_type =
-                            self.module.functions[function_index].return_type;
-                        match self
-                            .type_environment
-                            .fallible_carrier_slots(function_return_type)
-                        {
-                            Some((ok, _)) => Some((function_return_type, ok)),
-                            _ => None,
-                        }
-                    })
-            }
-            CallTarget::CrossModule(_)
-            | CallTarget::ModulePrivate(_)
-            | CallTarget::Generated(_)
-            | CallTarget::External(_) => None,
-        };
-
-        if result_carrying_user_call.is_some() {
-            return_hir_transformation_error!(
-                "Raw call to an error-returning function reached HIR lowering without explicit call-site handling",
-                self.hir_error_location(span)
-            );
+        let mut lowered_args = Vec::with_capacity(args.len() + usize::from(receiver.is_some()));
+        if let Some(receiver) = receiver {
+            let value = self.lower_child_expression_for_parent(&mut prelude, receiver)?;
+            lowered_args.push(value);
         }
-
         for (arg_index, argument) in args.iter().enumerate() {
-            if self.expression_needs_current_block_lowering(&argument.value) {
+            if self.expression_needs_current_block_lowering(argument.value()) {
                 self.flush_pending_call_prelude(&mut prelude, span)?;
             }
-
-            let lowered = self.lower_call_argument_value(argument, span, arg_index)?;
+            let lowered = self.lower_call_argument_value(
+                argument,
+                span,
+                arg_index + usize::from(receiver.is_some()),
+            )?;
             prelude.extend(lowered.prelude);
             lowered_args.push(lowered.value);
         }
+        self.lower_call_results_from_values(target, &lowered_args, prelude, result_type_ids, span)
+    }
 
-        let no_return = result_type_ids.is_empty();
+    pub(super) fn lower_call_results_from_values(
+        &mut self,
+        target: CallTarget,
+        lowered_args: &[HirValueId],
+        mut prelude: Vec<HirStatement>,
+        result_type_ids: &[FrontendTypeId],
+        span: &Option<SourceSpan>,
+    ) -> Result<LoweredResults, HirConstructionFailure> {
         let statement_id = self.allocate_node_id();
         let region = self.current_region_or_error(span)?;
-        let no_span = None;
         let is_external = matches!(target, CallTarget::External(_));
-
-        if no_return {
-            let args = self
-                .module
-                .expressions
-                .append_values(&lowered_args, *span)?;
-            let statement = HirStatement {
-                id: statement_id,
-                kind: HirStatementKind::Call {
-                    target,
-                    args,
-                    result: None,
+        let types = self.lower_call_result_types(result_type_ids, span)?;
+        if self.call_target_requires_result_projection(&target) {
+            self.module.call_result_contracts.insert(
+                target.clone(),
+                crate::compiler_frontend::hir::module::HirCallResultContract {
+                    returns: types.as_slice().into(),
+                    error_return: None,
                 },
-                span: *span,
-            };
-
-            self.side_table.map_statement(*span, &statement);
-            // Recorded optimistically: only callees with escaping failures will split.
-            if !is_external {
-                self.record_catch_protected_call(statement_id);
-            }
-            prelude.push(statement);
-
-            let value = self.unit_expression(&no_span, region)?;
-            self.log_call_result_binding(span, None, value);
-            return Ok(LoweredExpression { prelude, value });
+            );
         }
-
-        let call_result_type = self.lower_call_result_type(result_type_ids, span)?;
-        let temp_local = self.allocate_temp_local(call_result_type, None)?;
-        let args = self
-            .module
-            .expressions
-            .append_values(&lowered_args, *span)?;
-
+        let mut results = Vec::with_capacity(types.len());
+        let mut values = Vec::with_capacity(types.len());
+        for ty in types {
+            let local = self.allocate_temp_local(ty, None)?;
+            results.push(HirLocalDestination::Define(local));
+            values.push(self.make_local_load_expression(local, ty, &None, region)?);
+        }
+        let args = self.module.expressions.append_values(lowered_args, *span)?;
         let statement = HirStatement {
             id: statement_id,
             kind: HirStatementKind::Call {
                 target,
                 args,
-                result: Some(HirLocalDestination::Define(temp_local)),
+                results,
             },
             span: *span,
         };
-
         self.side_table.map_statement(*span, &statement);
-        // Recorded optimistically: only callees with escaping failures will split, and only
-        // while a catch handler protects the surrounding work.
         if !is_external {
             self.record_catch_protected_call(statement_id);
         }
         prelude.push(statement);
+        Ok(LoweredResults { prelude, values })
+    }
 
-        let value = self.make_expression(
-            &no_span,
-            HirExpressionKind::Load(HirPlace::local(temp_local)),
-            call_result_type,
-            ValueKind::RValue,
-            region,
-        )?;
-
-        self.log_call_result_binding(span, Some(temp_local), value);
-
-        Ok(LoweredExpression { prelude, value })
+    pub(crate) fn lower_call_result_types(
+        &mut self,
+        result_type_ids: &[FrontendTypeId],
+        span: &Option<SourceSpan>,
+    ) -> Result<Vec<TypeId>, HirConstructionFailure> {
+        result_type_ids
+            .iter()
+            .map(|ty| self.lower_type_id(*ty, span))
+            .collect()
     }
 
     pub(super) fn lower_call_result_type(
@@ -351,47 +286,34 @@ impl<'a> HirBuilder<'a> {
         result_type_ids: &[FrontendTypeId],
         span: &Option<SourceSpan>,
     ) -> Result<TypeId, HirConstructionFailure> {
-        if result_type_ids.is_empty() {
-            return Ok(self.type_environment.builtins().none);
+        match result_type_ids {
+            [] => Ok(self.type_environment.builtins().none),
+            [ty] => self.lower_type_id(*ty, span),
+            _ => return_hir_transformation_error!(
+                "Multiple slots reached scalar operation",
+                self.hir_error_location(span)
+            ),
         }
-
-        if result_type_ids.len() == 1 {
-            return self.lower_type_id(result_type_ids[0], span);
-        }
-
-        let field_types = result_type_ids
-            .iter()
-            .map(|ret| self.lower_type_id(*ret, span))
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(self.type_environment.intern_tuple(field_types))
-    }
-
-    fn shared_call_argument(value: Expression, span: &Option<SourceSpan>) -> CallArgument {
-        let arg_span = value.span.or(*span);
-        CallArgument::positional(value, CallAccessMode::Shared, arg_span)
-    }
-
-    fn mutable_call_argument(value: Expression, span: &Option<SourceSpan>) -> CallArgument {
-        let arg_span = value.span.or(*span);
-        CallArgument::positional(value, CallAccessMode::Mutable, arg_span)
     }
 
     pub(super) fn lower_call_argument_value(
         &mut self,
-        argument: &CallArgument,
+        argument: ArgumentView<'_>,
         call_span: &Option<SourceSpan>,
         argument_index: usize,
     ) -> Result<LoweredExpression, HirConstructionFailure> {
-        let lowered_value = if self.expression_needs_current_block_lowering(&argument.value) {
+        let value = argument.value();
+        let metadata = argument.metadata();
+        let lowered_value = if self.expression_needs_current_block_lowering(value) {
             LoweredExpression {
                 prelude: vec![],
-                value: self.lower_expression_value_to_current_block(&argument.value)?,
+                value: self.lower_expression_value_to_current_block(value)?,
             }
         } else {
-            self.lower_expression(&argument.value)?
+            self.lower_expression(value)?
         };
 
-        if argument.passing_mode != CallPassingMode::FreshMutableValue {
+        if metadata.passing_mode != CallPassingMode::FreshMutableValue {
             return Ok(lowered_value);
         }
 
@@ -414,10 +336,10 @@ impl<'a> HirBuilder<'a> {
             span: None,
         };
         self.side_table
-            .map_statement(argument.span, &write_statement);
+            .map_statement(metadata.span, &write_statement);
         prelude.push(write_statement);
 
-        let region = self.current_region_or_error(&argument.span)?;
+        let region = self.current_region_or_error(&metadata.span)?;
         let no_span = None;
         let value = self.make_expression(
             &no_span,
@@ -443,7 +365,7 @@ impl<'a> HirBuilder<'a> {
     }
 }
 
-fn hir_map_op_from_builtin(op: MapBuiltinOp) -> HirMapOp {
+pub(super) fn hir_map_op_from_builtin(op: MapBuiltinOp) -> HirMapOp {
     match op {
         MapBuiltinOp::Get => HirMapOp::Get,
         MapBuiltinOp::Contains => HirMapOp::Contains,

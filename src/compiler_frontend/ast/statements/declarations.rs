@@ -7,16 +7,21 @@
 //! expression and the declared local type.
 
 use crate::ast_log;
-use crate::compiler_frontend::ast::ast_nodes::AstNode;
+use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
+use crate::compiler_frontend::ast::const_values::ConstValueStore;
+use crate::compiler_frontend::ast::const_values::binding::{
+    bound_constant_initializer, resolve_const_expression_content,
+};
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::{ExpressionParseError, NumericDeferral};
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExpressionOperationView, ExpressionView,
+};
 use crate::compiler_frontend::ast::expressions::parse_expression_input::{
     ExpressionParseInput, ExpressionParseResources,
 };
-use crate::compiler_frontend::ast::function_body_to_ast;
 use crate::compiler_frontend::ast::module_ast::environment::config_resolution::expression_for_resolved_build_config_value;
 use crate::compiler_frontend::ast::module_ast::scope_context::AuthoredBindingFacts;
 use crate::compiler_frontend::ast::numeric_construction::{
@@ -26,13 +31,13 @@ use crate::compiler_frontend::ast::numeric_construction::{
 use crate::compiler_frontend::ast::numeric_known_shape::directed_recipe_shape;
 use crate::compiler_frontend::ast::statements::collections::{CurlyLiteral, new_curly_literal};
 use crate::compiler_frontend::ast::statements::functions::{
-    FunctionSignature, SignatureTypeFallbackPolicy, signature_member_to_declaration,
+    SignatureDefaultMode, SignatureTypeFallbackPolicy, signature_member_to_declaration,
 };
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::type_resolution::{
     TypeResolutionContext, TypeResolutionContextInputs, fold_collection_capacity,
-    resolve_diagnostic_type_to_type_id_checked, resolve_parsed_type_annotation,
+    resolve_parsed_type_annotation,
 };
 use crate::compiler_frontend::ast::{
     ContextKind, ScopeContext,
@@ -46,22 +51,20 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticToken,
     InvalidCollectionTypeReason, InvalidConfigReason, InvalidDeclarationReason,
-    InvalidFallibleHandlingReason, TypeMismatchContext,
+    InvalidFallibleHandlingReason, TypeMismatchContext, ValueReceiverContext,
 };
 
 use crate::compiler_frontend::build_config::BuildInputName;
-use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::datatype::diagnostic_type_spelling;
+use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::parsed::{ParsedCollectionCapacity, ParsedTypeRef};
-use crate::compiler_frontend::datatypes::{DataType, ReceiverKey};
 use crate::compiler_frontend::declaration_syntax::build_config_contract::{
     build_input_type_from_parsed, parsed_type_span,
 };
 use crate::compiler_frontend::declaration_syntax::declaration_shell::{
     DeclarationSyntax, parse_declaration_syntax,
 };
-use crate::compiler_frontend::declaration_syntax::r#struct::{
-    parse_struct_shell, validate_struct_default_values,
-};
+use crate::compiler_frontend::declaration_syntax::r#struct::parse_struct_shell;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceSpan};
 use crate::compiler_frontend::symbols::identifier_policy::{
     IdentifierNamingKind, ensure_not_keyword_shadow_identifier, naming_warning_for_identifier,
@@ -117,12 +120,19 @@ fn initializer_starts_with_type_parameter(source: &AstCursor, range: Option<Toke
 /// Both declaration paths use the shared module store so templates retain their exact view
 /// identity after composition. Classification does not rebuild a scratch template view.
 fn initializer_is_compile_time_constant(
-    initializer: &Expression,
+    initializer: ExpressionView<'_>,
     context: &ScopeContext,
+    expression_builder: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
 ) -> Result<bool, TemplateError> {
     initializer
-        .const_value_kind_with_template_classifier(&mut |template| {
-            classify_template_from_effective_tir(template, &context.template_ir_store)
+        .const_value_kind_with_template_classifier(const_values, &mut |template| {
+            classify_template_from_effective_tir(
+                template,
+                &context.template_ir_store,
+                expression_builder,
+                const_values,
+            )
         })
         .map(|kind| kind.is_compile_time_value())
 }
@@ -142,15 +152,10 @@ pub(crate) struct ResolvedDeclaration {
 
 /// Statement-level shape that declaration parsing discovered alongside the binding value.
 ///
-/// WHAT: keeps function bodies owned by statement emission while the declaration value remains a
-/// signature-only callable expression for lookup and type checking.
+/// WHAT: distinguishes ordinary bindings from struct-definition statements.
 pub(crate) enum ResolvedDeclarationStatementKind {
     Variable,
     StructDefinition(Vec<Declaration>),
-    Function {
-        signature: FunctionSignature,
-        body: Vec<AstNode>,
-    },
 }
 
 /// Mutable interner tables shared by declaration lowering.
@@ -176,6 +181,7 @@ pub(crate) struct DeclarationLoweringTables<'a> {
 fn register_pending_declaration(
     context: &ScopeContext,
     type_interner: &AstTypeInterner<'_>,
+    expression_builder: &AstExpressionBuilder,
     path_fork: &PathInternerFork,
     qualified_name: PathId,
     declaration_span: Option<SourceSpan>,
@@ -188,7 +194,12 @@ fn register_pending_declaration(
     let name = path_fork.component(qualified_name).ok_or_else(|| {
         CompilerError::compiler_error("a body-local declaration has no terminal declaration name")
     })?;
-    let directed_shape = directed_recipe_shape(context, type_interner.environment(), &items)?;
+    let directed_shape = directed_recipe_shape(
+        context,
+        type_interner.environment(),
+        &items,
+        expression_builder,
+    )?;
     let recipe = classify_recipe(items, directed_shape);
     let facts = AuthoredBindingFacts {
         name,
@@ -223,8 +234,7 @@ fn register_pending_declaration(
 
 /// Parse a new body-local declaration from the token stream.
 ///
-/// Handles function declarations as a fast path (they use a dedicated signature/body syntax)
-/// before falling through to generic value declaration parsing via `resolve_declaration_syntax`.
+/// Rejects module-only declaration headers before parsing, then resolves value declarations.
 /// Outcome of parsing one body-local declaration.
 ///
 /// WHAT: either a finished declaration, or an eligible numeric binding whose declaration node
@@ -240,15 +250,32 @@ pub(crate) enum NewDeclarationOutcome {
     PendingNumeric(NumericContinuationId),
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "declaration parsing keeps the cursor, symbol, scope and mutable state as separate borrows"
+)]
 pub(crate) fn new_declaration(
     token_stream: &mut AstCursor,
     symbol_id: StringId,
     context: &mut ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
-    warnings: &mut Vec<CompilerDiagnostic>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> DeclarationResult<NewDeclarationOutcome> {
+    // Functions and generic declaration headers belong to module-level declaration parsing.
+    if matches!(
+        token_stream.peek_next_tag(),
+        Some(TokenTag::TYPE_PARAMETER_BRACKET | TokenTag::TYPE)
+    ) {
+        return Err(CompilerDiagnostic::invalid_declaration(
+            InvalidDeclarationReason::DeclarationRequiresModuleTopLevel,
+            Some(symbol_id),
+            Some(token_stream.current_span()),
+        )
+        .into());
+    }
     let declaration_name = string_table.resolve(symbol_id).to_owned();
     ensure_not_keyword_shadow_identifier(
         symbol_id,
@@ -266,6 +293,11 @@ pub(crate) fn new_declaration(
     }
     // Capture the authored binding-name span before advancing past the name token.
     let binding_span = Some(token_stream.current_span());
+    if let Some(diagnostic) =
+        context.check_body_binding_visibility(symbol_id, binding_span, string_table)
+    {
+        return Err(diagnostic.into());
+    }
 
     // Move past the name
     token_stream.advance();
@@ -273,78 +305,6 @@ pub(crate) fn new_declaration(
     let qualified_name = path_fork
         .try_intern_child(context.scope, symbol_id)
         .expect("path table exhausted while creating declaration scope");
-
-    // ----------------------------
-    //  Function declaration fast-path
-    // ----------------------------
-    // Function declarations are parsed eagerly here because they use
-    // a dedicated signature/body syntax that does not fit value declarations.
-    if token_stream.current_tag() == TokenTag::TYPE_PARAMETER_BRACKET {
-        if let Some(warning) = naming_warning_for_identifier(
-            symbol_id,
-            Some(token_stream.current_span()),
-            IdentifierNamingKind::ValueLike,
-            string_table,
-        ) {
-            context.emit_warning(warning);
-        }
-
-        let function_signature = FunctionSignature::new(
-            token_stream,
-            warnings,
-            string_table,
-            &qualified_name,
-            context,
-            type_interner,
-            path_fork,
-        )?;
-        let function_context = context.new_child_function(
-            symbol_id,
-            function_signature.to_owned(),
-            string_table,
-            path_fork,
-        );
-
-        let function_body = function_body_to_ast(
-            token_stream,
-            function_context,
-            type_interner,
-            warnings,
-            string_table,
-            path_fork,
-        )?
-        // A local function is an independent body root: it owns its own numeric domain and
-        // completes before its declaring body's statements continue.
-        .expect_complete_nodes("a body-local function declaration");
-        let receiver = function_signature_receiver(&function_signature, string_table, path_fork);
-        let function_data_type =
-            DataType::Function(Box::new(receiver.clone()), function_signature.clone());
-        let function_type_id = resolve_diagnostic_type_to_type_id_checked(
-            &function_data_type,
-            type_interner.environment_mut_for_derived_types(),
-            Some(token_stream.current_span()),
-        )?;
-
-        return Ok(NewDeclarationOutcome::Ready(ResolvedDeclaration {
-            declaration: Declaration {
-                id: qualified_name,
-                value: Expression::function(
-                    receiver,
-                    function_signature.to_owned(),
-                    function_type_id,
-                    binding_span,
-                ),
-                binding_span,
-                config_qualifier: None,
-            },
-            statement_kind: ResolvedDeclarationStatementKind::Function {
-                signature: function_signature,
-                body: function_body?,
-            },
-            is_compile_time_binding: false,
-            binding_span,
-        }));
-    }
 
     if let Some(error) = check_signature_common_mistake(token_stream) {
         return Err(error.into());
@@ -396,6 +356,8 @@ pub(crate) fn new_declaration(
         Some(token_stream),
         &mut *context,
         type_interner,
+        expression_builder,
+        const_values,
         DeclarationLoweringTables {
             string_table,
             path_fork,
@@ -410,8 +372,31 @@ pub(crate) fn new_declaration(
     // initializer value span. `resolve_declaration_syntax` leaves it empty for this
     // body-local path; restore the exact anchor here.
     declaration.binding_span = binding_span;
-    let statement_kind = match &declaration.value.kind {
-        ExpressionKind::StructDefinition(params) => {
+    if is_compile_time_binding && let Some(authored) = declaration.value.initializer() {
+        let authored_is_template = matches!(
+            expression_builder.view(authored)?.operation(),
+            ExpressionOperationView::Template(_)
+        );
+        let content = resolve_const_expression_content(
+            authored,
+            expression_builder,
+            const_values,
+            type_interner.environment(),
+            &*context,
+            string_table,
+        )?;
+        const_values.bind_body_local(declaration.id, content)?;
+        let bound = bound_constant_initializer(
+            &declaration,
+            authored,
+            authored_is_template,
+            content,
+            expression_builder,
+        )?;
+        declaration.value = DeclarationValue::Initializer(bound);
+    }
+    let statement_kind = match &declaration.value {
+        DeclarationValue::StructDefinition(params) => {
             ResolvedDeclarationStatementKind::StructDefinition(params.to_owned())
         }
         _ => ResolvedDeclarationStatementKind::Variable,
@@ -423,19 +408,6 @@ pub(crate) fn new_declaration(
         is_compile_time_binding,
         binding_span,
     }))
-}
-/// Extract the receiver key from a function signature when the first parameter is named `this`.
-fn function_signature_receiver(
-    signature: &FunctionSignature,
-    string_table: &mut StringTable,
-    path_fork: &PathInternerFork,
-) -> Option<ReceiverKey> {
-    let this_name = string_table.intern("this");
-    signature
-        .parameters
-        .first()
-        .filter(|parameter| path_fork.component(parameter.id) == Some(this_name))
-        .and_then(|parameter| parameter.value.diagnostic_type.receiver_key_from_type())
 }
 
 /// Resolve a parsed declaration syntax into a fully typed `Declaration`.
@@ -460,6 +432,10 @@ pub(crate) enum DeclarationLowering {
     PendingNumeric(NumericContinuationId),
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "declaration lowering keeps the syntax, name, span, owner, scope and mutable state separate"
+)]
 pub fn resolve_declaration_syntax(
     declaration_syntax: DeclarationSyntax,
     qualified_name: PathId,
@@ -467,6 +443,8 @@ pub fn resolve_declaration_syntax(
     source_owner: Option<&AstCursor>,
     context: &mut ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     tables: DeclarationLoweringTables<'_>,
 ) -> DeclarationResult<DeclarationLowering> {
     let DeclarationLoweringTables {
@@ -545,6 +523,7 @@ pub fn resolve_declaration_syntax(
             capacity,
             Some(&*context),
             type_interner.environment_mut_for_derived_types(),
+            const_values,
         )
         .map_err(|diagnostic| diagnostic.into_diagnostic())?;
 
@@ -572,6 +551,8 @@ pub fn resolve_declaration_syntax(
             ExpectedCurlyLiteralContext::Collection(collection_context),
             context,
             type_interner,
+            expression_builder,
+            const_values,
             &value_mode,
             string_table,
             path_fork,
@@ -584,7 +565,7 @@ pub fn resolve_declaration_syntax(
             initializer_stream.advance();
         }
 
-        let mut parsed_initializer = match parsed_literal {
+        let parsed_initializer = match parsed_literal {
             CurlyLiteral::Ready(expression) => expression,
             CurlyLiteral::Retained(deferred) => {
                 if !retain_pending_origin {
@@ -608,6 +589,7 @@ pub fn resolve_declaration_syntax(
                 let continuation = register_pending_declaration(
                     context,
                     type_interner,
+                    expression_builder,
                     path_fork,
                     qualified_name,
                     declaration_syntax.span,
@@ -629,7 +611,12 @@ pub fn resolve_declaration_syntax(
         // Post-parse validation for token consumption and constant folding.
         let initializer_is_compile_time_constant =
             if declaration_syntax.binding_mode.is_compile_time() {
-                initializer_is_compile_time_constant(&parsed_initializer, context)?
+                initializer_is_compile_time_constant(
+                    expression_builder.view_owned(parsed_initializer)?,
+                    context,
+                    expression_builder,
+                    const_values,
+                )?
             } else {
                 true
             };
@@ -647,10 +634,19 @@ pub fn resolve_declaration_syntax(
 
         ensure_initializer_stream_ends(&mut initializer_stream, string_table)?;
 
-        parsed_initializer.value_mode = value_mode.to_owned();
         return Ok(DeclarationLowering::Ready(Declaration {
             id: qualified_name,
-            value: parsed_initializer,
+            type_id: expression_builder
+                .view_owned(parsed_initializer)?
+                .require_single(ValueReceiverContext::Declaration)?,
+            diagnostic_type: diagnostic_type_spelling(
+                expression_builder
+                    .view_owned(parsed_initializer)?
+                    .value_type_id()?,
+                type_interner.environment(),
+            ),
+            value_mode: value_mode.to_owned(),
+            value: DeclarationValue::Initializer(parsed_initializer.id()),
             binding_span: None,
             config_qualifier,
         }));
@@ -660,7 +656,6 @@ pub fn resolve_declaration_syntax(
         let mut type_resolution_context =
             TypeResolutionContext::from_inputs(TypeResolutionContextInputs {
                 declaration_table: &context.top_level_declarations,
-                declaring_file_id: context.shared.declaring_file_id,
                 visible_declaration_ids: context.visible_declaration_ids.as_ref(),
                 visible_external_symbols: context
                     .file_visibility
@@ -678,6 +673,7 @@ pub fn resolve_declaration_syntax(
                 generic_declarations_by_path: context.generic_declarations_by_path.as_deref(),
                 resolved_struct_fields_by_path: context.resolved_struct_fields_by_path.as_deref(),
                 type_environment: type_interner.environment_mut_for_derived_types(),
+                const_values,
                 visible_namespace_records: context
                     .file_visibility
                     .as_ref()
@@ -707,11 +703,12 @@ pub fn resolve_declaration_syntax(
     {
         return Ok(DeclarationLowering::Ready(Declaration {
             id: qualified_name,
-            value: Expression::no_value(
-                declaration_syntax.span,
-                DataType::Inferred,
-                ValueMode::ImmutableOwned,
-            ),
+            type_id: resolved_annotation
+                .type_id
+                .unwrap_or(builtin_type_ids::NONE),
+            diagnostic_type: resolved_annotation.diagnostic_type,
+            value_mode: ValueMode::ImmutableOwned,
+            value: DeclarationValue::PendingConstant,
             binding_span: None,
             config_qualifier,
         }));
@@ -745,11 +742,21 @@ pub fn resolve_declaration_syntax(
                 |qualifier| qualifier.qualifier_span,
             ),
             type_interner,
+            expression_builder,
+            const_values,
             string_table,
         )?;
         return Ok(DeclarationLowering::Ready(Declaration {
             id: qualified_name,
-            value,
+            type_id: expression_builder
+                .view_owned(value)?
+                .require_single(ValueReceiverContext::Declaration)?,
+            diagnostic_type: diagnostic_type_spelling(
+                expression_builder.view_owned(value)?.value_type_id()?,
+                type_interner.environment(),
+            ),
+            value_mode: expression_builder.view_owned(value)?.value_mode(),
+            value: DeclarationValue::Initializer(value.id()),
             binding_span: None,
             config_qualifier,
         }));
@@ -760,7 +767,7 @@ pub fn resolve_declaration_syntax(
         declaration_syntax.span,
     )?;
 
-    let mut parsed_initializer = match initializer_stream.current_tag() {
+    let parsed_initializer = match initializer_stream.current_tag() {
         // A leading `|` opens a struct definition; parenthesized const records parse
         // through the ordinary expression grammar below.
         TokenTag::TYPE_PARAMETER_BRACKET => {
@@ -799,17 +806,37 @@ pub fn resolve_declaration_syntax(
                     source_owner,
                     &constant_context,
                     type_interner,
+                    expression_builder,
+                    const_values,
                     string_table,
                     SignatureTypeFallbackPolicy::StrictCapacity,
+                    SignatureDefaultMode::FoldNow,
                     path_fork,
                     TypeMismatchContext::StructFieldDefault,
                 )?);
             }
 
-            validate_struct_default_values(&params, &context.template_ir_store)
-                .map_err(ExpressionParseError::from)?;
-
-            Expression::struct_definition(params, declaration_syntax.span, value_mode.to_owned())
+            ensure_initializer_stream_ends(&mut initializer_stream, string_table)?;
+            // A struct definition is nominal declaration syntax, never a foldable initializer.
+            if declaration_syntax.binding_mode.is_compile_time() {
+                return Err(CompilerDiagnostic::compile_time_evaluation_error(
+                    CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,
+                    path_fork.component(qualified_name),
+                    declaration_syntax.span,
+                )
+                .into());
+            }
+            return Ok(DeclarationLowering::Ready(Declaration {
+                id: qualified_name,
+                type_id: resolved_annotation
+                    .type_id
+                    .unwrap_or(builtin_type_ids::NONE),
+                diagnostic_type: resolved_annotation.diagnostic_type,
+                value_mode,
+                value: DeclarationValue::StructDefinition(params),
+                binding_span: None,
+                config_qualifier,
+            }));
         }
 
         _ => {
@@ -859,6 +886,8 @@ pub fn resolve_declaration_syntax(
                 &mut initializer_stream,
                 &expression_context,
                 type_interner,
+                expression_builder,
+                const_values,
                 &expression_context.expected_result_type_ids,
                 ValueReceiverKind::Declaration,
                 string_table,
@@ -885,6 +914,7 @@ pub fn resolve_declaration_syntax(
                         let continuation = register_pending_declaration(
                             context,
                             type_interner,
+                            expression_builder,
                             path_fork,
                             qualified_name,
                             declaration_syntax.span,
@@ -915,6 +945,8 @@ pub fn resolve_declaration_syntax(
                         token_stream: &mut initializer_stream,
                         scope_context: &expression_context,
                         type_interner,
+                        expression_builder,
+                        const_values,
                         expected_type: &mut expression_type,
                         cast_target_context: &mut cast_target_context,
                         value_mode: &value_mode,
@@ -955,6 +987,7 @@ pub fn resolve_declaration_syntax(
                         let continuation = register_pending_declaration(
                             context,
                             type_interner,
+                            expression_builder,
                             path_fork,
                             qualified_name,
                             declaration_syntax.span,
@@ -982,16 +1015,26 @@ pub fn resolve_declaration_syntax(
                     declared_type_id,
                     type_interner.environment(),
                     TypeMismatchContext::Declaration,
+                    expression_builder,
                 )?
             } else {
                 expression
             }
         }
-    };
+    }
+    .id();
+
+    expression_builder
+        .view(parsed_initializer)?
+        .require_single(ValueReceiverContext::Declaration)?;
 
     // Body-local compile-time constants must fully fold after parsing and coercion.
-    let initializer_is_compile_time_constant =
-        initializer_is_compile_time_constant(&parsed_initializer, context)?;
+    let initializer_is_compile_time_constant = initializer_is_compile_time_constant(
+        expression_builder.view(parsed_initializer)?,
+        context,
+        expression_builder,
+        const_values,
+    )?;
 
     if declaration_syntax.binding_mode.is_compile_time() && !initializer_is_compile_time_constant {
         return Err(CompilerDiagnostic::compile_time_evaluation_error(
@@ -1009,7 +1052,11 @@ pub fn resolve_declaration_syntax(
     if initializer_stream.current_tag() == TokenTag::ELSE
         && type_interner
             .environment()
-            .option_inner_type(parsed_initializer.type_id)
+            .option_inner_type(
+                expression_builder
+                    .view(parsed_initializer)?
+                    .value_type_id()?,
+            )
             .is_some()
     {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
@@ -1028,28 +1075,32 @@ pub fn resolve_declaration_syntax(
     {
         let env = type_interner.environment();
         if env.collection_fixed_capacity(type_id).is_some()
-            && let ExpressionKind::Collection(items) = &parsed_initializer.kind
-            && items.is_empty()
+            && let ExpressionOperationView::Collection(items) =
+                expression_builder.view(parsed_initializer)?.operation()
+            && items.len() == 0
         {
             return Err(CompilerDiagnostic::invalid_collection_type(
                 InvalidCollectionTypeReason::EmptyImmutableFixedCollection,
-                parsed_initializer.span,
+                expression_builder.view(parsed_initializer)?.span(),
             )
             .into());
         }
     }
 
-    // WHAT: the binding marker (`~=` / `=`) is the single source of truth for whether the
-    // stored declaration is a mutable place.
-    // WHY: rvalue initializers (for example struct literals and collections) inherit ownership
-    // from type defaults; preserving that ownership would incorrectly allow writes through
-    // immutable bindings and mutable receiver calls.
-    parsed_initializer.value_mode = value_mode.to_owned();
-
     ast_log!("Created new ", Cyan #value_mode);
     Ok(DeclarationLowering::Ready(Declaration {
         id: qualified_name,
-        value: parsed_initializer,
+        type_id: expression_builder
+            .view(parsed_initializer)?
+            .value_type_id()?,
+        diagnostic_type: diagnostic_type_spelling(
+            expression_builder
+                .view(parsed_initializer)?
+                .value_type_id()?,
+            type_interner.environment(),
+        ),
+        value_mode,
+        value: DeclarationValue::Initializer(parsed_initializer),
         binding_span: None,
         config_qualifier,
     }))

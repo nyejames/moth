@@ -6,7 +6,10 @@
 
 use super::super::slot_composition::child_wrappers::wrap_tir_node_in_wrappers_into;
 use super::super::slot_composition::schema::expand_tir_slot_placeholders_into;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, ExpressionView,
+};
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateBranchSelector, TemplateLoopHeader,
@@ -55,10 +58,11 @@ impl<'a> TirView<'a> {
         self.effective_node(root_node_id)
     }
 
-    pub(crate) fn effective_expression_for_node(
+    pub(crate) fn effective_expression_for_node<'expressions>(
         &self,
+        expressions: &'expressions AstExpressionBuilder,
         node_ref: TemplateIrNodeId,
-    ) -> Result<Option<&'a Expression>, CompilerError> {
+    ) -> Result<Option<ExpressionView<'expressions>>, CompilerError> {
         let site_id = {
             let node = self.effective_node(node_ref)?;
             match &node.kind {
@@ -67,7 +71,7 @@ impl<'a> TirView<'a> {
             }
         };
 
-        self.effective_expression_for_site(site_id)
+        self.effective_expression_for_site(expressions, site_id)
     }
 
     pub(crate) fn source_span_for_slot_occurrence(
@@ -199,12 +203,16 @@ fn expression_site_in_header(
 
 pub(crate) fn expand_tir_slot_placeholders(
     store: &mut TemplateIrStore,
+    expressions: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
     wrapper_template_id: TemplateIrId,
     routed_contributions: &super::super::slot_composition::TirSlotContributions,
     string_table: &crate::compiler_frontend::symbols::string_interning::StringTable,
 ) -> Result<TemplateIrNodeId, TemplateError> {
     expand_tir_slot_placeholders_into(
         store,
+        expressions,
+        const_values,
         wrapper_template_id,
         routed_contributions,
         string_table,
@@ -213,6 +221,8 @@ pub(crate) fn expand_tir_slot_placeholders(
 
 pub(crate) fn wrap_tir_node_in_wrappers(
     store: &mut TemplateIrStore,
+    expressions: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
     child_node_id: TemplateIrNodeId,
     wrapper_template_ids: &[TemplateIrId],
     string_table: &crate::compiler_frontend::symbols::string_interning::StringTable,
@@ -227,16 +237,32 @@ pub(crate) fn wrap_tir_node_in_wrappers(
             )
         })
         .collect::<Vec<_>>();
-    wrap_tir_node_in_wrappers_into(store, child_node_id, &wrapper_references, string_table)
+    wrap_tir_node_in_wrappers_into(
+        store,
+        expressions,
+        const_values,
+        child_node_id,
+        &wrapper_references,
+        string_table,
+    )
 }
 
 pub(crate) fn wrap_tir_node_in_wrapper_references(
     store: &mut TemplateIrStore,
+    expressions: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
     child_node_id: TemplateIrNodeId,
     wrapper_references: &[TemplateWrapperReference],
     string_table: &crate::compiler_frontend::symbols::string_interning::StringTable,
 ) -> Result<TemplateIrNodeId, TemplateError> {
-    wrap_tir_node_in_wrappers_into(store, child_node_id, wrapper_references, string_table)
+    wrap_tir_node_in_wrappers_into(
+        store,
+        expressions,
+        const_values,
+        child_node_id,
+        wrapper_references,
+        string_table,
+    )
 }
 
 // -------------------------
@@ -250,19 +276,21 @@ pub(crate) fn wrap_tir_node_in_wrapper_references(
 pub(crate) trait TirExpressionPayloadMutator {
     fn mutate_expression_payload(
         &mut self,
-        expression: &mut Expression,
+        expressions: &mut AstExpressionBuilder,
+        expression: &mut ExprId,
     ) -> Result<(), CompilerError>;
 }
 
 pub(crate) fn mutate_finalized_tir_body_root_expression_payloads<M>(
     store: &mut TemplateIrStore,
+    expressions: &mut AstExpressionBuilder,
     root: TemplateIrNodeId,
     mutator: &mut M,
 ) -> Result<(), CompilerError>
 where
     M: TirExpressionPayloadMutator,
 {
-    let mut walker = FinalizedBodyRootExpressionMutator::new(store, mutator);
+    let mut walker = FinalizedBodyRootExpressionMutator::new(store, expressions, mutator);
     walker.walk_node(root)
 }
 
@@ -271,6 +299,7 @@ where
     M: TirExpressionPayloadMutator,
 {
     store: &'store mut TemplateIrStore,
+    expressions: &'store mut AstExpressionBuilder,
     mutator: &'visitor mut M,
     active_nodes: HashSet<TemplateIrNodeId>,
     completed_nodes: HashSet<TemplateIrNodeId>,
@@ -289,9 +318,14 @@ impl<'store, 'visitor, M> FinalizedBodyRootExpressionMutator<'store, 'visitor, M
 where
     M: TirExpressionPayloadMutator,
 {
-    fn new(store: &'store mut TemplateIrStore, mutator: &'visitor mut M) -> Self {
+    fn new(
+        store: &'store mut TemplateIrStore,
+        expressions: &'store mut AstExpressionBuilder,
+        mutator: &'visitor mut M,
+    ) -> Self {
         Self {
             store,
+            expressions,
             mutator,
             active_nodes: HashSet::new(),
             completed_nodes: HashSet::new(),
@@ -494,12 +528,13 @@ where
                 .collect()),
 
             TemplateIrNodeKind::DynamicExpression { expression, .. } => {
-                self.mutator.mutate_expression_payload(expression)?;
+                self.mutator
+                    .mutate_expression_payload(self.expressions, expression)?;
                 Ok(Vec::new())
             }
 
             TemplateIrNodeKind::Conditional { selector, body, .. } => {
-                mutate_selector_expression(selector, self.mutator)?;
+                mutate_selector_expression(selector, self.expressions, self.mutator)?;
                 Ok(vec![TirExpressionWalkChild::Node(*body)])
             }
 
@@ -509,7 +544,7 @@ where
                 aggregate_wrapper,
                 ..
             } => {
-                mutate_loop_header_expressions(header, self.mutator)?;
+                mutate_loop_header_expressions(header, self.expressions, self.mutator)?;
 
                 let mut children = Vec::with_capacity(1 + usize::from(aggregate_wrapper.is_some()));
                 children.push(TirExpressionWalkChild::Node(*body));
@@ -556,21 +591,25 @@ where
 
 fn mutate_selector_expression<M>(
     selector: &mut TemplateBranchSelector,
+    expressions: &mut AstExpressionBuilder,
     mutator: &mut M,
 ) -> Result<(), CompilerError>
 where
     M: TirExpressionPayloadMutator,
 {
     match selector {
-        TemplateBranchSelector::Bool(condition) => mutator.mutate_expression_payload(condition),
+        TemplateBranchSelector::Bool(condition) => {
+            mutator.mutate_expression_payload(expressions, condition)
+        }
         TemplateBranchSelector::OptionPresentCapture { scrutinee, .. } => {
-            mutator.mutate_expression_payload(scrutinee)
+            mutator.mutate_expression_payload(expressions, scrutinee)
         }
     }
 }
 
 fn mutate_loop_header_expressions<M>(
     header: &mut TemplateLoopHeader,
+    expressions: &mut AstExpressionBuilder,
     mutator: &mut M,
 ) -> Result<(), CompilerError>
 where
@@ -578,18 +617,18 @@ where
 {
     match header {
         TemplateLoopHeader::Conditional { condition } => {
-            mutator.mutate_expression_payload(condition)
+            mutator.mutate_expression_payload(expressions, condition)
         }
         TemplateLoopHeader::Range { range, .. } => {
-            mutator.mutate_expression_payload(&mut range.start)?;
-            mutator.mutate_expression_payload(&mut range.end)?;
+            mutator.mutate_expression_payload(expressions, &mut range.start)?;
+            mutator.mutate_expression_payload(expressions, &mut range.end)?;
             if let Some(step) = &mut range.step {
-                mutator.mutate_expression_payload(step)?;
+                mutator.mutate_expression_payload(expressions, step)?;
             }
             Ok(())
         }
         TemplateLoopHeader::Collection { iterable, .. } => {
-            mutator.mutate_expression_payload(iterable)
+            mutator.mutate_expression_payload(expressions, iterable)
         }
     }
 }

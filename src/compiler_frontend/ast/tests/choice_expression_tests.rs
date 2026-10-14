@@ -4,7 +4,7 @@
 //! WHY: alpha choices are unit-variant-only and must fail fast for unknown/deferred forms.
 
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
-use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
+use crate::compiler_frontend::ast::expressions::expression_store::ExpressionOperationView;
 use crate::compiler_frontend::compiler_messages::{
     ChoiceVariantSeparatorGap, CommonSyntaxMistakeReason, DiagnosticPayload,
     InvalidChoiceVariantReason, NameNamespace,
@@ -48,11 +48,20 @@ fn resolves_choice_variant_expressions_with_choice_types() {
         })
         .expect("expected 'current' declaration in start function");
 
-    let (nominal_path, tag) = match &current_declaration.value.kind {
-        ExpressionKind::ChoiceConstruct {
-            nominal_path, tag, ..
-        } => (nominal_path, *tag),
-        other => panic!("expected ChoiceConstruct, got {other:?}"),
+    let choice = ast
+        .expressions
+        .view(
+            current_declaration
+                .value
+                .initializer()
+                .expect("fixture initializer"),
+        )
+        .expect("fixture initializer belongs to AST");
+    let ExpressionOperationView::Choice { tag, .. } = choice.operation() else {
+        panic!("expected Choice operation");
+    };
+    let DataType::Choices { nominal_path, .. } = &current_declaration.diagnostic_type else {
+        panic!("expected Choices diagnostic type");
     };
     assert_eq!(tag, 0, "expected Status::Ready to have tag 0");
     assert_eq!(
@@ -64,7 +73,7 @@ fn resolves_choice_variant_expressions_with_choice_types() {
     );
     assert!(
         matches!(
-            &current_declaration.value.diagnostic_type,
+            &current_declaration.diagnostic_type,
             DataType::Choices {
                 nominal_path,
                 ..
@@ -92,11 +101,20 @@ fn resolves_choice_variant_expressions_with_choice_types() {
         })
         .expect("expected 'selected' declaration in make_status");
 
-    let (nominal_path, tag) = match &selected_declaration.value.kind {
-        ExpressionKind::ChoiceConstruct {
-            nominal_path, tag, ..
-        } => (nominal_path, *tag),
-        other => panic!("expected ChoiceConstruct, got {other:?}"),
+    let selected = ast
+        .expressions
+        .view(
+            selected_declaration
+                .value
+                .initializer()
+                .expect("fixture initializer"),
+        )
+        .expect("fixture initializer belongs to AST");
+    let ExpressionOperationView::Choice { tag, .. } = selected.operation() else {
+        panic!("expected Choice operation");
+    };
+    let DataType::Choices { nominal_path, .. } = &selected_declaration.diagnostic_type else {
+        panic!("expected Choices diagnostic type");
     };
     assert_eq!(tag, 1, "expected Status::Busy to have tag 1");
     assert_eq!(
@@ -108,7 +126,7 @@ fn resolves_choice_variant_expressions_with_choice_types() {
     );
     assert!(
         matches!(
-            &selected_declaration.value.diagnostic_type,
+            &selected_declaration.diagnostic_type,
             DataType::Choices {
                 nominal_path,
                 ..

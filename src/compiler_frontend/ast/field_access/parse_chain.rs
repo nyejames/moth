@@ -6,20 +6,26 @@
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, NodeKind};
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression::ConstRecordState;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, OwnedExpr,
+};
 use crate::compiler_frontend::ast::expressions::parse_expression::complete_pending_expression;
-use crate::compiler_frontend::ast::expressions::parse_expression_places::place_expression_from_expression;
+use crate::compiler_frontend::ast::place_access::{
+    ReceiverSourceState, classify_expression_source_state,
+};
+use crate::compiler_frontend::ast::templates::tir::public_const_rebuild::rebuild_const_template_reference;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidAssignmentTargetReason, InvalidFieldAccessReason,
-    InvalidReceiverCallReason,
+    InvalidReceiverCallReason, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
-use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -42,7 +48,7 @@ use super::{MemberStepContext, ParsedBuiltinMemberCall, PostfixChainAccess, Rece
 ///      fabricated value; the enclosing expression boundary then decides whether its own fragment
 ///      completes at the site or defers to the body root with the item in place.
 pub(crate) enum ParsedPostfixExpression {
-    Value(Expression),
+    Value(OwnedExpr),
     RetainedOperand(ExpressionRpnItem),
 }
 
@@ -84,83 +90,160 @@ fn next_token_is_assignment_operator(next_token: Option<TokenTag>) -> bool {
 ///
 /// WHAT: preserves constant-context inlining, placeholder typing and value shape for the
 /// field-access receiver path.
-/// WHY: expression parsing can push plain references as narrow operands while member/place
-/// parsing can still wrap the same payload as a temporary `AstNode` during migration.
+/// WHY: expression and place parsing share declaration inlining policy, while postfix members
+/// bind the completed receiver ID through the same phase owner.
 pub(crate) fn reference_expression_from_declaration(
     reference_arg: &Declaration,
     context: &ScopeContext,
-    type_interner: &AstTypeInterner<'_>,
+    _type_interner: &AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    string_table: &mut StringTable,
     base_span: Option<SourceSpan>,
-) -> Expression {
+) -> Result<OwnedExpr, ExpressionParseError> {
+    let initializer = reference_arg.value.initializer();
+    let default = reference_arg.value.default();
+    let const_record_state = match (initializer, default) {
+        (Some(id), _) => {
+            expression_builder
+                .view(id)?
+                .classification()
+                .const_record_state
+        }
+        (_, Some(id)) => {
+            const_values
+                .metadata(id)
+                .ok_or_else(|| {
+                    CompilerError::compiler_error("declaration default outside constant owner")
+                })?
+                .const_record_state
+        }
+        _ => ConstRecordState::RuntimeValue,
+    };
+
     if context.kind.is_constant_context() {
         if context.is_unresolved_constant_placeholder(reference_arg) {
-            let placeholder_type = context
-                .expected_result_type_ids
-                .first()
-                .map(|type_id| diagnostic_type_spelling(*type_id, type_interner.environment()))
-                .unwrap_or_else(|| reference_arg.value.diagnostic_type.to_owned());
             let placeholder_type_id = context
                 .expected_result_type_ids
                 .first()
                 .copied()
-                .unwrap_or(reference_arg.value.type_id);
-            return Expression::reference_with_type_id(
-                reference_arg.id.to_owned(),
-                placeholder_type,
+                .unwrap_or(reference_arg.type_id);
+            return Ok(expression_builder.reference_with_type_id(
+                reference_arg.id,
                 placeholder_type_id,
                 base_span,
                 ValueMode::ImmutableOwned,
-                reference_arg.value.const_record_state,
+                const_record_state,
+            )?);
+        }
+        if const_record_state != ConstRecordState::ConstRecord
+            && let Some(initializer) = initializer
+        {
+            let mut input = expression_builder
+                .view(initializer)?
+                .to_completed_input(expression_builder)?;
+            input.span = base_span;
+            input.value_mode = ValueMode::ImmutableOwned;
+            return Ok(expression_builder.commit_replacement(input)?);
+        }
+        if const_record_state != ConstRecordState::ConstRecord
+            && let Some(default) = default
+        {
+            // WHY: an imported template constant keeps only its stable projection. A constant
+            //      reference rebuilds it as a `Template` so head and slot routing see template
+            //      semantics. Every other payload stays a plain constant.
+            let rebuilt = {
+                let mut template_store = context.template_ir_store.borrow_mut();
+                rebuild_const_template_reference(
+                    default,
+                    &mut template_store,
+                    expression_builder,
+                    const_values,
+                    context
+                        .file_value_resolution
+                        .as_ref()
+                        .map(|services| &*services.module_resources),
+                    string_table,
+                    base_span,
+                )?
+            };
+            // WHY: a reference occurrence carries its constant's synthetic provenance, as the
+            //      baseline clone of the declaration expression did. Template folding reads it
+            //      from the occurrence, so the constant's provenance must not be lost here.
+            let provenance = const_values
+                .metadata(default)
+                .map(|metadata| metadata.synthetic_interface_provenance.clone())
+                .unwrap_or_default();
+            let reference = match rebuilt {
+                Some(template) => {
+                    expression_builder.template(template, ValueMode::ImmutableOwned)?
+                }
+                None => expression_builder.constant(
+                    default,
+                    reference_arg.type_id,
+                    base_span,
+                    ValueMode::ImmutableOwned,
+                )?,
+            };
+            return Ok(
+                expression_builder.with_synthetic_interface_provenance(reference, provenance)?
             );
         }
-
-        if reference_arg.value.is_const_record_value() {
-            return Expression::reference_with_type_id(
-                reference_arg.id.to_owned(),
-                reference_arg.value.diagnostic_type.to_owned(),
-                reference_arg.value.type_id,
-                base_span,
-                ValueMode::ImmutableOwned,
-                reference_arg.value.const_record_state,
-            );
-        }
-
-        let mut inlined_expression = reference_arg.value.to_owned();
-        inlined_expression.span = base_span;
-        inlined_expression.value_mode = ValueMode::ImmutableOwned;
-        inlined_expression
-    } else {
-        Expression::reference_with_type_id(
-            reference_arg.id.to_owned(),
-            reference_arg.value.diagnostic_type.to_owned(),
-            reference_arg.value.type_id,
-            base_span,
-            reference_arg.value.value_mode.to_owned(),
-            reference_arg.value.const_record_state,
-        )
     }
+
+    Ok(expression_builder.reference_with_type_id(
+        reference_arg.id,
+        reference_arg.type_id,
+        base_span,
+        if context.kind.is_constant_context() {
+            ValueMode::ImmutableOwned
+        } else {
+            reference_arg.value_mode
+        },
+        const_record_state,
+    )?)
 }
 
 fn receiver_reference_node(
     reference_arg: &Declaration,
     context: &ScopeContext,
     type_interner: &AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    string_table: &mut StringTable,
     base_span: Option<SourceSpan>,
-) -> AstNode {
-    AstNode {
-        kind: NodeKind::ExpressionStatement(reference_expression_from_declaration(
-            reference_arg,
-            context,
-            type_interner,
-            base_span,
-        )),
+) -> Result<AstNode, ExpressionParseError> {
+    Ok(AstNode {
+        kind: NodeKind::ExpressionStatement(
+            reference_expression_from_declaration(
+                reference_arg,
+                context,
+                type_interner,
+                expression_builder,
+                const_values,
+                string_table,
+                base_span,
+            )?
+            .id(),
+        ),
         scope: context.scope.to_owned(),
         span: base_span,
-    }
+    })
 }
 
-fn receiver_node_type_id(node: &AstNode) -> Result<TypeId, CompilerError> {
-    node.expression_type_id()
+fn receiver_node_type_id(
+    node: &AstNode,
+    expression_builder: &AstExpressionBuilder,
+) -> Result<TypeId, ExpressionParseError> {
+    let NodeKind::ExpressionStatement(expression) = &node.kind else {
+        return Err(CompilerError::compiler_error(
+            "postfix receiver must be an expression statement",
+        )
+        .into());
+    };
+    Ok(expression_builder
+        .view(*expression)?
+        .require_single(ValueReceiverContext::ReceiverBase)?)
 }
 
 pub(super) fn type_id_is_external(type_id: TypeId, type_interner: &AstTypeInterner<'_>) -> bool {
@@ -176,17 +259,20 @@ pub(super) fn type_id_is_external(type_id: TypeId, type_interner: &AstTypeIntern
 )]
 pub(crate) fn parse_postfix_chain_expression(
     token_stream: &mut AstCursor<'_>,
-    receiver_expression: Expression,
+    receiver_expression: OwnedExpr,
     receiver_span: Option<SourceSpan>,
     chain_access: PostfixChainAccess,
     allow_boundary_catch: bool,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<ParsedPostfixExpression, ExpressionParseError> {
+    expression_builder.view_owned(receiver_expression)?;
     let receiver_node = AstNode {
-        kind: NodeKind::ExpressionStatement(receiver_expression),
+        kind: NodeKind::ExpressionStatement(receiver_expression.id()),
         scope: context.scope.to_owned(),
         span: receiver_span,
     };
@@ -198,14 +284,15 @@ pub(crate) fn parse_postfix_chain_expression(
         allow_boundary_catch,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     )?;
 
     match postfix {
-        ParsedPostfixChain::Node(node) => {
-            expression_from_postfix_node(&node).map(ParsedPostfixExpression::Value)
-        }
+        ParsedPostfixChain::Node(node) => expression_from_postfix_node(&node)
+            .map(|expression| ParsedPostfixExpression::Value(expression_builder.own(expression))),
         ParsedPostfixChain::RetainedOperand(item) => {
             Ok(ParsedPostfixExpression::RetainedOperand(item))
         }
@@ -214,9 +301,9 @@ pub(crate) fn parse_postfix_chain_expression(
 
 pub(crate) fn expression_from_postfix_node(
     postfix_node: &AstNode,
-) -> Result<Expression, ExpressionParseError> {
+) -> Result<ExprId, ExpressionParseError> {
     match &postfix_node.kind {
-        NodeKind::ExpressionStatement(expression) => Ok(expression.to_owned()),
+        NodeKind::ExpressionStatement(expression) => Ok(*expression),
 
         unexpected_kind => Err(CompilerError::compiler_error(format!(
             "Expected postfix expression node, found {unexpected_kind:?}"
@@ -236,6 +323,8 @@ fn parse_postfix_chain_typed(
     allow_boundary_catch: bool,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<ParsedPostfixChain, ExpressionParseError> {
@@ -271,7 +360,7 @@ fn parse_postfix_chain_typed(
         }
 
         let member_name = parse_member_name_typed(token_stream, &mut *string_table)?;
-        let receiver_type_id = receiver_node_type_id(&receiver_node)?;
+        let receiver_type_id = receiver_node_type_id(&receiver_node, expression_builder)?;
         let member_span = current_token_span(token_stream);
         let member_context = MemberStepContext {
             receiver_node: &receiver_node,
@@ -287,6 +376,8 @@ fn parse_postfix_chain_typed(
             token_stream,
             member_context.to_owned(),
             type_interner,
+            expression_builder,
+            const_values,
             path_fork,
         )? {
             receiver_node = field_access;
@@ -297,6 +388,8 @@ fn parse_postfix_chain_typed(
             token_stream,
             member_context.to_owned(),
             type_interner,
+            expression_builder,
+            const_values,
             string_table,
             path_fork,
         )? {
@@ -316,6 +409,8 @@ fn parse_postfix_chain_typed(
                         context,
                         chain_access,
                         type_interner,
+                        expression_builder,
+                        const_values,
                         string_table,
                         path_fork,
                     )?;
@@ -328,6 +423,8 @@ fn parse_postfix_chain_typed(
             token_stream,
             member_context.to_owned(),
             type_interner,
+            expression_builder,
+            const_values,
             string_table,
             path_fork,
         )? {
@@ -344,6 +441,8 @@ fn parse_postfix_chain_typed(
                         context,
                         chain_access,
                         type_interner,
+                        expression_builder,
+                        const_values,
                         string_table,
                         path_fork,
                     )?;
@@ -357,6 +456,8 @@ fn parse_postfix_chain_typed(
             member_context,
             allow_boundary_catch,
             type_interner,
+            expression_builder,
+            const_values,
             string_table,
             path_fork,
         )? {
@@ -377,6 +478,8 @@ fn parse_postfix_chain_typed(
                         context,
                         chain_access,
                         type_interner,
+                        expression_builder,
+                        const_values,
                         string_table,
                         path_fork,
                     )?;
@@ -421,11 +524,21 @@ fn parse_postfix_chain_typed(
     // ----------------------------
     if token_stream.current_tag().is_assignment_operator() {
         let receiver_expression = expression_from_postfix_node(&receiver_node)?;
-        if place_expression_from_expression(&receiver_expression).is_none() {
+        if matches!(
+            classify_expression_source_state(
+                expression_builder.view(receiver_expression)?,
+                path_fork
+            ),
+            ReceiverSourceState::Temporary
+        ) {
             let diagnostic = CompilerDiagnostic::invalid_assignment_target(
                 InvalidAssignmentTargetReason::TemporaryNotAssignable,
                 None,
-                Some(receiver_expression.type_id),
+                Some(
+                    expression_builder
+                        .view(receiver_expression)?
+                        .require_single(ValueReceiverContext::ReceiverBase)?,
+                ),
                 None,
                 None,
                 None,
@@ -475,12 +588,18 @@ fn parse_postfix_chain_typed(
 /// WHY: every retained call — receiver method or compiler-owned builtin — keeps the same
 ///      continuation policy at the chain boundary, so the operand's authored steps stay attached to
 ///      the position whose value they resolve against.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "retained operand continuation keeps the item, token stream, scope, chain access, type interner, expression builder, const store, string table, and path fork as separate borrows"
+)]
 fn continue_retained_operand(
     item: ExpressionRpnItem,
     token_stream: &mut AstCursor<'_>,
     context: &ScopeContext,
     chain_access: PostfixChainAccess,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<ExpressionRpnItem, ExpressionParseError> {
@@ -501,6 +620,8 @@ fn continue_retained_operand(
         },
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     )?;
@@ -515,11 +636,17 @@ fn continue_retained_operand(
 /// WHY: a call whose numeric-dependent argument was retained has no value yet; the statement and
 ///      mutation owners decide from the exclusive outcome whether they have a value, a mutation
 ///      target, or one deferred expression-statement position to record.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "field-access parsing keeps the token stream, base declaration, scope, type interner, expression builder, const store, string table, and path fork as separate borrows at the shared postfix entry point"
+)]
 pub fn parse_field_access(
     token_stream: &mut AstCursor<'_>,
     base_arg: &Declaration,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<ParsedPostfixExpression, ExpressionParseError> {
@@ -535,6 +662,8 @@ pub fn parse_field_access(
         parse_context,
         PostfixChainAccess::shared(),
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     )?;
@@ -546,7 +675,7 @@ pub fn parse_field_access(
         }
     };
 
-    let expression = expression_from_postfix_node(&postfix_node)?;
+    let expression = expression_builder.own(expression_from_postfix_node(&postfix_node)?);
     if token_stream.current_tag().is_assignment_operator() {
         return Ok(ParsedPostfixExpression::Value(expression));
     }
@@ -554,6 +683,8 @@ pub fn parse_field_access(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         expression,
         true,
         string_table,
@@ -562,12 +693,18 @@ pub fn parse_field_access(
     .map(ParsedPostfixExpression::Value)
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "receiver access chain parsing keeps the token stream, base declaration, scope, chain access, type interner, expression builder, const store, string table, and path fork as separate borrows"
+)]
 fn parse_field_access_with_receiver_access(
     token_stream: &mut AstCursor<'_>,
     base_arg: &Declaration,
     context: &ScopeContext,
     chain_access: PostfixChainAccess,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<ParsedPostfixChain, ExpressionParseError> {
@@ -577,11 +714,21 @@ fn parse_field_access_with_receiver_access(
     // an authored boundary catch there.
     parse_postfix_chain_typed(
         token_stream,
-        receiver_reference_node(base_arg, context, type_interner, base_span),
+        receiver_reference_node(
+            base_arg,
+            context,
+            type_interner,
+            expression_builder,
+            const_values,
+            string_table,
+            base_span,
+        )?,
         chain_access,
         true,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     )
@@ -598,13 +745,22 @@ pub(crate) fn parse_field_access_expression_with_receiver_access(
     chain_access: PostfixChainAccess,
     allow_boundary_catch: bool,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<ParsedPostfixExpression, ExpressionParseError> {
     let base_span = previous_token_span(token_stream).or_else(|| current_token_span(token_stream));
 
-    let receiver_expression =
-        reference_expression_from_declaration(base_arg, context, type_interner, base_span);
+    let receiver_expression = reference_expression_from_declaration(
+        base_arg,
+        context,
+        type_interner,
+        expression_builder,
+        const_values,
+        string_table,
+        base_span,
+    )?;
 
     parse_postfix_chain_expression(
         token_stream,
@@ -614,6 +770,8 @@ pub(crate) fn parse_field_access_expression_with_receiver_access(
         allow_boundary_catch,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     )

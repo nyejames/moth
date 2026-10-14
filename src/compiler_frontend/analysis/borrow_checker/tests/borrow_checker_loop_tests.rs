@@ -28,8 +28,13 @@ use crate::compiler_frontend::tests::type_id_fixture_support::lower_ast;
 
 fn borrow_check_source(source: &str) {
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
     run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("source should pass borrow checking");
 }
@@ -43,8 +48,13 @@ loop items |item|:
 ;
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
 
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("mutating a collection while iterating it should fail");
@@ -64,8 +74,13 @@ mutate(~items)
 after = items.length()
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
 
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("a mutable helper call on the active iterable should fail");
@@ -82,8 +97,13 @@ loop items |item|:
 ;
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
 
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("mutating an alias of the active iterable should fail");
@@ -102,8 +122,13 @@ loop inner |inner_item|:
 ;
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
 
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("the outer iterable must stay protected inside a nested loop");
@@ -122,8 +147,13 @@ loop inner |inner_item|:
 ;
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
 
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("the inner iterable must stay protected inside a nested loop");
@@ -171,8 +201,13 @@ return [: [output]</section>]
 ;
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
     let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("an independent output accumulator should not conflict with the iterable");
 
@@ -241,8 +276,13 @@ return [: [output]</section>]
 ;
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
     let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("a projected collection source should keep its carrier root live");
 
@@ -337,9 +377,9 @@ again = false
 return 0
 ;"#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let (mut hir, type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("fixture source should lower");
     let registry = default_external_package_registry(&mut string_table);
+    let (mut hir, type_environment) = lower_ast(ast, &mut string_table, &mut path_fork, &registry)
+        .expect("fixture source should lower");
     let local_named = |name| {
         hir.blocks
             .iter()
@@ -416,7 +456,7 @@ return 0
     *target = HirWriteTarget::DefineLocal(writer);
     *value = rvalue;
 
-    validate_hir_module(&hir, &type_environment)
+    validate_hir_module(&hir, &type_environment, &registry)
         .expect("loop re-entry definition should preserve HIR invariants");
     let report = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
         .expect("re-entry should retire the stale alias before the new value is installed");
@@ -471,8 +511,13 @@ first = shared.get(0) catch then "missing"
 ;
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
 
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("an alias read on every iteration should block mutating its source");
@@ -498,8 +543,13 @@ else
 value = alias
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
 
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("CFG future use through a branch join should preserve the alias conflict");
@@ -548,7 +598,8 @@ else
 value = alias.value
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
+    let registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(ast, &mut string_table, &mut path_fork, &registry);
     let point_local = hir
         .blocks
         .iter()

@@ -1,8 +1,9 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
+rendered_output_exact = "propagation_template label=hello"
 
 [[backends.html.artifact_assertions]]
 path = "index.html"
 kind = "html"
-must_contain = ["__moth_result_fallback", "propagation_template"]
+must_contain = ["propagation_template"]

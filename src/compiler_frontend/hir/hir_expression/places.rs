@@ -4,14 +4,11 @@
 //! WHY: HIR must distinguish assignable places from value expressions before later alias and
 //! mutation analysis can reason about them.
 
-#[cfg(test)]
-use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 
 use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValuePayload};
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-use crate::compiler_frontend::ast::expressions::expression_rpn::{
-    PlaceExpression, PlaceExpressionKind,
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    ExpressionOperationView, ExpressionView, PlaceProjectionView, PlaceView,
 };
 use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
 use crate::compiler_frontend::compiler_errors::CompilerError;
@@ -32,98 +29,68 @@ use crate::return_hir_transformation_error;
 use super::LoweredExpression;
 
 impl<'a> HirBuilder<'a> {
-    // WHAT: converts an AST node that semantically yields a value into HIR expression form.
-    // WHY: some runtime AST containers store expressions as general nodes, and HIR still needs a
-    //      single value-producing lowering path for them.
-    #[cfg(test)]
-    pub(crate) fn lower_ast_node_as_expression(
-        &mut self,
-        node: &AstNode,
-    ) -> Result<LoweredExpression, HirConstructionFailure> {
-        match &node.kind {
-            NodeKind::ExpressionStatement(expr) => {
-                if self.expression_needs_current_block_lowering(expr) {
-                    let value = self.lower_expression_value_to_current_block(expr)?;
-                    return Ok(LoweredExpression {
-                        prelude: vec![],
-                        value,
-                    });
-                }
-                self.lower_expression(expr)
-            }
-
-            _ => {
-                return_hir_transformation_error!(
-                    format!("AST node is not an expression: {:?}", node.kind),
-                    self.hir_error_location(&node.span)
-                )
-            }
-        }
-    }
-
-    // WHAT: resolves a frontend place expression into a concrete HIR place.
-    // WHY: copy expressions and assignment targets now carry narrow `PlaceExpression` values
-    //      instead of broad `AstNode` fragments.
+    /// Projects a bound AST place into HIR without retaining its expression domain.
     pub(crate) fn lower_place_expression_to_hir_place(
         &mut self,
-        place: &PlaceExpression,
+        place: PlaceView<'_>,
     ) -> Result<(Vec<HirStatement>, HirPlace), HirConstructionFailure> {
-        match &place.kind {
-            PlaceExpressionKind::Local(name) => {
-                if let Some(local) = self.locals_by_name.get(name).copied() {
-                    return Ok((vec![], HirPlace::local(local)));
-                }
-
-                // Field/index lowering requires a place. Module constants are lowered as
-                // rvalues, so materialize them into a temporary local when referenced in
-                // place-position expressions.
-                let lowered = self.lower_reference_expression(name, place.type_id, &place.span)?;
-                let (load_place, expression_type) = {
-                    let row = self.module.expressions.expression(lowered.value);
-                    let load_place = match &row.kind {
-                        HirExpressionKind::Load(place) => Some(*place),
-                        _ => None,
-                    };
-                    (load_place, row.ty)
-                };
-                if let Some(place) = load_place {
-                    return Ok((lowered.prelude, place));
-                }
-
-                let temp_local = self.allocate_temp_local(expression_type, None)?;
-                let assign_statement = HirStatement {
+        let metadata = place.metadata();
+        let (mut prelude, mut hir_place, mut current_type) =
+            if let Some(local) = self.locals_by_name.get(&metadata.root).copied() {
+                let ty = self.local_type_id_or_error(local, &metadata.span)?;
+                (Vec::new(), HirPlace::local(local), ty)
+            } else {
+                let value_id = self
+                    .module_constants_by_name
+                    .get(&metadata.root)
+                    .copied()
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error("Place root has no local or constant binding")
+                    })?;
+                let lowered = self.lower_const_store_expression(value_id, &metadata.span)?;
+                let ty = self.module.expressions.expression(lowered).ty;
+                let local = self.allocate_temp_local(ty, None)?;
+                let statement = HirStatement {
                     id: self.allocate_node_id(),
                     kind: HirStatementKind::Write {
-                        target: HirWriteTarget::DefineLocal(temp_local),
-                        value: lowered.value,
+                        target: HirWriteTarget::DefineLocal(local),
+                        value: lowered,
                     },
                     span: None,
                 };
-
-                self.side_table.map_statement(place.span, &assign_statement);
-
-                let mut prelude = lowered.prelude;
-                prelude.push(assign_statement);
-                Ok((prelude, HirPlace::local(temp_local)))
-            }
-
-            PlaceExpressionKind::Field { base, field } => {
-                let (prelude, base_place) = self.lower_place_expression_to_hir_place(base)?;
-                let field_id =
-                    self.resolve_field_id_for_type_or_error(base.type_id, *field, &place.span)?;
-
-                let place =
-                    base_place.with_field(field_id, &mut self.module.expressions, place.span)?;
-                Ok((prelude, place))
+                self.side_table.map_statement(metadata.span, &statement);
+                (vec![statement], HirPlace::local(local), ty)
+            };
+        for projection in place.projections() {
+            match projection {
+                PlaceProjectionView::Field { field, result_type } => {
+                    let field_id = self.resolve_field_id_for_type_or_error(
+                        current_type,
+                        field,
+                        &metadata.span,
+                    )?;
+                    hir_place = hir_place.with_field(
+                        field_id,
+                        &mut self.module.expressions,
+                        metadata.span,
+                    )?;
+                    current_type = result_type;
+                }
+                PlaceProjectionView::Index { index, result_type } => {
+                    let value = self.lower_child_expression_for_parent(&mut prelude, index)?;
+                    hir_place =
+                        hir_place.with_index(value, &mut self.module.expressions, metadata.span)?;
+                    current_type = result_type;
+                }
             }
         }
+        Ok((prelude, hir_place))
     }
 
-    // WHAT: lowers an expression-owned field access into a HIR value or const-record expansion.
-    // WHY: field access is now owned by `ExpressionKind::FieldAccess` rather than a statement node.
+    // Folded record members use the same constant visitor as every Constant operation.
     pub(crate) fn lower_field_access_expression(
         &mut self,
-        base: &Expression,
+        base: ExpressionView<'_>,
         field: StringId,
         result_type_id: FrontendTypeId,
         span: &Option<SourceSpan>,
@@ -155,7 +122,7 @@ impl<'a> HirBuilder<'a> {
     //      into a temporary local.
     fn lower_expression_to_place(
         &mut self,
-        base: &Expression,
+        base: ExpressionView<'_>,
         field: StringId,
         span: &Option<SourceSpan>,
     ) -> Result<(Vec<HirStatement>, HirPlace), HirConstructionFailure> {
@@ -202,7 +169,7 @@ impl<'a> HirBuilder<'a> {
 
     fn try_lower_const_record_field_access_expression(
         &mut self,
-        base: &Expression,
+        base: ExpressionView<'_>,
         field: StringId,
         result_type_id: FrontendTypeId,
         span: &Option<SourceSpan>,
@@ -267,13 +234,19 @@ impl<'a> HirBuilder<'a> {
 
         Ok(None)
     }
-    fn const_store_value_for_expression(&self, expression: &Expression) -> Option<ConstValueId> {
-        match &expression.kind {
-            ExpressionKind::Reference(name) => self.module_constants_by_name.get(name).copied(),
-            ExpressionKind::FieldAccess { base, field } => {
+    fn const_store_value_for_expression(
+        &self,
+        expression: ExpressionView<'_>,
+    ) -> Option<ConstValueId> {
+        match expression.operation() {
+            ExpressionOperationView::Constant(id) => Some(id),
+            ExpressionOperationView::Reference(name) => {
+                self.module_constants_by_name.get(&name).copied()
+            }
+            ExpressionOperationView::FieldAccess { base, field } => {
                 let base_value_id = self.const_store_value_for_expression(base)?;
                 self.module_const_values
-                    .field_value(base_value_id, *field, &*self.path_fork)
+                    .field_value(base_value_id, field, &*self.path_fork)
             }
             _ => None,
         }
@@ -407,7 +380,7 @@ impl<'a> HirBuilder<'a> {
                     Ok(CallTarget::CrossModule(origin.clone()))
                 }
                 SourceFunctionTarget::Generated { identity, .. } => {
-                    Ok(CallTarget::Generated(identity.clone()))
+                    Ok(CallTarget::Generated(Box::new(identity.clone())))
                 }
                 SourceFunctionTarget::ModulePrivate { identity, .. } => {
                     Ok(CallTarget::ModulePrivate(identity.clone()))

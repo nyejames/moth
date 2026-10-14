@@ -1,4 +1,5 @@
 use super::*;
+use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 #[derive(Debug)]
 struct DummyJsImportProvider {
@@ -220,7 +221,16 @@ fn module_contains_external_call(
                     ..
                 }
             )
-        })
+        }) || matches!(
+            &block.terminator,
+            HirTerminator::Invoke {
+                operation: HirFallibleOperation::Call {
+                    target: CallTarget::External(_),
+                    ..
+                },
+                ..
+            }
+        )
     })
 }
 
@@ -229,19 +239,33 @@ fn module_contains_external_module_export(
     export_name: &str,
 ) -> bool {
     module.executable.hir.blocks.iter().any(|block| {
-        block.statements.iter().any(|statement| {
-            let HirStatementKind::Call {
-                target: CallTarget::External(function_id),
+        let statement_calls =
+            block
+                .statements
+                .iter()
+                .filter_map(|statement| match &statement.kind {
+                    HirStatementKind::Call {
+                        target: CallTarget::External(function_id),
+                        ..
+                    } => Some(*function_id),
+                    _ => None,
+                });
+        let invoked_function = match &block.terminator {
+            HirTerminator::Invoke {
+                operation:
+                    HirFallibleOperation::Call {
+                        target: CallTarget::External(function_id),
+                        ..
+                    },
                 ..
-            } = &statement.kind
-            else {
-                return false;
-            };
-
+            } => Some(*function_id),
+            _ => None,
+        };
+        statement_calls.chain(invoked_function).any(|function_id| {
             module
                 .link_facts
                 .external_package_registry
-                .get_function_by_id(*function_id)
+                .get_function_by_id(function_id)
                 .and_then(|definition| definition.lowerings.js.as_ref())
                 .is_some_and(|lowering| {
                     matches!(

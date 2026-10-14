@@ -40,7 +40,7 @@ use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_identity_bridge::{
     BuiltinGenericType, GenericBaseType, generic_instantiation_key_argument_type_ids,
 };
-use crate::compiler_frontend::datatypes::ids::{FunctionTypeKey, TypeId, builtin_type_ids};
+use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::type_syntax::{
     TypeAnnotationContext, parsed_ref_to_data_type,
@@ -112,6 +112,7 @@ fn resolve_parsed_type_annotation_inner(
                         capacity,
                         scope_context,
                         context.type_environment,
+                        context.const_values,
                     ) {
                         Ok(value) => Some(value),
                         Err(diagnostic) => {
@@ -359,16 +360,10 @@ pub(crate) fn resolve_diagnostic_type_to_type_id_opt(
         // needs no declaration-site lookup.
         DataType::FixedScalar(scalar) => Some(builtin_type_ids::fixed_scalar(*scalar)),
         DataType::None => Some(type_environment.builtins().none),
-        DataType::Template => Some(type_environment.builtins().string),
         DataType::True | DataType::False => Some(type_environment.builtins().bool),
         DataType::Option(inner) => {
             let inner_id = resolve_diagnostic_type_to_type_id_opt(inner, type_environment)?;
             Some(type_environment.intern_option(inner_id))
-        }
-        DataType::FallibleCarrier { success, error } => {
-            let success_id = resolve_diagnostic_type_to_type_id_opt(success, type_environment)?;
-            let error_id = resolve_diagnostic_type_to_type_id_opt(error, type_environment)?;
-            Some(type_environment.intern_fallible_carrier(success_id, error_id))
         }
         DataType::Struct {
             type_id,
@@ -431,53 +426,11 @@ pub(crate) fn resolve_diagnostic_type_to_type_id_opt(
             }
             _ => None,
         },
-        DataType::Function(_, signature) => {
-            let param_ids: Box<[TypeId]> = signature
-                .parameters
-                .iter()
-                .filter_map(|p| {
-                    resolve_diagnostic_type_to_type_id_opt(
-                        &p.value.diagnostic_type,
-                        type_environment,
-                    )
-                })
-                .collect();
-            let return_ids: Box<[TypeId]> = signature
-                .returns
-                .iter()
-                .filter_map(|r| resolve_diagnostic_type_to_type_id_opt(&r.value, type_environment))
-                .collect();
-            Some(type_environment.intern_function(FunctionTypeKey {
-                parameters: param_ids,
-                returns: return_ids,
-                error_return: None,
-            }))
-        }
-        DataType::Returns(values) => {
-            returns_diagnostic_type_to_type_id_opt(values, type_environment)
-        }
         DataType::External { type_id } => Some(type_environment.intern_external(*type_id)),
         DataType::Parameters(_)
         | DataType::Inferred
         | DataType::NamedType(_)
         | DataType::NamespacedType { .. } => None,
-    }
-}
-
-pub(crate) fn returns_diagnostic_type_to_type_id_opt(
-    values: &[DataType],
-    type_environment: &mut TypeEnvironment,
-) -> Option<TypeId> {
-    match values {
-        [] => Some(type_environment.builtins().none),
-        [single] => resolve_diagnostic_type_to_type_id_opt(single, type_environment),
-        multiple => {
-            let field_ids = multiple
-                .iter()
-                .map(|value| resolve_diagnostic_type_to_type_id_opt(value, type_environment))
-                .collect::<Option<Vec<_>>>()?;
-            Some(type_environment.intern_tuple(field_ids))
-        }
     }
 }
 
@@ -552,42 +505,6 @@ pub(crate) fn resolve_type(
 
             Ok(DataType::Option(Box::new(resolved_inner)))
         }
-        DataType::Returns(values) => {
-            let mut resolved_values = Vec::with_capacity(values.len());
-            for value in values {
-                resolved_values.push(resolve_type(value, span, context, string_table)?);
-            }
-            Ok(DataType::Returns(resolved_values))
-        }
-        DataType::FallibleCarrier { success, error } => Ok(DataType::fallible_carrier(
-            resolve_type(success, span, context, string_table)?,
-            resolve_type(error, span, context, string_table)?,
-        )),
-        DataType::Function(receiver, signature) => {
-            let resolved_receiver = receiver
-                .as_ref()
-                .as_ref()
-                .map(|receiver_key| receiver_key.to_owned());
-
-            let mut resolved_signature = signature.to_owned();
-            for parameter in &mut resolved_signature.parameters {
-                parameter.value.diagnostic_type = resolve_type(
-                    &parameter.value.diagnostic_type,
-                    parameter.value.span.or(span),
-                    context,
-                    string_table,
-                )?;
-            }
-
-            for return_slot in &mut resolved_signature.returns {
-                return_slot.value = resolve_type(&return_slot.value, span, context, string_table)?;
-            }
-
-            Ok(DataType::Function(
-                Box::new(resolved_receiver),
-                resolved_signature,
-            ))
-        }
         DataType::NamespacedType { path } => {
             resolve_namespaced_type_from_context(path, span, context)
         }
@@ -601,11 +518,16 @@ pub(crate) fn resolve_type(
             let mut resolved_parameters = Vec::with_capacity(parameters.len());
             for parameter in parameters {
                 let mut resolved_parameter = parameter.to_owned();
-                resolved_parameter.value.diagnostic_type = resolve_type(
-                    &parameter.value.diagnostic_type,
-                    parameter.value.span.or(span),
+                resolved_parameter.diagnostic_type = resolve_type(
+                    &parameter.diagnostic_type,
+                    parameter.binding_span.or(span),
                     context,
                     string_table,
+                )?;
+                resolved_parameter.type_id = resolve_diagnostic_type_to_type_id_checked(
+                    &resolved_parameter.diagnostic_type,
+                    context.type_environment,
+                    parameter.binding_span.or(span),
                 )?;
                 resolved_parameters.push(resolved_parameter);
             }

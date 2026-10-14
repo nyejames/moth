@@ -57,6 +57,11 @@ macro_rules! emit_diagnostic_payload_enum {
                 found: TypeId,
                 context: TypeMismatchContext,
             },
+            InvalidValueReceiver {
+                receiver: ValueReceiverContext,
+                target_count: usize,
+                produced_count: usize,
+            },
             DuplicateDeclaration {
                 name: StringId,
             },
@@ -186,7 +191,7 @@ macro_rules! emit_diagnostic_payload_enum {
                 resource: SourceSpanCapacityResource,
             },
             CompilerCapacityExceeded {
-                resource: HirCapacityResource,
+                resource: CapacityResource,
             },
             InvalidCharacter {
                 character: char,

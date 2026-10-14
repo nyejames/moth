@@ -15,7 +15,8 @@ use super::super::store::TemplateIrStore;
 use super::super::subtree_copy::copy_tir_subtree_with_active_slot_plan;
 use super::super::summary::TemplateIrSummary;
 use super::builder::TemplateIrBuilder;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::templates::template::{
     SlotKey, Style, TemplateSegmentOrigin, TemplateType,
 };
@@ -26,8 +27,15 @@ use crate::compiler_frontend::ast::templates::tir::view::{TemplateTirPhase, TirV
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
 
-fn bool_expression(value: bool) -> Expression {
-    Expression::bool(value, None, ValueMode::ImmutableOwned)
+fn bool_expression(
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    value: bool,
+) -> ExprId {
+    expressions
+        .bool(const_values, value, None, ValueMode::ImmutableOwned)
+        .expect("test bool should construct")
+        .id()
 }
 
 fn text_node(
@@ -44,19 +52,21 @@ fn text_node(
 #[test]
 fn copied_conditional_and_loop_expression_sites_are_independent() {
     let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut string_table = StringTable::new();
 
     let conditional_body = text_node(&mut store, &mut string_table, "conditional");
     let loop_body = text_node(&mut store, &mut string_table, "loop");
     let mut builder = TemplateIrBuilder::new(&mut store);
     let conditional_root = builder.push_conditional_node(
-        TemplateBranchSelector::Bool(bool_expression(true)),
+        TemplateBranchSelector::Bool(bool_expression(&mut expressions, &mut const_values, true)),
         conditional_body,
         None,
     );
     let loop_root = builder.push_loop_node(
         TemplateLoopHeader::Conditional {
-            condition: Box::new(bool_expression(true)),
+            condition: bool_expression(&mut expressions, &mut const_values, true),
         },
         loop_body,
         None,
@@ -153,6 +163,8 @@ fn copied_conditional_and_loop_expression_sites_are_independent() {
 #[test]
 fn copied_child_remaps_retained_expression_and_slot_context() {
     let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut string_table = StringTable::new();
 
     let source_template = {
@@ -176,7 +188,7 @@ fn copied_child_remaps_retained_expression_and_slot_context() {
             .store
             .push_node(super::super::node::TemplateIrNode::new(
                 TemplateIrNodeKind::DynamicExpression {
-                    expression: Box::new(bool_expression(true)),
+                    expression: bool_expression(&mut expressions, &mut const_values, true),
                     origin: TemplateSegmentOrigin::Body,
                     site_id: expression_site,
                 },
@@ -199,12 +211,10 @@ fn copied_child_remaps_retained_expression_and_slot_context() {
     };
 
     let child_context = {
+        let override_expression = bool_expression(&mut expressions, &mut const_values, false);
         let expression_overlay = store
             .allocate_expression_overlay(TirExpressionOverlay {
-                overrides: vec![(
-                    source_expression_site,
-                    Box::new(Expression::bool(false, None, ValueMode::ImmutableOwned)),
-                )],
+                overrides: vec![(source_expression_site, override_expression)],
             })
             .expect("expression overlay should allocate");
         let slot_overlay = store
@@ -284,7 +294,7 @@ fn copied_child_remaps_retained_expression_and_slot_context() {
     assert_ne!(copied_slot_occurrence, source_slot_occurrence);
     assert!(
         child_view
-            .effective_expression_for_site(copied_expression_site)
+            .effective_expression_for_site(&expressions, copied_expression_site)
             .expect("copied expression overlay lookup should succeed")
             .is_some()
     );

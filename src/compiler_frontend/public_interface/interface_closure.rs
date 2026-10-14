@@ -541,7 +541,6 @@ impl ClosureWork {
             | CanonicalTypeIdentity::Collection { .. }
             | CanonicalTypeIdentity::OrderedMap { .. }
             | CanonicalTypeIdentity::Option(_)
-            | CanonicalTypeIdentity::FallibleCarrier(_)
             | CanonicalTypeIdentity::GenericParameter(_)
             | CanonicalTypeIdentity::AnonymousConstRecord => {}
         }
@@ -917,7 +916,6 @@ fn collect_type_origins(identity: &CanonicalTypeIdentity, origins: &mut Vec<Orig
         | CanonicalTypeIdentity::Collection { .. }
         | CanonicalTypeIdentity::OrderedMap { .. }
         | CanonicalTypeIdentity::Option(_)
-        | CanonicalTypeIdentity::FallibleCarrier(_)
         | CanonicalTypeIdentity::GenericParameter(_)
         | CanonicalTypeIdentity::AnonymousConstRecord => {}
     });

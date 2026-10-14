@@ -8,7 +8,9 @@
 
 use crate::ast_log;
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::templates::create_template_node::TemplatePathTables;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{
@@ -64,6 +66,8 @@ pub(crate) fn parse_template_body(
     let TemplateBodyParseRequest {
         context,
         type_interner,
+        expression_builder,
+        const_values,
         body_mode,
         direct_child_wrappers,
         control_flow_validation,
@@ -85,6 +89,8 @@ pub(crate) fn parse_template_body(
     let mut parser = TemplateBodyParser {
         token_stream,
         type_interner,
+        expression_builder,
+        const_values,
         direct_child_wrappers,
         control_flow_validation,
         string_table,
@@ -125,6 +131,8 @@ pub(crate) struct TemplateBodyParseRequest<'a, 'types> {
     pub(crate) context: &'a ScopeContext,
     pub(crate) end_policy: TemplateBodyEndPolicy,
     pub(crate) type_interner: &'a mut AstTypeInterner<'types>,
+    pub(crate) expression_builder: &'a mut AstExpressionBuilder,
+    pub(crate) const_values: &'a mut ConstValueStore,
     pub(crate) body_mode: TemplateBodyParseMode,
     pub(crate) direct_child_wrappers: &'a [TemplateWrapperReference],
     pub(crate) control_flow_validation: TemplateControlFlowValidationMode,
@@ -187,6 +195,8 @@ struct BodyParseInput<'context, 'build> {
 struct TemplateBodyParser<'a, 'cursor, 'types> {
     token_stream: &'a mut AstCursor<'cursor>,
     type_interner: &'a mut AstTypeInterner<'types>,
+    expression_builder: &'a mut AstExpressionBuilder,
+    const_values: &'a mut ConstValueStore,
     direct_child_wrappers: &'a [TemplateWrapperReference],
     control_flow_validation: TemplateControlFlowValidationMode,
     string_table: &'a mut StringTable,
@@ -476,6 +486,8 @@ impl<'a, 'cursor, 'types> TemplateBodyParser<'a, 'cursor, 'types> {
             self.source_path,
             input.context,
             self.type_interner,
+            self.expression_builder,
+            self.const_values,
             nested_direct_child_wrappers,
             parse_options,
             TemplatePathTables {

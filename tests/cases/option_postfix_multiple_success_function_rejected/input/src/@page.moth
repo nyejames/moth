@@ -1,0 +1,8 @@
+find_name || -> String?:
+    return "Priya"
+;
+
+display_pair || -> String?, String?:
+    name = find_name()?
+    return name, "guest"
+;

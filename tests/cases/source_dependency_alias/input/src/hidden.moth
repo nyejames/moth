@@ -1,0 +1,7 @@
+@types AccountId as LocalId, ACTIVE as LOCAL_ACTIVE
+
+hidden |maybe I32?| -> I32:
+    first = if maybe is |AccountId| then AccountId else 0
+    second = if maybe is |ACTIVE| then ACTIVE else 0
+    return first + second
+;

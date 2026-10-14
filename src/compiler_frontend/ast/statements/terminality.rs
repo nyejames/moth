@@ -26,8 +26,12 @@
 //! statement.
 
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, MatchExhaustiveness, NodeKind};
-use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
+use crate::compiler_frontend::ast::const_values::{ConstValuePayload, ConstValueStore};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExpressionOperationView,
+};
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidReturnShapeReason};
 use crate::compiler_frontend::source::SourceSpan;
 /// Policy that decides whether a function body must be terminal on all paths.
@@ -82,19 +86,21 @@ pub(crate) fn validate_function_body_terminality(
     body: &[AstNode],
     policy: FunctionTerminalityPolicy,
     span: Option<SourceSpan>,
-) -> Option<CompilerDiagnostic> {
+    expressions: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
+) -> Result<Option<CompilerDiagnostic>, CompilerError> {
     match policy {
         FunctionTerminalityPolicy::AllowImplicitUnit
-        | FunctionTerminalityPolicy::EntryStartImplicitReturn => None,
+        | FunctionTerminalityPolicy::EntryStartImplicitReturn => Ok(None),
 
         FunctionTerminalityPolicy::RequireExplicitReturn => {
-            if body_is_all_paths_terminal(body) {
-                None
+            if body_is_all_paths_terminal(body, expressions, const_values)? {
+                Ok(None)
             } else {
-                Some(CompilerDiagnostic::invalid_return_shape(
+                Ok(Some(CompilerDiagnostic::invalid_return_shape(
                     InvalidReturnShapeReason::FunctionMayFallThrough,
                     span,
-                ))
+                )))
             }
         }
     }
@@ -105,14 +111,18 @@ pub(crate) fn validate_function_body_terminality(
 /// WHAT: scans statements in order and returns true once any statement guarantees all-path
 /// terminality. Earlier fall-through statements may be followed by a later terminal statement.
 /// WHY: this matches the conservative contract documented at the module level.
-fn body_is_all_paths_terminal(body: &[AstNode]) -> bool {
+fn body_is_all_paths_terminal(
+    body: &[AstNode],
+    expressions: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
+) -> Result<bool, CompilerError> {
     for statement in body {
-        if statement_is_all_paths_terminal(statement) {
-            return true;
+        if statement_is_all_paths_terminal(statement, expressions, const_values)? {
+            return Ok(true);
         }
     }
 
-    false
+    Ok(false)
 }
 
 /// Returns true when a single statement guarantees that all paths through it terminate.
@@ -121,21 +131,32 @@ fn body_is_all_paths_terminal(body: &[AstNode]) -> bool {
 /// statements (`if`, `match`, `LexicalScope`).
 /// WHY: simple statements have fixed behavior, but nested control flow requires checking
 /// every branch.
-fn statement_is_all_paths_terminal(statement: &AstNode) -> bool {
+fn statement_is_all_paths_terminal(
+    statement: &AstNode,
+    expressions: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
+) -> Result<bool, CompilerError> {
     match &statement.kind {
-        NodeKind::Return(_) | NodeKind::ReturnError(_) => true,
+        NodeKind::Return(_) | NodeKind::ReturnError(_) => Ok(true),
 
-        NodeKind::Assert { condition, .. } => {
-            matches!(condition.kind, ExpressionKind::Bool(false))
+        NodeKind::Assert { condition, .. } => Ok(matches!(
+            expressions.view(*condition)?.operation(),
+            ExpressionOperationView::Constant(id)
+                if matches!(const_values.payload(id), Some(ConstValuePayload::Bool(false)))
+        )),
+
+        NodeKind::LexicalScope { body } => {
+            body_is_all_paths_terminal(body, expressions, const_values)
         }
-
-        NodeKind::LexicalScope { body } => body_is_all_paths_terminal(body),
 
         NodeKind::If(_, then_body, Some(else_body), _) => {
-            body_is_all_paths_terminal(then_body) && body_is_all_paths_terminal(else_body)
+            Ok(
+                body_is_all_paths_terminal(then_body, expressions, const_values)?
+                    && body_is_all_paths_terminal(else_body, expressions, const_values)?,
+            )
         }
 
-        NodeKind::If(_, _, None, _) => false,
+        NodeKind::If(_, _, None, _) => Ok(false),
 
         NodeKind::Match {
             arms,
@@ -143,22 +164,26 @@ fn statement_is_all_paths_terminal(statement: &AstNode) -> bool {
             exhaustiveness,
             ..
         } => {
-            let arms_terminal = arms.iter().all(|arm| body_is_all_paths_terminal(&arm.body));
+            let mut arms_terminal = true;
+            for arm in arms {
+                arms_terminal &= body_is_all_paths_terminal(&arm.body, expressions, const_values)?;
+            }
 
             match exhaustiveness {
                 MatchExhaustiveness::HasDefault => {
                     let Some(default_body) = maybe_default_body else {
-                        return false;
+                        return Ok(false);
                     };
 
-                    arms_terminal && body_is_all_paths_terminal(default_body)
+                    Ok(arms_terminal
+                        && body_is_all_paths_terminal(default_body, expressions, const_values)?)
                 }
 
-                MatchExhaustiveness::ExhaustiveChoice => arms_terminal,
+                MatchExhaustiveness::ExhaustiveChoice => Ok(arms_terminal),
             }
         }
 
-        _ => false,
+        _ => Ok(false),
     }
 }
 

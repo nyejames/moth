@@ -2,7 +2,8 @@ use super::super::construction_context::TemplateConstructionContext;
 use super::super::node::TemplateIrNodeKind;
 use super::super::store::TemplateIrStore;
 use super::super::view::TemplateTirPhase;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::templates::template::{Style, TemplateType};
 use crate::compiler_frontend::ast::templates::template_control_flow::TemplateBranchSelector;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -14,6 +15,8 @@ use std::rc::Rc;
 fn finish_consumes_the_construction_context_and_records_real_depth() {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut string_table = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut construction = TemplateConstructionContext::new(Rc::clone(&store), None);
 
     let body_text = string_table.intern("leaf");
@@ -23,8 +26,12 @@ fn finish_consumes_the_construction_context_and_records_real_depth() {
         .first()
         .expect("recorded text child");
 
-    let selector =
-        TemplateBranchSelector::Bool(Expression::bool(true, None, ValueMode::ImmutableOwned));
+    let selector = TemplateBranchSelector::Bool(
+        expressions
+            .bool(&mut const_values, true, None, ValueMode::ImmutableOwned)
+            .expect("test bool fits expression owner")
+            .id(),
+    );
     construction.record_conditional(selector, body_id, None);
 
     assert!(construction.control_flow_node_id().is_some());

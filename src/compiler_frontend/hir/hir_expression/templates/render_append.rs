@@ -5,9 +5,12 @@
 //! WHY: template control flow and aggregate wrapping share the same HIR concatenation semantics,
 //! and runtime slot source/site plans use that path after AST routing and validation.
 
-use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::const_values::store::{
+    ConstStringPiece, ConstStringValue, ConstValuePayload,
+};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    ExpressionOperationView, ExpressionView,
+};
 use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateBranchSelector, TemplateLoopHeader,
 };
@@ -158,11 +161,13 @@ impl<'a> HirBuilder<'a> {
 
     fn append_expression_to_accumulator(
         &mut self,
-        expression: &Expression,
+        expression: ExpressionView<'_>,
         append_context: RuntimeTemplateAppendContext<'_>,
         span_ref: &Option<SourceSpan>,
     ) -> Result<RuntimeTemplateEmission, HirConstructionFailure> {
-        if let ExpressionKind::StringSlice(text) = &expression.kind
+        if let ExpressionOperationView::Constant(id) = expression.operation()
+            && let Some(ConstValuePayload::String(ConstStringValue::Text(text))) =
+                self.module_const_values.payload(id)
             && self.string_table.resolve(*text).is_empty()
         {
             return Ok(RuntimeTemplateEmission::NoOutput);
@@ -281,8 +286,11 @@ impl<'a> HirBuilder<'a> {
             }
 
             OwnedRuntimeTemplateNode::DynamicExpression { expression, .. } => {
-                let emission =
-                    self.append_expression_to_accumulator(expression, append_context, span_ref)?;
+                let emission = self.append_expression_to_accumulator(
+                    append_context.anchor.bind(*expression)?,
+                    append_context,
+                    span_ref,
+                )?;
                 self.mark_owned_runtime_template_output_if_needed(
                     emission,
                     append_context,
@@ -447,7 +455,7 @@ impl<'a> HirBuilder<'a> {
         match selector {
             TemplateBranchSelector::Bool(condition) => {
                 self.lower_if_with_body_emitters(
-                    condition,
+                    append_context.anchor.bind(*condition)?,
                     span_ref,
                     None,
                     |builder: &mut HirBuilder<'_>| {
@@ -465,7 +473,7 @@ impl<'a> HirBuilder<'a> {
 
             TemplateBranchSelector::OptionPresentCapture { scrutinee, pattern } => {
                 self.append_runtime_option_present_template_branch(
-                    scrutinee,
+                    append_context.anchor.bind(*scrutinee)?,
                     pattern,
                     span_ref,
                     |builder: &mut HirBuilder<'_>| {
@@ -519,7 +527,7 @@ impl<'a> HirBuilder<'a> {
         match header {
             TemplateLoopHeader::Conditional { condition } => {
                 self.lower_while_with_body_emitter(
-                    condition,
+                    append_context.anchor.bind(*condition)?,
                     span_ref,
                     None,
                     emit_template_iteration,
@@ -528,6 +536,7 @@ impl<'a> HirBuilder<'a> {
 
             TemplateLoopHeader::Range { bindings, range } => {
                 self.lower_range_loop_with_body_emitter(
+                    append_context.anchor,
                     bindings,
                     range,
                     span_ref,
@@ -538,7 +547,7 @@ impl<'a> HirBuilder<'a> {
             TemplateLoopHeader::Collection { bindings, iterable } => {
                 self.lower_collection_loop_with_body_emitter(
                     bindings,
-                    iterable,
+                    append_context.anchor.bind(*iterable)?,
                     span_ref,
                     emit_template_iteration,
                 )?;
@@ -597,7 +606,7 @@ impl<'a> HirBuilder<'a> {
 
     fn append_runtime_template_expression_to_accumulator(
         &mut self,
-        expression: &Expression,
+        expression: ExpressionView<'_>,
         append_context: RuntimeTemplateAppendContext<'_>,
     ) -> Result<Option<RuntimeTemplateEmission>, HirConstructionFailure> {
         let Some(candidate) = runtime_template_append_candidate_for_expression(expression) else {
@@ -609,7 +618,7 @@ impl<'a> HirBuilder<'a> {
                 .append_runtime_slot_application_with_context(
                     handoff,
                     append_context,
-                    &expression.span,
+                    &expression.span(),
                 )
                 .map(Some),
 
@@ -618,7 +627,7 @@ impl<'a> HirBuilder<'a> {
                     .append_runtime_slot_application_with_context(
                         handoff,
                         append_context,
-                        &expression.span,
+                        &expression.span(),
                     )
                     .map(Some),
 
@@ -627,7 +636,7 @@ impl<'a> HirBuilder<'a> {
                         node,
                         append_context,
                         None,
-                        &expression.span,
+                        &expression.span(),
                     )
                     .map(Some),
             },
@@ -931,45 +940,19 @@ enum RuntimeTemplateAppendCandidate<'a> {
 }
 
 fn runtime_template_append_candidate_for_expression(
-    expression: &Expression,
+    expression: ExpressionView<'_>,
 ) -> Option<RuntimeTemplateAppendCandidate<'_>> {
-    match &expression.kind {
-        ExpressionKind::RuntimeSlotApplicationHandoff(handoff) => {
+    match expression.operation() {
+        ExpressionOperationView::RuntimeSlotApplication(handoff) => {
             Some(RuntimeTemplateAppendCandidate::SlotApplication(handoff))
         }
-
-        ExpressionKind::RuntimeTemplateHandoff(handoff) => {
+        ExpressionOperationView::RuntimeTemplate(handoff) => {
             Some(RuntimeTemplateAppendCandidate::TemplateHandoff { handoff })
         }
-
-        // String-boundary coercions are inserted around template helpers before
-        // HIR lowering. Append-mode slot applications need to see through them
-        // so they append into the active template accumulator.
-        ExpressionKind::Coerced { value, .. } => {
+        // String-boundary coercions preserve append-mode template semantics.
+        ExpressionOperationView::Coerce { value, .. } => {
             runtime_template_append_candidate_for_expression(value)
         }
-
-        ExpressionKind::Runtime(rpn) if rpn.items.len() == 1 => match &rpn.items[0] {
-            ExpressionRpnItem::Operand(expression) => {
-                runtime_template_append_candidate_for_expression(expression)
-            }
-            ExpressionRpnItem::Operator { .. } => None,
-            // Pending syntax never survives evaluation; flag it in debug builds so the invalid
-            // boundary is visible instead of silently reporting no append candidate.
-            ExpressionRpnItem::PendingNumericLiteral { .. }
-            | ExpressionRpnItem::PendingGroup { .. }
-            | ExpressionRpnItem::PendingNumericBinding { .. }
-            | ExpressionRpnItem::PendingNumericCast { .. }
-            | ExpressionRpnItem::PendingNumericCall { .. }
-            | ExpressionRpnItem::PendingNumericExpression { .. } => {
-                debug_assert!(
-                    false,
-                    "pending expression syntax reached HIR render-append query"
-                );
-                None
-            }
-        },
-
         _ => None,
     }
 }

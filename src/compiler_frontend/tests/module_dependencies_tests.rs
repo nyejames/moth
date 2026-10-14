@@ -316,6 +316,17 @@ fn same_file_backward_constant_reference_is_accepted() {
         vec!["Value", "ValueHolder"],
         "same-file backward constant reference should preserve source order"
     );
+    let typed_constant = sorted.module_symbols.ordered_semantic_declarations[0]
+        .declaration
+        .as_ref()
+        .expect("the typed constant retains its header declaration");
+    assert_eq!(
+        typed_constant.type_id,
+        crate::compiler_frontend::datatypes::builtin_type_ids::fixed_scalar(
+            moth_lexical::numeric::fixed_scalar::FixedScalar::I32,
+        ),
+        "pending constant references retain the exact seeded annotation identity",
+    );
 }
 
 #[test]

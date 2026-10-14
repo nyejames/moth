@@ -34,6 +34,8 @@ pub(super) fn parse_inline_value_if(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         target,
         string_table,
         condition,
@@ -46,6 +48,8 @@ pub(super) fn parse_inline_value_if(
         then_context: context,
         else_context: context,
         type_interner,
+        expression_builder,
+        const_values,
         // The authored block keeps the same active production target when a branch has to
         // resolve at the body root, so the parse runs against a copy of that exact target.
         target: target.clone(),
@@ -140,14 +144,13 @@ pub(super) fn parse_inline_value_if(
         result_type_ids: output.result_type_ids,
     };
 
-    Ok(match output.result_type_id {
-        Some(result_type_id) => ParsedReceiverValue::Complete(build_value_if_expression(
+    Ok(match output.needs_slot_inference {
+        false => ParsedReceiverValue::Complete(build_value_if_expression(
             value_if,
             span,
-            result_type_id,
-            type_interner.environment(),
-        )),
-        None => ParsedReceiverValue::NeedsSlotInference {
+            expression_builder,
+        )?),
+        true => ParsedReceiverValue::NeedsSlotInference {
             block: ValueBlock::If(value_if),
             span,
         },

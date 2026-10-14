@@ -3,16 +3,11 @@
 //! WHAT: validates struct definitions, defaults, constructors, and field access.
 //! WHY: struct parsing feeds both type resolution and HIR place lowering.
 
-use std::cell::RefCell;
-use std::rc::Rc;
-
-use crate::compiler_frontend::ast::ast_nodes::{Declaration, NodeKind};
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
-use crate::compiler_frontend::ast::templates::error::TemplateError;
-use crate::compiler_frontend::ast::templates::template::Template;
-use crate::compiler_frontend::ast::templates::tir::{
-    TemplateIrId, TemplateIrStore, TemplateTirPhase, TemplateTirReference, TemplateViewContext,
+use crate::compiler_frontend::ast::Ast;
+use crate::compiler_frontend::ast::ast_nodes::{DeclarationValue, NodeKind};
+use crate::compiler_frontend::ast::const_values::{ConstValueId, ConstValuePayload};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    ExpressionOperationView, ExpressionView,
 };
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticLabelMessage, DiagnosticLabelStyle, DiagnosticPayload, GenericInferenceSubject,
@@ -20,15 +15,11 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
-use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::declaration_syntax::r#struct::validate_struct_default_values;
-use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::path_interner::PathId;
+use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::tests::ast_fixture_support::start_function_body;
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_build_result, parse_single_file_ast_diagnostic,
 };
-use crate::compiler_frontend::value_mode::ValueMode;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 /// One exact `I32` scalar value for struct-default fixtures.
@@ -39,59 +30,50 @@ fn i32_value(value: i64) -> FixedScalarValue {
     FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32")
 }
 
-#[test]
-fn body_local_struct_default_preserves_missing_template_authority() {
-    let store = Rc::new(RefCell::new(TemplateIrStore::new()));
-    let fields = [Declaration {
-        id: PathId::ROOT,
-        value: Expression::template(
-            Template {
-                tir_reference: TemplateTirReference {
-                    root: TemplateIrId::new(99),
-                    phase: TemplateTirPhase::Composed,
-                    context: TemplateViewContext::default(),
-                },
-                span: None,
-            },
-            ValueMode::ImmutableOwned,
-        ),
-        binding_span: None,
-        config_qualifier: None,
-    }];
-
-    let error = validate_struct_default_values(&fields, &store)
-        .expect_err("missing struct-default TIR authority must fail");
-
-    assert!(matches!(error, TemplateError::Infrastructure(_)));
+/// Resolves a parsed declaration initializer to its expression view.
+fn initializer_view<'a>(ast: &'a Ast, declaration_value: &DeclarationValue) -> ExpressionView<'a> {
+    let id = declaration_value
+        .initializer()
+        .expect("fixture initializer");
+    ast.expressions.view(id).expect("fixture expression view")
 }
 
-#[test]
-fn authored_runtime_struct_default_remains_a_source_diagnostic() {
-    let store = Rc::new(RefCell::new(TemplateIrStore::new()));
-    let fields = [Declaration {
-        id: PathId::ROOT,
-        value: Expression::reference_with_type_id(
-            PathId::ROOT,
-            DataType::Bool,
-            builtin_type_ids::BOOL,
-            Option::<SourceSpan>::default(),
-            ValueMode::ImmutableReference,
-            ConstRecordState::RuntimeValue,
-        ),
-        binding_span: None,
-        config_qualifier: None,
-    }];
+/// Returns the folded constant behind a struct field default.
+///
+/// WHY: struct field defaults are stored as folded constants, not as authored expressions.
+fn default_constant(declaration_value: &DeclarationValue) -> ConstValueId {
+    declaration_value
+        .default()
+        .expect("fixture field default constant")
+}
 
-    let error = validate_struct_default_values(&fields, &store)
-        .expect_err("runtime struct default must be rejected");
-    let TemplateError::Diagnostic(diagnostic) = error else {
-        panic!("authored runtime default should remain a source diagnostic");
+/// Returns the `OptionSome` payload id behind a present optional default.
+///
+/// WHY: a present optional default folds to `OptionSome(inner)` carrying the declared optional
+///      type on the outer value.
+fn optional_payload_inner(ast: &Ast, id: ConstValueId, optional_type: TypeId) -> ConstValueId {
+    assert_eq!(
+        ast.const_values
+            .metadata(id)
+            .expect("optional default metadata")
+            .type_id,
+        optional_type,
+        "a present optional default must keep its declared optional type"
+    );
+    let Some(ConstValuePayload::OptionSome(inner)) = ast.const_values.payload(id) else {
+        panic!("a present optional default should fold to OptionSome");
     };
+    *inner
+}
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidStructDefaultValue
-    ));
+/// Returns the constant payload behind a constant-backed expression view.
+fn constant_payload_of<'a>(ast: &'a Ast, view: ExpressionView<'a>) -> &'a ConstValuePayload {
+    let ExpressionOperationView::Constant(id) = view.operation() else {
+        panic!("expected a constant-backed expression");
+    };
+    ast.const_values
+        .payload(id)
+        .expect("constant id must resolve to a payload")
 }
 
 #[test]
@@ -125,10 +107,10 @@ fn parses_struct_definitions_with_field_defaults() {
         Some("Point")
     );
     assert_eq!(fields.len(), 2);
-    assert!(matches!(fields[0].value.kind, ExpressionKind::NoValue));
+    assert!(matches!(fields[0].value, DeclarationValue::Absent));
     assert!(matches!(
-        fields[1].value.kind,
-        ExpressionKind::FixedScalar(value) if value == i32_value(2)
+        ast.const_values.payload(default_constant(&fields[1].value)),
+        Some(ConstValuePayload::FixedScalar(value)) if value == &i32_value(2)
     ));
 }
 
@@ -156,24 +138,27 @@ fn optional_present_default_preserves_struct_field_type() {
     };
     let string = ast.type_environment.builtins().string;
     assert_eq!(
-        ast.type_environment
-            .option_inner_type(fields[0].value.type_id),
+        ast.type_environment.option_inner_type(fields[0].type_id),
         Some(string),
         "a present default must keep the declared String? field identity"
     );
     assert_eq!(
-        fields[0].value.diagnostic_type, fields[1].value.diagnostic_type,
+        fields[0].diagnostic_type, fields[1].diagnostic_type,
         "declared spelling must survive a present default"
     );
-    let ExpressionKind::Coerced { value, to_type } = &fields[0].value.kind else {
-        panic!(
-            "present String default should be an explicit String -> String? coercion, got {:?}",
-            fields[0].value
-        );
-    };
-    assert_eq!(*to_type, fields[0].value.type_id);
-    assert_eq!(value.type_id, string);
-    assert!(matches!(value.kind, ExpressionKind::StringSlice(_)));
+    let text_inner =
+        optional_payload_inner(&ast, default_constant(&fields[0].value), fields[0].type_id);
+    assert_eq!(
+        ast.const_values
+            .metadata(text_inner)
+            .expect("text default payload metadata")
+            .type_id,
+        string
+    );
+    assert!(matches!(
+        ast.const_values.payload(text_inner),
+        Some(ConstValuePayload::String(_))
+    ));
 
     let label_type_id = ast
         .type_environment
@@ -203,15 +188,18 @@ fn parses_struct_construction_and_field_access_in_declarations() {
         panic!("expected point declaration");
     };
     assert!(matches!(
-        point_decl.value.kind,
-        ExpressionKind::StructInstance(..)
+        initializer_view(&ast, &point_decl.value).operation(),
+        ExpressionOperationView::Struct { .. }
     ));
 
     let NodeKind::VariableDeclaration(value_decl) = &body[1].kind else {
         panic!("expected field-read declaration");
     };
     assert!(
-        matches!(value_decl.value.kind, ExpressionKind::FieldAccess { .. }),
+        matches!(
+            initializer_view(&ast, &value_decl.value).operation(),
+            ExpressionOperationView::FieldAccess { .. }
+        ),
         "field access should be stored as an expression-owned field-access payload"
     );
 }
@@ -224,34 +212,42 @@ fn parses_builtin_error_with_default_code_field() {
     let NodeKind::VariableDeclaration(error_decl) = &body[0].kind else {
         panic!("expected error declaration");
     };
-    let ExpressionKind::StructInstance(fields) = &error_decl.value.kind else {
+    let ExpressionOperationView::Struct { fields } =
+        initializer_view(&ast, &error_decl.value).operation()
+    else {
         panic!("expected Error constructor to lower as a struct instance");
     };
 
-    assert_eq!(fields.len(), 2);
+    let field_views: Vec<_> = fields.iter().collect();
+    assert_eq!(field_views.len(), 2);
     assert_eq!(
         path_fork
-            .component(fields[0].id)
+            .component(field_views[0].name())
             .map(|id| string_table.resolve(id)),
         Some("message")
     );
     assert!(matches!(
-        fields[0].value.kind,
-        ExpressionKind::StringSlice(..)
+        constant_payload_of(&ast, field_views[0].value()),
+        ConstValuePayload::String(..)
     ));
     assert_eq!(
         path_fork
-            .component(fields[1].id)
+            .component(field_views[1].name())
             .map(|id| string_table.resolve(id)),
         Some("code")
     );
     // Consumer-visible canonical contract: the omitted `code` materialises as a
     // genuine `U32` zero fixed-scalar value, never a removed identity fallback.
     assert_eq!(
-        fields[1].value.type_id,
+        field_views[1]
+            .value()
+            .value_type_id()
+            .expect("Error.code default type"),
         builtin_type_ids::fixed_scalar(FixedScalar::U32)
     );
-    let ExpressionKind::FixedScalar(default_code) = &fields[1].value.kind else {
+    let ConstValuePayload::FixedScalar(default_code) =
+        constant_payload_of(&ast, field_views[1].value())
+    else {
         panic!("expected Error.code default to lower as a fixed-scalar literal");
     };
     assert_eq!(default_code.scalar(), FixedScalar::U32);
@@ -328,8 +324,9 @@ Label = |\n\
     let NodeKind::StructDefinition(path, fields) = &struct_node.kind else {
         panic!("expected struct definition node");
     };
-    let defaulted = &fields[0].value;
-    let required = &fields[1].value;
+    let defaulted = &fields[0];
+    let required = &fields[1];
+    assert!(matches!(required.value, DeclarationValue::Absent));
     let string = ast.type_environment.builtins().string;
 
     assert_eq!(
@@ -341,17 +338,21 @@ Label = |\n\
         defaulted.diagnostic_type, required.diagnostic_type,
         "the declared String? spelling must survive a constant-backed field default"
     );
-    let ExpressionKind::Coerced { value, to_type } = &defaulted.kind else {
-        panic!(
-            "present String default should retain its explicit String -> String? coercion, got {defaulted:?}"
-        );
-    };
-    assert_eq!(*to_type, defaulted.type_id);
-    assert_eq!(value.type_id, string);
+    let default_inner =
+        optional_payload_inner(&ast, default_constant(&defaulted.value), defaulted.type_id);
+    assert_eq!(
+        ast.const_values
+            .metadata(default_inner)
+            .expect("default payload metadata")
+            .type_id,
+        string
+    );
     assert!(
-        matches!(value.kind, ExpressionKind::StringSlice(_)),
-        "the constant should inline as a String payload, got {:?}",
-        value.kind
+        matches!(
+            ast.const_values.payload(default_inner),
+            Some(ConstValuePayload::String(_))
+        ),
+        "the constant should inline as a String payload"
     );
 
     let label_type_id = ast
@@ -427,63 +428,71 @@ outer = Outer()\n";
         .and_then(|nominal_id| ast.type_environment.type_id_for_nominal_id(nominal_id))
         .expect("Outer should have a nominal TypeId");
     assert_eq!(
-        outer_fields[0].value.type_id, inner_type_id,
+        outer_fields[0].type_id, inner_type_id,
         "Outer.child's constructor default should resolve to the nested Inner nominal"
     );
-    let ExpressionKind::StructInstance(nested_fields) = &outer_fields[0].value.kind else {
-        panic!(
-            "Outer.child should retain its explicit nested nominal default, got {:?}",
-            outer_fields[0].value.kind
-        );
+    let outer_child = default_constant(&outer_fields[0].value);
+    assert_eq!(
+        ast.const_values
+            .metadata(outer_child)
+            .expect("Outer.child default metadata")
+            .type_id,
+        inner_type_id,
+        "Outer.child's constructor default should fold to an Inner record"
+    );
+    let Some(ConstValuePayload::Record(nested_fields)) = ast.const_values.payload(outer_child)
+    else {
+        panic!("Outer.child should retain its explicit nested nominal default");
     };
     let nested_label = nested_fields
         .iter()
         .find(|field| {
             path_fork
-                .component(field.id)
+                .component(field.name)
                 .map(|id| string_table.resolve(id))
                 == Some("label")
         })
         .expect("the inlined Inner default should retain its label field");
+    let nested_label_inner =
+        optional_payload_inner(&ast, nested_label.value, inner_fields[0].type_id);
     assert_eq!(
-        ast.type_environment
-            .option_inner_type(nested_label.value.type_id),
-        Some(string),
+        ast.const_values
+            .metadata(nested_label_inner)
+            .expect("nested label payload metadata")
+            .type_id,
+        string,
         "inlining the nested constructor default must keep Inner.label as String?"
     );
-    let ExpressionKind::Coerced {
-        value: nested_value,
-        to_type: nested_to_type,
-    } = &nested_label.value.kind
-    else {
-        panic!(
-            "the inlined nested label should retain its String -> String? coercion, got {:?}",
-            nested_label.value.kind
-        );
-    };
-    assert_eq!(*nested_to_type, nested_label.value.type_id);
-    assert_eq!(nested_value.type_id, string);
     assert!(
-        matches!(nested_value.kind, ExpressionKind::StringSlice(_)),
-        "the inlined nested label should keep its String payload, got {:?}",
-        nested_value.kind
+        matches!(
+            ast.const_values.payload(nested_label_inner),
+            Some(ConstValuePayload::String(_))
+        ),
+        "the inlined nested label should keep its String payload"
     );
-    let ExpressionKind::Coerced { value, to_type } = &inner_fields[0].value.kind else {
-        panic!(
-            "Inner.label should retain its present String -> String? default, got {:?}",
-            inner_fields[0].value.kind
-        );
-    };
-    assert_eq!(*to_type, inner_fields[0].value.type_id);
-    assert_eq!(value.type_id, string);
+    let inner_label = optional_payload_inner(
+        &ast,
+        default_constant(&inner_fields[0].value),
+        inner_fields[0].type_id,
+    );
+    assert_eq!(
+        ast.const_values
+            .metadata(inner_label)
+            .expect("Inner.label payload metadata")
+            .type_id,
+        string,
+        "Inner.label default payload should be String"
+    );
     assert!(
-        matches!(value.kind, ExpressionKind::StringSlice(_)),
-        "Inner.label default should retain a String payload, got {:?}",
-        value.kind
+        matches!(
+            ast.const_values.payload(inner_label),
+            Some(ConstValuePayload::String(_))
+        ),
+        "Inner.label default should retain a String payload"
     );
     assert_eq!(
         ast.type_environment
-            .option_inner_type(inner_fields[0].value.type_id),
+            .option_inner_type(inner_fields[0].type_id),
         Some(string)
     );
 
@@ -537,7 +546,7 @@ boxed = Box(value = 7)\n";
 
     let TypeDefinition::GenericInstance(instance) = ast
         .type_environment
-        .get(boxed.value.type_id)
+        .get(boxed.type_id)
         .expect("boxed value should have a resolved type")
     else {
         panic!("Box(value = 7) should resolve to a concrete generic instance");
@@ -549,11 +558,7 @@ boxed = Box(value = 7)\n";
     );
     let published_label = ast
         .type_environment
-        .field_for(
-            boxed.value.type_id,
-            string_table.intern("label"),
-            &path_fork,
-        )
+        .field_for(boxed.type_id, string_table.intern("label"), &path_fork)
         .expect("the concrete Box should publish its label field");
     assert_eq!(
         ast.type_environment
@@ -588,34 +593,35 @@ fn optional_present_default_numeric_payloads_keep_declared_types() {
         panic!("expected NumericDefaults struct definition node");
     };
     let u8_type = builtin_type_ids::fixed_scalar(FixedScalar::U8);
-    let u8_default = &fields[0].value;
     assert_eq!(
-        ast.type_environment.option_inner_type(u8_default.type_id),
+        ast.type_environment.option_inner_type(fields[0].type_id),
         Some(u8_type),
         "U8? default should keep its declared optional identity"
     );
     assert!(matches!(
-        &u8_default.diagnostic_type,
+        &fields[0].diagnostic_type,
         DataType::Option(inner) if matches!(inner.as_ref(), DataType::FixedScalar(FixedScalar::U8))
     ));
-    let ExpressionKind::Coerced { value, to_type } = &u8_default.kind else {
-        panic!("U8? default should retain its receiving coercion, got {u8_default:?}");
-    };
-    assert_eq!(*to_type, u8_default.type_id);
-    assert_eq!(value.type_id, u8_type);
-    let ExpressionKind::FixedScalar(value) = &value.kind else {
-        panic!(
-            "U8? default should preserve its fixed-scalar payload, got {:?}",
-            value.kind
-        );
+    let u8_default =
+        optional_payload_inner(&ast, default_constant(&fields[0].value), fields[0].type_id);
+    assert_eq!(
+        ast.const_values
+            .metadata(u8_default)
+            .expect("U8 payload metadata")
+            .type_id,
+        u8_type
+    );
+    let ConstValuePayload::FixedScalar(value) =
+        ast.const_values.payload(u8_default).expect("U8 payload")
+    else {
+        panic!("U8? default should preserve its fixed-scalar payload");
     };
     assert_eq!(value.scalar(), FixedScalar::U8);
     assert_eq!(value.as_u64(), Some(255));
 
-    let dec_default = &fields[1].value;
     let dec_type = ast
         .type_environment
-        .option_inner_type(dec_default.type_id)
+        .option_inner_type(fields[1].type_id)
         .expect("Dec2? default should remain optional");
     assert_eq!(
         ast.type_environment
@@ -625,19 +631,22 @@ fn optional_present_default_numeric_payloads_keep_declared_types() {
         "Dec2? default should preserve its declared scale"
     );
     assert!(matches!(
-        &dec_default.diagnostic_type,
+        &fields[1].diagnostic_type,
         DataType::Option(inner) if matches!(inner.as_ref(), DataType::Number(scale) if scale.get() == 2)
     ));
-    let ExpressionKind::Coerced { value, to_type } = &dec_default.kind else {
-        panic!("Dec2? default should retain its receiving coercion, got {dec_default:?}");
-    };
-    assert_eq!(*to_type, dec_default.type_id);
-    assert_eq!(value.type_id, dec_type);
-    let ExpressionKind::Number(number) = &value.kind else {
-        panic!(
-            "Dec2? default should preserve its exact Number payload, got {:?}",
-            value.kind
-        );
+    let dec_default =
+        optional_payload_inner(&ast, default_constant(&fields[1].value), fields[1].type_id);
+    assert_eq!(
+        ast.const_values
+            .metadata(dec_default)
+            .expect("Dec2 payload metadata")
+            .type_id,
+        dec_type
+    );
+    let ConstValuePayload::Number(number) =
+        ast.const_values.payload(dec_default).expect("Dec2 payload")
+    else {
+        panic!("Dec2? default should preserve its exact Number payload");
     };
     assert_eq!(number.coefficient().to_string(), "120");
     assert_eq!(number.scale().get(), 2);

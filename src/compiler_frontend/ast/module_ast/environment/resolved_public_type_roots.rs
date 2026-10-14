@@ -286,7 +286,7 @@ pub(crate) fn build_resolved_public_type_roots(
                 roots.push(ResolvedPublicTypeRoot {
                     path: path.to_owned(),
                     kind: ResolvedPublicTypeRootKind::Constant {
-                        type_id: declaration.value.type_id,
+                        type_id: declaration.type_id,
                     },
                 });
             }
@@ -415,7 +415,7 @@ pub(crate) fn build_resolved_public_type_roots(
                 roots.push(ResolvedPublicTypeRoot {
                     path: path.to_owned(),
                     kind: ResolvedPublicTypeRootKind::Constant {
-                        type_id: declaration.value.type_id,
+                        type_id: declaration.type_id,
                     },
                 });
             }

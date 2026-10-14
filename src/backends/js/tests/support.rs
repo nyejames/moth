@@ -28,7 +28,9 @@ pub(super) use crate::compiler_frontend::external_packages::{
     CallTarget, ExternalFunctionId, IO_INPUT_EXTERNAL_TYPE_ID,
 };
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
-pub(super) use crate::compiler_frontend::hir::expression_store::HirExpressionStore;
+pub(super) use crate::compiler_frontend::hir::expression_store::{
+    HirExpressionStore, HirValueRange,
+};
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirMapEntry, ValueKind};
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{
@@ -42,7 +44,7 @@ use crate::compiler_frontend::hir::statements::{
 };
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 pub(super) use crate::compiler_frontend::tests::hir_fixture_support::{
-    bool_expression, expression, fixed_scalar_expression, string_expression, unit_expression,
+    bool_expression, expression, fixed_scalar_expression, string_expression,
 };
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
@@ -69,7 +71,6 @@ pub(super) use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 #[derive(Clone, Copy)]
 pub(super) struct TypeIds {
-    pub(super) unit: TypeId,
     /// The canonical I32 identity.
     pub(super) i32: TypeId,
     pub(super) boolean: TypeId,
@@ -77,7 +78,7 @@ pub(super) struct TypeIds {
     /// The canonical F64 identity.
     pub(super) f64: TypeId,
     pub(super) option_i32: TypeId,
-    pub(super) fallible_i32_string: TypeId,
+    pub(super) error: TypeId,
     pub(super) input_handle: TypeId,
     pub(super) choice_unit: TypeId,
     pub(super) collection_i32: TypeId,
@@ -143,10 +144,8 @@ pub(super) fn helper_source<'a>(source: &'a str, name: &str) -> &'a str {
 
 /// Returns the builtin `Error` type id, registering it on first use.
 ///
-/// WHAT: seeds the canonical `Error` identity the module environment does not seed, so fixtures
-///       can build the same `<success, Error>` carriers validated HIR gives boundary results.
-/// WHY: the internal fallible carrier carries the public builtin `Error`; a fixture-only carrier
-///      shape would diverge from every consumer that inspects the carrier's error slot.
+/// Seeds the canonical identity so failure-edge fixtures use the same builtin `Error` type
+/// as validated HIR.
 pub(super) fn fixture_error_type(type_environment: &mut TypeEnvironment) -> TypeId {
     let error_identity = CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error);
     if let Some(error_type_id) = type_environment.type_id_for_canonical_identity(&error_identity) {
@@ -166,25 +165,15 @@ pub(super) fn fixture_error_type(type_environment: &mut TypeEnvironment) -> Type
     error_type_id
 }
 
-/// Interns the internal fallible carrier for one success type with the builtin `Error` payload.
-///
-/// WHY: ReturnError results must match the carriers validated HIR produces, so every backend
-///      fixture derives its carrier from the same seeded `Error` identity.
-pub(super) fn fixture_carrier(type_environment: &mut TypeEnvironment, success: TypeId) -> TypeId {
-    let error_type = fixture_error_type(type_environment);
-    type_environment.intern_fallible_carrier(success, error_type)
-}
-
 /// Registers the type surface this backend's tests exercise.
 ///
 /// Deliberately local to each backend: the JS lane registers option, choice, collection, map,
-/// fallible-carrier and IO-input-handle types that the Wasm lane does not support, so the two
+/// builtin Error and IO-input-handle types that the Wasm lane does not support, so the two
 /// `TypeIds` shapes are not equivalent and must not be merged.
 pub(super) fn build_type_environment() -> (TypeEnvironment, TypeIds) {
     let mut env = TypeEnvironment::new();
     let builtins = env.builtins();
 
-    let unit = builtins.none;
     let i32 = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let boolean = builtins.bool;
     let string = builtins.string;
@@ -206,19 +195,18 @@ pub(super) fn build_type_environment() -> (TypeEnvironment, TypeIds) {
 
     let collection_i32 = env.intern_collection(i32, None);
     let map_string_i32 = env.intern_map(string, i32);
-    let fallible_i32_string = env.intern_fallible_carrier(i32, string);
+    let error = fixture_error_type(&mut env);
     let input_handle = env.intern_external(IO_INPUT_EXTERNAL_TYPE_ID);
 
     (
         env,
         TypeIds {
-            unit,
             i32,
             boolean,
             string,
             f64,
             option_i32,
-            fallible_i32_string,
+            error,
             input_handle,
             choice_unit,
             collection_i32,
@@ -346,26 +334,23 @@ pub(super) fn build_module(
 pub(super) fn lower_minimal_module(function_name: &str) -> String {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (type_environment, types) = build_type_environment();
-    let mut expressions = HirExpressionStore::default();
+    let (type_environment, _) = build_type_environment();
+    let expressions = HirExpressionStore::default();
 
     let block = HirBlock {
         id: BlockId(0),
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -423,14 +408,15 @@ pub(super) fn lower_minimal_map_module(function_name: &str) -> String {
         region,
         locals: vec![],
         statements: vec![statement(1, HirStatementKind::Expr(map_expression))],
-        terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -469,11 +455,11 @@ pub(super) fn lower_minimal_module_with_numeric_op(
     failure_mode: crate::compiler_frontend::hir::numeric::NumericFailureMode,
     operands: crate::compiler_frontend::hir::numeric::HirNumericOperands,
     result_type: TypeId,
-    mut expressions: HirExpressionStore,
+    expressions: HirExpressionStore,
 ) -> String {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (type_environment, types) = build_type_environment();
+    let (type_environment, _) = build_type_environment();
     let region = RegionId(0);
 
     let numeric_statement = statement(
@@ -491,14 +477,15 @@ pub(super) fn lower_minimal_module_with_numeric_op(
         region,
         locals: vec![local(0, result_type, region)],
         statements: vec![numeric_statement],
-        terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -587,14 +574,15 @@ fn lower_minimal_module_with_cast(
         region,
         locals: vec![],
         statements: vec![statement(1, HirStatementKind::Expr(cast_call))],
-        terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -690,7 +678,7 @@ pub(super) fn lower_minimal_module_with_io_call(
                 )],
                 &mut expressions,
             ),
-            result: None,
+            results: vec![],
         },
     );
 
@@ -699,14 +687,15 @@ pub(super) fn lower_minimal_module_with_io_call(
         region,
         locals: vec![],
         statements: vec![call_statement],
-        terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -777,7 +766,7 @@ pub(super) fn lower_minimal_module_with_io_input_call(
         HirStatementKind::Call {
             target: CallTarget::External(io_function_id),
             args,
-            result: None,
+            results: vec![],
         },
     );
 
@@ -786,14 +775,15 @@ pub(super) fn lower_minimal_module_with_io_input_call(
         region,
         locals: vec![input_local],
         statements: vec![call_statement],
-        terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(

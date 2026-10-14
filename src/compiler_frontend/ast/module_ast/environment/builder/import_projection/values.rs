@@ -1,12 +1,26 @@
 //! Imported aliases, constants, defaults, and folded values.
 
 use super::*;
+use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
-use std::cell::RefCell;
 
-use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
-use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
-use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
+use crate::compiler_frontend::ast::const_values::store::{
+    ConstStringPiece, ConstStringValue, ConstValueField, ConstValueMetadata,
+};
+use crate::compiler_frontend::ast::const_values::{
+    ConstValueId, ConstValuePayload, ConstValueStore, ConstValueStoreError,
+};
+use crate::compiler_frontend::ast::expressions::expression_types::{
+    ConstRecordState, ConstValueKind,
+};
+use crate::compiler_frontend::datatypes::definitions::{
+    ChoiceVariantPayloadDefinition, FieldDefinition,
+};
+use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::folded_value::{
+    OwnedFoldedString, OwnedFoldedStringPiece, PublicConstTemplateKind, PublicFoldedField,
+    PublicFoldedValue,
+};
 use crate::compiler_frontend::paths::module_resources::ResourceId;
 use crate::compiler_frontend::paths::resource_identity::StableResourceOriginId;
 use crate::compiler_frontend::project_globals::PROJECT_GLOBALS_DEPENDENCY_NAME;
@@ -15,11 +29,12 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
+use crate::compiler_frontend::value_mode::ValueMode;
 /// Services needed to invert one stable folded value into a fresh AST environment.
 ///
-/// WHAT: keeps canonical-type interning, the active type environment and the active TIR store
-/// explicit while allowing imported declarations and generated materialisation to share one
-/// folded-value inverse projection.
+/// WHAT: keeps canonical-type interning, path interning and the active type environment explicit
+/// while allowing imported declarations and generated materialisation to share one folded-value
+/// inverse projection.
 /// WHY: a second recursive value converter would make defaults and constants diverge between
 /// provider dependencies and generated sidecars.
 pub(crate) trait FoldedValueMaterialiser {
@@ -36,10 +51,6 @@ pub(crate) trait FoldedValueMaterialiser {
     fn path_fork(&mut self) -> &mut PathInternerFork;
 
     fn type_environment(&self) -> &TypeEnvironment;
-
-    fn template_ir_store(
-        &self,
-    ) -> Rc<RefCell<crate::compiler_frontend::ast::templates::tir::TemplateIrStore>>;
 }
 
 impl<'context, 'services> FoldedValueMaterialiser
@@ -74,12 +85,6 @@ impl<'context, 'services> FoldedValueMaterialiser
 
     fn type_environment(&self) -> &TypeEnvironment {
         &self.type_environment
-    }
-
-    fn template_ir_store(
-        &self,
-    ) -> Rc<RefCell<crate::compiler_frontend::ast::templates::tir::TemplateIrStore>> {
-        Rc::clone(&self.context.template_ir_store)
     }
 }
 
@@ -170,43 +175,83 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         string_table: &mut StringTable,
     ) -> Result<Declaration, CompilerError> {
         let type_id = self.intern_imported_canonical_type(&constant.type_identity)?;
-        let mut value =
-            self.project_imported_folded_value(&constant.folded_value, type_id, string_table)?;
-        // Imported constants are explicit compile-time values. Restore nominal record status
-        // here without changing ordinary folded/default materialisation into const records.
-        if matches!(&value.kind, ExpressionKind::StructInstance(_)) {
-            value.const_record_state = ConstRecordState::ConstRecord;
-        }
-        value.synthetic_interface_provenance = value
-            .synthetic_interface_provenance
-            .union(declaration_provenance);
+        let mut synthetic_interface_provenance = declaration_provenance.clone();
         if is_project_globals_origin(origin) {
             let project_member = SyntheticInterfaceMemberIdentity::new(
                 SyntheticInterfaceClass::ProjectContext,
                 PROJECT_GLOBALS_DEPENDENCY_NAME,
                 origin.defining_name(),
             );
-            value.synthetic_interface_provenance = value
-                .synthetic_interface_provenance
+            synthetic_interface_provenance = synthetic_interface_provenance
                 .union(&SyntheticInterfaceProvenance::single(project_member));
         }
+        // Imported constants are explicit compile-time values: a named record root is a nominal
+        // const record, and declaration provenance attaches to that root node only.
+        let root = ImportedRootMetadata {
+            const_record: true,
+            synthetic_interface_provenance,
+        };
+        let id = self
+            .with_owned_const_values(|builder, const_values| {
+                import_folded_value(
+                    builder,
+                    &constant.folded_value,
+                    type_id,
+                    const_values,
+                    string_table,
+                    None,
+                    root,
+                )
+            })
+            .map_err(const_store_error_into_compiler_error)?;
+        self.context
+            .const_values
+            .bind_module_constant(local_path, id)
+            .map_err(const_store_error_into_compiler_error)?;
+
         Ok(Declaration {
             id: local_path,
-            value,
+            type_id,
+            diagnostic_type: diagnostic_type_spelling(type_id, &self.type_environment),
+            value_mode: ValueMode::ImmutableReference,
+            value: DeclarationValue::Default(id),
             binding_span: None,
             config_qualifier: None,
         })
     }
 
-    pub(super) fn project_imported_folded_value(
+    /// Runs one projection with the constant store moved out of the builder.
+    ///
+    /// WHY: projection needs `&mut ConstValueStore` alongside `&mut self` as the materialiser. The
+    /// store is taken out for the call and restored afterwards, so the two borrows never overlap.
+    fn with_owned_const_values<T>(
+        &mut self,
+        project: impl FnOnce(&mut Self, &mut ConstValueStore) -> T,
+    ) -> T {
+        let mut const_values = std::mem::take(&mut self.context.const_values);
+        let result = project(self, &mut const_values);
+        self.context.const_values = const_values;
+        result
+    }
+
+    pub(in crate::compiler_frontend::ast::module_ast::environment) fn project_imported_folded_value(
         &mut self,
         folded: &PublicFoldedValue,
         expected_type_id: TypeId,
         string_table: &mut StringTable,
-    ) -> Result<Expression, CompilerError> {
+    ) -> Result<ConstValueId, CompilerError> {
         // Public folded values intentionally omit declaration spans, so imported projections
         // have no authored range to carry into a consumer-local resource table.
-        materialize_public_folded_value(self, folded, expected_type_id, string_table, None)
+        self.with_owned_const_values(|builder, const_values| {
+            materialize_public_folded_value(
+                builder,
+                folded,
+                expected_type_id,
+                const_values,
+                string_table,
+                None,
+            )
+        })
     }
 }
 
@@ -245,9 +290,9 @@ pub(in crate::compiler_frontend::ast) fn materialize_owned_folded_string(
     value: &OwnedFoldedString,
     string_table: &mut StringTable,
     mut intern_resource_origin: impl FnMut(&StableResourceOriginId) -> Result<ResourceId, CompilerError>,
-) -> Result<ExpressionKind, CompilerError> {
+) -> Result<ConstStringValue, CompilerError> {
     match value {
-        OwnedFoldedString::Text(text) => Ok(ExpressionKind::StringSlice(string_table.intern(text))),
+        OwnedFoldedString::Text(text) => Ok(ConstStringValue::Text(string_table.intern(text))),
         OwnedFoldedString::Pieces(pieces) => {
             let mut projected = Vec::with_capacity(pieces.len());
             for piece in pieces {
@@ -261,20 +306,80 @@ pub(in crate::compiler_frontend::ast) fn materialize_owned_folded_string(
                     OwnedFoldedStringPiece::SiteRoot => ConstStringPiece::SiteRoot,
                 });
             }
-            Ok(ExpressionKind::StructuralString { pieces: projected })
+            Ok(ConstStringValue::Pieces(projected))
         }
     }
 }
 
-/// Rebuild one stable folded value in the active module-local type and TIR environment.
+/// Rebuild one stable folded value as interned nodes in the consumer's constant store.
+///
+/// WHAT: walks the public value against consumer-local canonical types and inserts each node once.
+/// WHY: constant content lives only in `ConstValueStore`; projection creates no expression nodes.
 pub(crate) fn materialize_public_folded_value<M: FoldedValueMaterialiser>(
     materialiser: &mut M,
     folded: &PublicFoldedValue,
     expected_type_id: TypeId,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     span: Option<SourceSpan>,
-) -> Result<Expression, CompilerError> {
-    let kind = match folded {
+) -> Result<ConstValueId, CompilerError> {
+    import_folded_value(
+        materialiser,
+        folded,
+        expected_type_id,
+        const_values,
+        string_table,
+        span,
+        ImportedRootMetadata::default(),
+    )
+    .map_err(const_store_error_into_compiler_error)
+}
+
+/// Declaration-level facts applied only to the outermost node of one imported projection.
+///
+/// WHAT: carries declaration provenance and whether a named record is a nominal const record.
+/// WHY: nested folded children never inherit declaration facts, so only the root node stores them.
+#[derive(Default)]
+struct ImportedRootMetadata {
+    const_record: bool,
+    synthetic_interface_provenance: SyntheticInterfaceProvenance,
+}
+
+/// Converts a constant-store failure raised while projecting an imported value.
+///
+/// WHY: `Infrastructure` already carries the compiler error that produced it. A `Diagnostic` means the
+/// store rejected a projected node; imported folded input is validated upstream, so it is reported as
+/// an invariant break rather than a user-facing diagnostic.
+fn const_store_error_into_compiler_error(error: ConstValueStoreError) -> CompilerError {
+    match error {
+        ConstValueStoreError::Infrastructure(error) => *error,
+        ConstValueStoreError::Diagnostic(diagnostic) => CompilerError::compiler_error(format!(
+            "Imported folded value violated a constant store invariant: {diagnostic:?}"
+        )),
+    }
+}
+
+fn import_folded_value<M: FoldedValueMaterialiser>(
+    materialiser: &mut M,
+    folded: &PublicFoldedValue,
+    expected_type_id: TypeId,
+    const_values: &mut ConstValueStore,
+    string_table: &mut StringTable,
+    span: Option<SourceSpan>,
+    root: ImportedRootMetadata,
+) -> Result<ConstValueId, ConstValueStoreError> {
+    let node = |value_kind: ConstValueKind| ConstValueMetadata {
+        type_id: expected_type_id,
+        value_mode: ValueMode::ImmutableReference,
+        span,
+        const_record_state: ConstRecordState::RuntimeValue,
+        contains_regular_division: false,
+        synthetic_interface_provenance: root.synthetic_interface_provenance.clone(),
+        value_kind,
+        hir_visible: true,
+    };
+
+    match folded {
         PublicFoldedValue::Number(value) => {
             if materialiser
                 .type_environment()
@@ -284,27 +389,59 @@ pub(crate) fn materialize_public_folded_value<M: FoldedValueMaterialiser>(
                 return Err(CompilerError::compiler_error(format!(
                     "Imported folded Dec value at scale {} disagrees with its consumer-local canonical type",
                     value.scale()
-                )));
+                ))
+                .into());
             }
-            ExpressionKind::Number(value.clone())
+            const_values.insert_value(
+                node(ConstValueKind::Literal),
+                ConstValuePayload::Number(value.clone()),
+            )
         }
-        PublicFoldedValue::FixedScalar(value) => ExpressionKind::FixedScalar(*value),
-        PublicFoldedValue::Bool(value) => ExpressionKind::Bool(*value),
-        PublicFoldedValue::Char(value) => ExpressionKind::Char(*value),
+        PublicFoldedValue::FixedScalar(value) => const_values.insert_value(
+            node(ConstValueKind::Literal),
+            ConstValuePayload::FixedScalar(*value),
+        ),
+        PublicFoldedValue::Bool(value) => const_values.insert_value(
+            node(ConstValueKind::Literal),
+            ConstValuePayload::Bool(*value),
+        ),
+        PublicFoldedValue::Char(value) => const_values.insert_value(
+            node(ConstValueKind::Literal),
+            ConstValuePayload::Char(*value),
+        ),
         PublicFoldedValue::String(value) => {
-            materialize_owned_folded_string(value, string_table, |origin| {
+            let value = materialize_owned_folded_string(value, string_table, |origin| {
                 materialiser.intern_resource_origin(origin, span)
-            })?
+            })?;
+            const_values.insert_value(
+                node(ConstValueKind::Literal),
+                ConstValuePayload::String(value),
+            )
         }
-        PublicFoldedValue::ConstTemplate(template) => {
-            let template_ir_store = materialiser.template_ir_store();
-            ExpressionKind::Template(Box::new(materialize_public_const_template(
-                materialiser,
-                template,
-                &template_ir_store,
-                string_table,
-                span,
-            )?))
+        PublicFoldedValue::ConstTemplate { template, folded } => {
+            let (value_kind, hir_visible) = match template.kind {
+                PublicConstTemplateKind::Wrapper => (ConstValueKind::TemplateWrapper, true),
+                PublicConstTemplateKind::SlotInsert(_) => {
+                    (ConstValueKind::SlotInsertTemplate, false)
+                }
+            };
+            let folded = folded
+                .as_ref()
+                .map(|value| {
+                    materialize_owned_folded_string(value, string_table, |origin| {
+                        materialiser.intern_resource_origin(origin, span)
+                    })
+                })
+                .transpose()?;
+            let mut metadata = node(value_kind);
+            metadata.hir_visible = hir_visible;
+            const_values.insert_value(
+                metadata,
+                ConstValuePayload::Template {
+                    template: template.clone(),
+                    folded,
+                },
+            )
         }
         PublicFoldedValue::Collection(values) => {
             let element_type_id = materialiser
@@ -318,58 +455,83 @@ pub(crate) fn materialize_public_folded_value<M: FoldedValueMaterialiser>(
                 })?;
             let mut items = Vec::with_capacity(values.len());
             for value in values {
-                items.push(materialize_public_folded_value(
+                items.push(import_folded_value(
                     materialiser,
                     value,
                     element_type_id,
+                    const_values,
                     string_table,
                     span,
+                    ImportedRootMetadata::default(),
                 )?);
             }
-            ExpressionKind::Collection(items)
+            const_values.insert_value(
+                node(ConstValueKind::Composite),
+                ConstValuePayload::Collection(items),
+            )
         }
         PublicFoldedValue::Record(fields) => {
             // Anonymous const records keep their field facts on the folded values: the
             // compile-time marker type has no field definitions, so import projects the folded
-            // fields directly and restores the compile-time member-group state instead of a
-            // runtime struct instance.
+            // fields directly and marks the node as a compile-time member group.
             if expected_type_id
                 == materialiser
                     .type_environment()
                     .anonymous_const_record_type()
             {
-                let projected_fields = materialize_public_anonymous_record_fields(
+                let mut projected = Vec::with_capacity(fields.len());
+                for field in fields {
+                    let field_type_id =
+                        materialiser.intern_canonical_type(&field.type_identity, string_table)?;
+                    let field_path = materialiser
+                        .path_fork()
+                        .try_intern_child(PathId::ROOT, string_table.intern(&field.name))
+                        .ok_or_else(|| {
+                            CompilerError::compiler_error("Imported field path table exhausted")
+                        })?;
+                    let value = import_folded_value(
+                        materialiser,
+                        &field.value,
+                        field_type_id,
+                        const_values,
+                        string_table,
+                        span,
+                        ImportedRootMetadata::default(),
+                    )?;
+                    projected.push(ConstValueField {
+                        name: field_path,
+                        value,
+                    });
+                }
+                let mut metadata = node(ConstValueKind::Composite);
+                metadata.const_record_state = ConstRecordState::ConstRecord;
+                metadata.hir_visible = false;
+                const_values.insert_value(metadata, ConstValuePayload::Record(projected))
+            } else {
+                let definitions = materialiser
+                    .type_environment()
+                    .fields_for(expected_type_id)
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "Imported folded record value has a canonical type without fields",
+                        )
+                    })?
+                    .to_vec();
+                let projected = import_named_fields(
                     materialiser,
                     fields,
+                    &definitions,
+                    const_values,
                     string_table,
                     span,
                 )?;
-
-                return Ok(Expression::anonymous_const_record(
-                    projected_fields,
-                    span,
-                    ValueMode::ImmutableReference,
-                    expected_type_id,
-                ));
+                let mut metadata = node(ConstValueKind::Composite);
+                if root.const_record {
+                    metadata.const_record_state = ConstRecordState::ConstRecord;
+                    metadata.hir_visible = false;
+                }
+                const_values.insert_value(metadata, ConstValuePayload::Record(projected))
             }
-
-            let definitions = materialiser
-                .type_environment()
-                .fields_for(expected_type_id)
-                .ok_or_else(|| {
-                    CompilerError::compiler_error(
-                        "Imported folded record value has a canonical type without fields",
-                    )
-                })?
-                .to_vec();
-            let projected = materialize_public_folded_fields(
-                materialiser,
-                fields,
-                &definitions,
-                string_table,
-                span,
-            )?;
-            ExpressionKind::StructInstance(projected)
         }
         PublicFoldedValue::Choice {
             type_identity,
@@ -380,17 +542,17 @@ pub(crate) fn materialize_public_folded_value<M: FoldedValueMaterialiser>(
             if choice_type_id != expected_type_id {
                 return Err(CompilerError::compiler_error(
                     "Imported folded choice value disagrees with its declared canonical type",
-                ));
+                )
+                .into());
             }
-            let variants = materialiser
+            let variant = materialiser
                 .type_environment()
                 .variants_for(choice_type_id)
                 .ok_or_else(|| {
                     CompilerError::compiler_error(
                         "Imported folded choice value has a non-choice canonical type",
                     )
-                })?;
-            let variant = variants
+                })?
                 .iter()
                 .find(|variant| string_table.resolve(variant.name) == variant_name)
                 .cloned()
@@ -403,13 +565,6 @@ pub(crate) fn materialize_public_folded_value<M: FoldedValueMaterialiser>(
                 ChoiceVariantPayloadDefinition::Unit => &[][..],
                 ChoiceVariantPayloadDefinition::Record { fields } => fields.as_ref(),
             };
-            let projected = materialize_public_folded_fields(
-                materialiser,
-                fields,
-                field_definitions,
-                string_table,
-                span,
-            )?;
             let nominal_path = materialiser
                 .type_environment()
                 .nominal_path(choice_type_id)
@@ -417,37 +572,55 @@ pub(crate) fn materialize_public_folded_value<M: FoldedValueMaterialiser>(
                     CompilerError::compiler_error(
                         "Imported folded choice type has no consumer-local nominal path",
                     )
-                })?;
-            ExpressionKind::ChoiceConstruct {
-                nominal_path: nominal_path.to_owned(),
-                tag: variant.tag,
-                fields: projected,
-            }
-        }
-        PublicFoldedValue::Range { start, end } => {
-            // A range has no shared endpoint identity: preserve each folded scalar's
-            // exact type instead of applying the unconstrained literal default.
-            let (start_type, end_type) = match (start.as_ref(), end.as_ref()) {
-                (PublicFoldedValue::FixedScalar(start), PublicFoldedValue::FixedScalar(end)) => (
-                    builtin_type_ids::fixed_scalar(start.scalar()),
-                    builtin_type_ids::fixed_scalar(end.scalar()),
-                ),
-                _ => {
-                    return Err(CompilerError::compiler_error(
-                        "Imported folded range endpoints must be fixed scalar values",
-                    ));
-                }
-            };
-            let start = materialize_public_folded_value(
+                })?
+                .to_owned();
+            let projected = import_named_fields(
                 materialiser,
-                start,
-                start_type,
+                fields,
+                field_definitions,
+                const_values,
                 string_table,
                 span,
             )?;
-            let end =
-                materialize_public_folded_value(materialiser, end, end_type, string_table, span)?;
-            ExpressionKind::Range(Box::new(start), Box::new(end))
+            const_values.insert_value(
+                node(ConstValueKind::Composite),
+                ConstValuePayload::Choice {
+                    nominal_path,
+                    tag: variant.tag,
+                    fields: projected,
+                },
+            )
+        }
+        PublicFoldedValue::Range { start, end } => {
+            // A range has no shared endpoint identity: preserve each folded scalar's exact type
+            // instead of applying the unconstrained literal default.
+            let start_type_id = folded_range_endpoint_type(start)?;
+            let end_type_id = folded_range_endpoint_type(end)?;
+            let start_id = import_folded_value(
+                materialiser,
+                start,
+                start_type_id,
+                const_values,
+                string_table,
+                span,
+                ImportedRootMetadata::default(),
+            )?;
+            let end_id = import_folded_value(
+                materialiser,
+                end,
+                end_type_id,
+                const_values,
+                string_table,
+                span,
+                ImportedRootMetadata::default(),
+            )?;
+            const_values.insert_value(
+                node(ConstValueKind::Composite),
+                ConstValuePayload::Range {
+                    start: start_id,
+                    end: end_id,
+                },
+            )
         }
         PublicFoldedValue::OptionSome(value) => {
             let inner_type_id = materialiser
@@ -458,41 +631,51 @@ pub(crate) fn materialize_public_folded_value<M: FoldedValueMaterialiser>(
                         "Imported folded option value has a non-option canonical type",
                     )
                 })?;
-            let inner = materialize_public_folded_value(
+            let inner = import_folded_value(
                 materialiser,
                 value,
                 inner_type_id,
+                const_values,
                 string_table,
                 span,
+                ImportedRootMetadata::default(),
             )?;
-            ExpressionKind::Coerced {
-                value: Box::new(inner),
-                to_type: expected_type_id,
-            }
+            const_values.insert_value(
+                node(ConstValueKind::Composite),
+                ConstValuePayload::OptionSome(inner),
+            )
         }
-        PublicFoldedValue::OptionNone => ExpressionKind::OptionNone,
-    };
-
-    Ok(Expression::new(
-        kind,
-        span,
-        expected_type_id,
-        diagnostic_type_spelling(expected_type_id, materialiser.type_environment()),
-        ValueMode::ImmutableReference,
-    ))
+        PublicFoldedValue::OptionNone => {
+            const_values.insert_value(node(ConstValueKind::Literal), ConstValuePayload::OptionNone)
+        }
+    }
 }
 
-fn materialize_public_folded_fields<M: FoldedValueMaterialiser>(
+fn folded_range_endpoint_type(
+    endpoint: &PublicFoldedValue,
+) -> Result<TypeId, ConstValueStoreError> {
+    match endpoint {
+        PublicFoldedValue::FixedScalar(value) => Ok(builtin_type_ids::fixed_scalar(value.scalar())),
+        _ => Err(CompilerError::compiler_error(
+            "Imported folded range endpoints must be fixed scalar values",
+        )
+        .into()),
+    }
+}
+
+fn import_named_fields<M: FoldedValueMaterialiser>(
     materialiser: &mut M,
     fields: &[PublicFoldedField],
     definitions: &[FieldDefinition],
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     span: Option<SourceSpan>,
-) -> Result<Vec<Declaration>, CompilerError> {
+) -> Result<Vec<ConstValueField>, ConstValueStoreError> {
     if fields.len() != definitions.len() {
         return Err(CompilerError::compiler_error(
             "Imported folded aggregate value has a field count inconsistent with its canonical type",
-        ));
+        )
+        .into());
     }
 
     let mut projected = Vec::with_capacity(fields.len());
@@ -506,310 +689,22 @@ fn materialize_public_folded_fields<M: FoldedValueMaterialiser>(
             return Err(CompilerError::compiler_error(format!(
                 "Imported folded aggregate field '{}' does not match canonical field '{definition_name}'",
                 field.name
-            )));
+            ))
+            .into());
         }
-        projected.push(Declaration {
-            id: definition.name,
-            value: materialize_public_folded_value(
-                materialiser,
-                &field.value,
-                definition.type_id,
-                string_table,
-                span,
-            )?,
-            binding_span: None,
-            config_qualifier: None,
-        });
-    }
-    Ok(projected)
-}
-
-/// Materializes one imported anonymous const record's ordered fields.
-///
-/// WHAT: interns each folded field name into the consumer string table and each field's
-///       canonical type identity into the consumer type environment, then recursively
-///       materializes the field value against that consumer-local type.
-/// WHY: the anonymous const-record marker type has no `fields_for` definitions, so the folded
-///      fields are the only field authority and nested anonymous records re-enter this same
-///      recursive projection.
-fn materialize_public_anonymous_record_fields<M: FoldedValueMaterialiser>(
-    materialiser: &mut M,
-    fields: &[PublicFoldedField],
-    string_table: &mut StringTable,
-    span: Option<SourceSpan>,
-) -> Result<Vec<Declaration>, CompilerError> {
-    let mut projected = Vec::with_capacity(fields.len());
-
-    for field in fields {
-        let field_type_id =
-            materialiser.intern_canonical_type(&field.type_identity, string_table)?;
-
-        let field_path = materialiser
-            .path_fork()
-            .try_intern_child(PathId::ROOT, string_table.intern(&field.name))
-            .ok_or_else(|| CompilerError::compiler_error("Imported field path table exhausted"))?;
-
-        projected.push(Declaration {
-            id: field_path,
-            value: materialize_public_folded_value(
-                materialiser,
-                &field.value,
-                field_type_id,
-                string_table,
-                span,
-            )?,
-            binding_span: None,
-            config_qualifier: None,
-        });
-    }
-
-    Ok(projected)
-}
-
-/// Rebuilds one stable const-template value in the active module-local TIR store.
-///
-/// Imported constants and generated sidecars share this inverse projection so neither path
-/// carries a provider or declaring-module TIR identity into a fresh AST compilation.
-pub(in crate::compiler_frontend::ast) fn materialize_public_const_template<
-    M: FoldedValueMaterialiser,
->(
-    materialiser: &mut M,
-    template: &PublicConstTemplate,
-    store_handle: &Rc<RefCell<crate::compiler_frontend::ast::templates::tir::TemplateIrStore>>,
-    string_table: &mut StringTable,
-    span: Option<SourceSpan>,
-) -> Result<Template, CompilerError> {
-    let mut store = store_handle.borrow_mut();
-    let root = materialize_public_const_template_in_store(
-        materialiser,
-        template,
-        &mut store,
-        string_table,
-        span,
-    )?;
-
-    Ok(Template {
-        tir_reference: TemplateTirReference {
-            root,
-            phase: TemplateTirPhase::Finalized,
-            context: TemplateViewContext::default(),
-        },
-        span,
-    })
-}
-
-fn materialize_public_const_template_in_store<M: FoldedValueMaterialiser>(
-    materialiser: &mut M,
-    template: &PublicConstTemplate,
-    store: &mut crate::compiler_frontend::ast::templates::tir::TemplateIrStore,
-    string_table: &mut StringTable,
-    span: Option<SourceSpan>,
-) -> Result<crate::compiler_frontend::ast::templates::tir::TemplateIrId, CompilerError> {
-    let mut children = Vec::with_capacity(template.pieces.len());
-
-    for piece in &template.pieces {
-        let node = match piece {
-            PublicConstTemplatePiece::Text(value) => materialize_public_const_template_string(
-                materialiser,
-                value,
-                store,
-                string_table,
-                span,
-            )?,
-            PublicConstTemplatePiece::Slot(slot) => {
-                let placeholder = materialize_public_const_template_slot(
-                    materialiser,
-                    slot,
-                    store,
-                    string_table,
-                    span,
-                )?;
-                store.push_node(TemplateIrNode::new(
-                    TemplateIrNodeKind::Slot { placeholder },
-                    span,
-                ))
-            }
-        };
-        children.push(node);
-    }
-
-    let root = store.push_node(TemplateIrNode::new(
-        TemplateIrNodeKind::Sequence { children },
-        span,
-    ));
-    let kind = match &template.kind {
-        PublicConstTemplateKind::Wrapper => TemplateType::String,
-        PublicConstTemplateKind::SlotInsert(key) => {
-            TemplateType::SlotInsert(materialize_public_slot_key(key, string_table))
-        }
-    };
-    let summary = summarize_existing_root(store, root)?;
-    let mut template_ir = TemplateIr::new(root, Style::default(), kind, summary, span);
-    let conditional_wrappers = materialize_public_wrapper_references(
-        materialiser,
-        &template.conditional_child_wrappers,
-        store,
-        string_table,
-        span,
-    )?;
-    if !conditional_wrappers.is_empty() {
-        template_ir.conditional_child_wrapper_set =
-            Some(store.push_or_reuse_wrapper_set(conditional_wrappers));
-    }
-
-    Ok(store.push_template(template_ir))
-}
-
-/// Materializes one owned string run into a fresh module-local TIR node.
-///
-/// WHAT: re-interns owned text and stable resource origins, using a structural expression whenever
-///       the run contains a resource or site-root anchor.
-/// WHY: imported values outlive their donor tables, so inverse projection must rebuild local IDs
-///      without converting structural pieces into rendered placeholder text.
-fn materialize_public_const_template_string<M: FoldedValueMaterialiser>(
-    materialiser: &mut M,
-    value: &OwnedFoldedString,
-    store: &mut crate::compiler_frontend::ast::templates::tir::TemplateIrStore,
-    string_table: &mut StringTable,
-    span: Option<SourceSpan>,
-) -> Result<crate::compiler_frontend::ast::templates::tir::TemplateIrNodeId, CompilerError> {
-    let (pieces, has_structural) = match value {
-        OwnedFoldedString::Text(text) => {
-            let text_id = string_table.intern(text);
-            return Ok(store.push_node(TemplateIrNode::new(
-                TemplateIrNodeKind::Text {
-                    text: text_id,
-                    byte_len: text.len(),
-                    origin: TemplateSegmentOrigin::Head,
-                },
-                span,
-            )));
-        }
-        OwnedFoldedString::Pieces(pieces) => {
-            let mut projected = Vec::with_capacity(pieces.len());
-            let mut has_structural = false;
-            for piece in pieces {
-                projected.push(match piece {
-                    OwnedFoldedStringPiece::Text(text) => {
-                        ConstStringPiece::Text(string_table.intern(text))
-                    }
-                    OwnedFoldedStringPiece::Resource(origin) => {
-                        has_structural = true;
-                        ConstStringPiece::Resource(
-                            materialiser.intern_resource_origin(origin, span)?,
-                        )
-                    }
-                    OwnedFoldedStringPiece::SiteRoot => {
-                        has_structural = true;
-                        ConstStringPiece::SiteRoot
-                    }
-                });
-            }
-            (projected, has_structural)
-        }
-    };
-
-    if !has_structural {
-        let mut text = String::new();
-        for piece in &pieces {
-            if let ConstStringPiece::Text(text_id) = piece {
-                text.push_str(string_table.resolve(*text_id));
-            }
-        }
-        let text_id = string_table.intern(&text);
-        return Ok(store.push_node(TemplateIrNode::new(
-            TemplateIrNodeKind::Text {
-                text: text_id,
-                byte_len: text.len(),
-                origin: TemplateSegmentOrigin::Head,
-            },
-            span,
-        )));
-    }
-
-    let expression = Expression::new(
-        ExpressionKind::StructuralString { pieces },
-        span,
-        builtin_type_ids::STRING,
-        DataType::StringSlice,
-        ValueMode::ImmutableReference,
-    );
-    let site_id = store.next_expression_site_id();
-    Ok(store.push_node(TemplateIrNode::new(
-        TemplateIrNodeKind::DynamicExpression {
-            expression: Box::new(expression),
-            origin: TemplateSegmentOrigin::Head,
-            site_id,
-        },
-        span,
-    )))
-}
-
-fn materialize_public_const_template_slot<M: FoldedValueMaterialiser>(
-    materialiser: &mut M,
-    slot: &PublicConstTemplateSlot,
-    store: &mut crate::compiler_frontend::ast::templates::tir::TemplateIrStore,
-    string_table: &mut StringTable,
-    span: Option<SourceSpan>,
-) -> Result<TirSlotPlaceholder, CompilerError> {
-    let applied = materialize_public_wrapper_references(
-        materialiser,
-        &slot.applied_child_wrappers,
-        store,
-        string_table,
-        span,
-    )?;
-    let child = materialize_public_wrapper_references(
-        materialiser,
-        &slot.child_wrappers,
-        store,
-        string_table,
-        span,
-    )?;
-    let applied_set = (!applied.is_empty()).then(|| store.push_or_reuse_wrapper_set(applied));
-    let child_set = (!child.is_empty()).then(|| store.push_or_reuse_wrapper_set(child));
-
-    Ok(TirSlotPlaceholder::with_wrapper_sets(
-        materialize_public_slot_key(&slot.key, string_table),
-        store.next_slot_occurrence_id(),
-        applied_set,
-        child_set,
-        slot.skip_parent_child_wrappers,
-    ))
-}
-
-fn materialize_public_wrapper_references<M: FoldedValueMaterialiser>(
-    materialiser: &mut M,
-    wrappers: &[PublicConstTemplate],
-    store: &mut crate::compiler_frontend::ast::templates::tir::TemplateIrStore,
-    string_table: &mut StringTable,
-    span: Option<SourceSpan>,
-) -> Result<Vec<TemplateWrapperReference>, CompilerError> {
-    let mut references = Vec::with_capacity(wrappers.len());
-    for wrapper in wrappers {
-        let root = materialize_public_const_template_in_store(
+        let value = import_folded_value(
             materialiser,
-            wrapper,
-            store,
+            &field.value,
+            definition.type_id,
+            const_values,
             string_table,
             span,
+            ImportedRootMetadata::default(),
         )?;
-        references.push(TemplateWrapperReference::new(
-            root,
-            TemplateTirPhase::Finalized,
-            TemplateViewContext::default(),
-        ));
+        projected.push(ConstValueField {
+            name: definition.name,
+            value,
+        });
     }
-    Ok(references)
-}
-
-fn materialize_public_slot_key(
-    key: &PublicTemplateSlotKey,
-    string_table: &mut StringTable,
-) -> SlotKey {
-    match key {
-        PublicTemplateSlotKey::Default => SlotKey::Default,
-        PublicTemplateSlotKey::Named(name) => SlotKey::Named(string_table.intern(name)),
-        PublicTemplateSlotKey::Positional(position) => SlotKey::Positional(*position),
-    }
+    Ok(projected)
 }

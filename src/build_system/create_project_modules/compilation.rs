@@ -127,7 +127,10 @@ pub(super) fn publish_module_and_generated(
 ///       needed, and publishes the complete module result and its sidecars.
 /// WHY: the build-system contract makes publication atomic, so this is the single
 ///      merge-remap-publish tail shared by canonical directory and synthetic single-file lanes.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "publication keeps mutable module, generated-function, materialisation and resource owners, module identity and origin, the compiled result, string/path base lengths and mutable boundary string/path tables separate"
+)]
 pub(super) fn publish_compiled_module(
     modules: &mut ModuleArtifactStore,
     generated: &mut BoundaryGeneratedFunctionStore,
@@ -1091,7 +1094,10 @@ pub(super) fn compile_source_package_inventories(
 /// WHAT: owns the single final conversion from the premerge lane into the boundary vessel.
 /// WHY: every intermediate directory site stays typed until here, so source attachment and
 ///      string-table finalization happen exactly once at this outer tail.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "directory compilation keeps configuration, build profile, validated output settings, directives, mutable builder/string/source owners, build-config inputs and compilation mode separate"
+)]
 pub(crate) fn compile_directory_frontend(
     config: &Config,
     build_profile: FrontendBuildProfile,
@@ -1138,7 +1144,10 @@ pub(crate) fn compile_directory_frontend(
 ///       package snapshot beside package-scoped failures.
 /// WHY: the public wrapper above owns the single final vessel conversion; this lane never
 ///      constructs it early and never clones a diagnostic table solely to transport a failure.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "premerge directory orchestration keeps configuration, profile, output settings, directives, mutable builder/string/source owners, build-config inputs and mode separate"
+)]
 fn compile_directory_frontend_in_premerge_lane(
     config: &Config,
     build_profile: FrontendBuildProfile,

@@ -2,8 +2,8 @@ double |value I32| -> I32:
     return value + 2147483647
 ;
 
-combine |left I32, right I32| -> I32:
-    return left + right
+combine |lhs I32, rhs I32| -> I32:
+    return lhs + rhs
 ;
 
 trace ~U32 = 0

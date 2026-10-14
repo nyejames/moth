@@ -90,6 +90,23 @@ pub(crate) fn invalid_fallible_handling_message(
     context: DiagnosticRenderContext<'_>,
 ) -> String {
     match reason {
+        InvalidFallibleHandlingReason::FunctionHasMultipleSuccessReturns { count } => {
+            format!(
+                "This `?` propagation is inside a function with {count} authored success return slots, but requires exactly one optional success return slot. Inspect the option locally or use a single optional success return slot."
+            )
+        }
+
+        InvalidFallibleHandlingReason::EntryHasIncompatibleError {
+            produced_error_type,
+            entry_error_type,
+        } => {
+            let produced_error = diagnostic_type_name(*produced_error_type, context);
+            let entry_error = diagnostic_type_name(*entry_error_type, context);
+            format!(
+                "This `!` propagation produces `{produced_error}!`, which is incompatible with the entry's built-in `start` `{entry_error}!` boundary. Handle `{produced_error}` locally with `catch` or recover explicitly."
+            )
+        }
+
         InvalidFallibleHandlingReason::IncompatibleCatchErrorTypes {
             first_error_type_id,
             second_error_type_id,

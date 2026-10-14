@@ -8,15 +8,17 @@
 //! misuse by the orchestration layer and never reach here.
 
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::expressions::external_namespace_members::{
     ExternalNamespaceConstantMemberInput, ExternalNamespaceFunctionMemberInput,
     parse_external_namespace_constant_member, parse_external_namespace_function_member,
 };
 use crate::compiler_frontend::ast::expressions::parse_expression_dispatch::{
-    ExpressionOperandInput, push_expression_operand_with_span,
+    ExpressionOperandInput, push_expression_operand_with_span, stream_is_boundary_leading,
 };
 use crate::compiler_frontend::ast::expressions::source_function_calls::{
     SourceCallableMemberInput, parse_source_callable_member,
@@ -40,6 +42,8 @@ pub(super) struct LeafDispatchContext<'a, 'env, 'tokens> {
     pub(super) token_stream: &'a mut AstCursor<'tokens>,
     pub(super) context: &'a ScopeContext,
     pub(super) type_interner: &'a mut AstTypeInterner<'env>,
+    pub(super) expression_builder: &'a mut AstExpressionBuilder,
+    pub(super) const_values: &'a mut ConstValueStore,
     pub(super) expression: &'a mut Vec<ExpressionRpnItem>,
     pub(super) allow_boundary_catch: bool,
     pub(super) string_table: &'a mut StringTable,
@@ -96,6 +100,8 @@ fn resolve_source_value_member(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         expression,
         allow_boundary_catch,
         string_table,
@@ -112,9 +118,10 @@ fn resolve_source_value_member(
 
     // Namespace fields are not first-class function values. A function member must
     // continue through the normal call parser so missing `(...)` reports at the call
-    // boundary instead of lowering a `NoValue` declaration reference.
+    // boundary instead of lowering a function declaration shell as a value.
     if let Some(signature) = context.source_callable_signature(declaration) {
         let generic_template = context.lookup_generic_function_template(symbol_path);
+        let expression_is_boundary_leading = stream_is_boundary_leading(expression);
 
         parse_source_callable_member(SourceCallableMemberInput {
             token_stream,
@@ -125,21 +132,33 @@ fn resolve_source_value_member(
             call_span: member_span,
             context,
             expression,
+            expression_is_boundary_leading,
             allow_boundary_catch: *allow_boundary_catch,
             expected_result_evidence_allowed,
             type_interner,
+            expression_builder,
+            const_values,
             path_fork,
             string_table,
         })
     } else {
-        let reference_expression =
-            reference_expression_from_declaration(declaration, context, type_interner, member_span);
+        let reference_expression = reference_expression_from_declaration(
+            declaration,
+            context,
+            type_interner,
+            expression_builder,
+            const_values,
+            string_table,
+            member_span,
+        )?;
         token_stream.advance();
 
         push_expression_operand_with_span(
             token_stream,
             context,
             type_interner,
+            expression_builder,
+            const_values,
             string_table,
             expression,
             *allow_boundary_catch,
@@ -171,6 +190,8 @@ fn resolve_external_value_member(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         expression,
         allow_boundary_catch,
         string_table,
@@ -186,6 +207,8 @@ fn resolve_external_value_member(
                 token_stream,
                 context,
                 type_interner,
+                expression_builder,
+                const_values,
                 expression,
                 allow_boundary_catch: *allow_boundary_catch,
                 string_table,
@@ -201,6 +224,8 @@ fn resolve_external_value_member(
                 token_stream,
                 context,
                 type_interner,
+                expression_builder,
+                const_values,
                 expression,
                 allow_boundary_catch: *allow_boundary_catch,
                 string_table,

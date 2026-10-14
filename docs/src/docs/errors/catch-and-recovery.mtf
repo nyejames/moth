@@ -176,7 +176,7 @@ blocks without changing source acceptance.
 - Explicit propagation exits the function and does not target the nearest catch.
 - Catch bodies remain statement-like and stay out of conditions, templates and constants, except for directly foldable cast recovery at an explicit constant/default receiver.
 - Commas, parentheses, logical-line boundaries and statements delimit the selected expression.
-- First-class fallible carriers cannot be stored without handling.
+- Fallibility is a separate result channel, not a first-class value that can be stored.
 - Assertions, resource exhaustion, fatal foreign-value integrity guards and host termination remain outside `catch`.
 
 A catch on an assignment's right-hand expression protects that expression

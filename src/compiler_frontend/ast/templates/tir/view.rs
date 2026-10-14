@@ -52,7 +52,9 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 
 use super::ids::ChildTemplateOccurrenceId;
 use super::ids::{ExpressionSiteId, SlotOccurrenceId, TemplateIrId, TemplateIrNodeId};
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExpressionView,
+};
 use crate::compiler_frontend::ast::templates::template::Template;
 
 use super::node::{TemplateIr, TemplateIrNode, TirSlotPlaceholder};
@@ -525,15 +527,19 @@ impl<'a> TirView<'a> {
     ///      through the view so overlay resolution stays centralized. When no
     ///      override exists, the caller falls back to the structural expression
     ///      stored on the node.
-    pub(crate) fn effective_expression_for_site(
+    pub(crate) fn effective_expression_for_site<'expressions>(
         &self,
+        expressions: &'expressions AstExpressionBuilder,
         site_id: ExpressionSiteId,
-    ) -> Result<Option<&'a Expression>, CompilerError> {
+    ) -> Result<Option<ExpressionView<'expressions>>, CompilerError> {
         let Some(overlay) = self.expression_overlay()? else {
             return Ok(None);
         };
 
-        Ok(overlay.expression_for_site(site_id))
+        overlay
+            .expression_for_site(site_id)
+            .map(|id| expressions.view(id))
+            .transpose()
     }
 
     /// Returns the effective slot resolution for a `SlotOccurrenceId`, if the

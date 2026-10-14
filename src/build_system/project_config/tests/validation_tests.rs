@@ -1389,13 +1389,16 @@ fn rejects_an_invalid_moth_project_identifier() {
 #[test]
 fn converts_concrete_project_template_metadata_to_string() {
     let mut string_table = StringTable::new();
-    let template = PublicFoldedValue::ConstTemplate(PublicConstTemplate {
-        kind: PublicConstTemplateKind::Wrapper,
-        pieces: vec![PublicConstTemplatePiece::Text(OwnedFoldedString::Text(
-            "hello".to_owned(),
-        ))],
-        conditional_child_wrappers: Vec::new(),
-    });
+    let template = PublicFoldedValue::ConstTemplate {
+        template: PublicConstTemplate {
+            kind: PublicConstTemplateKind::Wrapper,
+            pieces: vec![PublicConstTemplatePiece::Text(OwnedFoldedString::Text(
+                "hello".to_owned(),
+            ))],
+            conditional_child_wrappers: Vec::new(),
+        },
+        folded: None,
+    };
 
     let (config, errors) = validate_and_apply(
         vec![(
@@ -1414,16 +1417,19 @@ fn converts_concrete_project_template_metadata_to_string() {
 #[test]
 fn converts_text_only_string_pieces_in_project_template_metadata() {
     let mut string_table = StringTable::new();
-    let template = PublicFoldedValue::ConstTemplate(PublicConstTemplate {
-        kind: PublicConstTemplateKind::Wrapper,
-        pieces: vec![PublicConstTemplatePiece::Text(OwnedFoldedString::Pieces(
-            vec![
-                OwnedFoldedStringPiece::Text("open".to_owned()),
-                OwnedFoldedStringPiece::Text(" note".to_owned()),
-            ],
-        ))],
-        conditional_child_wrappers: Vec::new(),
-    });
+    let template = PublicFoldedValue::ConstTemplate {
+        template: PublicConstTemplate {
+            kind: PublicConstTemplateKind::Wrapper,
+            pieces: vec![PublicConstTemplatePiece::Text(OwnedFoldedString::Pieces(
+                vec![
+                    OwnedFoldedStringPiece::Text("open".to_owned()),
+                    OwnedFoldedStringPiece::Text(" note".to_owned()),
+                ],
+            ))],
+            conditional_child_wrappers: Vec::new(),
+        },
+        folded: None,
+    };
 
     let (config, errors) = validate_and_apply(
         vec![(
@@ -1441,16 +1447,19 @@ fn converts_text_only_string_pieces_in_project_template_metadata() {
 #[test]
 fn rejects_unresolved_project_template_metadata() {
     let mut string_table = StringTable::new();
-    let template = PublicFoldedValue::ConstTemplate(PublicConstTemplate {
-        kind: PublicConstTemplateKind::Wrapper,
-        pieces: vec![PublicConstTemplatePiece::Slot(PublicConstTemplateSlot {
-            key: PublicTemplateSlotKey::Named("title".to_owned()),
-            applied_child_wrappers: Vec::new(),
-            child_wrappers: Vec::new(),
-            skip_parent_child_wrappers: false,
-        })],
-        conditional_child_wrappers: Vec::new(),
-    });
+    let template = PublicFoldedValue::ConstTemplate {
+        template: PublicConstTemplate {
+            kind: PublicConstTemplateKind::Wrapper,
+            pieces: vec![PublicConstTemplatePiece::Slot(PublicConstTemplateSlot {
+                key: PublicTemplateSlotKey::Named("title".to_owned()),
+                applied_child_wrappers: Vec::new(),
+                child_wrappers: Vec::new(),
+                skip_parent_child_wrappers: false,
+            })],
+            conditional_child_wrappers: Vec::new(),
+        },
+        folded: None,
+    };
 
     let (_, errors) = validate_and_apply(
         vec![(

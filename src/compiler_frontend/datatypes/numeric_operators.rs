@@ -215,6 +215,30 @@ pub(crate) fn comparison_supported(left: NumericScalar, right: NumericScalar) ->
     }
 }
 
+/// Exact comparison semantics, distinct from the arithmetic common-domain policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NumericComparisonDomain {
+    ExactInteger,
+    BinaryFloat,
+    Number(NumberScale),
+}
+
+pub(crate) fn comparison_domain(
+    left: NumericScalar,
+    right: NumericScalar,
+) -> Option<NumericComparisonDomain> {
+    if !comparison_supported(left, right) {
+        return None;
+    }
+    match (left, right) {
+        (NumericScalar::Number(scale), _) | (_, NumericScalar::Number(scale)) => {
+            Some(NumericComparisonDomain::Number(scale))
+        }
+        _ if left.is_integer() && right.is_integer() => Some(NumericComparisonDomain::ExactInteger),
+        _ => Some(NumericComparisonDomain::BinaryFloat),
+    }
+}
+
 /// The common arithmetic type of two fixed integers, or `None` when no fixed integer type
 /// represents every value of both.
 ///

@@ -441,14 +441,14 @@ pub(crate) enum OriginTypeCategory {
 ///
 /// Receiver methods are not independent namespace exports: they live on their receiver type's
 /// surface. A method exported on a receiver surface still needs a stable function origin, so the
-/// `Receiver` variant carries the receiver's [`OriginTypeId`] inline. Two methods named `run` on
-/// distinct receiver types cannot collapse because the receiver type identity is embedded in the
-/// variant. This is the sole authoritative receiver state: a free function with a receiver or a
-/// receiver method without a receiver type is unrepresentable.
+/// `Receiver` variant carries the receiver's [`OriginTypeId`] behind indirection so ordinary free
+/// function identities do not inherit another complete module/type identity in their inline
+/// footprint. Two methods named `run` on distinct receiver types remain distinct. This is the
+/// sole authoritative receiver state: inconsistent function/receiver combinations are unrepresentable.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum FunctionOriginKind {
     Free,
-    Receiver(OriginTypeId),
+    Receiver(Box<OriginTypeId>),
 }
 
 /// Owned, hashable, cross-build origin identity for one exported source type.
@@ -548,7 +548,7 @@ impl OriginFunctionId {
         Self {
             module_origin,
             defining_name,
-            kind: FunctionOriginKind::Receiver(receiver),
+            kind: FunctionOriginKind::Receiver(Box::new(receiver)),
         }
     }
 
@@ -564,8 +564,8 @@ impl OriginFunctionId {
 
     /// Whether this origin is a free function or a receiver method.
     ///
-    /// Returns the sole authoritative state: `Free` or `Receiver(OriginTypeId)`. The receiver
-    /// type identity for a method is embedded in the variant, not stored in a parallel field.
+    /// Returns the sole authoritative state: `Free` or `Receiver(Box<OriginTypeId>)`. The receiver
+    /// type identity for a method belongs to that variant, not a parallel field.
     pub(crate) fn kind(&self) -> &FunctionOriginKind {
         &self.kind
     }
@@ -574,7 +574,7 @@ impl OriginFunctionId {
     pub(crate) fn receiver(&self) -> Option<&OriginTypeId> {
         match &self.kind {
             FunctionOriginKind::Free => None,
-            FunctionOriginKind::Receiver(receiver) => Some(receiver),
+            FunctionOriginKind::Receiver(receiver) => Some(receiver.as_ref()),
         }
     }
 }

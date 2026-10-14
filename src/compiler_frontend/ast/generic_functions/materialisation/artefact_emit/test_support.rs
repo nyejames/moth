@@ -35,7 +35,6 @@ impl ModuleMaterialisationContext {
                 declaration_identity,
                 generic_parameter_owner: None,
                 receiver: None,
-                receiver_nominal_identity: None,
                 function_path: PathId::ROOT,
                 source_file: PathId::ROOT,
                 declaration_span: None,
@@ -55,6 +54,7 @@ impl ModuleMaterialisationContext {
                 signature: StableFunctionSignature {
                     parameters: Box::new([]),
                     returns: Box::new([]),
+                    error_return: None,
                 },
                 generic_parameters: Box::new([]),
                 visibility: StableFileVisibility::default(),

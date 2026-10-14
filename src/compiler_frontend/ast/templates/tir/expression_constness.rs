@@ -6,9 +6,10 @@
 
 use std::collections::HashSet;
 
-use crate::compiler_frontend::ast::expressions::eval_expression::pending_expression_item_bug;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::const_values::store::{ConstValuePayload, ConstValueStore};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExpressionOperationView, ExpressionView,
+};
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::TemplateConstValueKind;
 use crate::compiler_frontend::ast::templates::template_control_flow::{
@@ -31,18 +32,19 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 pub(crate) fn effective_branch_selector_for_view(
     view: &TirView<'_>,
+    expressions: &AstExpressionBuilder,
     selector: &TemplateBranchSelector,
     site_id: ExpressionSiteId,
 ) -> Result<TemplateBranchSelector, CompilerError> {
-    let Some(expression) = view.effective_expression_for_site(site_id)? else {
+    let Some(expression) = view.effective_expression_for_site(expressions, site_id)? else {
         return Ok(selector.clone());
     };
 
     Ok(match selector {
-        TemplateBranchSelector::Bool(_) => TemplateBranchSelector::Bool(expression.clone()),
+        TemplateBranchSelector::Bool(_) => TemplateBranchSelector::Bool(expression.id()),
         TemplateBranchSelector::OptionPresentCapture { pattern, .. } => {
             TemplateBranchSelector::OptionPresentCapture {
-                scrutinee: expression.clone(),
+                scrutinee: expression.id(),
                 pattern: pattern.clone(),
             }
         }
@@ -51,6 +53,7 @@ pub(crate) fn effective_branch_selector_for_view(
 
 pub(crate) fn effective_loop_header_for_view(
     view: &TirView<'_>,
+    expressions: &AstExpressionBuilder,
     header: &TemplateLoopHeader,
     header_sites: TemplateLoopHeaderExpressionSites,
 ) -> Result<TemplateLoopHeader, CompilerError> {
@@ -59,28 +62,29 @@ pub(crate) fn effective_loop_header_for_view(
             TemplateLoopHeader::Conditional { condition },
             TemplateLoopHeaderExpressionSites::Conditional { condition: site_id },
         ) => TemplateLoopHeader::Conditional {
-            condition: Box::new(
-                view.effective_expression_for_site(site_id)?
-                    .cloned()
-                    .unwrap_or_else(|| condition.as_ref().clone()),
-            ),
+            condition: view
+                .effective_expression_for_site(expressions, site_id)?
+                .map(ExpressionView::id)
+                .unwrap_or(*condition),
         },
         (
             TemplateLoopHeader::Range { bindings, range },
             TemplateLoopHeaderExpressionSites::Range { start, end, step },
         ) => {
             let mut range = range.as_ref().clone();
-            if let Some(expression) = view.effective_expression_for_site(start)? {
-                range.start = expression.clone();
+            if let Some(expression) = view.effective_expression_for_site(expressions, start)? {
+                range.start = expression.id();
             }
-            if let Some(expression) = view.effective_expression_for_site(end)? {
-                range.end = expression.clone();
+            if let Some(expression) = view.effective_expression_for_site(expressions, end)? {
+                range.end = expression.id();
             }
             match (&range.step, step) {
                 (None, None) => {}
                 (Some(_), Some(step_site_id)) => {
-                    if let Some(expression) = view.effective_expression_for_site(step_site_id)? {
-                        range.step = Some(expression.clone());
+                    if let Some(expression) =
+                        view.effective_expression_for_site(expressions, step_site_id)?
+                    {
+                        range.step = Some(expression.id());
                     }
                 }
                 _ => {
@@ -100,11 +104,10 @@ pub(crate) fn effective_loop_header_for_view(
             TemplateLoopHeaderExpressionSites::Collection { iterable: site_id },
         ) => TemplateLoopHeader::Collection {
             bindings: bindings.clone(),
-            iterable: Box::new(
-                view.effective_expression_for_site(site_id)?
-                    .cloned()
-                    .unwrap_or_else(|| iterable.as_ref().clone()),
-            ),
+            iterable: view
+                .effective_expression_for_site(expressions, site_id)?
+                .map(ExpressionView::id)
+                .unwrap_or(*iterable),
         },
         _ => {
             return Err(CompilerError::compiler_error(
@@ -114,571 +117,276 @@ pub(crate) fn effective_loop_header_for_view(
     })
 }
 
-/// Applies the expression-kind constness rules while delegating nested TIR
-/// values to the caller's exact-view traversal.
+/// Classifies operation views without reconstructing an expression tree. All
+/// children are checked even when an earlier child is runtime-dependent.
 pub(crate) fn classify_expression_const_evaluable_with_nested_template(
-    expression: &Expression,
+    expression: ExpressionView<'_>,
     loop_binding_paths: &[PathId],
     nested_template: &mut impl FnMut(TemplateTirReference, &[PathId]) -> Result<bool, TemplateError>,
 ) -> Result<bool, TemplateError> {
-    match &expression.kind {
-        ExpressionKind::FixedScalar(_)
-        | ExpressionKind::Number(_)
-        | ExpressionKind::StringSlice(_)
-        | ExpressionKind::StructuralString { .. }
-        | ExpressionKind::Bool(_)
-        | ExpressionKind::Char(_) => Ok(true),
-
-        ExpressionKind::Reference(path) => Ok(loop_binding_paths.iter().any(|known| known == path)),
-
-        #[cfg(test)]
-        ExpressionKind::FallibleCarrierConstruct { value, .. } => {
-            classify_expression_const_evaluable_with_nested_template(
-                value,
-                loop_binding_paths,
-                nested_template,
-            )
-        }
-
-        ExpressionKind::Coerced { value, .. } => {
-            classify_expression_const_evaluable_with_nested_template(
-                value,
-                loop_binding_paths,
-                nested_template,
-            )
-        }
-
-        ExpressionKind::Runtime(rpn) => {
-            let mut const_evaluable = true;
-            for item in &rpn.items {
-                match item {
-                    ExpressionRpnItem::Operand(operand) => {
-                        const_evaluable &=
-                            classify_expression_const_evaluable_with_nested_template(
-                                operand,
-                                loop_binding_paths,
-                                nested_template,
-                            )?;
-                    }
-                    ExpressionRpnItem::Operator { .. } => {}
-                    // A retained numeric recipe is not const-evaluable yet; body completion
-                    // replaces it before any fold runs, so the item stays here untouched.
-                    ExpressionRpnItem::PendingNumericBinding { .. }
-                    | ExpressionRpnItem::PendingNumericCast { .. }
-                    | ExpressionRpnItem::PendingNumericCall { .. }
-                    | ExpressionRpnItem::PendingNumericExpression { .. } => {
-                        const_evaluable = false;
-                    }
-                    // Pending syntax never survives evaluation; this fallible constness walk
-                    // reports the broken invariant instead of treating it as const-evaluable.
-                    ExpressionRpnItem::PendingNumericLiteral { .. }
-                    | ExpressionRpnItem::PendingGroup { .. } => {
-                        return Err(
-                            pending_expression_item_bug("TIR constness classification").into()
-                        );
+    use ExpressionOperationView as V;
+    match expression.operation() {
+        V::Constant(_) => Ok(true),
+        V::Reference(path) => Ok(loop_binding_paths.contains(&path)),
+        V::Template(template) => nested_template(template.tir_reference, loop_binding_paths),
+        V::Coerce { .. }
+        | V::NumericUnary { .. }
+        | V::NumericBinary { .. }
+        | V::LogicalNot { .. }
+        | V::LogicalBinary { .. }
+        | V::Compare { .. }
+        | V::Struct { .. }
+        | V::Choice { .. }
+        | V::Collection(_)
+        | V::Range { .. } => {
+            let mut evaluable = true;
+            let mut result = Ok(());
+            expression.visit_children(|child| {
+                if result.is_ok() {
+                    match classify_expression_const_evaluable_with_nested_template(
+                        child,
+                        loop_binding_paths,
+                        nested_template,
+                    ) {
+                        Ok(value) => evaluable &= value,
+                        Err(error) => result = Err(error),
                     }
                 }
-            }
-            Ok(const_evaluable)
+            });
+            result?;
+            Ok(evaluable)
         }
-
-        ExpressionKind::Template(template) => {
-            nested_template(template.tir_reference, loop_binding_paths)
-        }
-
-        ExpressionKind::ChoiceConstruct { fields, .. }
-        | ExpressionKind::StructInstance(fields)
-        | ExpressionKind::AnonymousConstRecord { fields } => {
-            let mut const_evaluable = true;
-            for field in fields {
-                const_evaluable &= classify_expression_const_evaluable_with_nested_template(
-                    &field.value,
-                    loop_binding_paths,
-                    nested_template,
-                )?;
-            }
-            Ok(const_evaluable)
-        }
-
-        ExpressionKind::Collection(items) => {
-            let mut const_evaluable = true;
-            for item in items {
-                const_evaluable &= classify_expression_const_evaluable_with_nested_template(
-                    item,
-                    loop_binding_paths,
-                    nested_template,
-                )?;
-            }
-            Ok(const_evaluable)
-        }
-
-        ExpressionKind::Range(start, end) => {
-            Ok(classify_expression_const_evaluable_with_nested_template(
-                start,
-                loop_binding_paths,
-                nested_template,
-            )? && classify_expression_const_evaluable_with_nested_template(
-                end,
-                loop_binding_paths,
-                nested_template,
-            )?)
-        }
-
-        ExpressionKind::NoValue
-        | ExpressionKind::OptionNone
-        | ExpressionKind::Copy(_)
-        | ExpressionKind::Function(_)
-        | ExpressionKind::FunctionCall { .. }
-        | ExpressionKind::FieldAccess { .. }
-        | ExpressionKind::MethodCall { .. }
-        | ExpressionKind::CollectionBuiltinCall { .. }
-        | ExpressionKind::MapBuiltinCall { .. }
-        | ExpressionKind::HandledFallibleFunctionCall { .. }
-        | ExpressionKind::HandledFallibleHostFunctionCall { .. }
-        | ExpressionKind::Cast(_)
-        | ExpressionKind::HandledFallibleExpression { .. }
-        | ExpressionKind::OptionPropagation { .. }
-        | ExpressionKind::HostFunctionCall { .. }
-        | ExpressionKind::RuntimeTemplateHandoff(_)
-        | ExpressionKind::RuntimeSlotApplicationHandoff(_)
-        | ExpressionKind::MapLiteral(_)
-        | ExpressionKind::StructDefinition(_)
-        | ExpressionKind::ValueBlock { .. } => Ok(false),
+        _ => Ok(false),
     }
 }
 
 pub(crate) fn tir_node_is_const_evaluable_value(
     store: &TemplateIrStore,
+    expressions: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
     node_id: TemplateIrNodeId,
-    string_table: &StringTable,
+    _string_table: &StringTable,
 ) -> Result<bool, TemplateError> {
-    tir_tree_is_const_evaluable_standalone_value(store, node_id, string_table, &mut HashSet::new())
+    let mut query = StructuralConstness {
+        store,
+        expressions,
+        const_values,
+        visiting_templates: HashSet::new(),
+    };
+    query.tree(node_id, &[], true)
 }
 
-fn tir_tree_is_const_evaluable_standalone_value(
-    store: &TemplateIrStore,
-    node_id: TemplateIrNodeId,
-    string_table: &StringTable,
-    visiting_templates: &mut HashSet<TemplateIrId>,
-) -> Result<bool, TemplateError> {
-    let node = store.get_node(node_id).ok_or_else(|| {
-        CompilerError::compiler_error(format!(
-            "TIR runtime contribution constness referenced missing node {node_id}."
-        ))
-    })?;
+/// Structural contribution planning deliberately refuses non-default nested
+/// overlays. Preparation owns exact effective-view classification instead.
+struct StructuralConstness<'a> {
+    store: &'a TemplateIrStore,
+    expressions: &'a AstExpressionBuilder,
+    const_values: &'a ConstValueStore,
+    visiting_templates: HashSet<TemplateIrId>,
+}
 
-    match &node.kind {
-        TemplateIrNodeKind::Sequence { children } => {
-            for child in children {
-                if !tir_tree_is_const_evaluable_standalone_value(
-                    store,
-                    *child,
-                    string_table,
-                    visiting_templates,
-                )? {
-                    return Ok(false);
-                }
-            }
-            Ok(true)
-        }
-        TemplateIrNodeKind::Text { .. } => Ok(true),
-        TemplateIrNodeKind::Slot { .. } | TemplateIrNodeKind::AggregateOutput => Ok(true),
-        TemplateIrNodeKind::DynamicExpression { expression, .. } => {
-            let kind =
-                expression.const_value_kind_with_template_classifier(&mut |template| {
-                    let nested = store.get_template(template.tir_reference.root).ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "TIR runtime contribution constness referenced missing template {}.",
-                        template.tir_reference.root
-                    ))
-                })?;
-                    if template.tir_reference.context != TemplateViewContext::default()
-                        || !visiting_templates.insert(template.tir_reference.root)
-                    {
-                        return Ok(TemplateConstValueKind::NonConst);
+impl StructuralConstness<'_> {
+    fn tree(
+        &mut self,
+        node_id: TemplateIrNodeId,
+        bindings: &[PathId],
+        standalone: bool,
+    ) -> Result<bool, TemplateError> {
+        let node = self.store.get_node(node_id).ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "TIR runtime contribution constness referenced missing node {node_id}."
+            ))
+        })?;
+        match &node.kind {
+            TemplateIrNodeKind::Sequence { children } => {
+                for &child in children {
+                    if !self.tree(child, bindings, standalone)? {
+                        return Ok(false);
                     }
-                    let result = tir_tree_is_const_evaluable_standalone_value(
-                        store,
-                        nested.root,
-                        string_table,
-                        visiting_templates,
+                }
+                Ok(true)
+            }
+            TemplateIrNodeKind::Text { .. }
+            | TemplateIrNodeKind::Slot { .. }
+            | TemplateIrNodeKind::AggregateOutput => Ok(true),
+            TemplateIrNodeKind::DynamicExpression { expression, .. } => {
+                let expression = self.expressions.view(*expression)?;
+                if standalone {
+                    let kind = expression.const_value_kind_with_template_classifier(
+                        self.const_values,
+                        &mut |template| {
+                            let reference = template.tir_reference;
+                            if reference.context != TemplateViewContext::default() {
+                                return Ok(TemplateConstValueKind::NonConst);
+                            }
+                            let result = self.nested(reference.root, &[], true)?;
+                            Ok(if result {
+                                TemplateConstValueKind::RenderableString
+                            } else {
+                                TemplateConstValueKind::NonConst
+                            })
+                        },
                     )?;
-                    visiting_templates.remove(&template.tir_reference.root);
-                    Ok(if result {
-                        TemplateConstValueKind::RenderableString
-                    } else {
-                        TemplateConstValueKind::NonConst
-                    })
-                })?;
-            Ok(kind.is_compile_time_value())
-        }
-        TemplateIrNodeKind::ChildTemplate { reference, .. } => {
-            let template = store.get_template(reference.root).ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "TIR runtime contribution constness referenced missing template {}.",
-                    reference.root
-                ))
-            })?;
-            if !visiting_templates.insert(reference.root) {
-                return Ok(false);
+                    Ok(kind.is_compile_time_value())
+                } else {
+                    self.expression(expression, bindings)
+                }
             }
-            let result = tir_tree_is_const_evaluable_standalone_value(
-                store,
-                template.root,
-                string_table,
-                visiting_templates,
-            );
-            visiting_templates.remove(&reference.root);
-            result
-        }
-        TemplateIrNodeKind::InsertContribution {
-            template: template_id,
-        } => {
-            let template = store.get_template(*template_id).ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "TIR runtime contribution constness referenced missing template {}.",
-                    template_id
-                ))
-            })?;
-            if !visiting_templates.insert(*template_id) {
-                return Ok(false);
+            TemplateIrNodeKind::ChildTemplate { reference, .. } => {
+                self.nested(reference.root, &[], standalone)
             }
-            let result = tir_tree_is_const_evaluable_standalone_value(
-                store,
-                template.root,
-                string_table,
-                visiting_templates,
-            );
-            visiting_templates.remove(template_id);
-            result
-        }
-        TemplateIrNodeKind::Conditional { selector, body, .. } => {
-            let Some(bindings) =
-                selector_is_const(selector, &[], store, string_table, visiting_templates)?
-            else {
-                return Ok(false);
-            };
-            tir_tree_is_const_evaluable_value(
-                store,
-                *body,
-                &bindings,
-                string_table,
-                visiting_templates,
-            )
-        }
-        TemplateIrNodeKind::Loop {
-            header,
-            body,
-            aggregate_wrapper,
-            ..
-        } => {
-            if !loop_header_is_const(header, &[], store, string_table, visiting_templates)? {
-                return Ok(false);
+            TemplateIrNodeKind::InsertContribution { template } => {
+                self.nested(*template, &[], standalone)
             }
-            let bindings = loop_body_const_evaluation_bindings(header, &[]);
-            if !tir_tree_is_const_evaluable_value(
-                store,
-                *body,
-                &bindings,
-                string_table,
-                visiting_templates,
-            )? {
-                return Ok(false);
+            TemplateIrNodeKind::Conditional { selector, body, .. } => {
+                let Some(body_bindings) = self.selector(selector, bindings)? else {
+                    return Ok(false);
+                };
+                self.tree(*body, &body_bindings, false)
             }
-            if let Some(wrapper) = aggregate_wrapper {
-                return tir_tree_is_const_evaluable_value(
-                    store,
-                    *wrapper,
-                    &[],
-                    string_table,
-                    visiting_templates,
-                );
-            }
-            Ok(true)
-        }
-        TemplateIrNodeKind::RuntimeSlotSite { .. }
-        | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => Ok(false),
-        // A retained position has no selected value yet, so it can never be a compile-time
-        // constant and must wait for body-root completion.
-        TemplateIrNodeKind::RetainedNumericIntake(_) => Ok(false),
-    }
-}
-
-fn tir_tree_is_const_evaluable_value(
-    store: &TemplateIrStore,
-    node_id: TemplateIrNodeId,
-    loop_binding_paths: &[PathId],
-    string_table: &StringTable,
-    visiting_templates: &mut HashSet<TemplateIrId>,
-) -> Result<bool, TemplateError> {
-    let node = store.get_node(node_id).ok_or_else(|| {
-        CompilerError::compiler_error(format!(
-            "TIR runtime contribution constness referenced missing node {node_id}."
-        ))
-    })?;
-
-    match &node.kind {
-        TemplateIrNodeKind::Sequence { children } => {
-            for child in children {
-                if !tir_tree_is_const_evaluable_value(
-                    store,
-                    *child,
-                    loop_binding_paths,
-                    string_table,
-                    visiting_templates,
-                )? {
+            TemplateIrNodeKind::Loop {
+                header,
+                body,
+                aggregate_wrapper,
+                ..
+            } => {
+                if !self.header(header, bindings)? {
                     return Ok(false);
                 }
-            }
-            Ok(true)
-        }
-        TemplateIrNodeKind::Text { .. } => Ok(true),
-        TemplateIrNodeKind::Slot { .. } | TemplateIrNodeKind::AggregateOutput => Ok(true),
-        TemplateIrNodeKind::DynamicExpression { expression, .. } => expression_is_const_evaluable(
-            expression,
-            loop_binding_paths,
-            store,
-            string_table,
-            visiting_templates,
-        ),
-        TemplateIrNodeKind::ChildTemplate { reference, .. } => {
-            let template = store.get_template(reference.root).ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "TIR runtime contribution constness referenced missing template {}.",
-                    reference.root
-                ))
-            })?;
-            if !visiting_templates.insert(reference.root) {
-                return Ok(false);
-            }
-            let result = tir_tree_is_const_evaluable_value(
-                store,
-                template.root,
-                &[],
-                string_table,
-                visiting_templates,
-            );
-            visiting_templates.remove(&reference.root);
-            result
-        }
-        TemplateIrNodeKind::InsertContribution {
-            template: template_id,
-        } => {
-            let template = store.get_template(*template_id).ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "TIR runtime contribution constness referenced missing template {}.",
-                    template_id
-                ))
-            })?;
-            if !visiting_templates.insert(*template_id) {
-                return Ok(false);
-            }
-            let result = tir_tree_is_const_evaluable_value(
-                store,
-                template.root,
-                &[],
-                string_table,
-                visiting_templates,
-            );
-            visiting_templates.remove(template_id);
-            result
-        }
-        TemplateIrNodeKind::Conditional { selector, body, .. } => {
-            let Some(bindings) = selector_is_const(
-                selector,
-                loop_binding_paths,
-                store,
-                string_table,
-                visiting_templates,
-            )?
-            else {
-                return Ok(false);
-            };
-            tir_tree_is_const_evaluable_value(
-                store,
-                *body,
-                &bindings,
-                string_table,
-                visiting_templates,
-            )
-        }
-        TemplateIrNodeKind::Loop {
-            header,
-            body,
-            aggregate_wrapper,
-            ..
-        } => {
-            if !loop_header_is_const(
-                header,
-                loop_binding_paths,
-                store,
-                string_table,
-                visiting_templates,
-            )? {
-                return Ok(false);
-            }
-            let bindings = loop_body_const_evaluation_bindings(header, loop_binding_paths);
-            if !tir_tree_is_const_evaluable_value(
-                store,
-                *body,
-                &bindings,
-                string_table,
-                visiting_templates,
-            )? {
-                return Ok(false);
-            }
-            if let Some(wrapper) = aggregate_wrapper {
-                return tir_tree_is_const_evaluable_value(
-                    store,
-                    *wrapper,
-                    loop_binding_paths,
-                    string_table,
-                    visiting_templates,
-                );
-            }
-            Ok(true)
-        }
-        TemplateIrNodeKind::RuntimeSlotSite { .. }
-        | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => Ok(false),
-        // A retained position has no selected value yet, so it can never be a compile-time
-        // constant and must wait for body-root completion.
-        TemplateIrNodeKind::RetainedNumericIntake(_) => Ok(false),
-    }
-}
-
-fn expression_is_const_evaluable(
-    expression: &Expression,
-    loop_binding_paths: &[PathId],
-    store: &TemplateIrStore,
-    string_table: &StringTable,
-    visiting_templates: &mut HashSet<TemplateIrId>,
-) -> Result<bool, TemplateError> {
-    classify_expression_const_evaluable_with_nested_template(
-        expression,
-        loop_binding_paths,
-        &mut |reference, bindings| {
-            let template = store.get_template(reference.root).ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "TIR runtime contribution constness referenced missing template {}.",
-                    reference.root
-                ))
-            })?;
-            if reference.context != TemplateViewContext::default() {
-                return Ok(false);
-            }
-            if !visiting_templates.insert(reference.root) {
-                return Ok(false);
-            }
-            let result = tir_tree_is_const_evaluable_value(
-                store,
-                template.root,
-                bindings,
-                string_table,
-                visiting_templates,
-            )?;
-            visiting_templates.remove(&reference.root);
-            Ok(result)
-        },
-    )
-}
-
-fn selector_is_const(
-    selector: &TemplateBranchSelector,
-    loop_binding_paths: &[PathId],
-    store: &TemplateIrStore,
-    string_table: &StringTable,
-    visiting_templates: &mut HashSet<TemplateIrId>,
-) -> Result<Option<Vec<PathId>>, TemplateError> {
-    match selector {
-        TemplateBranchSelector::Bool(condition) => Ok(expression_is_const_evaluable(
-            condition,
-            loop_binding_paths,
-            store,
-            string_table,
-            visiting_templates,
-        )?
-        .then(|| loop_binding_paths.to_vec())),
-        TemplateBranchSelector::OptionPresentCapture { scrutinee, pattern } => {
-            let decidable = match &scrutinee.kind {
-                ExpressionKind::OptionNone => true,
-                ExpressionKind::Reference(path) => {
-                    loop_binding_paths.iter().any(|known| known == path)
+                let body_bindings = loop_body_const_evaluation_bindings(header, bindings);
+                if !self.tree(*body, &body_bindings, false)? {
+                    return Ok(false);
                 }
-                ExpressionKind::Coerced { value, .. } => expression_is_const_evaluable(
-                    value,
-                    loop_binding_paths,
-                    store,
-                    string_table,
-                    visiting_templates,
-                )?,
-                _ => false,
-            };
-            if !decidable {
-                return Ok(None);
+                if let Some(wrapper) = aggregate_wrapper {
+                    return self.tree(*wrapper, if standalone { &[] } else { bindings }, false);
+                }
+                Ok(true)
             }
-            let mut bindings = loop_binding_paths.to_vec();
-            collect_option_capture_binding_path(pattern, &mut bindings);
-            Ok(Some(bindings))
+            TemplateIrNodeKind::RuntimeSlotSite { .. }
+            | TemplateIrNodeKind::RuntimeSlotContributionSource { .. }
+            | TemplateIrNodeKind::RetainedNumericIntake(_) => Ok(false),
+        }
+    }
+
+    fn nested(
+        &mut self,
+        id: TemplateIrId,
+        bindings: &[PathId],
+        standalone: bool,
+    ) -> Result<bool, TemplateError> {
+        let root = self
+            .store
+            .get_template(id)
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "TIR runtime contribution constness referenced missing template {id}."
+                ))
+            })?
+            .root;
+        if !self.visiting_templates.insert(id) {
+            return Ok(false);
+        }
+        let result = self.tree(root, bindings, standalone);
+        self.visiting_templates.remove(&id);
+        result
+    }
+
+    fn expression(
+        &mut self,
+        expression: ExpressionView<'_>,
+        bindings: &[PathId],
+    ) -> Result<bool, TemplateError> {
+        classify_expression_const_evaluable_with_nested_template(
+            expression,
+            bindings,
+            &mut |reference, nested_bindings| {
+                if reference.context != TemplateViewContext::default() {
+                    return Ok(false);
+                }
+                self.nested(reference.root, nested_bindings, false)
+            },
+        )
+    }
+
+    fn selector(
+        &mut self,
+        selector: &TemplateBranchSelector,
+        bindings: &[PathId],
+    ) -> Result<Option<Vec<PathId>>, TemplateError> {
+        match selector {
+            TemplateBranchSelector::Bool(id) => Ok(self
+                .expression(self.expressions.view(*id)?, bindings)?
+                .then(|| bindings.to_vec())),
+            TemplateBranchSelector::OptionPresentCapture { scrutinee, pattern } => {
+                let expression = self.expressions.view(*scrutinee)?;
+                let decidable = match expression.operation() {
+                    ExpressionOperationView::Constant(id) => matches!(
+                        self.const_values.value(id).map(|value| &value.payload),
+                        Some(
+                            ConstValuePayload::OptionNone
+                                | ConstValuePayload::OptionSome(_)
+                                | ConstValuePayload::Coerced(_)
+                        )
+                    ),
+                    ExpressionOperationView::Reference(path) => bindings.contains(&path),
+                    ExpressionOperationView::Coerce { value, .. } => {
+                        self.expression(value, bindings)?
+                    }
+                    _ => false,
+                };
+                if !decidable {
+                    return Ok(None);
+                }
+                let mut body_bindings = bindings.to_vec();
+                collect_option_capture_binding_path(pattern, &mut body_bindings);
+                Ok(Some(body_bindings))
+            }
+        }
+    }
+
+    fn header(
+        &mut self,
+        header: &TemplateLoopHeader,
+        bindings: &[PathId],
+    ) -> Result<bool, TemplateError> {
+        match header {
+            TemplateLoopHeader::Conditional { condition } => {
+                Ok(const_conditional_loop_condition_value(
+                    self.expressions.view(*condition)?,
+                    self.const_values,
+                )
+                .is_some())
+            }
+            TemplateLoopHeader::Range { range, .. } => {
+                if !self.expression(self.expressions.view(range.start)?, bindings)?
+                    || !self.expression(self.expressions.view(range.end)?, bindings)?
+                {
+                    return Ok(false);
+                }
+                match range.step {
+                    Some(step) => self.expression(self.expressions.view(step)?, bindings),
+                    None => Ok(true),
+                }
+            }
+            TemplateLoopHeader::Collection { iterable, .. } => {
+                self.expression(self.expressions.view(*iterable)?, bindings)
+            }
         }
     }
 }
 
-pub(crate) fn const_conditional_loop_condition_value(condition: &Expression) -> Option<bool> {
-    let mut condition = condition;
-    while let ExpressionKind::Coerced { value, .. } = &condition.kind {
+pub(crate) fn const_conditional_loop_condition_value(
+    mut condition: ExpressionView<'_>,
+    const_values: &ConstValueStore,
+) -> Option<bool> {
+    while let ExpressionOperationView::Coerce { value, .. } = condition.operation() {
         condition = value;
     }
-
-    match &condition.kind {
-        ExpressionKind::Bool(value) => Some(*value),
+    match condition.operation() {
+        ExpressionOperationView::Constant(id) => match &const_values.value(id)?.payload {
+            ConstValuePayload::Bool(value) => Some(*value),
+            _ => None,
+        },
         _ => None,
-    }
-}
-
-fn loop_header_is_const(
-    header: &TemplateLoopHeader,
-    loop_binding_paths: &[PathId],
-    store: &TemplateIrStore,
-    string_table: &StringTable,
-    visiting_templates: &mut HashSet<TemplateIrId>,
-) -> Result<bool, TemplateError> {
-    match header {
-        TemplateLoopHeader::Conditional { condition } => {
-            Ok(const_conditional_loop_condition_value(condition).is_some())
-        }
-        TemplateLoopHeader::Range { range, .. } => {
-            if !expression_is_const_evaluable(
-                &range.start,
-                loop_binding_paths,
-                store,
-                string_table,
-                visiting_templates,
-            )? || !expression_is_const_evaluable(
-                &range.end,
-                loop_binding_paths,
-                store,
-                string_table,
-                visiting_templates,
-            )? {
-                return Ok(false);
-            }
-            if let Some(step) = &range.step {
-                return expression_is_const_evaluable(
-                    step,
-                    loop_binding_paths,
-                    store,
-                    string_table,
-                    visiting_templates,
-                );
-            }
-            Ok(true)
-        }
-        TemplateLoopHeader::Collection { iterable, .. } => expression_is_const_evaluable(
-            iterable,
-            loop_binding_paths,
-            store,
-            string_table,
-            visiting_templates,
-        ),
     }
 }

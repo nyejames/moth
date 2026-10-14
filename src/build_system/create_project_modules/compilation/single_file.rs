@@ -68,7 +68,10 @@ use super::{
     discover_source_package_inventories, prepare_source_package_check_only_jobs,
 };
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "single-file compilation keeps configuration, profile, directives, mutable builder/string/source owners, extension, build-config inputs and mode separate"
+)]
 pub(crate) fn compile_single_file_frontend_with_inputs(
     config: &Config,
     build_profile: FrontendBuildProfile,
@@ -190,7 +193,10 @@ enum SingleFileFrontendTarget {
     Boracle,
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "single-file target compilation keeps configuration, profile, directives, mutable builder/string/source owners, extension, build-config inputs, mode and target selector separate"
+)]
 fn compile_single_file_frontend_with_target(
     config: &Config,
     build_profile: FrontendBuildProfile,

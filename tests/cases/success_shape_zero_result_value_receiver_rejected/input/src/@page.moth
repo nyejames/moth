@@ -1,0 +1,7 @@
+touch ||:
+    return
+;
+
+
+
+value = touch()

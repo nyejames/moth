@@ -93,31 +93,20 @@ fn fixture_lane_js_runtime_asset(canonical_source_path: PathBuf) -> RuntimeAsset
 /// caller-supplied interned path in the caller-owned string table.
 fn minimal_hir_module(start_name_path: PathId) -> HirModule {
     let mut module = HirModule::new();
-    let return_value = module
-        .expressions
-        .append_expression(HirExpression {
-            kind: HirExpressionKind::TupleConstruct {
-                elements: HirValueRange::empty(),
-            },
-            ty: NONE,
-            value_kind: ValueKind::Const,
-            region: RegionId(0),
-            span: None,
-        })
-        .expect("fixture expression fits");
     module.regions = vec![HirRegion::lexical(RegionId(0), None)];
     module.blocks = vec![HirBlock {
         id: BlockId(0),
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(return_value),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     }];
     module.functions = vec![HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: NONE,
+        returns: Box::new([]),
+        error_return: None,
     }];
     module.start_function = Some(FunctionId(0));
     module
@@ -330,7 +319,7 @@ fn entry_assembly_rejects_reachable_external_function_without_package_owner() {
         kind: HirStatementKind::Call {
             target: CallTarget::External(ExternalFunctionId::Synthetic(99_999)),
             args: HirValueRange::empty(),
-            result: None,
+            results: Vec::new(),
         },
         span: None,
     });
@@ -1376,9 +1365,9 @@ fn lane_module_with_generated_and_cross_module_calls(
         hir_module.blocks[0].statements.push(HirStatement {
             id: HirNodeId(7),
             kind: HirStatementKind::Call {
-                target: CallTarget::Generated(identity),
+                target: CallTarget::Generated(Box::new(identity)),
                 args: HirValueRange::empty(),
-                result: None,
+                results: Vec::new(),
             },
             span: None,
         });
@@ -1389,7 +1378,7 @@ fn lane_module_with_generated_and_cross_module_calls(
             kind: HirStatementKind::Call {
                 target: CallTarget::CrossModule(origin.clone()),
                 args: HirValueRange::empty(),
-                result: None,
+                results: Vec::new(),
             },
             span: None,
         });

@@ -464,17 +464,6 @@ macro_rules! define_reasoned_diagnostic_registry {
                 }
                 descriptor: { "MOTH-RULE-0053", "Compile-time evaluation error", Error }
             },
-            Type::InvalidFallibleOperand => {
-                payload: InvalidFallibleOperand;
-                fields: {
-                    reason: InvalidFallibleOperandReason,
-                    category: UnsupportedOperatorCategory,
-                    operand_type: TypeId
-                }
-                bindings: {}
-                remap: {}
-                descriptor: { "MOTH-TYPE-0004", "Unhandled fallible operand", Error }
-            },
             Type::IncompatibleChoiceComparison => {
                 payload: IncompatibleChoiceComparison;
                 fields: {
@@ -1172,6 +1161,7 @@ define_stable_reason_keys! {
 
     InvalidDeclarationReason => {
     &InvalidDeclarationReason::ReservedBuiltinName => "invalid_declaration.reserved_builtin_name",
+    &InvalidDeclarationReason::DeclarationRequiresModuleTopLevel => "invalid_declaration.declaration_requires_module_top_level",
     &InvalidDeclarationReason::ConstantCannotBeMutable => "invalid_declaration.constant_cannot_be_mutable",
     &InvalidDeclarationReason::ExternalTypeLiteralConstruction => "invalid_declaration.external_type_literal_construction",
     &InvalidDeclarationReason::ParameterizedGenericTypeAlias => "invalid_declaration.parameterized_generic_type_alias",
@@ -1366,8 +1356,10 @@ define_stable_reason_keys! {
     &InvalidFallibleHandlingReason::BangOnNonFallible => "invalid_fallible_handling.bang_on_non_fallible",
     &InvalidFallibleHandlingReason::BangOnOptional => "invalid_fallible_handling.bang_on_optional",
     &InvalidFallibleHandlingReason::FunctionHasNoErrorSlot => "invalid_fallible_handling.function_has_no_error_slot",
+    &InvalidFallibleHandlingReason::EntryHasIncompatibleError { .. } => "invalid_fallible_handling.entry_has_incompatible_error",
     &InvalidFallibleHandlingReason::NotOptionExpression => "invalid_fallible_handling.not_option_expression",
     &InvalidFallibleHandlingReason::FunctionHasNoOptionalReturn => "invalid_fallible_handling.function_has_no_optional_return",
+    &InvalidFallibleHandlingReason::FunctionHasMultipleSuccessReturns { .. } => "invalid_fallible_handling.function_has_multiple_success_returns",
     &InvalidFallibleHandlingReason::OptionPropagationReturnTypeMismatch => "invalid_fallible_handling.option_propagation_return_type_mismatch",
     &InvalidFallibleHandlingReason::OptionPropagationCatchConflict => "invalid_fallible_handling.option_propagation_catch_conflict",
     &InvalidFallibleHandlingReason::ExplicitPropagationCatchConflict => "invalid_fallible_handling.explicit_propagation_catch_conflict",
@@ -1417,9 +1409,6 @@ define_stable_reason_keys! {
     &CompileTimeEvaluationErrorReason::StructuralStringRequiresFinalText => "compile_time_evaluation_error.structural_string_requires_final_text",
     },
 
-    InvalidFallibleOperandReason => {
-    &InvalidFallibleOperandReason::FallibleValueNotHandled => "invalid_fallible_operand.fallible_value_not_handled",
-    },
 
     IncompatibleChoiceComparisonReason => {
     &IncompatibleChoiceComparisonReason::DifferentChoiceTypes => "incompatible_choice_comparison.different_choice_types",

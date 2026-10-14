@@ -11,9 +11,10 @@ use super::retained::{DeferredValueBlock, DeferredValueBlockForm, RetainedValueB
 use crate::compiler_frontend::ast::ContextKind;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, MatchExhaustiveness};
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::statements::branching::{ParsedMatchBlock, parse_match_block};
 use crate::compiler_frontend::ast::statements::match_headers::parse_scrutinee_until_is;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchArm;
@@ -42,6 +43,8 @@ pub(super) struct ValueMatchParseInput<'a, 'b, 'tokens> {
     pub(super) token_stream: &'a mut AstCursor<'tokens>,
     pub(super) context: &'a ScopeContext,
     pub(super) type_interner: &'a mut AstTypeInterner<'b>,
+    pub(super) expression_builder: &'a mut AstExpressionBuilder,
+    pub(super) const_values: &'a mut ConstValueStore,
     pub(super) target: ActiveValueProductionTarget,
     pub(super) string_table: &'a mut StringTable,
     pub(super) span: Option<SourceSpan>,
@@ -59,6 +62,8 @@ pub(super) fn parse_value_match_at_receiver(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         target,
         string_table,
         span,
@@ -71,6 +76,8 @@ pub(super) fn parse_value_match_at_receiver(
         token_stream,
         &scrutinee_context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     )?;
@@ -93,6 +100,8 @@ pub(super) fn parse_value_match_at_receiver(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         &mut warnings,
         Some(target.clone()),
         string_table,
@@ -131,7 +140,8 @@ pub(super) fn parse_value_match_at_receiver(
         expected_result_type_ids,
         receiver_kind,
         needs_slot_inference,
-        type_interner,
+        expression_builder,
+        const_values,
     })
 }
 
@@ -142,8 +152,8 @@ pub(super) fn parse_value_match_at_receiver(
 /// WHY: exhaustiveness, result slots and expression construction must run in one place, whether
 ///      the bodies came from this parse or from retained bodies resolved later at the enclosing
 ///      body root.
-pub(super) struct ValueMatchFinishInput<'a, 'b> {
-    pub(super) scrutinee: Expression,
+pub(super) struct ValueMatchFinishInput<'a> {
+    pub(super) scrutinee: ExprId,
     pub(super) arms: Vec<MatchArm>,
     pub(super) default: Option<Vec<AstNode>>,
     pub(super) exhaustiveness: MatchExhaustiveness,
@@ -151,7 +161,8 @@ pub(super) struct ValueMatchFinishInput<'a, 'b> {
     pub(super) expected_result_type_ids: Vec<TypeId>,
     pub(super) receiver_kind: ValueReceiverKind,
     pub(super) needs_slot_inference: bool,
-    pub(super) type_interner: &'a mut AstTypeInterner<'b>,
+    pub(super) expression_builder: &'a mut AstExpressionBuilder,
+    pub(super) const_values: &'a mut ConstValueStore,
 }
 
 /// Finishes a full value match from parsed arm and default bodies.
@@ -161,7 +172,7 @@ pub(super) struct ValueMatchFinishInput<'a, 'b> {
 /// WHY: the parse path and a resumed retained body must share one construction owner, so no
 ///      second inference or validation path can disagree with the authored parse.
 pub(super) fn finish_full_value_match(
-    input: ValueMatchFinishInput<'_, '_>,
+    input: ValueMatchFinishInput<'_>,
 ) -> FullMatchResult<ParsedReceiverValue> {
     let ValueMatchFinishInput {
         scrutinee,
@@ -172,10 +183,17 @@ pub(super) fn finish_full_value_match(
         expected_result_type_ids,
         receiver_kind,
         needs_slot_inference,
-        type_interner,
+        expression_builder,
+        const_values,
     } = input;
 
-    validate_value_match_completeness(&arms, default.as_deref(), span)?;
+    validate_value_match_completeness(
+        &arms,
+        default.as_deref(),
+        span,
+        &*expression_builder,
+        &*const_values,
+    )?;
 
     if needs_slot_inference {
         return Ok(ParsedReceiverValue::NeedsSlotInference {
@@ -191,19 +209,15 @@ pub(super) fn finish_full_value_match(
         });
     }
 
-    let result_type_id = infer_value_match_result_type(
+    let result_type_ids = infer_value_match_result_type(
         &arms,
         default.as_deref(),
         &expected_result_type_ids,
-        type_interner,
         span,
         receiver_kind,
+        expression_builder,
+        const_values,
     )?;
-    let result_type_ids = if expected_result_type_ids.is_empty() {
-        vec![result_type_id]
-    } else {
-        expected_result_type_ids
-    };
 
     Ok(ParsedReceiverValue::Complete(build_value_match_expression(
         ValueMatchBlock {
@@ -215,7 +229,6 @@ pub(super) fn finish_full_value_match(
             result_type_ids,
         },
         span,
-        result_type_id,
-        type_interner.environment(),
-    )))
+        expression_builder,
+    )?))
 }

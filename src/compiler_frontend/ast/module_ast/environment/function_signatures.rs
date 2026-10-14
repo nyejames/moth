@@ -6,6 +6,7 @@
 //! without adding a second nominal-type system just for headers.
 
 use super::builder::{AstModuleEnvironmentBuilder, DeclarationPassLanes};
+use crate::compiler_frontend::ast::ast_nodes::{DeclarationShell, DeclarationValue};
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use std::sync::Arc;
 
@@ -23,7 +24,7 @@ use crate::compiler_frontend::ast::statements::functions::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::type_resolution::{
-    collect_type_parameter_ids_from_declarations, collect_type_parameter_ids_from_type,
+    collect_type_parameter_ids_from_type, intern_resolved_function_signature,
     resolve_function_signature, validate_generic_parameters_used,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
@@ -174,6 +175,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     &source_owner,
                     &signature_context,
                     &mut type_interner,
+                    &mut self.context.expression_builder,
+                    &mut self.context.const_values,
                     string_table,
                     SignatureTypeFallbackPolicy::StrictCapacity,
                     self.path_fork,
@@ -191,7 +194,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             let path_fork = self.path_fork as *const PathInternerFork;
             let mut type_resolution_context = self.type_resolution_context_for_with_traits(
                 &visibility,
-                header.tokens.source(),
                 generic_parameter_scope.as_ref(),
                 Some(trait_environment),
             );
@@ -210,10 +212,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
 
             let mut used_generic_parameters = rustc_hash::FxHashSet::default();
-            collect_type_parameter_ids_from_declarations(
-                &resolved_signature.signature.parameters,
-                &mut used_generic_parameters,
-            );
+            for parameter in &resolved_signature.signature.parameters {
+                collect_type_parameter_ids_from_type(
+                    &parameter.diagnostic_type,
+                    &mut used_generic_parameters,
+                );
+            }
             for return_slot in &resolved_signature.signature.returns {
                 collect_type_parameter_ids_from_type(
                     return_slot.data_type(),
@@ -240,21 +244,22 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             //  Update declaration table
             // ---------------------------------
 
+            let function_type_id = intern_resolved_function_signature(
+                &resolved_signature.signature,
+                &mut self.type_environment,
+            );
             let update_result = match self.declaration_table_mut() {
                 Ok(declaration_table) => {
                     if let Some(function_declaration) =
                         declaration_table.get_mut_by_id(declaration_id)
                     {
-                        // Body parsing consults declaration-table placeholders before the
-                        // function body expression exists. Keep receiver metadata on the
-                        // placeholder so free-call lookup can reject receiver methods without
-                        // inspecting diagnostic-only type spelling.
-                        function_declaration.value.function_receiver =
-                            resolved_signature.receiver.to_owned();
-                        function_declaration.value.diagnostic_type = DataType::Function(
-                            Box::new(resolved_signature.receiver.to_owned()),
-                            resolved_signature.signature.to_owned(),
-                        );
+                        // Free-call lookup reads the shell's receiver fact before a body exists.
+                        function_declaration.value =
+                            DeclarationValue::Shell(DeclarationShell::Function {
+                                receiver: resolved_signature.receiver.clone(),
+                            });
+                        function_declaration.type_id = function_type_id;
+                        function_declaration.diagnostic_type = DataType::Inferred;
                         Ok(())
                     } else {
                         Err(CompilerError::compiler_error(
@@ -381,7 +386,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     .signature
                     .parameters
                     .first()
-                    .is_some_and(|parameter| parameter.value.value_mode.is_mutable()),
+                    .is_some_and(|parameter| parameter.value_mode.is_mutable()),
                 signature: resolved.signature.clone(),
             };
 
@@ -496,7 +501,7 @@ fn build_generic_function_template(
         declaration_identity: None,
         generic_parameter_owner: None,
         generic_parameter_list_id,
-        signature: signature.to_owned(),
+        signature: signature.clone(),
         declaration_span: header.name_span,
         body_tokens: Some(body),
     }
@@ -510,7 +515,7 @@ fn collect_type_parameter_ids_from_signature_type_ids(
 ) {
     for parameter in &signature.parameters {
         collect_type_parameter_ids_from_type_id(
-            parameter.value.type_id,
+            parameter.type_id,
             type_environment,
             canonical_by_local,
             used_parameters,

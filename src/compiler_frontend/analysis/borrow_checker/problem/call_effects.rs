@@ -10,7 +10,7 @@ use super::super::origins::{CallResultProvenance, CallResultUnknownReason};
 use super::{FunctionProblemBuilder, compiler_error};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::external_packages::{
-    CallTarget, ExternalAccessKind, ExternalReturnAlias,
+    CallTarget, ExternalAccessKind, ExternalHirReturnAlias,
 };
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallParameterAccess,
@@ -52,10 +52,13 @@ impl<'a> FunctionProblemBuilder<'a> {
                 )));
             }
             let provenance = match definition.hir_return_alias() {
-                ExternalReturnAlias::Fresh => CallResultProvenance::Fresh,
-                ExternalReturnAlias::AliasArgs(indices) => CallResultProvenance::AliasParams(
-                    indices.into_iter().collect::<Vec<_>>().into_boxed_slice(),
-                ),
+                ExternalHirReturnAlias::Fresh => CallResultProvenance::Fresh,
+                ExternalHirReturnAlias::AliasArgs(indices) => {
+                    CallResultProvenance::AliasParams(indices.into())
+                }
+                ExternalHirReturnAlias::Unknown => {
+                    CallResultProvenance::Unknown(CallResultUnknownReason::OpaqueExternal)
+                }
             };
             return Ok((accesses, provenance));
         }
@@ -64,7 +67,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             CallTarget::Local(id) => self.local_summaries.and_then(|summaries| summaries.get(id)),
             CallTarget::CrossModule(id) => self.module.imported_call_summaries.get(id),
             CallTarget::ModulePrivate(id) => self.module.module_private_call_summaries.get(id),
-            CallTarget::Generated(id) => self.module.generated_call_summaries.get(id),
+            CallTarget::Generated(id) => self.module.generated_call_summaries.get(id.as_ref()),
             CallTarget::External(_) => None,
         };
         let Some(summary) = summary else {

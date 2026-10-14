@@ -905,7 +905,7 @@ fn project_supported_metadata(value: &PublicFoldedValue) -> Option<PublicFoldedV
         PublicFoldedValue::Char(value) => Some(PublicFoldedValue::Char(*value)),
         PublicFoldedValue::String(value) => Some(PublicFoldedValue::String(value.clone())),
         PublicFoldedValue::OptionNone => Some(PublicFoldedValue::OptionNone),
-        PublicFoldedValue::ConstTemplate(template) => concrete_template_string(template)
+        PublicFoldedValue::ConstTemplate { template, .. } => concrete_template_string(template)
             .map(|text| PublicFoldedValue::String(OwnedFoldedString::Text(text))),
         PublicFoldedValue::OptionSome(inner) => project_supported_metadata(inner)
             .map(|value| PublicFoldedValue::OptionSome(Box::new(value))),
@@ -941,7 +941,7 @@ fn project_supported_metadata(value: &PublicFoldedValue) -> Option<PublicFoldedV
 fn extract_string_value(value: &PublicFoldedValue) -> Option<String> {
     match value {
         PublicFoldedValue::String(value) => value.clone().into_text(),
-        PublicFoldedValue::ConstTemplate(template) => concrete_template_string(template),
+        PublicFoldedValue::ConstTemplate { template, .. } => concrete_template_string(template),
         _ => None,
     }
 }

@@ -118,15 +118,15 @@ pub(super) fn generate_infallible_wrapper(
 }
 
 /// Generates a fallible wrapper that validates the external result shape and converts it to
-/// Moth's internal fallible carrier.
+/// Moth's JavaScript ABI envelope.
 ///
-/// WHAT: calls the raw JS export, expects `{ ok: boolean, value? }` or `{ ok: false, error }`,
-///       and returns `{ tag: "ok", value: ... }` or an internal Moth `Error` struct value. The
-///       foreign `error.code` is read once and projected onto the builtin `U32` code domain:
+/// WHAT: calls the raw JS export, expects `{ ok: boolean, value? }` or `{ ok: false, error }`
+///       and returns `{ tag: "ok", value: ... }` or `{ tag: "err", value: ... }` with a Moth `Error`.
+///       The foreign `error.code` is read once and projected onto the builtin `U32` code domain:
 ///       exact JS Number integers in `0..=4294967295` pass,
-///       integer `-0` normalizes to `0`, and every other value (negative, oversized,
+///       integer `-0` normalises to `0` and every other value (negative, oversized,
 ///       non-finite, fractional, non-Number, missing) falls back to the zero code.
-/// WHY: the JS backend consumes this carrier shape, and `Error.code` uses the exact Number
+/// WHY: the JS boundary consumes this ABI envelope and `Error.code` uses the exact Number
 ///      representation of `U32`.
 pub(super) fn generate_fallible_wrapper(
     wrapper_name: &str,

@@ -3023,6 +3023,34 @@ contract = "language.constants.non_constant_reference_rejected"
 role = "primary"
 
 [[case]]
+id = "body_local_struct_construction_rejected"
+path = "body_local_struct_construction_rejected"
+tags = ["integration", "diagnostics", "structs"]
+contract = "language.structs.body_local_construction_rejected"
+role = "primary"
+
+[[case]]
+id = "body_local_struct_const_reference_rejected"
+path = "body_local_struct_const_reference_rejected"
+tags = ["integration", "diagnostics", "structs"]
+contract = "language.constants.body_local_struct_reference_rejected"
+role = "primary"
+
+[[case]]
+id = "body_local_struct_compile_time_rejected"
+path = "body_local_struct_compile_time_rejected"
+tags = ["integration", "diagnostics", "structs"]
+contract = "language.constants.body_local_struct_not_foldable"
+role = "primary"
+
+[[case]]
+id = "top_level_struct_compile_time_rejected"
+path = "top_level_struct_compile_time_rejected"
+tags = ["integration", "diagnostics", "structs"]
+contract = "language.constants.top_level_struct_not_foldable"
+role = "primary"
+
+[[case]]
 id = "constants"
 path = "constants"
 tags = ["integration", "language"]
@@ -4857,6 +4885,20 @@ contract = "language.options.postfix_propagation_without_optional_context_reject
 role = "primary"
 
 [[case]]
+id = "option_postfix_multiple_success_function_rejected"
+path = "option_postfix_multiple_success_function_rejected"
+tags = ["integration", "language", "optionals", "diagnostics"]
+contract = "language.options.postfix_multiple_success_function_rejected"
+role = "primary"
+
+[[case]]
+id = "option_postfix_multiple_success_nested_branch_rejected"
+path = "option_postfix_multiple_success_nested_branch_rejected"
+tags = ["integration", "language", "optionals", "diagnostics"]
+contract = "language.options.postfix_multiple_success_function_rejected"
+role = "boundary"
+
+[[case]]
 id = "option_postfix_non_option_operand_rejected"
 path = "option_postfix_non_option_operand_rejected"
 tags = ["integration", "language", "optionals", "diagnostics"]
@@ -5169,6 +5211,20 @@ id = "entry_error_top_level_propagation_success"
 path = "entry_error_top_level_propagation_success"
 tags = ["integration", "results", "entry-start", "runtime", "js-backend"]
 contract = "language.results.builtin_error_propagation_in_start"
+role = "boundary"
+
+[[case]]
+id = "entry_error_incompatible_top_level_propagation_rejected"
+path = "entry_error_incompatible_top_level_propagation_rejected"
+tags = ["integration", "results", "entry-start", "diagnostics"]
+contract = "language.results.incompatible_error_propagation_in_start_rejected"
+role = "primary"
+
+[[case]]
+id = "entry_error_incompatible_nested_branch_propagation_rejected"
+path = "entry_error_incompatible_nested_branch_propagation_rejected"
+tags = ["integration", "results", "entry-start", "diagnostics"]
+contract = "language.results.incompatible_error_propagation_in_start_rejected"
 role = "boundary"
 
 [[case]]
@@ -5940,6 +5996,20 @@ id = "template_const_loop_nested_collection_runtime_rejected"
 path = "template_const_loop_nested_collection_runtime_rejected"
 tags = ["integration","templates","diagnostics"]
 contract = "language.templates.const_loop_nested_collection_runtime_rejected"
+role = "primary"
+
+[[case]]
+id = "template_loop_config_overflow_non_foldable_rejected"
+path = "template_loop_config_overflow_non_foldable_rejected"
+tags = ["integration","templates","diagnostics"]
+contract = "language.templates.loop_config_overflow_non_foldable_rejected"
+role = "primary"
+
+[[case]]
+id = "template_loop_overflow_non_foldable_rejected"
+path = "template_loop_overflow_non_foldable_rejected"
+tags = ["integration","templates","diagnostics"]
+contract = "language.templates.loop_overflow_non_foldable_rejected"
 role = "primary"
 
 [[case]]
@@ -7627,6 +7697,20 @@ id = "struct_constructor_all_defaults"
 path = "struct_constructor_all_defaults"
 tags = ["integration", "structs"]
 contract = "language.structs.constructor_all_defaults_acceptance"
+role = "primary"
+
+[[case]]
+id = "struct_default_forward_constant_reference_success"
+path = "struct_default_forward_constant_reference_success"
+tags = ["integration", "structs"]
+contract = "language.structs.default_forward_constant_reference"
+role = "primary"
+
+[[case]]
+id = "struct_default_pending_constructor_success"
+path = "struct_default_pending_constructor_success"
+tags = ["integration", "structs"]
+contract = "language.structs.default_pending_constructor"
 role = "primary"
 
 [[case]]
@@ -9884,10 +9968,10 @@ contract = "language.dependencies.dependency_binding_name_collision_rejected"
 role = "boundary"
 
 [[case]]
-id = "prelude_name_body_declaration_rejected"
-path = "prelude_name_body_declaration_rejected"
-tags = ["integration", "language", "diagnostics"]
-contract = "language.dependencies.prelude_body_declaration_rejected"
+id = "function_declaration_in_body_rejected"
+path = "function_declaration_in_body_rejected"
+tags = ["integration", "language", "functions", "diagnostics"]
+contract = "language.functions.nested_declaration_rejected"
 role = "primary"
 
 [[case]]
@@ -10555,6 +10639,13 @@ path = "value_used_as_type_rejected"
 tags = ["integration", "name-resolution", "namespace-misuse", "diagnostics"]
 contract = "language.bindings.value_used_as_type_rejected"
 role = "primary"
+
+[[case]]
+id = "callable_used_as_type_rejected"
+path = "callable_used_as_type_rejected"
+tags = ["integration", "name-resolution", "namespace-misuse", "diagnostics"]
+contract = "language.bindings.value_used_as_type_rejected"
+role = "boundary"
 
 [[case]]
 id = "shadowed_variable_rejected"
@@ -15226,6 +15317,13 @@ contract = "language.numbers.pending_member_diagnostic_after_independent_resolut
 role = "primary"
 
 [[case]]
+id = "scalar_pending_member_grouped_u64_receiver_rejected"
+path = "scalar_pending_member_grouped_u64_receiver_rejected"
+tags = ["integration", "numeric", "diagnostics", "inference"]
+contract = "language.numbers.pending_member_grouped_receiver_resolution"
+role = "primary"
+
+[[case]]
 id = "scalar_pending_member_nested_u64_receiver_rejected"
 path = "scalar_pending_member_nested_u64_receiver_rejected"
 tags = ["integration", "numeric", "diagnostics", "inference"]
@@ -16463,3 +16561,192 @@ path = "numeric_known_shape_shared_pair_runtime"
 tags = ["integration", "numeric", "inference", "generics", "structs", "runtime"]
 contract = "language.generics.numeric_constructor_late_receivers"
 role = "adversarial"
+
+[[case]]
+id = "success_shape_inferred_declaration_pair_rejected"
+path = "success_shape_inferred_declaration_pair_rejected"
+tags = ["integration", "results", "diagnostics", "success-shape"]
+contract = "language.results.scalar_inferred_declaration_rejects_multiple_success"
+role = "primary"
+
+[[case]]
+id = "success_shape_typed_declaration_pair_rejected"
+path = "success_shape_typed_declaration_pair_rejected"
+tags = ["integration", "results", "diagnostics", "success-shape"]
+contract = "language.results.scalar_typed_declaration_rejects_multiple_success"
+role = "primary"
+
+[[case]]
+id = "success_shape_assignment_pair_rejected"
+path = "success_shape_assignment_pair_rejected"
+tags = ["integration", "results", "diagnostics", "success-shape"]
+contract = "language.results.scalar_assignment_rejects_multiple_success"
+role = "primary"
+
+[[case]]
+id = "success_shape_single_return_pair_rejected"
+path = "success_shape_single_return_pair_rejected"
+tags = ["integration", "results", "diagnostics", "success-shape"]
+contract = "language.results.single_success_return_rejects_multiple_success"
+role = "primary"
+
+[[case]]
+id = "success_shape_nested_if_branch_pair_rejected"
+path = "success_shape_nested_if_branch_pair_rejected"
+tags = ["integration", "results", "diagnostics", "success-shape", "value-if"]
+contract = "language.results.nested_producing_branch_rejects_multiple_success"
+role = "primary"
+
+[[case]]
+id = "success_shape_zero_result_value_receiver_rejected"
+path = "success_shape_zero_result_value_receiver_rejected"
+tags = ["integration", "results", "diagnostics", "success-shape"]
+contract = "language.results.scalar_declaration_rejects_zero_success"
+role = "primary"
+
+[[case]]
+id = "success_shape_matching_multi_bind_runtime"
+path = "success_shape_matching_multi_bind_runtime"
+tags = ["integration", "results", "runtime", "success-shape"]
+contract = "language.results.matching_multi_bind_stages_once_before_writes"
+role = "primary"
+
+[[case]]
+id = "success_shape_multi_result_forwarding_runtime"
+path = "success_shape_multi_result_forwarding_runtime"
+tags = ["integration", "results", "runtime", "success-shape"]
+contract = "language.results.matching_return_forwards_ordered_success_once"
+role = "primary"
+
+[[case]]
+id = "grouped_pending_literal_plus_group_take_u8_runtime"
+path = "grouped_pending_literal_plus_group_take_u8_runtime"
+tags = ["integration", "numeric", "runtime", "grouped"]
+contract = "language.numbers.grouped_pending_literal_plus_group_take_u8_success"
+role = "primary"
+
+[[case]]
+id = "grouped_multi_bind_call_group_runtime"
+path = "grouped_multi_bind_call_group_runtime"
+tags = ["integration", "results", "runtime", "grouped", "multi-bind"]
+contract = "language.results.grouped_multi_bind_call_success"
+role = "primary"
+
+[[case]]
+id = "grouped_multi_bind_call_plain_runtime"
+path = "grouped_multi_bind_call_plain_runtime"
+tags = ["integration", "results", "runtime", "multi-bind"]
+contract = "language.results.grouped_multi_bind_call_plain_control_success"
+role = "boundary"
+
+[[case]]
+id = "grouped_collection_loop_template_head_runtime"
+path = "grouped_collection_loop_template_head_runtime"
+tags = ["integration", "templates", "runtime", "grouped"]
+contract = "language.templates.grouped_collection_loop_head_success"
+role = "primary"
+
+[[case]]
+id = "grouped_loop_condition_pending_template_runtime"
+path = "grouped_loop_condition_pending_template_runtime"
+tags = ["integration", "templates", "runtime", "grouped", "numeric"]
+contract = "language.templates.grouped_loop_condition_pending_success"
+role = "primary"
+
+[[case]]
+id = "grouped_nested_literal_typed_binding_runtime"
+path = "grouped_nested_literal_typed_binding_runtime"
+tags = ["integration", "numeric", "runtime", "grouped"]
+contract = "language.numbers.grouped_nested_literal_typed_binding_success"
+role = "primary"
+
+[[case]]
+id = "grouped_literal_out_of_range_u8_rejected"
+path = "grouped_literal_out_of_range_u8_rejected"
+tags = ["integration", "numeric", "diagnostics", "grouped"]
+contract = "language.numbers.grouped_literal_out_of_range_u8_rejected"
+role = "primary"
+
+[[case]]
+id = "grouped_arithmetic_overflow_u8_rejected"
+path = "grouped_arithmetic_overflow_u8_rejected"
+tags = ["integration", "numeric", "diagnostics", "grouped"]
+contract = "language.numbers.grouped_arithmetic_overflow_u8_rejected"
+role = "primary"
+
+[[case]]
+id = "grouped_unclosed_numeric_chain_rejected"
+path = "grouped_unclosed_numeric_chain_rejected"
+tags = ["integration", "numeric", "diagnostics", "grouped"]
+contract = "language.numbers.grouped_unclosed_numeric_chain_rejected"
+role = "primary"
+
+[[case]]
+id = "grouped_stray_close_numeric_chain_rejected"
+path = "grouped_stray_close_numeric_chain_rejected"
+tags = ["integration", "numeric", "diagnostics", "grouped"]
+contract = "language.numbers.grouped_stray_close_numeric_chain_rejected"
+role = "primary"
+
+[[case]]
+id = "grouped_dangling_operator_numeric_chain_rejected"
+path = "grouped_dangling_operator_numeric_chain_rejected"
+tags = ["integration", "numeric", "diagnostics", "grouped"]
+contract = "language.numbers.grouped_dangling_operator_numeric_chain_rejected"
+role = "primary"
+
+[[case]]
+id = "grouped_consecutive_operands_numeric_chain_rejected"
+path = "grouped_consecutive_operands_numeric_chain_rejected"
+tags = ["integration", "numeric", "diagnostics", "grouped"]
+contract = "language.numbers.grouped_consecutive_operands_numeric_chain_rejected"
+role = "primary"
+
+[[case]]
+id = "grouped_range_loop_template_bound_runtime"
+path = "grouped_range_loop_template_bound_runtime"
+tags = ["integration", "templates", "runtime", "grouped", "numeric"]
+contract = "language.templates.grouped_range_loop_bound_success"
+role = "boundary"
+
+[[case]]
+id = "native_four_mixed_results_runtime"
+path = "native_four_mixed_results_runtime"
+tags = ["integration", "results", "numeric", "runtime", "backend-contract"]
+contract = "backend.wasm.native_mixed_scalar_result_order"
+role = "backend"
+
+[[case]]
+id = "body_local_prelude_collision_rejected"
+path = "body_local_prelude_collision_rejected"
+tags = ["bindings", "prelude"]
+contract = "language.bindings.body_local_prelude_collision_rejected"
+role = "primary"
+
+[[case]]
+id = "optional_propagation_contract_runtime"
+path = "optional_propagation_contract_runtime"
+tags = ["integration", "option", "propagation", "runtime"]
+contract = "language.option.propagation_receiving_function_runtime"
+role = "primary"
+
+[[case]]
+id = "body_local_file_visible_names_rejected"
+path = "body_local_file_visible_names_rejected"
+tags = ["integration", "bindings", "aliases", "traits", "diagnostics", "name-resolution"]
+contract = "language.bindings.file_visible_names_cannot_be_shadowed"
+role = "primary"
+
+[[case]]
+id = "parameter_file_visible_names_rejected"
+path = "parameter_file_visible_names_rejected"
+tags = ["integration", "bindings", "aliases", "traits", "diagnostics", "name-resolution"]
+contract = "language.bindings.file_visible_names_cannot_be_shadowed"
+role = "boundary"
+
+[[case]]
+id = "capture_file_visible_names_rejected"
+path = "capture_file_visible_names_rejected"
+tags = ["integration", "bindings", "aliases", "traits", "diagnostics", "name-resolution"]
+contract = "language.bindings.file_visible_names_cannot_be_shadowed"
+role = "boundary"

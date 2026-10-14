@@ -54,6 +54,15 @@ impl<'a> HirValidator<'a> {
                     ));
                 }
             }
+            if let crate::compiler_frontend::hir::terminators::HirTerminator::Invoke { id, .. } =
+                &block.terminator
+                && self.statement_block_by_id.insert(*id, block.id).is_some()
+            {
+                return Err(self.error_with_hir(
+                    format!("Duplicate HIR operation node id {id:?}"),
+                    Some(HirLocation::Terminator(block.id)),
+                ));
+            }
         }
 
         for hir_struct in &self.module.structs {

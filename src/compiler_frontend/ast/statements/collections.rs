@@ -1,7 +1,7 @@
 //! Collection and map literal parsing helpers.
 //!
-//! WHAT: parses `{...}` literals into `ExpressionKind::Collection` or
-//!       `ExpressionKind::MapLiteral` during AST construction. A literal whose entries are still
+//! WHAT: parses `{...}` literals into `ExpressionOp::Collection` or
+//!       `ExpressionOp::Map` during AST construction. A literal whose entries are still
 //!       pending numeric fragments is returned as a deferred literal for body-root completion.
 //! WHY: curly-brace syntax introduces both homogeneous collections and ordered maps; the parser
 //!      must share the normal expression parser for item/key/value type-checking, and a literal
@@ -11,12 +11,15 @@ use std::collections::HashMap;
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::const_eval::{ConstStringRequirement, require_concrete_text};
+use crate::compiler_frontend::ast::const_values::store::{ConstValuePayload, ConstValueStore};
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::{ExpressionParseError, NumericDeferral};
 use crate::compiler_frontend::ast::expressions::expression::{
-    CollectionExpressionType, Expression, MapLiteralEntry, MapLiteralExpressionType,
+    CollectionExpressionType, MapLiteralExpressionType,
 };
-use crate::compiler_frontend::ast::expressions::expression_kind::ExpressionKind;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, ExpressionOperationView, ExpressionView, MapEntry, OwnedExpr,
+};
 use crate::compiler_frontend::ast::expressions::parse_expression::{
     create_expression_until, create_expression_with_trailing_newline_policy,
 };
@@ -38,8 +41,8 @@ use crate::compiler_frontend::ast::type_resolution::validate_map_key_type;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidCollectionTypeReason, InvalidMapLiteralReason, TypeMismatchContext,
+    ValueReceiverContext,
 };
-use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -64,13 +67,10 @@ type CollectionParseResult<T> = Result<T, ExpressionParseError>;
 
 /// A parsed `{...}` literal at the expression boundary.
 ///
-/// WHAT: `Ready` is a fully typed expression. `Retained` is a literal whose entries still contain
+/// WHAT: `Ready` is a fully typed `OwnedExpr`. `Retained` is a literal whose entries still contain
 ///       pending numeric fragments and must be finished by body-root completion.
-// `Ready` is a finished literal returned once to its declaration or expression caller. Boxing it
-// would add one heap allocation per literal.
-#[allow(clippy::large_enum_variant)]
 pub(crate) enum CurlyLiteral {
-    Ready(Expression),
+    Ready(OwnedExpr),
     Retained(DeferredExpression),
 }
 
@@ -80,12 +80,17 @@ pub(crate) enum CurlyLiteral {
 ///       caller to finish instead of being resolved against the entry's default type. Every pending
 ///       entry is captured as a fragment; a captured fragment gives its side a shape, so the literal
 ///       is retained, because a named binding's type comes from later body context.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "curly parsing keeps cursor, expected curly context, scope, mutable type/expression/constant/string/path owners, value mode and numeric-retention policy separate"
+)]
 pub(crate) fn new_curly_literal(
     token_stream: &mut AstCursor,
     curly_context: ExpectedCurlyLiteralContext,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     value_mode: &ValueMode,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
@@ -97,6 +102,8 @@ pub(crate) fn new_curly_literal(
             collection_context,
             context,
             type_interner,
+            expression_builder,
+            const_values,
             value_mode,
             string_table,
             path_fork,
@@ -107,6 +114,8 @@ pub(crate) fn new_curly_literal(
             map_context,
             context,
             type_interner,
+            expression_builder,
+            const_values,
             value_mode,
             string_table,
             path_fork,
@@ -116,6 +125,8 @@ pub(crate) fn new_curly_literal(
             token_stream,
             context,
             type_interner,
+            expression_builder,
+            const_values,
             value_mode,
             string_table,
             path_fork,
@@ -134,7 +145,7 @@ pub(crate) fn complete_deferred_collection<'env>(
     literal: DeferredCollectionLiteral,
     destination: Option<TypeId>,
     session: &mut impl DeferredExpressionCompletion<'env>,
-) -> Result<Expression, ExpressionParseError> {
+) -> Result<OwnedExpr, ExpressionParseError> {
     let DeferredCollectionLiteral {
         shape: _,
         element_shape,
@@ -152,25 +163,41 @@ pub(crate) fn complete_deferred_collection<'env>(
     };
     let elements = elements
         .into_iter()
-        .map(|element| complete_forward_value(session, element, explicit_element))
+        .map(|element| {
+            complete_forward_value(
+                session,
+                element,
+                explicit_element,
+                ValueReceiverContext::CollectionElement,
+            )
+        })
         .collect::<Result<Vec<_>, _>>()?;
 
     let materialised_element = materialise_side(session, element_shape)?;
     let element_type_id = optional_collection_element(session, destination, materialised_element);
     let mut items = Vec::with_capacity(elements.len());
     for element in elements {
-        items.push(complete_entry_value(session, element, element_type_id)?);
+        items.push(
+            complete_entry_value(
+                session,
+                element,
+                element_type_id,
+                ValueReceiverContext::CollectionElement,
+            )?
+            .id(),
+        );
     }
 
     let services = session.session_services();
-    Ok(build_collection_expression(
+    build_collection_expression(
         items,
         element_type_id,
         collection_context,
         span,
-        &value_mode,
+        value_mode,
         services.type_interner,
-    ))
+        services.expression_builder,
+    )
 }
 
 /// Finishes a retained map literal once its key and value types are known.
@@ -183,7 +210,7 @@ pub(crate) fn complete_deferred_map<'env>(
     literal: DeferredMapLiteral,
     destination: Option<TypeId>,
     session: &mut impl DeferredExpressionCompletion<'env>,
-) -> Result<Expression, ExpressionParseError> {
+) -> Result<OwnedExpr, ExpressionParseError> {
     let DeferredMapLiteral {
         shape: _,
         key_shape,
@@ -202,8 +229,18 @@ pub(crate) fn complete_deferred_map<'env>(
         .into_iter()
         .map(|entry| -> Result<DeferredMapEntry, ExpressionParseError> {
             Ok(DeferredMapEntry {
-                key: complete_forward_value(session, entry.key, explicit_key)?,
-                value: complete_forward_value(session, entry.value, explicit_value)?,
+                key: complete_forward_value(
+                    session,
+                    entry.key,
+                    explicit_key,
+                    ValueReceiverContext::MapKey,
+                )?,
+                value: complete_forward_value(
+                    session,
+                    entry.value,
+                    explicit_value,
+                    ValueReceiverContext::MapValue,
+                )?,
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -216,32 +253,47 @@ pub(crate) fn complete_deferred_map<'env>(
     let mut known_keys: KnownMapKeys = HashMap::new();
     let mut built_entries = Vec::with_capacity(entries.len());
     for entry in entries {
-        let key = complete_entry_value(session, entry.key, key_type_id)?;
-        let value = complete_entry_value(session, entry.value, value_type_id)?;
+        let key = complete_entry_value(
+            session,
+            entry.key,
+            key_type_id,
+            ValueReceiverContext::MapKey,
+        )?;
+        let value = complete_entry_value(
+            session,
+            entry.value,
+            value_type_id,
+            ValueReceiverContext::MapValue,
+        )?;
 
         let services = session.session_services();
         validate_map_key_entry(
-            &key,
+            services.expression_builder.view_owned(key)?,
             key_type_id,
             services.context,
             services.type_interner,
+            services.const_values,
             services.string_table,
             &mut known_keys,
         )?;
 
-        built_entries.push(MapLiteralEntry { key, value });
+        built_entries.push(MapEntry {
+            key: key.id(),
+            value: value.id(),
+        });
     }
 
     let services = session.session_services();
-    Ok(build_map_expression(
+    build_map_expression(
         built_entries,
         key_type_id,
         value_type_id,
         map_context,
         span,
-        &value_mode,
+        value_mode,
         services.type_interner,
-    ))
+        services.expression_builder,
+    )
 }
 
 /// Returns the collection element a consumer destination asks a raw entry to take.
@@ -429,11 +481,16 @@ fn side_expectation(
 /// WHAT: a parsed entry is `Ready`. A child that defers numeric completion (`NumericDeferral`) is
 ///       always captured as a `Fragment` owned by the literal, whether or not the literal retains
 ///       literal-only recipes; `retain` controls only that literal-only retention.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "entry parsing keeps cursor and scope, mutable type/expression/constant/string/path owners and receiving expectation, entry terminator and numeric-retention policy separate"
+)]
 fn parse_curly_entry(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     expectation: &mut EntryExpectation,
     end: CurlyEntryEnd,
     retain: bool,
@@ -451,6 +508,8 @@ fn parse_curly_entry(
         token_stream,
         scope_context: &entry_context,
         type_interner,
+        expression_builder,
+        const_values,
         expected_type: &mut expectation.expected_type,
         cast_target_context: &mut expectation.cast_target_context,
         value_mode: &entry_value_mode,
@@ -479,7 +538,7 @@ fn parse_curly_entry(
     };
 
     match parsed {
-        Ok(expression) => Ok(DeferredLiteralValue::Ready(expression)),
+        Ok(expression) => Ok(DeferredLiteralValue::Ready(expression.id())),
         // Retain only the complete entry, never a nested argument that lost its enclosing producer.
         Err(ExpressionParseError::NumericDeferral(deferral)) if deferral.complete_fragment => {
             let NumericDeferral {
@@ -510,13 +569,15 @@ fn parse_curly_entry(
 struct LiteralSide {
     known_type: Option<TypeId>,
     shape: Option<KnownShapeId>,
+    receiver: ValueReceiverContext,
 }
 
 impl LiteralSide {
-    fn new(known_type: Option<TypeId>) -> Self {
+    fn new(known_type: Option<TypeId>, receiver: ValueReceiverContext) -> Self {
         Self {
             known_type,
             shape: None,
+            receiver,
         }
     }
 }
@@ -535,12 +596,12 @@ struct MapBuild {
 
 /// Element entries of one collection literal while it is parsed.
 ///
-/// WHAT: `Ready` holds fully typed expressions. `Deferred` holds entries once a numeric fragment has
-///       joined the element side; the earlier ready entries move into it, in order, at that point.
+/// WHAT: `Ready` holds fully typed child `ExprId`s. `Deferred` holds entries once a numeric fragment
+///       has joined the element side; the earlier ready entries move into it, in order, at that point.
 /// WHY: a literal without pending numeric entries never allocates the deferred record, and a literal
 ///      that defers pays for exactly one transition.
 enum CollectionEntries {
-    Ready(Vec<Expression>),
+    Ready(Vec<ExprId>),
     Deferred(Vec<DeferredLiteralValue>),
 }
 
@@ -573,7 +634,7 @@ impl CollectionEntries {
         }
     }
 
-    fn into_ready(self) -> CollectionParseResult<Vec<Expression>> {
+    fn into_ready(self) -> CollectionParseResult<Vec<ExprId>> {
         match self {
             Self::Ready(items) => Ok(items),
             Self::Deferred(_) => Err(internal_literal_error(
@@ -592,7 +653,7 @@ impl CollectionEntries {
 
 /// Entries of one map literal while it is parsed, with the same transition as `CollectionEntries`.
 enum MapEntries {
-    Ready(Vec<MapLiteralEntry>),
+    Ready(Vec<MapEntry>),
     Deferred(Vec<DeferredMapEntry>),
 }
 
@@ -609,7 +670,7 @@ impl MapEntries {
             Self::Deferred(entries) => entries.push(DeferredMapEntry { key, value }),
             Self::Ready(entries) => match (key, value) {
                 (DeferredLiteralValue::Ready(key), DeferredLiteralValue::Ready(value)) => {
-                    entries.push(MapLiteralEntry { key, value });
+                    entries.push(MapEntry { key, value });
                 }
                 (key, value) => {
                     let mut deferred: Vec<DeferredMapEntry> = std::mem::take(entries)
@@ -626,7 +687,7 @@ impl MapEntries {
         }
     }
 
-    fn into_ready(self) -> CollectionParseResult<Vec<MapLiteralEntry>> {
+    fn into_ready(self) -> CollectionParseResult<Vec<MapEntry>> {
         match self {
             Self::Ready(entries) => Ok(entries),
             Self::Deferred(_) => Err(internal_literal_error(
@@ -757,39 +818,43 @@ fn settle_side_value(
     value: DeferredLiteralValue,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
 ) -> CollectionParseResult<DeferredLiteralValue> {
     match value {
         DeferredLiteralValue::Ready(expression) => {
+            let view = expression_builder.view(expression)?;
+            view.require_single(side.receiver)?;
+            let view_type = view.value_type_id()?;
+            let view_span = view.span();
             let expression = match side.known_type {
                 Some(type_id) => coerce_expression_to_explicit_type_boundary(
-                    expression,
+                    expression_builder.own(expression),
                     type_id,
                     type_interner.environment(),
                     TypeMismatchContext::CollectionElement,
-                )?,
+                    expression_builder,
+                )?
+                .id(),
                 None => {
-                    side.known_type = Some(expression.type_id);
+                    side.known_type = Some(view_type);
                     if let Some(previous_shape) = side.shape {
                         // A ready peer types raw origins but never retypes a pinned whole leaf.
                         register_shape_witness(
                             &mut context.numeric_state_mut(),
                             type_interner.environment(),
                             previous_shape,
-                            expression.type_id,
-                            expression.span,
+                            view_type,
+                            view_span,
                         );
-                        side.shape = Some(intern_concrete_shape(
-                            context,
-                            expression.type_id,
-                            expression.span,
-                        )?);
+                        side.shape = Some(intern_concrete_shape(context, view_type, view_span)?);
                     }
                     return Ok(DeferredLiteralValue::Ready(expression));
                 }
             };
 
             if side.shape.is_some() {
-                let incoming = intern_concrete_shape(context, expression.type_id, expression.span)?;
+                let view = expression_builder.view(expression)?;
+                let incoming = intern_concrete_shape(context, view.value_type_id()?, view.span())?;
                 join_side_shape(context, type_interner, side, incoming)?;
             }
 
@@ -800,6 +865,7 @@ fn settle_side_value(
                 context,
                 type_interner.environment_mut_for_derived_types(),
                 &fragment.items,
+                expression_builder,
             )?;
             // Forward facts are read before the join: joining ORs a forward peer's flag into the
             // shared root, which would make a raw literal read as a forward producer.
@@ -869,9 +935,13 @@ fn complete_entry_value<'env>(
     session: &mut impl DeferredExpressionCompletion<'env>,
     value: DeferredLiteralValue,
     side_type: TypeId,
-) -> Result<Expression, ExpressionParseError> {
+    receiver: ValueReceiverContext,
+) -> Result<OwnedExpr, ExpressionParseError> {
     let expression = match value {
-        DeferredLiteralValue::Ready(expression) => expression,
+        DeferredLiteralValue::Ready(expression) => session
+            .session_services()
+            .expression_builder
+            .own(expression),
         DeferredLiteralValue::Forward(producer) => session.take_forward_producer(producer, None)?,
         DeferredLiteralValue::Fragment(fragment)
         | DeferredLiteralValue::Joined { fragment, .. } => {
@@ -884,12 +954,18 @@ fn complete_entry_value<'env>(
     };
 
     let services = session.session_services();
-    Ok(coerce_expression_to_explicit_type_boundary(
+    services
+        .expression_builder
+        .view_owned(expression)?
+        .require_single(receiver)?;
+    coerce_expression_to_explicit_type_boundary(
         expression,
         side_type,
         services.type_interner.environment(),
         TypeMismatchContext::CollectionElement,
-    )?)
+        services.expression_builder,
+    )
+    .map_err(ExpressionParseError::from)
 }
 
 /// Resolves one retained numeric fragment against `expected`, then applies its handling suffix.
@@ -897,7 +973,7 @@ fn complete_fragment_expression<'env>(
     session: &mut impl DeferredExpressionCompletion<'env>,
     fragment: DeferredNumericExpression,
     expected: ExpectedType,
-) -> Result<Expression, ExpressionParseError> {
+) -> Result<OwnedExpr, ExpressionParseError> {
     let items = fragment.items;
     let value_mode = fragment.value_mode;
     let suffix = fragment.suffix;
@@ -905,13 +981,13 @@ fn complete_fragment_expression<'env>(
     let resolved = session.resolve_fragment(items, expected, &value_mode)?;
 
     let services = session.session_services();
-    let expression = apply_completed_handling_suffix(
+    apply_completed_handling_suffix(
         resolved,
         suffix,
         services.context,
         services.type_interner,
-    )?;
-    Ok(expression)
+        services.expression_builder,
+    )
 }
 
 /// Completes a forward entry from its natural result before its side's type is chosen.
@@ -927,12 +1003,18 @@ fn complete_forward_value<'env>(
     session: &mut impl DeferredExpressionCompletion<'env>,
     value: DeferredLiteralValue,
     explicit_type: Option<TypeId>,
+    receiver: ValueReceiverContext,
 ) -> Result<DeferredLiteralValue, ExpressionParseError> {
     match value {
         DeferredLiteralValue::Forward(producer) => {
             let expected = forward_entry_expectation(session, explicit_type);
             let expression = session.take_forward_producer(producer, expected)?;
-            Ok(DeferredLiteralValue::Ready(expression))
+            session
+                .session_services()
+                .expression_builder
+                .view_owned(expression)?
+                .require_single(receiver)?;
+            Ok(DeferredLiteralValue::Ready(expression.id()))
         }
         DeferredLiteralValue::Joined {
             fragment,
@@ -950,6 +1032,12 @@ fn complete_forward_value<'env>(
             let expected =
                 forward_entry_expectation(session, explicit_type).unwrap_or(ExpectedType::Infer);
             let expression = complete_fragment_expression(session, fragment, expected)?;
+            let (view_type, view_span) = {
+                let services = session.session_services();
+                let view = services.expression_builder.view_owned(expression)?;
+                view.require_single(receiver)?;
+                (view.value_type_id()?, view.span())
+            };
 
             let services = session.session_services();
             let mut state = services.context.numeric_state_mut();
@@ -957,10 +1045,10 @@ fn complete_forward_value<'env>(
                 &mut state,
                 services.type_interner.environment(),
                 shape,
-                expression.type_id,
-                expression.span,
+                view_type,
+                view_span,
             );
-            Ok(DeferredLiteralValue::Ready(expression))
+            Ok(DeferredLiteralValue::Ready(expression.id()))
         }
         other => Ok(other),
     }
@@ -985,12 +1073,17 @@ fn forward_entry_expectation<'env>(
 //  Collection literal parsing
 // ------------------------
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "collection parsing keeps cursor, expected collection context, scope, mutable type/expression/constant/string/path owners, value mode and numeric-retention policy separate"
+)]
 fn parse_collection_literal(
     token_stream: &mut AstCursor,
     collection_context: ExpectedCollectionContext,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     value_mode: &ValueMode,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
@@ -1013,13 +1106,15 @@ fn parse_collection_literal(
     token_stream.advance();
 
     let mut build = CollectionBuild {
-        element: LiteralSide::new(known_element),
+        element: LiteralSide::new(known_element, ValueReceiverContext::CollectionElement),
         entries: CollectionEntries::Ready(Vec::new()),
     };
     let consumed_close_curly = parse_collection_entries(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
         &mut build,
@@ -1067,7 +1162,7 @@ fn parse_collection_literal(
                 elements: build.entries.into_deferred(),
                 collection_context: Some(collection_context),
                 span: collection_span,
-                value_mode: value_mode.to_owned(),
+                value_mode: *value_mode,
             }),
         )));
     }
@@ -1080,16 +1175,23 @@ fn parse_collection_literal(
         element_type_id,
         Some(collection_context),
         collection_span,
-        value_mode,
+        *value_mode,
         type_interner,
-    )))
+        expression_builder,
+    )?))
 }
 
 /// Parses collection items until the closing `}`. Returns whether `}` was consumed.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "collection entries keep stream, scope, build, retain flag and mutable parse resources apart"
+)]
 fn parse_collection_entries(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
     build: &mut CollectionBuild,
@@ -1142,6 +1244,8 @@ fn parse_collection_entries(
                     token_stream,
                     context,
                     type_interner,
+                    expression_builder,
+                    const_values,
                     &mut expectation,
                     CurlyEntryEnd::ItemOrKey,
                     retain,
@@ -1154,8 +1258,13 @@ fn parse_collection_entries(
                     return Err(error.into());
                 }
 
-                let settled =
-                    settle_side_value(&mut build.element, parsed_item, context, type_interner)?;
+                let settled = settle_side_value(
+                    &mut build.element,
+                    parsed_item,
+                    context,
+                    type_interner,
+                    expression_builder,
+                )?;
                 build.entries.push(settled);
 
                 awaiting_item = false;
@@ -1186,19 +1295,24 @@ enum KnownMapKey {
 /// can be diagnosed at parse time.
 type KnownMapKeys = HashMap<KnownMapKey, Option<SourceSpan>>;
 
-/// Attempt to extract a `KnownMapKey` from a coerced key expression so
-/// duplicate-key detection can run for literal scalars.
+/// Attempt to extract a `KnownMapKey` from a coerced key view so duplicate-key detection runs
+/// for literal scalars without cloning declaration content.
 fn try_extract_known_map_key(
-    key: &Expression,
+    key: ExpressionView<'_>,
+    const_values: &ConstValueStore,
     string_table: &mut StringTable,
 ) -> CollectionParseResult<Option<KnownMapKey>> {
-    let known_key = match &key.kind {
-        ExpressionKind::StringSlice(_) | ExpressionKind::StructuralString { .. } => {
+    let ExpressionOperationView::Constant(id) = key.operation() else {
+        return Ok(None);
+    };
+    let known_key = match const_values.payload(id) {
+        Some(ConstValuePayload::String(_)) => {
             // A key whose final text is still unresolved is simply not knowable here, exactly like
             // a runtime operand. The constant-context check above owns the refusal, so duplicate
             // detection must not raise a second one from this collector.
             let Ok(Some(id)) = require_concrete_text(
                 key,
+                const_values,
                 ConstStringRequirement::DuplicateKeyValidation,
                 string_table,
             ) else {
@@ -1208,9 +1322,9 @@ fn try_extract_known_map_key(
         }
         // Every exact integer and `Byte` key keeps its scalar identity and payload, so
         // negatives and unsigned range facts stay part of what duplicate detection compares.
-        ExpressionKind::FixedScalar(v) => KnownMapKey::FixedScalar(*v),
-        ExpressionKind::Bool(v) => KnownMapKey::Bool(*v),
-        ExpressionKind::Char(v) => KnownMapKey::Char(*v),
+        Some(ConstValuePayload::FixedScalar(value)) => KnownMapKey::FixedScalar(*value),
+        Some(ConstValuePayload::Bool(value)) => KnownMapKey::Bool(*value),
+        Some(ConstValuePayload::Char(value)) => KnownMapKey::Char(*value),
         _ => return Ok(None),
     };
 
@@ -1225,36 +1339,41 @@ fn try_extract_known_map_key(
 /// build resolves later, so rejecting it would remove legal expressive power; such a key is merely
 /// unknowable for compile-time duplicate detection.
 fn validate_compile_time_map_key(
-    key: &Expression,
+    key: ExpressionView<'_>,
+    const_values: &ConstValueStore,
     context: &ScopeContext,
     string_table: &mut StringTable,
 ) -> CollectionParseResult<()> {
-    if context.kind.is_constant_context()
-        && matches!(
-            &key.kind,
-            ExpressionKind::StringSlice(_) | ExpressionKind::StructuralString { .. }
-        )
-    {
-        require_concrete_text(key, ConstStringRequirement::CompileTimeMapKey, string_table)
-            .map_err(ExpressionParseError::from)?;
+    if !context.kind.is_constant_context() {
+        return Ok(());
     }
-
+    let ExpressionOperationView::Constant(_) = key.operation() else {
+        return Ok(());
+    };
+    require_concrete_text(
+        key,
+        const_values,
+        ConstStringRequirement::CompileTimeMapKey,
+        string_table,
+    )
+    .map_err(ExpressionParseError::from)?;
     Ok(())
 }
 
 fn record_known_map_key(
     known_keys: &mut KnownMapKeys,
-    key: &Expression,
+    key: ExpressionView<'_>,
+    const_values: &ConstValueStore,
     string_table: &mut StringTable,
 ) -> CollectionParseResult<()> {
-    let Some(known_key) = try_extract_known_map_key(key, string_table)? else {
+    let Some(known_key) = try_extract_known_map_key(key, const_values, string_table)? else {
         return Ok(());
     };
 
-    if known_keys.insert(known_key, key.span).is_some() {
+    if known_keys.insert(known_key, key.span()).is_some() {
         return Err(CompilerDiagnostic::invalid_map_literal(
             InvalidMapLiteralReason::DuplicateKnownKey,
-            key.span,
+            key.span(),
         )
         .into());
     }
@@ -1264,16 +1383,17 @@ fn record_known_map_key(
 
 /// Validates one ready map key: key type policy, constant-context text, then duplicate detection.
 fn validate_map_key_entry(
-    key: &Expression,
+    key: ExpressionView<'_>,
     key_type_id: TypeId,
     context: &ScopeContext,
     type_interner: &AstTypeInterner<'_>,
+    const_values: &ConstValueStore,
     string_table: &mut StringTable,
     known_keys: &mut KnownMapKeys,
 ) -> CollectionParseResult<()> {
-    validate_map_key_type(key_type_id, type_interner.environment(), key.span)?;
-    validate_compile_time_map_key(key, context, string_table)?;
-    record_known_map_key(known_keys, key, string_table)
+    validate_map_key_type(key_type_id, type_interner.environment(), key.span())?;
+    validate_compile_time_map_key(key, const_values, context, string_table)?;
+    record_known_map_key(known_keys, key, const_values, string_table)
 }
 
 fn mixed_collection_entry_error(token_stream: &AstCursor) -> Option<CompilerDiagnostic> {
@@ -1337,12 +1457,17 @@ fn reject_missing_map_value_expression(token_stream: &mut AstCursor) -> Collecti
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "map parsing keeps cursor, expected map context, scope, mutable type/expression/constant/string/path owners, value mode and numeric-retention policy separate"
+)]
 fn parse_map_literal(
     token_stream: &mut AstCursor,
     map_context: ExpectedMapContext,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     value_mode: &ValueMode,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
@@ -1356,8 +1481,8 @@ fn parse_map_literal(
     token_stream.advance();
 
     let mut build = MapBuild {
-        key: LiteralSide::new(Some(key_type_id)),
-        value: LiteralSide::new(Some(value_type_id)),
+        key: LiteralSide::new(Some(key_type_id), ValueReceiverContext::MapKey),
+        value: LiteralSide::new(Some(value_type_id), ValueReceiverContext::MapValue),
         known_keys: HashMap::new(),
         entries: MapEntries::Ready(Vec::new()),
     };
@@ -1365,6 +1490,8 @@ fn parse_map_literal(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
         &mut build,
@@ -1388,7 +1515,7 @@ fn parse_map_literal(
                 entries: build.entries.into_deferred(),
                 map_context: Some(map_context),
                 span: map_span,
-                value_mode: value_mode.to_owned(),
+                value_mode: *value_mode,
             },
         ))));
     }
@@ -1400,16 +1527,23 @@ fn parse_map_literal(
         value_type_id,
         Some(map_context),
         map_span,
-        value_mode,
+        *value_mode,
         type_interner,
-    )))
+        expression_builder,
+    )?))
 }
 
 /// Parses map entries until the closing `}`. Returns whether `}` was consumed.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "map entries keep stream, scope, build, retain flag and mutable parse resources apart"
+)]
 fn parse_map_entries(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
     build: &mut MapBuild,
@@ -1459,6 +1593,8 @@ fn parse_map_entries(
                     token_stream,
                     context,
                     type_interner,
+                    expression_builder,
+                    const_values,
                     &mut key_expectation,
                     CurlyEntryEnd::ItemOrKey,
                     retain,
@@ -1476,6 +1612,8 @@ fn parse_map_entries(
                     token_stream,
                     context,
                     type_interner,
+                    expression_builder,
+                    const_values,
                     string_table,
                     path_fork,
                     build,
@@ -1493,11 +1631,16 @@ fn parse_map_entries(
 }
 
 /// Parses the separator and value of one map entry whose key is already parsed, then records it.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "map entry completion keeps cursor and scope, mutable type/expression/constant/string/path owners and map build, owned key and value expectation and numeric-retention policy separate"
+)]
 fn finish_map_entry(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
     build: &mut MapBuild,
@@ -1514,6 +1657,8 @@ fn finish_map_entry(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         &mut value_expectation,
         CurlyEntryEnd::Value,
         retain,
@@ -1521,17 +1666,30 @@ fn finish_map_entry(
         path_fork,
     )?;
 
-    let key = settle_side_value(&mut build.key, key, context, type_interner)?;
-    let value = settle_side_value(&mut build.value, parsed_value, context, type_interner)?;
+    let key = settle_side_value(
+        &mut build.key,
+        key,
+        context,
+        type_interner,
+        expression_builder,
+    )?;
+    let value = settle_side_value(
+        &mut build.value,
+        parsed_value,
+        context,
+        type_interner,
+        expression_builder,
+    )?;
 
     if let (DeferredLiteralValue::Ready(key_expression), Some(key_type_id)) =
         (&key, build.key.known_type)
     {
         validate_map_key_entry(
-            key_expression,
+            expression_builder.view(*key_expression)?,
             key_type_id,
             context,
             type_interner,
+            const_values,
             string_table,
             &mut build.known_keys,
         )?;
@@ -1545,10 +1703,16 @@ fn finish_map_entry(
 //  Inferred curly literal parsing
 // ------------------------
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "inferred curly keeps stream, scope, value mode, retain flag and mutable parse resources apart"
+)]
 fn parse_inferred_curly_literal(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     value_mode: &ValueMode,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
@@ -1573,6 +1737,8 @@ fn parse_inferred_curly_literal(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         &mut first_expectation,
         CurlyEntryEnd::ItemOrKey,
         retain,
@@ -1584,8 +1750,8 @@ fn parse_inferred_curly_literal(
         // First entry has `=`  =>  this is a map literal.
         TokenTag::ASSIGN => {
             let mut build = MapBuild {
-                key: LiteralSide::new(None),
-                value: LiteralSide::new(None),
+                key: LiteralSide::new(None, ValueReceiverContext::MapKey),
+                value: LiteralSide::new(None, ValueReceiverContext::MapValue),
                 known_keys: HashMap::new(),
                 entries: MapEntries::Ready(Vec::new()),
             };
@@ -1600,6 +1766,8 @@ fn parse_inferred_curly_literal(
                 token_stream,
                 context,
                 type_interner,
+                expression_builder,
+                const_values,
                 string_table,
                 path_fork,
                 &mut build,
@@ -1612,6 +1780,8 @@ fn parse_inferred_curly_literal(
                 token_stream,
                 context,
                 type_interner,
+                expression_builder,
+                const_values,
                 string_table,
                 path_fork,
                 &mut build,
@@ -1634,7 +1804,7 @@ fn parse_inferred_curly_literal(
                         entries: build.entries.into_deferred(),
                         map_context: None,
                         span: literal_span,
-                        value_mode: value_mode.to_owned(),
+                        value_mode: *value_mode,
                     },
                 ))));
             }
@@ -1648,25 +1818,33 @@ fn parse_inferred_curly_literal(
                 value_type_id,
                 None,
                 literal_span,
-                value_mode,
+                *value_mode,
                 type_interner,
-            )))
+                expression_builder,
+            )?))
         }
 
         // First expression is followed by `,` or `}`  =>  collection literal.
         TokenTag::COMMA | TokenTag::CLOSE_CURLY => {
             let mut build = CollectionBuild {
-                element: LiteralSide::new(None),
+                element: LiteralSide::new(None, ValueReceiverContext::CollectionElement),
                 entries: CollectionEntries::Ready(Vec::new()),
             };
-            let settled_first =
-                settle_side_value(&mut build.element, first_entry, context, type_interner)?;
+            let settled_first = settle_side_value(
+                &mut build.element,
+                first_entry,
+                context,
+                type_interner,
+                expression_builder,
+            )?;
             build.entries.push(settled_first);
 
             let consumed_close_curly = parse_collection_entries(
                 token_stream,
                 context,
                 type_interner,
+                expression_builder,
+                const_values,
                 string_table,
                 path_fork,
                 &mut build,
@@ -1688,7 +1866,7 @@ fn parse_inferred_curly_literal(
                         elements: build.entries.into_deferred(),
                         collection_context: None,
                         span: literal_span,
-                        value_mode: value_mode.to_owned(),
+                        value_mode: *value_mode,
                     }),
                 )));
             }
@@ -1701,9 +1879,10 @@ fn parse_inferred_curly_literal(
                 element_type_id,
                 None,
                 literal_span,
-                value_mode,
+                *value_mode,
                 type_interner,
-            )))
+                expression_builder,
+            )?))
         }
 
         _ => {
@@ -1720,20 +1899,16 @@ fn parse_inferred_curly_literal(
 //  Expression builders
 // ------------------------
 
-/// Builds a collection expression, interning its collection type when no explicit one exists.
+/// Builds a collection handle, interning its collection type when no explicit one exists.
 fn build_collection_expression(
-    items: Vec<Expression>,
+    items: Vec<ExprId>,
     element_type_id: TypeId,
     collection_context: Option<ExpectedCollectionContext>,
     span: Option<SourceSpan>,
-    value_mode: &ValueMode,
+    value_mode: ValueMode,
     type_interner: &mut AstTypeInterner<'_>,
-) -> Expression {
-    let element_diagnostic_type = match items.first() {
-        Some(first) => first.diagnostic_type.to_owned(),
-        None => diagnostic_type_spelling(element_type_id, type_interner.environment()),
-    };
-
+    expression_builder: &mut AstExpressionBuilder,
+) -> CollectionParseResult<OwnedExpr> {
     let (collection_type_id, fixed_capacity) = match collection_context {
         Some(ExpectedCollectionContext::Explicit {
             collection_type_id,
@@ -1743,76 +1918,49 @@ fn build_collection_expression(
         Some(ExpectedCollectionContext::CapacityOnlyShorthand { fixed_capacity }) => {
             (None, Some(fixed_capacity))
         }
-        None => (
-            Some(
-                type_interner
-                    .environment_mut_for_derived_types()
-                    .intern_collection(element_type_id, None),
-            ),
-            None,
-        ),
+        None => (None, None),
     };
 
-    Expression::collection_with_type_id(
-        items,
+    Ok(expression_builder.collection_with_type_id(
+        expression_builder.own_slice(&items),
         CollectionExpressionType {
             element_type_id,
-            element_diagnostic_type,
             fixed_capacity,
             collection_type_id,
         },
         type_interner.environment_mut_for_derived_types(),
         span,
-        value_mode.to_owned(),
-    )
+        value_mode,
+    )?)
 }
 
-/// Builds a map expression, interning its map type when no explicit one exists.
+/// Builds a map handle from child IDs in the phase-owned map-entry range.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "map expression keeps entries, types, context, span, value mode and interner/builder apart"
+)]
 fn build_map_expression(
-    entries: Vec<MapLiteralEntry>,
+    entries: Vec<MapEntry>,
     key_type_id: TypeId,
     value_type_id: TypeId,
     map_context: Option<ExpectedMapContext>,
     span: Option<SourceSpan>,
-    value_mode: &ValueMode,
+    value_mode: ValueMode,
     type_interner: &mut AstTypeInterner<'_>,
-) -> Expression {
-    let (key_diagnostic_type, value_diagnostic_type, map_type_id) = match map_context {
-        Some(ExpectedMapContext {
-            key_diagnostic_type,
-            value_diagnostic_type,
-            map_type_id,
-            ..
-        }) => {
-            let map_type_id = map_type_id.unwrap_or_else(|| {
-                type_interner
-                    .environment_mut_for_derived_types()
-                    .intern_map(key_type_id, value_type_id)
-            });
-            (key_diagnostic_type, value_diagnostic_type, map_type_id)
-        }
-        None => (
-            diagnostic_type_spelling(key_type_id, type_interner.environment()),
-            diagnostic_type_spelling(value_type_id, type_interner.environment()),
-            type_interner
-                .environment_mut_for_derived_types()
-                .intern_map(key_type_id, value_type_id),
-        ),
-    };
-
-    Expression::map_literal_with_type_id(
-        entries,
+    expression_builder: &mut AstExpressionBuilder,
+) -> CollectionParseResult<OwnedExpr> {
+    let map_type_id = map_context.and_then(|context| context.map_type_id);
+    Ok(expression_builder.map_literal_with_type_id(
+        expression_builder.own_slice(&entries),
         MapLiteralExpressionType {
             key_type_id,
             value_type_id,
-            key_diagnostic_type,
-            value_diagnostic_type,
-            map_type_id: Some(map_type_id),
+            map_type_id,
         },
         type_interner.environment_mut_for_derived_types(),
         span,
-        value_mode.to_owned(),
-    )
+        value_mode,
+    )?)
 }
 
 #[cfg(test)]

@@ -1,8 +1,9 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
+rendered_output_exact = " x\n 1"
 
 [[backends.html.artifact_assertions]]
 path = "index.html"
 kind = "html"
-must_contain = ["__moth_result_fallback"]
+must_contain = ['.tag === "ok"']

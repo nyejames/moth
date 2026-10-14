@@ -1415,7 +1415,6 @@ fn execute_terminator<'problem>(
             Ok(EventExecutionResult::NextBlocks(targets))
         }
         TerminatorEventKind::Return
-        | TerminatorEventKind::ReturnSuccess
         | TerminatorEventKind::ReturnError
         | TerminatorEventKind::RuntimeFailure
         | TerminatorEventKind::AssertFailure => Ok(EventExecutionResult::Complete),

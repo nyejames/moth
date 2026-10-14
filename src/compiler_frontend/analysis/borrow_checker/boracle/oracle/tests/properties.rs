@@ -911,8 +911,9 @@ fn event_references_place(problem: &BorrowProblem, event: &Event, candidate: Pla
                 .iter()
                 .any(|argument| argument.place == candidate)
                 || effect
-                    .result
-                    .is_some_and(|result| result.destination.place() == candidate)
+                    .results
+                    .iter()
+                    .any(|result| result.destination.place() == candidate)
         }
         EventKind::Access { use_id } => problem
             .uses()
@@ -1461,7 +1462,6 @@ fn renumber_branch_blocks(problem: &BorrowProblem) -> Result<Option<BorrowProble
                 *targets = remapped.into_boxed_slice();
             }
             TerminatorEventKind::Return
-            | TerminatorEventKind::ReturnSuccess
             | TerminatorEventKind::ReturnError
             | TerminatorEventKind::RuntimeFailure
             | TerminatorEventKind::AssertFailure => {}

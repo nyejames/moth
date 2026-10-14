@@ -9,12 +9,14 @@
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, OwnedExpr,
+};
+use crate::compiler_frontend::ast::module_ast::scope_context::EnclosingCallableOwner;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidFallibleHandlingReason,
 };
-use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::compatibility::is_type_compatible;
@@ -29,13 +31,19 @@ pub(crate) fn parse_option_propagation_suffix_for_expression(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
-    expression: Expression,
-) -> Result<Expression, ExpressionParseError> {
+    expression_builder: &mut AstExpressionBuilder,
+    expression: OwnedExpr,
+) -> Result<OwnedExpr, ExpressionParseError> {
     let propagation_span = Some(token_stream.current_postfix_operator_span());
     token_stream.advance();
 
-    let propagated =
-        finish_option_propagation(expression, propagation_span, context, type_interner)?;
+    let propagated = finish_option_propagation(
+        expression,
+        propagation_span,
+        context,
+        type_interner,
+        expression_builder,
+    )?;
 
     if token_stream.current_tag() == TokenTag::CATCH {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
@@ -56,16 +64,24 @@ pub(crate) fn parse_option_propagation_suffix_for_expression(
 ///      authored `?` by one rule — same reasons in the same order — so resumption shares this
 ///      finisher instead of restating the option checks.
 pub(crate) fn finish_option_propagation(
-    value: Expression,
+    value: OwnedExpr,
     propagation_span: Option<SourceSpan>,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
-) -> Result<Expression, ExpressionParseError> {
-    let propagation_span = propagation_span.or(value.span);
-    let value_span = value.span;
+    expression_builder: &mut AstExpressionBuilder,
+) -> Result<OwnedExpr, ExpressionParseError> {
+    let view = expression_builder.view_owned(value)?;
+    let propagation_span = propagation_span.or(view.span());
+    let value_span = view.span();
+    let value_type_id = match view.success_types() {
+        [type_id] => Some(*type_id),
+        _ => None,
+    };
 
     let type_environment = type_interner.environment();
-    let Some(inner_type_id) = type_environment.option_inner_type(value.type_id) else {
+    let Some(inner_type_id) =
+        value_type_id.and_then(|type_id| type_environment.option_inner_type(type_id))
+    else {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::NotOptionExpression,
             propagation_span,
@@ -73,15 +89,36 @@ pub(crate) fn finish_option_propagation(
         .into());
     };
 
-    let [function_return_type_id] = context.current_function_return_type_ids.as_slice() else {
+    let Some(contract) = context
+        .enclosing_callable
+        .as_deref()
+        .filter(|contract| contract.owner == EnclosingCallableOwner::Function)
+    else {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::FunctionHasNoOptionalReturn,
             propagation_span,
         )
         .into());
     };
+    if contract.authored_success_slot_count > 1 {
+        return Err(CompilerDiagnostic::invalid_fallible_handling(
+            InvalidFallibleHandlingReason::FunctionHasMultipleSuccessReturns {
+                count: contract.authored_success_slot_count,
+            },
+            propagation_span,
+        )
+        .into());
+    }
+    let [function_return_type_id] = contract.success_types.as_slice() else {
+        return Err(CompilerDiagnostic::invalid_fallible_handling(
+            InvalidFallibleHandlingReason::FunctionHasNoOptionalReturn,
+            propagation_span,
+        )
+        .into());
+    };
+    let function_return_type_id = *function_return_type_id;
 
-    if !type_environment.is_option(*function_return_type_id) {
+    if !type_environment.is_option(function_return_type_id) {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::FunctionHasNoOptionalReturn,
             propagation_span,
@@ -89,7 +126,11 @@ pub(crate) fn finish_option_propagation(
         .into());
     }
 
-    if !is_type_compatible(*function_return_type_id, value.type_id, type_environment) {
+    if !is_type_compatible(
+        function_return_type_id,
+        value_type_id.expect("optional operand was checked above"),
+        type_environment,
+    ) {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::OptionPropagationReturnTypeMismatch,
             propagation_span,
@@ -97,11 +138,5 @@ pub(crate) fn finish_option_propagation(
         .into());
     }
 
-    let diagnostic_type = diagnostic_type_spelling(inner_type_id, type_environment);
-    Ok(Expression::option_propagation_with_type_id(
-        value,
-        inner_type_id,
-        diagnostic_type,
-        value_span,
-    ))
+    Ok(expression_builder.option_propagation_with_type_id(value, inner_type_id, value_span)?)
 }

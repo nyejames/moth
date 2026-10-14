@@ -107,33 +107,6 @@ fn option_accepts_inner_type() {
 }
 
 #[test]
-fn raw_result_compatibility_does_not_use_none_slots_as_wildcards() {
-    let mut env = TypeEnvironment::new();
-    let i32_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
-    let error = env.builtins().string;
-    let none = env.builtins().none;
-    let result_with_success = env.intern_constructed(
-        TypeConstructor::Builtin(BuiltinTypeConstructor::FallibleCarrier),
-        Box::new([i32_type, error]),
-    );
-    let result_without_success = env.intern_constructed(
-        TypeConstructor::Builtin(BuiltinTypeConstructor::FallibleCarrier),
-        Box::new([none, error]),
-    );
-
-    assert!(!is_type_compatible(
-        result_without_success,
-        result_with_success,
-        &env
-    ));
-    assert!(!is_type_compatible(
-        result_with_success,
-        result_without_success,
-        &env
-    ));
-}
-
-#[test]
 fn postfix_error_compatibility_accepts_exact_and_one_level_option_wrapping() {
     let mut env = TypeEnvironment::new();
     let error = env.builtins().string;

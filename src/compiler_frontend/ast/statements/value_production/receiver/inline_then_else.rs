@@ -8,9 +8,10 @@
 use super::block_body::ValueBlockBranchBody;
 use super::result_type::{infer_inline_result_type, receiver_type_mismatch_context};
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::expressions::parse_expression::{
     create_expression_until, create_expression_with_trailing_newline_policy,
 };
@@ -33,7 +34,7 @@ use crate::compiler_frontend::ast::statements::value_production::types::{
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidControlFlowStatementReason,
+    CompilerDiagnostic, InvalidControlFlowStatementReason, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -60,6 +61,8 @@ pub(super) struct InlineThenElseInput<'a, 'b, 'tokens> {
     pub(super) then_context: &'a ScopeContext,
     pub(super) else_context: &'a ScopeContext,
     pub(super) type_interner: &'a mut AstTypeInterner<'b>,
+    pub(super) expression_builder: &'a mut AstExpressionBuilder,
+    pub(super) const_values: &'a mut ConstValueStore,
     pub(super) target: ActiveValueProductionTarget,
     pub(super) string_table: &'a mut StringTable,
     pub(super) path_fork: &'a mut PathInternerFork,
@@ -68,9 +71,9 @@ pub(super) struct InlineThenElseInput<'a, 'b, 'tokens> {
 pub(super) struct InlineThenElseOutput {
     pub(super) then_span: Option<SourceSpan>,
     pub(super) else_span: Option<SourceSpan>,
-    pub(super) then_values: Vec<Expression>,
-    pub(super) else_values: Vec<Expression>,
-    pub(super) result_type_id: Option<TypeId>,
+    pub(super) then_values: Vec<ExprId>,
+    pub(super) else_values: Vec<ExprId>,
+    pub(super) needs_slot_inference: bool,
     pub(super) result_type_ids: Vec<TypeId>,
     pub(super) generic_request_ranges: IfGenericRequestRanges,
 }
@@ -109,7 +112,7 @@ pub(super) enum InlineThenElseOutcome {
 pub(super) enum InlineBranchBody {
     /// The branch completed at its parse position; these values publish as one `then` node.
     Ready {
-        values: Vec<Expression>,
+        values: Vec<ExprId>,
         span: Option<SourceSpan>,
         scope: PathId,
     },
@@ -175,7 +178,7 @@ fn inline_branch_body(
 }
 
 /// Extracts the built expressions of a fully built branch value list.
-fn into_built_values(values: Vec<StatementExpression>) -> InlineThenElseResult<Vec<Expression>> {
+fn into_built_values(values: Vec<StatementExpression>) -> InlineThenElseResult<Vec<ExprId>> {
     let mut built = Vec::with_capacity(values.len());
     for value in values {
         let StatementExpression::Built(expression) = value else {
@@ -223,11 +226,17 @@ type InlineThenElseResult<T> = Result<T, ExpressionParseError>;
 /// WHY: known multi-value receivers and inferred multi-bind share this grammar, and each branch
 /// owns its numeric deferral so a pending value travels to the body root rather than escaping;
 /// slot inference stays with the multi-bind owner after these values are collected.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "inline branch parsing keeps the cursor, both scopes, target and mutable state separate"
+)]
 fn parse_inline_then_else_with_target(
     token_stream: &mut AstCursor,
     then_context: &ScopeContext,
     else_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     target: &ActiveValueProductionTarget,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
@@ -259,6 +268,8 @@ fn parse_inline_then_else_with_target(
         token_stream,
         context: then_context,
         type_interner,
+        expression_builder,
+        const_values,
         target,
         string_table,
         path_fork,
@@ -277,6 +288,8 @@ fn parse_inline_then_else_with_target(
         token_stream,
         context: else_context,
         type_interner,
+        expression_builder,
+        const_values,
         target,
         string_table,
         path_fork,
@@ -309,6 +322,8 @@ pub(super) fn parse_inline_then_else(
         then_context,
         else_context,
         type_interner,
+        expression_builder,
+        const_values,
         target,
         string_table,
         path_fork,
@@ -322,6 +337,8 @@ pub(super) fn parse_inline_then_else(
             then_context,
             else_context,
             type_interner,
+            expression_builder,
+            const_values,
             &target,
             string_table,
             path_fork,
@@ -363,23 +380,20 @@ pub(super) fn parse_inline_then_else(
                 else_span: parsed.else_span,
                 then_values,
                 else_values,
-                result_type_id: None,
+                needs_slot_inference: true,
                 result_type_ids: Vec::new(),
                 generic_request_ranges: parsed.generic_request_ranges,
             }));
         }
 
         let result_type_ids = expected_result_type_ids;
-        let result_type_id = type_interner
-            .environment_mut_for_derived_types()
-            .intern_tuple(result_type_ids.clone());
 
         return Ok(InlineThenElseOutcome::Complete(InlineThenElseOutput {
             then_span: parsed.then_span,
             else_span: parsed.else_span,
             then_values,
             else_values,
-            result_type_id: Some(result_type_id),
+            needs_slot_inference: false,
             result_type_ids,
             generic_request_ranges: parsed.generic_request_ranges,
         }));
@@ -428,6 +442,8 @@ pub(super) fn parse_inline_then_else(
         token_stream,
         scope_context: then_context,
         type_interner,
+        expression_builder,
+        const_values,
         expected_type: &mut then_expr_type,
         cast_target_context: &mut then_cast_target_context,
         value_mode: &ValueMode::ImmutableOwned,
@@ -454,21 +470,22 @@ pub(super) fn parse_inline_then_else(
             TokenTag::CLOSE_CURLY,
         ]
     };
-    let then_value = match create_expression_until(input, then_stops) {
-        Ok(expression) => StatementExpression::Built(expression),
-        Err(error) => {
-            let deferral = error.take_numeric_deferral(
-                "an inline value-if branch whose receiving site is not resolved yet",
-            )?;
-            StatementExpression::Retained(deferred_numeric_expression(
-                deferral.items,
-                deferral.expected,
-                deferral.value_mode,
-                deferral.span,
-                deferral.suffix,
-            ))
-        }
-    };
+    let then_value =
+        match create_expression_until(input, then_stops).map(|expression| expression.id()) {
+            Ok(expression) => StatementExpression::Built(expression),
+            Err(error) => {
+                let deferral = error.take_numeric_deferral(
+                    "an inline value-if branch whose receiving site is not resolved yet",
+                )?;
+                StatementExpression::Retained(deferred_numeric_expression(
+                    deferral.items,
+                    deferral.expected,
+                    deferral.value_mode,
+                    deferral.span,
+                    deferral.suffix,
+                ))
+            }
+        };
     let then_request_end = then_context.generic_request_checkpoint();
 
     if else_follows {
@@ -502,6 +519,8 @@ pub(super) fn parse_inline_then_else(
             token_stream,
             scope_context: else_context,
             type_interner,
+            expression_builder,
+            const_values,
             expected_type: &mut else_expr_type,
             cast_target_context: &mut else_cast_target_context,
             value_mode: &ValueMode::ImmutableOwned,
@@ -515,7 +534,9 @@ pub(super) fn parse_inline_then_else(
     if expected_type_id.is_none() {
         input = input.with_retained_pending_numeric_fragment();
     }
-    let else_value = match create_expression_with_trailing_newline_policy(input) {
+    let else_value = match create_expression_with_trailing_newline_policy(input)
+        .map(|expression| expression.id())
+    {
         Ok(expression) => StatementExpression::Built(expression),
         Err(error) => {
             let deferral = error.take_numeric_deferral(
@@ -583,39 +604,50 @@ pub(super) fn parse_inline_then_else(
         .into());
     };
 
+    let then_type = expression_builder
+        .view(then_expr)?
+        .require_single(ValueReceiverContext::Then)?;
+    let else_type = expression_builder
+        .view(else_expr)?
+        .require_single(ValueReceiverContext::Then)?;
+
     let result_type_id = if let Some(expected_type_id) = expected_type_id {
         expected_type_id
     } else {
         infer_inline_result_type(
-            then_expr.type_id,
-            else_expr.type_id,
+            then_type,
+            else_type,
             None,
             type_interner,
-            then_expr.span,
+            expression_builder.view(then_expr)?.span(),
             receiver_kind,
         )?
     };
 
     let mismatch_context = receiver_type_mismatch_context(receiver_kind);
     let then_expr = coerce_expression_to_explicit_type_boundary(
-        then_expr,
+        expression_builder.own(then_expr),
         result_type_id,
         type_interner.environment(),
         mismatch_context,
-    )?;
+        expression_builder,
+    )
+    .map(|expression| expression.id())?;
     let else_expr = coerce_expression_to_explicit_type_boundary(
-        else_expr,
+        expression_builder.own(else_expr),
         result_type_id,
         type_interner.environment(),
         mismatch_context,
-    )?;
+        expression_builder,
+    )
+    .map(|expression| expression.id())?;
 
     Ok(InlineThenElseOutcome::Complete(InlineThenElseOutput {
         then_span,
         else_span,
         then_values: vec![then_expr],
         else_values: vec![else_expr],
-        result_type_id: Some(result_type_id),
+        needs_slot_inference: false,
         result_type_ids: if expected_result_type_ids.is_empty() {
             vec![result_type_id]
         } else {

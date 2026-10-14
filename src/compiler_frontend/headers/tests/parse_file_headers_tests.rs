@@ -45,7 +45,6 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::{LexedSource, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::{TokenCursor, TokenRange, TokenizerEntryMode};
 use crate::compiler_frontend::traits::syntax::ConformanceTargetKind;
-use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 
 fn source_span_for(source: &str, needle: &str, occurrence: usize) -> SourceSpan {
     let (start, matched) = source
@@ -616,23 +615,15 @@ fn start_function_header(headers: &BoundModuleHeaders) -> &Header {
         .expect("expected start function header")
 }
 
-fn non_start_header_names(headers: &BoundModuleHeaders, string_table: &StringTable) -> Vec<String> {
-    let implicit_start_source_file = headers
-        .headers
-        .iter()
-        .find(|header| matches!(header.kind, HeaderKind::StartFunction))
-        .map(|header| header.declaration_path);
+fn declared_header_names(headers: &BoundModuleHeaders, string_table: &StringTable) -> Vec<String> {
     let mut names = headers
         .module_symbols
         .declared_names_by_file
-        .iter()
-        .flat_map(|(source_file, names)| {
-            names.iter().filter_map(|name| {
-                let resolved_name = string_table.resolve(*name);
-                (Some(*source_file) != implicit_start_source_file
-                    || resolved_name != IMPLICIT_START_FUNC_NAME)
-                    .then(|| resolved_name.to_owned())
-            })
+        .values()
+        .flat_map(|names| {
+            names
+                .iter()
+                .map(|name| string_table.resolve(*name).to_owned())
         })
         .collect::<Vec<_>>();
     names.sort_unstable();

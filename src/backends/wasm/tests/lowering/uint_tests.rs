@@ -55,7 +55,7 @@ fn uint_literal(
 }
 
 fn lower_entry_returning(
-    expressions: HirExpressionStore,
+    mut expressions: HirExpressionStore,
     value: HirValueId,
     return_type: crate::compiler_frontend::datatypes::ids::TypeId,
     path_fork: &mut PathInternerFork,
@@ -70,13 +70,18 @@ fn lower_entry_returning(
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(value),
+        terminator: HirTerminator::Return(
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit"),
+        ),
     };
     let start_function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type,
+        returns: vec![return_type].into_boxed_slice(),
+        error_return: None,
     };
     let module = build_module(
         path_fork,
@@ -207,18 +212,19 @@ fn uint_params_locals_and_results_use_the_exact_carrier() {
                 },
                 1,
             )],
-            terminator: HirTerminator::Return(load_local(
-                &mut expressions,
-                LocalId(1),
-                scalar_type,
-                RegionId(0),
-            )),
+            terminator: HirTerminator::Return({
+                let value = load_local(&mut expressions, LocalId(1), scalar_type, RegionId(0));
+                expressions
+                    .append_values(&[value], None)
+                    .expect("fixture return values should fit")
+            }),
         };
         let function = HirFunction {
             id: FunctionId(0),
             entry: BlockId(0),
             params: vec![LocalId(0)],
-            return_type: scalar_type,
+            returns: vec![scalar_type].into_boxed_slice(),
+            error_return: None,
         };
         let module = build_module(
             &mut path_fork,
@@ -610,18 +616,24 @@ fn uint_trap_arithmetic_selects_unsigned_operation_kinds() {
                     },
                     902,
                 )],
-                terminator: HirTerminator::Return(load_local(
-                    &mut expressions,
-                    LocalId(0),
-                    fixed_scalar_type(scalar),
-                    RegionId(0),
-                )),
+                terminator: HirTerminator::Return({
+                    let value = load_local(
+                        &mut expressions,
+                        LocalId(0),
+                        fixed_scalar_type(scalar),
+                        RegionId(0),
+                    );
+                    expressions
+                        .append_values(&[value], None)
+                        .expect("fixture return values should fit")
+                }),
             };
             let function = HirFunction {
                 id: FunctionId(0),
                 entry: BlockId(0),
                 params: vec![],
-                return_type: fixed_scalar_type(scalar),
+                returns: vec![fixed_scalar_type(scalar)].into_boxed_slice(),
+                error_return: None,
             };
             let module = build_module(
                 &mut path_fork,

@@ -100,9 +100,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     for field in fields {
                         self.validate_public_type_id(
                             exported_name,
-                            field.value.type_id,
+                            field.type_id,
                             &self.header_source_path(header),
-                            field.value.span,
+                            field.binding_span,
                             trait_environment,
                             string_table,
                         )?;
@@ -128,9 +128,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         for field in fields {
                             self.validate_public_type_id(
                                 exported_name,
-                                field.value.type_id,
+                                field.type_id,
                                 &self.header_source_path(header),
-                                field.value.span,
+                                field.binding_span,
                                 trait_environment,
                                 string_table,
                             )?;
@@ -165,7 +165,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
                     self.validate_public_type_id(
                         exported_name,
-                        resolved_declaration.value.type_id,
+                        resolved_declaration.type_id,
                         &self.header_source_path(header),
                         declaration.span,
                         trait_environment,
@@ -197,9 +197,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         for parameter in &signature.parameters {
             self.validate_public_type_id(
                 exported_name,
-                parameter.value.type_id,
+                parameter.type_id,
                 public_root_file,
-                parameter.value.span,
+                parameter.binding_span,
                 trait_environment,
                 string_table,
             )?;

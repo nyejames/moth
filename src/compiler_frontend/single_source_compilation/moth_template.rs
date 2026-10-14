@@ -639,10 +639,6 @@ fn attach_finalized_source_database(
 /// Prepare the standalone template source exactly once.
 ///
 /// The preparation owner lends its split database and span-builder view for this one call, so
-#[allow(
-    clippy::too_many_arguments,
-    reason = "template source preparation keeps the shared database, request, source text, entry id, mutable string/path state, and span builder as separate inputs"
-)]
 fn prepare_template_source(
     source_files: &Arc<SourceDatabase>,
     request: &MothTemplateCompilationRequest<'_>,

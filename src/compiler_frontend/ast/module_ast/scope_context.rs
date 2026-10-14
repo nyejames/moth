@@ -33,8 +33,8 @@ use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::generic_functions::{
-    GenericFunctionInstanceKey, GenericFunctionInstantiationRequest, GenericRequestSlot,
-    GenericRequestTicket,
+    GenericFunctionInstanceKey, GenericFunctionInstantiationRequest, GenericRequestRange,
+    GenericRequestSlot, GenericRequestTicket,
 };
 use crate::compiler_frontend::ast::module_ast::environment::{
     AstModuleLookups, DeclarationSemanticKind, ResolvedConstantSet, TopLevelDeclarationTable,
@@ -57,7 +57,6 @@ use crate::compiler_frontend::build_config::{
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::datatypes::ReceiverKey;
-use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_parameters::ActiveGenericTypeContext;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -452,6 +451,20 @@ pub struct ScopeShared {
     pub(crate) trait_environment_override: Option<Rc<TraitEnvironment>>,
 }
 
+/// Resolved exit contract installed once by the enclosing callable's body emitter.
+pub(crate) struct EnclosingCallableContract {
+    pub(crate) owner: EnclosingCallableOwner,
+    pub(crate) success_types: Vec<TypeId>,
+    pub(crate) authored_success_slot_count: usize,
+    pub(crate) error_type: Option<TypeId>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum EnclosingCallableOwner {
+    Function,
+    EntryStart,
+}
+
 /// Shared parser/lowering context for one active AST scope.
 pub struct ScopeContext {
     // Core scope identity.
@@ -494,21 +507,8 @@ pub struct ScopeContext {
     /// WHY: this is parse-time context for one receiver only. Function bodies leave it
     /// empty so the function's result slots never leak into unrelated local receivers.
     pub expected_result_type_ids: Vec<TypeId>,
-    pub expected_error_type: Option<TypeId>,
-
-    /// Success return slots for the nearest enclosing function-like body.
-    ///
-    /// WHAT: the sole owner of the function success contract. It stays stable through
-    /// nested statement bodies, value blocks and expression-local receiver contexts.
-    /// WHY: `return` and postfix option propagation exit the current function, so they
-    /// validate against its contract rather than any immediate expression receiver.
-    pub current_function_return_type_ids: Vec<TypeId>,
-    /// Whether this scope is inside an authored function body.
-    ///
-    /// WHAT: set for source functions and copied into their child scopes.
-    /// WHY: synthetic start exposes builtin Error! for postfix propagation, but
-    ///      that slot must not make a root `return` look like an authored return.
-    pub(crate) inside_authored_function: bool,
+    /// Callable exits use this inherited fact, never the immediate receiver or scope kind.
+    pub(crate) enclosing_callable: Option<Rc<EnclosingCallableContract>>,
 
     /// Active value-production target for `then` statements in the current scope.
     ///
@@ -527,7 +527,7 @@ pub struct ScopeContext {
     ///
     /// WHAT: one dense origin/equality/binding/continuation table per independent function,
     ///       root or concrete-generic body. Child control-flow, expression and template scopes
-    ///       share the enclosing body's handle; `new_child_function` installs a fresh one.
+    ///       share the enclosing body's handle; each independent body installs a fresh one.
     /// WHY: a binding's single static type is selected from every permitted use in its body, so
     ///      construction state must outlive any single statement and must never be shared with
     ///      an independent body; the value concept exists only in this construction vocabulary,
@@ -536,7 +536,7 @@ pub struct ScopeContext {
     /// Whether this context owns the numeric construction domain it carries.
     ///
     /// WHAT: true only for a context that begins an independent body (module/root construction
-    ///       and nested function bodies). Body completion releases the domain exactly once, at
+    ///       and each function body). Body completion releases the domain exactly once, at
     ///       that root.
     /// WHY: nested branches, loops, handlers and expression scopes share the enclosing domain
     ///      and must never complete or release it themselves.
@@ -571,9 +571,7 @@ impl Clone for ScopeContext {
             pending_catch_assignment_targets: self.pending_catch_assignment_targets.clone(),
             visible_declaration_ids: self.visible_declaration_ids.clone(),
             expected_result_type_ids: self.expected_result_type_ids.clone(),
-            expected_error_type: self.expected_error_type,
-            current_function_return_type_ids: self.current_function_return_type_ids.clone(),
-            inside_authored_function: self.inside_authored_function,
+            enclosing_callable: self.enclosing_callable.clone(),
             active_value_target: self.active_value_target.clone(),
             active_generic_type_context: self.active_generic_type_context.clone(),
             generic_template_validation: self.generic_template_validation,
@@ -637,10 +635,9 @@ impl ContextKind {
 impl ScopeContext {
     /// Marks the current end of the compiler-owned generic-instantiation request sink.
     ///
-    /// WHAT: returns a provisional request boundary that a parser can commit or roll back after
-    ///       it has validated a source construct and determined whether its work is active.
-    /// WHY: inactive static assertion messages still need frontend inference and evidence checks,
-    ///       but must not publish generated-function requests to later stages.
+    /// WHAT: returns a provisional boundary for the requests owned by one source construct.
+    /// WHY: known-true assertion messages retain semantic validation requests without activating
+    ///      their executable work.
     pub(crate) fn generic_request_checkpoint(&self) -> usize {
         self.shared
             .generic_function_instantiation_requests
@@ -648,24 +645,39 @@ impl ScopeContext {
             .len()
     }
 
-    /// Tombstones requests appended after a compiler-owned provisional boundary.
+    /// Retains a known-true assertion's request suffix for semantic validation only.
     ///
-    /// The ledger is shared by child scopes, so the operation is intentionally defined here rather
-    /// than in build orchestration. Slots are dropped in place rather than removed, so pending
-    /// tickets and static-if ranges keep their positions. Callers must only pass a checkpoint
-    /// obtained from the same shared ledger and must invoke this after validation has completed.
-    pub(crate) fn discard_generic_requests_since(&self, checkpoint: usize) {
+    /// Pending tickets keep their positions and validation class when they complete. Concrete
+    /// requests move in place without a second payload. Repeated retention is idempotent, and
+    /// tombstoned work is never revived. Callers must pass a checkpoint from this shared ledger
+    /// while the assertion's own requests still form its suffix.
+    pub(crate) fn retain_assertion_validation_requests_since(&self, checkpoint: usize) {
+        let range = GenericRequestRange::new(checkpoint, self.generic_request_checkpoint());
+        self.retain_assertion_validation_requests_in_range(range);
+    }
+
+    /// Retains only an assertion's original parse-time slots after numeric completion.
+    ///
+    /// Unlike a suffix checkpoint, this range excludes later siblings whose tickets were already
+    /// reserved when a retained assertion's condition first became statically true.
+    pub(crate) fn retain_assertion_validation_requests_in_range(&self, range: GenericRequestRange) {
         let mut slots = self
             .shared
             .generic_function_instantiation_requests
             .borrow_mut();
         debug_assert!(
-            checkpoint <= slots.len(),
-            "generic request checkpoint must belong to the current ledger"
+            range.start <= range.end && range.end <= slots.len(),
+            "generic request range must belong to the current ledger"
         );
-        if let Some(discarded) = slots.get_mut(checkpoint..) {
-            for slot in discarded {
-                *slot = GenericRequestSlot::Dropped;
+        if let Some(retained) = slots.get_mut(range.start..range.end) {
+            for slot in retained {
+                *slot = match std::mem::replace(slot, GenericRequestSlot::Dropped) {
+                    GenericRequestSlot::Pending => GenericRequestSlot::AssertionValidationPending,
+                    GenericRequestSlot::Concrete(request) => {
+                        GenericRequestSlot::AssertionValidation(request)
+                    }
+                    retained => retained,
+                };
             }
         }
     }
@@ -699,8 +711,8 @@ impl ScopeContext {
 
     /// Publishes a resolved request into the slot reserved for it.
     ///
-    /// WHAT: a `Dropped` slot belongs to inactive work. Its validation has already run, so the
-    ///       request is accepted without publishing. A non-pending slot is a compiler bug.
+    /// WHAT: pending validation completes as validation-only. A `Dropped` slot accepts the
+    ///       completed request without publishing it. Republishing either concrete class is a bug.
     pub(crate) fn publish_pending_generic_request(
         &self,
         ticket: GenericRequestTicket,
@@ -720,16 +732,20 @@ impl ScopeContext {
                 *slot = GenericRequestSlot::Concrete(request);
                 Ok(())
             }
+            GenericRequestSlot::AssertionValidationPending => {
+                *slot = GenericRequestSlot::AssertionValidation(request);
+                Ok(())
+            }
             GenericRequestSlot::Dropped => Ok(()),
-            GenericRequestSlot::Concrete(_) => Err(CompilerError::compiler_error(
-                "generic request ticket was published twice",
-            )),
+            GenericRequestSlot::Concrete(_) | GenericRequestSlot::AssertionValidation(_) => Err(
+                CompilerError::compiler_error("generic request ticket was published twice"),
+            ),
         }
     }
 
     /// Abandons the slot reserved for a call whose completion failed before publication.
     ///
-    /// WHAT: a `Pending` slot becomes `Dropped`, keeping its source-order position without
+    /// WHAT: either pending class becomes `Dropped`, keeping its source-order position without
     ///       publishing a request. A `Dropped` slot is already inactive and stays as it is.
     /// WHY: a failed retained call must not leave a pending slot behind, and discarding every
     ///      later slot would drop unrelated work.
@@ -747,14 +763,16 @@ impl ScopeContext {
             ));
         };
         match *slot {
-            GenericRequestSlot::Pending => {
+            GenericRequestSlot::Pending | GenericRequestSlot::AssertionValidationPending => {
                 *slot = GenericRequestSlot::Dropped;
                 Ok(())
             }
             GenericRequestSlot::Dropped => Ok(()),
-            GenericRequestSlot::Concrete(_) => Err(CompilerError::compiler_error(
-                "generic request ticket was abandoned after it was published",
-            )),
+            GenericRequestSlot::Concrete(_) | GenericRequestSlot::AssertionValidation(_) => {
+                Err(CompilerError::compiler_error(
+                    "generic request ticket was abandoned after it was published",
+                ))
+            }
         }
     }
 
@@ -862,7 +880,6 @@ impl ScopeContext {
         )));
         let root_frame_id = arena.borrow_mut().alloc_root_frame_with_capacity(0);
         record_scope_frame_depth(0);
-        let inside_authored_function = matches!(kind, ContextKind::Function);
 
         ScopeContext {
             kind,
@@ -877,9 +894,7 @@ impl ScopeContext {
             pending_catch_assignment_targets: FxHashSet::default(),
             visible_declaration_ids: None,
             expected_result_type_ids: Vec::new(),
-            expected_error_type: None,
-            current_function_return_type_ids: Vec::new(),
-            inside_authored_function,
+            enclosing_callable: None,
             active_value_target: None,
             active_generic_type_context: None,
             generic_template_validation: false,
@@ -942,9 +957,7 @@ impl ScopeContext {
             pending_catch_assignment_targets: self.pending_catch_assignment_targets.clone(),
             visible_declaration_ids: self.visible_declaration_ids.clone(),
             expected_result_type_ids,
-            expected_error_type: self.expected_error_type,
-            current_function_return_type_ids: self.current_function_return_type_ids.clone(),
-            inside_authored_function: self.inside_authored_function,
+            enclosing_callable: self.enclosing_callable.clone(),
             // Branch-like child scopes inherit value production so ordinary nested
             // `if`/match paths can produce for the nearest active value block.
             // Barriers such as loops, functions, conditions, and templates keep
@@ -958,61 +971,6 @@ impl ScopeContext {
             numeric_body_root: false,
             loop_depth,
         }
-    }
-    pub fn new_child_function(
-        &self,
-        function_name: StringId,
-        signature: FunctionSignature,
-        _string_table: &mut StringTable,
-        path_fork: &mut PathInternerFork,
-    ) -> ScopeContext {
-        increment_ast_counter(AstCounter::ScopeContextsCreated);
-
-        // Body-local functions are not closures. They receive the completed
-        // top-level/dependency visibility through `shared`, but their local frame starts
-        // fresh with parameters only so outer locals cannot be captured implicitly.
-        let child_frame_id = self
-            .arena
-            .borrow_mut()
-            .alloc_root_frame_with_capacity(signature.parameters.len());
-        record_scope_frame_depth(0);
-
-        let current_function_return_type_ids = signature.success_return_type_ids();
-        let expected_error_type = signature.error_return_type_id();
-        let function_scope = path_fork
-            .try_intern_child(self.scope, function_name)
-            .expect("path table exhausted while creating child function scope");
-        let mut new_context = ScopeContext {
-            kind: ContextKind::Function,
-            match_arm_boundary: false,
-            defer_typed_error_validation: false,
-            scope: function_scope,
-            shared: Rc::clone(&self.shared),
-            arena: Rc::clone(&self.arena),
-            template_ir_store: Rc::clone(&self.template_ir_store),
-            current_frame_id: child_frame_id,
-            unavailable_assignment_targets: self.unavailable_assignment_targets.clone(),
-            pending_catch_assignment_targets: self.pending_catch_assignment_targets.clone(),
-            visible_declaration_ids: self.visible_declaration_ids.clone(),
-            expected_result_type_ids: Vec::new(),
-            expected_error_type,
-            current_function_return_type_ids,
-            inside_authored_function: true,
-            active_value_target: None,
-            active_generic_type_context: None,
-            generic_template_validation: false,
-            generic_function_instantiation_stack: self.generic_function_instantiation_stack.clone(),
-            // A nested function body is an independent inference boundary: it never shares the
-            // declaring body's numeric origins.
-            numeric_construction: Rc::new(RefCell::new(NumericConstructionState::new())),
-            numeric_body_root: true,
-            loop_depth: 0,
-        };
-
-        // Share the top-level declaration table (cheap Rc clone); reset locals to params only.
-        new_context.set_local_declarations(signature.parameters, path_fork);
-
-        new_context
     }
 
     pub fn new_child_expression(&self, expected_result_type_ids: Vec<TypeId>) -> ScopeContext {
@@ -1037,9 +995,7 @@ impl ScopeContext {
             pending_catch_assignment_targets: self.pending_catch_assignment_targets.clone(),
             visible_declaration_ids: self.visible_declaration_ids.clone(),
             expected_result_type_ids,
-            expected_error_type: self.expected_error_type,
-            current_function_return_type_ids: self.current_function_return_type_ids.clone(),
-            inside_authored_function: self.inside_authored_function,
+            enclosing_callable: self.enclosing_callable.clone(),
             active_value_target: None,
             active_generic_type_context: self.active_generic_type_context.clone(),
             generic_template_validation: self.generic_template_validation,
@@ -1101,9 +1057,7 @@ impl ScopeContext {
             pending_catch_assignment_targets: self.pending_catch_assignment_targets.clone(),
             visible_declaration_ids: self.visible_declaration_ids.clone(),
             expected_result_type_ids: vec![],
-            expected_error_type: self.expected_error_type,
-            current_function_return_type_ids: self.current_function_return_type_ids.clone(),
-            inside_authored_function: self.inside_authored_function,
+            enclosing_callable: self.enclosing_callable.clone(),
             active_value_target: None,
             active_generic_type_context: self.active_generic_type_context.clone(),
             generic_template_validation: self.generic_template_validation,
@@ -1143,9 +1097,7 @@ impl ScopeContext {
             pending_catch_assignment_targets: parent.pending_catch_assignment_targets.clone(),
             visible_declaration_ids: parent.visible_declaration_ids.clone(),
             expected_result_type_ids: Vec::new(),
-            expected_error_type: parent.expected_error_type,
-            current_function_return_type_ids: parent.current_function_return_type_ids.clone(),
-            inside_authored_function: parent.inside_authored_function,
+            enclosing_callable: parent.enclosing_callable.clone(),
             active_value_target: None,
             active_generic_type_context: parent.active_generic_type_context.clone(),
             generic_template_validation: parent.generic_template_validation,

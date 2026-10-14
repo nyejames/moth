@@ -5,14 +5,15 @@
 //! from source namespace handling.
 
 use super::error::ExpressionParseError;
-use super::expression::Expression;
 use super::expression_rpn::ExpressionRpnItem;
+use super::expression_store::{AstExpressionBuilder, ExpressionConstructionFailure, OwnedExpr};
 use super::function_calls::{
     ExternalFunctionCallParseInput, ParsedFunctionCallExpression,
     parse_external_function_call_expression,
 };
 use super::parse_expression_dispatch::push_expression_operand;
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::statements::fallible_handling::fallible_catch_allowed_in_context;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
@@ -43,6 +44,8 @@ pub(super) struct ExternalNamespaceFunctionMemberInput<'a, 'env, 'tokens> {
     pub(super) token_stream: &'a mut AstCursor<'tokens>,
     pub(super) context: &'a ScopeContext,
     pub(super) type_interner: &'a mut AstTypeInterner<'env>,
+    pub(super) expression_builder: &'a mut AstExpressionBuilder,
+    pub(super) const_values: &'a mut ConstValueStore,
     pub(super) expression: &'a mut Vec<ExpressionRpnItem>,
     pub(super) allow_boundary_catch: bool,
     pub(super) string_table: &'a mut StringTable,
@@ -65,6 +68,8 @@ pub(super) fn parse_external_namespace_function_member(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         expression,
         allow_boundary_catch,
         string_table,
@@ -111,6 +116,8 @@ pub(super) fn parse_external_namespace_function_member(
             && fallible_catch_allowed_in_context(context),
         warnings: None,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     })?;
@@ -121,6 +128,8 @@ pub(super) fn parse_external_namespace_function_member(
                 token_stream,
                 context,
                 type_interner,
+                expression_builder,
+                const_values,
                 string_table,
                 expression,
                 allow_boundary_catch,
@@ -152,6 +161,8 @@ pub(super) struct ExternalNamespaceConstantMemberInput<'a, 'env, 'tokens> {
     pub(super) token_stream: &'a mut AstCursor<'tokens>,
     pub(super) context: &'a ScopeContext,
     pub(super) type_interner: &'a mut AstTypeInterner<'env>,
+    pub(super) expression_builder: &'a mut AstExpressionBuilder,
+    pub(super) const_values: &'a mut ConstValueStore,
     pub(super) expression: &'a mut Vec<ExpressionRpnItem>,
     pub(super) allow_boundary_catch: bool,
     pub(super) string_table: &'a mut StringTable,
@@ -174,6 +185,8 @@ pub(super) fn parse_external_namespace_constant_member(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         expression,
         allow_boundary_catch,
         string_table,
@@ -209,12 +222,16 @@ pub(super) fn parse_external_namespace_constant_member(
         member_span,
         value_mode,
         string_table,
+        expression_builder,
+        const_values,
     )?;
 
     push_expression_operand(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         expression,
         allow_boundary_catch,
@@ -237,19 +254,29 @@ pub(super) fn project_external_constant(
     span: Option<SourceSpan>,
     value_mode: ValueMode,
     string_table: &mut StringTable,
-) -> Result<Expression, CompilerDiagnostic> {
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+) -> Result<OwnedExpr, ExpressionConstructionFailure> {
     match (&constant_definition.data_type, constant_definition.value) {
         (
             ExternalSignatureType::Abi(ExternalAbiType::Fixed(scalar)),
             ExternalConstantValue::Fixed(value),
-        ) if value.scalar() == *scalar => Ok(Expression::fixed_scalar(value, span, value_mode)),
+        ) if value.scalar() == *scalar => {
+            expression_builder.fixed_scalar(const_values, value, span, value_mode)
+        }
         (
             ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::F64)),
             ExternalConstantValue::Registered {
                 scalar: FixedScalar::F64,
                 raw: ExternalConstantRawValue::BinaryFloat(value),
             },
-        ) => Expression::float_from_external_constant(value, constant_name, span, value_mode),
+        ) => expression_builder.float_from_external_constant(
+            const_values,
+            value,
+            constant_name,
+            span,
+            value_mode,
+        ),
         (
             ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::U32)),
             ExternalConstantValue::Registered {
@@ -264,19 +291,20 @@ pub(super) fn project_external_constant(
                     literal_text,
                     NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::U32),
                     span,
-                ));
+                )
+                .into());
             };
-            Ok(Expression::fixed_scalar(materialised, span, value_mode))
+            expression_builder.fixed_scalar(const_values, materialised, span, value_mode)
         }
         (
             ExternalSignatureType::Abi(ExternalAbiType::Utf8Str),
             ExternalConstantValue::StringSlice(value),
         ) => {
             let string_id = string_table.intern(value);
-            Ok(Expression::string_slice(string_id, span, value_mode))
+            expression_builder.string_slice(const_values, string_id, span, value_mode)
         }
         (ExternalSignatureType::Abi(ExternalAbiType::Bool), ExternalConstantValue::Bool(value)) => {
-            Ok(Expression::bool(value, span, value_mode))
+            expression_builder.bool(const_values, value, span, value_mode)
         }
         _ => unreachable!("registered external constant has mismatched signature and payload"),
     }

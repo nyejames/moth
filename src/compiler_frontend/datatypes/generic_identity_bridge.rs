@@ -7,7 +7,6 @@
 //!      semantic equality in AST or HIR; use `TypeId` in `TypeEnvironment` for that.
 
 use super::DataType;
-use super::display::format_fallible_signature_parts;
 use super::environment::TypeEnvironment;
 use super::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::external_packages::ExternalTypeId;
@@ -68,10 +67,6 @@ pub enum TypeIdentityKey {
         value: Box<TypeIdentityKey>,
     },
     Option(Box<TypeIdentityKey>),
-    FallibleCarrier {
-        success: Box<TypeIdentityKey>,
-        error: Box<TypeIdentityKey>,
-    },
     GenericInstance(GenericInstantiationKey),
 }
 impl GenericInstantiationKey {
@@ -95,10 +90,6 @@ impl TypeIdentityKey {
             Self::Map { key, value } => {
                 key.remap_path_ids(remap);
                 value.remap_path_ids(remap);
-            }
-            Self::FallibleCarrier { success, error } => {
-                success.remap_path_ids(remap);
-                error.remap_path_ids(remap);
             }
             Self::GenericInstance(instance) => instance.remap_path_ids(remap),
             Self::Builtin(_) | Self::External(_) => {}
@@ -201,14 +192,6 @@ fn display_type_identity_key_with_resolver<R: PathNameResolver>(
             "{}?",
             display_type_identity_key_with_resolver(inner, path_reader, string_table)
         ),
-        TypeIdentityKey::FallibleCarrier { success, error } => format_fallible_signature_parts(
-            vec![display_type_identity_key_with_resolver(
-                success,
-                path_reader,
-                string_table,
-            )],
-            display_type_identity_key_with_resolver(error, path_reader, string_table),
-        ),
         TypeIdentityKey::GenericInstance(instance) => {
             display_generic_instantiation_key_with_resolver(instance, path_reader, string_table)
         }
@@ -300,14 +283,6 @@ pub fn data_type_to_type_identity_key(data_type: &DataType) -> Option<TypeIdenti
         DataType::Option(inner) => {
             data_type_to_type_identity_key(inner).map(|key| TypeIdentityKey::Option(Box::new(key)))
         }
-        DataType::FallibleCarrier { success, error } => {
-            let ok_key = data_type_to_type_identity_key(success)?;
-            let err_key = data_type_to_type_identity_key(error)?;
-            Some(TypeIdentityKey::FallibleCarrier {
-                success: Box::new(ok_key),
-                error: Box::new(err_key),
-            })
-        }
         _ => None,
     }
 }
@@ -356,11 +331,6 @@ pub(crate) fn type_identity_key_to_type_id(
         TypeIdentityKey::Option(inner) => {
             let inner_id = type_identity_key_to_type_id(inner, type_environment)?;
             Some(type_environment.intern_option(inner_id))
-        }
-        TypeIdentityKey::FallibleCarrier { success, error } => {
-            let success_id = type_identity_key_to_type_id(success, type_environment)?;
-            let error_id = type_identity_key_to_type_id(error, type_environment)?;
-            Some(type_environment.intern_fallible_carrier(success_id, error_id))
         }
         TypeIdentityKey::GenericInstance(instance) => {
             let nominal_id = type_environment.nominal_id_for_path(&instance.base_path)?;

@@ -8,8 +8,12 @@
 //! literal arithmetic belongs to the indexed RPN result-typing owner in
 //! `ast::expressions::eval_expression::result_type`.
 
-use crate::compiler_frontend::ast::expressions::expression::Expression;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, TypeMismatchContext};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExpressionConstructionFailure, OwnedExpr,
+};
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, TypeMismatchContext, ValueReceiverContext,
+};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 
@@ -19,7 +23,7 @@ use crate::compiler_frontend::type_coercion::compatibility::is_type_compatible;
 ///
 /// Coercion diagnostics remain plain `CompilerDiagnostic` values until the
 /// owning accumulation boundary.
-type ContextualCoercionResult<T> = Result<T, CompilerDiagnostic>;
+type ContextualCoercionResult<T> = Result<T, ExpressionConstructionFailure>;
 
 /// Validates and applies the contextual coercion policy for an explicit typed boundary.
 ///
@@ -28,29 +32,32 @@ type ContextualCoercionResult<T> = Result<T, CompilerDiagnostic>;
 /// frontend-owned policy rather than duplicating the same compatibility checks. Numeric
 /// conversions are explicit-only, so no integer-to-float receiving promotion exists here.
 pub(crate) fn coerce_expression_to_explicit_type_boundary(
-    expression: Expression,
+    expression: OwnedExpr,
     expected_type_id: TypeId,
     type_environment: &TypeEnvironment,
     mismatch_context: TypeMismatchContext,
-) -> ContextualCoercionResult<Expression> {
-    if expression.type_id == expected_type_id {
+    expression_builder: &mut AstExpressionBuilder,
+) -> ContextualCoercionResult<OwnedExpr> {
+    let view = expression_builder.view_owned(expression)?;
+    let actual_type_id = view.require_single(value_receiver_context(mismatch_context))?;
+    let span = view.span();
+    if actual_type_id == expected_type_id {
         return Ok(expression);
     }
 
-    if is_type_compatible(expected_type_id, expression.type_id, type_environment) {
-        return Ok(coerce_expression_to_declared_type(
+    if is_type_compatible(expected_type_id, actual_type_id, type_environment) {
+        return coerce_expression_to_declared_type(
             expression,
             expected_type_id,
             type_environment,
-        ));
+            expression_builder,
+        );
     }
 
-    Err(CompilerDiagnostic::type_mismatch(
-        expected_type_id,
-        expression.type_id,
-        mismatch_context,
-        expression.span,
-    ))
+    Err(
+        CompilerDiagnostic::type_mismatch(expected_type_id, actual_type_id, mismatch_context, span)
+            .into(),
+    )
 }
 
 /// Applies contextual coercion to `expr` if the target type requires it.
@@ -62,18 +69,45 @@ pub(crate) fn coerce_expression_to_explicit_type_boundary(
 /// instead of silently mistyping the inner value.
 ///
 /// Returns the original expression unchanged when no coercion is needed.
+/// Callers must already have validated that `expr` produces exactly one success slot.
 pub(crate) fn coerce_expression_to_declared_type(
-    expr: Expression,
+    expression: OwnedExpr,
     declared_type_id: TypeId,
     type_environment: &TypeEnvironment,
-) -> Expression {
-    // Every exact numeric identity requires an explicit `cast` to convert, so contextual
-    // coercion never selects a numeric conversion for a typed value.
-    if should_wrap_in_option(expr.type_id, declared_type_id, type_environment) {
-        return Expression::coerced(expr, declared_type_id);
+    expression_builder: &mut AstExpressionBuilder,
+) -> ContextualCoercionResult<OwnedExpr> {
+    // Numeric conversions remain explicit. Only an option receiver adds a semantic wrapper.
+    let actual_type_id = expression_builder.view_owned(expression)?.value_type_id()?;
+    if should_wrap_in_option(actual_type_id, declared_type_id, type_environment) {
+        return expression_builder.coerced(expression, declared_type_id);
     }
 
-    expr
+    Ok(expression)
+}
+
+fn value_receiver_context(context: TypeMismatchContext) -> ValueReceiverContext {
+    match context {
+        TypeMismatchContext::Assignment => ValueReceiverContext::Assignment,
+        TypeMismatchContext::Declaration => ValueReceiverContext::Declaration,
+        TypeMismatchContext::ReturnValue | TypeMismatchContext::ErrorReturn => {
+            ValueReceiverContext::Return
+        }
+        TypeMismatchContext::FunctionArgument | TypeMismatchContext::ReceiverArgument => {
+            ValueReceiverContext::FunctionArgument
+        }
+        TypeMismatchContext::AssertionArgument => ValueReceiverContext::AssertionArgument,
+        TypeMismatchContext::ConstructorArgument | TypeMismatchContext::StructFieldDefault => {
+            ValueReceiverContext::ConstructorArgument
+        }
+        TypeMismatchContext::Operator => ValueReceiverContext::OperatorOperand,
+        TypeMismatchContext::Condition => ValueReceiverContext::Condition,
+        TypeMismatchContext::CollectionElement => ValueReceiverContext::CollectionElement,
+        TypeMismatchContext::TemplateInterpolation => ValueReceiverContext::TemplateInterpolation,
+        TypeMismatchContext::MatchScrutinee => ValueReceiverContext::MatchScrutinee,
+        TypeMismatchContext::MatchPattern
+        | TypeMismatchContext::Pattern
+        | TypeMismatchContext::General => ValueReceiverContext::General,
+    }
 }
 
 fn should_wrap_in_option(

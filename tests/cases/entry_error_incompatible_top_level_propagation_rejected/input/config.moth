@@ -1,0 +1,5 @@
+project #= (
+    name = "entry_error_incompatible_top_level_propagation_rejected",
+    entry_root = "src",
+)
+html #= ()

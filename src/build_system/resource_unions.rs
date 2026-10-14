@@ -185,7 +185,9 @@ pub(crate) fn append_public_folded_value(
 ) {
     match value {
         PublicFoldedValue::String(string) => append_owned_folded_string(union, string),
-        PublicFoldedValue::ConstTemplate(template) => append_public_const_template(union, template),
+        PublicFoldedValue::ConstTemplate { template, .. } => {
+            append_public_const_template(union, template)
+        }
         PublicFoldedValue::Collection(values) => {
             for value in values {
                 append_public_folded_value(union, value);

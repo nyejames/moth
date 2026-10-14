@@ -1,0 +1,10 @@
+NameError = |
+    message String,
+|
+
+load_name || -> String, NameError!:
+    return! NameError("Missing name")
+;
+
+name = load_name()!
+[: Hello [name]]

@@ -5,9 +5,12 @@
 //!      prove the cap behaves correctly for delimiters, nesting, and EOF boundaries.
 
 use super::*;
+use crate::compiler_frontend::ast::const_values::{ConstValuePayload, ConstValueStore};
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExpressionOperationView, OwnedExpr,
+};
 use crate::compiler_frontend::ast::expressions::parse_expression_input::{
     ExpressionParseInput, ExpressionParseResources,
 };
@@ -80,16 +83,21 @@ fn finish_tokens(builder: TestSourceTokensBuilder) -> std::sync::Arc<SourceToken
         .expect("canonical fixture tokens should build")
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "test helper mirrors the parser's separate borrows for the expression builder, const store, expected type, value mode, stop tokens, string table, and path fork"
+)]
 fn create_expression_until_for_test(
     stream: &mut AstCursor,
     context: &ScopeContext,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     expected_type: &mut ExpectedType,
     value_mode: &ValueMode,
     stop_tokens: &[TokenTag],
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<crate::compiler_frontend::ast::expressions::expression::Expression, ExpressionParseError>
-{
+) -> Result<OwnedExpr, ExpressionParseError> {
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
@@ -98,6 +106,8 @@ fn create_expression_until_for_test(
         token_stream: stream,
         scope_context: context,
         type_interner: &mut type_interner,
+        expression_builder,
+        const_values,
         expected_type,
         cast_target_context: &mut cast_target_context,
         value_mode,
@@ -110,6 +120,8 @@ fn create_expression_until_for_test(
 #[test]
 fn bounded_expression_empty_at_delimiter_errors() {
     let mut string_table = StringTable::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut path_fork = PathInternerFork::empty();
     let (_scope, context) = test_scope(&mut string_table, &mut path_fork);
 
@@ -127,6 +139,8 @@ fn bounded_expression_empty_at_delimiter_errors() {
     let error = create_expression_until_for_test(
         &mut stream,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         &mut data_type,
         &ValueMode::ImmutableOwned,
         &[TokenTag::COMMA],
@@ -153,6 +167,8 @@ fn bounded_expression_empty_at_delimiter_errors() {
 #[test]
 fn bounded_expression_parses_simple_literal() {
     let mut string_table = StringTable::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut path_fork = PathInternerFork::empty();
     let (_scope, context) = test_scope(&mut string_table, &mut path_fork);
 
@@ -171,6 +187,8 @@ fn bounded_expression_parses_simple_literal() {
     let expression = create_expression_until_for_test(
         &mut stream,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         &mut data_type,
         &ValueMode::ImmutableOwned,
         &[TokenTag::COMMA],
@@ -179,10 +197,17 @@ fn bounded_expression_parses_simple_literal() {
     )
     .expect("simple literal should parse");
 
+    let ExpressionOperationView::Constant(value) = expression_builder
+        .view_owned(expression)
+        .expect("issued expression")
+        .operation()
+    else {
+        panic!("literal must fold to constant content");
+    };
     assert!(matches!(
-        expression.kind,
-        ExpressionKind::FixedScalar(value)
-            if value == FixedScalarValue::signed(FixedScalar::I32, 42)
+        const_values.payload(value),
+        Some(ConstValuePayload::FixedScalar(value))
+            if *value == FixedScalarValue::signed(FixedScalar::I32, 42)
                 .expect("42 is an I32 value")
     ));
 
@@ -194,6 +219,8 @@ fn bounded_expression_parses_simple_literal() {
 #[test]
 fn bounded_expression_nested_parentheses() {
     let mut string_table = StringTable::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut path_fork = PathInternerFork::empty();
     let (_scope, context) = test_scope(&mut string_table, &mut path_fork);
 
@@ -218,6 +245,8 @@ fn bounded_expression_nested_parentheses() {
     let expression = create_expression_until_for_test(
         &mut stream,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         &mut data_type,
         &ValueMode::ImmutableOwned,
         &[TokenTag::COMMA],
@@ -227,10 +256,17 @@ fn bounded_expression_nested_parentheses() {
     .expect("nested parentheses should parse");
 
     // All literals fold to a single I32(6).
+    let ExpressionOperationView::Constant(value) = expression_builder
+        .view_owned(expression)
+        .expect("issued expression")
+        .operation()
+    else {
+        panic!("literal arithmetic must fold to constant content");
+    };
     assert!(matches!(
-        expression.kind,
-        ExpressionKind::FixedScalar(value)
-            if value == FixedScalarValue::signed(FixedScalar::I32, 6)
+        const_values.payload(value),
+        Some(ConstValuePayload::FixedScalar(value))
+            if *value == FixedScalarValue::signed(FixedScalar::I32, 6)
                 .expect("6 is an I32 value")
     ));
 
@@ -242,6 +278,8 @@ fn bounded_expression_nested_parentheses() {
 #[test]
 fn bounded_expression_nested_curly_braces() {
     let mut string_table = StringTable::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut path_fork = PathInternerFork::empty();
     let (_scope, context) = test_scope(&mut string_table, &mut path_fork);
 
@@ -266,6 +304,8 @@ fn bounded_expression_nested_curly_braces() {
     let expression = create_expression_until_for_test(
         &mut stream,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         &mut data_type,
         &ValueMode::ImmutableOwned,
         &[TokenTag::COMMA],
@@ -274,8 +314,21 @@ fn bounded_expression_nested_curly_braces() {
     )
     .expect("nested curly braces should parse");
 
-    // Should parse as a collection expression.
-    assert!(matches!(expression.kind, ExpressionKind::Collection(_)));
+    // A collection literal stays a `Collection` operation over its element expressions at the
+    // runtime boundary; composite constant folding belongs to the constant content boundary.
+    let ExpressionOperationView::Collection(items) = expression_builder
+        .view_owned(expression)
+        .expect("issued expression")
+        .operation()
+    else {
+        panic!("literal collection must stay a collection operation at the runtime boundary");
+    };
+    assert_eq!(items.iter().count(), 2);
+    assert!(
+        items
+            .iter()
+            .all(|item| matches!(item.operation(), ExpressionOperationView::Constant(_)))
+    );
     assert_eq!(stream.position(), 5);
     assert_eq!(stream.current_tag(), TokenTag::COMMA);
 }
@@ -283,6 +336,8 @@ fn bounded_expression_nested_curly_braces() {
 #[test]
 fn bounded_expression_missing_delimiter_reaches_eof() {
     let mut string_table = StringTable::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut path_fork = PathInternerFork::empty();
     let (_scope, context) = test_scope(&mut string_table, &mut path_fork);
 
@@ -302,6 +357,8 @@ fn bounded_expression_missing_delimiter_reaches_eof() {
     let error = create_expression_until_for_test(
         &mut stream,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         &mut data_type,
         &ValueMode::ImmutableOwned,
         &[TokenTag::COMMA],
@@ -328,6 +385,8 @@ fn bounded_expression_missing_delimiter_reaches_eof() {
 #[test]
 fn mutable_receiver_unexpected_operand_reports_full_operand_span() {
     let mut string_table = StringTable::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut path_fork = PathInternerFork::empty();
     let (_scope, context) = test_scope(&mut string_table, &mut path_fork);
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -355,6 +414,8 @@ fn mutable_receiver_unexpected_operand_reports_full_operand_span() {
     let error = create_expression_until_for_test(
         &mut stream,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         &mut data_type,
         &ValueMode::ImmutableOwned,
         &[],

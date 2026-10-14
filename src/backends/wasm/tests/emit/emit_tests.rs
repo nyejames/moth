@@ -72,13 +72,19 @@ fn lowers_hir_to_wasm_module_bytes() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(i32_expression(7, RegionId(0), &mut expressions)),
+        terminator: HirTerminator::Return({
+            let value = i32_expression(7, RegionId(0), &mut expressions);
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     };
     let start_function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: fixed_scalar_type(FixedScalar::I32),
+        returns: vec![fixed_scalar_type(FixedScalar::I32)].into_boxed_slice(),
+        error_return: None,
     };
 
     let hir_module = build_module(
@@ -192,7 +198,8 @@ fn emitted_assertions_deliver_static_messages_to_host_before_trapping_in_node() 
                 id: function_id,
                 entry: block_id,
                 params: vec![],
-                return_type: types.unit,
+                returns: vec![].into_boxed_slice(),
+                error_return: None,
             },
             path,
             if index == 0 {
@@ -470,13 +477,19 @@ fn rejects_invalid_helper_export_policy() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(i32_expression(0, RegionId(0), &mut expressions)),
+        terminator: HirTerminator::Return({
+            let value = i32_expression(0, RegionId(0), &mut expressions);
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     };
     let start_function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: fixed_scalar_type(FixedScalar::I32),
+        returns: vec![fixed_scalar_type(FixedScalar::I32)].into_boxed_slice(),
+        error_return: None,
     };
     let hir_module = build_module(
         &mut path_fork,
@@ -1208,7 +1221,7 @@ fn checked_f64_power_matches_wasm_javascript_and_rust_bits() {
                 operands: WasmNumericOperationOperands::Binary { left, right },
             }],
             terminator: WasmLirTerminator::Return {
-                value: Some(result_local),
+                values: vec![result_local],
             },
         }],
         linkage: WasmFunctionLinkage::ExportedWrapper,
@@ -1948,7 +1961,7 @@ fn build_binary16_scalar_storage_boundary_module() -> WasmLirModule {
                     kind: f16_kind,
                 },
             ],
-            terminator: WasmLirTerminator::Return { value: None },
+            terminator: WasmLirTerminator::Return { values: vec![] },
         }],
         linkage: WasmFunctionLinkage::ExportedWrapper,
     };
@@ -1982,7 +1995,7 @@ fn build_binary16_scalar_storage_boundary_module() -> WasmLirModule {
                 },
             ],
             terminator: WasmLirTerminator::Return {
-                value: Some(loaded),
+                values: vec![loaded],
             },
         }],
         linkage: WasmFunctionLinkage::ExportedWrapper,
@@ -2037,13 +2050,19 @@ fn rejects_unsupported_wasm_feature_flags() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(i32_expression(0, RegionId(0), &mut expressions)),
+        terminator: HirTerminator::Return({
+            let value = i32_expression(0, RegionId(0), &mut expressions);
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     };
     let start_function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: fixed_scalar_type(FixedScalar::I32),
+        returns: vec![fixed_scalar_type(FixedScalar::I32)].into_boxed_slice(),
+        error_return: None,
     };
     let hir_module = build_module(
         &mut path_fork,
@@ -2091,13 +2110,19 @@ fn rejects_unsupported_cfg_lowering_strategy() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(i32_expression(0, RegionId(0), &mut expressions)),
+        terminator: HirTerminator::Return({
+            let value = i32_expression(0, RegionId(0), &mut expressions);
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     };
     let start_function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: fixed_scalar_type(FixedScalar::I32),
+        returns: vec![fixed_scalar_type(FixedScalar::I32)].into_boxed_slice(),
+        error_return: None,
     };
     let hir_module = build_module(
         &mut path_fork,
@@ -2273,7 +2298,7 @@ fn build_manual_lir_module() -> WasmLirModule {
                 value: 7,
             }],
             terminator: WasmLirTerminator::Return {
-                value: Some(WasmLirLocalId(0)),
+                values: vec![WasmLirLocalId(0)],
             },
         }],
         linkage: WasmFunctionLinkage::Internal,
@@ -2348,7 +2373,7 @@ fn build_manual_lir_module() -> WasmLirModule {
                     src: WasmLirLocalId(10),
                 },
                 WasmLirStmt::Call {
-                    dst: Some(WasmLirLocalId(12)),
+                    results: vec![WasmLirLocalId(12)],
                     callee: WasmCalleeRef::Function(WasmLirFunctionId(0)),
                     args: vec![],
                 },
@@ -2383,7 +2408,7 @@ fn build_manual_lir_module() -> WasmLirModule {
                     buffer: WasmLirLocalId(8),
                 },
                 WasmLirStmt::Call {
-                    dst: None,
+                    results: vec![],
                     callee: WasmCalleeRef::Import(WasmImportId(0)),
                     args: vec![WasmLirLocalId(9)],
                 },
@@ -2468,7 +2493,7 @@ fn build_manual_lir_module() -> WasmLirModule {
                     rhs: WasmLirLocalId(14),
                 },
             ],
-            terminator: WasmLirTerminator::Return { value: None },
+            terminator: WasmLirTerminator::Return { values: vec![] },
         }],
         linkage: WasmFunctionLinkage::ExportedWrapper,
     };
@@ -2496,6 +2521,123 @@ fn build_manual_lir_module() -> WasmLirModule {
         }],
         memory_plan: WasmMemoryPlan::default(),
     }
+}
+
+#[test]
+fn native_multiple_call_results_preserve_slot_order_through_emission() {
+    let first = WasmLirLocalId(0);
+    let second = WasmLirLocalId(1);
+    let third = WasmLirLocalId(2);
+    let fourth = WasmLirLocalId(3);
+    let signature = WasmLirSignature {
+        params: vec![],
+        results: vec![
+            WasmAbiType::I32,
+            WasmAbiType::F32,
+            WasmAbiType::I64,
+            WasmAbiType::F64,
+        ],
+    };
+    let callee = WasmLirFunction {
+        id: WasmLirFunctionId(0),
+        debug_name: "mixed_results".to_owned(),
+        origin: WasmLirFunctionOrigin::ExportWrapper,
+        signature: signature.clone(),
+        locals: vec![
+            local(first.0, WasmAbiType::I32, "first"),
+            local(second.0, WasmAbiType::F32, "second"),
+            local(third.0, WasmAbiType::I64, "third"),
+            local(fourth.0, WasmAbiType::F64, "fourth"),
+        ],
+        blocks: vec![WasmLirBlock {
+            id: WasmLirBlockId(0),
+            statements: vec![
+                WasmLirStmt::Call {
+                    results: vec![],
+                    callee: WasmCalleeRef::Import(WasmImportId(0)),
+                    args: vec![],
+                },
+                WasmLirStmt::ConstI32 {
+                    dst: first,
+                    value: 7,
+                },
+                WasmLirStmt::ConstF32 {
+                    dst: second,
+                    value: 1.25,
+                },
+                WasmLirStmt::ConstI64 {
+                    dst: third,
+                    value: 9_007_199_254_740_993,
+                },
+                WasmLirStmt::ConstF64 {
+                    dst: fourth,
+                    value: -9.5,
+                },
+            ],
+            terminator: WasmLirTerminator::Return {
+                values: vec![first, second, third, fourth],
+            },
+        }],
+        linkage: WasmFunctionLinkage::Internal,
+    };
+    let caller = WasmLirFunction {
+        id: WasmLirFunctionId(1),
+        debug_name: "forward_mixed_results".to_owned(),
+        origin: WasmLirFunctionOrigin::ExportWrapper,
+        signature,
+        locals: vec![
+            local(first.0, WasmAbiType::I32, "first"),
+            local(second.0, WasmAbiType::F32, "second"),
+            local(third.0, WasmAbiType::I64, "third"),
+            local(fourth.0, WasmAbiType::F64, "fourth"),
+        ],
+        blocks: vec![WasmLirBlock {
+            id: WasmLirBlockId(0),
+            statements: vec![WasmLirStmt::Call {
+                results: vec![first, second, third, fourth],
+                callee: WasmCalleeRef::Function(WasmLirFunctionId(0)),
+                args: vec![],
+            }],
+            terminator: WasmLirTerminator::Return {
+                values: vec![first, second, third, fourth],
+            },
+        }],
+        linkage: WasmFunctionLinkage::ExportedWrapper,
+    };
+    let module = WasmLirModule {
+        functions: vec![callee, caller],
+        imports: vec![WasmImport {
+            id: WasmImportId(0),
+            module_name: "host".to_owned(),
+            item_name: "producer_called".to_owned(),
+            kind: WasmImportKind::Function(WasmLirSignature {
+                params: vec![],
+                results: vec![],
+            }),
+        }],
+        exports: vec![WasmExport {
+            export_name: "mixed_results".to_owned(),
+            kind: WasmExportKind::Function(WasmLirFunctionId(1)),
+        }],
+        static_data: vec![],
+        memory_plan: WasmMemoryPlan::default(),
+    };
+    let emitted = emit_lir_to_wasm_module(&module, &WasmBackendRequest::default())
+        .expect("native multiple scalar results should emit");
+    validate_wasm(&emitted.wasm_bytes);
+    let output = run_wasm_node_script(
+        &emitted.wasm_bytes,
+        r#"
+let producerCalls = 0;
+imports.host = { producer_called() { producerCalls += 1; } };
+"#,
+        r#"
+const values = instance.exports.mixed_results();
+require("node:assert/strict").equal(producerCalls, 1);
+process.stdout.write(values.map(String).join("|"));
+"#,
+    );
+    assert_eq!(output, b"7|1.25|9007199254740993|-9.5");
 }
 
 fn local(id: u32, ty: WasmAbiType, name: &str) -> WasmLirLocal {
@@ -2724,7 +2866,7 @@ fn checked_integer_boundary_function(
             id: WasmLirBlockId(0),
             statements,
             terminator: WasmLirTerminator::Return {
-                value: Some(return_local),
+                values: vec![return_local],
             },
         }],
         linkage: WasmFunctionLinkage::ExportedWrapper,
@@ -2842,7 +2984,7 @@ fn build_float_validation_lir_module() -> WasmLirModule {
                     precision,
                 }],
                 terminator: WasmLirTerminator::Return {
-                    value: Some(destination),
+                    values: vec![destination],
                 },
             }],
             linkage: WasmFunctionLinkage::ExportedWrapper,
@@ -2919,7 +3061,7 @@ fn checked_float_operation_function(
             id: WasmLirBlockId(0),
             statements,
             terminator: WasmLirTerminator::Return {
-                value: Some(result),
+                values: vec![result],
             },
         }],
         linkage: WasmFunctionLinkage::ExportedWrapper,
@@ -2958,7 +3100,7 @@ fn build_round_f16_lir_module() -> WasmLirModule {
                 source,
             }],
             terminator: WasmLirTerminator::Return {
-                value: Some(rounded),
+                values: vec![rounded],
             },
         }],
         linkage: WasmFunctionLinkage::ExportedWrapper,
@@ -2998,7 +3140,7 @@ fn build_round_f16_lir_module() -> WasmLirModule {
                     operands: WasmNumericOperationOperands::Binary { left, right },
                 },
             ],
-            terminator: WasmLirTerminator::Return { value: Some(sum) },
+            terminator: WasmLirTerminator::Return { values: vec![sum] },
         }],
         linkage: WasmFunctionLinkage::ExportedWrapper,
     };
@@ -3203,7 +3345,7 @@ fn build_scalar_storage_lir_module() -> WasmLirModule {
             blocks: vec![WasmLirBlock {
                 id: WasmLirBlockId(0),
                 statements,
-                terminator: WasmLirTerminator::Return { value: None },
+                terminator: WasmLirTerminator::Return { values: vec![] },
             }],
             linkage: WasmFunctionLinkage::ExportedWrapper,
         }],
@@ -3287,7 +3429,7 @@ fn integer_string_conversion_function(
             id: WasmLirBlockId(0),
             statements: vec![conversion],
             terminator: WasmLirTerminator::Return {
-                value: Some(output),
+                values: vec![output],
             },
         }],
         linkage: WasmFunctionLinkage::ExportedWrapper,
@@ -3331,7 +3473,7 @@ fn build_string_push_handle_wrapper_lir_module() -> WasmLirModule {
                 buffer,
                 handle: source,
             }],
-            terminator: WasmLirTerminator::Return { value: None },
+            terminator: WasmLirTerminator::Return { values: vec![] },
         }],
         linkage: WasmFunctionLinkage::ExportedWrapper,
     };
@@ -3396,7 +3538,7 @@ fn build_float_string_conversion_lir_module() -> WasmLirModule {
                     precision,
                 }],
                 terminator: WasmLirTerminator::Return {
-                    value: Some(output),
+                    values: vec![output],
                 },
             }],
             linkage: WasmFunctionLinkage::ExportedWrapper,
@@ -4039,18 +4181,24 @@ fn build_uint_scalar_fixture(
         region,
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(fixed_scalar_expression(
-            FixedScalarValue::signed(int_scalar, 0).expect("valid test value"),
-            region,
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return({
+            let value = fixed_scalar_expression(
+                FixedScalarValue::signed(int_scalar, 0).expect("valid test value"),
+                region,
+                &mut expressions,
+            );
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     });
     functions.push((
         HirFunction {
             id: FunctionId(0),
             entry: BlockId(100),
             params: vec![],
-            return_type: int_type,
+            returns: vec![int_type].into_boxed_slice(),
+            error_return: None,
         },
         start_path,
         HirFunctionOrigin::EntryStart,
@@ -4099,14 +4247,20 @@ fn build_uint_scalar_fixture(
                 },
                 1,
             )],
-            terminator: HirTerminator::Return(result),
+            terminator: HirTerminator::Return({
+                let value = result;
+                expressions
+                    .append_values(&[value], None)
+                    .expect("fixture return values should fit")
+            }),
         });
         functions.push((
             HirFunction {
                 id,
                 entry: block_id,
                 params: vec![LocalId(0), LocalId(1)],
-                return_type: uint_type,
+                returns: vec![uint_type].into_boxed_slice(),
+                error_return: None,
             },
             path,
             HirFunctionOrigin::Normal,
@@ -4146,14 +4300,20 @@ fn build_uint_scalar_fixture(
                 hir_local(1, uint_type, region),
             ],
             statements: vec![],
-            terminator: HirTerminator::Return(body),
+            terminator: HirTerminator::Return({
+                let value = body;
+                expressions
+                    .append_values(&[value], None)
+                    .expect("fixture return values should fit")
+            }),
         });
         functions.push((
             HirFunction {
                 id,
                 entry: block_id,
                 params: vec![LocalId(0), LocalId(1)],
-                return_type: bool_type,
+                returns: vec![bool_type].into_boxed_slice(),
+                error_return: None,
             },
             path,
             HirFunctionOrigin::Normal,
@@ -4198,14 +4358,20 @@ fn build_uint_scalar_fixture(
                 hir_local(1, right_type, region),
             ],
             statements: vec![],
-            terminator: HirTerminator::Return(body),
+            terminator: HirTerminator::Return({
+                let value = body;
+                expressions
+                    .append_values(&[value], None)
+                    .expect("fixture return values should fit")
+            }),
         });
         functions.push((
             HirFunction {
                 id,
                 entry: block_id,
                 params: vec![LocalId(0), LocalId(1)],
-                return_type: bool_type,
+                returns: vec![bool_type].into_boxed_slice(),
+                error_return: None,
             },
             path,
             HirFunctionOrigin::Normal,
@@ -4256,14 +4422,20 @@ fn build_uint_scalar_fixture(
             region,
             locals: vec![],
             statements: vec![],
-            terminator: HirTerminator::Return(body),
+            terminator: HirTerminator::Return({
+                let value = body;
+                expressions
+                    .append_values(&[value], None)
+                    .expect("fixture return values should fit")
+            }),
         });
         functions.push((
             HirFunction {
                 id,
                 entry: block_id,
                 params: vec![],
-                return_type,
+                returns: vec![return_type].into_boxed_slice(),
+                error_return: None,
             },
             path,
             HirFunctionOrigin::Normal,

@@ -8,12 +8,17 @@
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{
-    Declaration, LoopBindings, RangeEndKind, RangeLoopSpec,
+    Declaration, DeclarationValue, LoopBindings, RangeEndKind, RangeLoopSpec,
 };
+use crate::compiler_frontend::ast::const_values::{ConstValuePayload, ConstValueStore};
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::{ExpressionParseError, NumericDeferral};
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::expressions::expression_rpn::{
+    ExpressionRpnItem, single_operand,
+};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, ExpressionOperationView, ExpressionView, OwnedExpr,
+};
 use crate::compiler_frontend::ast::expressions::parse_expression::{
     create_expression_until, create_expression_with_trailing_newline_policy,
 };
@@ -35,6 +40,7 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidLoopHeaderReason, InvalidRangeOperandReason, RangeOperandKind,
+    ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -185,18 +191,24 @@ impl ParsedRangeSpec {
                 None => None,
             };
             let range = range_loop_spec_from_completed_operands(
-                start,
-                end,
+                start.map(|id| parser.expression_builder.own(id)),
+                parser.expression_builder.own(end),
                 end_kind,
-                step,
+                step.map(|id| parser.expression_builder.own(id)),
                 span,
                 parser.scope_context,
                 parser.type_interner,
+                parser.expression_builder,
+                parser.const_values,
                 parser.string_table,
                 parser.path_fork,
             )?;
             // The counter's domain is the spec's selected domain: one policy owns both.
-            let binding_type = range_binding_type(&range, parser.type_interner.environment())?;
+            let binding_type = range_binding_type(
+                &range,
+                parser.type_interner.environment(),
+                parser.expression_builder,
+            )?;
             let bindings = declare_loop_bindings(binding_names, binding_type, parser)?;
             return Ok(ParsedLoopHeader::Range(ParsedRangeHeader::Concrete {
                 bindings: Box::new(bindings),
@@ -222,7 +234,7 @@ impl ParsedRangeSpec {
 }
 
 /// The built expression of one range slot that needs no numeric completion.
-fn built_range_slot(slot: StatementExpression, position: &str) -> LoopHeaderResult<Expression> {
+fn built_range_slot(slot: StatementExpression, position: &str) -> LoopHeaderResult<ExprId> {
     match slot {
         StatementExpression::Built(expression) => Ok(expression),
         StatementExpression::Retained(_) => Err(CompilerError::compiler_error(format!(
@@ -254,6 +266,8 @@ struct CursorBareLoopBindingSuffix {
 struct LoopHeaderParser<'a, 'types> {
     scope_context: &'a mut ScopeContext,
     type_interner: &'a mut AstTypeInterner<'types>,
+    expression_builder: &'a mut AstExpressionBuilder,
+    const_values: &'a mut ConstValueStore,
     warnings: &'a mut Vec<CompilerDiagnostic>,
     string_table: &'a mut StringTable,
     path_fork: &'a mut PathInternerFork,
@@ -265,6 +279,8 @@ struct CursorExpressionInput<'a, 'types, 'cursor, 'tokens> {
     expression_end: usize,
     context: &'a ScopeContext,
     type_interner: &'a mut AstTypeInterner<'types>,
+    expression_builder: &'a mut AstExpressionBuilder,
+    const_values: &'a mut ConstValueStore,
     value_mode: &'a ValueMode,
     string_table: &'a mut StringTable,
     path_fork: &'a mut PathInternerFork,
@@ -276,6 +292,8 @@ struct CursorExpressionUntilInput<'a, 'types, 'cursor, 'tokens, 'stop> {
     expression_end: usize,
     context: &'a ScopeContext,
     type_interner: &'a mut AstTypeInterner<'types>,
+    expression_builder: &'a mut AstExpressionBuilder,
+    const_values: &'a mut ConstValueStore,
     value_mode: &'a ValueMode,
     string_table: &'a mut StringTable,
     path_fork: &'a mut PathInternerFork,
@@ -288,6 +306,8 @@ struct RangeLoopSpecInput<'a, 'types, 'cursor, 'tokens> {
     range_end: usize,
     context: &'a ScopeContext,
     type_interner: &'a mut AstTypeInterner<'types>,
+    expression_builder: &'a mut AstExpressionBuilder,
+    const_values: &'a mut ConstValueStore,
     string_table: &'a mut StringTable,
     path_fork: &'a mut PathInternerFork,
 }
@@ -307,10 +327,16 @@ fn loop_header_error<T>(
 /// WHAT: keeps all header reads on the short-lived `AstCursor` view and represents
 /// grammar splits as parser-position ranges rather than materialised payload vectors.
 /// WHY: this is the only loop-header parser and consumes canonical source-token views.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "loop header parsing keeps the cursor, scope, warnings and mutable state as separate inputs"
+)]
 pub(crate) fn parse_loop_header_cursor(
     token_stream: &mut AstCursor,
     mut context: ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
@@ -362,6 +388,8 @@ pub(crate) fn parse_loop_header_cursor(
         let mut parser = LoopHeaderParser {
             scope_context: &mut context,
             type_interner,
+            expression_builder,
+            const_values,
             warnings,
             string_table,
             path_fork,
@@ -395,6 +423,8 @@ fn parse_range_loop_header_cursor(
             range_end: pipe_binding_split.core_end,
             context: parser.scope_context,
             type_interner: parser.type_interner,
+            expression_builder: parser.expression_builder,
+            const_values: parser.const_values,
             string_table: parser.string_table,
             path_fork: parser.path_fork,
         })?;
@@ -410,6 +440,8 @@ fn parse_range_loop_header_cursor(
             range_end: bare_binding_suffix.core_end,
             context: parser.scope_context,
             type_interner: parser.type_interner,
+            expression_builder: parser.expression_builder,
+            const_values: parser.const_values,
             string_table: parser.string_table,
             path_fork: parser.path_fork,
         })?
@@ -423,6 +455,8 @@ fn parse_range_loop_header_cursor(
         range_end: header_end,
         context: parser.scope_context,
         type_interner: parser.type_interner,
+        expression_builder: parser.expression_builder,
+        const_values: parser.const_values,
         string_table: parser.string_table,
         path_fork: parser.path_fork,
     })?;
@@ -447,6 +481,8 @@ fn parse_non_range_loop_header_cursor(
             expression_end: pipe_binding_split.core_end,
             context: parser.scope_context,
             type_interner: parser.type_interner,
+            expression_builder: parser.expression_builder,
+            const_values: parser.const_values,
             value_mode: &ValueMode::ImmutableReference,
             string_table: parser.string_table,
             path_fork: parser.path_fork,
@@ -487,6 +523,8 @@ fn parse_non_range_loop_header_cursor(
             expression_end: bare_binding_suffix.core_end,
             context: parser.scope_context,
             type_interner: parser.type_interner,
+            expression_builder: parser.expression_builder,
+            const_values: parser.const_values,
             value_mode: &ValueMode::ImmutableReference,
             string_table: parser.string_table,
             path_fork: parser.path_fork,
@@ -502,6 +540,8 @@ fn parse_non_range_loop_header_cursor(
             expression_end: header_end,
             context: parser.scope_context,
             type_interner: parser.type_interner,
+            expression_builder: parser.expression_builder,
+            const_values: parser.const_values,
             value_mode: &ValueMode::ImmutableOwned,
             string_table: parser.string_table,
             path_fork: parser.path_fork,
@@ -517,6 +557,7 @@ fn parse_non_range_loop_header_cursor(
                 &deferral.items,
                 parser.scope_context,
                 parser.type_interner.environment(),
+                parser.expression_builder,
             )?
             .is_some()
             {
@@ -543,11 +584,15 @@ fn parse_non_range_loop_header_cursor(
             return Ok(ParsedLoopHeader::Conditional { condition });
         }
     };
+    let source_type = parser
+        .expression_builder
+        .view(expression)?
+        .require_single(ValueReceiverContext::General)?;
 
     let item_type_id = parser
         .type_interner
         .environment()
-        .collection_element_type(expression.type_id);
+        .collection_element_type(source_type);
 
     if let Some(item_type_id) = item_type_id {
         let bindings = declare_loop_bindings(None, item_type_id, parser)?;
@@ -558,7 +603,10 @@ fn parse_non_range_loop_header_cursor(
         });
     }
 
-    ensure_loop_condition(&expression, parser.type_interner.environment())?;
+    ensure_loop_condition(
+        parser.expression_builder.view(expression)?,
+        parser.type_interner.environment(),
+    )?;
     Ok(ParsedLoopHeader::Conditional {
         condition: StatementExpression::Built(expression),
     })
@@ -808,6 +856,8 @@ fn parse_range_loop_spec_cursor(
         range_end,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     } = input;
@@ -829,6 +879,8 @@ fn parse_range_loop_spec_cursor(
                             expression_end: range_end,
                             context,
                             type_interner,
+                            expression_builder,
+                            const_values,
                             value_mode: &ValueMode::ImmutableReference,
                             string_table,
                             path_fork,
@@ -839,8 +891,13 @@ fn parse_range_loop_spec_cursor(
                 )
             };
 
-        let start_span =
-            || omitted_start_span.or_else(|| start_operand.as_ref().and_then(range_slot_span));
+        let start_span = match omitted_start_span {
+            Some(span) => Some(span),
+            None => match &start_operand {
+                Some(slot) => range_slot_span(slot, expression_builder)?,
+                None => None,
+            },
+        };
 
         let end_kind = match token_stream.current_tag() {
             TokenTag::EXCLUSIVE_RANGE => {
@@ -855,7 +912,7 @@ fn parse_range_loop_spec_cursor(
             TokenTag::EOF if token_stream.position() >= range_end => {
                 return loop_header_error(
                     InvalidLoopHeaderReason::MissingRangeSeparator,
-                    start_span(),
+                    start_span,
                 );
             }
             _ => {
@@ -867,7 +924,7 @@ fn parse_range_loop_spec_cursor(
         };
 
         if token_stream.position() >= range_end || token_stream.current_tag() == TokenTag::EOF {
-            return loop_header_error(InvalidLoopHeaderReason::MissingRangeEndBound, start_span());
+            return loop_header_error(InvalidLoopHeaderReason::MissingRangeEndBound, start_span);
         }
 
         let end_start = token_stream.position();
@@ -880,6 +937,8 @@ fn parse_range_loop_spec_cursor(
                 expression_end: range_end,
                 context,
                 type_interner,
+                expression_builder,
+                const_values,
                 value_mode: &ValueMode::ImmutableReference,
                 string_table,
                 path_fork,
@@ -893,6 +952,8 @@ fn parse_range_loop_spec_cursor(
                     expression_end: range_end,
                     context,
                     type_interner,
+                    expression_builder,
+                    const_values,
                     value_mode: &ValueMode::ImmutableReference,
                     string_table,
                     path_fork,
@@ -915,6 +976,8 @@ fn parse_range_loop_spec_cursor(
                     expression_end: range_end,
                     context,
                     type_interner,
+                    expression_builder,
+                    const_values,
                     value_mode: &ValueMode::ImmutableReference,
                     string_table,
                     path_fork,
@@ -949,7 +1012,7 @@ fn parse_range_loop_spec_cursor(
 ///      witness is registered on the origins here: the header's counter is a forward result of
 ///      the selected operand domains, never a constraint that selects them.
 fn range_operand_from_result(
-    result: LoopHeaderResult<Expression>,
+    result: LoopHeaderResult<ExprId>,
 ) -> LoopHeaderResult<StatementExpression> {
     match result {
         Ok(expression) => Ok(StatementExpression::Built(expression)),
@@ -1020,10 +1083,13 @@ fn declare_retained_range_counter(
 }
 
 /// The authored span of one range operand slot.
-fn range_slot_span(slot: &StatementExpression) -> Option<SourceSpan> {
+fn range_slot_span(
+    slot: &StatementExpression,
+    expression_builder: &AstExpressionBuilder,
+) -> LoopHeaderResult<Option<SourceSpan>> {
     match slot {
-        StatementExpression::Built(expression) => expression.span,
-        StatementExpression::Retained(fragment) => fragment.span,
+        StatementExpression::Built(expression) => Ok(expression_builder.view(*expression)?.span()),
+        StatementExpression::Retained(fragment) => Ok(fragment.span),
     }
 }
 
@@ -1037,99 +1103,120 @@ fn range_slot_span(slot: &StatementExpression) -> Option<SourceSpan> {
 ///      both callers share one implementation instead of a second policy in the completion driver.
 #[allow(
     clippy::too_many_arguments,
-    reason = "the shared range policy keeps the four authored operand slots, the omitted-start span and the parser services as separate inputs"
+    reason = "the shared range policy keeps the four authored operand slots, the omitted-start span, the parser services and the expression storage as separate inputs"
 )]
 pub(crate) fn range_loop_spec_from_completed_operands(
-    start: Option<Expression>,
-    end: Expression,
+    start: Option<OwnedExpr>,
+    end: OwnedExpr,
     end_kind: RangeEndKind,
-    step: Option<Expression>,
+    step: Option<OwnedExpr>,
     omitted_start_span: Option<SourceSpan>,
     _context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     _string_table: &mut StringTable,
     _path_fork: &mut PathInternerFork,
 ) -> LoopHeaderResult<RangeLoopSpec> {
     let type_environment = type_interner.environment();
-    let domain = range_numeric_domain(start.as_ref(), &end, step.as_ref(), type_environment)?;
+    let domain = range_numeric_domain(
+        start
+            .map(|start| expression_builder.view_owned(start))
+            .transpose()?,
+        expression_builder.view_owned(end)?,
+        step.map(|step| expression_builder.view_owned(step))
+            .transpose()?,
+        type_environment,
+    )?;
     if domain.is_binary_float() && step.is_none() {
-        return loop_header_error(InvalidLoopHeaderReason::FloatRangeMissingStep, end.span);
+        return loop_header_error(
+            InvalidLoopHeaderReason::FloatRangeMissingStep,
+            expression_builder.view_owned(end)?.span(),
+        );
     }
-    if let Some(step_expression) = &step
-        && is_zero_numeric_literal(step_expression)
+    if let Some(step_id) = step
+        && is_zero_numeric_literal(expression_builder.view_owned(step_id)?, const_values)
     {
-        return loop_header_error(InvalidLoopHeaderReason::ZeroRangeStep, step_expression.span);
+        return loop_header_error(
+            InvalidLoopHeaderReason::ZeroRangeStep,
+            expression_builder.view_owned(step_id)?.span(),
+        );
     }
 
     let start = match start {
         Some(start) => start,
         None => {
-            let end_domain = NumericScalar::from_type_id(end.type_id, type_environment)
-                .expect("range numeric validation ensures the end has a numeric domain");
-            contextual_range_zero(end_domain, omitted_start_span)
+            let end_domain = NumericScalar::from_type_id(
+                expression_builder.view_owned(end)?.value_type_id()?,
+                type_environment,
+            )
+            .expect("range numeric validation ensures the end has a numeric domain");
+            contextual_range_zero(
+                end_domain,
+                omitted_start_span,
+                expression_builder,
+                const_values,
+            )?
         }
     };
 
     Ok(RangeLoopSpec {
-        start,
-        end,
+        start: start.id(),
+        end: end.id(),
         end_kind,
-        step,
+        step: step.map(OwnedExpr::id),
     })
 }
 
 fn range_operand_domain(
-    expression: &Expression,
+    operand: ExpressionView<'_>,
     kind: RangeOperandKind,
     type_environment: &TypeEnvironment,
 ) -> LoopHeaderResult<NumericScalar> {
-    let domain = NumericScalar::from_type_id(expression.type_id, type_environment);
+    let operand_type = operand.require_single(ValueReceiverContext::OperatorOperand)?;
+    let domain = NumericScalar::from_type_id(operand_type, type_environment);
     match domain {
         Some(domain) if domain.is_integer() || domain.is_binary_float() => Ok(domain),
         _ => Err(CompilerDiagnostic::invalid_range_operand(
             kind,
-            expression.type_id,
+            operand_type,
             InvalidRangeOperandReason::NotNumeric,
-            expression.span,
+            operand.span(),
         )
         .into()),
     }
 }
 
 fn range_numeric_domain(
-    start: Option<&Expression>,
-    end: &Expression,
-    step: Option<&Expression>,
+    start: Option<ExpressionView<'_>>,
+    end: ExpressionView<'_>,
+    step: Option<ExpressionView<'_>>,
     type_environment: &TypeEnvironment,
 ) -> LoopHeaderResult<NumericScalar> {
     let end_domain = range_operand_domain(end, RangeOperandKind::End, type_environment)?;
     let start_domain = match start {
-        Some(expression) => {
-            range_operand_domain(expression, RangeOperandKind::Start, type_environment)?
-        }
+        Some(operand) => range_operand_domain(operand, RangeOperandKind::Start, type_environment)?,
         None => end_domain,
     };
     let step_domain = step
-        .map(|step_expression| {
-            range_operand_domain(step_expression, RangeOperandKind::Step, type_environment)
-        })
+        .map(|operand| range_operand_domain(operand, RangeOperandKind::Step, type_environment))
         .transpose()?;
     let Some(domain) = range_iteration_domain(start_domain, end_domain, step_domain) else {
         // Applying the selector to the bounds alone tells whether the explicit step introduced
         // the incompatibility or the bounds already disagreed.
         let (operand, offender) = match step {
-            Some(step_expression)
+            Some(step_operand)
                 if range_iteration_domain(start_domain, end_domain, None).is_some() =>
             {
-                (RangeOperandKind::Step, step_expression)
+                (RangeOperandKind::Step, step_operand)
             }
             _ => (RangeOperandKind::End, end),
         };
         return Err(CompilerDiagnostic::invalid_range_operand(
             operand,
-            offender.type_id,
+            offender.value_type_id()?,
             InvalidRangeOperandReason::IncompatibleDomain,
-            offender.span,
+            offender.span(),
         )
         .into());
     };
@@ -1137,7 +1224,12 @@ fn range_numeric_domain(
     Ok(domain)
 }
 
-fn contextual_range_zero(domain: NumericScalar, span: Option<SourceSpan>) -> Expression {
+fn contextual_range_zero(
+    domain: NumericScalar,
+    span: Option<SourceSpan>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+) -> LoopHeaderResult<OwnedExpr> {
     match domain {
         NumericScalar::Fixed(scalar) => {
             let zero = match scalar.class() {
@@ -1147,7 +1239,12 @@ fn contextual_range_zero(domain: NumericScalar, span: Option<SourceSpan>) -> Exp
                 FixedScalarClass::Octet => None,
             }
             .expect("numeric range domain has a representable zero");
-            Expression::fixed_scalar(zero, span, ValueMode::ImmutableOwned)
+            Ok(expression_builder.fixed_scalar(
+                const_values,
+                zero,
+                span,
+                ValueMode::ImmutableOwned,
+            )?)
         }
         NumericScalar::Number(_) => {
             unreachable!("Number range domains are rejected before contextual zero materialisation")
@@ -1167,13 +1264,15 @@ fn contextual_range_zero(domain: NumericScalar, span: Option<SourceSpan>) -> Exp
 fn parse_cursor_expression(
     input: CursorExpressionInput<'_, '_, '_, '_>,
     retain_pending_numeric_fragment: bool,
-) -> LoopHeaderResult<Expression> {
+) -> LoopHeaderResult<ExprId> {
     let CursorExpressionInput {
         token_stream,
         expression_start,
         expression_end,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         value_mode,
         string_table,
         path_fork,
@@ -1190,6 +1289,8 @@ fn parse_cursor_expression(
                 token_stream: stream,
                 scope_context: context,
                 type_interner,
+                expression_builder,
+                const_values,
                 expected_type: &mut expected_type,
                 cast_target_context: &mut cast_target_context,
                 value_mode,
@@ -1204,19 +1305,21 @@ fn parse_cursor_expression(
         } else {
             input
         };
-        create_expression_with_trailing_newline_policy(input)
+        create_expression_with_trailing_newline_policy(input).map(|expression| expression.id())
     })
 }
 
 fn parse_cursor_expression_until(
     input: CursorExpressionUntilInput<'_, '_, '_, '_, '_>,
-) -> LoopHeaderResult<Expression> {
+) -> LoopHeaderResult<ExprId> {
     let CursorExpressionUntilInput {
         token_stream,
         expression_start,
         expression_end,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         value_mode,
         string_table,
         path_fork,
@@ -1234,6 +1337,8 @@ fn parse_cursor_expression_until(
                 token_stream: stream,
                 scope_context: context,
                 type_interner,
+                expression_builder,
+                const_values,
                 expected_type: &mut expected_type,
                 cast_target_context: &mut cast_target_context,
                 value_mode,
@@ -1243,7 +1348,7 @@ fn parse_cursor_expression_until(
             false,
         )
         .with_numeric_deferral_owner();
-        create_expression_until(input, stop_tokens)
+        create_expression_until(input, stop_tokens).map(|expression| expression.id())
     })
 }
 
@@ -1290,9 +1395,8 @@ fn retain_loop_condition(deferral: NumericDeferral, bool_type_id: TypeId) -> Sta
 /// WHY: a collection item is a fact about one named source; a larger expression has no single
 ///      element class to share.
 fn pending_source_binding(items: &[ExpressionRpnItem]) -> Option<NumericBindingId> {
-    match items {
-        [ExpressionRpnItem::PendingNumericBinding { binding, .. }] => Some(*binding),
-        [ExpressionRpnItem::PendingGroup { nodes, .. }] => pending_source_binding(nodes),
+    match single_operand(items) {
+        Some(ExpressionRpnItem::PendingNumericBinding { binding, .. }) => Some(*binding),
         _ => None,
     }
 }
@@ -1311,6 +1415,7 @@ fn pending_collection_source(
     items: &[ExpressionRpnItem],
     context: &ScopeContext,
     environment: &TypeEnvironment,
+    expression_builder: &AstExpressionBuilder,
 ) -> LoopHeaderResult<Option<KnownShapeId>> {
     if let Some(binding) = pending_source_binding(items) {
         let state = context.numeric_state();
@@ -1318,8 +1423,14 @@ fn pending_collection_source(
     }
     let node = match retained_known_shape(items) {
         Some(shape) => Some(shape),
-        None => match items {
-            [single] => retained_operand_result_shape(single, context, environment, false)?,
+        None => match single_operand(items) {
+            Some(single) => retained_operand_result_shape(
+                single,
+                context,
+                environment,
+                false,
+                expression_builder,
+            )?,
             _ => None,
         },
     };
@@ -1380,9 +1491,12 @@ fn retained_known_result_type(
     items: &[ExpressionRpnItem],
     context: &ScopeContext,
     environment: &TypeEnvironment,
+    expression_builder: &AstExpressionBuilder,
 ) -> LoopHeaderResult<Option<TypeId>> {
-    let shape = match items {
-        [single] => retained_operand_result_shape(single, context, environment, false)?,
+    let shape = match single_operand(items) {
+        Some(single) => {
+            retained_operand_result_shape(single, context, environment, false, expression_builder)?
+        }
         _ => None,
     };
     Ok(shape.and_then(|shape| concrete_shape_type(context, shape)))
@@ -1398,8 +1512,10 @@ fn collection_source_diagnostic(
     deferral: NumericDeferral,
     context: &ScopeContext,
     environment: &TypeEnvironment,
+    expression_builder: &AstExpressionBuilder,
 ) -> LoopHeaderResult<CompilerDiagnostic> {
-    let found_type = retained_known_result_type(&deferral.items, context, environment)?;
+    let found_type =
+        retained_known_result_type(&deferral.items, context, environment, expression_builder)?;
     Ok(CompilerDiagnostic::invalid_loop_header(
         InvalidLoopHeaderReason::CollectionSourceNotCollection { found_type },
         deferral.span,
@@ -1424,6 +1540,8 @@ fn parse_collection_iterable_cursor(
         expression_end,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         value_mode,
         string_table,
         path_fork,
@@ -1440,6 +1558,8 @@ fn parse_collection_iterable_cursor(
             expression_end,
             context,
             type_interner,
+            expression_builder,
+            const_values,
             value_mode,
             string_table,
             path_fork,
@@ -1449,9 +1569,12 @@ fn parse_collection_iterable_cursor(
         Ok(expression) => expression,
         Err(error) => {
             let deferral = error.take_numeric_deferral("a loop collection source")?;
-            if let Some(source) =
-                pending_collection_source(&deferral.items, context, type_interner.environment())?
-            {
+            if let Some(source) = pending_collection_source(
+                &deferral.items,
+                context,
+                type_interner.environment(),
+                expression_builder,
+            )? {
                 return Ok(CollectionIterable::Pending {
                     iterable: StatementExpression::Retained(deferred_numeric_expression(
                         deferral.items,
@@ -1463,18 +1586,23 @@ fn parse_collection_iterable_cursor(
                     source,
                 });
             }
-            let retained_element_type =
-                retained_known_result_type(&deferral.items, context, type_interner.environment())?
-                    .and_then(|return_type| {
-                        type_interner
-                            .environment()
-                            .collection_element_type(return_type)
-                    });
+            let retained_element_type = retained_known_result_type(
+                &deferral.items,
+                context,
+                type_interner.environment(),
+                expression_builder,
+            )?
+            .and_then(|return_type| {
+                type_interner
+                    .environment()
+                    .collection_element_type(return_type)
+            });
             let Some(item_type_id) = retained_element_type else {
                 return Err(collection_source_diagnostic(
                     deferral,
                     context,
                     type_interner.environment(),
+                    expression_builder,
                 )?
                 .into());
             };
@@ -1491,14 +1619,14 @@ fn parse_collection_iterable_cursor(
         }
     };
     let type_environment = type_interner.environment();
-    let Some(item_type_id) =
-        type_environment.collection_element_type(collection_expression.type_id)
-    else {
+    let collection_view = expression_builder.view(collection_expression)?;
+    let source_type = collection_view.require_single(ValueReceiverContext::General)?;
+    let Some(item_type_id) = type_environment.collection_element_type(source_type) else {
         return loop_header_error(
             InvalidLoopHeaderReason::CollectionSourceNotCollection {
-                found_type: Some(collection_expression.type_id),
+                found_type: Some(source_type),
             },
-            collection_expression.span,
+            collection_view.span(),
         );
     };
     Ok(CollectionIterable::Known {
@@ -1516,6 +1644,8 @@ fn parses_as_collection_cursor(
         expression_end,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         value_mode,
         string_table,
         path_fork,
@@ -1532,6 +1662,8 @@ fn parses_as_collection_cursor(
             expression_end,
             context,
             type_interner,
+            expression_builder,
+            const_values,
             value_mode,
             string_table,
             path_fork,
@@ -1539,7 +1671,12 @@ fn parses_as_collection_cursor(
         true,
     ) {
         Ok(expression) => expression,
-        Err(ExpressionParseError::Diagnostic(_)) => return Ok(false),
+        // Capacity exhaustion is not a rejected cursor shape: it must reach the module build.
+        Err(ExpressionParseError::Diagnostic(diagnostic))
+            if !diagnostic.is_compiler_capacity_exceeded() =>
+        {
+            return Ok(false);
+        }
         // A retained source is a collection only when the fragment's own parsed shape already
         // names a collection result; every other retained fragment reports its source constraint
         // from the real header parse instead of this syntax probe.
@@ -1547,13 +1684,18 @@ fn parses_as_collection_cursor(
             // A pending collection source and a retained operand whose known result is a collection
             // are the retained shapes that really are collection sources, so the probe must answer
             // like the real header parse.
-            let pending_source =
-                pending_collection_source(&deferral.items, context, type_interner.environment())?;
+            let pending_source = pending_collection_source(
+                &deferral.items,
+                context,
+                type_interner.environment(),
+                expression_builder,
+            )?;
             return Ok(pending_source.is_some()
                 || retained_known_result_type(
                     &deferral.items,
                     context,
                     type_interner.environment(),
+                    expression_builder,
                 )?
                 .is_some_and(|return_type| {
                     type_interner
@@ -1564,16 +1706,27 @@ fn parses_as_collection_cursor(
         }
         Err(error) => return Err(error),
     };
-    Ok(type_interner
-        .environment()
-        .collection_element_type(expression.type_id)
-        .is_some())
+    Ok(expression_builder
+        .view(expression)?
+        .success_shape()
+        .single()
+        .is_some_and(|source_type| {
+            type_interner
+                .environment()
+                .collection_element_type(source_type)
+                .is_some()
+        }))
 }
 
 fn parses_as_range_cursor(input: RangeLoopSpecInput<'_, '_, '_, '_>) -> LoopHeaderResult<bool> {
     match parse_range_loop_spec_cursor(input) {
         Ok(_) => Ok(true),
-        Err(ExpressionParseError::Diagnostic(_)) => Ok(false),
+        // Capacity exhaustion is not a rejected cursor shape: it must reach the module build.
+        Err(ExpressionParseError::Diagnostic(diagnostic))
+            if !diagnostic.is_compiler_capacity_exceeded() =>
+        {
+            Ok(false)
+        }
         // A retained numeric operand still leaves the header range-shaped; the real range parse
         // resolves the operand from a registered witness or reports its operand diagnostic.
         Err(ExpressionParseError::NumericDeferral(_)) => Ok(true),
@@ -1739,11 +1892,15 @@ fn token_string_id_at(
 pub(crate) fn range_binding_type(
     range: &RangeLoopSpec,
     type_environment: &TypeEnvironment,
+    expression_builder: &AstExpressionBuilder,
 ) -> LoopHeaderResult<TypeId> {
     Ok(range_numeric_domain(
-        Some(&range.start),
-        &range.end,
-        range.step.as_ref(),
+        Some(expression_builder.view(range.start)?),
+        expression_builder.view(range.end)?,
+        range
+            .step
+            .map(|step| expression_builder.view(step))
+            .transpose()?,
         type_environment,
     )?
     .type_id(type_environment))
@@ -1793,12 +1950,20 @@ fn validate_loop_binding_name(
 
     if parser
         .scope_context
-        .has_visible_local_declaration(&binding_name.id)
+        .has_visible_declaration(&binding_name.id)
     {
         return loop_header_error(
             InvalidLoopHeaderReason::BindingAlreadyDeclared,
             binding_name.span,
         );
+    }
+
+    if let Some(diagnostic) = parser.scope_context.check_body_binding_visibility(
+        binding_name.id,
+        binding_name.span,
+        parser.string_table,
+    ) {
+        return Err(diagnostic.into());
     }
 
     if let Some(warning) = naming_warning_for_identifier(
@@ -1827,17 +1992,14 @@ fn declare_loop_binding(
             .path_fork
             .try_intern_child(parser.scope_context.scope, binding_name.id)
             .expect("path table exhausted while declaring loop binding"),
-        value: Expression::new(
-            ExpressionKind::NoValue,
-            binding_span,
-            type_id,
-            data_type,
-            ValueMode::ImmutableOwned,
-        ),
+        type_id,
+        diagnostic_type: data_type,
+        value_mode: ValueMode::ImmutableOwned,
+        value: DeclarationValue::Absent,
         binding_span,
         config_qualifier: None,
     };
-    let binding_span = declaration.value.span;
+    let binding_span = declaration.binding_span;
     parser
         .scope_context
         .add_var(declaration.to_owned(), binding_span, parser.path_fork);
@@ -1846,12 +2008,15 @@ fn declare_loop_binding(
 }
 
 // Detect literal zero so we can reject `by 0` ranges with a targeted diagnostic.
-fn is_zero_numeric_literal(expression: &Expression) -> bool {
-    match &expression.kind {
-        ExpressionKind::FixedScalar(value) => {
-            value.as_i64() == Some(0) || value.as_u64() == Some(0) || value.as_f64() == Some(0.0)
+fn is_zero_numeric_literal(expression: ExpressionView<'_>, const_values: &ConstValueStore) -> bool {
+    let ExpressionOperationView::Constant(value) = expression.operation() else {
+        return false;
+    };
+    match const_values.payload(value) {
+        Some(ConstValuePayload::FixedScalar(scalar)) => {
+            scalar.as_i64() == Some(0) || scalar.as_u64() == Some(0) || scalar.as_f64() == Some(0.0)
         }
-        ExpressionKind::Number(value) => value.to_integer_exact() == Ok(0),
+        Some(ConstValuePayload::Number(number)) => number.to_integer_exact() == Ok(0),
         _ => false,
     }
 }

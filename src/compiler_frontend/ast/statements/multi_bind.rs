@@ -13,12 +13,17 @@
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{
-    AstNode, Declaration, MultiBindTarget, MultiBindTargetKind, NodeKind,
+    AstNode, Declaration, DeclarationValue, MultiBindTarget, MultiBindTargetKind, NodeKind,
 };
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::expressions::expression_rpn::{
+    ExpressionRpnItem, into_single_operand, single_operand,
+};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, ExpressionOperationView, ExpressionView,
+};
 use crate::compiler_frontend::ast::expressions::parse_expression::create_expression_with_trailing_newline_policy;
 use crate::compiler_frontend::ast::expressions::parse_expression_input::{
     ExpressionParseInput, ExpressionParseResources,
@@ -54,15 +59,14 @@ use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
-use crate::compiler_frontend::declaration_syntax::declaration_shell::{
-    BindingTargetSyntax, parse_binding_target_syntax,
-};
+use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
+use crate::compiler_frontend::declaration_syntax::declaration_shell::parse_binding_target_syntax;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
 use crate::compiler_frontend::symbols::identifier_policy::{
     IdentifierNamingKind, ensure_not_keyword_shadow_identifier, naming_warning_for_identifier,
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::parse_context::{CastTargetContext, ExpectedType};
 use crate::compiler_frontend::utilities::token_scan::has_top_level_comma_before_statement_end;
@@ -90,12 +94,12 @@ pub(crate) enum MultiBindStatement {
 }
 
 /// One parsed multi-bind right-hand side.
-// `Complete` is a one-shot parse result consumed immediately by the statement builder, so it
+// `Retained` is a one-shot parse result consumed immediately by the statement builder, so it
 // stays inline; boxing it would add an allocation to every multi-bind right-hand side.
 #[allow(clippy::large_enum_variant)]
 enum ParsedMultiBindValue {
     /// A completed expression, including a ready value block.
-    Complete(Expression),
+    Complete(ExprId),
     /// A retained value block, source call, or catch protecting one parsed source call.
     ///
     /// WHY: each shape has an existing owner that supplies its actual result slots and completes
@@ -106,6 +110,16 @@ enum ParsedMultiBindValue {
 struct ResolvedMultiBindTargets {
     targets: Vec<DeferredMultiBindTarget>,
     new_declarations: Vec<Declaration>,
+}
+
+/// Parsed target syntax retains the name token separately from its annotation anchor so collision
+/// validation can wait until the whole target list has passed syntax checking and backtracking.
+struct ParsedMultiBindTarget {
+    name: StringId,
+    name_span: Option<SourceSpan>,
+    binding_mode: BindingMode,
+    type_annotation: ParsedTypeRef,
+    span: Option<SourceSpan>,
 }
 
 /// One target slot of a multi-bind right-hand side, known at parse time.
@@ -141,6 +155,8 @@ pub(crate) fn parse_multi_bind_statement(
     token_stream: &mut AstCursor,
     context: &mut ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> MultiBindResult<Option<MultiBindStatement>> {
@@ -168,6 +184,7 @@ pub(crate) fn parse_multi_bind_statement(
         &parsed_targets,
         &mut rhs_context,
         type_interner,
+        const_values,
         string_table,
         path_fork,
     )?;
@@ -177,12 +194,14 @@ pub(crate) fn parse_multi_bind_statement(
             token_stream,
             &rhs_context,
             type_interner,
+            expression_builder,
+            const_values,
             parsed_targets.len(),
             &known_slot_types,
             string_table,
             path_fork,
         ) {
-            Some(Ok(expression)) => ParsedMultiBindValue::Complete(expression),
+            Some(Ok(expression)) => ParsedMultiBindValue::Complete(expression.id()),
             Some(Err(error)) => {
                 // A numeric-dependent block value owns its deferral here: the whole block is
                 // retained once and the body root completes it under the targets' slot
@@ -206,6 +225,8 @@ pub(crate) fn parse_multi_bind_statement(
                 token_stream,
                 &rhs_context,
                 type_interner,
+                expression_builder,
+                const_values,
                 string_table,
                 path_fork,
             )?,
@@ -215,6 +236,8 @@ pub(crate) fn parse_multi_bind_statement(
             token_stream,
             &rhs_context,
             type_interner,
+            expression_builder,
+            const_values,
             string_table,
             path_fork,
         )?
@@ -225,7 +248,8 @@ pub(crate) fn parse_multi_bind_statement(
     // numeric until the body root resolves its actual recipes and receivers.
     let slot_facts = match &rhs_value {
         ParsedMultiBindValue::Complete(expression) => {
-            let slots = extract_rhs_slot_types(expression, type_interner.environment())?;
+            let view = expression_builder.view(*expression)?;
+            let slots = extract_rhs_slot_types(view)?;
             let slot_count = slots.len();
             MultiBindSlotFacts {
                 rhs_slots: slots
@@ -233,11 +257,11 @@ pub(crate) fn parse_multi_bind_statement(
                     .map(|type_id| MultiBindSlot::Known(Some(type_id)))
                     .collect(),
                 producer_facts: (0..slot_count).map(|_| Vec::new()).collect(),
-                rhs_span: expression.span,
+                rhs_span: view.span(),
             }
         }
         ParsedMultiBindValue::Retained(value) => {
-            retained_multi_bind_slot_facts(value, &rhs_context)?
+            retained_multi_bind_slot_facts(value, &rhs_context, expression_builder, const_values)?
         }
     };
 
@@ -258,6 +282,7 @@ pub(crate) fn parse_multi_bind_statement(
         &slot_facts,
         &mut *context,
         type_interner,
+        const_values,
         string_table,
         path_fork,
     )?;
@@ -295,7 +320,7 @@ pub(crate) fn parse_multi_bind_statement(
 /// Check that every target name is legal for assignment and emit naming warnings
 /// for newly introduced identifiers.
 fn validate_multi_bind_target_identifiers(
-    parsed_targets: &[BindingTargetSyntax],
+    parsed_targets: &[ParsedMultiBindTarget],
     context: &ScopeContext,
     string_table: &mut StringTable,
     _path_fork: &PathInternerFork,
@@ -316,15 +341,20 @@ fn validate_multi_bind_target_identifiers(
             .into());
         }
 
-        if context.get_reference(&target.name).is_none()
-            && let Some(warning) = naming_warning_for_identifier(
+        if context.get_reference(&target.name).is_none() {
+            if let Some(diagnostic) =
+                context.check_body_binding_visibility(target.name, target.name_span, string_table)
+            {
+                return Err(diagnostic.into());
+            }
+            if let Some(warning) = naming_warning_for_identifier(
                 target.name,
                 target.span,
                 IdentifierNamingKind::ValueLike,
                 string_table,
-            )
-        {
-            context.emit_warning(warning);
+            ) {
+                context.emit_warning(warning);
+            }
         }
     }
 
@@ -337,7 +367,7 @@ fn validate_multi_bind_target_identifiers(
 fn parse_target_list(
     token_stream: &mut AstCursor,
     string_table: &mut StringTable,
-) -> MultiBindResult<Option<Vec<BindingTargetSyntax>>> {
+) -> MultiBindResult<Option<Vec<ParsedMultiBindTarget>>> {
     let start_position = token_stream.position();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut parsed_targets = Vec::new();
@@ -376,6 +406,7 @@ fn parse_target_list(
             )
             .into());
         };
+        let name_span = Some(token_stream.current_span());
         token_stream.advance();
         let target_syntax = {
             let (target_syntax, next_index) = {
@@ -391,8 +422,15 @@ fn parse_target_list(
             token_stream.set_position(next_index)?;
             target_syntax
         };
-        validate_target_mutability(&target_syntax, string_table)?;
-        parsed_targets.push(target_syntax);
+        let target = ParsedMultiBindTarget {
+            name: target_syntax.name,
+            name_span,
+            binding_mode: target_syntax.binding_mode,
+            type_annotation: target_syntax.type_annotation,
+            span: target_syntax.span,
+        };
+        validate_target_mutability(&target, string_table)?;
+        parsed_targets.push(target);
 
         match token_stream.current_tag() {
             TokenTag::COMMA => {
@@ -448,7 +486,7 @@ fn parse_target_list(
 
 /// Reject mutable multi-bind targets that lack an explicit type annotation.
 fn validate_target_mutability(
-    target_syntax: &BindingTargetSyntax,
+    target_syntax: &ParsedMultiBindTarget,
     _string_table: &StringTable,
 ) -> MultiBindResult<()> {
     if target_syntax.binding_mode.is_mutable()
@@ -467,7 +505,7 @@ fn validate_target_mutability(
 
 /// Ensure no two targets in the same multi-bind share the same name.
 fn validate_unique_target_names(
-    parsed_targets: &[BindingTargetSyntax],
+    parsed_targets: &[ParsedMultiBindTarget],
     _string_table: &StringTable,
 ) -> MultiBindResult<()> {
     let mut seen_target_names = HashSet::new();
@@ -496,6 +534,8 @@ fn parse_multi_bind_rhs_expression(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> MultiBindResult<ParsedMultiBindValue> {
@@ -516,6 +556,8 @@ fn parse_multi_bind_rhs_expression(
             token_stream,
             scope_context: context,
             type_interner,
+            expression_builder,
+            const_values,
             expected_type: &mut inferred_rhs_type,
             cast_target_context: &mut cast_target_context,
             value_mode: &ValueMode::ImmutableOwned,
@@ -526,7 +568,7 @@ fn parse_multi_bind_rhs_expression(
     )
     .with_numeric_deferral_owner();
     let rhs_value = match create_expression_with_trailing_newline_policy(rhs_input) {
-        Ok(expression) => ParsedMultiBindValue::Complete(expression),
+        Ok(expression) => ParsedMultiBindValue::Complete(expression.id()),
         Err(error) => retain_multi_bind_value(error)?,
     };
 
@@ -558,19 +600,16 @@ fn retain_multi_bind_value(error: ExpressionParseError) -> MultiBindResult<Parse
         deferral
             .items
             .first()
-            .and_then(ExpressionRpnItem::source_span)
+            .and_then(ExpressionRpnItem::authored_span)
     });
     if !deferral.complete_fragment {
         return Err(ExpressionParseError::NumericDeferral(deferral));
     }
-    if !matches!(deferral.suffix, DeferredExpressionSuffix::None) || deferral.items.len() != 1 {
+    if !matches!(deferral.suffix, DeferredExpressionSuffix::None) {
         return Err(unsupported_multi_bind_rhs(rhs_span));
     }
-    let Some(item) = deferral.items.pop() else {
-        return Err(CompilerError::compiler_error(
-            "a retained multi-bind value lost its fragment after classification",
-        )
-        .into());
+    let Some(item) = into_single_operand(std::mem::take(&mut deferral.items)) else {
+        return Err(unsupported_multi_bind_rhs(rhs_span));
     };
 
     match item {
@@ -611,6 +650,8 @@ fn unsupported_multi_bind_rhs(span: Option<SourceSpan>) -> ExpressionParseError 
 fn retained_multi_bind_slot_facts(
     value: &DeferredMultiBindValue,
     context: &ScopeContext,
+    expression_builder: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
 ) -> MultiBindResult<MultiBindSlotFacts> {
     match value {
         DeferredMultiBindValue::Call(call) => {
@@ -619,7 +660,7 @@ fn retained_multi_bind_slot_facts(
             Ok(MultiBindSlotFacts {
                 rhs_slots,
                 producer_facts: producers,
-                rhs_span: retained_multi_bind_span(value),
+                rhs_span: retained_multi_bind_span(value, expression_builder)?,
             })
         }
         DeferredMultiBindValue::Catch { handler, .. } => {
@@ -628,15 +669,15 @@ fn retained_multi_bind_slot_facts(
             Ok(MultiBindSlotFacts {
                 rhs_slots,
                 producer_facts: producers,
-                rhs_span: retained_multi_bind_span(value),
+                rhs_span: retained_multi_bind_span(value, expression_builder)?,
             })
         }
         DeferredMultiBindValue::RetainedExpression {
             slot_expected_types,
             deferred,
         } => {
-            let [ExpressionRpnItem::PendingNumericExpression { expression, .. }] =
-                deferred.items.as_slice()
+            let Some(ExpressionRpnItem::PendingNumericExpression { expression, .. }) =
+                single_operand(&deferred.items)
             else {
                 return Err(CompilerError::compiler_error(
                     "a retained multi-bind value block lost its single deferred value-block item",
@@ -651,7 +692,7 @@ fn retained_multi_bind_slot_facts(
             };
             let producer_facts = {
                 let state = context.numeric_state();
-                block.multi_bind_producer_facts(&state)?
+                block.multi_bind_producer_facts(&state, expression_builder, const_values)?
             };
             if slot_expected_types.len() != producer_facts.len() {
                 return Err(CompilerError::compiler_error(
@@ -683,16 +724,19 @@ fn retained_multi_bind_slot_facts(
 }
 
 /// The authored span of one retained multi-bind value, used by statement-level diagnostics.
-fn retained_multi_bind_span(value: &DeferredMultiBindValue) -> Option<SourceSpan> {
-    match value {
+fn retained_multi_bind_span(
+    value: &DeferredMultiBindValue,
+    expression_builder: &AstExpressionBuilder,
+) -> MultiBindResult<Option<SourceSpan>> {
+    Ok(match value {
         DeferredMultiBindValue::Call(call) => retained_call_span(call),
         DeferredMultiBindValue::Catch { handler, .. } => match &handler.handled {
-            StatementExpression::Built(expression) => expression.span,
+            StatementExpression::Built(expression) => expression_builder.view(*expression)?.span(),
             StatementExpression::Retained(deferred) => deferred.span,
         },
         // The retained block carries its own authored span.
         DeferredMultiBindValue::RetainedExpression { deferred, .. } => deferred.span,
-    }
+    })
 }
 
 /// Read the ordered success slots of a catch protecting exactly one parsed source call.
@@ -701,8 +745,8 @@ fn retained_multi_bind_span(value: &DeferredMultiBindValue) -> Option<SourceSpan
 ///       otherwise requires the protected fragment to be exactly one retained terminal call, a
 ///       bare call or a retained chain's terminal method, with no authored suffix.
 /// WHY: a completed catch is a value block, so the parse-time classifier admits it for any call
-///      kind whose result is a multi-slot tuple; the retained catch mirrors that (multi-bind
-///      always has at least two targets, so the tuple condition is implied), while a handler body
+///      kind whose result has multiple success slots; the retained catch mirrors that (multi-bind
+///      always has at least two targets, so the multiple-slot condition is implied), while a handler body
 ///      or any other protected value stays on the statement-level invariant instead of
 ///      fabricating an arity.
 fn retained_catch_slots(payload: &DeferredCatchHandler) -> MultiBindResult<Vec<MultiBindSlot>> {
@@ -730,10 +774,7 @@ fn retained_catch_slots(payload: &DeferredCatchHandler) -> MultiBindResult<Vec<M
     // The protected fragment is exactly one retained terminal call: a source, concrete-receiver,
     // or external call, or the terminal unhandled method of a retained chain. Its ordered slots
     // come from the parsed signature, never from a general expression.
-    let terminal = match deferred.items.as_slice() {
-        [item] => retained_terminal_call(item),
-        _ => None,
-    };
+    let terminal = single_operand(&deferred.items).and_then(retained_terminal_call);
     let Some(terminal) = terminal else {
         // A retained catch around anything but one call (an authored arithmetic or otherwise
         // single-result fragment) is ordinary multi-bind source misuse, not corrupted construction
@@ -808,17 +849,23 @@ fn retained_call_span(call: &DeferredCall) -> Option<SourceSpan> {
 }
 
 fn resolve_known_slot_types(
-    parsed_targets: &[BindingTargetSyntax],
+    parsed_targets: &[ParsedMultiBindTarget],
     context: &mut ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    const_values: &ConstValueStore,
     string_table: &mut StringTable,
     _path_fork: &PathInternerFork,
 ) -> MultiBindResult<Vec<Option<TypeId>>> {
     let mut known = Vec::with_capacity(parsed_targets.len());
 
     for target_syntax in parsed_targets {
-        let explicit_type =
-            resolve_target_explicit_type(target_syntax, context, type_interner, string_table)?;
+        let explicit_type = resolve_target_explicit_type(
+            target_syntax,
+            context,
+            type_interner,
+            const_values,
+            string_table,
+        )?;
         if let Some((type_id, _)) = explicit_type {
             known.push(Some(type_id));
             continue;
@@ -827,7 +874,7 @@ fn resolve_known_slot_types(
         if let Some(existing_reference) = context.get_reference(&target_syntax.name)
             && let Some(existing) = existing_reference.ready_declaration()
         {
-            known.push(Some(existing.value.type_id));
+            known.push(Some(existing.type_id));
             continue;
         }
 
@@ -846,7 +893,7 @@ fn resolve_known_slot_types(
 ///      written in.
 fn register_generic_slot_receivers(
     slot_facts: &MultiBindSlotFacts,
-    parsed_targets: &[BindingTargetSyntax],
+    parsed_targets: &[ParsedMultiBindTarget],
     explicit_types: &[Option<(TypeId, DataType)>],
     context: &ScopeContext,
     type_interner: &AstTypeInterner<'_>,
@@ -867,7 +914,7 @@ fn register_generic_slot_receivers(
                 .and_then(|reference| {
                     reference
                         .ready_declaration()
-                        .map(|declaration| declaration.value.type_id)
+                        .map(|declaration| declaration.type_id)
                 }),
         };
         let Some(receiver) = receiver else {
@@ -912,72 +959,51 @@ fn resolve_generic_slot_type(
 }
 
 /// Verify that the RHS expression belongs to a whitelisted multi-value-producing surface.
-fn classify_multi_bind_rhs(
-    expression: &Expression,
-    type_environment: &TypeEnvironment,
-) -> MultiBindResult<()> {
-    match &expression.kind {
-        ExpressionKind::FunctionCall { .. }
-        | ExpressionKind::HandledFallibleFunctionCall { .. }
-        | ExpressionKind::HandledFallibleHostFunctionCall { .. }
-        | ExpressionKind::HostFunctionCall { .. } => Ok(()),
+fn classify_multi_bind_rhs(expression: ExpressionView<'_>) -> MultiBindResult<()> {
+    match expression.operation() {
+        ExpressionOperationView::Call(_) => Ok(()),
 
-        ExpressionKind::ValueBlock { .. } => {
-            let Some(tuple_fields) = type_environment.tuple_field_ids(expression.type_id) else {
-                return Err(CompilerDiagnostic::invalid_multi_bind(
-                    InvalidMultiBindReason::RhsNotMultiValue,
-                    None,
-                    expression.span,
-                )
-                .into());
-            };
-
-            if tuple_fields.len() < 2 {
-                return Err(CompilerDiagnostic::invalid_multi_bind(
-                    InvalidMultiBindReason::RhsNotMultiValue,
-                    None,
-                    expression.span,
-                )
-                .into());
-            }
-
-            Ok(())
-        }
+        ExpressionOperationView::ValueBlock(_) if expression.success_types().len() >= 2 => Ok(()),
+        ExpressionOperationView::ValueBlock(_) => Err(CompilerDiagnostic::invalid_multi_bind(
+            InvalidMultiBindReason::RhsNotMultiValue,
+            None,
+            expression.span(),
+        )
+        .into()),
 
         _ => Err(CompilerDiagnostic::invalid_multi_bind(
             InvalidMultiBindReason::UnsupportedRhs,
             None,
-            expression.span,
+            expression.span(),
         )
         .into()),
     }
 }
 
 /// Extract the ordered slot `TypeId`s from a classified multi-value RHS expression.
-fn extract_rhs_slot_types(
-    rhs_expression: &Expression,
-    type_environment: &TypeEnvironment,
-) -> MultiBindResult<Vec<TypeId>> {
-    classify_multi_bind_rhs(rhs_expression, type_environment)?;
+fn extract_rhs_slot_types(rhs_expression: ExpressionView<'_>) -> MultiBindResult<Vec<TypeId>> {
+    classify_multi_bind_rhs(rhs_expression)?;
 
-    let Some(tuple_fields) = type_environment.tuple_field_ids(rhs_expression.type_id) else {
+    let slots = rhs_expression.success_types();
+    if slots.len() < 2 {
         return Err(CompilerDiagnostic::invalid_multi_bind(
             InvalidMultiBindReason::RhsNotMultiValue,
             None,
-            rhs_expression.span,
+            rhs_expression.span(),
         )
         .into());
-    };
+    }
 
-    Ok(tuple_fields.to_vec())
+    Ok(slots.to_vec())
 }
 
 /// Resolve each authored target from a known producer type or a pending producer route.
 fn resolve_multi_bind_targets(
-    parsed_targets: &[BindingTargetSyntax],
+    parsed_targets: &[ParsedMultiBindTarget],
     slot_facts: &MultiBindSlotFacts,
     context: &mut ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    const_values: &ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> MultiBindResult<ResolvedMultiBindTargets> {
@@ -990,6 +1016,7 @@ fn resolve_multi_bind_targets(
             target_syntax,
             context,
             type_interner,
+            const_values,
             string_table,
         )?);
     }
@@ -1103,13 +1130,10 @@ fn resolve_multi_bind_targets(
             )?;
             new_declarations.push(Declaration {
                 id: target_id.to_owned(),
-                value: Expression::new(
-                    ExpressionKind::NoValue,
-                    target_span,
-                    slot_type,
-                    target_data_type.to_owned(),
-                    target_ownership.to_owned(),
-                ),
+                type_id: slot_type,
+                diagnostic_type: target_data_type.to_owned(),
+                value_mode: target_ownership.to_owned(),
+                value: DeclarationValue::Absent,
                 binding_span: target_span,
                 config_qualifier: None,
             });
@@ -1132,7 +1156,7 @@ fn resolve_multi_bind_targets(
         if let Some(declaration) = existing_reference.ready_declaration() {
             let slot_type = match generic_shape {
                 // A generic slot without its own type takes the declaration's type.
-                Some(_) => slot_type.unwrap_or(declaration.value.type_id),
+                Some(_) => slot_type.unwrap_or(declaration.type_id),
                 None => slot_type.ok_or_else(|| {
                     CompilerError::compiler_error(
                         "a ready multi-bind target had no known producer type",
@@ -1380,13 +1404,13 @@ fn require_ready_multi_bind_targets(
 // --------------------------
 
 /// Map the parsed binding mode to the value mode used for the target declaration.
-fn binding_target_ownership(target_syntax: &BindingTargetSyntax) -> ValueMode {
+fn binding_target_ownership(target_syntax: &ParsedMultiBindTarget) -> ValueMode {
     target_syntax.binding_mode.value_mode()
 }
 
 /// Validate that an existing mutable local is compatible with the corresponding RHS slot.
 fn resolve_existing_target(
-    target_syntax: &BindingTargetSyntax,
+    target_syntax: &ParsedMultiBindTarget,
     slot_type: TypeId,
     explicit_type_id: Option<&TypeId>,
     existing_declaration: &Declaration,
@@ -1403,7 +1427,7 @@ fn resolve_existing_target(
         .into());
     }
 
-    if !existing_declaration.value.value_mode.is_mutable() {
+    if !existing_declaration.value_mode.is_mutable() {
         return Err(CompilerDiagnostic::invalid_multi_bind(
             InvalidMultiBindReason::ExistingTargetImmutable,
             Some(target_syntax.name),
@@ -1413,10 +1437,10 @@ fn resolve_existing_target(
     }
 
     if let Some(explicit_type_id) = explicit_type_id
-        && *explicit_type_id != existing_declaration.value.type_id
+        && *explicit_type_id != existing_declaration.type_id
     {
         return Err(CompilerDiagnostic::type_mismatch(
-            existing_declaration.value.type_id,
+            existing_declaration.type_id,
             *explicit_type_id,
             TypeMismatchContext::General,
             target_syntax.span,
@@ -1424,9 +1448,9 @@ fn resolve_existing_target(
         .into());
     }
 
-    if existing_declaration.value.type_id != slot_type {
+    if existing_declaration.type_id != slot_type {
         return Err(CompilerDiagnostic::type_mismatch(
-            existing_declaration.value.type_id,
+            existing_declaration.type_id,
             slot_type,
             TypeMismatchContext::General,
             target_syntax.span,
@@ -1437,7 +1461,7 @@ fn resolve_existing_target(
     Ok(MultiBindTarget {
         id: existing_declaration.id.to_owned(),
         type_id: slot_type,
-        value_mode: existing_declaration.value.value_mode.to_owned(),
+        value_mode: existing_declaration.value_mode.to_owned(),
         kind: MultiBindTargetKind::Assignment,
         span: target_syntax.span,
     })
@@ -1447,7 +1471,7 @@ fn resolve_existing_target(
 ///
 /// If the target has an explicit annotation, it is checked against the corresponding RHS slot type.
 fn resolve_new_target_data_type(
-    target_syntax: &BindingTargetSyntax,
+    target_syntax: &ParsedMultiBindTarget,
     explicit_type_id: Option<TypeId>,
     explicit_diagnostic_type: Option<&DataType>,
     slot_type: TypeId,
@@ -1483,7 +1507,7 @@ fn register_new_declarations(
     path_fork: &PathInternerFork,
 ) {
     for declaration in new_declarations {
-        let binding_span = declaration.value.span;
+        let binding_span = declaration.binding_span;
         context.add_var(declaration, binding_span, path_fork);
     }
 }
@@ -1491,9 +1515,10 @@ fn register_new_declarations(
 // --------------------------
 //  Helpers
 fn resolve_target_explicit_type(
-    target_syntax: &BindingTargetSyntax,
+    target_syntax: &ParsedMultiBindTarget,
     context: &mut ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    const_values: &ConstValueStore,
     string_table: &mut StringTable,
 ) -> MultiBindResult<Option<(TypeId, DataType)>> {
     if target_syntax.type_annotation.eq(&ParsedTypeRef::Inferred) {
@@ -1504,7 +1529,6 @@ fn resolve_target_explicit_type(
         let mut type_resolution_context =
             TypeResolutionContext::from_inputs(TypeResolutionContextInputs {
                 declaration_table: &context.top_level_declarations,
-                declaring_file_id: context.shared.declaring_file_id,
                 visible_declaration_ids: context.visible_declaration_ids.as_ref(),
                 visible_external_symbols: context
                     .file_visibility
@@ -1522,6 +1546,7 @@ fn resolve_target_explicit_type(
                 generic_declarations_by_path: context.generic_declarations_by_path.as_deref(),
                 resolved_struct_fields_by_path: context.resolved_struct_fields_by_path.as_deref(),
                 type_environment: type_interner.environment_mut_for_derived_types(),
+                const_values,
                 visible_namespace_records: context
                     .file_visibility
                     .as_ref()

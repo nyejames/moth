@@ -13,10 +13,12 @@ use crate::compiler_frontend::ast::expressions::call_argument::{
 };
 use crate::compiler_frontend::ast::expressions::call_validation::{
     CallArgumentResolutionContext, CallDiagnosticContext, ExpectedAccessMode,
-    ExpectedParameterType, ParameterExpectation, resolve_call_arguments,
+    ExpectedParameterType, ParameterDefault, ParameterExpectation, resolve_call_arguments,
 };
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    ExpressionOperationView, OwnedExpr,
+};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarationTable};
 use crate::compiler_frontend::compiler_messages::{
@@ -36,13 +38,25 @@ use crate::compiler_frontend::tests::parse_support::{
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{TokenTag, TokenizerEntryMode};
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
-use crate::compiler_frontend::value_mode::ValueMode;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use std::rc::Rc;
 use std::sync::Arc;
 
-fn parse_args(source: &str) -> Vec<CallArgument> {
-    parse_args_with_receiving_context(
+fn ast_const_payload_is_fixed_scalar(
+    const_values: &crate::compiler_frontend::ast::const_values::store::ConstValueStore,
+    id: crate::compiler_frontend::ast::const_values::store::ConstValueId,
+    expected: FixedScalarValue,
+) -> bool {
+    matches!(const_values.payload(id), Some(crate::compiler_frontend::ast::const_values::store::ConstValuePayload::FixedScalar(value)) if *value == expected)
+}
+
+type OwnedTestArguments = (
+    Vec<CallArgument<OwnedExpr>>,
+    crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder,
+    crate::compiler_frontend::ast::const_values::store::ConstValueStore,
+);
+fn parse_args(source: &str) -> Vec<CallArgument<OwnedExpr>> {
+    parse_owned_args_with_receiving_context(
         source,
         super::CallArgumentReceivingContext::existing_call(super::CallArgumentSyntax::Supported {
             callee_name: None,
@@ -50,13 +64,21 @@ fn parse_args(source: &str) -> Vec<CallArgument> {
         None,
     )
     .expect("call arguments should parse")
+    .0
 }
-
 fn parse_args_with_receiving_context(
     source: &str,
     receiving_context: super::CallArgumentReceivingContext,
     expectations: Option<&[ParameterExpectation]>,
-) -> Result<Vec<CallArgument>, ExpressionParseError> {
+) -> Result<Vec<CallArgument<OwnedExpr>>, ExpressionParseError> {
+    parse_owned_args_with_receiving_context(source, receiving_context, expectations)
+        .map(|owned| owned.0)
+}
+fn parse_owned_args_with_receiving_context(
+    source: &str,
+    receiving_context: super::CallArgumentReceivingContext,
+    expectations: Option<&[ParameterExpectation]>,
+) -> Result<OwnedTestArguments, ExpressionParseError> {
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -96,6 +118,11 @@ fn parse_args_with_receiving_context(
         0,
     );
 
+    let mut expression_builder =
+        crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder::new()
+            .unwrap();
+    let mut const_values =
+        crate::compiler_frontend::ast::const_values::store::ConstValueStore::default();
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
@@ -103,15 +130,21 @@ fn parse_args_with_receiving_context(
         &mut token_stream,
         &context,
         &mut type_interner,
+        &mut expression_builder,
+        &mut const_values,
         &mut string_table,
         receiving_context,
         expectations,
         super::CallArgumentSyntaxContext::Ordinary,
         &mut path_fork,
     )
+    .map(|arguments| (arguments, expression_builder, const_values))
 }
 
-fn parse_args_with_parameter_names(source: &str, parameter_names: &[&str]) -> Vec<CallArgument> {
+fn parse_args_with_parameter_names(
+    source: &str,
+    parameter_names: &[&str],
+) -> Vec<CallArgument<OwnedExpr>> {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let file_path = path_fork
@@ -161,6 +194,11 @@ fn parse_args_with_parameter_names(source: &str, parameter_names: &[&str]) -> Ve
         })
         .collect::<Vec<_>>();
 
+    let mut expression_builder =
+        crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder::new()
+            .unwrap();
+    let mut const_values =
+        crate::compiler_frontend::ast::const_values::store::ConstValueStore::default();
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
@@ -168,6 +206,8 @@ fn parse_args_with_parameter_names(source: &str, parameter_names: &[&str]) -> Ve
         &mut token_stream,
         &context,
         &mut type_interner,
+        &mut expression_builder,
+        &mut const_values,
         &mut string_table,
         &expectations,
         super::CallArgumentSyntax::Supported { callee_name: None },
@@ -186,13 +226,17 @@ fn parse_raw_call_args_for_test(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder,
+    const_values: &mut crate::compiler_frontend::ast::const_values::store::ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<Vec<CallArgument>, ExpressionParseError> {
+) -> Result<Vec<CallArgument<OwnedExpr>>, ExpressionParseError> {
     super::parse_call_arguments_with_receiving_context(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         super::CallArgumentReceivingContext::existing_call(super::CallArgumentSyntax::Supported {
             callee_name: None,
@@ -243,6 +287,11 @@ fn parse_args_diagnostic(source: &str) -> CompilerDiagnostic {
         0,
     );
 
+    let mut expression_builder =
+        crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder::new()
+            .unwrap();
+    let mut const_values =
+        crate::compiler_frontend::ast::const_values::store::ConstValueStore::default();
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
@@ -250,6 +299,8 @@ fn parse_args_diagnostic(source: &str) -> CompilerDiagnostic {
         &mut token_stream,
         &context,
         &mut type_interner,
+        &mut expression_builder,
+        &mut const_values,
         &mut string_table,
         &mut path_fork,
     )
@@ -518,6 +569,11 @@ fn final_validation_consumes_retained_slots_for_defaults_and_access_policy() {
         0,
     );
 
+    let mut expression_builder =
+        crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder::new()
+            .unwrap();
+    let mut const_values =
+        crate::compiler_frontend::ast::const_values::store::ConstValueStore::default();
     let mut type_environment = TypeEnvironment::new();
     let i32_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let expectations = [
@@ -531,11 +587,9 @@ fn final_validation_consumes_retained_slots_for_defaults_and_access_policy() {
             name: Some(string_table.intern("second")),
             expected_type: ExpectedParameterType::Known(i32_type_id),
             access_mode: ExpectedAccessMode::Shared,
-            default_value: Some(Expression::fixed_scalar(
+            default_value: Some(ParameterDefault::Folded(const_values.insert_resolved(i32_type_id, crate::compiler_frontend::ast::const_values::store::ConstValuePayload::FixedScalar(
                 FixedScalarValue::signed(FixedScalar::I32, 2).expect("2 is an I32 value"),
-                None,
-                ValueMode::ImmutableOwned,
-            )),
+            ), None).expect("fixture default"))),
         },
         ParameterExpectation {
             name: Some(string_table.intern("third")),
@@ -551,6 +605,8 @@ fn final_validation_consumes_retained_slots_for_defaults_and_access_policy() {
         &mut token_stream,
         &context,
         &mut type_interner,
+        &mut expression_builder,
+        &mut const_values,
         &mut string_table,
         &expectations,
         super::CallArgumentSyntax::Supported { callee_name: None },
@@ -566,6 +622,8 @@ fn final_validation_consumes_retained_slots_for_defaults_and_access_policy() {
         &expectations,
         span,
         CallArgumentResolutionContext {
+            expression_builder: &mut expression_builder,
+            const_values: &mut const_values,
             string_table: &mut string_table,
             type_environment: type_check_context.type_environment,
             compatibility_cache: type_check_context.compatibility_cache,
@@ -575,19 +633,19 @@ fn final_validation_consumes_retained_slots_for_defaults_and_access_policy() {
     .unwrap_or_else(|_| panic!("retained slots should resolve without rerouting"));
 
     assert!(matches!(
-        resolved[0].value.kind,
-        ExpressionKind::FixedScalar(value)
-            if value == FixedScalarValue::signed(FixedScalar::I32, 1).expect("1 is an I32 value")
+        expression_builder.view_owned(resolved[0].value).expect("owned argument").operation(),
+        ExpressionOperationView::Constant(id)
+            if ast_const_payload_is_fixed_scalar(&const_values, id, FixedScalarValue::signed(FixedScalar::I32, 1).expect("1 is an I32 value"))
     ));
     assert!(matches!(
-        resolved[1].value.kind,
-        ExpressionKind::FixedScalar(value)
-            if value == FixedScalarValue::signed(FixedScalar::I32, 2).expect("2 is an I32 value")
+        expression_builder.view_owned(resolved[1].value).expect("owned argument").operation(),
+        ExpressionOperationView::Constant(id)
+            if ast_const_payload_is_fixed_scalar(&const_values, id, FixedScalarValue::signed(FixedScalar::I32, 2).expect("2 is an I32 value"))
     ));
     assert!(matches!(
-        resolved[2].value.kind,
-        ExpressionKind::FixedScalar(value)
-            if value == FixedScalarValue::signed(FixedScalar::I32, 3).expect("3 is an I32 value")
+        expression_builder.view_owned(resolved[2].value).expect("owned argument").operation(),
+        ExpressionOperationView::Constant(id)
+            if ast_const_payload_is_fixed_scalar(&const_values, id, FixedScalarValue::signed(FixedScalar::I32, 3).expect("3 is an I32 value"))
     ));
     assert_eq!(resolved[0].passing_mode, CallPassingMode::FreshMutableValue);
 }
@@ -621,7 +679,7 @@ fn whole_numeric_call_arguments_use_f64_parameter_destinations() {
         access_mode: ExpectedAccessMode::Shared,
         default_value: None,
     }];
-    let arguments = parse_args_with_receiving_context(
+    let (arguments, expression_builder, const_values) = parse_owned_args_with_receiving_context(
         "identity(18_446_744_073_709_551_615)",
         super::CallArgumentReceivingContext::existing_call(super::CallArgumentSyntax::Supported {
             callee_name: None,
@@ -629,15 +687,23 @@ fn whole_numeric_call_arguments_use_f64_parameter_destinations() {
         Some(&expectation),
     )
     .expect("an F64 parameter should receive an out-of-I32-range whole literal");
-
+    let expected = FixedScalarValue::binary_float(FixedScalar::F64, 18_446_744_073_709_551_615_f64)
+        .expect("exact F64 identity");
     assert_eq!(
-        arguments[0].value.type_id,
+        expression_builder
+            .view_owned(arguments[0].value)
+            .expect("owned argument")
+            .require_single(
+                crate::compiler_frontend::compiler_messages::ValueReceiverContext::FunctionArgument
+            )
+            .expect("single value"),
         builtin_type_ids::fixed_scalar(FixedScalar::F64)
     );
     assert!(
         matches!(
-            arguments[0].value.kind,
-            ExpressionKind::FixedScalar(value) if value.as_f64() == Some(18_446_744_073_709_551_615_f64)
+            expression_builder.view_owned(arguments[0].value).expect("owned argument").operation(),
+            ExpressionOperationView::Constant(id)
+            if ast_const_payload_is_fixed_scalar(&const_values, id, expected)
         ),
         "expected the call argument to retain exact F64 identity"
     );

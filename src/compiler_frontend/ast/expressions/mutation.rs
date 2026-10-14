@@ -1,18 +1,17 @@
-//! Mutation expression parsing for assignment and compound assignment.
+//! Assignment parsing and completed compound-value construction.
 //!
 //! WHAT:
 //!   - Parses simple assignment (`=`) and compound assignment
-//!     (`+=`, `-=`, `*=`, `/=`, `//=`, `%=`, `^=`) after a place
-//!     expression has been resolved.
+//!     (`+=`, `-=`, `*=`, `/=`, `//=`, `%=`, `^=`) after a typed place
+//!     has been resolved.
 //!   - Validates mutability and type compatibility for the target.
 //!   - Parses compound RHSs with numeric-literal peer hints for fixed scalars and non-power
 //!     `Dec` targets, evaluates `target op rhs` in its promoted domain and converts incompatible
 //!     numeric results back through builtin cast evidence.
 //!
-//! WHY:  Mutation is a distinct expression kind in the AST; centralising
-//!       the parsing, validation, and compound-value construction here
-//!       keeps the main expression dispatch logic free of assignment-
-//!       specific rules.
+//! WHY: assignment statements retain a PlaceId and an OwnedExpr, while numeric-dependent
+//! values stay in the body's one-shot continuation owner. Keeping their construction
+//! here leaves expression dispatch free of assignment-specific rules.
 //!
 //! Use `handle_mutation` when the statement parser has only a variable
 //! reference, or `handle_mutation_target` when the caller has already
@@ -30,13 +29,13 @@
 use crate::ast_log;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, NodeKind};
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::eval_expression::evaluate_expression;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, Operator};
-use crate::compiler_frontend::ast::expressions::expression_kind::ResolvedCastExpression;
+use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
-use crate::compiler_frontend::ast::expressions::expression_rpn::{
-    PlaceExpression, PlaceExpressionKind,
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, CastFacts, OwnedExpr, PlaceId, PlaceProjectionView,
 };
 use crate::compiler_frontend::ast::expressions::expression_types::{
     CastHandling, ResolvedCastEvidence,
@@ -65,7 +64,7 @@ use crate::compiler_frontend::builtins::casts::targets::builtin_cast_target_for_
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidAssignmentTargetReason, InvalidFallibleHandlingReason,
-    TypeMismatchContext,
+    TypeMismatchContext, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -104,13 +103,14 @@ pub(crate) enum MutationOutcome {
 ///       retains the assignment boundary's established diagnostic.
 fn assignment_type_mismatch(
     expected_type_id: TypeId,
-    actual_value: &Expression,
+    actual_type_id: TypeId,
+    span: Option<SourceSpan>,
 ) -> ExpressionParseError {
     CompilerDiagnostic::type_mismatch(
         expected_type_id,
-        actual_value.type_id,
+        actual_type_id,
         TypeMismatchContext::Assignment,
-        actual_value.span,
+        span,
     )
     .into()
 }
@@ -147,7 +147,7 @@ pub(crate) fn compound_assignment_operator_for_tag(
 struct CompoundAssignmentInput<'a> {
     /// Declaration of the variable being assigned to.
     variable_declaration: &'a Declaration,
-    target: &'a PlaceExpression,
+    target: PlaceId,
     target_type_id: TypeId,
     operator: Operator,
 }
@@ -162,12 +162,14 @@ pub(crate) struct CompoundAssignmentReadyInput<'a, 'env> {
     /// The authored declaration's value mode: every compound tag is an arithmetic operator, so
     /// the promoted evaluation runs in the declared binding's mode.
     pub(crate) declaration_value_mode: &'a ValueMode,
-    pub(crate) target: &'a PlaceExpression,
+    pub(crate) target: PlaceId,
     pub(crate) target_type_id: TypeId,
     pub(crate) operator: Operator,
-    pub(crate) rhs: Expression,
+    pub(crate) rhs: OwnedExpr,
     pub(crate) context: &'a ScopeContext,
     pub(crate) type_interner: &'a mut AstTypeInterner<'env>,
+    pub(crate) expression_builder: &'a mut AstExpressionBuilder,
+    pub(crate) const_values: &'a mut ConstValueStore,
     pub(crate) string_table: &'a mut StringTable,
     pub(crate) path_fork: &'a mut PathInternerFork,
 }
@@ -180,7 +182,7 @@ pub(crate) struct CompoundAssignmentReadyInput<'a, 'env> {
 ///      arrives straight from the cursor or from body-root numeric completion.
 pub(crate) fn evaluate_compound_assignment_with_ready_rhs(
     input: CompoundAssignmentReadyInput<'_, '_>,
-) -> Result<Expression, ExpressionParseError> {
+) -> Result<OwnedExpr, ExpressionParseError> {
     let CompoundAssignmentReadyInput {
         declaration_value_mode,
         target,
@@ -189,31 +191,37 @@ pub(crate) fn evaluate_compound_assignment_with_ready_rhs(
         rhs,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     } = input;
 
-    let target_expression = expression_from_place_expression(target);
+    let target_span = expression_builder.place(target)?.metadata().span;
+    let target_expression = expression_from_place_expression(expression_builder, target)?;
     let operator_item = ExpressionRpnItem::Operator {
         operator,
-        span: target.span,
+        span: target_span,
     };
     let mut inferred = ExpectedType::Infer;
     let value = evaluate_expression(
         context,
         vec![
-            ExpressionRpnItem::Operand(target_expression),
-            ExpressionRpnItem::Operand(rhs),
+            ExpressionRpnItem::Operand(target_expression.id()),
+            ExpressionRpnItem::Operand(rhs.id()),
             operator_item,
         ],
         type_interner,
+        expression_builder,
+        const_values,
         &mut inferred,
         declaration_value_mode,
         string_table,
         path_fork,
     )?;
+    let source_type_id = expression_builder.view_owned(value)?.value_type_id()?;
 
-    if is_type_compatible(target_type_id, value.type_id, type_interner.environment()) {
+    if is_type_compatible(target_type_id, source_type_id, type_interner.environment()) {
         return Ok(value);
     }
 
@@ -223,24 +231,24 @@ pub(crate) fn evaluate_compound_assignment_with_ready_rhs(
     // the source supports a cast classification. Let the builtin pair evidence owner decide the
     // destination conversion, including exact `Dec` scales.
     let source_target =
-        builtin_cast_target_for_type(value.type_id, type_environment, string_table, path_fork);
+        builtin_cast_target_for_type(source_type_id, type_environment, string_table, path_fork);
     let destination_target =
         builtin_cast_target_for_type(target_type_id, type_environment, string_table, path_fork);
     let cast_targets = source_target.zip(destination_target);
-    let evidence = cast_targets.and_then(|(source, target)| {
-        lookup_builtin_evidence(source, target).map(|evidence| (target, evidence))
-    });
-    let Some((target, evidence)) = evidence else {
-        return Err(assignment_type_mismatch(target_type_id, &value));
+    let evidence =
+        cast_targets.and_then(|(source, target)| lookup_builtin_evidence(source, target));
+    let Some(evidence) = evidence else {
+        return Err(assignment_type_mismatch(
+            target_type_id,
+            source_type_id,
+            expression_builder.view_owned(value)?.span(),
+        ));
     };
 
-    let source_type_id = value.type_id;
-    let cast_span = value.span;
-    let cast = ResolvedCastExpression {
-        source: Box::new(value),
+    let cast_span = expression_builder.view_owned(value)?.span();
+    let cast = CastFacts {
         source_type_id,
         target_type_id,
-        target,
         requires_optional_wrap_after_cast: false,
         evidence: ResolvedCastEvidence::Builtin {
             policy: evidence.policy,
@@ -249,12 +257,14 @@ pub(crate) fn evaluate_compound_assignment_with_ready_rhs(
         handling: CastHandling::StoreConversion,
         span: cast_span,
     };
-    let cast_value = Expression::cast(cast, target_type_id, type_interner.environment());
+    let cast_value = expression_builder.cast(value, cast, target_type_id)?;
     let mut inferred = ExpectedType::Infer;
     let converted_value = evaluate_expression(
         context,
-        vec![ExpressionRpnItem::Operand(cast_value)],
+        vec![ExpressionRpnItem::Operand(cast_value.id())],
         type_interner,
+        expression_builder,
+        const_values,
         &mut inferred,
         declaration_value_mode,
         string_table,
@@ -269,14 +279,20 @@ pub(crate) fn evaluate_compound_assignment_with_ready_rhs(
 /// WHY: `Dec ^ I32` keeps the exponent in the `I32` domain even when the compound assignment's
 ///      receiving type is a Dec scale, while unsigned fixed-scalar powers keep the exponent in
 ///      their unsigned peer domain.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "compound assignment evaluation keeps the token stream, scope, input, type interner, expression builder, const store, string table, and path fork as separate borrows"
+)]
 fn evaluate_compound_assignment_value(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     input: CompoundAssignmentInput<'_>,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<Expression, ExpressionParseError> {
+) -> Result<OwnedExpr, ExpressionParseError> {
     let CompoundAssignmentInput {
         variable_declaration,
         target,
@@ -312,9 +328,11 @@ fn evaluate_compound_assignment_value(
             token_stream,
             scope_context: &rhs_context,
             type_interner,
+            expression_builder,
+            const_values,
             expected_type: &mut expr_type,
             cast_target_context: &mut cast_target_context,
-            value_mode: &variable_declaration.value.value_mode,
+            value_mode: &variable_declaration.value_mode,
             string_table,
             path_fork,
         },
@@ -328,13 +346,15 @@ fn evaluate_compound_assignment_value(
     //  domain before applying the store conversion
     // -------------------------------------------
     evaluate_compound_assignment_with_ready_rhs(CompoundAssignmentReadyInput {
-        declaration_value_mode: &variable_declaration.value.value_mode,
+        declaration_value_mode: &variable_declaration.value_mode,
         target,
         target_type_id,
         operator,
         rhs,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     })
@@ -355,19 +375,21 @@ fn evaluate_compound_assignment_value(
 fn build_mutation_from_target(
     token_stream: &mut AstCursor,
     variable_declaration: &Declaration,
-    target: PlaceExpression,
+    target: PlaceId,
     declaration_span: Option<SourceSpan>,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<MutationOutcome, ExpressionParseError> {
     let span = Some(token_stream.current_span());
-    let target_type_id = target.type_id;
+    let target_type_id = expression_builder.place(target)?.metadata().type_id;
 
     ast_log!(
         "Handling mutation for ",
-        #variable_declaration.value.value_mode, " ",
+        #variable_declaration.value_mode, " ",
         Blue path_fork.render_portable(variable_declaration.id, string_table, &mut Vec::new())
     );
 
@@ -375,21 +397,30 @@ fn build_mutation_from_target(
     //  Validate mutability
     // -----------------------
 
-    if !place_expression_is_mutable(&target) {
-        let (reason, field_name, root_binding_name) = match &target.kind {
-            PlaceExpressionKind::Field { field, base } => {
-                let root = root_binding_name_of_place(base, path_fork);
-                (
-                    InvalidAssignmentTargetReason::ImmutableFieldRoot,
-                    Some(*field),
-                    root,
-                )
-            }
-            PlaceExpressionKind::Local(_) => {
-                (InvalidAssignmentTargetReason::ImmutableBinding, None, None)
-            }
+    let (is_mutable, field_name) = {
+        let target_view = expression_builder.place(target)?;
+        let is_mutable = place_expression_is_mutable(target_view);
+        let field_name = target_view
+            .projections()
+            .filter_map(|projection| match projection {
+                PlaceProjectionView::Field { field, .. } => Some(field),
+                PlaceProjectionView::Index { .. } => None,
+            })
+            .last();
+        (is_mutable, field_name)
+    };
+    if !is_mutable {
+        let root_binding_name = if field_name.is_some() {
+            let target_view = expression_builder.place(target)?;
+            root_binding_name_of_place(target_view, path_fork)
+        } else {
+            None
         };
-
+        let reason = if field_name.is_some() {
+            InvalidAssignmentTargetReason::ImmutableFieldRoot
+        } else {
+            InvalidAssignmentTargetReason::ImmutableBinding
+        };
         let diagnostic = CompilerDiagnostic::invalid_assignment_target(
             reason,
             path_fork.component(variable_declaration.id),
@@ -430,6 +461,8 @@ fn build_mutation_from_target(
                 token_stream,
                 &rhs_context,
                 type_interner,
+                expression_builder,
+                const_values,
                 &[target_type_id],
                 ValueReceiverKind::Assignment,
                 string_table,
@@ -438,7 +471,7 @@ fn build_mutation_from_target(
                 match value_block_result {
                     Ok(ParsedReceiverValue::Complete(expression)) => Ok(expression),
                     Ok(ParsedReceiverValue::Retained(retained)) => {
-                        Err(retained.into_deferral(&variable_declaration.value.value_mode))
+                        Err(retained.into_deferral(&variable_declaration.value_mode))
                     }
                     Ok(ParsedReceiverValue::NeedsSlotInference { .. }) => unreachable!(
                         "an assignment receiver knows its target type; a value block cannot ask for slot inference"
@@ -451,9 +484,11 @@ fn build_mutation_from_target(
                         token_stream,
                         scope_context: &rhs_context,
                         type_interner,
+                        expression_builder,
+                        const_values,
                         expected_type: &mut expr_type,
                         cast_target_context: &mut cast_target_context,
-                        value_mode: &variable_declaration.value.value_mode,
+                        value_mode: &variable_declaration.value_mode,
                         string_table,
                         path_fork,
                     },
@@ -476,6 +511,9 @@ fn build_mutation_from_target(
                     );
                 }
             };
+            expression_builder
+                .view_owned(rhs)?
+                .require_single(ValueReceiverContext::Assignment)?;
 
             // Direct option fallback is rejected at each closed receiver so the
             // later statement parser does not report the trailing `else` as an
@@ -484,7 +522,7 @@ fn build_mutation_from_target(
             if token_stream.current_tag() == TokenTag::ELSE
                 && type_interner
                     .environment()
-                    .option_inner_type(rhs.type_id)
+                    .option_inner_type(expression_builder.view_owned(rhs)?.value_type_id()?)
                     .is_some()
             {
                 return Err(CompilerDiagnostic::invalid_fallible_handling(
@@ -499,6 +537,7 @@ fn build_mutation_from_target(
                 target_type_id,
                 type_interner.environment(),
                 TypeMismatchContext::Assignment,
+                expression_builder,
             )?
         }
 
@@ -524,13 +563,13 @@ fn build_mutation_from_target(
                 context,
                 CompoundAssignmentInput {
                     variable_declaration,
-                    target: &target,
+                    target,
                     target_type_id,
-                    // The operator is a fieldless enum: the evaluation input takes it by value,
-                    // and the retention arm below still needs the authored operator.
-                    operator: operator.clone(),
+                    operator,
                 },
                 type_interner,
+                expression_builder,
+                const_values,
                 string_table,
                 path_fork,
             ) {
@@ -551,7 +590,10 @@ fn build_mutation_from_target(
     };
 
     Ok(MutationOutcome::Ready(AstNode {
-        kind: NodeKind::Assignment { target, value },
+        kind: NodeKind::Assignment {
+            target,
+            value: value.id(),
+        },
         span,
         scope: context.scope,
     }))
@@ -568,7 +610,7 @@ fn build_mutation_from_target(
 ///      rather than a synthetic declaration.
 fn retain_ready_target_mutation(
     error: ExpressionParseError,
-    target: PlaceExpression,
+    target: PlaceId,
     variable_declaration: &Declaration,
     declaration_span: Option<SourceSpan>,
     operator: Option<Operator>,
@@ -585,7 +627,7 @@ fn retain_ready_target_mutation(
     ));
     let assignment_target = DeferredAssignmentTarget::Ready {
         target,
-        declaration_value_mode: variable_declaration.value.value_mode.to_owned(),
+        declaration_value_mode: variable_declaration.value_mode.to_owned(),
         declaration_span,
     };
     let continuation = match operator {
@@ -620,10 +662,12 @@ fn retain_ready_target_mutation(
 pub(crate) fn handle_mutation_target(
     token_stream: &mut AstCursor,
     variable_declaration: &Declaration,
-    target: PlaceExpression,
+    target: PlaceId,
     declaration_span: Option<SourceSpan>,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<MutationOutcome, ExpressionParseError> {
@@ -634,6 +678,8 @@ pub(crate) fn handle_mutation_target(
         declaration_span,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     )
@@ -643,12 +689,18 @@ pub(crate) fn handle_mutation_target(
 ///
 /// WHAT: parses field-access chains on the variable, then builds the mutation
 ///       node through `build_mutation_from_target`.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "mutation handling keeps the token stream, declaration, span, scope, type interner, expression builder, const store, string table, and path fork as separate borrows at the shared mutation entry point"
+)]
 pub fn handle_mutation(
     token_stream: &mut AstCursor,
     variable_declaration: &Declaration,
     declaration_span: Option<SourceSpan>,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<MutationOutcome, ExpressionParseError> {
@@ -657,6 +709,8 @@ pub fn handle_mutation(
         variable_declaration,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     )?;
@@ -678,11 +732,16 @@ pub fn handle_mutation(
         }
     };
 
-    let Some(target) = place_expression_from_expression(&target_expression) else {
+    let Some(target) = place_expression_from_expression(expression_builder, target_expression)?
+    else {
         return Err(CompilerDiagnostic::invalid_assignment_target(
             InvalidAssignmentTargetReason::TemporaryNotAssignable,
             None,
-            Some(target_expression.type_id),
+            expression_builder
+                .view_owned(target_expression)?
+                .success_types()
+                .first()
+                .copied(),
             None,
             None,
             None,
@@ -698,6 +757,8 @@ pub fn handle_mutation(
         declaration_span,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     )

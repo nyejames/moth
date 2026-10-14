@@ -1,14 +1,14 @@
 //! Contextual coercion tests.
 
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpn;
-use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, DiagnosticPayload, TypeMismatchContext,
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, CoercionOperation, ExpressionOp, OwnedExpr, SuccessShape,
 };
-use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticPayload, TypeMismatchContext, ValueReceiverContext,
+};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::type_coercion::contextual::{
     coerce_expression_to_declared_type, coerce_expression_to_explicit_type_boundary,
 };
@@ -32,11 +32,39 @@ fn float_value(scalar: FixedScalar, value: f64) -> FixedScalarValue {
         .expect("test float value is finite at its fixed precision")
 }
 
-fn fixed_expression(value: FixedScalarValue) -> Expression {
-    Expression::fixed_scalar(value, None, ValueMode::ImmutableOwned)
+fn fixed_expression(
+    builder: &mut AstExpressionBuilder,
+    constants: &mut ConstValueStore,
+    value: FixedScalarValue,
+) -> OwnedExpr {
+    builder
+        .fixed_scalar(constants, value, None, ValueMode::ImmutableOwned)
+        .expect("test literal construction cannot fail")
 }
 
-fn assert_type_mismatch(diagnostic: CompilerDiagnostic, expected: TypeId, found: TypeId) {
+fn bool_expression(
+    builder: &mut AstExpressionBuilder,
+    constants: &mut ConstValueStore,
+    value: bool,
+) -> OwnedExpr {
+    builder
+        .bool(constants, value, None, ValueMode::ImmutableOwned)
+        .expect("test literal construction cannot fail")
+}
+
+fn assert_type_mismatch(
+    failure: crate::compiler_frontend::ast::expressions::expression_store::ExpressionConstructionFailure,
+    expected: TypeId,
+    found: TypeId,
+) {
+    let diagnostic = match failure {
+        crate::compiler_frontend::ast::expressions::expression_store::ExpressionConstructionFailure::Diagnostic(
+            diagnostic,
+        ) => diagnostic,
+        crate::compiler_frontend::ast::expressions::expression_store::ExpressionConstructionFailure::Invariant(
+            error,
+        ) => panic!("expected a type mismatch diagnostic, got invariant {error:?}"),
+    };
     match diagnostic.payload {
         DiagnosticPayload::TypeMismatch {
             expected: expected_id,
@@ -53,178 +81,235 @@ fn assert_type_mismatch(diagnostic: CompilerDiagnostic, expected: TypeId, found:
 
 #[test]
 fn same_type_integer_declaration_is_unchanged() {
-    let env = TypeEnvironment::new();
-    let result = coerce_expression_to_declared_type(
-        fixed_expression(signed_value(FixedScalar::I32, 42)),
-        fixed_scalar_id(FixedScalar::I32),
-        &env,
+    let environment = TypeEnvironment::new();
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let expression = fixed_expression(
+        &mut builder,
+        &mut constants,
+        signed_value(FixedScalar::I32, 42),
     );
 
-    assert_eq!(result.type_id, fixed_scalar_id(FixedScalar::I32));
-    let ExpressionKind::FixedScalar(value) = result.kind else {
-        panic!("an exactly typed integer must not be wrapped or retyped");
-    };
-    assert_eq!(value, signed_value(FixedScalar::I32, 42));
+    let result = coerce_expression_to_declared_type(
+        expression,
+        fixed_scalar_id(FixedScalar::I32),
+        &environment,
+        &mut builder,
+    )
+    .expect("exact type needs no coercion");
+
+    assert_eq!(result, expression);
+    let view = builder.view_owned(result).expect("test node is committed");
+    assert_eq!(
+        view.value_type_id().expect("one success slot"),
+        fixed_scalar_id(FixedScalar::I32)
+    );
 }
 
 #[test]
 fn same_type_binary_float_declaration_is_unchanged() {
-    let env = TypeEnvironment::new();
-    let result = coerce_expression_to_declared_type(
-        fixed_expression(float_value(FixedScalar::F64, 1.5)),
-        fixed_scalar_id(FixedScalar::F64),
-        &env,
+    let environment = TypeEnvironment::new();
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let expression = fixed_expression(
+        &mut builder,
+        &mut constants,
+        float_value(FixedScalar::F64, 1.5),
     );
 
-    assert_eq!(result.type_id, fixed_scalar_id(FixedScalar::F64));
-    let ExpressionKind::FixedScalar(value) = result.kind else {
-        panic!("an exactly typed float must not be wrapped or retyped");
-    };
-    assert_eq!(value, float_value(FixedScalar::F64, 1.5));
+    let result = coerce_expression_to_declared_type(
+        expression,
+        fixed_scalar_id(FixedScalar::F64),
+        &environment,
+        &mut builder,
+    )
+    .expect("exact type needs no coercion");
+
+    assert_eq!(result, expression);
 }
 
 #[test]
 fn numeric_declarations_never_convert_implicitly() {
-    let env = TypeEnvironment::new();
+    let environment = TypeEnvironment::new();
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
 
-    // An `I32` value stays `I32` in an `F64` declaration. The literal keeps its exact integer
-    // value; only an explicit `cast` converts it.
+    let integer = fixed_expression(
+        &mut builder,
+        &mut constants,
+        signed_value(FixedScalar::I32, 16_777_217),
+    );
     let result = coerce_expression_to_declared_type(
-        fixed_expression(signed_value(FixedScalar::I32, 16_777_217)),
+        integer,
         fixed_scalar_id(FixedScalar::F64),
-        &env,
-    );
-    assert_eq!(result.type_id, fixed_scalar_id(FixedScalar::I32));
-    let ExpressionKind::FixedScalar(value) = result.kind else {
-        panic!("a binary-float declaration must not rewrite an integer value");
-    };
-    assert_eq!(value, signed_value(FixedScalar::I32, 16_777_217));
+        &environment,
+        &mut builder,
+    )
+    .expect("incompatible receiver leaves its operand unchanged");
+    assert_eq!(result, integer);
 
-    // An `F64` value stays exact in an `F32` declaration; the destination never rounds it
-    // implicitly.
+    let float = fixed_expression(
+        &mut builder,
+        &mut constants,
+        float_value(FixedScalar::F64, 16_777_217.0),
+    );
     let result = coerce_expression_to_declared_type(
-        fixed_expression(float_value(FixedScalar::F64, 16_777_217.0)),
+        float,
         fixed_scalar_id(FixedScalar::F32),
-        &env,
-    );
-    assert_eq!(result.type_id, fixed_scalar_id(FixedScalar::F64));
-    let ExpressionKind::FixedScalar(value) = result.kind else {
-        panic!("a narrower float declaration must not rewrite an F64 value");
-    };
-    assert_eq!(value, float_value(FixedScalar::F64, 16_777_217.0));
+        &environment,
+        &mut builder,
+    )
+    .expect("incompatible receiver leaves its operand unchanged");
+    assert_eq!(result, float);
 
-    // A `U64` value stays `U64` in an `I32` declaration: integer receivers never search for a
-    // compatible signed or unsigned domain.
+    let unsigned = fixed_expression(
+        &mut builder,
+        &mut constants,
+        unsigned_value(FixedScalar::U64, 9_007_199_791_611_905),
+    );
     let result = coerce_expression_to_declared_type(
-        fixed_expression(unsigned_value(FixedScalar::U64, 9_007_199_791_611_905)),
+        unsigned,
         fixed_scalar_id(FixedScalar::I32),
-        &env,
-    );
-    assert_eq!(result.type_id, fixed_scalar_id(FixedScalar::U64));
-    let ExpressionKind::FixedScalar(value) = result.kind else {
-        panic!("an integer declaration must not rewrite an unsigned value");
-    };
-    assert_eq!(
-        value,
-        unsigned_value(FixedScalar::U64, 9_007_199_791_611_905)
-    );
+        &environment,
+        &mut builder,
+    )
+    .expect("incompatible receiver leaves its operand unchanged");
+    assert_eq!(result, unsigned);
 }
 
 #[test]
 fn bool_into_binary_float_declaration_is_unchanged() {
-    // Bool → binary float is not coercible; the expression is returned unchanged.
-    let env = TypeEnvironment::new();
-    let result = coerce_expression_to_declared_type(
-        Expression::bool(true, None, ValueMode::ImmutableOwned),
-        fixed_scalar_id(FixedScalar::F64),
-        &env,
-    );
+    let environment = TypeEnvironment::new();
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let expression = bool_expression(&mut builder, &mut constants, true);
 
-    assert_eq!(result.type_id, builtin_type_ids::BOOL);
-    assert!(matches!(result.kind, ExpressionKind::Bool(true)));
+    let result = coerce_expression_to_declared_type(
+        expression,
+        fixed_scalar_id(FixedScalar::F64),
+        &environment,
+        &mut builder,
+    )
+    .expect("bool is not coercible to a float receiver");
+
+    assert_eq!(result, expression);
 }
 
 #[test]
 fn numeric_explicit_type_boundary_rejects_implicit_conversion() {
-    let env = TypeEnvironment::new();
+    let environment = TypeEnvironment::new();
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let i32_id = fixed_scalar_id(FixedScalar::I32);
     let u32_id = fixed_scalar_id(FixedScalar::U32);
     let u64_id = fixed_scalar_id(FixedScalar::U64);
     let f32_id = fixed_scalar_id(FixedScalar::F32);
     let f64_id = fixed_scalar_id(FixedScalar::F64);
 
-    // Constant and runtime values, unsigned values and floats all require an explicit `cast` at
-    // an exact receiver: the removed implicit promotions, integer-domain searches and implicit
-    // destination rounding must not reappear.
     let cases = [
         (
-            fixed_expression(signed_value(FixedScalar::I32, 1)),
-            f64_id,
-            i32_id,
-        ),
-        (
-            Expression::new(
-                ExpressionKind::Runtime(ExpressionRpn::empty()),
-                None,
-                i32_id,
-                DataType::FixedScalar(FixedScalar::I32),
-                ValueMode::ImmutableOwned,
+            fixed_expression(
+                &mut builder,
+                &mut constants,
+                signed_value(FixedScalar::I32, 1),
             ),
             f64_id,
             i32_id,
         ),
         (
-            fixed_expression(unsigned_value(FixedScalar::U32, 1)),
+            fixed_expression(
+                &mut builder,
+                &mut constants,
+                unsigned_value(FixedScalar::U32, 1),
+            ),
             f64_id,
             u32_id,
         ),
         (
-            fixed_expression(unsigned_value(FixedScalar::U64, 1)),
+            fixed_expression(
+                &mut builder,
+                &mut constants,
+                unsigned_value(FixedScalar::U64, 1),
+            ),
             f64_id,
             u64_id,
         ),
         (
-            fixed_expression(unsigned_value(FixedScalar::U64, 1)),
+            fixed_expression(
+                &mut builder,
+                &mut constants,
+                unsigned_value(FixedScalar::U64, 1),
+            ),
             i32_id,
             u64_id,
         ),
         (
-            fixed_expression(float_value(FixedScalar::F64, 16_777_217.0)),
+            fixed_expression(
+                &mut builder,
+                &mut constants,
+                float_value(FixedScalar::F64, 16_777_217.0),
+            ),
             f32_id,
             f64_id,
         ),
     ];
 
     for (expression, expected, found) in cases {
-        let error = coerce_expression_to_explicit_type_boundary(
+        let failure = coerce_expression_to_explicit_type_boundary(
             expression,
             expected,
-            &env,
+            &environment,
             TypeMismatchContext::Declaration,
+            &mut builder,
         )
         .expect_err("a numeric value must not cross to another exact type implicitly");
-        assert_type_mismatch(error, expected, found);
+        assert_type_mismatch(failure, expected, found);
     }
 }
 
 #[test]
 fn option_declaration_from_inner_expression_becomes_coerced() {
-    let mut env = TypeEnvironment::new();
-    let option_string = env.intern_option(env.builtins().string);
-    let mut string_table = StringTable::new();
-    let expr =
-        Expression::string_slice(string_table.intern("Ana"), None, ValueMode::ImmutableOwned);
+    let mut environment = TypeEnvironment::new();
+    let option_string = environment.intern_option(environment.builtins().string);
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut strings = crate::compiler_frontend::symbols::string_interning::StringTable::new();
+    let mut paths = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
+    let name = crate::compiler_frontend::tests::ast_fixture_support::symbol(
+        "value",
+        &mut paths,
+        &mut strings,
+    );
+    let expression =
+        crate::compiler_frontend::tests::ast_fixture_support::reference_expr_with_type_id(
+            &mut builder,
+            name,
+            environment.builtins().string,
+            None,
+            ValueMode::ImmutableOwned,
+        );
 
-    let result = coerce_expression_to_declared_type(expr, option_string, &env);
+    let result = coerce_expression_to_declared_type(
+        builder.own(expression),
+        option_string,
+        &environment,
+        &mut builder,
+    )
+    .expect("inner string coerces into its option receiver");
 
-    assert_eq!(result.type_id, option_string);
+    let view = builder
+        .view_owned(result)
+        .expect("coerced node is committed");
+    assert_eq!(
+        view.value_type_id().expect("one success slot"),
+        option_string
+    );
     assert!(
         matches!(
-            result.kind,
-            ExpressionKind::Coerced {
-                to_type,
+            view.operation(),
+            crate::compiler_frontend::ast::expressions::expression_store::ExpressionOperationView::Coerce {
+                operation: CoercionOperation::ToType(target),
                 ..
-            } if to_type == option_string
+            } if target == option_string
         ),
         "inner value should become an explicit option coercion"
     );
@@ -232,14 +317,74 @@ fn option_declaration_from_inner_expression_becomes_coerced() {
 
 #[test]
 fn option_declaration_from_option_expression_is_unchanged() {
-    let mut env = TypeEnvironment::new();
-    let string_type = env.builtins().string;
-    let option_string = env.intern_option(string_type);
-    let expr =
-        Expression::option_none_with_type_id(string_type, DataType::StringSlice, &mut env, None);
+    let mut environment = TypeEnvironment::new();
+    let string_type = environment.builtins().string;
+    let option_string = environment.intern_option(string_type);
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let expression = builder
+        .option_none_with_type_id(&mut constants, string_type, &mut environment, None)
+        .expect("option none content construction cannot fail");
 
-    let result = coerce_expression_to_declared_type(expr, option_string, &env);
+    let result =
+        coerce_expression_to_declared_type(expression, option_string, &environment, &mut builder)
+            .expect("option none already has its option type");
 
-    assert_eq!(result.type_id, option_string);
-    assert!(matches!(result.kind, ExpressionKind::OptionNone));
+    assert_eq!(result, expression);
+}
+
+#[test]
+fn explicit_boundary_checks_success_arity_before_scalar_type_access() {
+    let environment = TypeEnvironment::new();
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    for (shape, produced_count) in [
+        (SuccessShape::Zero, 0),
+        (
+            builder
+                .success_from_slots(vec![builtin_type_ids::BOOL, builtin_type_ids::STRING], None)
+                .expect("two slots are a valid multiple shape"),
+            2,
+        ),
+    ] {
+        let operand = bool_expression(&mut builder, &mut constants, true);
+        let mut input = builder
+            .completed_input(
+                ExpressionOp::PropagateOption { value: operand },
+                shape,
+                None,
+                ValueMode::ImmutableOwned,
+            )
+            .expect("test shape input is constructible");
+        input.success = shape;
+        let expression = builder
+            .append_completed(input)
+            .expect("test producer is constructible");
+        let failure = coerce_expression_to_explicit_type_boundary(
+            expression,
+            builtin_type_ids::BOOL,
+            &environment,
+            TypeMismatchContext::Declaration,
+            &mut builder,
+        )
+        .expect_err(
+            "a scalar receiver must reject zero and multiple successes before reading a value type",
+        );
+        let diagnostic = match failure {
+            crate::compiler_frontend::ast::expressions::expression_store::ExpressionConstructionFailure::Diagnostic(
+                diagnostic,
+            ) => diagnostic,
+            crate::compiler_frontend::ast::expressions::expression_store::ExpressionConstructionFailure::Invariant(
+                error,
+            ) => panic!("expected an arity diagnostic, got invariant {error:?}"),
+        };
+        assert_eq!(
+            diagnostic.payload,
+            DiagnosticPayload::InvalidValueReceiver {
+                receiver: ValueReceiverContext::Declaration,
+                target_count: 1,
+                produced_count,
+            }
+        );
+    }
 }

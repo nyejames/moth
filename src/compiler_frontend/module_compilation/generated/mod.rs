@@ -42,6 +42,10 @@ pub(crate) use provider_materialisations::ProviderMaterialisationRegistry;
 #[cfg(test)]
 pub(crate) use convergence::{builtin_failure_diagnostic, infer_builtin_failure_summaries};
 
+// Generic lifetime regressions issue real canonical requests rather than inventing evidence keys.
+#[cfg(test)]
+pub(crate) use requests::install_generated_request_contracts;
+
 #[cfg(test)]
 #[path = "tests/fixtures.rs"]
 pub(crate) mod test_fixtures;

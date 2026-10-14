@@ -127,28 +127,6 @@ fn hir_display_renders_format_float_trap() {
 }
 
 #[test]
-fn hir_display_renders_format_float_return_error() {
-    let string_table = StringTable::new();
-    let path_fork = PathInternerFork::empty();
-    let display = terse_display_context(&string_table, &path_fork);
-
-    let mut expressions = HirExpressionStore::default();
-    let source = expressions
-        .append_expression(float_expression(-0.25))
-        .expect("float should append");
-    let rendered = display.render_statement(
-        &float_statement(HirStatementKind::FormatFloat {
-            source,
-            failure_mode: NumericFailureMode::ReturnError,
-            result: HirLocalDestination::Define(LocalId(9001)),
-        }),
-        &expressions,
-    );
-
-    assert_eq!(rendered, "define l9001 = format_float_err(F64(-0.25))");
-}
-
-#[test]
 fn hir_display_renders_validate_float_trap() {
     let string_table = StringTable::new();
     let path_fork = PathInternerFork::empty();
@@ -168,28 +146,6 @@ fn hir_display_renders_validate_float_trap() {
     );
 
     assert_eq!(rendered, "define l9002 = validate_float_trap(F64(2.5))");
-}
-
-#[test]
-fn hir_display_renders_validate_float_return_error() {
-    let string_table = StringTable::new();
-    let path_fork = PathInternerFork::empty();
-    let display = terse_display_context(&string_table, &path_fork);
-
-    let mut expressions = HirExpressionStore::default();
-    let source = expressions
-        .append_expression(float_expression(0.0))
-        .expect("float should append");
-    let rendered = display.render_statement(
-        &float_statement(HirStatementKind::ValidateFloat {
-            source,
-            failure_mode: NumericFailureMode::ReturnError,
-            result: HirLocalDestination::Define(LocalId(9003)),
-        }),
-        &expressions,
-    );
-
-    assert_eq!(rendered, "define l9003 = validate_float_err(F64(0.0))");
 }
 
 #[test]

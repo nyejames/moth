@@ -13,7 +13,10 @@
 use crate::compiler_frontend::ast::ast_nodes::{
     Declaration, LoopBindings, RangeEndKind, RangeLoopSpec,
 };
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::const_values::store::{ConstValuePayload, ConstValueStore};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, ExpressionOperationView, ExpressionView, OccurrenceFacts,
+};
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
@@ -35,7 +38,7 @@ use moth_lexical::numeric::precision::BinaryFloatPrecision;
 #[derive(Clone)]
 pub(crate) struct TemplateFoldBinding {
     pub(crate) path: PathId,
-    pub(crate) value: Expression,
+    pub(crate) value: ExprId,
 }
 
 // -------------------------
@@ -100,21 +103,27 @@ struct ConstRangeIntegerInput<'range> {
 impl ConstRangeCursor {
     pub(crate) fn new(
         range: &RangeLoopSpec,
+        expressions: &AstExpressionBuilder,
+        constants: &ConstValueStore,
         limit: usize,
         span: Option<crate::compiler_frontend::source::SourceSpan>,
     ) -> Result<Self, TemplateError> {
-        let start = const_numeric_expression(&range.start)?;
-        let end = const_numeric_expression(&range.end)?;
+        let start = const_numeric_expression(expressions.view(range.start)?, constants)?;
+        let end = const_numeric_expression(expressions.view(range.end)?, constants)?;
         let step = range
             .step
-            .as_ref()
-            .map(const_numeric_expression)
+            .map(|id| const_numeric_expression(expressions.view(id)?, constants))
             .transpose()?;
         let Some(scalar) = const_range_domain(start, end, step) else {
             return Err(invalid_range_bounds(span));
         };
 
-        Self::new_fixed(scalar, (start, end, step), range, limit, span)
+        let step_span = range
+            .step
+            .map(|id| expressions.view(id).map(|value| value.span()))
+            .transpose()?
+            .flatten();
+        Self::new_fixed(scalar, (start, end, step), range, step_span, limit, span)
     }
     /// Builds the shared `i128` integer cursor for one exact fixed integer domain.
     ///
@@ -164,12 +173,12 @@ impl ConstRangeCursor {
         scalar: FixedScalar,
         range_values: (FixedScalarValue, FixedScalarValue, Option<FixedScalarValue>),
         range: &RangeLoopSpec,
+        step_span: Option<crate::compiler_frontend::source::SourceSpan>,
         limit: usize,
         span: Option<crate::compiler_frontend::source::SourceSpan>,
     ) -> Result<Self, TemplateError> {
         let (start, end, step) = range_values;
         let end_kind = range.end_kind;
-        let step_span = range.step.as_ref().and_then(|expression| expression.span);
         let kind = match scalar.class() {
             FixedScalarClass::SignedInteger | FixedScalarClass::UnsignedInteger => {
                 let current =
@@ -434,11 +443,28 @@ fn fixed_integer_range_contains(
 /// WHAT: accepts a materialised fixed scalar through transparent coercion wrappers.
 /// WHY: `Byte` and `Dec` have no range counter domain, so they take the ordinary
 ///      "bounds are not const" diagnostic instead of selecting a counter.
-fn const_numeric_expression(expression: &Expression) -> Result<FixedScalarValue, TemplateError> {
-    match &expression.kind {
-        ExpressionKind::FixedScalar(value) if value.scalar() != FixedScalar::Byte => Ok(*value),
-        ExpressionKind::Coerced { value, .. } => const_numeric_expression(value),
-        _ => Err(invalid_range_bounds(expression.span)),
+fn const_numeric_expression(
+    expression: ExpressionView<'_>,
+    constants: &ConstValueStore,
+) -> Result<FixedScalarValue, TemplateError> {
+    match expression.operation() {
+        ExpressionOperationView::Constant(id) => const_numeric_payload(id, constants)
+            .ok_or_else(|| invalid_range_bounds(expression.span())),
+        ExpressionOperationView::Coerce { value, .. } => const_numeric_expression(value, constants),
+        _ => Err(invalid_range_bounds(expression.span())),
+    }
+}
+
+fn const_numeric_payload(
+    id: crate::compiler_frontend::ast::const_values::store::ConstValueId,
+    constants: &ConstValueStore,
+) -> Option<FixedScalarValue> {
+    match constants.payload(id)? {
+        ConstValuePayload::FixedScalar(value) if value.scalar() != FixedScalar::Byte => {
+            Some(*value)
+        }
+        ConstValuePayload::Coerced(value) => const_numeric_payload(*value, constants),
+        _ => None,
     }
 }
 
@@ -456,16 +482,55 @@ fn float_range_contains(current: f64, end: f64, end_kind: RangeEndKind, ascendin
 // -------------------------
 
 pub(crate) fn const_collection_items(
-    iterable: &Expression,
-) -> Result<&[Expression], TemplateError> {
-    match &iterable.kind {
-        ExpressionKind::Collection(items) => Ok(items),
-        ExpressionKind::Coerced { value, .. } => const_collection_items(value),
-        _ => Err(CompilerDiagnostic::invalid_template_structure(
+    iterable: ExprId,
+    expressions: &mut AstExpressionBuilder,
+    constants: &ConstValueStore,
+) -> Result<Vec<ExprId>, TemplateError> {
+    let iterable = expressions.view(iterable)?;
+    let span = iterable.span();
+    let mode = iterable.value_mode();
+    let values = match iterable.operation() {
+        ExpressionOperationView::Collection(items) => {
+            return Ok(items.iter().map(|item| item.id()).collect());
+        }
+        ExpressionOperationView::Coerce { value, .. } => {
+            let value = value.id();
+            return const_collection_items(value, expressions, constants);
+        }
+        ExpressionOperationView::Constant(id) => const_collection_payload(id, constants),
+        _ => None,
+    };
+    let Some(values) = values else {
+        return Err(CompilerDiagnostic::invalid_template_structure(
             InvalidTemplateStructureReason::TemplateLoopSourceNotConst,
-            iterable.span,
+            span,
         )
-        .into()),
+        .into());
+    };
+    let mut items = Vec::with_capacity(values.len());
+    for &value in values {
+        let metadata = constants.metadata(value).ok_or_else(|| {
+            crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                "Missing const collection item.",
+            )
+        })?;
+        items.push(
+            expressions
+                .constant(value, metadata.type_id, span, mode)?
+                .id(),
+        );
+    }
+    Ok(items)
+}
+
+fn const_collection_payload(
+    id: crate::compiler_frontend::ast::const_values::store::ConstValueId,
+    constants: &ConstValueStore,
+) -> Option<&[crate::compiler_frontend::ast::const_values::store::ConstValueId]> {
+    match constants.payload(id)? {
+        ConstValuePayload::Collection(items) => Some(items),
+        ConstValuePayload::Coerced(value) => const_collection_payload(*value, constants),
+        _ => None,
     }
 }
 
@@ -478,83 +543,119 @@ pub(crate) fn build_range_iteration_bindings(
     counter: FixedScalarValue,
     zero_based_index: usize,
     range_provenance: &SyntheticInterfaceProvenance,
-) -> Vec<TemplateFoldBinding> {
-    let mut fold_bindings = Vec::new();
-
+    expressions: &mut AstExpressionBuilder,
+    constants: &mut ConstValueStore,
+) -> Result<Vec<TemplateFoldBinding>, TemplateError> {
+    let mut fold_bindings = Vec::with_capacity(2);
     if let Some(item) = &bindings.item {
-        let value = Expression::fixed_scalar(counter, item.value.span, ValueMode::ImmutableOwned);
-        debug_assert_eq!(
-            value.type_id, item.value.type_id,
-            "fixed range cursor must produce the declared binding type"
-        );
-        fold_bindings.push(TemplateFoldBinding {
-            path: item.id,
-            value: value.with_synthetic_interface_provenance(range_provenance.clone()),
-        });
-    }
-
-    if let Some(index) = &bindings.index {
-        fold_bindings.push(iteration_index_binding(
-            index,
-            zero_based_index,
-            range_provenance,
-        ));
-    }
-
-    fold_bindings
-}
-
-pub(crate) fn build_collection_iteration_bindings(
-    bindings: &LoopBindings,
-    item_value: &Expression,
-    zero_based_index: usize,
-    iterable_provenance: &SyntheticInterfaceProvenance,
-) -> Vec<TemplateFoldBinding> {
-    let mut fold_bindings = Vec::new();
-
-    if let Some(item) = &bindings.item {
-        let mut value = item_value.to_owned();
-        value.span = item.value.span;
-        value.synthetic_interface_provenance = value
-            .synthetic_interface_provenance
-            .union(iterable_provenance);
+        let constant = constants.insert_resolved(
+            item.type_id,
+            ConstValuePayload::FixedScalar(counter),
+            item.binding_span,
+        )?;
+        let value = iteration_constant(expressions, constant, item, range_provenance.clone())?;
         fold_bindings.push(TemplateFoldBinding {
             path: item.id,
             value,
         });
     }
+    if let Some(index) = &bindings.index {
+        fold_bindings.push(iteration_index_binding(
+            index,
+            zero_based_index,
+            range_provenance,
+            expressions,
+            constants,
+        )?);
+    }
+    Ok(fold_bindings)
+}
 
+pub(crate) fn build_collection_iteration_bindings(
+    bindings: &LoopBindings,
+    item_value: ExprId,
+    zero_based_index: usize,
+    iterable_provenance: &SyntheticInterfaceProvenance,
+    expressions: &mut AstExpressionBuilder,
+    constants: &mut ConstValueStore,
+) -> Result<Vec<TemplateFoldBinding>, TemplateError> {
+    let mut fold_bindings = Vec::with_capacity(2);
+    if let Some(item) = &bindings.item {
+        let mut input = expressions
+            .view(item_value)?
+            .to_completed_input(expressions)?;
+        input.span = item.binding_span;
+        let provenance = input.occurrence.as_ref().map_or_else(
+            || iterable_provenance.clone(),
+            |facts| facts.provenance.union(iterable_provenance),
+        );
+        input.occurrence = Some(OccurrenceFacts {
+            provenance,
+            diagnostic_spelling: None,
+        });
+        let value = expressions.commit_replacement(input)?;
+        fold_bindings.push(TemplateFoldBinding {
+            path: item.id,
+            value: value.id(),
+        });
+    }
     if let Some(index) = &bindings.index {
         fold_bindings.push(iteration_index_binding(
             index,
             zero_based_index,
             iterable_provenance,
-        ));
+            expressions,
+            constants,
+        )?);
     }
-
-    fold_bindings
+    Ok(fold_bindings)
 }
 
-/// Builds the positional index binding for one const loop iteration.
-///
-/// WHY: range and collection loops share one I32 positional index domain, so both
-///      iteration paths materialise the same counter type.
+fn iteration_constant(
+    expressions: &mut AstExpressionBuilder,
+    constant: crate::compiler_frontend::ast::const_values::store::ConstValueId,
+    declaration: &Declaration,
+    provenance: SyntheticInterfaceProvenance,
+) -> Result<ExprId, TemplateError> {
+    let mut input = expressions.completed_input(
+        crate::compiler_frontend::ast::expressions::expression_store::ExpressionOp::Constant(
+            constant,
+        ),
+        crate::compiler_frontend::ast::expressions::expression_store::SuccessShape::One(
+            declaration.type_id,
+        ),
+        declaration.binding_span,
+        ValueMode::ImmutableOwned,
+    )?;
+    input.occurrence = Some(OccurrenceFacts {
+        provenance,
+        diagnostic_spelling: None,
+    });
+    Ok(expressions.commit_replacement(input)?.id())
+}
+
 fn iteration_index_binding(
     index: &Declaration,
     zero_based_index: usize,
     provenance: &SyntheticInterfaceProvenance,
-) -> TemplateFoldBinding {
-    // Iteration indices stay within the const-loop expansion limit, well below
-    // `i32::MAX`, so this checked conversion cannot fail in practice.
-    let position = i32::try_from(zero_based_index).unwrap_or(i32::MAX);
-    let value = Expression::fixed_scalar(
-        FixedScalarValue::signed(FixedScalar::I32, i64::from(position))
-            .expect("const loop positions fit I32"),
-        index.value.span,
-        ValueMode::ImmutableOwned,
-    );
-    TemplateFoldBinding {
+    expressions: &mut AstExpressionBuilder,
+    constants: &mut ConstValueStore,
+) -> Result<TemplateFoldBinding, TemplateError> {
+    let position = i32::try_from(zero_based_index).map_err(|_| {
+        crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+            "Const loop position exceeded I32.",
+        )
+    })?;
+    let scalar = FixedScalarValue::signed(FixedScalar::I32, i64::from(position))
+        .expect("checked I32 position");
+    let constant = constants.insert_resolved(
+        index.type_id,
+        ConstValuePayload::FixedScalar(scalar),
+        index.binding_span,
+    )?;
+    let value = iteration_constant(expressions, constant, index, provenance.clone())?;
+    Ok(TemplateFoldBinding {
         path: index.id,
-        value: value.with_synthetic_interface_provenance(provenance.clone()),
-    }
+        value,
+    })
 }

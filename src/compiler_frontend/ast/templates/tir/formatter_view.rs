@@ -16,8 +16,12 @@
 //! this adapter. Node-root formatting avoids scratch `TemplateIr` entries, and
 //! no intermediate content-to-TIR conversion remains in the render-unit path.
 
-use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::const_values::store::{
+    ConstStringPiece, ConstStringValue, ConstValuePayload, ConstValueStore, ConstValueStoreError,
+};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExpressionConstructionFailure,
+};
 use crate::compiler_frontend::ast::templates::formatter_contract::{
     FormatterAnchorId, FormatterInput, FormatterInputPiece, FormatterOpaqueKind,
     FormatterOpaquePiece, FormatterOutputPiece, FormatterTextPiece, output_to_input,
@@ -38,7 +42,7 @@ use crate::compiler_frontend::ast::templates::tir::view::{
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
-use crate::compiler_frontend::datatypes::{DataType, builtin_type_ids};
+use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -68,6 +72,8 @@ pub(crate) struct TirFormatterResult {
 ///      mutation owner must be explicit at this adapter boundary.
 struct FormatterStore<'store> {
     store: &'store mut TemplateIrStore,
+    expressions: &'store mut AstExpressionBuilder,
+    const_values: &'store mut ConstValueStore,
     /// Owning published template ID, or `None` for a node-root formatter that
     /// has no published template (control-flow body roots). When `None`,
     /// `effective_node` reads the store directly and `structural_child_view`
@@ -80,6 +86,16 @@ struct FormatterStore<'store> {
 }
 
 impl FormatterStore<'_> {
+    fn reborrow(
+        &mut self,
+    ) -> (
+        &mut TemplateIrStore,
+        &mut AstExpressionBuilder,
+        &mut ConstValueStore,
+    ) {
+        (self.store, self.expressions, self.const_values)
+    }
+
     fn view(&self) -> Result<TirView<'_>, CompilerError> {
         let root = self.root.ok_or_else(|| {
             CompilerError::compiler_error(
@@ -129,8 +145,14 @@ impl FormatterStore<'_> {
 ///       templates, dynamic expressions) are preserved; head-origin content and
 ///       structural nodes break runs and pass through unchanged.
 /// WHY: this keeps formatter behavior on the authoritative TIR representation.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "formatter view keeps store, expressions, phase, context, and style as separate inputs"
+)]
 pub(crate) fn format_tir_template(
     store: &mut TemplateIrStore,
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     root: TemplateIrId,
     phase: TemplateTirPhase,
     context: TemplateViewContext,
@@ -152,6 +174,8 @@ pub(crate) fn format_tir_template(
 
     let mut formatter_store = FormatterStore {
         store,
+        expressions,
+        const_values,
         root: Some(root),
         root_node_id,
         head_node_count,
@@ -170,8 +194,14 @@ pub(crate) fn format_tir_template(
 /// WHY: control-flow body roots are parser-emitted TIR nodes, not template
 ///      identities. Formatting them directly avoids scratch templates that
 ///      would remain in the durable store without a referencing identity.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the optional owner and body root stay separate from the store and formatter inputs"
+)]
 pub(crate) fn format_tir_body_node_root(
     store: &mut TemplateIrStore,
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     owning_template: Option<TemplateIrId>,
     body_root: TemplateIrNodeId,
     phase: TemplateTirPhase,
@@ -181,6 +211,8 @@ pub(crate) fn format_tir_body_node_root(
 ) -> Result<TirFormatterResult, CompilerMessages> {
     let mut formatter_store = FormatterStore {
         store,
+        expressions,
+        const_values,
         root: owning_template,
         root_node_id: body_root,
         head_node_count: 0,
@@ -450,15 +482,17 @@ fn format_referenced_child_template(
         return Ok(None);
     }
 
+    let (store, expressions, const_values) = formatter_store.reborrow();
     let result = format_tir_template(
-        formatter_store.store,
+        store,
+        expressions,
+        const_values,
         template_ref,
         phase,
         context,
         &style,
         string_table,
     )?;
-
     let formatted_template_id = formatter_store
         .store
         .push_structurally_derived_template(
@@ -606,7 +640,10 @@ struct ChildRunEligibility {
 /// resulting nodes are spliced back in order.
 /// WHY: formatter runs operate on TIR node IDs while keeping structural nodes
 /// outside the formatter-visible surface.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "sequence formatting keeps mutable formatter storage, original root and children, source span and head-prefix count, pre/post whitespace profiles, optional formatter and mutable string table separate"
+)]
 fn format_tir_sequence(
     formatter_store: &mut FormatterStore<'_>,
     original_node_ref: TemplateIrNodeId,
@@ -808,7 +845,6 @@ fn opaque_kind_for_kind(
 /// output back to TIR node IDs using a local anchor side-table.
 /// WHY: this is the core adapter step that lets existing formatters consume TIR
 /// data and produce TIR data.
-#[allow(clippy::too_many_arguments)]
 fn process_formatter_run(
     formatter_store: &mut FormatterStore<'_>,
     run: &[TemplateIrNodeId],
@@ -944,18 +980,42 @@ fn output_to_tir_nodes(
             FormatterOutputPiece::Opaque(anchor) => {
                 if anchor.kind == FormatterOpaqueKind::SiteRoot {
                     let site_id = formatter_store.store.next_expression_site_id();
-                    let expression = Expression::new(
-                        ExpressionKind::StructuralString {
-                            pieces: vec![ConstStringPiece::SiteRoot],
-                        },
-                        None,
-                        builtin_type_ids::STRING,
-                        DataType::StringSlice,
-                        ValueMode::ImmutableOwned,
-                    );
+                    let value = formatter_store
+                        .const_values
+                        .insert_resolved(
+                            builtin_type_ids::STRING,
+                            ConstValuePayload::String(ConstStringValue::Pieces(vec![
+                                ConstStringPiece::SiteRoot,
+                            ])),
+                            representative_span,
+                        )
+                        .map_err(|error| match error {
+                            ConstValueStoreError::Diagnostic(diagnostic) => {
+                                CompilerMessages::from_diagnostic_ref(diagnostic, string_table)
+                            }
+                            ConstValueStoreError::Infrastructure(error) => {
+                                compiler_error_messages(*error, string_table)
+                            }
+                        })?;
+                    let expression = formatter_store
+                        .expressions
+                        .constant(
+                            value,
+                            builtin_type_ids::STRING,
+                            None,
+                            ValueMode::ImmutableOwned,
+                        )
+                        .map_err(|error| match error {
+                            ExpressionConstructionFailure::Diagnostic(diagnostic) => {
+                                CompilerMessages::from_diagnostic_ref(diagnostic, string_table)
+                            }
+                            ExpressionConstructionFailure::Invariant(error) => {
+                                compiler_error_messages(error, string_table)
+                            }
+                        })?;
                     nodes.push(formatter_store.store.push_node(TemplateIrNode::new(
                         TemplateIrNodeKind::DynamicExpression {
-                            expression: Box::new(expression),
+                            expression: expression.id(),
                             origin: TemplateSegmentOrigin::Body,
                             site_id,
                         },

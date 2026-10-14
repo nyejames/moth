@@ -19,6 +19,8 @@
 //!   reaching HIR lowering is an internal compiler invariant failure.
 //! - Borrow analysis facts are side-table metadata keyed by HIR IDs. HIR is not mutated to
 //!   encode borrow or ownership state.
+//! - Functions and calls carry ordered success slots separately from an optional error channel.
+//!   `Invoke` owns fallible operations and edge-local result definitions, never carrier values.
 //!
 //! `hir_builder` owns lowering orchestration and mutable construction state. Its construction
 //! failure lane preserves typed capacity diagnostics alongside infrastructure failures.

@@ -1,22 +1,23 @@
 //! Tests for AST template normalization at the HIR boundary.
 
-use super::super::public_const_templates::{
-    const_template_value_from_projection, project_const_template_value,
-};
 use super::super::template_helpers::{
     FinalizedTemplateValue, TemplateValueFinalizationInputs, finalize_template_value,
 };
 use super::*;
+use crate::compiler_frontend::ast::const_values::binding::{
+    const_template_value_from_projection, project_const_template_value,
+};
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::ast::const_values::store::{
-    ConstStringValue, ConstTemplateValue, ConstValueStoreError,
+    ConstStringValue, ConstTemplateValue, ConstValuePayload, ConstValueStore, ConstValueStoreError,
 };
-use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, ExpressionOperationView,
+};
 use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
 use crate::compiler_frontend::ast::expressions::expression_types::ConstValueKind;
 use crate::compiler_frontend::ast::module_ast::environment::builder::import_projection::values::{
-    FoldedValueMaterialiser, materialize_public_const_template,
+    FoldedValueMaterialiser, materialize_owned_folded_string, materialize_public_folded_value,
 };
 use crate::compiler_frontend::ast::templates::template::TemplateConstValueKind;
 use crate::compiler_frontend::ast::templates::template::{
@@ -46,11 +47,10 @@ use crate::compiler_frontend::ast::templates::{
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
 use crate::compiler_frontend::compiler_messages::InvalidTemplateStructureReason;
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::folded_value::{
-    OwnedFoldedString, OwnedFoldedStringPiece, PublicConstTemplatePiece,
+    OwnedFoldedString, OwnedFoldedStringPiece, PublicConstTemplatePiece, PublicFoldedValue,
 };
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::compiler_frontend::paths::module_resources::{ModuleResourceTable, ResourceId};
@@ -69,11 +69,11 @@ use crate::compiler_frontend::synthetic_interface_provenance::{
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::path::Path;
 
-/// Consumer-local materializer used to verify that projected const-template strings rebuild as
+/// Consumer-local materializer used to verify that projected const-template values import through
+/// the live folded-value path and keep their structural pieces intact.
 struct ConstTemplateProjectionMaterializer {
     type_environment: TypeEnvironment,
     module_resources: ModuleResourceTable,
-    template_ir_store: Rc<RefCell<TemplateIrStore>>,
     path_fork: PathInternerFork,
 }
 impl ConstTemplateProjectionMaterializer {
@@ -81,7 +81,6 @@ impl ConstTemplateProjectionMaterializer {
         Self {
             type_environment: TypeEnvironment::new(),
             module_resources: ModuleResourceTable::new(),
-            template_ir_store: Rc::new(RefCell::new(TemplateIrStore::new())),
             path_fork: PathInternerFork::empty(),
         }
     }
@@ -110,10 +109,6 @@ impl FoldedValueMaterialiser for ConstTemplateProjectionMaterializer {
 
     fn type_environment(&self) -> &TypeEnvironment {
         &self.type_environment
-    }
-
-    fn template_ir_store(&self) -> Rc<RefCell<TemplateIrStore>> {
-        Rc::clone(&self.template_ir_store)
     }
 }
 #[cfg(feature = "benchmark_counters")]
@@ -177,6 +172,8 @@ fn registered_text_template(
 /// on the nested wrapper reached through the outer wrapper's overlay.
 fn nested_wrapper_finalization_fixture(
     string_table: &mut StringTable,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     unsafe_nested_wrapper: bool,
 ) -> (Template, Rc<RefCell<TemplateIrStore>>) {
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
@@ -253,7 +250,6 @@ fn nested_wrapper_finalization_fixture(
             let runtime_slot_plan_id = store.push_slot_plan(TemplateSlotPlan {
                 contribution_sources: Vec::new(),
                 slot_sites: Vec::new(),
-                span: None,
             });
             store
                 .attach_runtime_slot_plan(inner_wrapper_template_id, runtime_slot_plan_id)
@@ -273,7 +269,15 @@ fn nested_wrapper_finalization_fixture(
             let mut builder = TemplateIrBuilder::new(&mut store);
             let outer_dynamic_text = string_table.intern("outer-structural");
             let outer_dynamic_node = builder.push_dynamic_expression_node(
-                Expression::string_slice(outer_dynamic_text, None, ValueMode::ImmutableOwned),
+                expression_builder
+                    .string_slice(
+                        const_values,
+                        outer_dynamic_text,
+                        None,
+                        ValueMode::ImmutableOwned,
+                    )
+                    .expect("fixture string construction")
+                    .id(),
                 TemplateSegmentOrigin::Body,
                 None,
             );
@@ -389,11 +393,15 @@ fn nested_wrapper_finalization_fixture(
         .allocate_expression_overlay(TirExpressionOverlay {
             overrides: vec![(
                 outer_expression_site_id,
-                Box::new(Expression::string_slice(
-                    string_table.intern("outer-overlay"),
-                    None,
-                    ValueMode::ImmutableOwned,
-                )),
+                expression_builder
+                    .string_slice(
+                        const_values,
+                        string_table.intern("outer-overlay"),
+                        None,
+                        ValueMode::ImmutableOwned,
+                    )
+                    .expect("fixture overlay string construction")
+                    .id(),
             )],
         })
         .expect("test overlay allocation");

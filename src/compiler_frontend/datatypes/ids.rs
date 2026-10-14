@@ -22,8 +22,8 @@ pub struct TypeId(pub u32);
 /// WHAT: deterministic IDs for builtin types so that factory methods and tests
 /// can construct expressions without threading a full `TypeEnvironment`.
 ///
-/// WHY: `Expression::int()` and similar factories should not need `&TypeEnvironment`
-/// just to refer to `I32`. These constants are valid for any `TypeEnvironment`
+/// WHY: expression builders such as `AstExpressionBuilder::fixed_scalar` should not need
+/// `&TypeEnvironment` just to refer to `I32`. These constants are valid for any `TypeEnvironment`
 /// created via `TypeEnvironment::new()` or `Default::default()`.
 ///
 /// WARNING: if `TypeEnvironment::new()` changes its builtin seeding order,
@@ -34,6 +34,7 @@ pub mod builtin_type_ids {
     pub const BOOL: TypeId = TypeId(0);
     pub const STRING: TypeId = TypeId(1);
     pub const CHAR: TypeId = TypeId(2);
+    #[cfg(test)]
     pub const RANGE: TypeId = TypeId(3);
     /// The seeded `None` type. This is not an unresolved-type sentinel: resolvers
     /// that need a `TypeId` for every spelling also map an unresolved annotation
@@ -98,7 +99,7 @@ pub enum BuiltinTypeKey {
 
 /// A type constructor paired with its arguments.
 ///
-/// Used for collections, options, results, and nominal generic instances.
+/// Used for collections and options; nominal generic instances have their own key.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TypeConstructor {
     Builtin(BuiltinTypeConstructor),
@@ -110,11 +111,9 @@ pub enum BuiltinTypeConstructor {
     Collection { fixed_capacity: Option<usize> },
     OrderedMap,
     Option,
-    FallibleCarrier,
-    Tuple,
 }
 
-/// Key for a constructed type (collection, option, result, or nominal instance).
+/// Key for a constructed collection, map or option type.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ConstructedTypeKey {
     pub constructor: TypeConstructor,

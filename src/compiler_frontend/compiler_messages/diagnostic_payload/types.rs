@@ -55,6 +55,41 @@ pub enum HirCapacityResource {
     PlaceProjections,
 }
 
+/// Which compact AST expression or constant-value buffer could not represent another
+/// source-owned value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AstCapacityResource {
+    /// Completed AST semantic expression rows.
+    ExpressionRows,
+    /// Typed AST expression ranges and semantic side records.
+    ExpressionSideEntries,
+    /// Constant value rows in the constant store.
+    ConstValues,
+    /// Choice variant tags stored on choice construction expressions.
+    ChoiceTags,
+    /// Distances between flat expression grouping markers.
+    GroupDistances,
+}
+
+/// The compact buffer that overflowed, tagged with the stage that owns it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum CapacityResource {
+    Hir(HirCapacityResource),
+    Ast(AstCapacityResource),
+}
+
+impl From<HirCapacityResource> for CapacityResource {
+    fn from(resource: HirCapacityResource) -> Self {
+        Self::Hir(resource)
+    }
+}
+
+impl From<AstCapacityResource> for CapacityResource {
+    fn from(resource: AstCapacityResource) -> Self {
+        Self::Ast(resource)
+    }
+}
+
 /// Why project-context-dependent semantic facts cannot cross a package facade boundary.
 ///
 /// The reason is intentionally independent of the rendered wording so build, check and tooling
@@ -63,6 +98,28 @@ pub enum HirCapacityResource {
 pub enum ProjectContextEscapeReason {
     ExportedDeclaration,
     ReachableExecutable,
+}
+
+/// The semantic receiving boundary that requires a producer's success slots.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ValueReceiverContext {
+    Declaration,
+    Assignment,
+    Return,
+    Then,
+    FunctionArgument,
+    ConstructorArgument,
+    OperatorOperand,
+    Condition,
+    ReceiverBase,
+    CollectionElement,
+    MapKey,
+    MapValue,
+    TemplateInterpolation,
+    CastSource,
+    MatchScrutinee,
+    AssertionArgument,
+    General,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1080,6 +1137,7 @@ pub enum InvalidDeclarationReason {
     TraitIncompatibilityMissingTrait,
     TraitIncompatibilitySemicolon,
     MissingInitializerExpression,
+    DeclarationRequiresModuleTopLevel,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -1372,8 +1430,15 @@ pub enum InvalidFallibleHandlingReason {
     BangOnNonFallible,
     BangOnOptional,
     FunctionHasNoErrorSlot,
+    EntryHasIncompatibleError {
+        produced_error_type: TypeId,
+        entry_error_type: TypeId,
+    },
     NotOptionExpression,
     FunctionHasNoOptionalReturn,
+    FunctionHasMultipleSuccessReturns {
+        count: usize,
+    },
     OptionPropagationReturnTypeMismatch,
     OptionPropagationCatchConflict,
     ExplicitPropagationCatchConflict,
@@ -1512,12 +1577,20 @@ impl InvalidFallibleHandlingReason {
                 "This expression uses '!' propagation, but the surrounding function does not declare an error return slot."
             }
 
+            InvalidFallibleHandlingReason::EntryHasIncompatibleError { .. } => {
+                "This '!' propagation produces an error incompatible with the entry's built-in start Error! boundary. Handle it locally with `catch` or recover explicitly."
+            }
+
             InvalidFallibleHandlingReason::NotOptionExpression => {
                 "The '?' option-propagation suffix is only valid for optional expressions."
             }
 
             InvalidFallibleHandlingReason::FunctionHasNoOptionalReturn => {
                 "This expression uses '?' propagation, but the surrounding function does not return an optional success value."
+            }
+
+            InvalidFallibleHandlingReason::FunctionHasMultipleSuccessReturns { .. } => {
+                "This '?' propagation requires exactly one optional success return slot. Inspect the option locally or use a single optional success return slot."
             }
 
             InvalidFallibleHandlingReason::OptionPropagationReturnTypeMismatch => {
@@ -1605,16 +1678,6 @@ pub enum CompileTimeEvaluationErrorReason {
     StructuralStringRequiresFinalText,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum UnsupportedOperatorCategory {
-    Arithmetic,
-    Comparison,
-    Range,
-    Logical,
-    Unary,
-    Other,
-}
-
 /// Diagnostic-owned exact source operator for unsupported-operand diagnostics.
 ///
 /// WHAT: carries the authored source spelling of the operator that failed type checking,
@@ -1696,11 +1759,6 @@ impl DiagnosticCompoundAssignmentOperator {
             Self::Exponent => "^=",
         }
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum InvalidFallibleOperandReason {
-    FallibleValueNotHandled,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

@@ -11,10 +11,10 @@ use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::failure_facts::{
     HirBuiltinFailureBoundary, HirBuiltinFailureSource,
 };
-use crate::compiler_frontend::hir::numeric::NumericFailureMode;
 use crate::compiler_frontend::hir::reachability::{
     HirReachability, collect_reachability_from_function_link_facts,
 };
+use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
 use crate::compiler_frontend::public_interface::{
     PublicDeclarationSemantics, PublicFunctionCategory,
 };
@@ -735,15 +735,25 @@ fn assert_published_numeric_proofs_match_final_hir(
         .hir
         .blocks
         .iter()
-        .flat_map(|block| block.statements.iter())
-        .filter(|statement| matches!(statement.kind, HirStatementKind::NumericOp { .. }))
-        .map(|statement| {
-            let published = executable
-                .numeric_proofs
-                .integer_operation_is_safe(statement.id);
+        .flat_map(|block| {
+            let statement_operations = block.statements.iter().filter_map(|statement| {
+                matches!(statement.kind, HirStatementKind::NumericOp { .. }).then_some(statement.id)
+            });
+            let invoked_operation = match &block.terminator {
+                HirTerminator::Invoke {
+                    id,
+                    operation: HirFallibleOperation::NumericOp { .. },
+                    ..
+                } => Some(*id),
+                _ => None,
+            };
+            statement_operations.chain(invoked_operation)
+        })
+        .map(|id| {
+            let published = executable.numeric_proofs.integer_operation_is_safe(id);
             assert_eq!(
                 published,
-                fresh.integer_operation_is_safe(statement.id),
+                fresh.integer_operation_is_safe(id),
                 "published proof must match the final HIR"
             );
             published
@@ -849,15 +859,13 @@ fn published_link_facts_follow_private_failure_lane_rewrites() {
         for artefact in frontend.project.successful_artefacts_in_module_id_order() {
             let hir = &artefact.module.executable.hir;
             let has_failure_lane = hir.blocks.iter().any(|block| {
-                block.statements.iter().any(|statement| {
-                    matches!(
-                        statement.kind,
-                        HirStatementKind::NumericOp {
-                            failure_mode: NumericFailureMode::ReturnError,
-                            ..
-                        }
-                    )
-                })
+                matches!(
+                    &block.terminator,
+                    HirTerminator::Invoke {
+                        operation: HirFallibleOperation::NumericOp { .. },
+                        ..
+                    }
+                )
             });
             assert_eq!(
                 has_failure_lane,
@@ -1120,7 +1128,7 @@ fn static_if_duplicate_identity_request_publishes_one_canonical_sidecar() {
                 HirStatementKind::Call {
                     target: CallTarget::Generated(target),
                     ..
-                } if target == identity
+                } if target.as_ref() == identity
             )
         })
         .count();
@@ -1881,6 +1889,177 @@ same_private_box PrivateBox of Bool = forward(private_box)
         }
     }
     assert!(saw_box && saw_maybe && saw_private_box);
+}
+
+#[test]
+fn requester_public_receiver_evidence_preserves_independent_declaration_bounds() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let temporary_directory = tempfile::tempdir().expect("should create temporary project");
+    let root = temporary_directory.path();
+    let source_root = root.join("src");
+    fs::create_dir_all(source_root.join("provider")).expect("should create generic provider");
+    fs::write(
+        root.join("config.moth"),
+        "project #= (name = \"docs\", entry_root = \"src\")\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(
+        source_root.join("provider/@mod.moth"),
+        r#"export:
+    LEFT_TEXT must:
+        left_text |This| -> String
+    ;
+    RIGHT_TEXT must:
+        right_text |This| -> String
+    ;
+    FIRST_TEXT must:
+        first_text |This| -> String
+    ;
+    SECOND_TEXT must:
+        second_text |This| -> String
+    ;
+
+    combine type T is FIRST_TEXT and SECOND_TEXT |value T| -> String:
+        return [:[value.first_text()]/[value.second_text()]]
+    ;
+;
+"#,
+    )
+    .expect("should write two-bound generic provider");
+    fs::write(
+        source_root.join("@page.moth"),
+        r#"@provider LEFT_TEXT, RIGHT_TEXT, FIRST_TEXT, SECOND_TEXT, combine
+
+export:
+    Label = |text String|
+    Box type T = |value T|
+;
+
+left_text |this Label| -> String:
+    return [:left=[this.text]]
+;
+right_text |this Label| -> String:
+    return [:right=[this.text]]
+;
+Label must LEFT_TEXT, RIGHT_TEXT
+
+first_text type T is LEFT_TEXT |this Box of T| -> String:
+    return this.value.left_text()
+;
+second_text type T is RIGHT_TEXT |this Box of T| -> String:
+    return this.value.right_text()
+;
+Box must FIRST_TEXT, SECOND_TEXT
+
+result = combine(Box(Label("payload")))
+[:result=[result]]
+"#,
+    )
+    .expect("should write requester-owned public generic evidence");
+
+    let mut config = Config::new(root.to_path_buf());
+    config.entry_root = PathBuf::from("src");
+    let mut strings = StringTable::new();
+    let frontend = compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut BuilderSurface::with_mandatory_core(),
+        &mut strings,
+    )
+    .expect("both requester receiver contracts should restore before combine emits");
+    assert!(!frontend.has_diagnosed_or_blocked());
+    let sidecars = frontend.project.generated.sidecars().collect::<Vec<_>>();
+    assert_eq!(
+        sidecars.len(),
+        3,
+        "combine and both evidence methods must materialise"
+    );
+    let combine = sidecars
+        .iter()
+        .find(|sidecar| sidecar.identity.declaration().defining_name() == "combine")
+        .expect("the cross-module generic must materialise");
+    assert_eq!(combine.identity.evidence().len(), 2);
+    let [box_identity] = combine.identity.type_arguments() else {
+        panic!("combine must have one real requester-owned Box type argument");
+    };
+    let CanonicalTypeIdentity::GenericInstance { base, arguments } = box_identity else {
+        panic!("the public Box must retain its canonical generic-instance identity");
+    };
+    assert_eq!(base.defining_name(), "Box");
+    for evidence in combine.identity.evidence() {
+        // Aligned generic conformance is declared on Box, not separately on Box of Label.
+        let CanonicalTypeIdentity::SourceNominal(target) = evidence.target_type_identity() else {
+            panic!("selected generic conformance must target the actual Box constructor");
+        };
+        assert_eq!(target, base);
+    }
+    assert_ne!(
+        combine.identity.evidence()[0].trait_identity(),
+        combine.identity.evidence()[1].trait_identity(),
+        "both source conformances must be selected, not duplicated"
+    );
+
+    for (method_name, bound_name) in [("first_text", "LEFT_TEXT"), ("second_text", "RIGHT_TEXT")] {
+        let method = sidecars
+            .iter()
+            .find(|sidecar| sidecar.identity.declaration().defining_name() == method_name)
+            .expect("each selected source evidence method must materialise");
+        assert_eq!(method.identity.type_arguments(), arguments.as_ref());
+        let [evidence] = method.identity.evidence() else {
+            panic!("{method_name} must request exactly its own declaration-site bound");
+        };
+        assert_eq!(evidence.target_type_identity(), &arguments[0]);
+        let crate::compiler_frontend::canonical_type_identity::CanonicalTraitIdentity::Source(
+            trait_origin,
+        ) = evidence.trait_identity()
+        else {
+            panic!("{method_name} must request real source trait evidence");
+        };
+        assert_eq!(trait_origin.defining_name(), bound_name);
+        assert!(
+            combine
+                .module
+                .executable
+                .hir
+                .blocks
+                .iter()
+                .flat_map(|block| &block.statements)
+                .any(|statement| matches!(
+                    &statement.kind,
+                    HirStatementKind::Call { target: CallTarget::Generated(identity), .. }
+                        if identity.as_ref() == &method.identity
+                )),
+            "combine must call the correctly bounded {method_name} sidecar"
+        );
+    }
+
+    // Use the existing rendered-output owner rather than inspecting generated JS text.
+    let builder = ProjectBuilder::new(Box::new(
+        crate::projects::html_project::html_project_builder::HtmlProjectBuilder::new(),
+    ));
+    let mut built = build_project(
+        &builder,
+        root.to_str()
+            .expect("temporary project path should be UTF-8"),
+        &[],
+        &BuildConfigInputSet::new(),
+    )
+    .expect("independently bounded evidence must build end to end");
+    let rendered =
+        crate::compiler_tests::integration_test_runner::assertions::execute_html_harness_for_test(
+            &mut built,
+        )
+        .expect("the generated evidence calls must execute");
+    assert_eq!(rendered.runtime_error_message(), None);
+    assert!(
+        rendered
+            .combined_output()
+            .contains("result=left=payload/right=payload"),
+        "both independent declaration bounds must produce their correct text: {:?}",
+        rendered.events()
+    );
 }
 
 #[test]

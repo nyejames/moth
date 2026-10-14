@@ -13,7 +13,7 @@
 //!
 //! A rejected member ends the chain as one deferred occurrence. Completion issues its ordinary
 //! diagnostic on the receiver it has by then. An unhandled fallible step is recovered before the
-//! next step reads it, so a carrier type is never used as a receiver.
+//! next step consumes only its success shape.
 
 use super::PostfixChainAccess;
 use super::builtin_call_args::{
@@ -38,9 +38,10 @@ use super::receiver_access::{
 use super::receiver_calls::{
     DeferredCallReceiver, DeferredReceiverCall, DeferredReceiverCallee, ReservedGenericRequest,
     complete_deferred_receiver_call, generic_parameter_receiver_type, lookup_receiver_method,
-    recover_unhandled_carrier,
+    recover_pending_producer,
 };
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::call_arguments::{
     CallArgumentSyntax, ParsedCallArguments, expected_type_for_resolved_parameter,
@@ -53,8 +54,12 @@ use crate::compiler_frontend::ast::expressions::call_validation::{
     generic_template_expectations,
 };
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::expressions::expression_rpn::{
+    ExpressionRpnItem, single_operand, single_operand_mut, trailing_operand_start,
+};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, OwnedExpr,
+};
 use crate::compiler_frontend::ast::expressions::expression_types::{
     ConstRecordState, FallibleHandling,
 };
@@ -69,8 +74,8 @@ use crate::compiler_frontend::ast::generic_functions::{
 };
 use crate::compiler_frontend::ast::numeric_construction::{
     DeferredCall, DeferredCallArgument, DeferredCallHandling, DeferredExpression,
-    DeferredExpressionCompletion, DeferredExpressionServices, DeferredExpressionSuffix,
-    NumericRecipe, StatementExpression, binding_reference_shape, retained_known_shape,
+    DeferredExpressionCompletion, DeferredExpressionSuffix, NumericRecipe, StatementExpression,
+    binding_reference_shape, retained_known_shape,
 };
 use crate::compiler_frontend::ast::numeric_known_shape::{KnownShape, KnownShapeId};
 use crate::compiler_frontend::ast::statements::body_symbol;
@@ -84,9 +89,8 @@ use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidAssignmentTargetReason, InvalidBuiltinCallReason,
-    InvalidFieldAccessReason, InvalidReceiverCallReason,
+    InvalidFieldAccessReason, InvalidReceiverCallReason, ValueReceiverContext,
 };
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
@@ -135,7 +139,7 @@ pub(crate) struct RetainedBuiltinStep {
     /// expectations the completed lane validates against once every leaf is concrete.
     pub(crate) expected_argument_shapes: Vec<KnownShapeId>,
     /// The success slot as a construction shape; `None` when the operation yields no value.
-    /// WHY: its canonical type and fallible carrier are derived at body-root completion.
+    /// Its canonical success type materialises at body-root completion.
     pub(crate) success_shape: Option<KnownShapeId>,
     /// The declared error an authored `!` unwraps; `None` for an infallible operation.
     pub(crate) error_return_type_id: Option<TypeId>,
@@ -213,10 +217,6 @@ fn retained_chain_root(item: &ExpressionRpnItem) -> RetainedReceiverAccess {
             is_place: true,
             is_mutable: value_mode.is_mutable(),
         },
-        ExpressionRpnItem::PendingGroup { nodes, .. } => match nodes.as_slice() {
-            [single] => retained_chain_root(single),
-            _ => RetainedReceiverAccess::temporary(),
-        },
         _ => RetainedReceiverAccess::temporary(),
     }
 }
@@ -260,12 +260,11 @@ fn validate_retained_step_access(
 pub(crate) struct RetainedFieldStep {
     pub(crate) field_name: StringId,
     pub(crate) type_id: TypeId,
-    pub(crate) diagnostic_type: DataType,
     pub(crate) value_mode: ValueMode,
     pub(crate) const_record_state: ConstRecordState,
     /// A declaration-level const field inlines its compile-time value exactly as the completed
     /// chain does; the pending receiver has no const-record projection of its own.
-    pub(crate) const_inline_value: Option<Expression>,
+    pub(crate) const_inline_value: Option<ExprId>,
     pub(crate) span: Option<SourceSpan>,
 }
 
@@ -297,14 +296,14 @@ struct RetainedPostfixSteps {
 /// One retained operand whose authored postfix continuation applies before the enclosing
 /// expression's remaining operators evaluate.
 ///
-/// WHAT: the pending operand item, its authored member steps, its authored handling suffix and the
+/// WHAT: the pending operand items, its authored member steps, its authored handling suffix and the
 ///       evaluation context the operand's own fragment completes with.
-/// WHY: `complete_nested_items` replaces this item with one operand value, so the following
+/// WHY: fragment completion replaces this item with one operand value, so the following
 ///      operators keep their authored RPN positions while the suffix applies to exactly this
-///      operand. The payload lives with the postfix owner; the shared enum only carries it.
+///      operand. The payload lives with the postfix owner. The shared enum only carries it.
 #[derive(Debug, Clone)]
 pub(crate) struct RetainedOperandContinuation {
-    pub(crate) operand: ExpressionRpnItem,
+    pub(crate) operand: Vec<ExpressionRpnItem>,
     pub(crate) steps: Vec<RetainedPostfixStep>,
     pub(crate) suffix: DeferredExpressionSuffix,
     pub(crate) expected: ExpectedType,
@@ -350,9 +349,9 @@ pub(crate) fn retained_member_target(item: &ExpressionRpnItem) -> Option<Retaine
     let DeferredExpression::OperandContinuation(payload) = expression.as_ref() else {
         return None;
     };
-    if !matches!(payload.suffix, DeferredExpressionSuffix::None)
-        || !retained_chain_root(&payload.operand).is_place
-    {
+    let root_is_place = single_operand(&payload.operand)
+        .is_some_and(|operand| retained_chain_root(operand).is_place);
+    if !matches!(payload.suffix, DeferredExpressionSuffix::None) || !root_is_place {
         return None;
     }
     if payload.invalid_member.is_some() {
@@ -523,7 +522,7 @@ pub(crate) enum GenericSuccessSlots {
 /// Reads the terminal call a fragment or multi-bind value produces, if the item is one.
 ///
 /// WHAT: returns a bare pending call, or the terminal unhandled method of a retained chain whose
-///       operand and suffix are valid. Groups around a single node are transparent.
+///       operand and suffix are valid.
 /// WHY: a chained method is the same call-like producer as a bare call once its operand resolves,
 ///      so every consumer reads one query. A handled method already consumed its own carrier
 ///      inside the chain, so it is not a terminal call and returns `None`.
@@ -532,10 +531,6 @@ pub(crate) fn retained_terminal_call(item: &ExpressionRpnItem) -> Option<Retaine
         ExpressionRpnItem::PendingNumericCall { call, .. } => {
             Some(RetainedTerminalCall::Call(call.as_ref()))
         }
-        ExpressionRpnItem::PendingGroup { nodes, .. } => match nodes.as_slice() {
-            [single] => retained_terminal_call(single),
-            _ => None,
-        },
         ExpressionRpnItem::PendingNumericExpression { expression, .. } => {
             let DeferredExpression::OperandContinuation(payload) = expression.as_ref() else {
                 return None;
@@ -558,15 +553,16 @@ pub(crate) fn retained_terminal_call(item: &ExpressionRpnItem) -> Option<Retaine
     }
 }
 
-/// Derives one retained operand's known result, following authored groups and continuations.
+/// Derives one retained operand's known result, following its authored continuations.
 ///
-/// `carrier_handled` says an enclosing catch recovers this operand's fallible carrier, so an
-/// unhandled builtin step contributes its success result instead of an unhandled carrier.
+/// `carrier_handled` records that an enclosing catch handles this operand's error channel, so an
+/// unhandled builtin step contributes its success result rather than an unresolved handling need.
 pub(crate) fn retained_operand_result(
     item: &ExpressionRpnItem,
     scope_context: &ScopeContext,
     environment: &TypeEnvironment,
     carrier_handled: bool,
+    expression_builder: &AstExpressionBuilder,
 ) -> Option<RetainedOperandResult> {
     match item {
         ExpressionRpnItem::PendingNumericCall { call, .. } => {
@@ -577,12 +573,6 @@ pub(crate) fn retained_operand_result(
                     .map(RetainedOperandResult::Type),
             }
         }
-        ExpressionRpnItem::PendingGroup { nodes, .. } => match nodes.as_slice() {
-            [single] => {
-                retained_operand_result(single, scope_context, environment, carrier_handled)
-            }
-            _ => None,
-        },
         ExpressionRpnItem::PendingNumericBinding { binding, .. } => {
             if let Some(shape) = binding_reference_shape(&scope_context.numeric_state(), *binding) {
                 return Some(RetainedOperandResult::Shape(shape));
@@ -594,10 +584,17 @@ pub(crate) fn retained_operand_result(
                 // (an authored group follows the same position), so the binding's value is that
                 // operand's derived result; a multi-operand recipe keeps no known result. The
                 // initializer's carrier is its own handling, never the use site's catch.
-                Some(NumericRecipe::Directed { items, .. }) => match items.as_slice() {
-                    [single] => retained_operand_result(single, scope_context, environment, false),
-                    _ => None,
-                },
+                Some(NumericRecipe::Directed { items, .. }) => {
+                    single_operand(items).and_then(|single| {
+                        retained_operand_result(
+                            single,
+                            scope_context,
+                            environment,
+                            false,
+                            expression_builder,
+                        )
+                    })
+                }
                 _ => None,
             }
         }
@@ -608,9 +605,10 @@ pub(crate) fn retained_operand_result(
                     scope_context,
                     environment,
                     carrier_handled,
+                    expression_builder,
                 ),
                 DeferredExpression::CatchHandler(handler) => {
-                    retained_catch_result(handler, scope_context, environment)
+                    retained_catch_result(handler, scope_context, environment, expression_builder)
                 }
                 _ => retained_known_shape(std::slice::from_ref(item))
                     .map(RetainedOperandResult::Shape),
@@ -629,6 +627,7 @@ fn retained_continuation_result(
     scope_context: &ScopeContext,
     environment: &TypeEnvironment,
     carrier_handled: bool,
+    expression_builder: &AstExpressionBuilder,
 ) -> Option<RetainedOperandResult> {
     if payload.invalid_member.is_some() {
         // The rejected member's result exists at no type, so it fixes no shape for a further step
@@ -652,12 +651,15 @@ fn retained_continuation_result(
                 _ => step.success_shape.map(RetainedOperandResult::Shape),
             }
         }
-        None => retained_operand_result(
-            &payload.operand,
-            scope_context,
-            environment,
-            carrier_handled,
-        ),
+        None => single_operand(&payload.operand).and_then(|operand| {
+            retained_operand_result(
+                operand,
+                scope_context,
+                environment,
+                carrier_handled,
+                expression_builder,
+            )
+        }),
     }?;
     match payload.suffix {
         DeferredExpressionSuffix::None | DeferredExpressionSuffix::Propagate { .. } => {
@@ -687,6 +689,7 @@ fn retained_catch_result(
     handler: &DeferredCatchHandler,
     scope_context: &ScopeContext,
     environment: &TypeEnvironment,
+    expression_builder: &AstExpressionBuilder,
 ) -> Option<RetainedOperandResult> {
     match &handler.handled {
         StatementExpression::Built(_) => {
@@ -696,10 +699,17 @@ fn retained_catch_result(
                 _ => None,
             }
         }
-        StatementExpression::Retained(deferred) => match deferred.items.as_slice() {
-            [single] => retained_operand_result(single, scope_context, environment, true),
-            _ => None,
-        },
+        StatementExpression::Retained(deferred) => {
+            single_operand(&deferred.items).and_then(|single| {
+                retained_operand_result(
+                    single,
+                    scope_context,
+                    environment,
+                    true,
+                    expression_builder,
+                )
+            })
+        }
     }
 }
 
@@ -717,8 +727,15 @@ pub(crate) fn retained_operand_result_shape(
     scope_context: &ScopeContext,
     environment: &TypeEnvironment,
     include_unhandled_success: bool,
+    expression_builder: &AstExpressionBuilder,
 ) -> Result<Option<KnownShapeId>, ExpressionParseError> {
-    match retained_operand_result(item, scope_context, environment, include_unhandled_success) {
+    match retained_operand_result(
+        item,
+        scope_context,
+        environment,
+        include_unhandled_success,
+        expression_builder,
+    ) {
         Some(RetainedOperandResult::Type(type_id)) => {
             intern_concrete_shape(scope_context, type_id).map(Some)
         }
@@ -742,13 +759,18 @@ pub(crate) fn retained_operand_numeric_origin_shape(
     environment: &TypeEnvironment,
     receiver_type_id: TypeId,
     include_unhandled_success: bool,
+    expression_builder: &AstExpressionBuilder,
 ) -> Option<KnownShapeId> {
-    let shape =
-        match retained_operand_result(item, scope_context, environment, include_unhandled_success)?
-        {
-            RetainedOperandResult::Type(_) => return None,
-            RetainedOperandResult::Shape(shape) => shape,
-        };
+    let shape = match retained_operand_result(
+        item,
+        scope_context,
+        environment,
+        include_unhandled_success,
+        expression_builder,
+    )? {
+        RetainedOperandResult::Type(_) => return None,
+        RetainedOperandResult::Shape(shape) => shape,
+    };
     let state = scope_context.numeric_state();
     match state.shape(shape) {
         KnownShape::Numeric(_) => Some(shape),
@@ -766,19 +788,12 @@ pub(crate) fn retained_operand_numeric_origin_shape(
     }
 }
 
-/// Whether one unresolved retained origin is a pending numeric call, following authored groups.
+/// Whether one unresolved retained origin is a pending numeric call.
 ///
 /// WHY: only a call's member waits for the call's own result. Every other unresolved origin keeps
 ///      its member as a retained occurrence, so its ordinary diagnostic comes from completion.
 fn retained_pending_numeric_call(item: &ExpressionRpnItem) -> bool {
-    match item {
-        ExpressionRpnItem::PendingNumericCall { .. } => true,
-        ExpressionRpnItem::PendingGroup { nodes, .. } => match nodes.as_slice() {
-            [single] => retained_pending_numeric_call(single),
-            _ => false,
-        },
-        _ => false,
-    }
+    matches!(item, ExpressionRpnItem::PendingNumericCall { .. })
 }
 
 /// The authored access and receiving facts of one retained operand member chain.
@@ -804,12 +819,18 @@ pub(crate) struct RetainedOperandInput<'a> {
 ///
 /// PRECONDITION: the cursor is on the authored dot and `expression`'s last item is a retained
 ///               numeric operand.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "retained operand member access keeps the token stream, expression output, operand input, scope, type interner, expression builder, const store, string table, and path fork as separate borrows"
+)]
 pub(crate) fn retain_pending_operand_member_access(
     token_stream: &mut AstCursor<'_>,
     expression: &mut Vec<ExpressionRpnItem>,
     input: RetainedOperandInput<'_>,
     scope_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
@@ -818,21 +839,34 @@ pub(crate) fn retain_pending_operand_member_access(
         expected: operand_expected,
         value_mode: operand_value_mode,
     } = input;
-    let item = expression.pop().ok_or_else(|| {
+    let operand_start = trailing_operand_start(expression)?.ok_or_else(|| {
         CompilerError::compiler_error(
             "a retained operand member step was recorded without an authored operand",
         )
     })?;
+    let operand = expression.split_off(operand_start);
+    let item = single_operand(&operand);
 
-    let receiver =
-        retained_operand_result_shape(&item, scope_context, type_interner.environment(), false)?
-            .and_then(|shape| receiver_shape(scope_context, shape));
-    let Some(receiver) = receiver else {
+    // A grouped operand with several items has no single receiver item, so it has no receiver. It
+    // records an occurrence, like any other origin without a receiver, rather than failing here.
+    let receiver = match item {
+        Some(receiver_item) => retained_operand_result_shape(
+            receiver_item,
+            scope_context,
+            type_interner.environment(),
+            false,
+            expression_builder,
+        )?
+        .and_then(|shape| receiver_shape(scope_context, shape))
+        .map(|receiver| (receiver_item, receiver)),
+        None => None,
+    };
+    let Some((receiver_item, receiver)) = receiver else {
         // An origin that fixes no receiver type cannot resolve a member here. A pending call's member
         // waits for its own result, while every other origin, including a scalar awaiting its width,
         // keeps the member as an occurrence so later eligible uses still parse and the ordinary
         // diagnostic issues at the body root.
-        if retained_pending_numeric_call(&item) {
+        if item.is_some_and(retained_pending_numeric_call) {
             return Err(pending_numeric_member_access_error(
                 token_stream,
                 string_table,
@@ -845,13 +879,15 @@ pub(crate) fn retain_pending_operand_member_access(
             token_stream,
             scope_context,
             type_interner,
+            expression_builder,
+            const_values,
             string_table,
             path_fork,
         )?;
         // The occurrence is diagnostic metadata only; the original operand retains the binding
         // identity and cannot contribute a result value or receiver constraint.
         expression.push(invalid_member_operand(
-            item,
+            operand,
             Vec::new(),
             body_symbol::PendingNumericMemberAccess {
                 member_name,
@@ -859,7 +895,8 @@ pub(crate) fn retain_pending_operand_member_access(
             },
             operand_expected,
             operand_value_mode,
-        ));
+            expression_builder,
+        )?);
         return Ok(());
     };
 
@@ -870,29 +907,33 @@ pub(crate) fn retain_pending_operand_member_access(
         token_stream,
         RetainedChainRoot {
             shape: receiver,
-            access: retained_chain_root(&item),
+            access: retained_chain_root(receiver_item),
         },
         &chain_access,
         scope_context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     )?;
     expression.push(match invalid_member {
         Some(occurrence) => invalid_member_operand(
-            item,
+            operand,
             steps,
             occurrence,
             operand_expected,
             operand_value_mode,
-        ),
+            expression_builder,
+        )?,
         None => retained_operand_item(
-            item,
+            operand,
             steps,
             DeferredExpressionSuffix::None,
             operand_expected,
             operand_value_mode,
-        ),
+            expression_builder,
+        )?,
     });
     Ok(())
 }
@@ -912,27 +953,42 @@ pub(crate) fn retain_pending_operand_member_access(
 ///
 /// Returns false when the operand does not end in such an operation, or that operation already
 /// carries an authored handling; the caller then keeps the operand-position suffix path.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "call propagation retention keeps the token stream, expression output, scope, type interner, expression builder, const store, string table, path fork, and catch policy as separate borrows"
+)]
 pub(crate) fn retain_operand_call_propagation(
     token_stream: &mut AstCursor<'_>,
     expression: &mut [ExpressionRpnItem],
     scope_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
     allow_boundary_catch: bool,
 ) -> Result<bool, ExpressionParseError> {
-    if let Some(call) = expression.last_mut().and_then(single_retained_call_mut) {
+    let Some(operand_start) = trailing_operand_start(expression)? else {
+        return Ok(false);
+    };
+    if let Some(call) =
+        single_operand_mut(&mut expression[operand_start..]).and_then(single_retained_call_mut)
+    {
         return retain_deferred_call_propagation(
             token_stream,
             call,
             scope_context,
             type_interner,
+            expression_builder,
+            const_values,
             string_table,
             path_fork,
             allow_boundary_catch,
         );
     }
-    let Some(step) = expression.last_mut().and_then(terminal_retained_step_mut) else {
+    let Some(step) =
+        single_operand_mut(&mut expression[operand_start..]).and_then(terminal_retained_step_mut)
+    else {
         return Ok(false);
     };
     match step {
@@ -941,6 +997,8 @@ pub(crate) fn retain_operand_call_propagation(
             method,
             scope_context,
             type_interner,
+            expression_builder,
+            const_values,
             string_table,
             path_fork,
             allow_boundary_catch,
@@ -950,6 +1008,8 @@ pub(crate) fn retain_operand_call_propagation(
             builtin,
             scope_context,
             type_interner,
+            expression_builder,
+            const_values,
             string_table,
             path_fork,
             allow_boundary_catch,
@@ -959,11 +1019,17 @@ pub(crate) fn retain_operand_call_propagation(
 }
 
 /// Retain an authored operand `!` on one retained call, reading its declared facts per variant.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "deferred call propagation keeps the token stream, call, scope, type interner, expression builder, const store, string table, path fork, and catch policy as separate borrows"
+)]
 fn retain_deferred_call_propagation(
     token_stream: &mut AstCursor<'_>,
     call: &mut DeferredCall,
     scope_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
     allow_boundary_catch: bool,
@@ -991,6 +1057,8 @@ fn retain_deferred_call_propagation(
         token_stream,
         scope_context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
         allow_boundary_catch,
@@ -1017,11 +1085,17 @@ fn retain_deferred_call_propagation(
 ///       call builds.
 /// WHY: the method step that ends the operand is the chain's fallible producer; its handling stays
 ///      on that step, so earlier steps and the continuation suffix are left unchanged.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "receiver method propagation keeps the token stream, method, scope, type interner, expression builder, const store, string table, path fork, and catch policy as separate borrows"
+)]
 fn retain_receiver_method_propagation(
     token_stream: &mut AstCursor<'_>,
     method: &mut DeferredReceiverCall,
     scope_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
     allow_boundary_catch: bool,
@@ -1046,6 +1120,8 @@ fn retain_receiver_method_propagation(
         token_stream,
         scope_context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
         allow_boundary_catch,
@@ -1074,11 +1150,17 @@ fn retain_receiver_method_propagation(
 /// WHY: a retained builtin member already resolved its operation and result slots, so an authored
 ///      operand suffix must travel with the step instead of ending the fragment; a `catch` stays
 ///      with the enclosing fragment owner exactly as it does for a retained receiver method.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "builtin step propagation keeps the token stream, step, scope, type interner, expression builder, const store, string table, path fork, and catch policy as separate borrows"
+)]
 fn retain_builtin_step_propagation(
     token_stream: &mut AstCursor<'_>,
     step: &mut RetainedBuiltinStep,
     scope_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
     allow_boundary_catch: bool,
@@ -1092,6 +1174,8 @@ fn retain_builtin_step_propagation(
         token_stream,
         scope_context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
         allow_boundary_catch,
@@ -1166,10 +1250,16 @@ struct RetainedPropagationFacts<'a> {
 ///       once, and returns the propagation handling the operation records for its completion.
 /// WHY: every retained operation shares one `!` legality check and one token consumption, so the
 ///      operand position and the operation's receiving site cannot disagree on the decision.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "retained operation propagation keeps the token stream, scope, type interner, expression builder, const store, string table, path fork, catch policy, and propagation facts as separate borrows"
+)]
 fn parse_retained_operation_propagation(
     token_stream: &mut AstCursor<'_>,
     scope_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
     allow_boundary_catch: bool,
@@ -1180,6 +1270,8 @@ fn parse_retained_operation_propagation(
         token_stream,
         scope_context,
         type_interner,
+        expression_builder,
+        const_values,
         facts.success_contract,
         facts.error_return,
         facts.authored_failure_lane,
@@ -1226,7 +1318,7 @@ fn set_retained_call_authored_handling(call: &mut DeferredCall, handling: Deferr
     }
 }
 
-/// The terminal step of one suffix-free operand continuation, following authored groups of one.
+/// The terminal step of one suffix-free operand continuation.
 ///
 /// WHY: the chain's last step carries its authored `!`, while earlier steps keep their own handling.
 ///      A rejected member is the position's whole outcome, so a following bang must not validate
@@ -1244,10 +1336,6 @@ fn terminal_retained_step_mut(item: &mut ExpressionRpnItem) -> Option<&mut Retai
             }
             payload.steps.last_mut()
         }
-        ExpressionRpnItem::PendingGroup { nodes, .. } => match nodes.as_mut_slice() {
-            [single] => terminal_retained_step_mut(single),
-            _ => None,
-        },
         _ => None,
     }
 }
@@ -1255,10 +1343,6 @@ fn terminal_retained_step_mut(item: &mut ExpressionRpnItem) -> Option<&mut Retai
 fn single_retained_call_mut(item: &mut ExpressionRpnItem) -> Option<&mut DeferredCall> {
     match item {
         ExpressionRpnItem::PendingNumericCall { call, .. } => Some(call.as_mut()),
-        ExpressionRpnItem::PendingGroup { nodes, .. } => match nodes.as_mut_slice() {
-            [single] => single_retained_call_mut(single),
-            _ => None,
-        },
         _ => None,
     }
 }
@@ -1295,58 +1379,39 @@ pub(crate) fn retain_operand_handling_suffix(
     suffix: DeferredExpressionSuffix,
     expected_type: ExpectedType,
     value_mode: &ValueMode,
+    expression_builder: &AstExpressionBuilder,
 ) -> Result<(), ExpressionParseError> {
-    let item = expression.pop().ok_or_else(|| {
+    let operand_start = trailing_operand_start(expression)?.ok_or_else(|| {
         CompilerError::compiler_error(
             "an authored operand suffix was recorded without an authored operand",
         )
     })?;
+    let mut operand = expression.split_off(operand_start);
 
-    let item = match item {
+    // A plain continuation that has not recorded its own suffix yet takes this one in place, so one
+    // operand keeps one wrapper. A group, or a continuation that already has a suffix, wraps as one
+    // operand, so a second authored suffix applies to the first one's result.
+    if let [
         ExpressionRpnItem::PendingNumericExpression {
-            expression: inner,
-            span,
-        } => {
-            if let DeferredExpression::OperandContinuation(mut payload) = *inner {
-                // A continuation that has not recorded its own suffix yet takes this one in
-                // place, so one operand keeps one wrapper; a second authored suffix applies to
-                // the first one's result and therefore wraps the existing continuation.
-                if matches!(payload.suffix, DeferredExpressionSuffix::None) {
-                    payload.suffix = suffix;
-                    expression.push(ExpressionRpnItem::PendingNumericExpression {
-                        expression: Box::new(DeferredExpression::OperandContinuation(payload)),
-                        span,
-                    });
-                    return Ok(());
-                }
-                let wrapped = ExpressionRpnItem::PendingNumericExpression {
-                    expression: Box::new(DeferredExpression::OperandContinuation(payload)),
-                    span,
-                };
-                expression.push(retained_operand_item(
-                    wrapped,
-                    Vec::new(),
-                    suffix,
-                    expected_type,
-                    value_mode,
-                ));
-                return Ok(());
-            }
-            ExpressionRpnItem::PendingNumericExpression {
-                expression: inner,
-                span,
-            }
-        }
-        other => other,
-    };
+            expression: inner, ..
+        },
+    ] = operand.as_mut_slice()
+        && let DeferredExpression::OperandContinuation(payload) = inner.as_mut()
+        && matches!(payload.suffix, DeferredExpressionSuffix::None)
+    {
+        payload.suffix = suffix;
+        expression.extend(operand);
+        return Ok(());
+    }
 
     expression.push(retained_operand_item(
-        item,
+        operand,
         Vec::new(),
         suffix,
         expected_type,
         value_mode,
-    ));
+        expression_builder,
+    )?);
     Ok(())
 }
 
@@ -1359,28 +1424,31 @@ pub(crate) fn retain_operand_handling_suffix(
 ///      parameter and result slots; only the argument values are missing, so no second member
 ///      grammar or receiver value is needed.
 pub(crate) fn retained_builtin_operand(
-    receiver_expression: Expression,
+    receiver_expression: ExprId,
     step: RetainedBuiltinStep,
-) -> ExpressionRpnItem {
+    expression_builder: &AstExpressionBuilder,
+) -> Result<ExpressionRpnItem, ExpressionParseError> {
     retained_operand_item(
-        ExpressionRpnItem::Operand(receiver_expression),
+        vec![ExpressionRpnItem::Operand(receiver_expression)],
         vec![RetainedPostfixStep::Builtin(Box::new(step))],
         DeferredExpressionSuffix::None,
         ExpectedType::Infer,
         &ValueMode::ImmutableOwned,
+        expression_builder,
     )
 }
 
 /// Build the wrapper item for one retained operand continuation.
 fn retained_operand_item(
-    operand: ExpressionRpnItem,
+    operand: Vec<ExpressionRpnItem>,
     steps: Vec<RetainedPostfixStep>,
     suffix: DeferredExpressionSuffix,
     expected: ExpectedType,
     value_mode: &ValueMode,
-) -> ExpressionRpnItem {
-    let span = operand.source_span();
-    ExpressionRpnItem::PendingNumericExpression {
+    expression_builder: &AstExpressionBuilder,
+) -> Result<ExpressionRpnItem, ExpressionParseError> {
+    let span = operand_leading_item(&operand)?.source_span(expression_builder)?;
+    Ok(ExpressionRpnItem::PendingNumericExpression {
         expression: Box::new(DeferredExpression::OperandContinuation(Box::new(
             RetainedOperandContinuation {
                 // A group carries the authored receiving context its own fragment completes with;
@@ -1395,7 +1463,7 @@ fn retained_operand_item(
             },
         ))),
         span,
-    }
+    })
 }
 
 /// Build the distinct operand for one already-rejected member occurrence.
@@ -1406,14 +1474,15 @@ fn retained_operand_item(
 ///      reference / alias / value shapes is what stops the rejected member's result position from
 ///      selecting the scalar receiver's type.
 fn invalid_member_operand(
-    operand: ExpressionRpnItem,
+    operand: Vec<ExpressionRpnItem>,
     steps: Vec<RetainedPostfixStep>,
     occurrence: body_symbol::PendingNumericMemberAccess,
     expected: ExpectedType,
     value_mode: &ValueMode,
-) -> ExpressionRpnItem {
-    let span = operand.source_span();
-    ExpressionRpnItem::PendingNumericExpression {
+    expression_builder: &AstExpressionBuilder,
+) -> Result<ExpressionRpnItem, ExpressionParseError> {
+    let span = operand_leading_item(&operand)?.source_span(expression_builder)?;
+    Ok(ExpressionRpnItem::PendingNumericExpression {
         expression: Box::new(DeferredExpression::OperandContinuation(Box::new(
             RetainedOperandContinuation {
                 expected: operand_evaluation_expected(&operand, expected),
@@ -1425,21 +1494,46 @@ fn invalid_member_operand(
             },
         ))),
         span,
+    })
+}
+
+/// The receiving context one grouped fragment completes with.
+///
+/// WHAT: a group is not a receiving boundary, so a numeric literal expectation becomes `Infer` and
+///       every other expectation is inherited.
+/// WHY: this is the one owner of the group expected-type rule. Dispatch uses it at group open, and
+///      retained operands reach it through `operand_evaluation_expected`.
+pub(crate) fn grouped_evaluation_expected(outer_expected: ExpectedType) -> ExpectedType {
+    match outer_expected {
+        ExpectedType::NumericLiteral(_) => ExpectedType::Infer,
+        other => other,
     }
 }
 
 /// The receiving context one retained operand's own fragment completes with.
+///
+/// WHY: only a grouped operand inherits the authored receiving context. Every other operand completes
+///      with its own value, so the fragment boundary still owns the coercion of the suffix result.
 fn operand_evaluation_expected(
-    operand: &ExpressionRpnItem,
+    operand: &[ExpressionRpnItem],
     outer_expected: ExpectedType,
 ) -> ExpectedType {
-    match operand {
-        ExpressionRpnItem::PendingGroup { .. } => match outer_expected {
-            ExpectedType::NumericLiteral(_) => ExpectedType::Infer,
-            other => other,
-        },
+    match operand.first() {
+        Some(ExpressionRpnItem::GroupOpen { .. }) => grouped_evaluation_expected(outer_expected),
         _ => ExpectedType::Infer,
     }
+}
+
+/// The leading item of one retained operand, which carries the operand's authored span.
+///
+/// WHY: a group's open marker carries its first operand's span, so the leading item owns the span
+///      of a grouped operand as well as a plain one.
+fn operand_leading_item(
+    operand: &[ExpressionRpnItem],
+) -> Result<&ExpressionRpnItem, CompilerError> {
+    operand.first().ok_or_else(|| {
+        CompilerError::compiler_error("a retained operand was recorded without authored items")
+    })
 }
 
 /// Complete one retained operand continuation: its operand value, its authored steps, then its
@@ -1457,7 +1551,7 @@ pub(crate) fn complete_retained_operand_continuation<
 >(
     payload: RetainedOperandContinuation,
     session: &mut S,
-) -> Result<Expression, ExpressionParseError> {
+) -> Result<OwnedExpr, ExpressionParseError> {
     let RetainedOperandContinuation {
         operand,
         steps,
@@ -1466,29 +1560,41 @@ pub(crate) fn complete_retained_operand_continuation<
         value_mode,
         invalid_member,
     } = payload;
-
     if let Some(occurrence) = invalid_member {
         // The occurrence's ordinary diagnostic is this position's whole outcome, issued on the
         // receiver completed through the steps before the rejected member. Like any member access,
-        // the receiver is a closed receiving site unless a catch protects it, so a carrier still
-        // pending there is rejected first.
-        let receiver = session.resolve_fragment(vec![operand], ExpectedType::Infer, &value_mode)?;
+        // the receiver is a closed receiving site unless a catch protects its pending error.
+        let receiver = session.resolve_fragment(operand, ExpectedType::Infer, &value_mode)?;
         let receiver = complete_retained_postfix_steps(receiver, steps, session)?;
         if !session.typed_errors_are_protected() {
-            validate_completed_typed_errors(&receiver)?;
+            let services = session.session_services();
+            validate_completed_typed_errors(services.expression_builder.view_owned(receiver)?)?;
         }
+        let receiver_type_id = {
+            let services = session.session_services();
+            services
+                .expression_builder
+                .view_owned(receiver)?
+                .require_single(ValueReceiverContext::ReceiverBase)?
+        };
         return Err(
-            body_symbol::pending_member_access_diagnostic(&occurrence, receiver.type_id).into(),
+            body_symbol::pending_member_access_diagnostic(&occurrence, receiver_type_id).into(),
         );
     }
 
-    let value = session.resolve_fragment(vec![operand], expected, &value_mode)?;
+    let value = session.resolve_fragment(operand, expected, &value_mode)?;
     let value = complete_retained_postfix_steps(value, steps, session)?;
     if matches!(suffix, DeferredExpressionSuffix::None) {
         return Ok(value);
     }
     let services = session.session_services();
-    apply_completed_handling_suffix(value, suffix, services.context, services.type_interner)
+    apply_completed_handling_suffix(
+        value,
+        suffix,
+        services.context,
+        services.type_interner,
+        services.expression_builder,
+    )
 }
 
 /// Complete every retained postfix step on one already-completed receiver value.
@@ -1496,19 +1602,30 @@ pub(crate) fn complete_retained_postfix_steps<
     'env,
     S: DeferredExpressionCompletion<'env> + ?Sized,
 >(
-    mut value: Expression,
+    mut value: OwnedExpr,
     steps: Vec<RetainedPostfixStep>,
     session: &mut S,
-) -> Result<Expression, ExpressionParseError> {
+) -> Result<OwnedExpr, ExpressionParseError> {
     for step in steps {
         // A value still carrying an unhandled typed producer cannot receive a further step. The
         // ready lane rejects it at this closed receiving site, on the producer's own span. A catch
         // that protects this subtree owns that producer, so the step receives it open instead.
         if !session.typed_errors_are_protected() {
-            validate_completed_typed_errors(&value)?;
+            let services = session.session_services();
+            validate_completed_typed_errors(services.expression_builder.view_owned(value)?)?;
+        }
+        {
+            let services = session.session_services();
+            services
+                .expression_builder
+                .view_owned(value)?
+                .require_single(ValueReceiverContext::ReceiverBase)?;
         }
         value = match step {
-            RetainedPostfixStep::Field(field) => complete_retained_field_step(value, field),
+            RetainedPostfixStep::Field(field) => {
+                let services = session.session_services();
+                complete_retained_field_step(value, field, services.expression_builder)?
+            }
             RetainedPostfixStep::DeclaredField(field) => {
                 complete_retained_declared_field_step(value, field, session)?
             }
@@ -1525,7 +1642,7 @@ pub(crate) fn complete_retained_postfix_steps<
                 // The step's receiver is the value just completed; injecting it resumes the one
                 // shared receiver-call constructor the completed chain also uses.
                 let mut call = *call;
-                call.receiver = DeferredCallReceiver::Ready(value);
+                call.receiver = DeferredCallReceiver::Ready(value.id());
                 complete_deferred_receiver_call(call, session)?
             }
         };
@@ -1542,10 +1659,10 @@ pub(crate) fn complete_retained_postfix_steps<
 ///      shape at the authored site, so completion resumes the existing constructor once instead of
 ///      searching members or re-parsing arguments.
 fn complete_retained_builtin_step<'env, S: DeferredExpressionCompletion<'env> + ?Sized>(
-    value: Expression,
+    value: OwnedExpr,
     step: RetainedBuiltinStep,
     session: &mut S,
-) -> Result<Expression, ExpressionParseError> {
+) -> Result<OwnedExpr, ExpressionParseError> {
     let RetainedBuiltinStep {
         kind,
         member_name,
@@ -1564,14 +1681,10 @@ fn complete_retained_builtin_step<'env, S: DeferredExpressionCompletion<'env> + 
         let mut slots = Vec::with_capacity(expected_argument_shapes.len());
         for shape in expected_argument_shapes.iter() {
             session.settle_forward_producers(*shape)?;
-            let DeferredExpressionServices {
-                context,
-                type_interner,
-                ..
-            } = session.session_services();
+            let services = session.session_services();
             slots.push(ExpectedParameterType::Known(materialise_builtin_shape(
-                context,
-                type_interner,
+                services.context,
+                services.type_interner,
                 *shape,
             )?));
         }
@@ -1579,9 +1692,15 @@ fn complete_retained_builtin_step<'env, S: DeferredExpressionCompletion<'env> + 
     };
 
     // Retained arguments finish against their routed slot, so validation sees concrete leaves.
-    // Ready arguments pass through unchanged.
+    // Ready arguments re-enter the issuing expression owner.
     let arguments = match arguments {
-        ParsedCallArguments::Ready(arguments) => arguments,
+        ParsedCallArguments::Ready(arguments) => {
+            let services = session.session_services();
+            arguments
+                .into_iter()
+                .map(|argument| argument.map_value(|id| services.expression_builder.own(id)))
+                .collect()
+        }
         ParsedCallArguments::Retained(arguments) => {
             let mut completed_arguments = Vec::with_capacity(arguments.len());
             for mut argument in arguments {
@@ -1609,68 +1728,80 @@ fn complete_retained_builtin_step<'env, S: DeferredExpressionCompletion<'env> + 
         session.settle_forward_producers(success_shape)?;
     }
 
-    let DeferredExpressionServices {
-        context,
-        type_interner,
-        string_table,
-        path_fork,
-    } = session.session_services();
-    // Ready and retained arguments validate through the same owner, so no argument skips the
-    // shared rules.
-    let completed_arguments = resolve_builtin_member_arguments(
-        BuiltinCallSite {
-            member_name: kind.source_name(),
-            member_span,
-        },
-        &arguments,
-        &builtin_argument_expectations(slots),
-        context,
-        type_interner,
-        string_table,
-        path_fork,
-    )?;
-    let result_type_ids =
-        builtin_result_type_ids(success_shape, error_return_type_id, context, type_interner)?;
-
-    let expression = match kind {
-        RetainedBuiltinKind::Collection(op) => {
-            Expression::collection_builtin_call_with_typed_arguments(
-                value,
-                op,
-                completed_arguments,
-                result_type_ids,
-                type_interner.environment_mut_for_derived_types(),
+    let expression = {
+        let services = session.session_services();
+        // Ready and retained arguments validate through the same owner, so no argument skips the
+        // shared rules.
+        let completed_arguments = resolve_builtin_member_arguments(
+            BuiltinCallSite {
+                member_name: kind.source_name(),
                 member_span,
+            },
+            &arguments,
+            &builtin_argument_expectations(slots),
+            services.context,
+            services.type_interner,
+            services.expression_builder,
+            services.const_values,
+            services.string_table,
+            services.path_fork,
+        )?;
+        let result_type_ids =
+            builtin_result_type_ids(success_shape, services.context, services.type_interner)?;
+        let expression = match kind {
+            RetainedBuiltinKind::Collection(op) => services
+                .expression_builder
+                .collection_builtin_call_with_typed_arguments(
+                    value,
+                    op,
+                    completed_arguments,
+                    result_type_ids,
+                    member_span,
+                )?,
+            RetainedBuiltinKind::Map(op) => services
+                .expression_builder
+                .map_builtin_call_with_typed_arguments(
+                    value,
+                    op,
+                    op.requires_mutable_receiver(),
+                    completed_arguments,
+                    result_type_ids,
+                    member_span,
+                )?,
+        };
+        match error_return_type_id {
+            Some(error_type) => services.expression_builder.with_typed_error_producer(
+                expression,
+                error_type,
+                Some(member_name),
+            )?,
+            None => expression,
+        }
+    };
+    match authored_handling {
+        // Recovery preserves the pending typed producer exactly as the ready lane does.
+        DeferredCallHandling::Unhandled => {
+            let services = session.session_services();
+            recover_pending_producer(
+                expression,
+                member_name,
+                services.type_interner,
+                services.expression_builder,
             )
         }
-        RetainedBuiltinKind::Map(op) => Expression::map_builtin_call_with_typed_arguments(
-            value,
-            op,
-            op.requires_mutable_receiver(),
-            completed_arguments,
-            result_type_ids,
-            type_interner.environment_mut_for_derived_types(),
-            member_span,
-        ),
-    };
-
-    match authored_handling {
-        // An unhandled fallible carrier is recovered with its typed producer still pending, as the
-        // ready lane leaves it. The next closed receiving site rejects that producer on its span.
-        DeferredCallHandling::Unhandled => Ok(recover_unhandled_carrier(
-            expression,
-            member_name,
-            type_interner,
-        )),
         // The authored `!` was consumed and validated at the operand position against this
         // operation's declared slots, so completion applies the one propagation the completed call
         // path would apply, with the operator span the authored site recorded.
-        DeferredCallHandling::Propagate { span } => apply_completed_handling_suffix(
-            expression,
-            DeferredExpressionSuffix::Propagate { span },
-            context,
-            type_interner,
-        ),
+        DeferredCallHandling::Propagate { span } => {
+            let services = session.session_services();
+            apply_completed_handling_suffix(
+                expression,
+                DeferredExpressionSuffix::Propagate { span },
+                services.context,
+                services.type_interner,
+                services.expression_builder,
+            )
+        }
     }
 }
 
@@ -1680,25 +1811,27 @@ fn complete_retained_builtin_step<'env, S: DeferredExpressionCompletion<'env> + 
 ///       same `FieldAccess` node the completed chain builds, with the member span.
 /// WHY: the receiver value only exists at completion, so the resolved field facts were recorded at
 ///      the authored site and must not be searched again.
-fn complete_retained_field_step(value: Expression, field: RetainedFieldStep) -> Expression {
+fn complete_retained_field_step(
+    value: OwnedExpr,
+    field: RetainedFieldStep,
+    expression_builder: &mut AstExpressionBuilder,
+) -> Result<OwnedExpr, ExpressionParseError> {
     increment_ast_counter(AstCounter::PostfixReceiverNodesCopied);
-    if let Some(mut inlined) = field.const_inline_value {
-        inlined.span = field.span;
-        return inlined;
+    if let Some(inlined) = field.const_inline_value {
+        let mut input = expression_builder
+            .view(inlined)?
+            .to_completed_input(expression_builder)?;
+        input.span = field.span.or(input.span);
+        return Ok(expression_builder.commit_replacement(input)?);
     }
-
-    let mut expression = Expression::new(
-        ExpressionKind::FieldAccess {
-            base: Box::new(value),
-            field: field.field_name,
-        },
-        field.span,
+    Ok(expression_builder.field_access(
+        value,
+        field.field_name,
         field.type_id,
-        field.diagnostic_type,
+        field.span,
         field.value_mode,
-    );
-    expression.const_record_state = field.const_record_state;
-    expression
+        field.const_record_state,
+    )?)
 }
 
 /// Complete one declared-envelope field projection on the completed receiver's concrete owner.
@@ -1708,32 +1841,48 @@ fn complete_retained_field_step(value: Expression, field: RetainedFieldStep) -> 
 /// WHY: a declared envelope's owner is generic, so its concrete instance exists only here. The
 ///      ordinary finisher owns visibility, member, and access diagnostics on that concrete owner.
 fn complete_retained_declared_field_step<'env, S: DeferredExpressionCompletion<'env> + ?Sized>(
-    value: Expression,
+    value: OwnedExpr,
     field: RetainedDeclaredFieldStep,
     session: &mut S,
-) -> Result<Expression, ExpressionParseError> {
-    let services = session.session_services();
-    let resolved = resolve_field_member_for_known_receiver(
-        value.type_id,
-        field.field_name,
-        services.context,
-        services.type_interner,
-        services.path_fork,
-    )?;
+) -> Result<OwnedExpr, ExpressionParseError> {
+    let receiver_type_id = {
+        let services = session.session_services();
+        services
+            .expression_builder
+            .view_owned(value)?
+            .require_single(ValueReceiverContext::ReceiverBase)?
+    };
+    let field_name = field.field_name;
+    let field_span = field.span;
+    let resolved = {
+        let services = session.session_services();
+        resolve_field_member_for_known_receiver(
+            receiver_type_id,
+            field_name,
+            services.context,
+            services.type_interner,
+            services.expression_builder,
+            services.const_values,
+            services.path_fork,
+        )?
+    };
     let Some(member) = resolved else {
+        let services = session.session_services();
         return Err(unknown_member_diagnostic(
-            value.type_id,
-            field.field_name,
-            field.span,
+            receiver_type_id,
+            field_name,
+            field_span,
             None,
             services.type_interner,
             services.path_fork,
         ));
     };
-    Ok(complete_retained_field_step(
+    let services = session.session_services();
+    complete_retained_field_step(
         value,
-        retained_field_step(member, field.span),
-    ))
+        retained_field_step(member, field_span),
+        services.expression_builder,
+    )
 }
 
 /// Parse and retain the authored steps of one member chain on a known receiver type.
@@ -1745,12 +1894,18 @@ fn complete_retained_declared_field_step<'env, S: DeferredExpressionCompletion<'
 ///      facts its ordinary constructor needs so completion never re-parses tokens.
 ///
 /// PRECONDITION: the cursor is on the first authored dot of the step chain.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "retained postfix parsing keeps the token stream, root, chain access, scope, type interner, expression builder, const store, string table, and path fork as separate borrows"
+)]
 fn parse_retained_postfix_steps(
     token_stream: &mut AstCursor<'_>,
     root: RetainedChainRoot,
     chain_access: &PostfixChainAccess,
     scope_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<RetainedPostfixSteps, ExpressionParseError> {
@@ -1792,6 +1947,8 @@ fn parse_retained_postfix_steps(
                 token_stream,
                 scope_context,
                 type_interner,
+                expression_builder,
+                const_values,
                 string_table,
                 path_fork,
                 steps,
@@ -1902,6 +2059,8 @@ fn parse_retained_postfix_steps(
                 token_stream,
                 scope_context,
                 type_interner,
+                expression_builder,
+                const_values,
                 string_table,
                 Some(member_name),
                 &expectations,
@@ -1909,7 +2068,7 @@ fn parse_retained_postfix_steps(
             )? {
                 ParsedCallArguments::Ready(arguments) => arguments
                     .into_iter()
-                    .map(DeferredCallArgument::Ready)
+                    .map(|argument| DeferredCallArgument::Ready(argument.map_value(OwnedExpr::id)))
                     .collect(),
                 ParsedCallArguments::Retained(arguments) => arguments,
             };
@@ -1921,6 +2080,7 @@ fn parse_retained_postfix_steps(
                 expected_context: GenericCallExpectedContext::None,
                 context: scope_context,
                 type_interner,
+                expression_builder,
                 path_fork,
                 call_span: member_span,
                 owned_producers,
@@ -1965,6 +2125,8 @@ fn parse_retained_postfix_steps(
                 member_name,
                 scope_context,
                 type_interner,
+                expression_builder,
+                const_values,
                 path_fork,
             )?
         {
@@ -2032,6 +2194,8 @@ fn parse_retained_postfix_steps(
                 token_stream,
                 scope_context,
                 type_interner,
+                expression_builder,
+                const_values,
                 string_table,
                 &expectations,
                 CallArgumentSyntax::UnsupportedBuiltinMember {
@@ -2057,6 +2221,8 @@ fn parse_retained_postfix_steps(
                         &expectations,
                         scope_context,
                         type_interner,
+                        expression_builder,
+                        const_values,
                         string_table,
                         path_fork,
                     )?;
@@ -2082,7 +2248,7 @@ fn parse_retained_postfix_steps(
                     kind: RetainedBuiltinKind::Collection(member.op),
                     member_name,
                     member_span,
-                    arguments,
+                    arguments: arguments.map_values(OwnedExpr::id),
                     expected_argument_shapes: member.rule.expected_argument_shapes,
                     success_shape: member.rule.success_shape,
                     error_return_type_id: member.rule.error_return_type_id,
@@ -2172,6 +2338,8 @@ fn parse_retained_postfix_steps(
                     token_stream,
                     scope_context,
                     type_interner,
+                    expression_builder,
+                    const_values,
                     string_table,
                     &expectations,
                     CallArgumentSyntax::UnsupportedBuiltinMember {
@@ -2196,6 +2364,8 @@ fn parse_retained_postfix_steps(
                             &expectations,
                             scope_context,
                             type_interner,
+                            expression_builder,
+                            const_values,
                             string_table,
                             path_fork,
                         )?;
@@ -2221,7 +2391,7 @@ fn parse_retained_postfix_steps(
                     kind: RetainedBuiltinKind::Map(member.op),
                     member_name,
                     member_span,
-                    arguments,
+                    arguments: arguments.map_values(OwnedExpr::id),
                     expected_argument_shapes: expected_shapes,
                     success_shape,
                     error_return_type_id: member.rule.error_return_type_id,
@@ -2283,6 +2453,8 @@ fn parse_retained_postfix_steps(
                     token_stream,
                     scope_context,
                     type_interner,
+                    expression_builder,
+                    const_values,
                     string_table,
                     &initial_expectations,
                     argument_syntax,
@@ -2296,6 +2468,7 @@ fn parse_retained_postfix_steps(
                         call_span: member_span,
                         scope_context,
                         type_interner,
+                        expression_builder,
                         string_table,
                         path_fork,
                     })?;
@@ -2305,7 +2478,9 @@ fn parse_retained_postfix_steps(
                     Some(instantiation.request),
                     raw_arguments
                         .into_iter()
-                        .map(DeferredCallArgument::Ready)
+                        .map(|argument| {
+                            DeferredCallArgument::Ready(argument.map_value(OwnedExpr::id))
+                        })
                         .collect(),
                 )
             } else {
@@ -2313,6 +2488,8 @@ fn parse_retained_postfix_steps(
                     token_stream,
                     scope_context,
                     type_interner,
+                    expression_builder,
+                    const_values,
                     string_table,
                     &initial_expectations,
                     argument_syntax,
@@ -2320,7 +2497,9 @@ fn parse_retained_postfix_steps(
                 )? {
                     ParsedCallArguments::Ready(arguments) => arguments
                         .into_iter()
-                        .map(DeferredCallArgument::Ready)
+                        .map(|argument| {
+                            DeferredCallArgument::Ready(argument.map_value(OwnedExpr::id))
+                        })
                         .collect(),
                     ParsedCallArguments::Retained(arguments) => arguments,
                 };
@@ -2388,6 +2567,8 @@ fn parse_retained_postfix_steps(
                 token_stream,
                 scope_context,
                 type_interner,
+                expression_builder,
+                const_values,
                 string_table,
                 path_fork,
                 steps,
@@ -2405,6 +2586,8 @@ fn parse_retained_postfix_steps(
                 token_stream,
                 scope_context,
                 type_interner,
+                expression_builder,
+                const_values,
                 string_table,
                 path_fork,
                 steps,
@@ -2481,7 +2664,6 @@ fn retained_field_step(field: ResolvedFieldMember, span: Option<SourceSpan>) -> 
     RetainedFieldStep {
         field_name: field.field_name,
         type_id: field.type_id,
-        diagnostic_type: field.diagnostic_type,
         value_mode: field.value_mode,
         const_record_state: field.const_record_state,
         const_inline_value: field.const_inline_value,
@@ -2515,6 +2697,8 @@ fn consume_invalid_member_access(
     token_stream: &mut AstCursor<'_>,
     scope_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<(StringId, Option<SourceSpan>), ExpressionParseError> {
@@ -2540,6 +2724,8 @@ fn consume_invalid_member_access(
         token_stream,
         scope_context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     )?;
@@ -2556,6 +2742,8 @@ fn consume_rejected_member_steps(
     token_stream: &mut AstCursor<'_>,
     scope_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
@@ -2571,6 +2759,8 @@ fn consume_rejected_member_steps(
                 token_stream,
                 scope_context,
                 type_interner,
+                expression_builder,
+                const_values,
                 string_table,
                 path_fork,
             )?;
@@ -2604,10 +2794,16 @@ fn consume_rejected_member_steps(
 ///      waits for that type while the authored syntax after it still parses and registers its uses.
 ///
 /// PRECONDITION: the cursor is on the rejected member's name, which has been read but not consumed.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "rejected member reporting keeps the token stream, scope, type interner, expression builder, const store, string table, path fork, steps, and occurrence as separate borrows"
+)]
 fn rejected_chain_member(
     token_stream: &mut AstCursor<'_>,
     scope_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
     steps: Vec<RetainedPostfixStep>,
@@ -2617,6 +2813,8 @@ fn rejected_chain_member(
         token_stream,
         scope_context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     )?;

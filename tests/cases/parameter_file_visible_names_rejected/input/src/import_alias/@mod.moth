@@ -1,0 +1,5 @@
+@types AccountId as LocalId
+
+parameter_binding |LocalId I32| -> I32:
+    return LocalId
+;

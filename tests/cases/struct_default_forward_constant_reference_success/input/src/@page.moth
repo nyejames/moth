@@ -1,0 +1,7 @@
+Box = |
+    n I32 = width,
+|
+
+width #= 3
+b = Box()
+[:struct_default_forward_constant_reference n=[b.n]]

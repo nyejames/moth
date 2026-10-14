@@ -578,6 +578,31 @@ pub(crate) fn diagnostic_type_name(
     )
 }
 
+pub(crate) fn value_receiver_context_name(
+    receiver: crate::compiler_frontend::compiler_messages::ValueReceiverContext,
+) -> &'static str {
+    use crate::compiler_frontend::compiler_messages::ValueReceiverContext;
+    match receiver {
+        ValueReceiverContext::Declaration => "declaration",
+        ValueReceiverContext::Assignment => "assignment",
+        ValueReceiverContext::Return => "return",
+        ValueReceiverContext::Then => "then",
+        ValueReceiverContext::FunctionArgument => "function argument",
+        ValueReceiverContext::ConstructorArgument => "constructor argument",
+        ValueReceiverContext::OperatorOperand => "operator operand",
+        ValueReceiverContext::Condition => "condition",
+        ValueReceiverContext::ReceiverBase => "receiver base",
+        ValueReceiverContext::CollectionElement => "collection element",
+        ValueReceiverContext::MapKey => "map key",
+        ValueReceiverContext::MapValue => "map value",
+        ValueReceiverContext::TemplateInterpolation => "template interpolation",
+        ValueReceiverContext::CastSource => "cast source",
+        ValueReceiverContext::MatchScrutinee => "match scrutinee",
+        ValueReceiverContext::AssertionArgument => "assertion argument",
+        ValueReceiverContext::General => "value",
+    }
+}
+
 pub(crate) fn type_mismatch_context_name(
     context: crate::compiler_frontend::compiler_messages::TypeMismatchContext,
 ) -> &'static str {

@@ -12,8 +12,8 @@ use super::super::store::{ControlFlowBodyKind, TemplateIrStore};
 use super::super::summary::TemplateIrSummary;
 use super::super::view::TemplateTirPhase;
 use super::builder::TemplateIrBuilder;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::templates::template::SlotKey;
 use crate::compiler_frontend::ast::templates::template::{
     Style, TemplateSegmentOrigin, TemplateType,
@@ -26,11 +26,8 @@ use crate::compiler_frontend::ast::templates::tir::copy_state::TirCopyState;
 use crate::compiler_frontend::ast::templates::tir::ids::SlotOccurrenceId;
 use crate::compiler_frontend::ast::templates::tir::slot_plan::convert_tir_tree_to_active_slot_plan;
 use crate::compiler_frontend::ast::templates::tir::store::MalformedTirStore;
-use crate::compiler_frontend::datatypes::DataType;
-use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 fn build_finalized_tir_template(store: &mut TemplateIrStore) -> TemplateIrId {
@@ -61,23 +58,19 @@ fn runtime_slot_plan(render_root: TemplateIrNodeId) -> TemplateSlotPlan {
             render_root,
             span: None,
         }],
-        span: None,
     }
 }
 
-fn bool_selector() -> TemplateBranchSelector {
-    TemplateBranchSelector::Bool(Expression {
-        kind: ExpressionKind::Bool(true),
-        type_id: builtin_type_ids::BOOL,
-        failure_facts: Default::default(),
-        diagnostic_type: DataType::Bool,
-        function_receiver: None,
-        value_mode: ValueMode::ImmutableOwned,
-        span: None,
-        const_record_state: ConstRecordState::RuntimeValue,
-        contains_regular_division: false,
-        synthetic_interface_provenance: SyntheticInterfaceProvenance::empty(),
-    })
+fn bool_selector(
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+) -> TemplateBranchSelector {
+    TemplateBranchSelector::Bool(
+        expressions
+            .bool(const_values, true, None, ValueMode::ImmutableOwned)
+            .expect("test bool should construct")
+            .id(),
+    )
 }
 
 #[test]
@@ -427,7 +420,6 @@ fn slot_plan_commit_rejects_source_id_that_differs_from_index() {
                     span: None,
                 }],
                 slot_sites: vec![],
-                span: None,
             },
         )
         .expect_err("source IDs must match their vector index");
@@ -451,7 +443,6 @@ fn slot_plan_commit_rejects_site_id_that_differs_from_index() {
                     render_root,
                     span: None,
                 }],
-                span: None,
             },
         )
         .expect_err("site IDs must match their vector index");
@@ -475,7 +466,6 @@ fn slot_plan_commit_rejects_missing_source_render_root() {
                     span: None,
                 }],
                 slot_sites: vec![],
-                span: None,
             },
         )
         .expect_err("source render roots must exist");
@@ -755,8 +745,11 @@ fn conditional_construction_allocates_one_selector_site_and_stores_its_body() {
     let mut store = TemplateIrStore::new();
     let body = empty_sequence(&mut store);
 
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let selector = bool_selector(&mut expressions, &mut const_values);
     let mut builder = TemplateIrBuilder::new(&mut store);
-    let node = builder.push_conditional_node(bool_selector(), body, None);
+    let node = builder.push_conditional_node(selector, body, None);
     let next_site_id = builder.store.next_expression_site_id();
     let TemplateIrNodeKind::Conditional {
         selector_site_id,

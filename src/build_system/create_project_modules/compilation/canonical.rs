@@ -116,7 +116,10 @@ pub(super) struct BoundaryCompilationContext<'a> {
 }
 
 impl<'a> BoundaryCompilationContext<'a> {
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "boundary construction keeps configuration, profile, resolver, source owner, directives, external packages, builder and completed-package services, resolved build-config values, canonical/fixed/direct facts, build-config inputs, builder globals and optional project globals separate"
+    )]
     pub(super) fn new(
         config: &'a Config,
         build_profile: FrontendBuildProfile,
@@ -852,7 +855,10 @@ fn compile_check_only_job(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "check-only compilation keeps boundary context, provider/generated/materialisation stores, owned jobs, provider/package edges and their indexes, build-config index and mutable string/path tables separate"
+)]
 pub(super) fn compile_check_only_batches(
     context: &BoundaryCompilationContext<'_>,
     provider_store: &ModuleArtifactStore,
@@ -963,7 +969,10 @@ pub(super) fn check_only_success_batch(
     Ok(Some(batch))
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "wave compilation keeps owned boundary context and graph, canonical waves and check-only jobs, provider/package edges and mutable resource/string/path owners separate"
+)]
 pub(super) fn compile_module_waves_in_premerge_lane(
     context: BoundaryCompilationContext<'_>,
     graph: ProjectModuleGraph,

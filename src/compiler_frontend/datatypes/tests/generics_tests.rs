@@ -616,12 +616,10 @@ fn substitute_type_id_rewrites_constructed_function_and_nominal_instances() {
         TypeConstructor::Builtin(BuiltinTypeConstructor::Option),
         Box::new([parameter_type_id]),
     );
-    let tuple_with_parameter =
-        type_environment.intern_tuple(vec![parameter_type_id, option_of_parameter]);
     let function_with_parameter = type_environment.intern_function(FunctionTypeKey {
         parameters: Box::new([box_of_parameter, collection_of_parameter]),
-        returns: Box::new([tuple_with_parameter]),
-        error_return: None,
+        returns: Box::new([parameter_type_id, option_of_parameter]),
+        error_return: Some(parameter_type_id),
     });
 
     let mut mapping = FxHashMap::default();
@@ -648,16 +646,6 @@ fn substitute_type_id_rewrites_constructed_function_and_nominal_instances() {
     assert_eq!(instance.base, box_nominal);
     assert_eq!(instance.arguments.as_ref(), &[int_type_id]);
 
-    let substituted_tuple = type_environment.substitute_type_id(tuple_with_parameter, &mapping);
-    let tuple_fields = type_environment
-        .tuple_field_ids(substituted_tuple)
-        .expect("substitution should preserve tuple identity");
-    assert_eq!(tuple_fields[0], int_type_id);
-    assert_eq!(
-        type_environment.option_inner_type(tuple_fields[1]),
-        Some(int_type_id)
-    );
-
     let substituted_function =
         type_environment.substitute_type_id(function_with_parameter, &mapping);
     let substituted_function_again =
@@ -678,7 +666,11 @@ fn substitute_type_id_rewrites_constructed_function_and_nominal_instances() {
         type_environment.collection_element_type(function_definition.parameters[1].type_id),
         Some(int_type_id)
     );
-    assert_eq!(function_definition.returns[0], substituted_tuple);
+    assert_eq!(
+        function_definition.returns.as_ref(),
+        &[int_type_id, substituted_option]
+    );
+    assert_eq!(function_definition.error_return, Some(int_type_id));
 }
 
 #[test]
@@ -724,6 +716,63 @@ fn trait_bounds_lookup_succeeds_after_registration() {
     assert_eq!(
         type_environment.trait_bounds_for_generic_parameter(canonical_u),
         Some(&[TraitId(2)][..]),
+    );
+}
+
+/// Callable bounds must remain independent even when exported nominal parameter identity is shared.
+#[test]
+fn receiver_contract_lists_isolate_bounds_without_allocating_parameter_types() {
+    let mut type_environment = TypeEnvironment::new();
+    let mut string_table = StringTable::new();
+    let local_id = TypeParameterId(0);
+    let nominal_name = string_table.intern("Item");
+    let mut nominal_bounds = FxHashMap::default();
+    nominal_bounds.insert(local_id, vec![TraitId(0)]);
+    let nominal = type_environment
+        .register_generic_parameter_list([(local_id, nominal_name)].into_iter(), &nominal_bounds);
+    let parameter_id = nominal.canonical_by_local[&local_id];
+    let parameter_type_id = type_environment
+        .type_id_for_generic_parameter(parameter_id)
+        .expect("registered nominal parameter has a type");
+    let mut contracts = Vec::new();
+    for (name, bound) in [("LeftItem", TraitId(1)), ("RightItem", TraitId(2))] {
+        let mut bounds = FxHashMap::default();
+        bounds.insert(local_id, vec![bound]);
+        let name = string_table.intern(name);
+        let contract = type_environment
+            .register_generic_parameter_contract(
+                nominal.list_id,
+                [(local_id, name)].into_iter(),
+                &bounds,
+            )
+            .expect("receiver contract aligns with its nominal owner");
+        assert_eq!(contract.canonical_by_local[&local_id], parameter_id);
+        contracts.push((contract.list_id, name, bound));
+    }
+    assert_ne!(contracts[0].0, contracts[1].0);
+    for (list_id, name, bound) in contracts {
+        assert_ne!(list_id, nominal.list_id);
+        let parameter = &type_environment
+            .generic_parameters(list_id)
+            .expect("receiver contract list is retained")
+            .parameters[0];
+        assert_eq!(parameter.id, parameter_id);
+        assert_eq!(parameter.name, name);
+        assert_eq!(parameter.trait_bounds, [bound]);
+        assert_eq!(
+            type_environment.type_id_for_generic_parameter(parameter.id),
+            Some(parameter_type_id),
+        );
+    }
+    let nominal_parameter = &type_environment
+        .generic_parameters(nominal.list_id)
+        .expect("nominal list is retained")
+        .parameters[0];
+    assert_eq!(nominal_parameter.name, nominal_name);
+    assert_eq!(nominal_parameter.trait_bounds, [TraitId(0)]);
+    assert_eq!(
+        type_environment.trait_bounds_for_generic_parameter(parameter_id),
+        Some(&[TraitId(0)][..]),
     );
 }
 

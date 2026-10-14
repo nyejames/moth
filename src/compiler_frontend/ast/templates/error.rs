@@ -64,3 +64,43 @@ impl From<ExpressionParseError> for TemplateError {
         }
     }
 }
+
+impl
+    From<
+        crate::compiler_frontend::ast::expressions::expression_store::ExpressionConstructionFailure,
+    > for TemplateError
+{
+    fn from(
+        error: crate::compiler_frontend::ast::expressions::expression_store::ExpressionConstructionFailure,
+    ) -> Self {
+        use crate::compiler_frontend::ast::expressions::expression_store::ExpressionConstructionFailure;
+        match error {
+            ExpressionConstructionFailure::Diagnostic(diagnostic) => Self::Diagnostic(diagnostic),
+            ExpressionConstructionFailure::Invariant(error) => error.into(),
+        }
+    }
+}
+
+impl From<crate::compiler_frontend::ast::const_values::store::ConstValueStoreError>
+    for TemplateError
+{
+    fn from(
+        error: crate::compiler_frontend::ast::const_values::store::ConstValueStoreError,
+    ) -> Self {
+        use crate::compiler_frontend::ast::const_values::store::ConstValueStoreError;
+        match error {
+            ConstValueStoreError::Diagnostic(diagnostic) => Self::Diagnostic(diagnostic),
+            ConstValueStoreError::Infrastructure(error) => Self::Infrastructure(error),
+        }
+    }
+}
+
+impl From<crate::compiler_frontend::ast::const_eval::ConstantFoldError> for TemplateError {
+    fn from(error: crate::compiler_frontend::ast::const_eval::ConstantFoldError) -> Self {
+        use crate::compiler_frontend::ast::const_eval::ConstantFoldError;
+        match error {
+            ConstantFoldError::Diagnostic(diagnostic) => Self::Diagnostic(diagnostic),
+            ConstantFoldError::Infrastructure(error) => Self::Infrastructure(error),
+        }
+    }
+}

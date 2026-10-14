@@ -12,7 +12,9 @@ mod facts;
 
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::analysis::borrow_checker::diagnostics::BorrowDiagnostics;
-use crate::compiler_frontend::analysis::borrow_checker::state::{BorrowState, FunctionLayout};
+use crate::compiler_frontend::analysis::borrow_checker::state::{
+    BorrowState, FunctionLayout, LocalState,
+};
 #[cfg(any(test, feature = "show_borrow_checker"))]
 use crate::compiler_frontend::analysis::borrow_checker::types::BorrowStateSnapshot;
 use crate::compiler_frontend::analysis::borrow_checker::types::{
@@ -21,7 +23,7 @@ use crate::compiler_frontend::analysis::borrow_checker::types::{
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expression_store::HirExpressionStore;
-use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, HirValueId};
+use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, HirValueId, LocalId};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use crate::compiler_frontend::semantic_identity::{
@@ -69,6 +71,8 @@ pub(super) struct BlockTransferStats {
     pub statement_facts: Vec<(HirNodeId, StatementBorrowFact)>,
     pub terminator_fact: Option<(BlockId, TerminatorBorrowFact)>,
     pub value_facts: Vec<(HirValueId, ValueBorrowFact)>,
+    // Captured operation payloads are installed only after the outgoing edge kills old outcomes.
+    pub invoke_results: Vec<(LocalId, LocalState)>,
 }
 
 /// Executes one forward transfer step for a single basic block.
@@ -121,9 +125,22 @@ pub(super) fn transfer_block(
     };
 
     match &block.terminator {
-        HirTerminator::Return(value)
-        | HirTerminator::ReturnSuccess(value)
-        | HirTerminator::ReturnError(value) => {
+        HirTerminator::Return(values) => {
+            let terminator_order = layout.terminator_order_or_unknown(block.id);
+            let location = context.diagnostics.terminator_error_span(block.id);
+            for value in context.expressions.values(*values) {
+                transfer_aggregate_expression_ownership(
+                    layout,
+                    state,
+                    *value,
+                    block.id,
+                    terminator_order,
+                    location,
+                    &mut aggregate_context,
+                )?;
+            }
+        }
+        HirTerminator::ReturnError(value) => {
             let terminator_order = layout.terminator_order_or_unknown(block.id);
             let location = context.diagnostics.terminator_error_span(block.id);
             transfer_aggregate_expression_ownership(
@@ -136,18 +153,20 @@ pub(super) fn transfer_block(
                 &mut aggregate_context,
             )?;
         }
-        HirTerminator::FallibleBranch { result, .. } => {
+        HirTerminator::Invoke { operation, .. } => {
             let terminator_order = layout.terminator_order_or_unknown(block.id);
             let location = context.diagnostics.terminator_error_span(block.id);
-            transfer_aggregate_expression_ownership(
-                layout,
-                state,
-                *result,
-                block.id,
-                terminator_order,
-                location,
-                &mut aggregate_context,
-            )?;
+            for value in operation.operands(context.expressions) {
+                transfer_aggregate_expression_ownership(
+                    layout,
+                    state,
+                    value,
+                    block.id,
+                    terminator_order,
+                    location,
+                    &mut aggregate_context,
+                )?;
+            }
         }
         _ => {}
     }

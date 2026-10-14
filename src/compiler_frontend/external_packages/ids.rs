@@ -8,7 +8,8 @@
 
 use crate::compiler_frontend::hir::ids::FunctionId;
 use crate::compiler_frontend::semantic_identity::{
-    ModulePrivateExecutableIdentity, OriginFunctionId, StablePackageIdentity,
+    GeneratedFunctionIdentity, ModulePrivateExecutableIdentity, OriginFunctionId,
+    StablePackageIdentity,
 };
 
 use super::ExternalSymbolPath;
@@ -166,6 +167,7 @@ pub enum CallTarget {
     Local(FunctionId),
     CrossModule(OriginFunctionId),
     ModulePrivate(ModulePrivateExecutableIdentity),
-    Generated(crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity),
+    /// Keep the large stable key out of every call and Invoke's inline payload.
+    Generated(Box<GeneratedFunctionIdentity>),
     External(ExternalFunctionId),
 }

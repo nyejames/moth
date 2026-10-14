@@ -1,18 +1,14 @@
-//! Compile-time template folding.
+//! Compile-time template folding over immutable, owner-bound semantic expressions.
 //!
-//! WHAT: Converts finalized TIR-backed template trees and const control-flow
-//! bodies into compact or piece-bearing [`ConstStringValue`] emissions.
-//!
-//! WHY: Keeps compile-time folding inside AST template preparation and shares
-//! the same finalized template semantics that later runtime handoff consumes,
-//! without entangling parser or HIR code.
+//! Exact prepared TIR views retain structural authority. Bindings share committed IDs;
+//! the ordinary expression folder owns isolated replacement construction and fold refusal.
 
-use crate::compiler_frontend::ast::const_eval::{ConstantFoldOutcome, constant_fold};
-use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
-use crate::compiler_frontend::ast::expressions::eval_expression::pending_expression_item_bug;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-use crate::compiler_frontend::ast::expressions::expression_rpn::{
-    ExpressionRpn, ExpressionRpnItem,
+use crate::compiler_frontend::ast::const_eval::{BindingFold, fold_expression_with_bindings};
+use crate::compiler_frontend::ast::const_values::store::{
+    ConstStringValue, ConstValuePayload, ConstValueStore,
+};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, ExpressionOperationView, ExpressionView,
 };
 use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
@@ -26,50 +22,27 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
-use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
-use crate::compiler_frontend::symbols::path_interner::PathId;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 
-// -------------------------
-//  Folding Context
-// -------------------------
-
-/// Narrow state shared by TIR constant folding and its AST expression helpers.
-///
-/// The exact TIR view owns structural authority. Project path and formatting services stay at the
-/// outer AST boundaries that consume them rather than travelling through the TIR reducer.
 pub(crate) struct TirFoldContext<'a> {
     pub string_table: &'a mut StringTable,
+    pub expression_builder: &'a mut AstExpressionBuilder,
+    pub const_values: &'a mut ConstValueStore,
     pub template_const_loop_iteration_limit: usize,
-
     pub(crate) bindings: Vec<TemplateFoldBinding>,
-    /// Optional source-scope lookup for already-resolved module constants.
-    ///
-    /// WHY: AST emission folds TIR before the finalized `ConstValueStore` exists, so
-    ///      range operands need a lazy path back to the active visibility-filtered scope.
     pub(crate) source_scope: Option<&'a ScopeContext>,
 }
 
-/// Compile-time template folding must keep structural no-output distinct from output that happens
-/// to be an empty string, because parent wrappers apply only to structurally emitted children.
-///
-/// WHAT: carries the module-local compact or piece-bearing folded string through every recursive
-/// fold result.
-/// WHY: one emission shape keeps text fast while preserving `Resource` and `SiteRoot` anchors until
-/// the owning public or HIR boundary can handle them.
+/// Structural no-output is distinct from an emitted empty string for parent wrappers.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum TemplateEmission {
     NoOutput,
     Output(ConstStringValue),
 }
 
-/// Exact fold output paired with the semantic provenance consumed to produce it.
-///
-/// WHAT: keeps text emission and the canonical synthetic-interface dependency set together for
-///      every exact TIR fold, including recursive child and wrapper folds.
-/// WHY: provenance must follow the selected fold path and must stay attached to the result it was
-///      consumed for; an ambient accumulator would leak unselected branches.
+/// Provenance follows only the exact selected emission path, never an ambient accumulator.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct TemplateFoldResult {
     pub(crate) emission: TemplateEmission,
@@ -91,47 +64,26 @@ impl TemplateFoldResult {
     }
 }
 
-/// Borrow-first expression resolution result for template folding.
-///
-/// WHAT: distinguishes expressions that were not modified during fold-binding
-///       resolution (borrowed reference to the original) from expressions that
-///       were actually rewritten (owned).
-/// WHY: most template expressions pass through folding unchanged because they
-///      contain no foldable bindings. Returning a borrowed reference avoids
-///      cloning the entire expression tree on the common no-substitution path,
-///      which is the majority of expressions in template-heavy modules.
-pub(crate) enum FoldResolvedExpression<'a> {
-    /// The expression was not changed; fold sites can use the original.
-    Borrowed(&'a Expression),
-    /// The expression was actually rewritten; this is the owned result.
-    Owned(Box<Expression>),
-}
-
-impl FoldResolvedExpression<'_> {
-    /// Consumes the resolved expression and returns an owned `Expression`.
-    ///
-    /// WHAT: clones only when the resolved expression is borrowed (no substitution
-    ///       happened), so callers that genuinely need an owned value still work.
-    /// WHY: a few call sites (like RPN operand vectors) need owned values, but
-    ///      this method makes the clone explicit and only happens when the
-    ///      borrow-first path determined a rewrite is required.
-    pub(crate) fn into_owned(self) -> Expression {
-        match self {
-            FoldResolvedExpression::Borrowed(expr) => expr.clone(),
-            FoldResolvedExpression::Owned(expr) => *expr,
+impl<'a> TirFoldContext<'a> {
+    /// Creates a fold context with no active bindings or source scope.
+    pub(crate) fn new(
+        string_table: &'a mut StringTable,
+        expression_builder: &'a mut AstExpressionBuilder,
+        const_values: &'a mut ConstValueStore,
+        template_const_loop_iteration_limit: usize,
+    ) -> Self {
+        Self {
+            string_table,
+            expression_builder,
+            const_values,
+            template_const_loop_iteration_limit,
+            bindings: Vec::new(),
+            source_scope: None,
         }
     }
 }
 
 impl TirFoldContext<'_> {
-    fn lookup_binding(&self, path: &PathId) -> Option<&Expression> {
-        self.bindings
-            .iter()
-            .rev()
-            .find(|binding| binding.path == *path)
-            .map(|binding| &binding.value)
-    }
-
     pub(crate) fn push_bindings(
         &mut self,
         bindings: impl IntoIterator<Item = TemplateFoldBinding>,
@@ -146,349 +98,196 @@ impl TirFoldContext<'_> {
     }
 }
 
-// -------------------------
-//  Folding Implementation
-// -------------------------
+pub(crate) fn resolve_fold_bindings_in_expression(
+    expression: ExprId,
+    fold_context: &mut TirFoldContext<'_>,
+) -> Result<ExprId, TemplateError> {
+    let original = fold_context.expression_builder.view(expression)?;
+    if let ExpressionOperationView::Reference(path) = original.operation()
+        && let Some(binding) = fold_context
+            .bindings
+            .iter()
+            .rev()
+            .find(|binding| binding.path == path)
+    {
+        // A binding is already a completed value. Preserve optional wrappers and nested
+        // template identity rather than evaluating or reconstructing the bound root.
+        fold_context.expression_builder.view(binding.value)?;
+        return Ok(binding.value);
+    }
+    let bindings = &fold_context.bindings;
+    let resolved = if bindings.is_empty() {
+        expression
+    } else {
+        fold_expression_with_bindings(
+            expression,
+            fold_context.expression_builder,
+            fold_context.const_values,
+            fold_context.string_table,
+            BindingFold::speculative(fold_context.source_scope),
+            |path| {
+                bindings
+                    .iter()
+                    .rev()
+                    .find(|binding| binding.path == path)
+                    .map(|binding| binding.value)
+            },
+        )?
+    };
+    // Rendering a coerced template enters that nested value's own exact context.
+    let view = fold_context.expression_builder.view(resolved)?;
+    if resolved == expression
+        && let ExpressionOperationView::Coerce { value, .. } = view.operation()
+        && matches!(value.operation(), ExpressionOperationView::Template(_))
+    {
+        return Ok(value.id());
+    }
+    Ok(resolved)
+}
 
-/// Resolves one option-capture scrutinee and returns both its binding and the provenance consumed
-/// while deciding whether the capture is present.
 pub(crate) fn selected_option_capture_payload_with_provenance(
-    scrutinee: &Expression,
+    scrutinee: ExprId,
     pattern: &MatchPattern,
     store: &TemplateIrStore,
     fold_context: &mut TirFoldContext<'_>,
 ) -> Result<(Option<TemplateFoldBinding>, SyntheticInterfaceProvenance), TemplateError> {
-    match const_option_presence(scrutinee, store, fold_context)? {
-        ConstOptionPresence::Present { value, provenance } => Ok((
-            Some(TemplateFoldBinding {
-                path: option_capture_binding_path(pattern)?,
-                value: *value,
-            }),
-            provenance,
-        )),
-
-        ConstOptionPresence::Absent { provenance } => Ok((None, provenance)),
-    }
-}
-
-enum ConstOptionPresence {
-    Present {
-        value: Box<Expression>,
-        provenance: SyntheticInterfaceProvenance,
-    },
-    Absent {
-        provenance: SyntheticInterfaceProvenance,
-    },
-}
-
-fn const_option_presence(
-    scrutinee: &Expression,
-    store: &TemplateIrStore,
-    fold_context: &mut TirFoldContext<'_>,
-) -> Result<ConstOptionPresence, TemplateError> {
     let resolved = resolve_fold_bindings_in_expression(scrutinee, fold_context)?;
-
-    // Work with the resolved expression by reference to avoid an extra clone
-    // when the resolver returned a borrowed reference (no binding was substituted).
-    let resolved_ref: &Expression = match &resolved {
-        FoldResolvedExpression::Borrowed(expr) => expr,
-        FoldResolvedExpression::Owned(expr) => expr,
-    };
-
-    match &resolved_ref.kind {
-        ExpressionKind::OptionNone => Ok(ConstOptionPresence::Absent {
-            provenance: resolved_ref.synthetic_interface_provenance.clone(),
-        }),
-
-        ExpressionKind::Coerced { value, .. } => {
-            let payload = (**value).clone();
-
-            // Scalar and other non-template payloads keep their ordinary const rules.
-            // The active fold view supplies the store authority for any nested
-            // template reached by expression recursion.
-            let payload_is_compile_time_constant = payload
-                .const_value_kind_with_template_classifier(&mut |template| {
-                    let reference = template.tir_reference;
-                    let view = TirView::with_minimum_phase(
-                        store,
-                        reference.root,
-                        reference.phase,
-                        TemplateTirPhase::Composed,
-                        reference.context,
-                    )?;
-                    Ok(prepare_tir_view(&view, TemplatePreparationMode::Value)?
+    let view = fold_context.expression_builder.view(resolved)?;
+    let provenance = expression_provenance(view);
+    let payload = match view.operation() {
+        ExpressionOperationView::Constant(id) => match fold_context.const_values.payload(id) {
+            Some(ConstValuePayload::OptionNone) => return Ok((None, provenance)),
+            Some(ConstValuePayload::OptionSome(value) | ConstValuePayload::Coerced(value)) => {
+                let metadata = fold_context.const_values.metadata(*value).ok_or_else(|| {
+                    CompilerError::compiler_error("Missing option capture constant.")
+                })?;
+                let value = *value;
+                let type_id = metadata.type_id;
+                let span = view.span();
+                let mode = view.value_mode();
+                fold_context
+                    .expression_builder
+                    .constant(value, type_id, span, mode)?
+                    .id()
+            }
+            _ => return Err(option_capture_const_deferred_error(view).into()),
+        },
+        ExpressionOperationView::Coerce { value, .. } => {
+            let constant = value
+                .const_value_kind_with_template_classifier(
+                    fold_context.const_values,
+                    &mut |template| {
+                        let reference = template.tir_reference;
+                        let view = TirView::with_minimum_phase(
+                            store,
+                            reference.root,
+                            reference.phase,
+                            TemplateTirPhase::Composed,
+                            reference.context,
+                        )?;
+                        Ok(prepare_tir_view(
+                            &view,
+                            fold_context.expression_builder,
+                            fold_context.const_values,
+                            TemplatePreparationMode::Value,
+                        )?
                         .facts
                         .final_value_kind)
-                })?
+                    },
+                )?
                 .is_compile_time_value();
-
-            if payload_is_compile_time_constant {
-                Ok(ConstOptionPresence::Present {
-                    provenance: resolved_ref
-                        .synthetic_interface_provenance
-                        .union(&payload.synthetic_interface_provenance),
-                    value: Box::new(payload),
-                })
-            } else {
-                Err(option_capture_const_deferred_error(resolved_ref).into())
+            if !constant {
+                return Err(option_capture_const_deferred_error(view).into());
             }
+            value.id()
         }
-
-        _ => Err(option_capture_const_deferred_error(resolved_ref).into()),
-    }
-}
-
-fn option_capture_binding_path(pattern: &MatchPattern) -> Result<PathId, TemplateError> {
+        _ => return Err(option_capture_const_deferred_error(view).into()),
+    };
     let MatchPattern::OptionPresentCapture { binding_path, .. } = pattern else {
         return Err(CompilerError::compiler_error(
             "Template option-capture folding received a non-capture pattern.",
         )
         .into());
     };
-
-    Ok(*binding_path)
+    let provenance = provenance.union(&expression_provenance(
+        fold_context.expression_builder.view(payload)?,
+    ));
+    Ok((
+        Some(TemplateFoldBinding {
+            path: *binding_path,
+            value: payload,
+        }),
+        provenance,
+    ))
 }
 
-fn option_capture_const_deferred_error(expression: &Expression) -> CompilerDiagnostic {
+fn expression_provenance(expression: ExpressionView<'_>) -> SyntheticInterfaceProvenance {
+    expression
+        .occurrence_facts()
+        .map_or_else(SyntheticInterfaceProvenance::empty, |facts| {
+            facts.provenance.clone()
+        })
+}
+
+fn option_capture_const_deferred_error(expression: ExpressionView<'_>) -> CompilerDiagnostic {
     CompilerDiagnostic::invalid_template_structure(
         InvalidTemplateStructureReason::TemplateOptionCaptureConstDeferred,
-        expression.span,
+        expression.span(),
     )
 }
 
 pub(crate) fn fold_conditional_loop_const_condition(
-    condition: &Expression,
-    fallback_span: Option<crate::compiler_frontend::source::SourceSpan>,
+    condition: ExprId,
+    fallback_span: Option<SourceSpan>,
+    fold_context: &TirFoldContext<'_>,
 ) -> Result<bool, TemplateError> {
-    match &condition.kind {
-        ExpressionKind::Bool(value) => Ok(*value),
-
-        ExpressionKind::Coerced { value, .. } => {
-            fold_conditional_loop_const_condition(value, fallback_span)
-        }
-
-        _ => Err(CompilerDiagnostic::invalid_template_structure(
-            InvalidTemplateStructureReason::TemplateLoopConditionNotConst,
-            condition.span.or(fallback_span),
-        )
-        .into()),
-    }
+    fold_resolved_bool_condition(
+        fold_context.expression_builder.view(condition)?,
+        fallback_span,
+        fold_context.const_values,
+        InvalidTemplateStructureReason::TemplateLoopConditionNotConst,
+    )
 }
 
-/// Evaluates a const template condition and returns the exact value provenance consumed by it.
 pub(crate) fn fold_bool_condition_with_provenance(
-    condition: &Expression,
-    fallback_span: Option<crate::compiler_frontend::source::SourceSpan>,
+    condition: ExprId,
+    fallback_span: Option<SourceSpan>,
     fold_context: &mut TirFoldContext<'_>,
 ) -> Result<(bool, SyntheticInterfaceProvenance), TemplateError> {
     let resolved = resolve_fold_bindings_in_expression(condition, fold_context)?;
-
-    // Borrow the resolved expression by reference to avoid cloning when no
-    // binding was substituted (the common path for const template conditions).
-    let resolved_ref: &Expression = match &resolved {
-        FoldResolvedExpression::Borrowed(expr) => expr,
-        FoldResolvedExpression::Owned(expr) => expr,
-    };
-
-    let value = fold_resolved_bool_condition(resolved_ref, fallback_span)?;
-    Ok((value, resolved_ref.synthetic_interface_provenance.clone()))
+    let view = fold_context.expression_builder.view(resolved)?;
+    let value = fold_resolved_bool_condition(
+        view,
+        fallback_span,
+        fold_context.const_values,
+        InvalidTemplateStructureReason::TemplateIfConditionNotConst,
+    )?;
+    Ok((value, expression_provenance(view)))
 }
 
 fn fold_resolved_bool_condition(
-    condition: &Expression,
-    fallback_span: Option<crate::compiler_frontend::source::SourceSpan>,
+    condition: ExpressionView<'_>,
+    fallback_span: Option<SourceSpan>,
+    constants: &ConstValueStore,
+    reason: InvalidTemplateStructureReason,
 ) -> Result<bool, TemplateError> {
-    match &condition.kind {
-        ExpressionKind::Bool(value) => Ok(*value),
-        ExpressionKind::Coerced { value, .. } => fold_resolved_bool_condition(value, fallback_span),
-        _ => Err(CompilerDiagnostic::invalid_template_structure(
-            InvalidTemplateStructureReason::TemplateIfConditionNotConst,
-            condition.span.or(fallback_span),
-        )
-        .into()),
-    }
-}
-
-/// Resolves fold bindings in an expression using a borrow-first strategy.
-///
-/// WHAT: examines an expression and returns either a borrowed reference to the
-///       original (when no substitution was needed) or an owned rewritten expression.
-/// WHY: most template expressions contain no foldable bindings. Cloning the
-///      entire expression tree on every fold call is wasted work when the common
-///      path simply passes the expression through unchanged. The borrow-first
-///      approach avoids allocation on the no-substitution path entirely.
-pub(crate) fn resolve_fold_bindings_in_expression<'a>(
-    expression: &'a Expression,
-    fold_context: &mut TirFoldContext<'_>,
-) -> Result<FoldResolvedExpression<'a>, TemplateError> {
-    match &expression.kind {
-        ExpressionKind::Reference(path) => {
-            if let Some(bound_value) = fold_context.lookup_binding(path) {
-                // Binding found: produce an owned clone of the bound value.
-                // This is the actual substitution that justifies an allocation.
-                add_ast_counter(AstCounter::TemplateFoldBindingSubstitutions, 1);
-                add_ast_counter(AstCounter::TemplateFoldExpressionCloneRequests, 1);
-                add_ast_counter(AstCounter::TemplateFoldExpressionOwnedRewrites, 1);
-                Ok(FoldResolvedExpression::Owned(Box::new(bound_value.clone())))
-            } else {
-                // No binding: borrow the original expression unchanged.
-                Ok(FoldResolvedExpression::Borrowed(expression))
+    match condition.operation() {
+        ExpressionOperationView::Constant(id) => {
+            let mut payload = constants.payload(id);
+            while let Some(ConstValuePayload::Coerced(value)) = payload {
+                payload = constants.payload(*value);
+            }
+            if let Some(ConstValuePayload::Bool(value)) = payload {
+                return Ok(*value);
             }
         }
-
-        ExpressionKind::Coerced { value, to_type } => {
-            let resolved = resolve_fold_bindings_in_expression(value, fold_context)?;
-
-            // If the inner value was not substituted, the coerced wrapper is
-            // also unchanged — borrow the original expression.
-            if matches!(resolved, FoldResolvedExpression::Borrowed(_)) {
-                // A coercion wrapper around a template expression is transparent
-                // for template string rendering: the nested template is rendered
-                // as string content. Returning the inner template directly lets
-                // downstream fold paths (including the parser-TIR-backed route)
-                // handle it as a nested template rather than failing on the
-                // Coerced wrapper.
-                if matches!(value.kind, ExpressionKind::Template(_)) {
-                    return Ok(FoldResolvedExpression::Borrowed(value));
-                }
-                return Ok(FoldResolvedExpression::Borrowed(expression));
-            }
-
-            // Inner value was rewritten: rebuild the coerced wrapper with the
-            // resolved inner value. Only allocate because the inner actually changed.
-            let resolved_owned = resolved.into_owned();
-            add_ast_counter(AstCounter::TemplateFoldExpressionCloneRequests, 1);
-            add_ast_counter(AstCounter::TemplateFoldExpressionOwnedRewrites, 1);
-            Ok(FoldResolvedExpression::Owned(Box::new(Expression {
-                kind: ExpressionKind::Coerced {
-                    value: Box::new(resolved_owned),
-                    to_type: *to_type,
-                },
-                ..expression.clone()
-            })))
+        ExpressionOperationView::Coerce { value, .. } => {
+            return fold_resolved_bool_condition(value, fallback_span, constants, reason);
         }
-
-        ExpressionKind::Runtime(rpn) => {
-            fold_runtime_expression_with_bindings(expression, rpn, fold_context)
-        }
-
-        // All other expression kinds have no foldable bindings — borrow unchanged.
-        _ => Ok(FoldResolvedExpression::Borrowed(expression)),
+        _ => {}
     }
-}
-
-/// Resolves fold bindings in a runtime RPN expression.
-///
-/// WHAT: substitutes foldable bindings inside RPN operand expressions and
-///       attempts constant folding on the substituted result. Returns a borrowed
-///       reference when no operand was substituted and folding did not produce
-///       a new value.
-/// WHY: RPN expressions in const template loops are the other main allocation
-///      hot spot. When all operands are non-binding references or literals,
-///      the expression passes through unchanged and should not be cloned.
-fn fold_runtime_expression_with_bindings<'a>(
-    expression: &'a Expression,
-    rpn: &ExpressionRpn,
-    fold_context: &mut TirFoldContext<'_>,
-) -> Result<FoldResolvedExpression<'a>, TemplateError> {
-    let mut substituted = Vec::with_capacity(rpn.items.len());
-    let mut any_substituted = false;
-    let mut retained_pending = false;
-
-    for item in &rpn.items {
-        let new_item = match item {
-            ExpressionRpnItem::Operand(value) => {
-                let resolved = resolve_fold_bindings_in_expression(value, fold_context)?;
-                match resolved {
-                    FoldResolvedExpression::Borrowed(_) => {
-                        // Operand unchanged — push the original clone (operator
-                        // nodes need owned items in the substituted Vec).
-                        item.clone()
-                    }
-                    FoldResolvedExpression::Owned(owned) => {
-                        any_substituted = true;
-                        add_ast_counter(AstCounter::TemplateFoldExpressionCloneRequests, 1);
-                        ExpressionRpnItem::Operand(*owned)
-                    }
-                }
-            }
-            ExpressionRpnItem::Operator { .. } => item.clone(),
-            // A retained numeric recipe must stay untouched: body completion replaces it
-            // before any fold runs, so the item is carried through unchanged.
-            ExpressionRpnItem::PendingNumericBinding { .. }
-            | ExpressionRpnItem::PendingNumericCast { .. }
-            | ExpressionRpnItem::PendingNumericCall { .. }
-            | ExpressionRpnItem::PendingNumericExpression { .. } => {
-                retained_pending = true;
-                item.clone()
-            }
-            // Pending syntax never survives evaluation; its presence here is a broken
-            // compiler invariant, not a foldable position.
-            ExpressionRpnItem::PendingNumericLiteral { .. }
-            | ExpressionRpnItem::PendingGroup { .. } => {
-                return Err(pending_expression_item_bug("template folding").into());
-            }
-        };
-        substituted.push(new_item);
-    }
-
-    // No operand was substituted and constant folding has nothing new to
-    // evaluate — borrow the original expression unchanged.
-    if !any_substituted {
-        return Ok(FoldResolvedExpression::Borrowed(expression));
-    }
-
-    // A retained numeric recipe cannot be constant-folded yet: keep the substituted RPN
-    // as authored so body completion resolves its pending items exactly once.
-    if retained_pending {
-        add_ast_counter(AstCounter::TemplateFoldExpressionCloneRequests, 1);
-        add_ast_counter(AstCounter::TemplateFoldExpressionOwnedRewrites, 1);
-        return Ok(FoldResolvedExpression::Owned(Box::new(Expression {
-            kind: ExpressionKind::Runtime(ExpressionRpn { items: substituted }),
-            ..expression.clone()
-        })));
-    }
-
-    // At least one operand was substituted; attempt constant folding on the
-    // updated RPN to see if the expression can be simplified further.
-    // Folding consumes what it is given, and both non-folding outcomes below rebuild a runtime
-    // node from the pre-fold items, so this caller keeps its own copy.
-    add_ast_counter(AstCounter::ExpressionOperandClones, substituted.len());
-
-    match constant_fold(
-        substituted.clone(),
-        fold_context.string_table,
-        fold_context.source_scope,
-    ) {
-        Ok(ConstantFoldOutcome::Folded(mut stack)) => {
-            if stack.len() == 1
-                && let Some(ExpressionRpnItem::Operand(folded)) = stack.pop()
-            {
-                add_ast_counter(AstCounter::TemplateFoldExpressionCloneRequests, 1);
-                add_ast_counter(AstCounter::TemplateFoldExpressionOwnedRewrites, 1);
-                return Ok(FoldResolvedExpression::Owned(Box::new(folded)));
-            }
-            // Folding did not simplify to a single value; build a new Runtime
-            // expression from the substituted RPN.
-            add_ast_counter(AstCounter::TemplateFoldExpressionCloneRequests, 1);
-            add_ast_counter(AstCounter::TemplateFoldExpressionOwnedRewrites, 1);
-            Ok(FoldResolvedExpression::Owned(Box::new(Expression {
-                kind: ExpressionKind::Runtime(ExpressionRpn { items: substituted }),
-                ..expression.clone()
-            })))
-        }
-
-        Ok(ConstantFoldOutcome::NotConstant(_))
-        | Ok(ConstantFoldOutcome::TextUnavailable { .. })
-        | Err(_) => {
-            // Both non-constant outcomes stay speculative here. Runtime lowering resolves
-            // structural pieces after URL contexts are assigned.
-            add_ast_counter(AstCounter::TemplateFoldExpressionCloneRequests, 1);
-            add_ast_counter(AstCounter::TemplateFoldExpressionOwnedRewrites, 1);
-            Ok(FoldResolvedExpression::Owned(Box::new(Expression {
-                kind: ExpressionKind::Runtime(ExpressionRpn { items: substituted }),
-                ..expression.clone()
-            })))
-        }
-    }
+    Err(
+        CompilerDiagnostic::invalid_template_structure(reason, condition.span().or(fallback_span))
+            .into(),
+    )
 }

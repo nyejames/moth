@@ -48,7 +48,6 @@ arguments.
 - collections
 - maps
 - functions
-- fallible result carriers
 - external opaque types
 
 If any variant contains an unsupported payload field, equality for the whole

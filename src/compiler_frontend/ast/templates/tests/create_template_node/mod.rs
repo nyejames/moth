@@ -1,8 +1,10 @@
 use super::*;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
-use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
+use crate::compiler_frontend::ast::const_values::store::{ConstStringValue, ConstValueStore};
 use crate::compiler_frontend::ast::cursor::AstCursor;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExpressionView,
+};
 use crate::compiler_frontend::ast::templates::create_template_node::TemplatePathTables;
 use crate::compiler_frontend::ast::templates::template::{TemplateSegmentOrigin, TemplateType};
 use crate::compiler_frontend::ast::templates::template_folding::{
@@ -23,6 +25,7 @@ use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan};
 use crate::compiler_frontend::style_directives::{StyleDirectiveRegistry, StyleDirectiveSpec};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::tests::ast_fixture_support::make_test_variable;
 use crate::compiler_frontend::tokenizer::lexer::{LexedSource, TokenizeFailure, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::{
     SourceTokens, TemplateBodyMode, TestSourceTokensBuilder, TokenIndex, TokenTag,
@@ -174,11 +177,14 @@ fn fold_template_in_context(
     template: &Template,
     context: &ScopeContext,
     string_table: &mut StringTable,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
 ) -> StringId {
     // Every caller supplies a parser-emitted or direct module-local TIR
     // reference, so folding never needs a content-finalizer fallback here.
 
-    let mut fold_context = context.new_tir_fold_context(string_table);
+    let mut fold_context =
+        context.new_tir_fold_context(string_table, expression_builder, const_values);
     fold_template_with_fold_context(
         template,
         &context.template_ir_store,
@@ -205,7 +211,12 @@ fn fold_template_with_fold_context(
         TemplateTirPhase::Composed,
         reference.context,
     )?;
-    let prepared = prepare_tir_view(&view, preparation_mode)?;
+    let prepared = prepare_tir_view(
+        &view,
+        &*fold_context.expression_builder,
+        &*fold_context.const_values,
+        preparation_mode,
+    )?;
     if !matches!(prepared.outcome, TemplatePreparationOutcome::Foldable) {
         panic!("test template expected to be foldable")
     }
@@ -244,6 +255,8 @@ fn effective_tir_kind(template: &Template, context: &ScopeContext) -> TemplateTy
 
 fn runtime_template_context(
     scope: &PathId,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> ScopeContext {
@@ -251,6 +264,8 @@ fn runtime_template_context(
     runtime_template_context_with_style_directives(
         scope,
         &style_directives,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     )
@@ -259,22 +274,28 @@ fn runtime_template_context(
 fn runtime_template_context_with_style_directives(
     scope: &PathId,
     style_directives: &StyleDirectiveRegistry,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> ScopeContext {
     let value_name = string_table.intern("value");
-    let declaration = Declaration {
-        id: path_fork
-            .try_intern_child(*scope, value_name)
-            .expect("test path fits"),
-        value: Expression::string_slice(
+    let value = expression_builder
+        .string_slice(
+            const_values,
             string_table.intern("dynamic"),
             None,
             ValueMode::ImmutableOwned,
-        ),
-        binding_span: None,
-        config_qualifier: None,
-    };
+        )
+        .expect("test string slice should construct")
+        .id();
+    let declaration = make_test_variable(
+        path_fork
+            .try_intern_child(*scope, value_name)
+            .expect("test path fits"),
+        value,
+        expression_builder,
+    );
 
     with_test_path_context(
         ScopeContext::new_for_tests(
@@ -335,6 +356,8 @@ fn folded_template_output_with_style_directives(
     style_directives: &StyleDirectiveRegistry,
 ) -> String {
     let mut string_table = StringTable::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let fixture = template_tokens_from_source_with_style_directives(
@@ -362,12 +385,20 @@ fn folded_template_output_with_style_directives(
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
     )
     .expect("template should parse");
-    let folded = fold_template_in_context(&template, &context, &mut string_table);
+    let folded = fold_template_in_context(
+        &template,
+        &context,
+        &mut string_table,
+        &mut expression_builder,
+        &mut const_values,
+    );
 
     string_table.resolve(folded).to_owned()
 }
@@ -382,6 +413,8 @@ fn template_parse_rendered_error_with_style_directives(
     style_directives: &StyleDirectiveRegistry,
 ) -> String {
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let scope = path_fork
@@ -424,6 +457,8 @@ fn template_parse_rendered_error_with_style_directives(
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -481,6 +516,8 @@ fn template_warnings_with_style_directives(
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let fixture = template_tokens_from_source_with_style_directives(
         source,
         style_directives,
@@ -493,6 +530,8 @@ fn template_warnings_with_style_directives(
         runtime_template_context_with_style_directives(
             &source_path,
             style_directives,
+            &mut expression_builder,
+            &mut const_values,
             &mut string_table,
             &mut path_fork,
         )
@@ -514,6 +553,8 @@ fn template_warnings_with_style_directives(
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -562,7 +603,8 @@ fn collect_body_text_from_tir(
 fn tir_root_has_head_dynamic_expression(
     template: &Template,
     store: &TemplateIrStore,
-    predicate: impl Fn(&Expression) -> bool,
+    expression_builder: &AstExpressionBuilder,
+    predicate: impl Fn(ExpressionView<'_>) -> bool,
 ) -> bool {
     let reference = &template.tir_reference;
     let Some(template_ir) = store.get_template(reference.root) else {
@@ -580,7 +622,11 @@ fn tir_root_has_head_dynamic_expression(
                     expression,
                     origin: TemplateSegmentOrigin::Head,
                     ..
-                } if predicate(expression)
+                } if predicate(
+                    expression_builder
+                        .view(*expression)
+                        .expect("dynamic expression should belong to the builder"),
+                )
             )
         })
     };
@@ -591,7 +637,11 @@ fn tir_root_has_head_dynamic_expression(
             expression,
             origin: TemplateSegmentOrigin::Head,
             ..
-        } => predicate(expression),
+        } => predicate(
+            expression_builder
+                .view(*expression)
+                .expect("dynamic expression should belong to the builder"),
+        ),
         _ => false,
     }
 }

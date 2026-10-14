@@ -9,7 +9,7 @@
 use crate::compiler_frontend::ast::Ast;
 use crate::compiler_frontend::ast::AstDocFragmentKind;
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression_store::ExpressionView;
 use crate::compiler_frontend::ast::expressions::failure_classification::AstBuiltinFailureSummaries;
 use crate::compiler_frontend::ast::expressions::failure_facts::{
     ImplicitFailureContributor, ImplicitFailureSource,
@@ -35,8 +35,11 @@ impl<'a> HirBuilder<'a> {
     ///       inactive handler provenance before link facts are published.
     /// WHY: expression lowering already visits every provenance-bearing AST value; this avoids
     ///      introducing another AST walk or storing provenance on every HIR expression.
-    pub(crate) fn accumulate_function_provenance(&mut self, expression: &Expression) {
-        if expression.synthetic_interface_provenance.is_empty() {
+    pub(crate) fn accumulate_function_provenance(&mut self, expression: ExpressionView<'_>) {
+        let Some(occurrence) = expression.occurrence_facts() else {
+            return;
+        };
+        if occurrence.provenance.is_empty() {
             return;
         }
         let Some(function_id) = self.current_function else {
@@ -46,7 +49,7 @@ impl<'a> HirBuilder<'a> {
             .function_provenance_by_block
             .entry((function_id, self.current_block))
             .or_default()
-            .merge(&expression.synthetic_interface_provenance);
+            .merge(&occurrence.provenance);
     }
 
     pub(super) fn assign_function_origins(&mut self) -> Result<(), CompilerError> {
@@ -153,7 +156,11 @@ impl<'a> HirBuilder<'a> {
                 ));
         // Completed AST contains owned runtime handoffs, never unresolved TIR references.
         let template_ir_store = TemplateIrStore::new();
-        let summaries = AstBuiltinFailureSummaries::compute(&[&ast.nodes], &template_ir_store)?;
+        let summaries = AstBuiltinFailureSummaries::compute(
+            &[&ast.nodes],
+            &template_ir_store,
+            &ast.expressions,
+        )?;
 
         for node in &ast.nodes {
             let NodeKind::Function(path, signature, _) = &node.kind else {
@@ -173,6 +180,9 @@ impl<'a> HirBuilder<'a> {
                 )
             })?;
             let contributors = self.project_failure_contributors(&pending.body.implicit)?;
+            // Inert messages still carry private-call obligations. The module service installs
+            // canonical generated contracts for these validation-only roots before AST release;
+            // resolving their targets here creates no executable call or link dependency.
             let assertion_message_calls =
                 self.project_failure_contributors(&pending.assertion_message_calls)?;
             let mut deferred_custom_catches =

@@ -13,10 +13,11 @@ use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::source::SourceSpan;
 
 use crate::compiler_frontend::ast::Ast;
-use crate::compiler_frontend::ast::ast_nodes::{Declaration, NodeKind};
+use crate::compiler_frontend::ast::ast_nodes::{Declaration, DeclarationValue, NodeKind};
 use crate::compiler_frontend::ast::const_values::store::{
     ConstStringValue, ConstValueId, ConstValueStore, ConstValueVisit,
 };
+use crate::compiler_frontend::ast::expressions::expression_store::ExpressionStore;
 use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ReturnChannel};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::TypeId;
@@ -229,8 +230,17 @@ impl<'a> HirBuilder<'a> {
         let result = store.fold_value(value_id, &mut |metadata, visit| {
             let region = self.current_region_or_error(span)?;
             let ty = self.lower_type_id(metadata.type_id, span)?;
+            #[cfg(feature = "benchmark_counters")]
+            if matches!(
+                visit,
+                ConstValueVisit::FixedScalar(_) | ConstValueVisit::Bool(_) | ConstValueVisit::Char(_)
+            ) {
+                increment_frontend_counter(FrontendCounter::CensusHirScalarPayloadCopiesSampled);
+            }
             match visit {
                 ConstValueVisit::Number(value) => {
+                    #[cfg(feature = "benchmark_counters")]
+                    increment_frontend_counter(FrontendCounter::CensusHirNumberPayloadClonesSampled);
                     self.validate_number_value_type(value, metadata.type_id, &metadata.span)?;
                     self.make_expression(
                         span,
@@ -268,6 +278,8 @@ impl<'a> HirBuilder<'a> {
                     // `HirExpressionKind::StructuralString` values from template lowering;
                     // physical variant planning owns final URL text.
                     ConstStringValue::Pieces(pieces) => {
+                        #[cfg(feature = "benchmark_counters")]
+                        increment_frontend_counter(FrontendCounter::CensusHirStructuralPiecesClonesSampled);
                         let pieces = self.module.expressions.append_string_pieces(pieces, *span)?;
                         self.make_expression(
                             span,
@@ -670,18 +682,6 @@ impl<'a> HirBuilder<'a> {
             (None, None) => None,
         };
 
-        let success_return_type = match success_return_type_ids.as_slice() {
-            [] => self.type_environment.builtins().none,
-            [single] => *single,
-            multiple => self.type_environment.intern_tuple(multiple.to_vec()),
-        };
-        let return_type = if let Some(error_type) = error_return_type_id {
-            self.type_environment
-                .intern_fallible_carrier(success_return_type, error_type)
-        } else {
-            success_return_type
-        };
-
         let region_id = self.allocate_region_id();
         self.push_region(HirRegion::lexical(region_id, None));
 
@@ -701,7 +701,8 @@ impl<'a> HirBuilder<'a> {
             id: function_id,
             entry: entry_block_id,
             params: vec![],
-            return_type,
+            returns: success_return_type_ids.into_boxed_slice(),
+            error_return: error_return_type_id,
         };
 
         self.functions_by_name.insert(*name, function_id);
@@ -755,15 +756,15 @@ impl<'a> HirBuilder<'a> {
         fallback_span: &Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
         for param in &signature.parameters {
-            let param_span = param.value.span.or(*fallback_span);
+            let param_span = param.binding_span.or(*fallback_span);
 
-            let param_type = self.lower_type_id(param.value.type_id, &param_span)?;
+            let param_type = self.lower_type_id(param.type_id, &param_span)?;
             // Authored parameter binding uses the explicit `Declaration.binding_span`
             // (the binding-name anchor), never the default-value/initializer span.
             let local_id = self.allocate_named_local(
                 param.id.to_owned(),
                 param_type,
-                param.value.value_mode.is_mutable(),
+                param.value_mode.is_mutable(),
                 param.binding_span,
             )?;
 
@@ -776,11 +777,17 @@ impl<'a> HirBuilder<'a> {
 
     pub(super) fn lower_variable_declaration_statement(
         &mut self,
+        expressions: &ExpressionStore,
         variable: &Declaration,
         span: &Option<SourceSpan>,
         statement_span: Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
-        if variable.value.is_const_record_value() {
+        let initializer = variable
+            .value
+            .initializer()
+            .map(|id| expressions.view(id))
+            .transpose()?;
+        if initializer.is_some_and(|initializer| initializer.is_const_record_value()) {
             if !self.module_constants_by_name.contains_key(&variable.id) {
                 return_hir_transformation_error!(
                     format!(
@@ -793,24 +800,34 @@ impl<'a> HirBuilder<'a> {
             return Ok(());
         }
 
-        let source_location = if variable.value.span.is_none() {
-            *span
-        } else {
-            variable.value.span
-        };
-
-        let local_type = self.lower_type_id(variable.value.type_id, &source_location)?;
+        if matches!(
+            variable.value,
+            DeclarationValue::PendingConstant
+                | DeclarationValue::Shell(_)
+                | DeclarationValue::Default(_)
+                | DeclarationValue::StructDefinition(_)
+        ) {
+            return_hir_transformation_error!(
+                "Unresolved or non-runtime declaration owner reached HIR statement lowering",
+                self.hir_error_location(span)
+            );
+        }
+        let source_location = initializer.and_then(|value| value.span()).or(*span);
+        let local_type = self.lower_type_id(variable.type_id, &source_location)?;
         // Authored binding: the local carries the explicit `Declaration.binding_span`
         // (the binding-name anchor), never the initializer span. The initializer span
         // belongs to the value expression lowered below.
         let local_id = self.allocate_named_local(
             variable.id.to_owned(),
             local_type,
-            variable.value.value_mode.is_mutable(),
+            variable.value_mode.is_mutable(),
             variable.binding_span,
         )?;
 
-        let value = self.lower_expression_value_to_current_block(&variable.value)?;
+        let Some(initializer) = initializer else {
+            return Ok(());
+        };
+        let value = self.lower_expression_value_to_current_block(initializer)?;
 
         // Authored initialization carries the statement span, falling back to the
         // initializer span when the statement is identity-free.
@@ -820,7 +837,7 @@ impl<'a> HirBuilder<'a> {
                 value,
             },
             span,
-            statement_span.or(variable.value.span),
+            statement_span.or(initializer.span()),
         )
     }
 

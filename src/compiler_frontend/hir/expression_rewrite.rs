@@ -51,17 +51,13 @@ pub(crate) fn rewrite_expression_bottom_up(
             left_changed || right_changed
         }
         HirExpressionKind::UnaryOp { operand, .. }
-        | HirExpressionKind::TupleGet { tuple: operand, .. }
-        | HirExpressionKind::FallibleUnwrapSuccess { result: operand }
-        | HirExpressionKind::FallibleUnwrapError { result: operand }
         | HirExpressionKind::Cast {
             source: operand, ..
         }
         | HirExpressionKind::VariantPayloadGet {
             source: operand, ..
         } => rewrite_edge(store, side_table, operand, rewrite)?,
-        HirExpressionKind::Collection(elements)
-        | HirExpressionKind::TupleConstruct { elements } => {
+        HirExpressionKind::Collection(elements) => {
             rewrite_values(store, side_table, elements, row.span, rewrite)?
         }
         HirExpressionKind::StructConstruct { fields, .. } => {

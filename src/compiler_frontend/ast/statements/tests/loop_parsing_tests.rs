@@ -6,22 +6,54 @@
 use super::*;
 use crate::compiler_frontend::ast::Ast;
 use crate::compiler_frontend::ast::ast_nodes::RangeEndKind;
+use crate::compiler_frontend::ast::const_values::ConstValuePayload;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    ExprId, ExpressionOperationView, ExpressionView,
+};
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidLoopHeaderReason, InvalidRangeOperandReason, RangeOperandKind,
     ReservedNameOwner, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId};
 use crate::compiler_frontend::tests::ast_fixture_support::function_body_by_name;
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
 use crate::compiler_frontend::tokenizer::tokens::{TestSourceTokensBuilder, TokenTag};
-use moth_lexical::numeric::fixed_scalar::FixedScalar;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use std::sync::Arc;
+
+#[test]
+fn rejects_non_single_loop_sources_and_range_operands() {
+    let producers = "pair || -> I32, I32:\nreturn 1, 2\n;\nempty ||:\nreturn\n;\n";
+    for (header, produced_count) in [
+        ("pair()", 2),
+        ("empty()", 0),
+        ("pair() |item|", 2),
+        ("empty() |item|", 0),
+        ("0 to pair()", 2),
+        ("0 to empty()", 0),
+        ("pair() to 5", 2),
+        ("empty() to 5", 0),
+        ("0 to 5 by pair()", 2),
+        ("0 to 5 by empty()", 0),
+    ] {
+        let source = format!("{producers}loop {header}:\n;\n");
+        let diagnostic = parse_single_file_ast_diagnostic(&source);
+        assert!(matches!(
+            &diagnostic.payload,
+            DiagnosticPayload::InvalidValueReceiver {
+                target_count: 1,
+                produced_count: actual,
+                ..
+            } if *actual == produced_count
+        ));
+    }
+}
 
 #[test]
 fn malformed_loop_header_payload_stays_infrastructure_error_while_scanning_for_colon() {
@@ -105,6 +137,31 @@ fn loop_function_body<'a>(
     function_body_by_name(ast, path_fork, string_table, "loop_test")
 }
 
+/// Returns the stored view of a parsed loop-header expression.
+fn expression_view(ast: &Ast, id: ExprId) -> ExpressionView<'_> {
+    ast.expressions
+        .view(id)
+        .expect("parsed loop expression should be stored")
+}
+
+/// Returns the single value type of a parsed loop-header expression.
+fn expression_type_id(ast: &Ast, id: ExprId) -> TypeId {
+    expression_view(ast, id)
+        .value_type_id()
+        .expect("parsed loop expression should produce one value")
+}
+
+/// Returns the fixed-scalar value of a parsed loop-header literal, or `None` for other expressions.
+fn fixed_scalar_constant(ast: &Ast, id: ExprId) -> Option<FixedScalarValue> {
+    let ExpressionOperationView::Constant(constant) = expression_view(ast, id).operation() else {
+        return None;
+    };
+    match ast.const_values.payload(constant)? {
+        ConstValuePayload::FixedScalar(value) => Some(*value),
+        _ => None,
+    }
+}
+
 // --------------------------
 //  Conditional loops
 // --------------------------
@@ -120,7 +177,7 @@ fn parses_conditional_loop_without_bindings() {
         panic!("expected conditional loop in function body");
     };
 
-    assert!(matches!(condition.diagnostic_type, DataType::Bool));
+    assert_eq!(expression_type_id(&ast, *condition), builtin_type_ids::BOOL);
     assert_eq!(loop_body.len(), 1);
     assert!(matches!(loop_body[0].kind, NodeKind::Assignment { .. }));
 }
@@ -154,18 +211,18 @@ fn parses_range_loop_with_pipe_binding() {
     assert!(bindings.index.is_none());
     assert_eq!(range.end_kind, RangeEndKind::Inclusive);
     assert!(matches!(
-        range.start.kind,
-        ExpressionKind::FixedScalar(value)
+        fixed_scalar_constant(&ast, range.start),
+        Some(value)
             if value.scalar() == FixedScalar::I32 && value.as_i64() == Some(1)
     ));
     assert!(matches!(
-        range.end.kind,
-        ExpressionKind::FixedScalar(value)
+        fixed_scalar_constant(&ast, range.end),
+        Some(value)
             if value.scalar() == FixedScalar::I32 && value.as_i64() == Some(5)
     ));
     assert!(matches!(
-        range.step.as_ref().map(|expr| &expr.kind),
-        Some(ExpressionKind::FixedScalar(value))
+        range.step.and_then(|step| fixed_scalar_constant(&ast, step)),
+        Some(value)
             if value.scalar() == FixedScalar::I32 && value.as_i64() == Some(2)
     ));
     assert_eq!(loop_body.len(), 1);
@@ -210,7 +267,7 @@ fn range_index_binding_has_i32_type() {
         bindings
             .index
             .as_ref()
-            .map(|binding| &binding.value.diagnostic_type),
+            .map(|binding| &binding.diagnostic_type),
         Some(DataType::FixedScalar(FixedScalar::I32))
     ));
 }
@@ -232,29 +289,26 @@ fn range_item_type_uses_canonical_fixed_integer_promotion() {
 
     assert!(bindings.item.as_ref().is_some_and(|binding| {
         matches!(
-            &binding.value.diagnostic_type,
+            &binding.diagnostic_type,
             DataType::FixedScalar(FixedScalar::I32)
         )
     }));
     assert!(bindings.index.as_ref().is_some_and(|binding| {
         matches!(
-            &binding.value.diagnostic_type,
+            &binding.diagnostic_type,
             DataType::FixedScalar(FixedScalar::I32)
         )
     }));
-    assert!(matches!(
-        &range.start.diagnostic_type,
-        DataType::FixedScalar(FixedScalar::I8)
-    ));
-    assert!(matches!(
-        &range.end.diagnostic_type,
-        DataType::FixedScalar(FixedScalar::U16)
-    ));
+    assert_eq!(
+        expression_type_id(&ast, range.start),
+        builtin_type_ids::fixed_scalar(FixedScalar::I8)
+    );
+    assert_eq!(
+        expression_type_id(&ast, range.end),
+        builtin_type_ids::fixed_scalar(FixedScalar::U16)
+    );
     assert!(range.step.as_ref().is_some_and(|step| {
-        matches!(
-            &step.diagnostic_type,
-            DataType::FixedScalar(FixedScalar::U16)
-        )
+        expression_type_id(&ast, *step) == builtin_type_ids::fixed_scalar(FixedScalar::U16)
     }));
 }
 
@@ -272,7 +326,7 @@ fn range_item_type_promotes_mixed_i32_u32_to_i64() {
 
     assert!(bindings.item.as_ref().is_some_and(|binding| {
         matches!(
-            &binding.value.diagnostic_type,
+            &binding.diagnostic_type,
             DataType::FixedScalar(FixedScalar::I64)
         )
     }));
@@ -294,19 +348,19 @@ fn omitted_range_start_zero_uses_promoted_fixed_domain() {
     };
 
     assert!(matches!(
-        range.start.kind,
-        ExpressionKind::FixedScalar(value)
+        fixed_scalar_constant(&ast, range.start),
+        Some(value)
             if value.scalar() == FixedScalar::U64 && value.as_u64() == Some(0)
     ));
     assert!(bindings.item.as_ref().is_some_and(|binding| {
         matches!(
-            &binding.value.diagnostic_type,
+            &binding.diagnostic_type,
             DataType::FixedScalar(FixedScalar::U64)
         )
     }));
     assert!(bindings.index.as_ref().is_some_and(|binding| {
         matches!(
-            &binding.value.diagnostic_type,
+            &binding.diagnostic_type,
             DataType::FixedScalar(FixedScalar::I32)
         )
     }));
@@ -328,15 +382,15 @@ fn omitted_range_zero_keeps_endpoint_type_before_step_promotion() {
     };
 
     assert!(matches!(
-        range.start.kind,
-        ExpressionKind::FixedScalar(value)
+        fixed_scalar_constant(&ast, range.start),
+        Some(value)
             if value.scalar() == FixedScalar::U16 && value.as_u64() == Some(0)
     ));
     // D15: the `U16` endpoint and `I8` step mix selects the smallest signed type that contains
     // both complete ranges, so the counter domain is `I32` without a minimum-width floor.
     assert!(bindings.item.as_ref().is_some_and(|binding| {
         matches!(
-            &binding.value.diagnostic_type,
+            &binding.diagnostic_type,
             DataType::FixedScalar(FixedScalar::I32)
         )
     }));
@@ -356,7 +410,7 @@ fn range_item_type_promotes_f16_with_explicit_step_to_f32() {
 
     assert!(bindings.item.as_ref().is_some_and(|binding| {
         matches!(
-            &binding.value.diagnostic_type,
+            &binding.diagnostic_type,
             DataType::FixedScalar(FixedScalar::F32)
         )
     }));
@@ -469,7 +523,7 @@ fn float_step_selects_wider_precision_for_mixed_float_bounds_in_either_order() {
         let item_type = bindings
             .item
             .as_ref()
-            .map(|binding| binding.value.diagnostic_type.to_owned());
+            .map(|binding| binding.diagnostic_type.to_owned());
         assert_eq!(
             item_type,
             Some(DataType::FixedScalar(FixedScalar::F32)),
@@ -539,8 +593,14 @@ fn parses_collection_loop_with_pipe_item_binding() {
         Some("item")
     );
     assert!(bindings.index.is_none());
-    assert!(matches!(iterable.kind, ExpressionKind::Reference(_)));
-    assert!(ast.type_environment.is_collection(iterable.type_id));
+    assert!(matches!(
+        expression_view(&ast, *iterable).operation(),
+        ExpressionOperationView::Reference(_)
+    ));
+    assert!(
+        ast.type_environment
+            .is_collection(expression_type_id(&ast, *iterable))
+    );
     assert_eq!(loop_body.len(), 1);
 }
 
@@ -585,7 +645,7 @@ fn collection_index_binding_has_i32_type() {
         bindings
             .index
             .as_ref()
-            .map(|binding| &binding.value.diagnostic_type),
+            .map(|binding| &binding.diagnostic_type),
         Some(DataType::FixedScalar(FixedScalar::I32))
     ));
 }
@@ -768,6 +828,19 @@ fn rejects_loop_binding_shadowing_existing_name() {
 }
 
 #[test]
+fn rejects_loop_binding_shadowing_visible_source_declaration() {
+    let diagnostic = parse_single_file_ast_diagnostic(
+        "source_value || -> I32:\n    return 1\n;\nloop 0 to 2 |source_value|:\n;\n",
+    );
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::InvalidLoopHeader {
+            reason: InvalidLoopHeaderReason::BindingAlreadyDeclared,
+        }
+    ));
+}
+
+#[test]
 fn rejects_keyword_shadow_loop_binding_names() {
     let payload = parse_loop_fixture_diagnostic(
         "items = {1, 2, 3}\nloop items |_if|:\n    io.line([: [items]])\n;",
@@ -842,14 +915,14 @@ fn parses_omitted_start_exclusive_range_loop() {
     };
 
     assert!(matches!(
-        range.start.kind,
-        ExpressionKind::FixedScalar(value)
+        fixed_scalar_constant(&ast, range.start),
+        Some(value)
             if value.scalar() == FixedScalar::I32 && value.as_i64() == Some(0)
     ));
     assert_eq!(range.end_kind, RangeEndKind::Exclusive);
     assert!(matches!(
-        range.end.kind,
-        ExpressionKind::FixedScalar(value)
+        fixed_scalar_constant(&ast, range.end),
+        Some(value)
             if value.scalar() == FixedScalar::I32 && value.as_i64() == Some(5)
     ));
 }
@@ -866,14 +939,14 @@ fn parses_omitted_start_inclusive_range_loop() {
     };
 
     assert!(matches!(
-        range.start.kind,
-        ExpressionKind::FixedScalar(value)
+        fixed_scalar_constant(&ast, range.start),
+        Some(value)
             if value.scalar() == FixedScalar::I32 && value.as_i64() == Some(0)
     ));
     assert_eq!(range.end_kind, RangeEndKind::Inclusive);
     assert!(matches!(
-        range.end.kind,
-        ExpressionKind::FixedScalar(value)
+        fixed_scalar_constant(&ast, range.end),
+        Some(value)
             if value.scalar() == FixedScalar::I32 && value.as_i64() == Some(5)
     ));
 }
