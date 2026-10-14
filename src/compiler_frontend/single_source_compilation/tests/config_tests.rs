@@ -22,8 +22,8 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenTag, TokenizerEntryMode};
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use moth_lexical::numeric::parse::NumberLiteralErrorReason;
-use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
 use std::path::Path;
 
 fn compile_project_source(
@@ -31,24 +31,12 @@ fn compile_project_source(
     inputs: &crate::compiler_frontend::build_config::BuildConfigInputSet,
     globals: &crate::compiler_frontend::build_config::BuilderConfigGlobalSet,
 ) -> Result<(CompiledConfigSource, StringTable), CompilerMessages> {
-    compile_project_source_with_profile(source_code, inputs, globals, NumericProfile::STANDARD)
-}
-
-/// Compile one authored config source under a caller-selected boundary profile, so a test can
-/// prove that `Int`/`Float` config values fold at the widths the build selected.
-fn compile_project_source_with_profile(
-    source_code: &str,
-    inputs: &crate::compiler_frontend::build_config::BuildConfigInputSet,
-    globals: &crate::compiler_frontend::build_config::BuilderConfigGlobalSet,
-    numeric_profile: NumericProfile,
-) -> Result<(CompiledConfigSource, StringTable), CompilerMessages> {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let surface = BuilderSurface::with_mandatory_core();
     let style_directives = StyleDirectiveRegistry::built_ins();
     let outcome = compile_config_source(
         ConfigCompilationRequest {
-            numeric_profile,
             authored_path: Path::new("project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code,
@@ -72,14 +60,14 @@ fn compiles_one_authored_source_to_folded_declarations_and_key_spans() {
     let _path_fork = PathInternerFork::empty();
     let surface = BuilderSurface::with_mandatory_core();
     let style_directives = StyleDirectiveRegistry::built_ins();
+    let source_code =
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n";
 
-    let compiled = compile_config_source(
+    let outcome = compile_config_source(
         ConfigCompilationRequest {
-            numeric_profile: NumericProfile::STANDARD,
             authored_path: Path::new("project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
-            source_code:
-                "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+            source_code,
             style_directives: &style_directives,
             binding_packages: &surface.binding_packages,
             build_config_inputs: &crate::compiler_frontend::build_config::BuildConfigInputSet::new(
@@ -92,17 +80,35 @@ fn compiles_one_authored_source_to_folded_declarations_and_key_spans() {
                 .project_field_config_policies(),
         },
         &mut string_table,
-    )
-    .result
-    .expect("an authored config source should compile to folded declarations");
+    );
+    let compiled = outcome
+        .result
+        .expect("an authored config source should compile to folded declarations");
+    let span_builder = outcome.span_builder;
+    drop(style_directives);
+    drop(surface);
 
     let project = compiled
         .declarations
         .iter()
         .find(|declaration| string_table.resolve(declaration.name) == "project")
         .expect("the authored project record should reach the folded declarations");
-    assert!(matches!(project.value, PublicFoldedValue::Record(_)));
-    assert!(project.name_span.is_some());
+    assert_eq!(
+        compiled
+            .declarations
+            .iter()
+            .map(|declaration| string_table.resolve(declaration.name))
+            .collect::<Vec<_>>(),
+        ["project", "html"]
+    );
+    let name_range = project
+        .name_span
+        .expect("the owned declaration should retain its name")
+        .resolve_with(span_builder.resolver_for(outcome.file_id));
+    assert_eq!(
+        &source_code[name_range.start() as usize..name_range.end() as usize],
+        "project"
+    );
     let PublicFoldedValue::Record(fields) = &project.value else {
         panic!("project value must be a record");
     };
@@ -111,9 +117,34 @@ fn compiles_one_authored_source_to_folded_declarations_and_key_spans() {
         project.direct_field_spans.len(),
         "direct field spans must align with folded record fields"
     );
-    assert!(
-        fields.iter().any(|field| field.name == "name"),
-        "folded record fields must retain compiler-owned project fields"
+    assert_eq!(
+        fields
+            .iter()
+            .map(|field| (field.name.as_str(), &field.value))
+            .collect::<Vec<_>>(),
+        [
+            (
+                "name",
+                &PublicFoldedValue::String(OwnedFoldedString::Text("docs".to_owned())),
+            ),
+            (
+                "entry_root",
+                &PublicFoldedValue::String(OwnedFoldedString::Text("src".to_owned())),
+            ),
+        ]
+    );
+    assert_eq!(
+        project
+            .direct_field_spans
+            .iter()
+            .map(|span| {
+                let range = span
+                    .expect("each owned field retains its initializer span")
+                    .resolve_with(span_builder.resolver_for(outcome.file_id));
+                &source_code[range.start() as usize..range.end() as usize]
+            })
+            .collect::<Vec<_>>(),
+        ["\"docs\"", "\"src\""]
     );
 }
 
@@ -126,7 +157,6 @@ fn projects_authored_anonymous_const_records() {
 
     let compiled = compile_config_source(
         ConfigCompilationRequest {
-            numeric_profile: NumericProfile::STANDARD,
             authored_path: Path::new("project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code: "labels #= (\n    first = \"a\",\n)\n",
@@ -163,43 +193,26 @@ fn projects_authored_anonymous_const_records() {
 }
 
 #[test]
-fn boundary_int_config_constant_folds_at_the_boundary_int_width() {
+fn config_constant_above_the_i32_width_reports_out_of_range() {
     let inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
-    // One past the `Int32` maximum: the same authored constant either folds or diagnoses
-    // depending only on the boundary `Int` width this service was handed.
+    // One past the `I32` maximum: an untyped config literal materialises at the exact default
+    // width, so this authored constant never folds.
     let source = "limit #= 3_000_000_000\n";
 
     let messages = compile_project_source(source, &inputs, &globals)
         .err()
-        .expect("a config constant above the standard Int width must not fold");
+        .expect("a config constant above the I32 width must not fold");
     assert!(
         messages.diagnostics().any(|diagnostic| matches!(
             &diagnostic.payload,
             DiagnosticPayload::InvalidNumberLiteral {
-                reason: NumberLiteralErrorReason::OutsideIntRange,
+                reason: NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I32),
                 ..
             }
         )),
-        "the Int32 boundary must report the out-of-range config literal",
+        "the I32 boundary must report the out-of-range config literal",
     );
-
-    let (compiled, string_table) = compile_project_source_with_profile(
-        source,
-        &inputs,
-        &globals,
-        NumericProfile {
-            int_width: IntWidth::Bits64,
-            float_precision: FloatPrecision::Bits64,
-        },
-    )
-    .expect("an Int64 boundary must fold the same config constant");
-    let limit = compiled
-        .declarations
-        .iter()
-        .find(|declaration| string_table.resolve(declaration.name) == "limit")
-        .expect("the authored constant should reach the folded declarations");
-    assert_eq!(limit.value, PublicFoldedValue::Int(3_000_000_000));
 }
 
 #[test]
@@ -272,7 +285,6 @@ fn diagnosed_late_config_stage_retains_tokenizer_span_builder() {
 
     let outcome = compile_config_source(
         ConfigCompilationRequest {
-            numeric_profile: NumericProfile::STANDARD,
             authored_path,
             file_id,
             source_code,
@@ -321,10 +333,9 @@ fn rejects_config_local_nominal_values_with_structured_diagnostics() {
 
     let messages = compile_config_source(
         ConfigCompilationRequest {
-            numeric_profile: NumericProfile::STANDARD,
             authored_path: Path::new("project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
-            source_code: "Inner = |\n    x Int,\n|\nOuter = |\n    inner Inner,\n|\nouter #= Outer(Inner(1))\n",
+            source_code: "Inner = |\n    x I32,\n|\nOuter = |\n    inner Inner,\n|\nouter #= Outer(Inner(1))\n",
             style_directives: &style_directives,
             binding_packages: &surface.binding_packages,
             build_config_inputs: &crate::compiler_frontend::build_config::BuildConfigInputSet::new(),
@@ -363,7 +374,6 @@ fn rejects_authored_plain_bindings_inside_the_service() {
 
     let messages = compile_config_source(
         ConfigCompilationRequest {
-            numeric_profile: NumericProfile::STANDARD,
             authored_path: Path::new("project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code: "entry_root = \"src\"\n",
@@ -407,7 +417,6 @@ fn rejects_implicit_sibling_field_reference_inside_a_grouped_project_record() {
 
     let messages = compile_config_source(
         ConfigCompilationRequest {
-            numeric_profile: NumericProfile::STANDARD,
             authored_path: Path::new("project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code: "project #= (\n    name = \"docs\",\n    alias = name,\n)\n",
@@ -449,7 +458,6 @@ fn rejects_config_qualifier_on_builder_section_fields() {
 
     let messages = compile_config_source(
         ConfigCompilationRequest {
-            numeric_profile: NumericProfile::STANDARD,
             authored_path: Path::new("project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code: "origin #Config of String = \"/docs\"\nhtml #= (\n    origin = origin,\n)\n",
@@ -737,8 +745,8 @@ fn declaration_config_bootstrap_preserves_multiple_folded_input_dependencies() {
     let inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
     let (compiled, string_table) = compile_project_source(
-        "first_value #Config of Int = 1\n\
-         second_value #Config of Int = 2\n\
+        "first_value #Config of I32 = 1\n\
+         second_value #Config of I32 = 2\n\
          project #= (\n\
              name = \"docs\",\n\
              aggregate = first_value + second_value,\n\
@@ -803,8 +811,8 @@ fn declaration_config_bootstrap_rejects_fixed_project_dependence_through_multipl
     let inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
     let Err(messages) = compile_project_source(
-        "first_value #Config of Int = 1\n\
-         second_value #Config of Int = 2\n\
+        "first_value #Config of I32 = 1\n\
+         second_value #Config of I32 = 2\n\
          project #= (\n\
              name = \"docs\",\n\
              template_const_loop_iteration_limit = first_value + second_value,\n\
@@ -1019,12 +1027,12 @@ fn declaration_config_open_metadata_supports_all_primitive_and_optional_contract
     let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
     let (compiled, string_table) = compile_project_source(
         "custom_string #Config of String = \"text\"\n\
-         custom_int #Config of Int = 7\n\
-         custom_float #Config of Float = 1.25\n\
+         custom_int #Config of I32 = 7\n\
+         custom_float #Config of F64 = 1.25\n\
          custom_bool #Config of Bool = true\n\
          custom_char #Config of Char = 'c'\n\
          custom_string_optional #Config of String? = none\n\
-         custom_int_optional #Config of Int? = 9\n\
+         custom_int_optional #Config of I32? = 9\n\
          project #= (\n\
              name = \"docs\",\n\
              custom_string = custom_string,\n\
@@ -1060,14 +1068,18 @@ fn declaration_config_open_metadata_supports_all_primitive_and_optional_contract
         field_value("custom_string"),
         PublicFoldedValue::String(OwnedFoldedString::Text(value)) if value == "text"
     ));
-    assert!(matches!(
+    assert_eq!(
         field_value("custom_int"),
-        PublicFoldedValue::Int(7)
-    ));
-    assert!(matches!(
+        &PublicFoldedValue::FixedScalar(
+            FixedScalarValue::signed(FixedScalar::I32, 7).expect("I32 literal in range")
+        )
+    );
+    assert_eq!(
         field_value("custom_float"),
-        PublicFoldedValue::Float(value) if value.value() == 1.25
-    ));
+        &PublicFoldedValue::FixedScalar(
+            FixedScalarValue::binary_float(FixedScalar::F64, 1.25).expect("1.25 is exact at F64")
+        )
+    );
     assert!(matches!(
         field_value("custom_bool"),
         PublicFoldedValue::Bool(true)
@@ -1080,11 +1092,51 @@ fn declaration_config_open_metadata_supports_all_primitive_and_optional_contract
         field_value("custom_string_optional"),
         PublicFoldedValue::OptionNone
     ));
-    assert!(matches!(
+    assert_eq!(
         field_value("custom_int_optional"),
-        PublicFoldedValue::OptionSome(value)
-            if matches!(value.as_ref(), PublicFoldedValue::Int(9))
-    ));
+        &PublicFoldedValue::OptionSome(Box::new(PublicFoldedValue::FixedScalar(
+            FixedScalarValue::signed(FixedScalar::I32, 9).expect("I32 literal in range")
+        )))
+    );
+}
+
+#[test]
+fn declaration_constants_fold_wide_fixed_scalars_at_their_own_boundaries() {
+    let inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
+    let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
+    // Each authored constant completes at its own declared width before any use: `mixed` takes
+    // its I16 result from the I8 + U8 mixed-width operation, with no later receiver involved.
+    let (compiled, string_table) = compile_project_source(
+        "wide #U64 = 18446744073709551615\n\
+         small #U8 = 255\n\
+         signed_min #I8 = -128\n\
+         mixed #I16 = signed_min + small\n",
+        &inputs,
+        &globals,
+    )
+    .expect("typed wide constants should fold at their declared widths");
+
+    let folded_value = |name: &str| {
+        &compiled
+            .declarations
+            .iter()
+            .find(|declaration| string_table.resolve(declaration.name) == name)
+            .unwrap_or_else(|| panic!("config declaration '{name}' should be present"))
+            .value
+    };
+    assert_eq!(
+        folded_value("wide"),
+        &PublicFoldedValue::FixedScalar(
+            FixedScalarValue::unsigned(FixedScalar::U64, u64::MAX)
+                .expect("u64::MAX is in U64 range")
+        )
+    );
+    assert_eq!(
+        folded_value("mixed"),
+        &PublicFoldedValue::FixedScalar(
+            FixedScalarValue::signed(FixedScalar::I16, 127).expect("127 is in I16 range")
+        )
+    );
 }
 
 #[test]
@@ -1218,7 +1270,9 @@ fn declaration_config_rejects_mismatched_typed_input() {
             crate::compiler_frontend::build_config::BuildConfigInputEntry::new(
                 crate::compiler_frontend::build_config::BuildInputName::new("version")
                     .expect("version is a valid build input name"),
-                crate::compiler_frontend::build_config::PrimitiveBuildValue::Int(7),
+                crate::compiler_frontend::build_config::PrimitiveBuildValue::Fixed(
+                    FixedScalarValue::signed(FixedScalar::I32, 7).expect("7 fits I32"),
+                ),
                 crate::compiler_frontend::build_config::BuildConfigValueLocation::Command(
                     crate::compiler_frontend::build_config::BuildCommandLocation::new(0),
                 ),
@@ -1235,7 +1289,7 @@ fn declaration_config_rejects_mismatched_typed_input() {
         &inputs,
         &globals,
     ) else {
-        panic!("an Int input must not satisfy a String contract");
+        panic!("an I32 input must not satisfy a String contract");
     };
     let diagnostic = messages
         .diagnostics()
@@ -1480,7 +1534,6 @@ fn preparation_config_diagnostics_retain_their_original_source_spans() {
         let file_id = sources.get_by_canonical_path(canonical_path).unwrap().id;
         let outcome = compile_config_source(
             ConfigCompilationRequest {
-                numeric_profile: NumericProfile::STANDARD,
                 authored_path,
                 file_id,
                 source_code: &source,

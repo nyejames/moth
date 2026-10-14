@@ -1,4 +1,4 @@
-can_error |fail Bool| -> String, Int, Error!:
+can_error |fail Bool| -> String, I32, Error!:
     if fail:
         return! Error("failed")
     ;
@@ -6,14 +6,14 @@ can_error |fail Bool| -> String, Int, Error!:
     return "ok", 1
 ;
 
-local_recover || -> String, Int:
+local_recover || -> String, I32:
     name, count = can_error(true) catch:
         then "local", 10
     ;
     return name, count
 ;
 
-propagate_recover || -> String, Int, Error!:
+propagate_recover || -> String, I32, Error!:
     name, count = can_error(true)!
     return name, count
 ;

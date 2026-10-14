@@ -1,0 +1,77 @@
+-- Declared generic errors share actual numeric origins, not an early default
+-- invented to satisfy catch metadata. Independent error and success parameters
+-- stay distinct, and an unconstrained error still uses the ordinary I32 default.
+
+Packet type T = |value T|
+
+fail_value type T, E |fallback T, err E| -> T, E!:
+    return! err
+;
+fail_same type T |fallback T, err T| -> T, T!:
+    return! err
+;
+wrap_error_packet type T |value T| -> Packet of T:
+    return Packet(value)
+;
+fail_receiver type T |this Packet of T| -> String, T!:
+    return! this.value
+;
+get_values type T |this Packet of T| -> {T}:
+    return {this.value}
+;
+
+read_i32 |value I32| -> String:
+    return cast value
+;
+read_u64 |value U64| -> String:
+    return cast value
+;
+
+read_default_error || -> String:
+    value = fail_value(7, 1) catch |err| then err
+    return read_i32(value)
+;
+read_shared_error || -> String:
+    value = fail_same(4294967306, 4294967307) catch |err| then err
+    return read_u64(value)
+;
+read_independent_error || -> String:
+    error_origin = 4294967308
+    value = fail_value(7, error_origin) catch then 9
+    error_text = read_u64(error_origin)
+    return [:value=[value] error=[error_text]]
+;
+
+read_full_error || -> String:
+    return fail_value("unused", 18446744073709551615) catch |err| then read_u64(err)
+;
+
+-- A method on a pending generic receiver shares its error's numeric origin as well.
+read_method_error || -> String:
+    packet = wrap_error_packet(4294967340)
+    error_text = packet.fail_receiver() catch |err| then read_u64(err)
+    return error_text
+;
+
+-- A terminal method step's authored `!` propagates through its own declared error.
+read_propagated_method_error || -> String, U64!:
+    packet = wrap_error_packet(4294967342)
+    verified = read_u64(packet.value)
+    return packet.fail_receiver()!
+;
+
+-- A chained terminal builtin `!` propagates through the chain's own error.
+read_chained_bang || -> String, Error!:
+    packet = wrap_error_packet(4294967345)
+    verified = read_u64(packet.value)
+    return read_u64(packet.get_values().get(0)!)
+;
+
+default_error = read_default_error()
+shared_error = read_shared_error()
+independent_error = read_independent_error()
+full_error = read_full_error()
+method_error = read_method_error()
+propagated_method_error = read_propagated_method_error() catch |err| then read_u64(err)
+chained_bang_result = read_chained_bang() catch then "failed"
+[:generic_numeric_error default=[default_error] shared=[shared_error] independent=[independent_error] full=[full_error] method=[method_error] propagated_method=[propagated_method_error] chained_bang=[chained_bang_result]]

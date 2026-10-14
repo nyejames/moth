@@ -1,8 +1,8 @@
 Point = |
-    x Int = 0,
+    x I32 = 0,
 |
 
-length |this Point| -> Int:
+length |this Point| -> I32:
     return this.x
 ;
 

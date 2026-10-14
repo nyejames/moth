@@ -1,0 +1,5 @@
+project #= (
+    name = "boundary_ints_static",
+    entry_root = "src",
+)
+html #= ()

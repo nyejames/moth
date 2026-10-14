@@ -1,0 +1,14 @@
+# Authored for Phase 5B.2 and unobserved until the parent harness run. The grouped String? subject uses the same known-option literal rule as option_value_if_literal_predicate_rejected; the body starts on the predicate line, so the literal is rejected. No html_wasm block is declared.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0042"]
+message_contains = ["Inline value-producing optional checks must use"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0042"
+reason = "invalid_control_flow_statement.value_if_option_literal_predicate"
+path = "input/@page.moth"
+line = 2
+count = 1

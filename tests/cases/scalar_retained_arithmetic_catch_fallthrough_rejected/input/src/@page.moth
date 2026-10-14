@@ -1,0 +1,16 @@
+-- An empty handler on a retained whole arithmetic fragment is ordinary invalid
+-- source. Completion resolves the fragment's own I32 site, so the fallthrough
+-- check must run against that resolved contract and report
+-- CatchHandlerCanFallThrough (MOTH-RULE-0051) at the source, never an internal
+-- HIR fallthrough invariant failure.
+--
+-- `pending` stays unannotated so the origin is genuinely pending and the call
+-- fragment is retained rather than a concrete equivalent.
+
+failing |value I32| -> I32, Error!:
+    return! Error("empty handler")
+;
+
+pending = 1
+value = failing(pending) + 10 catch:
+    ;

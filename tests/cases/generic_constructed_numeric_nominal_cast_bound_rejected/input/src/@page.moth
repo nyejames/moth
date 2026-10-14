@@ -1,0 +1,16 @@
+-- A nominal bound requires only infallible I64 evidence. The literal fits I64,
+-- but the later U64 receiver converts to I64 only fallibly, so the bound must
+-- not be satisfied by an I32 default or by a search for other evidence.
+
+Bounded type T is CASTABLE_TO_I64 = |
+    value T,
+|
+
+read_u64 |value U64| -> String:
+    return cast value
+;
+
+number = Bounded(1)
+text = read_u64(number.value)
+
+[:generic_constructed_numeric_nominal_cast_bound_rejected [text]]

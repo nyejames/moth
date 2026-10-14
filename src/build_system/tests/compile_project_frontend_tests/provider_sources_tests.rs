@@ -1,5 +1,6 @@
 use super::*;
-use moth_lexical::numeric::profile::NumericProfile;
+use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 #[derive(Debug)]
 struct DummyJsImportProvider {
     calls: Arc<AtomicUsize>,
@@ -131,7 +132,9 @@ fn register_dummy_draw_function(
                 name: "draw".to_owned(),
                 parameters: Vec::new(),
                 returns: vec![ExternalReturnSlot::fresh(
-                    crate::compiler_frontend::external_packages::ExternalSignatureType::NativeInt,
+                    crate::compiler_frontend::external_packages::ExternalSignatureType::Abi(
+                        ExternalAbiType::Fixed(FixedScalar::I32),
+                    ),
                 )],
                 error_return_type: None,
                 lowerings: ExternalFunctionLowerings::default(),
@@ -180,7 +183,9 @@ fn register_dummy_use_widget_function(
                     },
                 ],
                 returns: vec![ExternalReturnSlot::fresh(
-                    crate::compiler_frontend::external_packages::ExternalSignatureType::NativeInt,
+                    crate::compiler_frontend::external_packages::ExternalSignatureType::Abi(
+                        ExternalAbiType::Fixed(FixedScalar::I32),
+                    ),
                 )],
                 error_return_type: None,
                 lowerings: ExternalFunctionLowerings::default(),
@@ -216,7 +221,16 @@ fn module_contains_external_call(
                     ..
                 }
             )
-        })
+        }) || matches!(
+            &block.terminator,
+            HirTerminator::Invoke {
+                operation: HirFallibleOperation::Call {
+                    target: CallTarget::External(_),
+                    ..
+                },
+                ..
+            }
+        )
     })
 }
 
@@ -225,19 +239,33 @@ fn module_contains_external_module_export(
     export_name: &str,
 ) -> bool {
     module.executable.hir.blocks.iter().any(|block| {
-        block.statements.iter().any(|statement| {
-            let HirStatementKind::Call {
-                target: CallTarget::External(function_id),
+        let statement_calls =
+            block
+                .statements
+                .iter()
+                .filter_map(|statement| match &statement.kind {
+                    HirStatementKind::Call {
+                        target: CallTarget::External(function_id),
+                        ..
+                    } => Some(*function_id),
+                    _ => None,
+                });
+        let invoked_function = match &block.terminator {
+            HirTerminator::Invoke {
+                operation:
+                    HirFallibleOperation::Call {
+                        target: CallTarget::External(function_id),
+                        ..
+                    },
                 ..
-            } = &statement.kind
-            else {
-                return false;
-            };
-
+            } => Some(*function_id),
+            _ => None,
+        };
+        statement_calls.chain(invoked_function).any(|function_id| {
             module
                 .link_facts
                 .external_package_registry
-                .get_function_by_id(*function_id)
+                .get_function_by_id(function_id)
                 .and_then(|definition| definition.lowerings.js.as_ref())
                 .is_some_and(|lowering| {
                     matches!(
@@ -313,7 +341,9 @@ fn register_dummy_draw_function_with_js_lowering(
                 name: "draw".to_owned(),
                 parameters: Vec::new(),
                 returns: vec![ExternalReturnSlot::fresh(
-                    crate::compiler_frontend::external_packages::ExternalSignatureType::NativeInt,
+                    crate::compiler_frontend::external_packages::ExternalSignatureType::Abi(
+                        ExternalAbiType::Fixed(FixedScalar::I32),
+                    ),
                 )],
                 error_return_type: None,
                 lowerings: ExternalFunctionLowerings {
@@ -410,7 +440,7 @@ fn provider_runtime_assets_deduped_for_repeated_imports() {
     .expect("should write entry");
     fs::write(
         dir.join("other.moth"),
-        "@drawing.js draw as render\nrun || -> Int:\n    return render()\n;\n",
+        "@drawing.js draw as render\nrun || -> I32:\n    return render()\n;\n",
     )
     .expect("should write helper");
     fs::write(dir.join("drawing.js"), "export function draw() {}\n").expect("should write js");
@@ -469,12 +499,12 @@ fn entry_runtime_metadata_ignores_unreachable_external_calls() {
     fs::write(dir.join("@page.moth"), "@other run\nvalue = 1\n").expect("should write entry");
     fs::write(
         dir.join("other.moth"),
-        "@drawing.js get_number\nrun || -> Int, Error!:\n    return get_number()!\n;\n",
+        "@drawing.js get_number\nrun || -> I32, Error!:\n    return get_number()!\n;\n",
     )
     .expect("should write helper source");
     fs::write(
         dir.join("drawing.js"),
-        "import { mothOk } from \"@moth/runtime\";\n/**\n * @moth.sig get_number || -> Int, Error!\n */\nexport function getNumber() { return mothOk(7); }\n",
+        "import { mothOk } from \"@moth/runtime\";\n/**\n * @moth.sig get_number || -> I32, Error!\n */\nexport function getNumber() { return mothOk(7); }\n",
     )
     .expect("should write js");
 
@@ -505,7 +535,7 @@ fn entry_runtime_metadata_ignores_unreachable_external_calls() {
         !module.link_facts.external_import_candidates.is_empty(),
         "module link facts should retain provider candidates independently of entry reachability"
     );
-    let project_compilation = ProjectCompilation::from_frontend(modules, NumericProfile::STANDARD)
+    let project_compilation = ProjectCompilation::from_frontend(modules)
         .expect("compiled module should assemble an entry");
     let entries = project_compilation.entries();
     assert_eq!(
@@ -600,7 +630,7 @@ fn entry_runtime_metadata_ignores_unreachable_source_package_wrappers() {
             .any(|import| import.package_id == canvas_package_id),
         "module link facts should retain the available @web/canvas runtime candidate"
     );
-    let project_compilation = ProjectCompilation::from_frontend(modules, NumericProfile::STANDARD)
+    let project_compilation = ProjectCompilation::from_frontend(modules)
         .expect("compiled module should assemble an entry");
     let entries = project_compilation.entries();
     assert_eq!(
@@ -650,11 +680,9 @@ fn provider_backed_import_with_js_lowering_passes_html_build() {
     .expect("provider-backed import should compile");
 
     let builder = crate::projects::html_project::html_project_builder::HtmlProjectBuilder::new();
-    let project_compilation = crate::build_system::build::ProjectCompilation::from_frontend(
-        modules,
-        NumericProfile::STANDARD,
-    )
-    .expect("compiled modules should assemble entries");
+    let project_compilation =
+        crate::build_system::build::ProjectCompilation::from_frontend(modules)
+            .expect("compiled modules should assemble entries");
     let project = builder
         .build_backend(
             project_compilation,
@@ -692,7 +720,7 @@ fn linked_module_js_lowering_is_observed_separately() {
     .expect("should write page");
     fs::write(
         package_root.join("@mod.moth"),
-        "export:\n    helper || -> Int:\n        return 7\n    ;\n;\n",
+        "export:\n    helper || -> I32:\n        return 7\n    ;\n;\n",
     )
     .expect("should write package module");
 
@@ -718,11 +746,9 @@ fn linked_module_js_lowering_is_observed_separately() {
     )
     .expect("provider-backed import should compile");
     let builder = crate::projects::html_project::html_project_builder::HtmlProjectBuilder::new();
-    let project_compilation = crate::build_system::build::ProjectCompilation::from_frontend(
-        modules,
-        NumericProfile::STANDARD,
-    )
-    .expect("compiled modules should assemble entries");
+    let project_compilation =
+        crate::build_system::build::ProjectCompilation::from_frontend(modules)
+            .expect("compiled modules should assemble entries");
     let project = builder
         .build_backend(
             project_compilation,
@@ -768,7 +794,7 @@ fn provider_backed_direct_selection_compiles_and_reuses_cache() {
     .expect("should write page");
     fs::write(
         dir.join("other.moth"),
-        "@drawing.js draw as render_again\nrun || -> Int:\n    return render_again()\n;\n",
+        "@drawing.js draw as render_again\nrun || -> I32:\n    return render_again()\n;\n",
     )
     .expect("should write helper source");
     fs::write(dir.join("drawing.js"), "export function draw() {}\n").expect("should write js");
@@ -868,12 +894,12 @@ fn provider_backed_same_bare_name_from_different_directories_gets_distinct_packa
     .expect("should write page");
     fs::write(
         dir.join("a/use.moth"),
-        "@a/helper.js draw as draw_a\nrun_a || -> Int:\n    return draw_a()\n;\n",
+        "@a/helper.js draw as draw_a\nrun_a || -> I32:\n    return draw_a()\n;\n",
     )
     .expect("should write a source");
     fs::write(
         dir.join("b/use.moth"),
-        "@b/helper.js draw as draw_b\nrun_b || -> Int:\n    return draw_b()\n;\n",
+        "@b/helper.js draw as draw_b\nrun_b || -> I32:\n    return draw_b()\n;\n",
     )
     .expect("should write b source");
     fs::write(dir.join("a/helper.js"), "export function draw() {}\n").expect("should write a js");
@@ -1020,7 +1046,6 @@ fn directory_project_rejects_missing_entry_root() {
     let frontend_surface = crate::builder_surface::BuilderSurface::with_mandatory_core();
     let build_config_inputs = crate::compiler_frontend::build_config::BuildConfigInputSet::new();
     let services = crate::build_system::project_config::ProjectConfigParseServices {
-        numeric_profile: NumericProfile::STANDARD,
         style_directives: &style_directives,
         frontend_surface: &frontend_surface,
         build_config_inputs: &build_config_inputs,
@@ -1091,7 +1116,7 @@ fn html_js_provider_namespace_binding_resolves() {
     .expect("should write page");
     fs::write(
         dir.join("drawing.js"),
-        "/**\n * @moth.sig draw || -> Int\n */\nexport function draw() { return 1; }\n",
+        "/**\n * @moth.sig draw || -> I32\n */\nexport function draw() { return 1; }\n",
     )
     .expect("should write js");
 
@@ -1144,12 +1169,12 @@ fn directory_module_external_import_candidates_are_scoped_to_owned_sources() {
     .expect("should write second module");
     fs::write(
         src.join("first/drawing.js"),
-        "/**\n * @moth.sig draw || -> Int\n */\nexport function draw() { return 1; }\n",
+        "/**\n * @moth.sig draw || -> I32\n */\nexport function draw() { return 1; }\n",
     )
     .expect("should write first JS provider");
     fs::write(
         src.join("second/drawing.js"),
-        "/**\n * @moth.sig draw || -> Int\n */\nexport function draw() { return 2; }\n",
+        "/**\n * @moth.sig draw || -> I32\n */\nexport function draw() { return 2; }\n",
     )
     .expect("should write second JS provider");
 
@@ -1267,12 +1292,12 @@ fn directory_module_external_import_candidates_are_scoped_to_owned_sources_when_
     .expect("should write a-b module");
     fs::write(
         src.join("a/drawing.js"),
-        "/**\n * @moth.sig draw || -> Int\n */\nexport function draw() { return 1; }\n",
+        "/**\n * @moth.sig draw || -> I32\n */\nexport function draw() { return 1; }\n",
     )
     .expect("should write a JS provider");
     fs::write(
         src.join("a-b/drawing.js"),
-        "/**\n * @moth.sig draw || -> Int\n */\nexport function draw() { return 2; }\n",
+        "/**\n * @moth.sig draw || -> I32\n */\nexport function draw() { return 2; }\n",
     )
     .expect("should write a-b JS provider");
 
@@ -1384,7 +1409,7 @@ fn html_js_provider_direct_selection_resolves() {
     .expect("should write page");
     fs::write(
         dir.join("drawing.js"),
-        "/**\n * @moth.sig draw || -> Int\n */\nexport function draw() { return 1; }\n",
+        "/**\n * @moth.sig draw || -> I32\n */\nexport function draw() { return 1; }\n",
     )
     .expect("should write js");
 
@@ -1429,7 +1454,7 @@ fn html_js_provider_direct_alias_for_function_and_opaque_type_resolves() {
     .expect("should write page");
     fs::write(
         dir.join("drawing.js"),
-        "/**\n * @moth.opaque Widget\n */\n/**\n * @moth.sig draw || -> Int\n */\nexport function draw() { return 1; }\n",
+        "/**\n * @moth.opaque Widget\n */\n/**\n * @moth.sig draw || -> I32\n */\nexport function draw() { return 1; }\n",
     )
     .expect("should write js");
 
@@ -1474,7 +1499,7 @@ fn html_js_provider_receiver_method_in_project_local_js_rejected() {
     .expect("should write page");
     fs::write(
         dir.join("drawing.js"),
-        "/**\n * @moth.opaque Canvas\n */\n/**\n * @moth.sig make_canvas || -> Canvas\n */\nexport function makeCanvas() {\n    return {};\n}\n/**\n * @moth.sig fill_rect |this ~Canvas, x Float, y Float, width Float, height Float|\n */\nexport function fillRect(ctx, x, y, width, height) {}\n",
+        "/**\n * @moth.opaque Canvas\n */\n/**\n * @moth.sig make_canvas || -> Canvas\n */\nexport function makeCanvas() {\n    return {};\n}\n/**\n * @moth.sig fill_rect |this ~Canvas, x F64, y F64, width F64, height F64|\n */\nexport function fillRect(ctx, x, y, width, height) {}\n",
     )
     .expect("should write js with receiver-style signature");
 
@@ -1536,12 +1561,12 @@ fn html_js_provider_repeated_imports_reuse_cache() {
     .expect("should write entry");
     fs::write(
         dir.join("other.moth"),
-        "@drawing.js draw as render_again\nrun || -> Int:\n    return render_again()\n;\n",
+        "@drawing.js draw as render_again\nrun || -> I32:\n    return render_again()\n;\n",
     )
     .expect("should write helper source");
     fs::write(
         dir.join("drawing.js"),
-        "/**\n * @moth.sig draw || -> Int\n */\nexport function draw() { return 1; }\n",
+        "/**\n * @moth.sig draw || -> I32\n */\nexport function draw() { return 1; }\n",
     )
     .expect("should write js");
 

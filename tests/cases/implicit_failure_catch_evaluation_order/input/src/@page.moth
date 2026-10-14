@@ -10,12 +10,12 @@ trace_i ~U32 = 0
 trace_j ~U32 = 0
 trace_k ~U32 = 0
 
-note_private |seen ~U32, value Int| -> Int:
+note_private |seen ~U32, value I32| -> I32:
     seen = seen + 1
     return value + 2147483647
 ;
 
-note_typed |seen ~U32, value Int| -> Int, Error!:
+note_typed |seen ~U32, value I32| -> I32, Error!:
     seen = seen + 10
     if value is 2:
         return! Error("typed failed")
@@ -23,18 +23,18 @@ note_typed |seen ~U32, value Int| -> Int, Error!:
     return value
 ;
 
-fetch |seen ~U32, value Int| -> {Int}:
+fetch |seen ~U32, value I32| -> {I32}:
     seen = seen + 1
     probe = value + 2147483647
     return {10, probe, 30}
 ;
 
-combine |left_arg Int, right_arg Int| -> Int:
+combine |left_arg I32, right_arg I32| -> I32:
     return left_arg + right_arg
 ;
 
-big Int = 2147483647
-ok Int = 0 - 2147483646
+big I32 = 2147483647
+ok I32 = 0 - 2147483646
 
 -- A: private call fails first; the typed call never runs.
 code_a ~U32 = 0

@@ -1,0 +1,7 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = ""
+runtime_error_contains = ["External floating-point boundary produced a non-finite value"]

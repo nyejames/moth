@@ -10,12 +10,18 @@
 
 use crate::compiler_frontend::ast::ContextKind;
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
-use crate::compiler_frontend::ast::expressions::parse_expression::create_expression_until;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
+use crate::compiler_frontend::ast::expressions::parse_expression::{
+    ExpressionParseSeed, create_expression_until, create_expression_until_with_seed,
+};
 use crate::compiler_frontend::ast::expressions::parse_expression_input::{
     ExpressionParseInput, ExpressionParseResources,
+};
+use crate::compiler_frontend::ast::numeric_construction::{
+    StatementExpression, deferred_numeric_expression,
 };
 use crate::compiler_frontend::ast::statements::condition_validation::{
     ensure_if_statement_condition, if_condition_is_missing,
@@ -45,9 +51,13 @@ mod inline_if;
 mod inline_match;
 mod inline_then_else;
 mod result_type;
+mod retained;
 mod single_predicate;
 
+pub(crate) use retained::{DeferredValueBlock, RetainedValueBlock, complete_deferred_value_block};
+
 use inline_then_else::same_logical_line;
+use single_predicate::SinglePredicateParseOutcome;
 
 /// Forwards accumulated parser warnings into the outer scope.
 ///
@@ -67,9 +77,11 @@ pub(super) struct ValueIfParseInput<'a, 'b, 'tokens> {
     pub(super) token_stream: &'a mut AstCursor<'tokens>,
     pub(super) context: &'a ScopeContext,
     pub(super) type_interner: &'a mut AstTypeInterner<'b>,
+    pub(super) expression_builder: &'a mut AstExpressionBuilder,
+    pub(super) const_values: &'a mut ConstValueStore,
     pub(super) target: ActiveValueProductionTarget,
     pub(super) string_table: &'a mut StringTable,
-    pub(super) condition: Expression,
+    pub(super) condition: StatementExpression,
     pub(super) span: Option<SourceSpan>,
     pub(super) path_fork: &'a mut PathInternerFork,
 }
@@ -80,31 +92,39 @@ pub(super) struct ValueIfParseInput<'a, 'b, 'tokens> {
 /// WHAT: returns `None` if the current token is not `If`, otherwise parses the value
 /// block and returns the resulting expression. The error preserves authored diagnostics and
 /// retained-data infrastructure failures until the enclosing AST emission boundary.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "receiver parsing keeps the cursor, scope, expected types, kind and mutable state separate"
+)]
 pub fn try_parse_value_block_at_receiver(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     expected_result_type_ids: &[TypeId],
     receiver_kind: ValueReceiverKind,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Option<Result<Expression, ExpressionParseError>> {
+) -> Option<Result<ParsedReceiverValue, ExpressionParseError>> {
     try_parse_value_block_at_receiver_with_target(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         ActiveValueProductionTarget::known(expected_result_type_ids.to_vec(), receiver_kind),
         string_table,
         path_fork,
     )
     .map(|parsed| {
         parsed.map(|value| match value {
-            ParsedReceiverValue::Complete(expression) => expression,
             ParsedReceiverValue::NeedsSlotInference { .. } => {
                 unreachable!(
                     "known receivers must wrap a finished expression; mixed-slot parse results belong to multi-bind"
                 )
             }
+            value => value,
         })
     })
 }
@@ -112,10 +132,16 @@ pub fn try_parse_value_block_at_receiver(
 /// Parses a value-producing `if` at a closed receiver using an explicit production target.
 ///
 /// WHAT: the shared structural dispatcher for known and mixed inferred slots.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "shared dispatch keeps the cursor, scope, target and mutable state separate"
+)]
 pub fn try_parse_value_block_at_receiver_with_target(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     target: ActiveValueProductionTarget,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
@@ -154,6 +180,8 @@ pub fn try_parse_value_block_at_receiver_with_target(
                 token_stream,
                 context,
                 type_interner,
+                expression_builder,
+                const_values,
                 target,
                 string_table,
                 span,
@@ -162,11 +190,13 @@ pub fn try_parse_value_block_at_receiver_with_target(
         )),
 
         IfHeaderShape::PotentialInlineSinglePredicate => {
-            if let Some(result) = inline_match::try_parse_inline_single_predicate_value_match(
+            let seed = match inline_match::try_parse_inline_single_predicate_value_match(
                 inline_match::InlineSinglePredicateParseInput {
                     token_stream,
                     context,
                     type_interner,
+                    expression_builder,
+                    const_values,
                     target: target.clone(),
                     string_table,
                     header_index,
@@ -175,27 +205,34 @@ pub fn try_parse_value_block_at_receiver_with_target(
                     path_fork,
                 },
             ) {
-                return Some(result);
-            }
+                SinglePredicateParseOutcome::Decided(result) => return Some(result),
+                SinglePredicateParseOutcome::OrdinarySubject(seed) => Some(seed),
+                SinglePredicateParseOutcome::Absent => None,
+            };
 
             Some(parse_bool_value_if_after_condition(
                 token_stream,
                 context,
                 type_interner,
+                expression_builder,
+                const_values,
                 target,
                 string_table,
                 header_index,
                 span,
+                seed,
                 path_fork,
             ))
         }
 
         IfHeaderShape::PotentialBlockSinglePredicate => {
-            if let Some(result) = block_match::try_parse_block_single_predicate_value_match(
+            let seed = match block_match::try_parse_block_single_predicate_value_match(
                 block_match::BlockSinglePredicateParseInput {
                     token_stream,
                     context,
                     type_interner,
+                    expression_builder,
+                    const_values,
                     target: target.clone(),
                     string_table,
                     span,
@@ -203,17 +240,22 @@ pub fn try_parse_value_block_at_receiver_with_target(
                     path_fork,
                 },
             ) {
-                return Some(result);
-            }
+                SinglePredicateParseOutcome::Decided(result) => return Some(result),
+                SinglePredicateParseOutcome::OrdinarySubject(seed) => Some(seed),
+                SinglePredicateParseOutcome::Absent => None,
+            };
 
             Some(parse_bool_value_if_after_condition(
                 token_stream,
                 context,
                 type_interner,
+                expression_builder,
+                const_values,
                 target,
                 string_table,
                 header_index,
                 span,
+                seed,
                 path_fork,
             ))
         }
@@ -222,10 +264,13 @@ pub fn try_parse_value_block_at_receiver_with_target(
             token_stream,
             context,
             type_interner,
+            expression_builder,
+            const_values,
             target,
             string_table,
             header_index,
             span,
+            None,
             path_fork,
         )),
     }
@@ -243,13 +288,16 @@ fn parse_bool_value_if_after_condition(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     target: ActiveValueProductionTarget,
     string_table: &mut StringTable,
     header_index: usize,
     span: Option<SourceSpan>,
+    seed: Option<StatementExpression>,
     path_fork: &mut PathInternerFork,
 ) -> ReceiverResult<ParsedReceiverValue> {
-    if if_condition_is_missing(token_stream) {
+    if seed.is_none() && if_condition_is_missing(token_stream) {
         return Err(CompilerDiagnostic::invalid_control_flow_statement(
             InvalidControlFlowStatementReason::ExpectedConditionAfterIf,
             Some(token_stream.current_span()),
@@ -261,19 +309,57 @@ fn parse_bool_value_if_after_condition(
     let condition_context =
         context.new_child_control_flow(ContextKind::Condition, string_table, path_fork);
     let mut cast_target_context = CastTargetContext::None;
+    // An ordinary single-predicate subject already parsed exactly once; resume the central parser
+    // from its seed instead of relexing it, so forward producers and generic requests stay issued
+    // once. A completed subject contributes its ID, a retained one its ordered fragment.
+    let seed = seed.map(|seed| match seed {
+        StatementExpression::Built(id) => {
+            ExpressionParseSeed::Completed(expression_builder.own(id))
+        }
+        StatementExpression::Retained(fragment) => ExpressionParseSeed::Fragment(fragment),
+    });
     let input = ExpressionParseInput::until(ExpressionParseResources {
         token_stream,
         scope_context: &condition_context,
         type_interner,
+        expression_builder,
+        const_values,
         expected_type: &mut condition_type,
         cast_target_context: &mut cast_target_context,
         value_mode: &ValueMode::ImmutableOwned,
         string_table,
         path_fork,
-    });
-    let condition = create_expression_until(input, &[TokenTag::THEN, TokenTag::COLON])?;
-
-    ensure_if_statement_condition(&condition, type_interner.environment())?;
+    })
+    .with_numeric_deferral_owner();
+    let condition = match match seed {
+        Some(seed) => {
+            create_expression_until_with_seed(input, &[TokenTag::THEN, TokenTag::COLON], seed)
+                .map(|expression| expression.id())
+        }
+        None => create_expression_until(input, &[TokenTag::THEN, TokenTag::COLON])
+            .map(|expression| expression.id()),
+    } {
+        Ok(expression) => {
+            ensure_if_statement_condition(
+                expression_builder.view(expression)?,
+                type_interner.environment(),
+            )?;
+            StatementExpression::Built(expression)
+        }
+        // A pending origin keeps the condition authored as `Bool` for the enclosing body root,
+        // matching statement `if` headers. Only an owning deferral can be retained.
+        Err(error @ ExpressionParseError::NumericDeferral(_)) => {
+            let deferral = error.take_numeric_deferral("an if condition")?;
+            StatementExpression::Retained(deferred_numeric_expression(
+                deferral.items,
+                ExpectedType::Known(type_interner.environment().builtins().bool),
+                deferral.value_mode,
+                deferral.span,
+                deferral.suffix,
+            ))
+        }
+        Err(error) => return Err(error),
+    };
 
     if token_stream.current_tag() == TokenTag::THEN {
         if !same_logical_line(token_stream, header_index, token_stream.position()) {
@@ -288,6 +374,8 @@ fn parse_bool_value_if_after_condition(
             token_stream,
             context,
             type_interner,
+            expression_builder,
+            const_values,
             target,
             string_table,
             condition,
@@ -301,6 +389,8 @@ fn parse_bool_value_if_after_condition(
             token_stream,
             context,
             type_interner,
+            expression_builder,
+            const_values,
             target,
             string_table,
             condition,

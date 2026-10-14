@@ -1,0 +1,71 @@
+-- A known U64 parameter supplies the leaf width for raw inline literals, get
+-- projections and a get argument protected by the enclosing call catch. Optional
+-- collection and map parameters take the same leaf width from inline literals.
+-- Independent grids keep each path's witness distinct.
+-- A known I64 parameter also types the raw leaf of a named operand argument as a plain call,
+-- including through one optional collection or map layer.
+
+read_u64s |values {U64}| -> String, Error!:
+    first = values.get(0)!
+    return cast first
+;
+
+read_i64s |values {I64}| -> String, Error!:
+    first = values.get(0)!
+    return cast first
+;
+
+read_optional |values {U64}?| -> I32:
+    return if values is:
+        |present| => then present.length()
+        none => then 0
+    ;
+;
+
+read_optional_map |values {U64 = U64}?| -> I32:
+    return if values is:
+        |present| => then present.length
+        none => then 0
+    ;
+;
+
+read_optional_i64s |values {I64}?| -> String, Error!:
+    return if values is:
+        |present| => then cast present.get(0)!
+        none => then "missing"
+    ;
+;
+
+read_optional_i64_map |values {String = I64}?| -> String, Error!:
+    return if values is:
+        |present| => then cast present.get("a")!
+        none => then "missing"
+    ;
+;
+
+render_receivers || -> String, Error!:
+    inline = read_u64s({4_294_967_296})!
+
+    grid = {{4_294_967_297}}
+    projected = read_u64s(grid.get(0)!)!
+
+    caught_grid = {{4_294_967_298}}
+    recovered = read_u64s(caught_grid.get(0)) catch then "missing"
+
+    -- Index 9 is absent, so the nested get fails before read_u64s runs.
+    absent_grid = {{4_294_967_299}}
+    absent = read_u64s(absent_grid.get(9)) catch then "missing"
+
+    optional_array = read_optional({18_446_744_073_709_551_615})
+    optional_map = read_optional_map({18_446_744_073_709_551_615 = 18_446_744_073_709_551_614})
+
+    base I32 = 10
+    named = read_i64s({base + 1})!
+    optional_named = read_optional_i64s({base + 1})!
+    optional_named_map = read_optional_i64_map({"a" = base + 2})!
+
+    return [:aggregate_parameter_projection_receivers inline=[inline] projected=[projected] recovered=[recovered] absent=[absent] optional_array=[optional_array] optional_map=[optional_map] named=[named] optional_named=[optional_named] optional_named_map=[optional_named_map]]
+;
+
+result = render_receivers() catch then "failed"
+[:[result]]

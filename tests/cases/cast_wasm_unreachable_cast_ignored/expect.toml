@@ -4,10 +4,20 @@ entry = "."
 mode = "success"
 warnings = "forbid"
 rendered_output_contains = ["wasm unreachable cast ignored"]
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_not_contain = [
+    "function __moth_cast_int_to_string(",
+    "function __moth_cast_int(",
+    "dead-handler-materialisation",
+]
+
 
 [backends.html_wasm]
 mode = "success"
 warnings = "forbid"
+rendered_output_contains = ["wasm unreachable cast ignored"]
 
 [[backends.html_wasm.artifact_assertions]]
 path = "page.wasm"

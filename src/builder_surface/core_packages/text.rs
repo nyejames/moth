@@ -12,6 +12,7 @@ use crate::compiler_frontend::external_packages::{
     ExternalFunctionLowerings, ExternalFunctionSpec, ExternalJsLowering, ExternalParameter,
     external_success_returns,
 };
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 pub fn register_core_text_package(registry: &mut ExternalPackageRegistry) {
     let package_id = registry
@@ -33,7 +34,7 @@ pub fn register_core_text_package(registry: &mut ExternalPackageRegistry) {
             "length",
             "__moth_text_length",
             vec![text_param.clone()],
-            ExternalSignatureType::NativeInt,
+            ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::I32)),
         ),
         (
             "is_empty",

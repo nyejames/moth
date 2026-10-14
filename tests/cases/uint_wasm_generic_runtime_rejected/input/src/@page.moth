@@ -1,12 +1,12 @@
--- Task 4: a Uint carried through a generic aggregate executes in HTML-JS
--- but stays outside the Wasm capability boundary, which rejects reachable
--- generic runtime values with a structured diagnostic before lowering.
+-- Task 4: a U32 carried through a generic aggregate executes in HTML-JS,
+-- while HTML-Wasm rejects the reachable fixed-width aggregate with a
+-- structured diagnostic before lowering.
 
 Box type T = |
     value T,
 |
 
-top Uint = 4294967295 + 0
+top U32 = 4294967295 + 0
 boxed = Box(top)
 top_text String = cast boxed.value
 

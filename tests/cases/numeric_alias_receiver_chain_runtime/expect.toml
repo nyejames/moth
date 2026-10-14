@@ -1,0 +1,7 @@
+entry = "."
+
+# HTML owns the combined deep-copy and repeated exact-receiver source contract.
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "chain=4294967296/4294967296/4294967296/4294967296/4294967296/4294967296/4294967296/4294967296 annotation=4294967296"

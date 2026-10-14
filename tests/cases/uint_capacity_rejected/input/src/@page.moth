@@ -1,8 +1,8 @@
--- Task 5A: fixed-collection capacities stay Int; a `#Uint` capacity
--- constant is not silently accepted. Mirrors the neighbouring non-Int
+-- Task 5A: fixed-collection capacities stay I32; a `#U32` capacity
+-- constant is not silently accepted. Mirrors the neighbouring non-I32
 -- capacity rejection (fixed_collection_capacity_non_int_constant_rejected).
 
-cap #Uint = 4
+cap #U32 = 4
 
 render || -> String:
     values ~{cap String} = {}

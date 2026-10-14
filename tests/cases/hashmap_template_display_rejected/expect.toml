@@ -4,4 +4,4 @@ entry = "."
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-SYNTAX-0022"]
-message_contains = ["Template head expressions", "{String = Int}"]
+message_contains = ["Template head expressions", "{String = I32}"]

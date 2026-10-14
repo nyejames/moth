@@ -128,6 +128,9 @@ fn validate_runtime_tir_view_node(
         | TemplateIrNodeKind::AggregateOutput
         | TemplateIrNodeKind::RuntimeSlotSite { .. }
         | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => {}
+        // A retained position is pending compiler construction data with no payload and no
+        // children: body-root completion replaces it before the runtime template is published.
+        TemplateIrNodeKind::RetainedNumericIntake(_) => {}
     }
 
     Ok(())
@@ -245,6 +248,9 @@ fn tir_view_subtree_contains_escaped_insert(
         | TemplateIrNodeKind::AggregateOutput
         | TemplateIrNodeKind::RuntimeSlotSite { .. }
         | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => Ok(false),
+        // A retained position holds no insert helper: its value is installed by body-root
+        // completion, and this scan runs on published runtime templates.
+        TemplateIrNodeKind::RetainedNumericIntake(_) => Ok(false),
     }
 }
 

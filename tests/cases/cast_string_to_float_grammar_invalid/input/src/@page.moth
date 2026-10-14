@@ -1,9 +1,9 @@
-parse_float |text String| -> Float, Error!:
-    return cast! text
+parse_float |text String| -> F64, Error!:
+    return cast text
 ;
 
 safe |text String| -> String:
-    value Float = parse_float(text) catch: then -999.0;
+    value F64 = parse_float(text) catch: then -999.0;
     return cast value
 ;
 

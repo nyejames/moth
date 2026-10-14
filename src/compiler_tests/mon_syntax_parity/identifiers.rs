@@ -24,19 +24,19 @@ fn identifier_shape_fixtures() -> Vec<ParityFixture> {
         accepted_literal,
         "",
         Schema::record(vec![
-            Field::required("ascii9", SchemaType::Int),
-            Field::required("_leading", SchemaType::Int),
-            Field::required("__field_name", SchemaType::Int),
-            Field::required("é2", SchemaType::Int),
-            Field::required("λ7", SchemaType::Int),
+            Field::required("ascii9", SchemaType::I32),
+            Field::required("_leading", SchemaType::I32),
+            Field::required("__field_name", SchemaType::I32),
+            Field::required("é2", SchemaType::I32),
+            Field::required("λ7", SchemaType::I32),
         ]),
         SourceExpectation::Accept,
         MonExpectation::Accept(Value::Record(vec![
-            ("ascii9".into(), Value::Int(1)),
-            ("_leading".into(), Value::Int(2)),
-            ("__field_name".into(), Value::Int(3)),
-            ("é2".into(), Value::Int(4)),
-            ("λ7".into(), Value::Int(5)),
+            ("ascii9".into(), Value::I32(1)),
+            ("_leading".into(), Value::I32(2)),
+            ("__field_name".into(), Value::I32(3)),
+            ("é2".into(), Value::I32(4)),
+            ("λ7".into(), Value::I32(5)),
         ])),
     ));
 
@@ -45,7 +45,7 @@ fn identifier_shape_fixtures() -> Vec<ParityFixture> {
         "digit_cannot_start_identifier",
         invalid_start.clone(),
         "",
-        Schema::record(vec![Field::required("name", SchemaType::Int)]),
+        Schema::record(vec![Field::required("name", SchemaType::I32)]),
         source_invalid_expression(
             InvalidExpressionReason::ExpectedOperatorBeforeExpression,
             in_literal(&invalid_start, "name", 1),
@@ -62,7 +62,7 @@ fn identifier_shape_fixtures() -> Vec<ParityFixture> {
         "combining_mark_is_not_identifier_continuation",
         combining_mark.clone(),
         "",
-        Schema::record(vec![Field::required("e", SchemaType::Int)]),
+        Schema::record(vec![Field::required("e", SchemaType::I32)]),
         SourceExpectation::Reject {
             code: "MOTH-SYNTAX-0007",
             reason: SourceReason::InvalidCharacter('\u{301}'),
@@ -80,7 +80,7 @@ fn identifier_shape_fixtures() -> Vec<ParityFixture> {
         "hyphen_is_not_identifier_continuation",
         punctuation.clone(),
         "",
-        Schema::record(vec![Field::required("name", SchemaType::Int)]),
+        Schema::record(vec![Field::required("name", SchemaType::I32)]),
         SourceExpectation::Reject {
             code: "MOTH-SYNTAX-0031",
             reason: SourceReason::CommonSyntaxMistake(
@@ -107,7 +107,7 @@ fn identifier_shape_fixtures() -> Vec<ParityFixture> {
         "multibyte_name_source_site_and_mon_byte_span",
         multibyte_name.clone(),
         "",
-        Schema::record(vec![Field::required("value", SchemaType::Int)]),
+        Schema::record(vec![Field::required("value", SchemaType::I32)]),
         source_unknown_name(in_literal(&multibyte_name, "éclair", 1)),
         MonExpectation::Reject {
             code: MonErrorCode::UnexpectedToken,

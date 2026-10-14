@@ -30,7 +30,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::moth_template::bundle::{
     DIRECT_TEMPLATE_PROJECT_NAME, prepare_file_value_bundle,
 };
-use crate::projects::html_project::moth_template::input::MothTemplateCompileRequest;
+use crate::projects::html_project::moth_template::input::MothTemplateInput;
 use crate::projects::html_project::moth_template::output::{
     CompiledMothTemplateDocument, MothTemplateCompileOutput,
 };
@@ -44,12 +44,11 @@ use crate::projects::html_project::style_directives::html_project_style_directiv
 use std::sync::Arc;
 
 pub(crate) fn compile_moth_template(
-    request: MothTemplateCompileRequest,
+    input: MothTemplateInput,
     string_table: &mut StringTable,
 ) -> Result<MothTemplateCompileOutput, CompilerMessages> {
     let mut resource_inputs = ResourceInputRegistry::new();
-    let compiled =
-        compile_moth_template_with_registry(request, string_table, &mut resource_inputs)?;
+    let compiled = compile_moth_template_with_registry(input, string_table, &mut resource_inputs)?;
 
     Ok(MothTemplateCompileOutput {
         documents: compiled.documents,
@@ -69,18 +68,15 @@ pub(crate) struct DirectTemplateRegistryCompile {
     warning_source_contexts: Vec<RenderSourceContext>,
 }
 
-/// Compile one request against a caller-owned registry so a failed plan still leaves its
+/// Compile one input against a caller-owned registry so a failed plan still leaves its
 /// registered sources inspectable.
 pub(crate) fn compile_moth_template_with_registry(
-    request: MothTemplateCompileRequest,
+    input: MothTemplateInput,
     string_table: &mut StringTable,
     resource_inputs: &mut ResourceInputRegistry,
 ) -> Result<DirectTemplateRegistryCompile, CompilerMessages> {
     let mut path_fork = PathInternerFork::empty();
-    // The profile is read before the request is consumed by source collection, then handed to every
-    // source's fold so one request cannot mix boundary widths.
-    let numeric_profile = request.numeric_profile;
-    let sources = match request.collect_sources(string_table, &mut path_fork) {
+    let sources = match input.collect_sources(string_table, &mut path_fork) {
         Ok(sources) => sources,
         Err(mut messages) => {
             if let Err(error) =
@@ -122,7 +118,6 @@ pub(crate) fn compile_moth_template_with_registry(
                     source_code: None,
                     style_directives: &style_directives,
                     file_value_resolution: Some(file_value_bundle),
-                    numeric_profile,
                 },
                 string_table,
             ),

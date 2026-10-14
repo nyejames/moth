@@ -1,0 +1,16 @@
+receive_u32 |value U32| -> String:
+    return cast value
+;
+
+receive_i64 |value I64| -> String:
+    return cast value
+;
+
+-- The binding is cast to U32 before its later uncast I64 use. The cast target
+-- is not a source constraint: the source resolves I64 from the uncast use and
+-- the cast follows the complete I64-to-U32 policy.
+casts_then_use = 1
+from_cast = receive_u32(cast casts_then_use)
+from_use = receive_i64(casts_then_use)
+
+[:scalar cast source first=[from_cast] later=[from_use]]

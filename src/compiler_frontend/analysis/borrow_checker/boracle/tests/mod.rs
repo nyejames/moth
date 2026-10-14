@@ -21,10 +21,13 @@ use super::super::problem::{
     ValueOriginId,
 };
 use super::PrecisionLossReason;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
-use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
+use crate::compiler_frontend::hir::expressions::{
+    HirExpressionKind, HirVariantCarrier, HirVariantField, OPTION_SOME_VARIANT_INDEX, ValueKind,
+};
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{
     BlockId as HirBlockId, FunctionId, HirValueId, LocalId, RegionId,
@@ -35,6 +38,13 @@ use crate::compiler_frontend::hir::regions::HirRegion;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind, HirWriteTarget};
 use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+
+fn i32_literal(value: i64) -> HirExpressionKind {
+    HirExpressionKind::FixedScalar(
+        FixedScalarValue::signed(FixedScalar::I32, value).expect("I32 literal in range"),
+    )
+}
 
 #[test]
 fn boracle_provenance_copy_keeps_source_and_result_origins_independent() {
@@ -298,7 +308,7 @@ fn boracle_mixed_binding_preserves_alias_and_slot_write_possibilities() {
 
 #[test]
 fn boracle_hir_projection_to_distinct_destination_preserves_stored_child_origin() {
-    let problem = hir_distinct_projection_problem();
+    let problem = hir_option_projection_problem();
     let aggregate = problem
         .events()
         .iter()
@@ -306,7 +316,7 @@ fn boracle_hir_projection_to_distinct_destination_preserves_stored_child_origin(
             EventKind::Aggregate { fields, .. } => Some((event.id, fields[0].source)),
             _ => None,
         })
-        .expect("HIR tuple assignment should emit aggregate storage");
+        .expect("HIR Option assignment should emit aggregate storage");
     let projection = problem
         .events()
         .iter()
@@ -318,7 +328,7 @@ fn boracle_hir_projection_to_distinct_destination_preserves_stored_child_origin(
             } => Some((event.id, *source, *destination)),
             _ => None,
         })
-        .expect("HIR tuple assignment should emit a projection");
+        .expect("HIR Option payload extraction should emit a projection");
     let source_binding = problem.places()[projection.1.index()].root;
     let projection_destination = &problem.places()[projection.2.place().index()];
     assert_ne!(projection.1, projection.2.place());
@@ -338,6 +348,7 @@ fn boracle_hir_projection_to_distinct_destination_preserves_stored_child_origin(
     let child_origins = solution
         .origins_after_event(aggregate.0, aggregate.1)
         .expect("aggregate child origin should be retained");
+    assert!(!child_origins.is_empty());
     assert_eq!(
         solution
             .origins_after_event(projection.0, projection.2.place())
@@ -356,32 +367,70 @@ fn boracle_hir_projection_to_distinct_destination_preserves_stored_child_origin(
 
 #[test]
 fn boracle_hir_aggregate_rebinding_replaces_stale_child_origin() {
-    let problem = hir_aggregate_rebinding_problem();
+    let problem = hir_option_projection_problem_with_rebinding(true);
     let aggregates = problem
         .events()
         .iter()
         .filter_map(|event| match &event.kind {
-            EventKind::Aggregate { fields, .. } => Some((event.id, fields[0].source)),
+            EventKind::Aggregate {
+                destination,
+                fields,
+                ..
+            } => Some((event.id, *destination, fields[0].source)),
             _ => None,
         })
         .collect::<Vec<_>>();
     assert_eq!(aggregates.len(), 2);
+    assert_eq!(aggregates[0].1.place(), aggregates[1].1.place());
+    assert_eq!(
+        aggregates[1].1,
+        BindingDestination::Update(aggregates[0].1.place())
+    );
+    assert!(problem.uses().iter().any(|use_row| {
+        use_row.kind == UseKind::BindingWrite(aggregates[1].1)
+            && use_row.place == aggregates[1].1.place()
+    }));
     let projection = problem
         .events()
         .iter()
         .find_map(|event| match &event.kind {
-            EventKind::Projection { destination, .. } => Some((event.id, *destination)),
+            EventKind::Projection {
+                source,
+                destination,
+                ..
+            } => Some((event.id, *source, *destination)),
             _ => None,
         })
-        .expect("rebuilt HIR tuple should project its current child");
+        .expect("rebuilt HIR Option should project its current child");
+    assert_eq!(projection.1, aggregates[1].1.place());
+    assert!(problem.uses().iter().any(|use_row| {
+        use_row.kind == UseKind::Read
+            && problem.places()[use_row.place.index()].root
+                == problem.places()[projection.1.index()].root
+            && problem.places()[use_row.place.index()].projections.as_ref()
+                == [super::super::problem::ProjectionElem::FixedIndex(0)]
+    }));
+    assert!(problem.uses().iter().any(|use_row| {
+        use_row.kind == UseKind::BindingWrite(projection.2) && use_row.place == projection.2.place()
+    }));
 
     let solution = super::OriginSolver::solve(&problem).expect("HIR aggregate rebind should solve");
+    let stale_child = solution
+        .origins_after_event(aggregates[0].0, aggregates[0].2)
+        .expect("original aggregate child should have an origin");
     let current_child = solution
-        .origins_after_event(aggregates[1].0, aggregates[1].1)
+        .origins_after_event(aggregates[1].0, aggregates[1].2)
         .expect("current aggregate child should have an origin");
+    assert!(!stale_child.is_empty());
+    assert!(!current_child.is_empty());
+    assert!(
+        current_child
+            .iter()
+            .all(|origin| !stale_child.contains(origin))
+    );
     assert_eq!(
         solution
-            .origins_after_event(projection.0, projection.1.place())
+            .origins_after_event(projection.0, projection.2.place())
             .expect("projection should use the current aggregate generation"),
         current_child
     );
@@ -784,12 +833,8 @@ fn hir_shared_subset(kind: SharedSubsetKind) -> (HirModule, HirFunction) {
     let source = LocalId(0);
     let result = LocalId(1);
     let mut module = HirModule::new();
-    let initial_value = append_hir_expression(
-        &mut module,
-        HirExpressionKind::Int(1),
-        ValueKind::RValue,
-        region,
-    );
+    let initial_value =
+        append_hir_expression(&mut module, i32_literal(1), ValueKind::RValue, region);
     let copied_or_loaded_value = append_hir_expression(
         &mut module,
         match kind {
@@ -808,6 +853,10 @@ fn hir_shared_subset(kind: SharedSubsetKind) -> (HirModule, HirFunction) {
         ValueKind::Place,
         region,
     );
+    let returns = module
+        .expressions
+        .append_values(&[return_value], None)
+        .expect("return slots should fit the HIR expression store");
     module.blocks = vec![HirBlock {
         id: HirBlockId(0),
         region,
@@ -830,14 +879,15 @@ fn hir_shared_subset(kind: SharedSubsetKind) -> (HirModule, HirFunction) {
                 span: None,
             },
         ],
-        terminator: HirTerminator::Return(return_value),
+        terminator: HirTerminator::Return(returns),
     }];
     module.regions = vec![HirRegion::lexical(region, None)];
     let function = HirFunction {
         id: FunctionId(0),
         entry: HirBlockId(0),
         params: Vec::new(),
-        return_type: builtin_type_ids::INT,
+        returns: vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)].into_boxed_slice(),
+        error_return: None,
     };
     (module, function)
 }
@@ -2001,10 +2051,11 @@ fn alias_params_call_parts(parameter_indices: Vec<usize>) -> BorrowProblemParts 
                         use_id: UseId::new(0),
                     }]
                     .into_boxed_slice(),
-                    result: Some(CallResult {
+                    results: vec![CallResult {
                         destination: BindingDestination::Define(PlaceId::new(1)),
                         origin: ValueOriginId::new(1),
-                    }),
+                    }]
+                    .into_boxed_slice(),
                 }),
                 EventSource::none(),
             ),
@@ -2100,10 +2151,11 @@ fn uninitialized_argument_alias_params_problem() -> BorrowProblem {
                         use_id: UseId::new(0),
                     }]
                     .into_boxed_slice(),
-                    result: Some(CallResult {
+                    results: vec![CallResult {
                         destination: BindingDestination::Define(PlaceId::new(1)),
                         origin: ValueOriginId::new(1),
-                    }),
+                    }]
+                    .into_boxed_slice(),
                 }),
                 EventSource::none(),
             ),
@@ -2240,10 +2292,11 @@ fn partial_argument_alias_params_problem() -> BorrowProblem {
                         },
                     ]
                     .into_boxed_slice(),
-                    result: Some(CallResult {
+                    results: vec![CallResult {
                         destination: BindingDestination::Define(PlaceId::new(2)),
                         origin: ValueOriginId::new(1),
-                    }),
+                    }]
+                    .into_boxed_slice(),
                 }),
                 EventSource::none(),
             ),
@@ -2661,7 +2714,7 @@ fn same_call_conflict_problem() -> BorrowProblem {
                 EventKind::CallEffect(CallEffect {
                     call: super::super::problem::CallId::new(0),
                     arguments: vec![first_argument, second_argument].into_boxed_slice(),
-                    result: None,
+                    results: Box::new([]),
                 }),
                 EventSource::none(),
             ),
@@ -2671,155 +2724,78 @@ fn same_call_conflict_problem() -> BorrowProblem {
     .expect("same-call conflict problem should validate")
 }
 
-fn hir_distinct_projection_problem() -> BorrowProblem {
-    let region = RegionId(0);
-    let source = LocalId(0);
-    let result = LocalId(1);
-    let mut module = HirModule::new();
-    let first_element = append_hir_expression(
-        &mut module,
-        HirExpressionKind::Int(1),
-        ValueKind::RValue,
-        region,
-    );
-    let second_element = append_hir_expression(
-        &mut module,
-        HirExpressionKind::Int(2),
-        ValueKind::RValue,
-        region,
-    );
-    let tuple_elements = module
-        .expressions
-        .append_values(&[first_element, second_element], None)
-        .expect("tuple elements should fit the HIR expression store");
-    let tuple = append_hir_expression(
-        &mut module,
-        HirExpressionKind::TupleConstruct {
-            elements: tuple_elements,
-        },
-        ValueKind::RValue,
-        region,
-    );
-    let source_load = append_hir_expression(
-        &mut module,
-        HirExpressionKind::Load(HirPlace::local(source)),
-        ValueKind::Place,
-        region,
-    );
-    let projected = append_hir_expression(
-        &mut module,
-        HirExpressionKind::TupleGet {
-            tuple: source_load,
-            index: 0,
-        },
-        ValueKind::RValue,
-        region,
-    );
-    let result_elements = module
-        .expressions
-        .append_values(&[projected], None)
-        .expect("projected tuple element should fit the HIR expression store");
-    let result_tuple = append_hir_expression(
-        &mut module,
-        HirExpressionKind::TupleConstruct {
-            elements: result_elements,
-        },
-        ValueKind::RValue,
-        region,
-    );
-    let result_load = append_hir_expression(
-        &mut module,
-        HirExpressionKind::Load(HirPlace::local(result)),
-        ValueKind::Place,
-        region,
-    );
-    module.blocks = vec![HirBlock {
-        id: HirBlockId(0),
-        region,
-        locals: vec![hir_local(source, region), hir_local(result, region)],
-        statements: vec![
-            HirStatement {
-                id: crate::compiler_frontend::hir::ids::HirNodeId(0),
-                kind: HirStatementKind::Write {
-                    target: HirWriteTarget::DefineLocal(source),
-                    value: tuple,
-                },
-                span: None,
-            },
-            HirStatement {
-                id: crate::compiler_frontend::hir::ids::HirNodeId(1),
-                kind: HirStatementKind::Write {
-                    target: HirWriteTarget::DefineLocal(result),
-                    value: result_tuple,
-                },
-                span: None,
-            },
-        ],
-        terminator: HirTerminator::Return(result_load),
-    }];
-    module.regions = vec![HirRegion::lexical(region, None)];
-    let function = HirFunction {
-        id: FunctionId(0),
-        entry: HirBlockId(0),
-        params: Vec::new(),
-        return_type: builtin_type_ids::INT,
-    };
-    super::super::problem::from_hir(&module, &function, None, None)
-        .expect("distinct HIR projection should extract")
+fn hir_option_projection_problem() -> BorrowProblem {
+    hir_option_projection_problem_with_rebinding(false)
 }
 
-fn hir_aggregate_rebinding_problem() -> BorrowProblem {
+fn hir_option_projection_problem_with_rebinding(rebind: bool) -> BorrowProblem {
     let region = RegionId(0);
     let source = LocalId(0);
     let result = LocalId(1);
     let mut module = HirModule::new();
-    let first_element = append_hir_expression(
-        &mut module,
-        HirExpressionKind::Int(1),
-        ValueKind::RValue,
-        region,
-    );
-    let first_elements = module
+    let mut type_environment = TypeEnvironment::new();
+    let scalar_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
+    let option_type = type_environment.intern_option(scalar_type);
+    let child = append_hir_expression(&mut module, i32_literal(1), ValueKind::RValue, region);
+    let fields = module
         .expressions
-        .append_values(&[first_element], None)
-        .expect("first tuple element should fit the HIR expression store");
-    let tuple_one = append_hir_expression(
-        &mut module,
-        HirExpressionKind::TupleConstruct {
-            elements: first_elements,
+        .append_variant_fields(
+            &[HirVariantField {
+                name: None,
+                value: child,
+            }],
+            None,
+        )
+        .expect("option payload should fit the HIR expression store");
+    let option = crate::compiler_frontend::tests::hir_fixture_support::expression(
+        HirExpressionKind::VariantConstruct {
+            carrier: HirVariantCarrier::Option,
+            variant_index: OPTION_SOME_VARIANT_INDEX,
+            fields,
         },
-        ValueKind::RValue,
+        option_type,
         region,
-    );
-    let second_element = append_hir_expression(
-        &mut module,
-        HirExpressionKind::Int(2),
         ValueKind::RValue,
-        region,
+        &mut module.expressions,
     );
-    let second_elements = module
-        .expressions
-        .append_values(&[second_element], None)
-        .expect("second tuple element should fit the HIR expression store");
-    let tuple_two = append_hir_expression(
-        &mut module,
-        HirExpressionKind::TupleConstruct {
-            elements: second_elements,
-        },
-        ValueKind::RValue,
-        region,
-    );
-    let source_load = append_hir_expression(
-        &mut module,
+    let replacement = rebind.then(|| {
+        let child = append_hir_expression(&mut module, i32_literal(2), ValueKind::RValue, region);
+        let fields = module
+            .expressions
+            .append_variant_fields(
+                &[HirVariantField {
+                    name: None,
+                    value: child,
+                }],
+                None,
+            )
+            .expect("replacement option payload should fit the HIR expression store");
+        crate::compiler_frontend::tests::hir_fixture_support::expression(
+            HirExpressionKind::VariantConstruct {
+                carrier: HirVariantCarrier::Option,
+                variant_index: OPTION_SOME_VARIANT_INDEX,
+                fields,
+            },
+            option_type,
+            region,
+            ValueKind::RValue,
+            &mut module.expressions,
+        )
+    });
+    let source_load = crate::compiler_frontend::tests::hir_fixture_support::expression(
         HirExpressionKind::Load(HirPlace::local(source)),
-        ValueKind::Place,
+        option_type,
         region,
+        ValueKind::Place,
+        &mut module.expressions,
     );
     let projected = append_hir_expression(
         &mut module,
-        HirExpressionKind::TupleGet {
-            tuple: source_load,
-            index: 0,
+        HirExpressionKind::VariantPayloadGet {
+            carrier: HirVariantCarrier::Option,
+            source: source_load,
+            variant_index: OPTION_SOME_VARIANT_INDEX,
+            field_index: 0,
         },
         ValueKind::RValue,
         region,
@@ -2830,29 +2806,27 @@ fn hir_aggregate_rebinding_problem() -> BorrowProblem {
         ValueKind::Place,
         region,
     );
+    let returns = module
+        .expressions
+        .append_values(&[result_load], None)
+        .expect("return slots should fit the HIR expression store");
+    let mut source_local = hir_local(source, region);
+    source_local.ty = option_type;
     module.blocks = vec![HirBlock {
         id: HirBlockId(0),
         region,
-        locals: vec![hir_local(source, region), hir_local(result, region)],
+        locals: vec![source_local, hir_local(result, region)],
         statements: vec![
             HirStatement {
                 id: crate::compiler_frontend::hir::ids::HirNodeId(0),
                 kind: HirStatementKind::Write {
                     target: HirWriteTarget::DefineLocal(source),
-                    value: tuple_one,
+                    value: option,
                 },
                 span: None,
             },
             HirStatement {
                 id: crate::compiler_frontend::hir::ids::HirNodeId(1),
-                kind: HirStatementKind::Write {
-                    target: HirWriteTarget::AssignPlace(HirPlace::local(source)),
-                    value: tuple_two,
-                },
-                span: None,
-            },
-            HirStatement {
-                id: crate::compiler_frontend::hir::ids::HirNodeId(2),
                 kind: HirStatementKind::Write {
                     target: HirWriteTarget::DefineLocal(result),
                     value: projected,
@@ -2860,23 +2834,37 @@ fn hir_aggregate_rebinding_problem() -> BorrowProblem {
                 span: None,
             },
         ],
-        terminator: HirTerminator::Return(result_load),
+        terminator: HirTerminator::Return(returns),
     }];
+    if let Some(replacement) = replacement {
+        module.blocks[0].statements.insert(
+            1,
+            HirStatement {
+                id: crate::compiler_frontend::hir::ids::HirNodeId(2),
+                kind: HirStatementKind::Write {
+                    target: HirWriteTarget::AssignPlace(HirPlace::local(source)),
+                    value: replacement,
+                },
+                span: None,
+            },
+        );
+    }
     module.regions = vec![HirRegion::lexical(region, None)];
     let function = HirFunction {
         id: FunctionId(0),
         entry: HirBlockId(0),
         params: Vec::new(),
-        return_type: builtin_type_ids::INT,
+        returns: Box::new([scalar_type]),
+        error_return: None,
     };
     super::super::problem::from_hir(&module, &function, None, None)
-        .expect("aggregate rebinding HIR should extract")
+        .expect("option payload projection should extract")
 }
 
 fn hir_local(id: LocalId, region: RegionId) -> HirLocal {
     HirLocal {
         id,
-        ty: builtin_type_ids::INT,
+        ty: builtin_type_ids::fixed_scalar(FixedScalar::I32),
         mutable: true,
         region,
         span: None,
@@ -2891,7 +2879,7 @@ fn append_hir_expression(
 ) -> HirValueId {
     crate::compiler_frontend::tests::hir_fixture_support::expression(
         kind,
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         region,
         value_kind,
         &mut module.expressions,

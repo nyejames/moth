@@ -3,19 +3,26 @@
 ## Status
 
 ```text
-STATUS: paused after Phase 3; template control-flow simplification complete
-CURRENT_SLICE: Phase 3 implementation, review corrections and 3M closeout accepted
-BLOCKERS: completion of the exact numeric migration and a fresh restart review
-NEXT_ACTION: after numeric completion, reassess owners, lifetimes, coverage and benchmarks; require explicit user resumption before further implementation
+STATUS: PAUSED after Phase 4 squash-merged into main
+CURRENT_SLICE: Phase 4, R1, R2.0–R2.4 and P2 isolation complete. Phase 5 pending.
+BLOCKERS: P5 to P8 remain unstarted and require explicit reactivation. Fresh Windows proof remains pending.
+NEXT_ACTION: Await explicit reactivation of Phase 5. Do not continue automatically.
 ```
+
+The main squash checkpoint retains expression-refactor source `534aea1a5`,
+including the P2 isolation correction after reviewed checkpoint `20fddc3c4`.
+Historical review `1343c64ec` and R2.4 qualification of compiler source
+`6b855aab9` retain their original scope. Those gates and timing records do not
+retarget the main squash tree. Windows-specific proof remains pending.
 
 ## Purpose and authority
 
 Replace the growing, recursively owned `Expression` record with compact typed
 semantic nodes addressed by IDs. Preserve Moth's architecture: AST construction
-resolves types, applies contextual coercion and folds constants, TIR stays
-AST-local, and HIR remains the first backend-facing semantic IR. This work
-changes representation and ownership, not the timing of those decisions.
+resolves types, applies contextual coercion and folds constants. TIR stays
+AST-local and HIR remains the first backend-facing semantic IR. Bounded numeric
+construction now completes at the owning body root before semantic publication.
+This work changes representation and ownership, not that delivered timing.
 
 The plan also completes the dense HIR, bounded Wiring and native result/Core
 constant-evaluation foundations that would otherwise extend and then replace
@@ -110,8 +117,8 @@ activation tree before touching their owners.
 
 | Responsibility | Final owner and invariant |
 |---|---|
-| Parsing and contextual construction | Short-lived parser/builder state owns incomplete operands, numeric literal recipes and pending receiving context. Completed semantic nodes do not impersonate declaration shells or unresolved placeholders. |
-| Declarations and symbols | Dedicated records own identity, visibility, declared type and callable/constructor descriptors. A declaration without an initializer has an explicit absence, not a fake expression. |
+| Parsing and contextual construction | Short-lived parser/builder state and body-owned numeric construction own incomplete operands, literal recipes and receiving witnesses until root completion. Completed semantic nodes do not impersonate declaration shells or unresolved placeholders. |
+| Declarations and symbols | Dedicated records own identity, visibility, declared type and callable/constructor descriptors. A declaration without an initialiser has an explicit absence, not a fake expression. |
 | Typed expressions | Compact IDs address stage-owned semantic nodes with resolved result shape, exact source location and the operation facts required by their consumers. Fixed children use IDs, variable payloads use typed ranges. |
 | Results and failure | One authoritative zero/single/multiple success shape per producer, with a separate typed error channel. Optional absence and divergence remain distinct concepts. |
 | Constants | Existing constant owners hold content. Occurrences retain source, type, contextual/config provenance and other occurrence facts without copying the content graph. |
@@ -162,675 +169,370 @@ the type system and folder, not merely make one `size_of` result smaller.
   malformed IDs remain compiler invariant failures. Estimate errors only change
   allocation cost and never semantics.
 
-## Phase 0 - activation, contracts and baseline
+## Phase 0 - accepted activation and restart baseline
 
-**Inputs:** merged Dec contextual-materialisation correction and the separately
-planned Uint addition, delivered MON syntax/tooling and the existing numeric
-profile contracts. Do not infer Uint's exact identity or width from its spelling.
-Read its merged contract, including literals, external signatures and profiles.
+**Complete.** The numeric restart fixed the owner inventory and result, TIR,
+failure and service handoffs. The [benchmark report](../../../benchmarks/frontend-optimization-results.md)
+owns activation, restart, candidate and validation evidence.
 
-**Deliverable:** a current owner/lifetime map, an obligation checklist tied to
-this plan, reproducible baseline evidence and concrete work packages for Phase 1.
-Keep baseline revision/toolchains/worktree details in working notes rather than
-pinning this plan to a specific commit.
+### Contracts retained after the numeric restart
 
-- [x] Record the activation tree, effective Rust/Node/tool flags, build profiles,
-  validation state, relevant existing failures and benchmark environment. Pin
-  the comparison cohort and retain raw measurements under `tmp/`.
-- [x] Inventory every durable and transient use of `Expression`,
-  `ExpressionKind`, `ExpressionRpnItem`, declaration/signature/default records,
-  constant materialisation and recursive expression/place carriers. Classify
-  which fields represent syntax, semantic identity, content, occurrence facts,
-  analysis summaries, control flow or obsolete reactivity.
-- [x] Map single-module, single-file, config, direct-template, generic validation,
-  concrete materialisation and generated-sidecar services. For each owner record
-  its issuing ID domain, dependencies, last reader and release point.
-- [x] Freeze the semantic contract for zero/one/multiple results, fallible call
-  continuations, per-slot aliases/provenance, normal-root `start` and the private
-  inferred-failure installer. Select the precise HIR control-flow form in Phase 2.
-- [x] Map TIR overlay inheritance, nested-value context, static-if views and
-  retained generic syntax. Identify facts that must survive AST release before
-  failure-summary convergence or diagnostic rendering.
-- [x] Census node and payload counts, variant frequencies/co-occurrence, list
-  lengths, cardinality bounds, read frequency, clone/copy traffic, allocation
-  growth and retained bytes. Instrument only facts needed to answer a decision.
-- [x] Profile type resolution, compatibility/substitution, call/default/constructor
-  preparation, constant resolution and folding separately from HIR and backend
-  work. Record stage and end-to-end time, peak memory and dev-stack pressure.
-- [x] List the source, unit, backend, Boracle and benchmark owners needed by each
-  phase. Add coverage only for a missing contract or invariant, with one primary
-  test owner per behaviour.
+- `ast/numeric_construction.rs` and `numeric_known_shape.rs` own body-local
+  origins, recipes, receiving witnesses, symbolic shapes and continuations.
+  `complete_numeric_body` resolves them before publication and releases them on
+  success and failure. Independent functions and concrete generic bodies have
+  separate domains. Permanent stores receive completed typed nodes.
+- `ast/templates/tir/numeric_intake.rs` queues intake by body domain in the
+  module-shared TIR owner. One root's completion leaves sibling intake intact.
+  Completed TIR holds typed values. Drained intake alone leaves capacity live.
+- Retained calls link numeric origins through declared parameter/result shapes,
+  then resume concrete inference and completion. Request reservation/publication
+  stays separate from numeric selection. Preserve inactive requests and the
+  immediate expected-result boundary.
+- Compact nodes retain canonical types, D15 domains, conversion boundaries and
+  failure facts after body completion. Cast sources resolve independently of
+  targets. Historical eager-literal layouts do not describe this contract.
+- Authored safety eligibility, actual implicit/typed failure and deferred
+  private-call eligibility have separate owners. Type-check handlers and their
+  constraints before pruning. Retain sparse failure snapshots rather than the
+  construction witness graph. Base/generated summaries converge after AST
+  release, then lane installation/pruning refreshes final CFG and link facts.
 
-Phase 0 evidence and its limits live in
-`benchmarks/frontend-optimization-results.md`, with raw baseline records,
-provenance and detailed inventory under `tmp/typed-semantic-expressions/`.
-Published-AST counts are occurrences, memory bytes are allocator proxies and
-stack pressure has a 1 MiB pass/fail observation only. Sampling records operation
-and stage ownership without claiming measured compatibility/substitution/default
-leaf costs. Phase 2 must resolve storage and lifetime choices under its evidence
-rules. Phase 1 has retired V1 and recorded the surviving-workload baseline.
+### Remaining owner and lifetime map
 
-### Starting owner map
+Paths beginning `ast/` or `datatypes/` are relative to
+`src/compiler_frontend/`. Refresh the owning source before changing a boundary.
 
-Refresh these paths and follow their callers at activation. They identify the
-work that already exists, not proposed extra abstraction layers.
-
-| Area | Starting owners | Required question |
-|---|---|---|
-| Expression and parser scratch | `src/compiler_frontend/ast/expressions/{expression.rs,expression_kind.rs,expression_rpn.rs,parse_expression.rs}` | Which fields/variants need to survive semantic completion, and which only serve parsing? |
-| Symbols, declarations and types | `src/compiler_frontend/headers/module_symbols.rs`, `ast/ast_nodes.rs`, `ast/module_ast/environment/`, `ast/type_resolution/`, `datatypes/` under `src/compiler_frontend/` | Where do fake values, duplicate signatures and ParsedTypeRef/DataType/TypeId round trips enter? |
-| Calls and defaults | `ast/expressions/{function_calls.rs,call_argument.rs,call_validation.rs,constructor_views.rs,struct_instance.rs,choice_constructor.rs}` and `ast/generic_functions/calls.rs` | Which resolved descriptors and default IDs can parsing, inference and validation borrow once? |
-| Operators and folding | `ast/expressions/eval_expression/`, `ast/expressions/const_eval/`, `ast/const_values/`, `ast/templates/` | Which resolved operation facts, borrowed values and unchanged roots get discarded or copied? |
-| Views and generic lifetime | `ast/module_ast/finalization/`, `ast/generic_functions/{body_rules.rs,templates.rs,materialisation/}` | Can unused validation data be released while later materialisation retains canonical syntax and stable semantic inputs? |
-| HIR and failure closure | `src/compiler_frontend/hir/`, especially `hir_expression/`, `failure_facts.rs` and `private_failure_lane.rs` | Which carriers, rewrites and analysis tables must change together before final publication? |
-| Cross-stage consumers | `src/compiler_frontend/module_compilation/generated/`, borrow/Boracle extraction, public interfaces and both backend lowerers | Which local IDs need remapping, which stable projections need rebuilding and which published facts must refresh? |
-
-Paths shortened to `ast/` and `datatypes/` in this table are relative to
-`src/compiler_frontend/`. Confirm module ownership before adding files.
-
-**Exit check:** every transferred obligation has a phase and a test/documentation
-owner. Every ID domain has a defined lifetime, or a named Phase 2 experiment that
-will decide it before migration. No numeric, TIR, result or failure semantic
-decision remains hidden in an implementation convenience.
-
-### Activation inventory (durable)
-
-The activation inventory records physical carriers and their current lifetimes. Canonical compiler, build and language authorities still own semantics. Recheck the current source before migrating an owner. Quantitative census, profiles and baseline measurements belong in the existing benchmark evidence report, with raw data and revision details under `tmp/`.
-
-**Retained expression, signature and default carriers.**
-
-| Carrier | Physical owner | Durable fact |
-|---|---|---|
-| `Expression` record | `ast/expressions/expression.rs` | Recursive pre-migration owner. `kind` carries content, `type_id` carries canonical resolved type, `failure_facts` carries origin-owned analysis summaries, `diagnostic_type` carries display spelling policy, `function_receiver` and `value_mode` carry identity and access class, `span` and provenance fields carry occurrence facts |
-| `ExpressionKind::Function` | `ast/expressions/expression_kind.rs` | Owns a full `FunctionSignature` including parameter-default `Expression` values. Phase 4 replaces it with the selected compact construction path |
-| `diagnostic_type` as `DataType::Function` | `datatypes/datatype.rs`, `ast/expressions/expression.rs` | Owns a second full signature copy. `Expression::function` moves the supplied signature into `kind` and clones it once into `diagnostic_type`, so two owning copies remain from one clone. Signature and default consolidation in Phases 4 and 5 covers this carrier too, not only `ExpressionKind::Function` |
-| `NoValue` sentinel | `ast/expressions/expression_kind.rs`, `ast/expressions/expression.rs` factories, `headers/module_symbols.rs`, `ast/ast_nodes.rs` | Carries four current roles: absent default or initializer, declaration/header shell, unresolved-pending constant and temporary/blanked row. The existing `NoValue` plus `DataType::Inferred` predicate crosses those roles: config absent/temporary rows also match, while annotated constants with a non-`Inferred` type do not. Preserve resolved-lookup hiding and deferred validation, including the bare-identifier constness exemption in `parse_expression_identifiers.rs`, when replacing the sentinel. Phase 4 keeps explicit pending/shell state separate from absence. An unresolved authored initializer is not absent; a transient placeholder is not a completed semantic node or zero-result shape |
-| Call and constructor default views | `ast/expressions/call_validation.rs` (`ParameterExpectation`), `ast/expressions/constructor_views.rs` (`ConstructorField`) | Hold cloned default `Expression` views under the `NoValue`-means-absent rule. They are not canonical default stores. Phase 5 folds them into one borrowed descriptor owner |
-| Canonical signature and declaration tables | `ast/statements/functions.rs` (`FunctionSignature`), `ast/type_resolution/mod.rs` (`ResolvedFunctionSignature`), `ast/module_ast/environment/` (lookups, declaration table, receiver catalogues), `headers/module_symbols.rs` | Own resolved signatures, struct fields, choice shells, receiver entries and generic templates. Later phases borrow these resolved facts instead of re-resolving or re-cloning full signatures |
-| Choice and struct shells | `ast/module_ast/environment/{lookups,resolved_public_type_roots}.rs`, `builtins/error_type.rs` (`BuiltinErrorManifest`) | Struct field defaults stay retained for later projection. Accepted choice payload fields stay default-free. Both flow through preparation into sidecars |
-| `ScopeArena` and `ScopeFrame` | `ast/module_ast/scope_context/scope_frame.rs` | Transient parser-side arena for one parse context. Frames own body-local declarations through `Rc`, and frame clones copy `Rc` handles rather than declaration payloads. The arena dies with the emission and validation pass that built it |
-| Parser and header scratch | `ast/expressions/expression_rpn.rs`, `parse_expression*.rs`, call/header inputs | Pending literal recipes and groups resolve during evaluation. Evaluated operands and located operators may survive in runtime RPN content |
-| TIR and template carriers | `ast/templates/tir/` (`store.rs`, `view.rs`, `overlays.rs`, `node.rs`), `ast/templates/runtime_handoff.rs` | `TemplateIrStore` plus `TirView` form the AST-local module-owned view authority. Structural children inherit the accepted expression overlay while nested value expressions take their own complete context. No TIR identity crosses the HIR handoff |
-| Match and value-production carriers | `ast/statements/match_patterns/types.rs`, `ast/statements/value_production/types.rs` | Guards, scrutinees, produced values and closed `ValueBlock` forms stay content and control flow. Parser receiving-context targets stay transient analysis |
-| Statement carriers | `ast/ast_nodes.rs` (`AstNode`, `NodeKind`, `Declaration`, `MultiBindTarget`) | Own declaration rows, call preludes, loop and branch payloads and multi-slot binders. Phases 3 and 4 migrate expression and place edges without indiscriminately flattening unrelated statement collections |
-
-**Lifetimes past the emitted AST.**
-
-- The emitted `Ast` drops by value at HIR lowering, but that drop does not end all `Expression` ownership. Preparation-owned declaration, signature, default and constant owners outlive the emitted AST through post-HIR generated convergence and release only at `freeze`.
-- `ModuleMaterialisationPreparation` is captured during AST finalization and read by generated convergence before `freeze` consumes its builder. Its `from_environment` step shares the resolved-signature, struct-field, choice-shell and receiver-method `Rc` tables and clones generic templates, builtin AST nodes and constant storage.
-- The generated declaration-table fork shares the base `Rc` table and blanks module-constant rows to `NoValue` before sidecar use. The blanked fork does not prove the base graph reclaimed.
-- `freeze` builds a new `Expression`-free `ModuleMaterialisationContext` with declaration closure, evidence, semantic closure, artefacts, module origin, frozen identity handle and path and string tables. The frozen context publishes under `Arc` for build-system readers and retains template rows through frozen artefacts.
-- Generated sidecars take two distinct routes. The `Preparing` route uses the live preparation through `materialise_ast`, refills constant rows per row and shares the choice, struct and signature tables. The `Published` route uses the provider frozen context through `materialise_ast_at` with stable artefacts. Both routes receive the live requester preparation, lower sidecar AST to HIR and converge generated summaries before transaction publication.
-
-**Constants and single-source services.**
-
-- `ConstValueStore` owns module-local folded values under donor-local `ConstValueId` handles. Public projection converts values to `PublicFoldedValue` before publication. Two live owners exist after finalization: the HIR builder copy used during lowering and the preparation clone used after HIR and borrow work.
-- Store-to-`Expression` round trips build temporary `Expression` trees only. `expression_for_resolution` serves body-local constant substitution and `expression_for_materialisation` serves a generated-environment boundary. Scalar and aggregate recursion stays store-owned, and occurrence metadata round-trips back onto rebuilt rows.
-- The config service and the direct-template service stop at folded data and run no HIR, borrow or backend stages. `FoldedConfigDeclaration` carries a name, a `PublicFoldedValue` and spans, while `FoldedMothTemplate` carries `OwnedFoldedString` content with module resources, warnings and source snapshots. Donor-local constant and type handles resolve before return, so only owned folded values, spans, records, resource origins and string content escape into caller-owned tables.
-
-**Service and ID-domain handoffs.**
-
-Paths below are relative to `src/compiler_frontend/` unless qualified.
-
-| Service owner | Issuing domains and dependencies | Last reader and release |
-|---|---|---|
-| `module_compilation/service.rs` | Prepared/bound/ordered module inputs, module-local `TypeEnvironment`, HIR and `ConstValueId` domains, one AST-local TIR store and a requester path fork | Public projection reads folded constants before HIR. Lowering consumes the emitted AST and moves its constant store into the HIR builder. Preparation owners remain through generated convergence until `freeze`. Published HIR stays paired with its type environment |
-| `src/build_system/create_project_modules/compilation/single_file.rs` | Synthetic discovery and retained preparation feed the same module service with fresh path/string domains | Uses the module service's release boundaries rather than a second semantic pipeline |
-| `single_source_compilation/config.rs` | Self-contained path/type/constant/TIR domains, but declaration names use the caller's `StringTable` | Projection releases AST/store ownership. Build config application reads owned folded values, resolution records and spans. The live source span owner remains until those build-owned validations finish |
-| `single_source_compilation/moth_template.rs` | Caller string domain, service/bundle source domain and a fresh resource domain. Retained bundle inputs feed ordinary synthetic headers, binding, ordering and folding | Fold/extraction releases path/type/constant/TIR owners. Folded content retains caller `StringId`s with its resource table and source database, not an AST graph |
-| `ast/generic_functions/body_rules.rs` | Retained canonical `StableBodySyntax` plus validation-local scope/type/expression data | Static selection, terminality and generic failure-boundary validation consume retained validation bodies in the finalizer. Those bodies drop before completed AST publication and never enter executable HIR |
-| `ast/generic_functions/materialisation/artefact_emit.rs` | Frozen provider declaration/semantic closure, stable syntax/evidence and identity tables. Provider paths rebase into generated-local type/path domains | Materialised AST ends at sidecar HIR lowering. The frozen context remains with the published module artefact for later requests |
-| `module_compilation/generated/` and `ast/generic_functions/materialisation/sidecar_build.rs` | Stable generated request identities select the live `Preparing` or frozen `Published` route. Each sidecar owns its local stores; owning handoffs remap local IDs | Sidecar lowering releases AST. Validated HIR, refreshed link facts and summaries enter the transaction delta. Requester preparation releases at `freeze`, after convergence |
-
-Raw `TypeId`, constant, expression, TIR and HIR indexes never become public or generated request identities. Stable projections cross module boundaries with explicit rebasing. Phase 2's `expression-domain-and-TIR-lifetime` experiment chooses the future expression issuing scope without assuming body-local IDs can enter module-owned TIR.
-
-**Current HIR limitation and alias rule.**
-
-- `HirFunction` keeps one fused `return_type` with no slot list and no block parameters. Zero successes use the `none` type, multiple successes use an interned tuple and error slots use the internal fallible carrier. Transport uses `TupleConstruct` and `TupleGet` while failure uses `FallibleBranch` with `FallibleUnwrapSuccess` and `FallibleUnwrapError`. Phase 4 removes this encoding and updates its consumers together, including the private inferred-failure installer, entry narrowing and carrier construction.
-- Shared call summaries carry one whole-return `FunctionReturnAliasSummary` in `PublicCallSummary.return_alias`. That shape does not prove per-slot precision. Phase 4 keeps conservative root unions with occurrence provenance on native slots and must not invent disjointness for fresh bindings or separate slots.
-- The accepted success contract distinguishes zero, one and ordered multiple slots from optional absence and divergence. A producer executes once, multi-bind computes all right-hand values before writing existing targets and fallible continuations define success values only on success and one error value only on failure.
-- Normal-root `start`, including a synthetic single-file root, remains compiler-synthesised and non-exported with fragment success slots plus built-in `Error!`. Entry assembly activates it at most once for that entry after compilation. Dependency binding and compilation never activate it, and imported non-entry root work stays dormant while ordinary module effects retain their own contracts. Runtime fragment results stay staged until success. The same-module private inferred-failure lane remains internal and converges before final CFG validation, link-fact refresh and publication. Phase 1 preserves those contracts while Phase 2 selects their native control-flow form.
-
-**Phase 2 experiments.**
-
-Phase 2 decides representation under evidence rules through exactly these four experiments. No other experiment name in this plan creates a separate track.
-
-- `expression-domain-and-TIR-lifetime`: issuing scope, each store's last reader, the validation/canonical/materialisation lifetime split and the AST/TIR-to-HIR handoff with failure snapshots.
-- `native-call-continuation`: new block arguments with edge-defined results against an invoke-like terminator, covering the private installer with both supported backend lanes together.
-- `fold-reclamation-and-candidate-isolation`: bounds and reclamation for discarded append-only storage with overlay and replacement-root isolation while unchanged immutable nodes keep their IDs.
-- `payload-packing-and-capacity`: common variant, list and co-occurrence bounds with side-store counting and overflow diagnostics.
-- The `TypeEnvironment` diagnostic display boundary stays excluded from all four. The diagnostic-layout migration's Phase 4C owns its replacement.
-
-**Phase 1 bounded packages.**
-
-| Package | Exclusive owners | Contract |
-|---|---|---|
-| A. Source syntax and diagnostics | Tokenizer and lexer, `declaration_syntax`, production header parsing records, central diagnostic reason and schema owners | Remove reactive grammar and reactive-only header flags. Keep legitimate directives. Reject removed spellings through ordinary structured syntax diagnostics without a migration-only family and without renumbering or reusing codes |
-| B. AST, TIR, defaults and constants | All affected `ast` owners, expression records and coercion paths, calls and constructors, declarations and functions, generic requests and materialisation, constant values, template-head grammar and dispatch, finalization fixed points, `src/compiler_frontend/tests/{ast_fixture_support,type_id_fixture_support}.rs` (`ReturnSlot.reactive_template` constructors) | Remove reactive metadata, subscription collection and interpolation intake. Delete fixed-point modules rather than leaving no-op calls. Keep TIR overlays, nested-value context, static-if selection, canonical generic syntax, plain handoffs, structural text, ordinary defaults and full result and failure facts |
-| C. HIR, lowering and reachability | `hir`, `hir_builder` and their subsystem tests | Delete HIR reactivity types, reactive side tables and accessors, reactive binding in lowering and invalidation-specific flow. Migrate affected lowering callers to the final AST shape. Keep ordinary expression, place, result, failure, assertion-message, fragment, static-branch, remapping and entry facts |
-| D. Analysis, summaries and Boracle | Borrow and lifetime analysis, `public_call_summary` and `src/compiler_frontend/tests/public_call_summary_tests.rs`, public type and interface projection and validation, local and generated summary finalization and interface consumers, Boracle event, build, execute, origin, reduction and validation owners, `src/build_system/tests/module_lane_tests.rs` (`BorrowCheckReport` reactive-invalidation fixture) | Remove reactive parameter access and effects, public and generated reactive fields with joins and widening, observation and invalidation metadata and `ReactiveObserve` oracle events with their entire consumers including feature-gated Boracle modules. Keep ordinary mutation, transfer, convergence, stable identities, topology legality and numeric proofs |
-| E. Backends and HTML runtime | JS and Wasm backends with gates and tests, Core Text and package JS helpers, backend numeric-proof JS drivers, HTML project JS path | Delete helper demand, template-object preservation, snapshots, reactive initialisers, scheduling and subscription helpers and reactive mounting and gates. Inspect indirectly named String coercion, map-key and numeric-formatting paths. Keep ordinary binding cells, plain template and resource lowering, fragments, entry staging, lazy assertions, error boundaries and numeric and text semantics |
-| F. Fixtures, hooks and allowlists | `tests/cases` fixtures and manifest, fixture-only harness hooks, honesty and source audit allowlists, `xtask/src/{architecture_boundary.rs,architecture_boundary/tests.rs}` (V1 static-solver vocabulary and event exemption) | Classify every affected fixture as delete, rewrite or preserve. Delete retired-only fixtures. Rewrite mixed cases around surviving contracts with original failure evidence kept locally. Remove test-only hooks, stale allowlists and V1 architecture-boundary entries with their production owners while keeping the unrelated boundary rules |
-| G. Documentation, status, navigation and highlighting | Public and developer docs with source examples, progress matrices, README, agent routing, index, HTML highlighter and style scanner with tests, benchmark highlighter fixture | Delete public reactivity pages and navigation. Publish the complete Wiring teaching and reference family against the permanent reference with accepted contracts separated from future work. Audit compiler, build, memory, matrix, example, grammar, highlighting, editor, instruction, diagram, routing and index owners. Keep genuine historical records explicitly historical |
-
-**Primary test, documentation and service owners by phase.**
-
-| Phase | Primary test owners | Documentation and service owners |
-|---|---|---|
-| 1 | Tokenizer, declaration, header, AST, template, default, generic, folding, HIR, lowering, reachability, borrow, public-summary, interface and generated unit filters. Deleted V1 fixtures, rewritten mixed cases, surviving template and resource and import and assertion and entry runtime coverage, honesty and source audits. JS and Wasm backend with HTML runtime tests. Boracle lanes without reactive observation. Post-removal baseline owned by the parent | Wiring teaching and reference family with progress matrices, index, navigation, diagrams, grammar and highlighting owners. Single-module, single-file, config and direct-template services keep their folded-data contracts unchanged |
-| 2 | Constant-store, TIR view and overlay and store, HIR validation and private-lane unit tests. Rerun of manifest behaviour fixtures. New continuation coverage across both backend lanes. Losing candidates with flags removed | Decisions recorded with selected and rejected forms, exact interfaces, invariants and reopen evidence. No separate validation-lifetime or failure-snapshot track outside the four named experiments |
-| 3 | `hir/tests`, compiler end-to-end tests, one-MiB dev-stack regression through `moth check`, remapping, final-CFG validation and link-fact checks. JS tests with Wasm lowering and emit tests. Affected borrow and Boracle consumers. Non-recording benchmark checks after cutover | Dense HIR with flat places, capacity policy and freeze and publication contracts in the compiler architecture owners. Generated-sidecar service moves to direct store access |
-| 4 | Phase 4D contract table: store integrity, results with control flow, numeric fidelity, immutable views, static branches, generic lifetime, failure lifetime with bounded witnesses, subtle failure facts, diagnostics after release and source mutation and final HIR with publication. Receiver-diagnostic negatives with legal forwarding positives. Extended dev-stack regression with bounded depth rejection. JS and Wasm boundary tests | Result-slot, channel, projection, entry and propagation contracts in the canonical language and compiler owners. Single-target multi-result rejection with multiple-success `?` handling and narrow enclosing-function facts land here |
-| 5 | Constant-folding, expression evaluation, literal parsing and constant-store tests. New `ConstValueVisit` boundary with default and generic coverage. Rerun of manifest behaviour fixtures with type and fold stage profiles | Descriptor consolidation and direct-handoff contracts in the compiler architecture owners. Validation, canonical and materialisation services keep their split lifetimes |
-| 6 | New bounded Wire and Route negative and positive matrix under existing test directories with manifest fixtures. Target-validation matrix for supported backends. Phase 1 teaching examples revisited | Bounded Wire and Route contract in the permanent reference with signatures, generics, fingerprints, projections and HIR owners carrying only consumed metadata. Observation, subscriptions, delivery, invocation, composition, channels, async, UI scheduling and capability storage stay excluded |
-| 7 | Constant-folding tests with Core Text runtime-contract fixtures. Five-operation folding with parity and elision, optional and multi-slot transport through the real materialisation boundary and a target-without-lowering fold test. No invented public Core API and no second test-only evaluator | Trusted Core operation and deterministic-bound contracts beside existing external lowering metadata. Imported-constant publication with stable identities in the package owners |
-| 8 | Re-run of every Phase 1 to 7 unit owner above with full validation on the final tree, affected Boracle with reference and oracle lanes and final backend lanes. Slice review with matrix and audit-log hygiene | Permanent architecture update with selected layouts, lifetimes, cross-domain projections and rejected-choice rationale. Concise reproducible evidence in the existing benchmark owner. Plan with roadmap entry removed in the completion commit |
-
-## Phase 1 - retire Reactivity V1 before storage migration
-
-**Consumes:** Phase 0's owner and fixture inventory.
-**Produces:** one supported compiler path without V1 reactivity, accurate public
-documentation and a second baseline for representation comparisons.
-
-- [x] Remove reactive `$Type`, `$=` and `$T` parameter forms, `$(source)`
-  interpolation and obsolete call/header metadata through their current owners.
-  Audit deferred `$bind` prose separately rather than assuming it was implemented.
-  Preserve legitimate `$` directives and use ordinary structured syntax diagnostics
-  for removed source. Do not add a migration-only diagnostic family, renumber
-  existing codes or reuse a retired code for a new Wiring meaning.
-- [x] Remove expression/TIR reactive metadata, String reactivity fixed points,
-  subscription summaries, public/generated projection fields, HIR invalidation
-  machinery, JS scheduling/snapshot paths and reactive HTML mounting glue.
-- [x] Preserve ordinary template evaluation, structural/resource Strings,
-  fragments and insertion, value/alias/borrow contracts, assertions and existing
-  builder lifecycle ownership. Do not turn normal retained values into a new
-  subscription representation.
-- [x] Classify every affected fixture. Delete tests whose only contract was
-  retired behaviour. Rewrite mixed-purpose tests around the surviving semantic
-  contract and retain their original failure evidence. Remove test-only V1
-  hooks and stale audit allowlists with the production owner they served.
-- [x] Publish the Wiring teaching/reference structure described below, clearly
-  separating accepted foundation contracts from executable support and future
-  work. Remove obsolete public reactivity pages and navigation. Correct async
-  channel examples without implementing channels.
-- [x] Audit compiler/build/memory references, progress rows, source examples,
-  grammar/highlighting/editor snippets, test instructions, diagrams, `AGENTS.md`
-  routing and `index.md` for the retired model. Change each affected owner, not
-  merely the page visible from the site menu.
-- [x] Inspect indirect helper-demand, template-object preservation, String
-  coercion, map-key and numeric-formatting paths even when their names omit
-  `reactive`. Give each remaining hit a remove/adapt/preserve/historical/external
-  follow-up disposition. Preserve lazy assertion messages, imported-root
-  suppression, normal entry activation and unrelated dependency invalidation.
-- [x] Rebuild documentation and verify removed pages disappear from generated
-  navigation/output. Verify ordinary templates, fragments, resources, static
-  branches and imports still pass their contractual coverage.
-- [x] Record a post-removal baseline on the surviving workload cohort. Use this
-  baseline to measure representation/folding work. Keep the pre-removal baseline
-  to attribute retirement separately. Removed cases are not a storage speedup.
-
-### Required Wiring documentation delivery
-
-The permanent language route owns exact semantics. Complete the public Wiring
-family with introduction, Wires, Routes and scope/future material, using Basic
-teaching, unsuffixed detailed references and page composition according to the
-site conventions. Keep precise source/runtime availability in the progress
-matrix. The teaching work transferred here is part of delivery:
-
-| Lesson | Required distinction/examples |
+| Owner | Contract used by remaining work |
 |---|---|
-| Shared member-list forms | Function parameters, struct fields and choice payloads share a pipe-list shape but have different contracts. Named const-record values do not become runtime type declarations. |
-| Head-directed `of` | Ordinary generic type application, Wire/Route parameter contracts and future Channel specialisation use one separator without becoming one inference rule. |
-| `~` | Declaration mutability and operation/argument exclusivity retain their separate meanings. A Wire does not grant mutation authority. |
-| Receiving context | Generic construction, `none`, casts and routes get only the information their immediate receiving contract supplies. No ambient higher-order inference or parse-failure retry. |
-| Blocks and templates | Structural blocks and ordinary templates keep their own roles. A template creates no hidden Wire, Route or subscription. |
+| `ast/expressions/`, declaration records and `ast/module_ast/environment/` | Parser scratch stays transient. Completed expressions use the phase-owned builder/store. Canonical declarations own absence, pending state, signatures, receiver identity and defaults. Preserve resolved-lookup hiding, deferred validation and the bare-identifier constness exemption. |
+| `ast/statements/functions.rs`, `ast/type_resolution/`, call/constructor preparation | Phase 5 consolidates borrowed resolved descriptors and default IDs, including diagnostic function-type/signature copies. Struct defaults survive projection. Choice payload fields stay default-free. |
+| `ast/templates/tir/`, runtime handoff and static-if specialisation | AST-local views retain their expression domain and accepted overlay. Structural children inherit it, nested values use their complete context and no TIR identity crosses HIR. |
+| `ast/module_ast/finalization/`, generic body rules and materialisation | Validation bodies serve static selection, terminality and failure-boundary checks, then drop before AST publication. Retain canonical `StableBodySyntax` and stable semantic inputs for later instantiation. Preparation survives emitted-AST lowering until generated convergence and consuming `freeze`. |
+| `ast/const_values/` | `ConstValueStore` owns content under local `ConstValueId`. Public projection uses `PublicFoldedValue`. Phase 5 removes unnecessary resolution/materialisation graph round trips while preserving occurrence metadata and the shared scalar/optional/aggregate vocabulary. |
+| `module_compilation/service.rs`, generated compilation and sidecar build | Lowering consumes AST and moves constant ownership into HIR. Live `Preparing` and frozen `Published` provider routes both use requester preparation and converge sidecar summaries before transaction publication. Frozen `ModuleMaterialisationContext` retains stable closure, artefacts, identity and path/string tables under `Arc`. |
+| Single-file, config and direct-template services | Single-file uses the module service. Config returns owned folded values, records and spans, with declaration names in the caller's `StringTable`. Direct templates return `OwnedFoldedString` content retaining caller `StringId`s alongside resources, warnings and source snapshots. Their local type/constant/TIR owners end at projection/extraction, with captured source ownership retained through build-owned validation. |
+| HIR, public/generated projection, borrow/Boracle and JS/Wasm | Consume native dense facts directly. Remap local domains at their owning handoff. Stable semantic projections cross modules, rather than raw TypeId, ExprId, ConstValueId, TIR or HIR indexes. |
 
-Include a reusable forwarding helper, captured row identity with a zero-input
-event, an ordinary choice-based update, child-message lifting without route
-composition and a labelled future channel receiver. Preserve the future spelling
-`reader, writer Channel of AppMessage = Channel()` and directional endpoints.
-An omitted initializer is only an explicitly hypothetical future form. Compile
-executable examples through normal docs/tests and label future examples as such.
-Do not claim unsupported route application or new anonymous-record semantics.
-Keep one canonical contract owner after the public rollout: compose the permanent
-reference or move it and update every route in the same checkpoint, without
-retaining competing copies. Include educational compiler diagrams, template and
-design-scope pages, editor resources and test-harness instructions in the delivery
-inventory, alongside both progress matrices and generated navigation.
+Preparation retains canonical syntax and stable semantic projections, not shared
+validation graphs or a cloned `ConstValueStore`. P4.5 proves compaction, detached
+instantiation and owned-result consumption. Phase 5 owns descriptor/default
+consolidation and direct constant handoffs.
 
-**Exit check:** searches and source/runtime coverage show no supported V1 owner
-or renamed compatibility implementation. Surviving semantics remain covered.
-The new baseline measures the feature set the storage redesign will preserve.
+## Phase 1 - accepted Reactivity V1 retirement
 
-## Phase 2 - investigate representation, packing and lifetimes
+**Complete.** Compiler, analyses, Boracle, backends, HTML runtime and tooling
+share one path without V1 reactive syntax, observation or scheduling. Ordinary
+directives, templates/resources, fragments, defaults, alias/borrow semantics,
+lazy assertion messages, entry activation and dependency invalidation retain
+their contracts. Removed spellings use structured syntax diagnostics.
 
-**Consumes:** current census, two baselines and fixed semantic contracts.
-**Produces:** selected layouts, issuing domains, release/freeze boundaries,
-concrete internal interfaces and bounded migration tasks for Phases 3 and 4.
+The public Wiring family now separates accepted design from executable support.
+Phase 6 still owns shared member lists, head-directed `of`, exclusivity,
+immediate receivers, forwarding, binding identity, choice updates and
+child-message lifting. Future examples keep their labels, including directional
+`reader, writer Channel of AppMessage = Channel()` endpoints. Credit retirement
+to its own benchmark comparison rather than later representation work.
 
-IDs are the chosen architecture. The investigation selects their efficient
-physical form. Begin with a small safe Rust enum plus IDs/ranges as the readable
-reference, then compare a small number of justified alternatives. Keep at most
-three live candidates per decision. An additional idea may replace a candidate
-when its expected benefit, invariant cost and discriminating test are recorded.
-Do not keep permanent experiment flags or an exhaustive matrix of combinations.
+## Phase 2 - accepted representation and lifetime decisions
 
-Use other compilers as comparison inputs, not as a stage-order template. The
-[rustc THIR reference](https://rustc-dev-guide.rust-lang.org/thir.html) describes
-separate indexed expression/statement storage and short-lived typed bodies.
-Compare those lifetime boundaries against Moth's longer-lived TIR views and
-generic inputs while keeping Moth's immediate typing/folding. Zig's
-[memory-layout investigation](https://ziglang.org/download/0.8.0/release-notes.html#Reworked-Memory-Layout)
-and [AST owner](https://github.com/ziglang/zig/blob/master/lib/std/zig/Ast.zig)
-provide compact node, side-data and columnar candidates. Verify current source
-when borrowing an idea, then measure its Moth-specific access and construction
-cost. Neither precedent proves the fastest layout for this compiler.
+**Complete.** The compiler architecture owns the selected interfaces. The
+benchmark report retains candidate evidence and reopening rationale.
 
-### Candidate decisions
-
-| Decision | Candidates and evidence required |
+| Decision | Accepted contract |
 |---|---|
-| Hot node layout | Compact Rust enum versus typed tag/flags and fixed payload words. Compare actual aligned size, tag decoding, traversal, construction and type/fold throughput. |
-| Record organisation | AoS versus limited SoA only where measured passes read a strict subset. Count all columns, edge stores, allocations and cache traffic, not only one hot array. |
-| Result shape | Inline common zero/single forms and a typed range/ID for multiple types. Compare explicit enums and checked encodings without stealing unbounded TypeId bits. |
-| Optional identities | `NonZeroU32`/niche-capable IDs where their issuing policy supports it. Test exhaustion and zero handling. Existing TypeId zero remains valid. |
-| Variable payloads | Typed ranges for arguments, fields, map entries, structural pieces and cold lists. Measure small-list frequency before introducing any special inline form. |
-| Failure/occurrence facts | Dense presence bits or optional fact IDs with sparse typed payloads. Measure co-occurrence and repeated lookup cost. Do not introduce a hash table for every sparse field. |
-| Constants and literals | Separate occurrence metadata from content, direct constant handles and exact scalar payload storage. Compare neutral shared content versus one direct phase projection only where lifetime and retained-byte evidence justify it. |
-| Construction and reclamation | Append-only owner/partition, safe local rollback, scratch-to-store promotion or justified compaction. Measure peak overlap and unreachable retained payloads after folds/substitution. |
+| Nodes and payloads | Safe Rust enum/AoS reference, owner-local typed IDs and checked typed ranges. Fixed children stay inline, variable children use explicit ID lists and cold facts use typed owners. The 64-byte projected-row ceiling guides decisions rather than describing production memory or licensing lost facts. |
+| Results | Explicit inline zero/single forms and ordered multiple types. TypeId zero stays valid. Optional absence and divergence remain separate. |
+| Construction and release | Scratch promotion of completed reachable nodes, immutable unchanged-root reuse and last-reader compaction. Candidate instantiations keep isolated replacement roots/overlays. Owned service results and detached preparation pass P4.5 lifetime proofs. |
+| Fallible HIR | Invoke-like continuation with edge-defined success slots and a separate error slot. Only the selected edge defines its values. |
+| Diagnostics and numeric content | Preserve the exact eight-byte SourceSpan, locked 22/10 split and captured snapshot owner. Keep integer extrema, float bits/signed zero, exact Dec coefficients/scales, U32 error codes and sparse origin-owned failure witnesses. |
 
-Set a candidate byte ceiling from the census before implementation. It is a
-decision aid, not permission to weaken semantics. Measure bytes per useful live
-expression, including side stores, edges, cold facts, nested heap payloads,
-reserved capacity, construction/freeze overlap and dead/replaced nodes. Include
-destruction cost and peak resident memory. A smaller header with a larger live
-graph has not won the memory comparison.
+Phase 5 keeps the existing sharing of `Arc<BigInt>` coefficients and established
+interning/caches. The rejected owned-folder signature left copies and regressed
+matched timings. Key normalisation cost and low TIR-cache reuse didn't justify
+new formats or wider caches. Reopen an optimisation with a changed causal
+hypothesis and complete lifetime/invalidation evidence. The diagnostic display
+boundary remains with diagnostic-layout work, including its locked 32-byte
+record and at-most-48-byte draft. Retain required TypeEnv ownership until that
+boundary changes.
 
-### Compact encoding constraints
+## Phase 3 - accepted dense HIR and binding contracts
 
-- Preserve the locked exact eight-byte `SourceSpan`. Reuse its source identity
-  and snapshot owner. Do not rescan source or reopen the span bit split here.
-- Tag/flag/result codecs own typed constructors and accessors, checked bounds,
-  reserved-bit rules and boundary tests. Keep raw masks out of semantic code.
-  Any stolen payload bits require a proven bound and exact extension, or choose
-  a larger straightforward form. Avoid varint/delta decoding on hot traversals
-  without evidence sufficient to justify the extra work.
-- Keep full integer extrema, float bits including negative zero, and exact Dec
-  coefficients/scales. Numeric identity differs from physical carrier. Do not
-  silently narrow a full-width value because its word also stores a tag.
-- Closed implicit-failure causes may use a compact typed code/bitset instead of
-  repeated static-slice descriptors if order and policy remain exact. Public
-  `Error.code` stays U32. Existing failure summaries and origin-owned witness
-  lists must not become repeated subtree scans.
-- A fact is not absent merely because one vector is empty. Account for explicit
-  exit, typed-producer conflicts, deferred catches, post-discharge folding
-  eligibility and private-failure witnesses retained in inert expressions.
-- Do not reopen already shared `Arc<BigInt>` coefficients by adding another
-  sharing layer. Optional interning or caches require measured reuse and a
-  complete identity/invalidation model, not only potential duplicate values.
+**Complete.** Dense HIR, template/control-flow hardening and explicit binding
+contracts remain accepted.
 
-### Lifetime decisions required before cutover
+`HirValueId` addresses canonical module-owned expression rows. Arguments,
+elements, entries, fields, String pieces and projections use typed ranges.
+Flat places contain a root local and ordered projections, with index expressions
+by ID. Statements, terminators, patterns and all durable consumers use this
+representation directly, including remapping, numerical proofs, link facts,
+borrow/lifetime analysis, Boracle, generated services and both backends.
 
-- [x] For each expression, payload, default, constant and TIR view store, record
-  its owner and last reader. Prove that every surviving ID has a live matching
-  store. Reusing an integer in a sibling store does not authorise cross-access.
-- [x] Define how a fold that discards an operand releases or bounds its retained
-  storage. Dropping an ID does not reclaim append-only payloads. Test repeated
-  replacement and mostly-folded large bodies, not only live runtime trees.
-- [x] Preserve immutable overlay/root isolation between candidate instantiations.
-  Structural TIR children inherit the accepted overlay, nested value expressions
-  use their own context, and runtime dependence does not skip required validation.
-- [x] Separate throwaway generic-body validation storage from retained canonical
-  tokens/declaration syntax and from concrete materialisation. Prove later
-  instantiation after validation storage is dropped.
-- [x] Define AST/TIR-to-HIR ownership transfer and required failure fact snapshots.
-  Base/generated recursive summary convergence cannot depend on a retained AST.
-  Diagnostics retain exact locations/types/provenance after expression/TIR drop.
-- [x] Preserve the current diagnostic TypeEnv dependency until its own display
-  snapshot boundary replaces it. This plan does not claim that shrinking
-  expressions implements diagnostic layout Phase 4 or frees every TypeEnv early.
-- [x] Choose the native fallible-call HIR form: proposed new block arguments with
-  edge-defined results or an explicit invoke-like terminator. Success and error definitions
-  are mutually exclusive. Do not hide a semantic carrier behind an accessor.
+`FrontendArenaCapacityEstimate` gathers cheap facts through existing preparation
+and header aggregation. Naturally known local counts refine reserves. Hard caps
+and saturating arithmetic bound estimates, while underestimation grows normally
+and changes allocation cost alone. Structural freeze fixes counts/topology and
+retained capacity. Owning scalar remapping can continue before publication.
+Private-lane installation/pruning precedes final CFG validation and link-fact
+refresh in base and generated modules, including unchanged reuse.
 
-Phase 2 selected the safe enum/AoS reference, explicit result shape, typed
-owner-local IDs/ranges, scratch promotion with last-reader compaction and an
-invoke-like HIR continuation. The compiler architecture owns these contracts
-and the benchmark evidence report records the bounded comparisons and limits.
-The checked decisions above accept design and prototype proofs. Actual payload
-and service-root release, generic-preparation detachment, diagnostic rendering,
-native CFG/backend execution and compiler-wide performance remain required
-production proofs in Phases 3 and 4.
+### Local definitions and assignments
 
-### Prior evidence to use, not blindly repeat
+`Write` distinguishes `DefineLocal` from `AssignPlace`, local destinations
+distinguish `Define` from `Update` and CFG edges carry source/destination pairs.
+`ValueKind` owns incoming place/rvalue classification.
 
-These are historical observations before the Dec/Uint prerequisites. Refresh
-the census and source owners on activation. They are not new benchmark claims
-or fixed target sizes for this implementation.
+Binding semantics come from explicit HIR and `ValueKind`, rather than raw `Load`
+shape or borrow-analysis state. Analyses validate and track those operations
+without reclassifying them. Future optimisations need a compiler-owned lowering
+proof, rather than access to solver-local snapshots.
 
-- The reviewed 64-bit build had a 424-byte `Expression`: kind 88, TypeId 4,
-  failure facts 168, diagnostic facts 56, receiver 8, value mode 1, SourceSpan 8,
-  reactive source 8, reactive template 56, const-record flag 1, division flag 1,
-  provenance 24 and padding 1. RPN items inherited the large expression stride
-  even for operators. The earlier statement boxing fix reduced AstNode size but
-  left nested calls sensitive to expression-parser frames.
-- The source-span investigation compared 22/10 and 20/12 splits within a 0.1%
-  tie, selecting 22/10. Its measured overflow used 249 rows/1,992 bytes across
-  286,779 spans. A terminator-packing prototype was declined because the total
-  prize was below 2 KiB. Use the same whole-workload reasoning here.
-- The token AoS/SoA experiment accounted for 495,972 bytes over 41,331 tokens
-  under equal capacity. A proxy traversal win did not prove a whole-compiler win.
-- An owned-folder attempt passed correctness but measured +0.560% and +0.534%
-  on the constant chain in five paired runs, with two 256-byte copies still in
-  the inspected assembly. A different signature alone does not establish reuse.
-- Substitution-key normalisation cost about 39–56 ns and at most 0.19% of the
-  measured check time. The observed TIR cache had 1 hit in 11,275 attempts.
-  These do not justify new key formats, wider caches or process-wide local IDs.
-- The 32-byte diagnostic record and at-most-48-byte draft remain locked design
-  contracts for later implementation. Borrow the census/codec/overflow method,
-  not a claim that the pending diagnostic migration already improved runtime.
+- Each dynamic definition creates a fresh binding occurrence and retires stale
+  alias state, including repeated loop entry. Parameters receive definitions
+  through the ABI. Compiler temporaries gain no Wire-visible binding identity.
+- Assignments preserve mutable alias write-through. Call results count as caller
+  rvalues even if lowering loads an internal result local. Fresh result bindings
+  may share allocations without sharing the callee's binding slot.
+- Multi-bind and edge transfer read every input before writing destinations.
+  Selected edges define bindings afresh. Definitions create no allocation family,
+  lifetime owner or capability by themselves.
+- Range scratch locals `next_value`, `distance` and `candidate_in_range` use
+  definitions. Persistent current/step/index state uses updates. A float candidate
+  defines scratch output only when in range, while dedicated operations can
+  explicitly update persistent destinations.
+- JS constructs fresh place/rvalue wrappers for definitions and uses ordinary
+  local/projected write helpers for updates. Solver-local mode snapshots, `UNINIT`
+  decisions and unmeasured alias specialisation have retired. Boracle consumes
+  the same definition/update semantics. Wasm retains immutable aliases and
+  value-backed mutable writes, with its existing structured rejection for
+  unsupported mutable binding aliases.
 
-**Exit check:** record selected and rejected candidates, full memory/time
-accounting, exact interfaces, invariants, remaining limitations and the evidence
-that would justify reopening a decision. Remove losing code and temporary
-measurement flags. A repeatable regression requires revision or an explicit
-reported design tradeoff, not an automatic acceptance because it is below 5%.
-
-## Phase 3 - complete dense HIR and capacity foundations
-
-**Consumes:** selected store/range contracts and freeze/publication map.
-**Produces:** the dense HIR checkpoint, with current semantics preserved and no
-durable recursive expression/place representation.
-
-- [x] Make `HirValueId` the canonical module expression-store handle. Remove
-  redundant expression IDs and migrate fixed children to IDs.
-- [x] Move variable expression payloads to typed ranges: arguments, collection
-  elements, map entries, struct/variant fields, structural String pieces and
-  place projections. Flatten `HirPlace` to root local plus ordered projections,
-  with index expressions addressed by `HirValueId`.
-- [x] Migrate every durable carrier, including statements, terminators, patterns
-  and nested records, in the same accepted cutover. Temporary lowering locals
-  cannot become a retained compatibility graph.
-- [x] Convert lowering, validation, displays, rewrites, remapping, def/use,
-  numeric proof tables, link facts, borrow/lifetime inputs, Boracle extraction,
-  generated materialisation and JavaScript/Wasm consumers to direct store access.
-- [x] Preserve source locations, evaluation order, region/value facts, numeric
-  domains, failure/conversion order and existing target rejections. Do not derive
-  source numeric meaning from physical carriers during this migration.
-- [x] Extend `FrontendArenaCapacityEstimate` only where measured store growth
-  justifies it. Gather cheap source facts in existing parallel preparation and
-  existing header aggregation. Use naturally known local counts. Add no separate
-  sizing-only scan or duplicate policy owner. Keep hard caps and saturating math.
-- [x] Track estimate, actual count, initial reserve, growth and retained capacity
-  only where they answer allocation questions. Underestimation grows normally.
-  Freeze completed arrays to fixed ownership without excessive peak overlap.
-- [x] Keep convergence-dependent rewrites before final publication. Structural
-  freeze fixes topology/counts but may allow owning scalar remapping. After
-  private lane installation or pruning, publish link facts for the final CFG,
-  including unchanged base reuse and generated sidecars.
-- [x] Delete superseded visitors/constructors and add a narrow architecture check
-  for reliably detectable forbidden durable recursive HIR ownership.
-
-**Checks:** growth and empty/nonempty range access, flat field/index places,
-remapping across base/generated stores, final-CFG validation/link facts, numeric
-profile parity, affected borrow/Boracle and both supported backend lanes. Use
-source contracts for user behaviour and owner-local tests for store invariants.
-Run the affected frontend/end-to-end benchmark checks after the cutover.
-
-### Local definition and assignment hardening
-
-Phase 3 also owns the local-write correction uncovered by the re-entered-block
-bug fixed at `9fb59805ce9a97752b2e2564d8b7c4e1335e4b24`. Preserve that fix's
-behavioural regression and replace its temporary borrow-driven JS decision.
-Complete this correction before accepting the dense-HIR checkpoint, without
-starting the native-result redesign assigned to Phase 4.
-
-HIR must distinguish a local definition from assignment to an existing place.
-Each execution of a definition establishes a new dynamic occurrence, even when
-a loop reuses one static `LocalId`. Assignment through an existing mutable alias
-writes through and does not detach it. Authored declarations are definitions.
-Compiler temporaries may also be definitions, but do not thereby acquire
-Wire-visible source binding identity. Function entry defines parameters through
-the call ABI. Operation destinations explicitly preserve definition versus
-update, and selected CFG edges define their destinations.
-
-Place-derived and rvalue-derived writes have one authoritative classification.
-A call result remains an rvalue at the caller binding boundary even when its
-lowered expression loads an internal result local. A fresh result binding may
-share an allocation without aliasing the callee's binding slot. Reuse an adequate
-dense value classification rather than duplicating it. Do not infer binding
-semantics from raw `Load` shape or borrow analysis state.
-
-The selected contract uses `Write` with `DefineLocal` or `AssignPlace`, typed
-`Define`/`Update` local destinations and explicit source/destination jump pairs.
-`ValueKind` remains the incoming-value authority. Current range `next_value`,
-`distance` and `candidate_in_range` locals are scratch definitions because each
-operation recomputes them before use. Persistent current, step and index writes
-are updates. A float candidate defines its scratch output only when in range.
-No artificial initialisation is added to turn scratch definitions into updates.
-
-Use the smallest typed representation that excludes invalid combinations.
-A local destination can distinguish definition and update, while an ordinary
-write target can distinguish local definition and assignment to a place.
-Do not use a general creation boolean, a statement-side table, a backend-specific
-bit or a compatibility conversion back to ambiguous assignment.
-
-- [x] **3A: inventory and contract.** Inventory every statement/terminator
-  `LocalId` destination and `Assign` producer as definition, update, edge
-  definition, parameter definition or no write. Include declarations,
-  assignments, multi-bind targets, loop binders, loop-body declarations, range
-  initialisation/updates, conditional state, result/tuple spills, parameters,
-  call/map/cast/numeric/range-failure/float-candidate/format/validation results,
-  value-producing if/match/catch joins, jump arguments, private failure rewrites
-  and generated functions. Audit backend reads of local-mode snapshots and
-  separate validation from semantic decisions. Bare numeric destinations can
-  update existing loop state, and `FloatRangeCandidate` can update persistent
-  destinations, so do not classify every operation result as a definition.
-- [x] **3B: producers and dense representation.** Preserve declaration versus
-  assignment through ordinary and multi-bind lowering. Read all multi-bind
-  right-hand results before updating targets. Loop binders define on each
-  iteration. Classify compiler temporary initialisation and generated state
-  updates explicitly. Encode operation destinations and the existing CFG edge
-  contract so Phase 4 can reuse them. Preserve local-origin metadata and keep
-  source binding identity separate from static locals and allocation provenance.
-- [x] **3C: validation.** Validate function ownership, local-only definition
-  targets, source/destination types, valid IDs/ranges, permitted dedicated
-  destination forms, exact CFG arity/types and parameter-entry ownership.
-  Preserve spans/origins and tags through remapping, rewriting, growth, freezing
-  and publication. Malformed completed HIR is a compiler invariant failure.
-  Do not add a second flow-sensitive initialisation solver.
-- [x] **3D: analyses.** Definitions retire stale state from earlier dynamic
-  executions before establishing their new alias/value relationships.
-  Updates retain ordinary slot/alias write-through semantics. Borrow modes
-  remain analysis state and cannot reclassify HIR operations. Project explicit
-  definition/update into normalized Boracle input, reference and operational
-  semantics without a Boracle-only interpretation or duplicate semantic table.
-- [x] **3E: JS assignment cleanup.** Define from a place with a fresh alias
-  wrapper and from an rvalue with a fresh value wrapper. Existing local writes
-  use the ordinary borrow/value assignment helpers and projected writes mutate
-  the existing place. Remove semantic `LocalMode`, `UNINIT`, statement/block
-  entry-state queries and alias-only helpers. Remove unmeasured definite-alias
-  emission specialisation. A future useful optimisation requires a narrow
-  compiler-owned lowering proof rather than exposing solver state. Remove
-  `BorrowCheckReport` from JS emitter/lowering/orchestration/test APIs if no
-  legitimate consumer remains, otherwise narrow the handoff to the required fact.
-- [x] **3F: CFG destinations.** Remove borrow block-entry queries from JS jump
-  transfer. Read every incoming source before writing any destination, and
-  establish edge-defined bindings afresh on repeated entry. Preserve the future
-  success/error edge-definition contract without implementing native channels now.
-- [x] **3G: Wasm.** Migrate visitors, validation and LIR consumers mechanically.
-  Definition and update may share a physical local operation where correct.
-  Reject selected mutable local binding aliases through the normal target
-  diagnostic until Wasm can preserve their write-through semantics. Keep
-  immutable aliases and value-backed mutable local writes supported. Add no
-  unnecessary target-specific binding abstraction.
-- [x] **3H: other consumers.** Preserve return/allocation provenance, lifetime
-  ownership, numeric interval invalidation/replacement, value-derived link facts,
-  reachability and private-failure destination tags. Definitions do not create
-  allocation families, lifetime owners or capabilities. Base and generated HIR
-  use the same contract.
-- [x] **3I: regressions.** Retain `loop_body_bindings_rebind_each_iteration`
-  covering scalar/aggregate binders, aliases, nested same-collection loops,
-  ranges, conditional loops and mutable write-through. Add owner-local HIR tests
-  for declarations/updates, place/rvalue/call initialisers, immutable/mutable
-  aliases, multi-bind categories, binders, temporary definitions, generated
-  numeric/float-candidate updates and edge destinations. Add borrow tests for
-  definition re-entry resetting prior aliases, slot/alias assignments, nested
-  binders and joins. JS tests consume explicit HIR for definition/update with
-  place/rvalue and edge transfer, replacing fabricated mode snapshots. Preserve
-  caller-result binding freshness with shared allocation and alias write-through
-  end-to-end cases. Cover supported Wasm physical equivalence once.
-- [x] **3J: architecture check.** Add a narrow reliable check against backend
-  solver-local snapshot APIs once no legitimate consumer remains. Do not ban
-  all borrow terminology or authorised compiler facts. Audit `Load` shape
-  branches that attempt to recover binding semantics.
-- [x] **3K: permanent documentation.** Update Stage 5/6 compiler contracts and
-  runtime/backend lowering authority for explicit dynamic definition/update,
-  parameter/operation/edge destinations, analysis-state authority and direct
-  lowering. Keep borrow facts as validation/assertion context, not semantic
-  reconstruction. Phase 4 consumes this destination contract.
-- [x] **3L: deletion gate.** Remove ambiguous compatibility paths, duplicate
-  definition/update tables, backend snapshot-driven assignment/jump decisions,
-  obsolete test fixtures and stale comments. Remove unused broad borrow-report
-  plumbing. No base/generated or production/oracle split may preserve the old path.
-- [x] **3M: validation and costs.** Run the parent Phase 3 gates, affected HIR,
-  borrow/Boracle, JS, supported Wasm and integration coverage plus architecture
-  checks. Measure destination and statement size, side storage, HIR node/local
-  counts, runtime helper/branch changes, JS output after removing alias
-  specialisation and frontend deltas on the same Phase 3 cohort. Refresh five-pair
-  performance evidence after the hardening. Do not trade semantic integrity for
-  a smaller record or an unmeasured optimisation.
-
-  The historical post-hardening layout, capacity, native-output and five-pair
-  evidence is recorded in `benchmarks/frontend-optimization-results.md`, with
-  its corpus and static-stack limits. The accepted interleaved removal comparison
-  covers 41 frontend and 39 CLI comparable cases. Ten subsequent native history
-  runs at the `eb16fdbe4` production tree are absolute observations, not paired
-  speed attribution. Boracle and its differential campaign passed. Final
-  integrated `just validate-full` passed with Node 24.21.0 and the repository
-  Rust pin. The committed package donor was rechecked clean at the shared
-  reviewed checkpoint before integration. Phase 4 remains paused.
-
-**Exit check:** all current HIR consumers use one dense representation directly,
-published stores keep no unnecessary growth capacity, and estimate quality has
-no semantic effect. Local definition/update and place/rvalue semantics remain
-explicit through every producer, analysis and lowerer. Re-entered definitions
-cannot write through stale aliases. Keep unrelated outer HIR collections and
-broad borrow-fact compaction outside this phase.
+Unrelated HIR collections and broad borrow-fact compaction remain with their owners.
 
 ## Phase 4 - integrated typed-expression and native-result cutover
 
-Consume Phase 3's explicit local and edge destination contract when adding
-native result channels. Do not redesign binding semantics or recover them from
-borrow state during that cutover.
+**Complete and squash-merged into main from expression-refactor source `534aea1a5`.**
+R1, R2.0 to R2.4 and P2 isolation are audit-accepted. Phase 5 remains pending
+explicit reactivation. The
+[benchmark report](../../../benchmarks/frontend-optimization-results.md#r24-final-qualification)
+owns historical R2.4 evidence for `6b855aab9` and exact-checkpoint timing limits.
 
-**Consumes:** Phase 2's final interfaces and lifetimes plus dense HIR.
-**Produces:** the typed-expression/native-result checkpoint. Treat 4A–4D as
-bounded review packages within one coupled accepted representation checkpoint.
+**Contract:** selected stores/lifetimes, dense HIR, explicit local/edge
+destinations and exact numeric construction form one coupled
+typed-expression/native-result checkpoint across 4A to 4D.
 
-### 4A. Semantic construction and values
+Preserve exact identities, I32/F64 defaults, body-root completion, receiving
+witnesses, D15 domains/checks, source-independent casts and authored safety
+catches. Keep delivered generic expected-type boundaries and binding semantics.
+Phases 5 to 7 own repeated-work reductions, Wiring and Core evaluation.
 
-- [ ] Separate parser/RPN scratch, declarations, signatures, missing defaults,
-  places and constant content from completed semantic expressions. Preserve early
-  nominal registration, contextual numeric materialisation and AST-local folding.
-- [ ] Construct resolved nodes through the selected compact store API. Publish
-  child IDs/ranges, canonical result shape, exact spans and required operation
-  facts. Move sparse occurrence/failure facts to their selected owner.
-- [ ] Replace fake `NoValue` declaration expressions and unresolved placeholder
-  values at symbol/signature boundaries. Keep authored type/declaration syntax
-  where diagnostics and later generic materialisation need it.
-- [ ] Migrate constants, defaults, constructor fields, receiver operations,
-  templates/TIR, static-if specialisation and generic validation/materialisation.
-  Preserve one shared scalar/optional/aggregate value vocabulary and immutable
-  roots. No-selection/no-substitution paths reuse their roots.
-- [ ] Pass accepted TIR views into materialisation with their original context.
-  Release discarded validation and replacement storage according to Phase 2,
-  then project required semantic facts before the AST/TIR owner is dropped.
+### Accepted 4A to 4C contracts
 
-### 4B. One producer/result contract
+| Owner | Invariant for remaining work |
+|---|---|
+| Construction and values | Explicit declaration states, canonical generic preparation and resolved operator facts. Owner-local ExprId/ConstValueId stores replace recursive completed expressions. Checked scratch promotion, consuming freeze and TIR release preserve only required roots and facts. |
+| Producers and receivers | One zero/single/ordered-multiple result contract covers calls, returns, multi-bind, joins, forwarding and entry functions. Producers execute once. Folded slots use ordinary constants, not tuple values or host-call caches. |
+| HIR and consumers | Native success/error slots are edge-defined through lowering, private failure installation, analyses, stable projection and JS/supported Wasm. Catch joins operate per slot and every RHS precedes writes. Allocation/provenance unions stay conservative where alias precision lacks proof. |
 
-- [ ] Replace the single `data_type` assumption with authoritative zero, single
-  or ordered multiple success types and a separate error channel. Remove a
-  call's duplicated resolved result lists. Signature shapes and instantiated
-  call shapes remain separate where their meaning/lifetime differ.
-- [ ] Route zero/one/multiple producers through ordinary calls, returns,
-  multi-bind, value-producing `if`/`match`/`catch`, receiver calls, supported
-  forwarding and implicit entry functions. A collection, record or optional
-  remains one result. Zero results do not imply divergence.
-- [ ] Materialise folded producers through ordinary single-valued constant IDs
-  and the shared result receiver. A multi-result producer executes once. It
-  creates no tuple type, first-class multi-result constant or hidden host-call
-  cache. Existing constant multi-bind syntax gains no new source forms.
-- [ ] Enforce arity and contextual coercion per slot. Single-target misuse gets
-  the transferred value-receiver diagnostic family at its receiver, not the
-  `InvalidMultiBind` family. Carry receiver kind, target count, produced slot
-  count and authored producer location. Guidance cannot suggest `_`, implicit
-  discards, fabricated binding names or a tuple. Never select slot zero or insert
-  dummy values. Cover declarations, assignments, returns and nested `then`
-  negatives, with matching multi-bind and already-legal forwarding positives.
-- [ ] Complete the transferred postfix `?` multiple-success/context diagnostic
-  work and its narrow enclosing-function facts. Preserve normal-root `start`
-  returning through built-in `Error!`. Do not replace valid top-level error
-  propagation with a blanket rejection.
+Receiver diagnostics retain kind, target/slot counts and producer location.
+Single-target misuse uses value-receiver diagnostics, not `InvalidMultiBind`.
+Guidance permits multi-bind/forwarding without selecting slot zero or inventing
+discards, dummy names or tuple results.
 
-### 4C. Channels, publication and backend boundaries
+Compiler-owned non-exported `start`, including synthetic single-file roots,
+keeps fragment slots and built-in `Error!`. Entry assembly activates it at most
+once. Imported non-entry work stays dormant and private inferred failure
+converges before publication.
 
-- [ ] Migrate HIR function signatures, infallible calls, returns and fallible
-  calls to native ordered slots and the selected explicit continuation form.
-  Success locals are defined only on success, the error local only on error.
-- [ ] Migrate `hir/private_failure_lane.rs` and every inferred private-failure
-  installer together. It must not manufacture the removed carrier shape after
-  the main lowerer has switched. Preserve convergence, handler pruning and final
-  validation/link-fact refresh for both base modules and generated sidecars.
-- [ ] Join recovered values per slot through normal CFG/value targets. Propagate
-  the error channel without tuple/payload extraction. Compute all RHS results
-  before writing any existing multi-bind target, preserving swaps and aliases.
-- [ ] Thread slot identity through walking, rewrites, source maps, dominance,
-  def/use, summaries, lifetime/borrow metadata and external alias transport.
-  Keep current conservative root unions where precision is unavailable. Fresh
-  bindings and separate result slots do not prove distinct allocation origins.
-- [ ] Rebuild public/generated projections with stable semantic identities.
-  Remap local IDs through the owning handoff and resolve external identities in
-  the consuming registry. No donor ExprId, TypeId, HIR ID or registry index leaks.
-- [ ] Make JavaScript arrays/objects/tagged envelopes ABI choices only. Use
-  supported native Wasm values and explicit unsupported-target diagnostics.
-  Keep aggregate/memory/Dec limitations in their existing owners. Do not promise
-  the later full Wasm implementation as part of this checkpoint.
+### Accepted hardening prerequisites
 
-### 4D. Coupled correctness and deletion gate
+Grouping uses flat transient `GroupOpen`/`GroupClose` markers, with no
+`PendingGroup`. Completed-expression walkers use reusable heap stacks.
+`validate_types` is iterative and constant materialisation borrows its store.
+Capacity failure propagates without rolling back a builder that will be dropped.
 
-Complete these tests in the relevant owner before accepting the checkpoint:
+Design B keeps raw ExprId rows compact and uses transient `OwnedExpr` or borrowed
+token-bound `OwnedExprs` at construction/install boundaries. Check owners before
+indices or mutation, including sibling indexes and pre-freeze handles. Freeze
+issues a fresh token. `own`/`own_slice` are the only raw re-entry family and must
+use the original builder: raw IDs cannot detect a wrong conversion owner.
+
+Constant/alias retention follows actual installer roots and private accessors
+avoid duplicate validation. The [checkpoint evidence](../../../benchmarks/frontend-optimization-results.md#typed-expression-hardening-checkpoint)
+owns memory, diagnostic, platform and matched timing records. The accepted H2/H3
+stage-cost exception is bounded to that change, not later deltas or scaling.
+Windows canvas command-line failures remain separate from stack/benchmark proof.
+
+### P4.5 - accepted lifetime handoffs
+
+Store proofs cover dead validation/handler/cold/handoff payload capacity,
+same-typed ordered values, replacements and losing/failed candidates. Accepted
+TIR overlays and nested contexts survive owned materialisation. Canonical
+preparation and frozen providers instantiate later in independent requester and
+sibling domains, retaining const-template defaults and donor resource origins.
+Service consumers retain recursive failure facts, exact source snapshots and
+the required diagnostic `TypeEnvironment` after construction-owner release.
+
+Known-true assertions retain canonical validation-only generic demand through
+existing materialisation/convergence, without executable message work. Active
+demand wins for shared identities. Inactive branches and abstract validation
+roots publish neither class. Numerical catch validation roots remain until HIR
+consumes them, then infallible lowering retains only protected value/provenance.
+
+### Accepted closeout and R1 corrections
+
+The existing new-binding guard owns source/import, alias, trait and
+forward-declaration collisions, including parameters, loops and
+option/choice/catch/template captures. Preserve `MOTH-RULE-0038` for
+source/import collisions and `MOTH-RULE-0039` for Core trait reservations.
+Value lookup stays value-only, hidden originals and namespace members gain no
+bare visibility and compiler-owned `start` stays outside source lookup. Mutable
+updates remain assignments. Bound names gain no invented previous-declaration
+labels. Add no second lookup route or name registry.
+
+Syntax-accepted multi-bind collisions reach their semantic owner. Native
+I32/F32/I64/F64 results retain ABI types and order through execution. Optional
+HTML-Wasm keeps its existing capability reason and site. Compact extent tests
+prove checked helper boundaries, not production transaction atomicity.
+Block/template collision owners retain source-review evidence rather than
+dedicated collision cases. Argument-count allowances need owner-specific reasons.
+
+Constant projection uses iterative heap-stack postorder without memoisation,
+preserving authored field order, provenance and independently owned
+repeated-child outputs. Debug `fold_value` handles the previously overflowing
+shallow record chain at depth 1024 on the real main-thread stack. Separate 1 MiB
+proofs cover source depth 256 and store depth 2048, not deep owned clone/drop or
+downstream walkers. The bounded const-record CLI case hides HIR values and
+doesn't prove HIR-pool conversion.
+
+Canvas runs its unchanged script from a test-owned temporary `.mjs` file and
+passes locally. Corrected-harness Windows execution remains pending. Keep the
+historical OS error 206 exposure OPEN, separate from Windows stack/benchmark
+proof and unchanged non-blocking CI policy.
+
+The [benchmark report](../../../benchmarks/frontend-optimization-results.md#typed-expression-hardening-checkpoint)
+retains restart anchors, completed-checkpoint gates and both historical timing
+comparisons. H2/H3 costs, documented closeout variation and the final comparison's
+four residual stage costs have separate, exact-checkpoint acceptances. None
+creates a later regression allowance or changes performance/scaling budgets.
+
+### R2 - grouped `not` follow-up
+
+**Boundary:** R1, R2.0 to R2.4 and P2 isolation are audit-accepted and retained
+in the main squash checkpoint. Preserve the user's testing-authority commit
+`d767691b4` unchanged. Phases 5 to 8 remain unstarted and need explicit
+reactivation, their own validation, independent audit and checkpoint.
+
+#### Accepted R2.0 to R2.3 contracts
+
+| Owner | Contract and proof boundary |
+|---|---|
+| HIR validation | `hir/validation/expressions.rs` validates consecutive logical-not rows iteratively. Preserve each row's type, region, value-kind and source mappings, active-path cycle detection and entered-row cleanup on success/error. Keep distinct malformed-IR checks, with no completed-node cache or general framework. Actual debug `moth check` passes at depths 512/2048. The bounded 1 MiB proof covers 2048 rows, while the same-validator three-row dangling retry covers error cleanup. |
+| HIR lowering | `OperatorFrame` carries one `Option<bool>` current-block classification through consecutive successful `LogicalNot` frames instead of rescanning descendants. Keep the boundary scan and other operators' policies. Reuse only within the selected expression view and unchanged active-catch context. Preserve each unary node/span, operand evaluation, pending-prelude flush and current-block delivery, including short-circuit, call and recovery continuations. |
+| JS emission | `JsEmitter::lower_unary_op` iterates consecutive unary HIR nodes in one buffer, lowers the terminal once and emits one parenthesised layer per operator. The existing short-circuit case executes 512 nested `not` operators through HTML-JS with exact output and effects unchanged. HTML-Wasm retains `MOTH-RULE-0064` on line 11. |
+
+The [benchmark report](../../../benchmarks/frontend-optimization-results.md)
+owns exact R2 cohorts, timings and provenance. Keep these comparison limits:
+
+- Revised testing documentation changes the standard docs workload identity.
+  Earlier cohorts remain historical, not matched pairs for changed inputs.
+- The failed large-run preflight supplies no measured baseline. Original safe
+  depths 32–256 precede R2.1. Deep pre/post-lowering comparisons use the
+  post-R2.1 validator baseline, five independent frontend/CLI cohorts, one
+  preflight and ten measured runs, timers only and one Rayon thread.
+- Historical R2.2 measurements attribute near-linear HIR work through depth
+  2048, not an overall compiler speedup. Runtime hashes match, but control
+  inputs have path matches only and the uncommitted overlay has no raw patch
+  or binary fingerprint. R2.4 adds committed-source and binary provenance.
+- The pre-change both-backend overflow remains unattributed to a precise frame.
+  Map-use and cast-policy prepasses still recurse by depth. Folded constant
+  chains don't prove runtime HIR behaviour or broader backend stack safety.
+
+The [R2.4 evidence](../../../benchmarks/frontend-optimization-results.md#r24-final-qualification)
+owns the final cohorts, follow-up movements and local full gate. Keep both
+historical and final raw records rather than resetting comparisons.
+
+#### R2.4 - qualification and pause checkpoint
+
+- Five matched standard frontend/CLI pairs retain frozen inputs. Five focused
+  pairs compare post-validator `e70d351db` with `6b855aab9` through depth 2048.
+  Alternating repeats investigate exposed standard-suite movements without
+  waiving costs under older exceptions.
+- `just validate-full` passes locally, including 6,105 primary units, 2,784
+  integration target results, ten feature lanes, 148 preflights and 14 scaling
+  series. The new grouped-not dev HIR series fits n^0.88 under n^1.25.
+  Arithmetic's independent n^1.25 budget stays unchanged.
+- Corrected-harness Windows Canvas and fresh Windows frontend qualification
+  remain unavailable locally. Keep the OPEN ledger and non-blocking policy.
+- Completed plan notes now retain future-facing contracts. The evidence report
+  owns exact measurements and caveats. Documentation build/surface proof and
+  independent scaling, evidence and documentation audits pass without findings.
+
+The P2 isolation correction at `534aea1a5`, after review `20fddc3c4`, isolates
+the three constant-store depth tests and the deep HIR `not` validator test in
+child processes. All four retain
+depth 2048, 1 MiB workers and their semantic assertions. The existing crate
+test-support module now shares the project tests' exact-filter subprocess
+runner. Focused validation passes 17 constant-store tests, 87 HIR-validator tests
+and 15 project stack-budget tests. A temporary smoke probe confirms that a child
+abort reports captured output without aborting the parent and that an unmatched
+filter fails. The probe has been removed. This correction adds no Windows or
+broader owned-value/backend stack-safety proof.
+
+Pause after the merged Phase 4 checkpoint. Phase 5 requires explicit reactivation.
+No persistent cache, new parser/arena, semantic-owner transfer, stack increase,
+repeated-type/folding work or new roadmap-plan import belongs to this checkpoint.
+
+
+### 4D. Checkpoint invariants retained by later phases
+
+Preserve these owner-local contracts and their evidence through the remaining work:
 
 | Contract | Required evidence |
 |---|---|
 | Store integrity | Growth preserves handles, typed ranges cover exact elements, empty ranges work, sibling-domain IDs cannot be confused, injected small limits exercise every compact overflow diagnostic without allocating billions of nodes. |
 | Results and control flow | Zero results versus one optional `none` versus divergence, per-slot arity/coercion, same-typed slots with different values to expose swaps, exactly-once producers, all RHS before writes, success/error dominance, catch joins and valid/invalid propagation contexts. |
-| Numeric fidelity | All current profiles and entry services preserve post-Dec/Uint literal rules, full integer extrema, F16/F32 rounding, signed zero, exact Dec payloads, numeric identity/carrier separation and U32 error codes. |
+| Receiver diagnostics | Cover declarations, assignments, returns and nested `then` negatives, with matching multi-bind and already-legal forwarding positives. |
+| Numeric fidelity | Preserve all exact numeric identities and entry services, I32/F64 defaults, body-root completion, authored-order receiver conflicts, D15 narrow/mixed domains, per-operation F16 rounding, full integer extrema, signed zero, exact Dec payloads, source-independent casts and U32 error codes. Reuse delivered numeric tests and add only representation-boundary assertions. |
 | Immutable views | Two instantiations with different roots cannot contaminate one another. Structural TIR children inherit the selected overlay, nested values use their own context, runtime-dependent paths still undergo required validation and handoff materialises that same view. |
 | Static branches | Both authored branches validate. Inactive branches create no active concrete generic requests, emitted HIR/runtime capabilities or active resource uses, while graph-active resource validity/dependencies remain mandatory. |
 | Generic lifetime | Release unused validation AST/store, then instantiate later from retained canonical syntax. Base/generated/sibling local ID collisions cannot select the wrong object. |
 | Failure lifetime | Drop AST/TIR before base/generated recursive convergence. Retain origin-owned source order, skipped recursive backedges, bounded private witnesses including three private hops plus origin/elision facts and typed deferred-catch producer/handler locations. |
-| Subtle failure facts | Known-true assertions fully validate messages and retain private witnesses in inert replacements. Preserve post-discharge catch folding such as U8 arithmetic widened to U32, typed conflicts and error code zero. Checked compound write-back priority applies to its own arithmetic, not unrelated RHS recovery. |
+| Subtle failure facts | Known-true assertions fully validate messages and retain private witnesses in inert replacements. Preserve authored safety eligibility independently of actual failure, typed handler constraints before pruning, post-discharge catch folding under D15, typed conflicts and error code zero. Equal-type U8 arithmetic remains U8, not the historical widened U32 example. Checked compound write-back priority applies to its own arithmetic, not unrelated RHS recovery. |
 | Diagnostics | Render after expression/TIR release and source-file mutation using the captured source snapshot, donor labels, types and provenance. Retain the current required TypeEnv lifetime until the diagnostic owner changes. |
 | Final HIR/publication | Validate final CFG, dominance and link facts after lane install, handler pruning and unchanged reuse in base and generated modules. Check supported JS/Wasm output through existing contractual owners. |
 
-Use the existing one-MiB child-process dev-stack regression through `moth check`
-as a starting owner. Add representative nested calls, parentheses, loops and
-conditionals where they expose a distinct remaining risk. Measure native frames
-and accepted/rejected limits. Compact IDs reduce recursive payload pressure but
-do not prove every recursive compiler path stack-safe. Define bounded structured
-rejection where an authored depth exceeds a supported limit. Do not raise CI's
-stack budget or weaken fixtures to conceal a remaining failure.
+The stack-safe prerequisite owns grouped-arithmetic stack correctness. Its 1 MiB
+child-process `moth check` tests (`src/projects/tests/check_tests.rs`) cover
+constant chains at 512 and 2048, runtime-leaf chains at 256 and malformed or
+postfix chains at 2048. Every completed-expression walker has its own
+small-stack test. Keep these passing rather than adding parallel grouped cases.
+Require the Windows in-process development-built frontend benchmark to pass on
+its real main-thread stack, alongside grouped-numeric scaling within the
+existing n^1.25 budget.
 
-**Exit check:** no completed semantic expression tree, placeholder declaration
-value, legacy result carrier or re-expansion adapter remains. All affected
-services use the selected stores, release rules and native slots. Meaningful
-semantic/invariant coverage and current feature lanes pass. Wider validation
-and performance evidence follow the shared gate below.
+Preserve CI's stack budget and contractual fixtures. Recorded native-frame and
+accepted/rejected depth measurements do not introduce new parser depth limits
+at this checkpoint. Compact IDs relieve payload pressure, not every recursive
+path.
+
+Keep independent hazards with their owners when interpreting this evidence:
+statement-body parsing reaches about 23 debug levels at 1 MiB and curly literals
+about 15. Grouped-not classification now reuses one hint across consecutive
+`not` nodes, and JS unary rendering emits each layer without accumulated-child
+copies. Map-use and cast-policy prepasses remain recursive by expression depth.
+Borrow-state memory scales as O(blocks × locals²). Keep these independent
+hazards separate from expression-store and grouped-arithmetic costs.
+
+**Accepted cutover:** no completed semantic expression tree, placeholder
+declaration value, legacy result carrier or re-expansion adapter remains.
+Affected services use the selected stores, release rules and native slots.
+Later phases preserve the source, service, feature-lane and performance
+contracts rather than restarting this representation migration.
 
 ## Phase 5 - reduce repeated type and folding work
 
-**Consumes:** final representations and updated profiles.
+**Consumes:** final representations and current type/fold profiles.
 **Produces:** direct semantic handoffs and measured reductions in repeated work.
 Representation adoption is mandatory. Optional optimisation mechanisms require
 current evidence and can be declined with their investigation recorded.
@@ -863,7 +565,7 @@ current evidence and can be declined with their investigation recorded.
   it to an API that borrows and then copies it again.
 - [ ] Re-profile after each material change. Investigate further ideas, such as
   numeric factor reuse or narrow memoisation, only when remaining attribution
-  and complete semantic keys justify them. Keep key lifetime, profile, config,
+  and complete semantic keys justify them. Keep key lifetime, config,
   imported-constant and directive invalidation explicit. Do not repeat the
   rejected owned-folder/key experiments without a changed causal hypothesis.
 
@@ -974,7 +676,7 @@ projection and the canonical external/Core Text contracts.
   and tests. No wall-clock budget framework, guessed resource URL, locale,
   normalisation, host-time/randomness/IO or fallible host-call evaluation.
 - [ ] Enable only existing `@core/text` `length`, `is_empty`, `contains`,
-  `starts_with` and `ends_with`. Read their actual post-Uint signatures. Cover
+  `starts_with` and `ends_with`. Read their current exact signatures. Cover
   empty strings/patterns, non-ASCII/non-BMP and combining sequences against the
   canonical contract. A UTF-8 byte count cannot replace its length semantics.
 - [ ] Test optional presence/absence and multiple success slots through the

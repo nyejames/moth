@@ -91,7 +91,6 @@ pub(super) fn success_test_case(
         tags: Vec::new(),
         contract: None,
         role: None,
-        numeric_profile: Default::default(),
         backend_id,
         entry_path: PathBuf::from("."),
         flags: Vec::new(),

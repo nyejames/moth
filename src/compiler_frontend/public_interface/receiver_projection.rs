@@ -12,6 +12,7 @@
 //! identity from the per-binding type and trait projection while preserving the proven,
 //! deterministic construction logic.
 
+use super::direct_projection::FoldedValueJoinContext;
 use super::model::{
     PublicParameterTypeSlot, PublicReceiverMethodCategory, PublicReceiverMethodSemantics,
 };
@@ -30,7 +31,6 @@ use crate::compiler_frontend::canonical_type_identity::{
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::folded_value::FoldedValueProjectionContext;
 use crate::compiler_frontend::semantic_identity::{
     ExportBinding, OriginDeclarationId, OriginFunctionId, OriginTypeCategory, OriginTypeId,
     StableModuleOriginIdentity,
@@ -264,7 +264,7 @@ pub(super) struct ReceiverProjectionContext<'a> {
     pub(super) projection_context: &'a CanonicalTypeProjectionContext<'a>,
     pub(super) string_table: &'a StringTable,
     pub(super) path_fork: &'a PathInternerFork,
-    pub(super) folded_value_context: &'a FoldedValueProjectionContext<'a>,
+    pub(super) folded_value_context: &'a FoldedValueJoinContext<'a>,
 }
 
 /// Project the canonical signature for each receiver-method callable seed.
@@ -301,7 +301,14 @@ pub(crate) fn project_receiver_method_signatures(
             ))
         })?;
 
-        let default_provenance = project_defaults_provenance(&entry.signature.parameters);
+        let default_provenance = project_defaults_provenance(
+            entry
+                .signature
+                .parameters
+                .iter()
+                .map(|parameter| parameter.default),
+            context.folded_value_context.const_values,
+        )?;
         let parameters = entry
             .signature
             .parameters
@@ -312,12 +319,12 @@ pub(crate) fn project_receiver_method_signatures(
                     .component(declaration.id)
                     .map(|name| string_table.resolve(name).to_owned());
                 let type_identity = project_type_id_to_canonical_identity(
-                    declaration.value.type_id,
+                    declaration.type_id,
                     type_environment,
                     canonical_context,
                 )?;
                 let folded_default =
-                    project_folded_default(&declaration.value, context.folded_value_context)?;
+                    project_folded_default(declaration.default, context.folded_value_context)?;
                 let access = project_parameter_access(declaration);
                 Ok(PublicParameterTypeSlot {
                     name,

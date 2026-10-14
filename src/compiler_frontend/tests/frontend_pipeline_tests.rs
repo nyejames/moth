@@ -18,13 +18,15 @@ use crate::builder_surface::external_import_providers::resolution_table::Externa
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::ast::Ast;
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
-use crate::compiler_frontend::ast::expressions::expression::{
-    Expression, ExpressionKind, FallibleHandling,
+use crate::compiler_frontend::ast::const_values::ConstValuePayload;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    ExprId, ExpressionOperationView, ExpressionView, ResolvedCallableTarget,
 };
-use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
-use crate::compiler_frontend::ast::expressions::expression_types::CastHandling;
+use crate::compiler_frontend::ast::expressions::expression_types::{
+    CastHandling, FallibleHandling,
+};
 use crate::compiler_frontend::ast::expressions::failure_facts::{
-    FailureDisposition, ImplicitFailureSource,
+    ExpressionFailureFacts, FailureDisposition, ImplicitFailureSource,
 };
 use crate::compiler_frontend::ast::statements::value_production::types::{
     ValueBlock, ValueCatchBlock,
@@ -42,8 +44,8 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::external_packages::{
-    CallTarget, ExternalAccessKind, ExternalFunctionDef, ExternalFunctionLowerings,
-    ExternalParameter, ExternalReturnSlot, ExternalSignatureType,
+    CallTarget, ExternalAbiType, ExternalAccessKind, ExternalFunctionDef,
+    ExternalFunctionLowerings, ExternalParameter, ExternalReturnSlot, ExternalSignatureType,
 };
 use crate::compiler_frontend::headers::SourceTokenOwner;
 use crate::compiler_frontend::headers::parse_file_headers::{
@@ -61,7 +63,9 @@ use crate::compiler_frontend::hir::ids::{BlockId, HirValueId, LocalId};
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::{HirNumericOperands, NumericFailureMode};
 use crate::compiler_frontend::hir::statements::{HirStatementKind, HirWriteTarget};
-use crate::compiler_frontend::hir::terminators::{HirTerminator, RuntimeFailureCause};
+use crate::compiler_frontend::hir::terminators::{
+    HirFallibleOperation, HirTerminator, RuntimeFailureCause,
+};
 use crate::compiler_frontend::paths::file_references::ResolvedFileReferenceTable;
 use crate::compiler_frontend::paths::module_roots::ModuleRootTable;
 use crate::compiler_frontend::paths::path_resolution::ProjectPathResolver;
@@ -81,12 +85,16 @@ use crate::compiler_frontend::tokenizer::tokens::{TemplateBodyMode, TokenizerEnt
 use crate::compiler_frontend::{AstBuildRequest, CompilerFrontend, FrontendBuildProfile};
 use crate::projects::settings::Config;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
-use moth_lexical::numeric::profile::NumericProfile;
 use rustc_hash::FxHashMap;
 use std::fs;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tempfile::TempDir;
+
+/// One materialised `I32` fixture value; panics when the fixture literal is out of range.
+fn i32_value(value: i64) -> FixedScalarValue {
+    FixedScalarValue::signed(FixedScalar::I32, value).expect("I32 literal in range")
+}
 
 type TokenizedFile = (
     (SourceTokenOwner, PathId, Arc<PathSyntaxTable>),
@@ -180,7 +188,7 @@ impl FrontendProject {
 
         let path_fork = source_files.fork_path_interner();
         let frontend = FrontendServices {
-            options: Config::new(canonical_project_root).frontend_options(NumericProfile::STANDARD),
+            options: Config::new(canonical_project_root).frontend_options(),
             string_table,
             path_fork,
             style_directives,
@@ -458,7 +466,7 @@ fn compiles_single_file_program_through_borrow_check() {
     let mut project = FrontendProject::new(
         &[(
             "src/@page.moth",
-            "Point = |\n    value Int,\n|\npoint = Point(1)\nloop 0 to 2 |i|:\n    io.line([: [point.value]])\n;\n",
+            "Point = |\n    value I32,\n|\npoint = Point(1)\nloop 0 to 2 |i|:\n    io.line([: [point.value]])\n;\n",
         )],
         "src/@page.moth",
         StyleDirectiveRegistry::built_ins(),
@@ -506,7 +514,7 @@ fn compiles_multi_file_dependency_program_through_borrow_check() {
             ),
             (
                 "src/helper.moth",
-                "add|left Int, right Int| -> Int:\n    return left + right\n;\n",
+                "add|left I32, right I32| -> I32:\n    return left + right\n;\n",
             ),
         ],
         "src/@page.moth",
@@ -524,7 +532,7 @@ fn compiles_multi_file_dependency_program_through_borrow_check() {
     );
     assert_report_describes_module(&hir, &report);
 
-    // The lowered helper is the imported `add|left Int, right Int|`, not just "some function":
+    // The lowered helper is the imported `add|left I32, right I32|`, not just "some function":
     // it takes exactly the two declared parameters and carries a stable exported origin.
     let helper = hir
         .functions
@@ -735,7 +743,7 @@ fn terminality_observes_the_selected_branch() {
     let mut project = FrontendProject::new(
         &[(
             "src/@page.moth",
-            "enabled #= true\nchoose || -> Int:\n    if enabled:\n        return 1\n    ;\n;\nio.line([: [choose()]])\n",
+            "enabled #= true\nchoose || -> I32:\n    if enabled:\n        return 1\n    ;\n;\nio.line([: [choose()]])\n",
         )],
         "src/@page.moth",
         StyleDirectiveRegistry::built_ins(),
@@ -757,7 +765,7 @@ fn selected_terminating_value_if_body_replaces_its_receiver_before_hir() {
     let mut project = FrontendProject::new(
         &[(
             "src/@page.moth",
-            "enabled #= true\ndisabled #= false\nchoose_then || -> Int:\n    return if enabled:\n        return 1\n    else\n        then 2\n    ;\n;\nchoose_else || -> Int:\n    return if disabled:\n        then 1\n    else\n        return 2\n    ;\n;\nio.line([: [choose_then()]-[choose_else()]])\n",
+            "enabled #= true\ndisabled #= false\nchoose_then || -> I32:\n    return if enabled:\n        return 1\n    else\n        then 2\n    ;\n;\nchoose_else || -> I32:\n    return if disabled:\n        then 1\n    else\n        return 2\n    ;\n;\nio.line([: [choose_then()]-[choose_else()]])\n",
         )],
         "src/@page.moth",
         StyleDirectiveRegistry::built_ins(),
@@ -878,26 +886,57 @@ fn named_function_body<'a>(
         .expect("authored function should exist")
 }
 
-fn initializer(node: &crate::compiler_frontend::ast::ast_nodes::AstNode) -> &Expression {
+fn expression_view(ast: &Ast, id: ExprId) -> ExpressionView<'_> {
+    ast.expressions
+        .view(id)
+        .expect("fixture expression must exist in the AST expression store")
+}
+
+fn failure_facts_of(expression: ExpressionView<'_>) -> ExpressionFailureFacts {
+    expression.failure_facts().cloned().unwrap_or_default()
+}
+
+fn handled_value<'a>(
+    expression: ExpressionView<'a>,
+    block: &ValueCatchBlock,
+) -> ExpressionView<'a> {
+    expression
+        .bind(block.handled_value)
+        .expect("catch handled value must exist in the expression store")
+}
+
+fn initializer<'a>(
+    ast: &'a Ast,
+    node: &crate::compiler_frontend::ast::ast_nodes::AstNode,
+) -> ExpressionView<'a> {
     let NodeKind::VariableDeclaration(declaration) = &node.kind else {
         panic!("expected declaration, got {:?}", node.kind);
     };
-    &declaration.value
+    expression_view(
+        ast,
+        declaration
+            .value
+            .initializer()
+            .expect("fixture initializer"),
+    )
 }
 
-fn returned_value(node: &crate::compiler_frontend::ast::ast_nodes::AstNode) -> &Expression {
+fn returned_value<'a>(
+    ast: &'a Ast,
+    node: &crate::compiler_frontend::ast::ast_nodes::AstNode,
+) -> ExpressionView<'a> {
     let NodeKind::Return(values) = &node.kind else {
         panic!("expected success return, got {:?}", node.kind);
     };
     assert_eq!(values.len(), 1);
-    &values[0]
+    expression_view(ast, values[0])
 }
 
-fn catch_block(expression: &Expression) -> &ValueCatchBlock {
-    let ExpressionKind::ValueBlock { block } = &expression.kind else {
+fn catch_block<'a>(expression: ExpressionView<'a>) -> &'a ValueCatchBlock {
+    let ExpressionOperationView::ValueBlock(block) = expression.operation() else {
         panic!("catch should remain an expression-owned value block");
     };
-    let ValueBlock::Catch(block) = block.as_ref() else {
+    let ValueBlock::Catch(block) = block else {
         panic!("expected catch value block");
     };
     block
@@ -929,14 +968,15 @@ fn builtin_error_type_id(project: &FrontendProject, ast: &Ast) -> TypeId {
 }
 
 #[track_caller]
-fn assert_catch_contract(
-    expression: &Expression,
+fn assert_catch_contract<'a>(
+    expression: ExpressionView<'a>,
     has_implicit: bool,
     typed_error_id: Option<TypeId>,
     error_type_id: TypeId,
-) -> &ValueCatchBlock {
+) -> &'a ValueCatchBlock {
     let block = catch_block(expression);
-    let facts = &block.handled_value.failure_facts;
+    let handled = handled_value(expression, block);
+    let facts = failure_facts_of(handled);
     let summary = &facts.summary;
     assert_eq!(summary.first_implicit.is_some(), has_implicit);
     assert_eq!(
@@ -996,7 +1036,7 @@ fn assert_catch_contract(
         body.iter().all(|node| node.scope == first.scope),
         "handler nodes must share their lexical scope"
     );
-    assert_eq!(expression.type_id, block.handled_value.type_id);
+    assert_eq!(expression.success_shape(), handled.success_shape());
     block
 }
 
@@ -1032,11 +1072,11 @@ fn hir_block(hir: &HirModule, id: BlockId) -> &HirBlock {
 
 fn loaded_local(hir: &HirModule, expression: &HirValueId) -> LocalId {
     let HirExpressionKind::Load(place) = &hir.expressions.expression(*expression).kind else {
-        panic!("carrier must be loaded from its producer local");
+        panic!("value must be loaded from its producer local");
     };
     assert!(
         place.projections.is_empty(),
-        "carrier must be a direct local load"
+        "value must be a direct local load"
     );
     place.root
 }
@@ -1045,22 +1085,13 @@ fn numeric_producer(hir: &HirModule, operator: NumericOperator) -> (&HirBlock, L
     let producers = hir
         .blocks
         .iter()
-        .flat_map(|block| {
-            block
-                .statements
-                .iter()
-                .filter_map(move |statement| match &statement.kind {
-                    HirStatementKind::NumericOp {
-                        op,
-                        failure_mode,
-                        result,
-                        ..
-                    } if op.operator == operator => {
-                        assert_eq!(*failure_mode, NumericFailureMode::ReturnError);
-                        Some((block, result.local()))
-                    }
-                    _ => None,
-                })
+        .filter_map(|block| match &block.terminator {
+            HirTerminator::Invoke {
+                operation: HirFallibleOperation::NumericOp { op, .. },
+                error_result,
+                ..
+            } if op.operator == operator => Some((block, *error_result)),
+            _ => None,
         })
         .collect::<Vec<_>>();
     assert_eq!(
@@ -1071,81 +1102,89 @@ fn numeric_producer(hir: &HirModule, operator: NumericOperator) -> (&HirBlock, L
     producers[0]
 }
 
-fn fallible_edges(hir: &HirModule, block: &HirBlock, carrier: LocalId) -> (BlockId, BlockId) {
-    let HirTerminator::FallibleBranch {
-        result,
-        success_block,
-        error_block,
+fn fallible_edges(hir: &HirModule, block: &HirBlock, error_local: LocalId) -> (BlockId, BlockId) {
+    let HirTerminator::Invoke {
+        success,
+        failure,
+        success_results,
+        error_result,
+        ..
     } = &block.terminator
     else {
-        panic!("recoverable producer must branch before its payload is consumed");
+        panic!("recoverable producer must invoke before its values are consumed");
     };
-    assert_eq!(loaded_local(hir, result), carrier);
+    assert_eq!(*error_result, error_local);
+    assert!(!success_results.contains(error_result));
     for statement in &block.statements {
-        if let HirStatementKind::Write { value, .. } = &statement.kind {
-            match &hir.expressions.expression(*value).kind {
-                HirExpressionKind::FallibleUnwrapSuccess { result }
-                | HirExpressionKind::FallibleUnwrapError { result } => {
-                    assert_ne!(
-                        loaded_local(hir, result),
-                        carrier,
-                        "a producer must branch before either payload is assigned"
-                    );
-                }
-                _ => {}
-            }
+        if let HirStatementKind::Write { value, .. } = &statement.kind
+            && let HirExpressionKind::Load(place) = &hir.expressions.expression(*value).kind
+        {
+            assert_ne!(
+                place.root, error_local,
+                "failure value is defined only on the failure edge"
+            );
+            assert!(
+                !success_results.contains(&place.root),
+                "success values are defined only on the success edge"
+            );
         }
     }
-    (*success_block, *error_block)
+    (*success, *failure)
 }
 
-// Every producer has its own error adapter. Only that edge may unwrap its carrier,
-// then assign the common handler's Error slot before entering the handler once.
-fn error_adapter(hir: &HirModule, error_block: BlockId, carrier: LocalId) -> (BlockId, LocalId) {
+// Every producer transfers only its edge-local error into the common handler.
+fn error_adapter(
+    hir: &HirModule,
+    error_block: BlockId,
+    error_local: LocalId,
+) -> (BlockId, LocalId) {
     let adapter = hir_block(hir, error_block);
-    let [statement] = adapter.statements.as_slice() else {
-        panic!("error adapter must only initialise the handler's error slot");
-    };
-    let HirStatementKind::Write {
-        target: HirWriteTarget::DefineLocal(error_local),
-        value,
-    } = &statement.kind
-    else {
-        panic!("error adapter must assign the shared error local");
-    };
-    let HirExpressionKind::FallibleUnwrapError { result } =
-        &hir.expressions.expression(*value).kind
-    else {
-        panic!("error adapter must unwrap the producer's failure payload");
-    };
-    assert_eq!(loaded_local(hir, result), carrier);
-    let HirTerminator::Jump { target, .. } = &adapter.terminator else {
+    assert!(
+        adapter.statements.is_empty(),
+        "error adapter must not evaluate success values"
+    );
+    let HirTerminator::Jump { target, args } = &adapter.terminator else {
         panic!("error adapter must enter the common handler");
     };
+    let [argument] = args.as_slice() else {
+        panic!("error adapter must transfer exactly its error slot");
+    };
+    assert_eq!(argument.source, error_local);
     assert_ne!(*target, error_block);
-    (*target, *error_local)
+    (*target, argument.destination)
 }
 
 #[test]
 fn implicit_failure_private_chain_preserves_success_and_selects_error_materialisation() {
     let mut project = failure_project(
-        "multiply |left Int, right Int| -> Int:\n    return left * right\n;\n\
-         first |left Int, right Int| -> Int:\n    return multiply(left, right)\n;\n\
-         second |left Int, right Int| -> Int:\n    return first(left, right)\n;\n\
-         safe_product |left Int, right Int| -> Int, Error!:\n    return second(left, right)\n;\n",
+        "multiply |left I32, right I32| -> I32:\n    return left * right\n;\n\
+         first |left I32, right I32| -> I32:\n    return multiply(left, right)\n;\n\
+         second |left I32, right I32| -> I32:\n    return first(left, right)\n;\n\
+         safe_product |left I32, right I32| -> I32, Error!:\n    return second(left, right)\n;\n",
     );
     let ast = project.ast();
-    let product = returned_value(&named_function_body(&project, &ast, "multiply")[0]);
-    assert_eq!(product.type_id, builtin_type_ids::INT);
-    assert!(product.failure_facts.checked_numeric_operation);
-    assert!(product.failure_facts.summary.first_numeric.is_some());
+    let product = returned_value(&ast, &named_function_body(&project, &ast, "multiply")[0]);
+    assert_eq!(
+        product.value_type_id().expect("multiply return has a type"),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
+    );
+    assert!(failure_facts_of(product).checked_numeric_operation);
+    assert!(failure_facts_of(product).summary.first_numeric.is_some());
 
     for name in ["first", "second", "safe_product"] {
-        let value = returned_value(&named_function_body(&project, &ast, name)[0]);
-        assert_eq!(value.type_id, builtin_type_ids::INT);
-        assert!(matches!(value.kind, ExpressionKind::FunctionCall { .. }));
-        assert!(value.failure_facts.summary.first_private_call.is_some());
-        assert!(value.failure_facts.summary.first_typed.is_none());
+        let value = returned_value(&ast, &named_function_body(&project, &ast, name)[0]);
+        assert_eq!(
+            value
+                .value_type_id()
+                .expect("private call return has a type"),
+            builtin_type_ids::fixed_scalar(FixedScalar::I32)
+        );
+        assert!(matches!(
+            value.operation(),
+            ExpressionOperationView::Call(_)
+        ));
+        assert!(failure_facts_of(value).summary.first_private_call.is_some());
+        assert!(failure_facts_of(value).summary.first_typed.is_none());
     }
 
     let lowered = project
@@ -1174,6 +1213,7 @@ fn implicit_failure_private_chain_preserves_success_and_selects_error_materialis
         &mut hir,
         &report,
         &mut type_environment,
+        project.frontend.external_package_registry.as_ref(),
     )
     .expect("private failure lane must install");
     project
@@ -1229,10 +1269,12 @@ fn implicit_failure_private_chain_preserves_success_and_selects_error_materialis
                 HirBuiltinFailureSource::Call(CallTarget::Local(_))
             ));
         }
-        let carrier = type_environment.fallible_carrier_slots(function.return_type);
-        assert!(
-            carrier.is_some(),
-            "{name} must expose builtin Error through one carrier"
+        assert_eq!(
+            function.error_return,
+            type_environment.type_id_for_canonical_identity(&CanonicalTypeIdentity::Builtin(
+                CanonicalBuiltinType::Error
+            )),
+            "{name} must expose builtin Error through its error channel"
         );
         assert!(
             function_reaches_error_return(&hir, function.entry),
@@ -1240,16 +1282,9 @@ fn implicit_failure_private_chain_preserves_success_and_selects_error_materialis
         );
     }
     assert!(
-        hir.blocks
-            .iter()
-            .any(|block| block.statements.iter().any(|statement| {
-                matches!(
-                    statement.kind,
-                    HirStatementKind::NumericOp {
-                        failure_mode: NumericFailureMode::ReturnError,
-                        ..
-                    }
-                )
+        hir.blocks.iter().any(|block| matches!(&block.terminator,
+            HirTerminator::Invoke {
+                operation: crate::compiler_frontend::hir::terminators::HirFallibleOperation::NumericOp { .. }, ..
             })),
         "the private multiply helper must return overflow instead of trapping"
     );
@@ -1259,27 +1294,27 @@ fn implicit_failure_private_chain_preserves_success_and_selects_error_materialis
 fn implicit_failure_lanes_and_builtin_catch_preserve_float_integrity_guards() {
     let mut project = failure_project(
         "@test/default measure\n\
-         plain |value Float| -> String:\n\
+         plain |value F64| -> String:\n\
              label String = cast measure(value)\n    return label\n;\n\
-         escaping |value Float, left Int, right Int| -> String:\n\
+         escaping |value F64, left I32, right I32| -> String:\n\
              label String = cast measure(value)\n\
              product = left * right\n    return [: [label] [product]]\n;\n\
-         caught |value Float| -> String:\n\
+         caught |value F64| -> String:\n\
              label String = cast measure(value) * value catch then \"fallback\"\n\
              return label\n;\n\
-         declared |value Float| -> String, Error!:\n\
+         declared |value F64| -> String, Error!:\n\
              label String = cast measure(value)\n    return label\n;\n",
     );
     Arc::make_mut(&mut project.frontend.external_package_registry)
         .register_function(ExternalFunctionDef {
             name: "measure".to_owned(),
             parameters: vec![ExternalParameter {
-                language_type: ExternalSignatureType::NativeFloat,
+                language_type: ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::F64)),
                 access_kind: ExternalAccessKind::Shared,
             }],
-            returns: vec![ExternalReturnSlot::fresh(
-                ExternalSignatureType::NativeFloat,
-            )],
+            returns: vec![ExternalReturnSlot::fresh(ExternalSignatureType::Abi(
+                ExternalAbiType::Fixed(FixedScalar::F64),
+            ))],
             error_return_type: None,
             lowerings: ExternalFunctionLowerings::default(),
         })
@@ -1295,7 +1330,7 @@ fn implicit_failure_lanes_and_builtin_catch_preserve_float_integrity_guards() {
                 Default::default(),
             )
         })
-        .expect("float formatting and external validation must lower");
+        .expect("float text conversion and external validation must lower");
     let mut hir = lowered.hir_module;
     let mut type_environment = lowered.type_environment;
     let mut report = project
@@ -1311,6 +1346,7 @@ fn implicit_failure_lanes_and_builtin_catch_preserve_float_integrity_guards() {
         &mut hir,
         &report,
         &mut type_environment,
+        project.frontend.external_package_registry.as_ref(),
     )
     .expect("only implicit failures may join the private lane");
     project
@@ -1318,68 +1354,92 @@ fn implicit_failure_lanes_and_builtin_catch_preserve_float_integrity_guards() {
         .with_compiler(|compiler| compiler.check_borrows(&hir))
         .expect("integrity guards and installed numeric lanes must pass borrow checking");
 
-    for (name, expected_mode, escapes) in [
-        ("plain", NumericFailureMode::Trap, false),
-        ("escaping", NumericFailureMode::Trap, true),
-        ("caught", NumericFailureMode::Trap, false),
-        ("declared", NumericFailureMode::ReturnError, false),
+    for (name, expected_invoke, escapes) in [
+        ("plain", false, false),
+        ("escaping", false, true),
+        ("caught", false, false),
+        ("declared", true, false),
     ] {
         let function = named_hir_function(&project, &hir, name);
         assert_eq!(
             report.analysis.public_call_summaries[&function.id].escapes_builtin_failure,
             escapes,
         );
-        let mut formatting = Vec::new();
-        let mut validation = Vec::new();
+        // External float integrity is independently guarded, even after numeric lane installation.
+        let mut trapping_guards = 0;
+        let mut invoking_guards = 0;
         for block_id in reachable_block_ids(&hir, function.entry) {
-            for statement in &hir.blocks[block_id.0 as usize].statements {
-                match &statement.kind {
-                    HirStatementKind::FormatFloat { failure_mode, .. } => {
-                        formatting.push(*failure_mode);
-                    }
-                    HirStatementKind::ValidateFloat { failure_mode, .. } => {
-                        validation.push(*failure_mode);
-                    }
-                    _ => {}
+            let block = hir_block(&hir, block_id);
+            for statement in &block.statements {
+                if let HirStatementKind::ValidateFloat { failure_mode, .. } = &statement.kind {
+                    assert_eq!(*failure_mode, NumericFailureMode::Trap);
+                    trapping_guards += 1;
                 }
+            }
+            if matches!(&block.terminator, HirTerminator::Invoke {
+                operation: crate::compiler_frontend::hir::terminators::HirFallibleOperation::ValidateFloat { .. }, ..
+            }) {
+                invoking_guards += 1;
             }
         }
         assert_eq!(
-            formatting,
-            [expected_mode],
-            "{name} must preserve its formatting contract"
+            invoking_guards,
+            usize::from(expected_invoke),
+            "{name} finite validation channel"
         );
         assert_eq!(
-            validation,
-            [expected_mode],
-            "{name} must preserve finite-value validation"
+            trapping_guards,
+            usize::from(!expected_invoke),
+            "{name} finite validation trap"
         );
     }
-    for name in ["escaping", "caught"] {
-        let function = named_hir_function(&project, &hir, name);
-        assert!(
-            function_numeric_ops_return_error(&hir, function.entry),
-            "{name} must still recover ordinary checked arithmetic",
-        );
-    }
+    let escaping = named_hir_function(&project, &hir, "escaping");
+    assert!(
+        function_numeric_ops_return_error(&hir, escaping.entry),
+        "escaping arithmetic must retain its outward error edge"
+    );
+    let caught = named_hir_function(&project, &hir, "caught");
+    let reachable = reachable_block_ids(&hir, caught.entry);
+    let (producer, error_local) = reachable
+        .iter()
+        .find_map(|id| {
+            let block = hir_block(&hir, *id);
+            match &block.terminator {
+                HirTerminator::Invoke {
+                    operation: HirFallibleOperation::NumericOp { op, .. },
+                    error_result,
+                    ..
+                } if op.operator == NumericOperator::Multiply => Some((block, *error_result)),
+                _ => None,
+            }
+        })
+        .expect("caught arithmetic must retain its protected native numeric operation");
+    let (_, failure) = fallible_edges(&hir, producer, error_local);
+    let (handler, _) = error_adapter(&hir, failure, error_local);
+    assert!(
+        reachable_block_ids(&hir, caught.entry).contains(&handler),
+        "caught arithmetic must still enter local recovery"
+    );
 }
 
 #[test]
 fn implicit_failure_compound_writeback_and_range_update_join_private_lane() {
     let mut project = failure_project(
-        "bump |amount U8| -> U8:\n\
+        // The RHS is deliberately a wider U16 so `total += amount` stays a mixed-domain
+        // write-back: only that genuinely wider RHS keeps the checked store conversion.
+        "bump |amount U16| -> U8:\n\
              total ~U8 = 200\n\
              total += amount\n\
              return total\n;\n\
-         safe_bump |amount U8| -> U8, Error!:\n\
+         safe_bump |amount U16| -> U8, Error!:\n\
              return bump(amount)\n;\n\
-         walk |start Int, end Int| -> Int:\n\
-             seen ~Int = 0\n\
+         walk |start I32, end I32| -> I32:\n\
+             seen ~I32 = 0\n\
              loop start to & end |value|:\n\
                  seen = copy value\n\
              ;\n\
              return seen\n;\n\
-         safe_walk |start Int, end Int| -> Int, Error!:\n\
+         safe_walk |start I32, end I32| -> I32, Error!:\n\
              return walk(start, end)\n;\n",
     );
     let ast = project.ast();
@@ -1409,6 +1469,7 @@ fn implicit_failure_compound_writeback_and_range_update_join_private_lane() {
         &mut hir,
         &report,
         &mut type_environment,
+        project.frontend.external_package_registry.as_ref(),
     )
     .expect("statement-owned checks must join the private failure lane");
     project
@@ -1432,18 +1493,11 @@ fn implicit_failure_compound_writeback_and_range_update_join_private_lane() {
         reachable_block_ids(&hir, walk.entry)
             .into_iter()
             .any(|block_id| {
-                hir.blocks[block_id.0 as usize]
-                    .statements
-                    .iter()
-                    .any(|statement| {
-                        matches!(
-                statement.kind,
-                HirStatementKind::RangeStepFailure {
-                    cause: crate::compiler_frontend::hir::numeric::RangeStepFailureCause::ZeroStep,
-                    failure_mode: NumericFailureMode::ReturnError,
-                    ..
-                }
-            )
+                matches!(&hir_block(&hir, block_id).terminator,
+                    HirTerminator::Invoke {
+                        operation: crate::compiler_frontend::hir::terminators::HirFallibleOperation::RangeStepFailure {
+                            cause: crate::compiler_frontend::hir::numeric::RangeStepFailureCause::ZeroStep,
+                        }, ..
                     })
             }),
         "a zero step must return builtin Error through the private failure lane",
@@ -1451,12 +1505,12 @@ fn implicit_failure_compound_writeback_and_range_update_join_private_lane() {
 }
 
 #[test]
-fn private_failure_lane_marks_carriers_as_temps_without_weakening_fresh_mutable_arguments() {
+fn private_failure_lane_marks_edge_locals_as_temps_without_weakening_fresh_mutable_arguments() {
     let mut project = failure_project(
-        "increment |value ~Int| -> Int:\n\
+        "increment |value ~I32| -> I32:\n\
              value += 1\n\
              return value\n;\n\
-         fresh |value Int| -> Int:\n\
+         fresh |value I32| -> I32:\n\
              return increment(value + 1)\n;\n",
     );
     let ast = project.ast();
@@ -1499,10 +1553,11 @@ fn private_failure_lane_marks_carriers_as_temps_without_weakening_fresh_mutable_
         &mut hir,
         &report,
         &mut type_environment,
+        project.frontend.external_package_registry.as_ref(),
     )
     .expect("private checked arithmetic must install failure lanes");
 
-    let mut introduced_carriers = 0;
+    let mut introduced_errors = 0;
     for local in hir.blocks.iter().flat_map(|block| &block.locals) {
         let origin = hir.side_table.local_origin(local.id);
         if let Some(original_origin) = original_origins.get(&local.id) {
@@ -1513,34 +1568,63 @@ fn private_failure_lane_marks_carriers_as_temps_without_weakening_fresh_mutable_
             continue;
         }
 
-        introduced_carriers += 1;
-        let origin = origin.expect("every lane-generated carrier must have a typed origin");
+        let origin = origin.expect("every lane-generated edge local must have a typed origin");
         assert_eq!(origin.kind, HirLocalOriginKind::CompilerTemp);
         assert_eq!(origin.call_span, None);
         assert_eq!(origin.argument_index, None);
         assert!(
             local.mutable,
-            "carrier storage must remain writable scratch space"
+            "lane destinations must remain writable scratch storage"
+        );
+        let error_destination = hir.blocks.iter().any(|block| {
+            matches!(&block.terminator,
+            HirTerminator::Invoke { error_result, .. } if *error_result == local.id)
+        });
+        let success_destination = hir.blocks.iter().any(|block| {
+            matches!(&block.terminator,
+            HirTerminator::Invoke { success_results, .. } if success_results.contains(&local.id))
+        });
+        assert!(
+            error_destination || success_destination,
+            "lane storage must be an edge destination"
         );
         assert!(
-            type_environment.fallible_carrier_slots(local.ty).is_some(),
-            "lane-generated storage must carry the checked success and error outcomes"
+            !(error_destination && success_destination),
+            "success and error destinations must be disjoint"
         );
+        if error_destination {
+            introduced_errors += 1;
+            assert_eq!(
+                Some(local.ty),
+                type_environment.type_id_for_canonical_identity(&CanonicalTypeIdentity::Builtin(
+                    CanonicalBuiltinType::Error
+                )),
+                "lane-generated error storage must preserve the native Error type"
+            );
+        } else {
+            assert_eq!(
+                local.ty,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                "numeric update scratch must retain its success-slot type"
+            );
+        }
     }
     assert!(
-        introduced_carriers > 0,
-        "checked arithmetic and the private call must introduce transport carriers"
+        introduced_errors > 0,
+        "checked arithmetic and private calls must introduce native error destinations"
     );
     project
         .frontend
         .with_compiler(|compiler| compiler.check_borrows(&hir))
-        .expect("transport carriers must not introduce exclusive aliases of fresh mutable roots");
+        .expect("edge locals must not introduce exclusive aliases of fresh mutable roots");
 }
 
 #[test]
 fn private_failure_lane_preserves_unrelated_fatal_fallible_edge() {
     let mut project = failure_project(
-        "bump |amount U8| -> U8:\n\
+        // The wider U16 RHS keeps both compound stores genuine mixed-domain write-backs with
+        // their own checked conversion traps.
+        "bump |amount U16| -> U8:\n\
              total ~U8 = 200\n\
              total += amount\n\
              total += amount\n\
@@ -1602,6 +1686,7 @@ fn private_failure_lane_preserves_unrelated_fatal_fallible_edge() {
         &mut hir,
         &report,
         &mut type_environment,
+        project.frontend.external_package_registry.as_ref(),
     )
     .expect("an unrelated fatal fallible edge must not reject lane installation");
 
@@ -1617,18 +1702,13 @@ fn private_failure_lane_preserves_unrelated_fatal_fallible_edge() {
         panic!("the typed store conversion must return Error regardless of its rendered message");
     };
     let error = hir.expressions.expression(*error);
-    assert!(matches!(
-        error.kind,
-        HirExpressionKind::FallibleUnwrapError { .. }
-    ));
-    let return_type = hir
+    assert!(matches!(error.kind, HirExpressionKind::Load(_)));
+    let error_type = hir
         .functions
         .iter()
         .find(|function| function.id == function_id)
         .expect("private function must remain installed")
-        .return_type;
-    let (_, error_type) = type_environment
-        .fallible_carrier_slots(return_type)
+        .error_return
         .expect("private failure lane must be fallible");
     assert_eq!(error.ty, error_type);
     assert_eq!(
@@ -1659,25 +1739,17 @@ fn store_conversion_returns_before_assign(hir: &HirModule, entry: BlockId) -> bo
     let mut found = false;
     for block_id in reachable_block_ids(hir, entry) {
         let block = &hir.blocks[block_id.0 as usize];
-        let Some(carrier) = block
-            .statements
-            .iter()
-            .find_map(|statement| match &statement.kind {
-                HirStatementKind::CastOp {
-                    result: Some(local),
-                    ..
-                } => Some(*local),
-                _ => None,
-            })
-        else {
-            continue;
-        };
-        let HirTerminator::FallibleBranch {
-            success_block,
-            error_block,
+        let HirTerminator::Invoke {
+            operation: HirFallibleOperation::CastOp { .. },
+            success: success_block,
+            failure: error_block,
+            success_results,
             ..
         } = &block.terminator
         else {
+            continue;
+        };
+        let [success_local] = success_results.as_slice() else {
             return false;
         };
         if !matches!(
@@ -1703,8 +1775,8 @@ fn store_conversion_returns_before_assign(hir: &HirModule, entry: BlockId) -> bo
                         HirStatementKind::Write { value, .. }
                             if matches!(
                                 &hir.expressions.expression(*value).kind,
-                                HirExpressionKind::FallibleUnwrapSuccess { result }
-                                    if loaded_local(hir, result) == carrier.local()
+                                HirExpressionKind::Load(place)
+                                    if place.root == *success_local
                             )
                     )
                 });
@@ -1719,13 +1791,24 @@ fn store_conversion_returns_before_assign(hir: &HirModule, entry: BlockId) -> bo
 fn function_numeric_ops_return_error(hir: &HirModule, entry: BlockId) -> bool {
     let mut found = false;
     for block_id in reachable_block_ids(hir, entry) {
-        for statement in &hir.blocks[block_id.0 as usize].statements {
-            if let HirStatementKind::NumericOp { failure_mode, .. } = &statement.kind {
-                if *failure_mode != NumericFailureMode::ReturnError {
-                    return false;
-                }
-                found = true;
+        let block = hir_block(hir, block_id);
+        for statement in &block.statements {
+            if let HirStatementKind::NumericOp { failure_mode, .. } = &statement.kind
+                && *failure_mode == NumericFailureMode::Trap
+            {
+                return false;
             }
+        }
+        if let HirTerminator::Invoke {
+            operation: HirFallibleOperation::NumericOp { .. },
+            failure,
+            ..
+        } = &block.terminator
+        {
+            if !function_reaches_error_return(hir, *failure) {
+                return false;
+            }
+            found = true;
         }
     }
     found
@@ -1773,7 +1856,7 @@ fn function_reaches_error_return(hir: &HirModule, entry: BlockId) -> bool {
 fn implicit_failure_custom_contract_requires_explicit_mapping_even_with_other_error_return() {
     let mut project = failure_project(
         "Failure = | message String |\n\
-         area |left Int, right Int, invalid Bool| -> Int, Failure!:\n\
+         area |left I32, right I32, invalid Bool| -> I32, Failure!:\n\
              if invalid:\n        return! Failure(\"invalid\")\n    ;\n\
              return left * right\n;\n",
     );
@@ -1800,12 +1883,12 @@ fn implicit_failure_custom_contract_requires_explicit_mapping_even_with_other_er
 
     let mut project = failure_project(
         "Failure = | message String |\n\
-         area |left Int, right Int| -> Int, Failure!:\n\
+         area |left I32, right I32| -> I32, Failure!:\n\
              result = left * right catch |err|:\n\
                  return! Failure(err.message)\n    ;\n    return result\n;\n",
     );
     let ast = project.ast();
-    let expression = initializer(&named_function_body(&project, &ast, "area")[0]);
+    let expression = initializer(&ast, &named_function_body(&project, &ast, "area")[0]);
     let block = assert_catch_contract(
         expression,
         true,
@@ -1817,7 +1900,12 @@ fn implicit_failure_custom_contract_requires_explicit_mapping_even_with_other_er
     };
     assert!(error.is_some());
     assert!(matches!(body[0].kind, NodeKind::ReturnError(_)));
-    assert!(expression.failure_facts.summary.first_implicit.is_none());
+    assert!(
+        failure_facts_of(expression)
+            .summary
+            .first_implicit
+            .is_none()
+    );
     project
         .lower_ast_result(ast)
         .expect("numeric catch mapping to a custom error must lower");
@@ -1827,39 +1915,32 @@ fn implicit_failure_custom_contract_requires_explicit_mapping_even_with_other_er
 fn implicit_failure_catch_covers_multiply_and_add_not_only_last_operand() {
     for protected in ["left * right + offset", "(left * right) + offset"] {
         let mut project = failure_project(&format!(
-            "total |left Int, right Int, offset Int| -> Int:\n\
+            "total |left I32, right I32, offset I32| -> I32:\n\
                  value = {protected} catch then 0\n    return value\n;\n"
         ));
         let ast = project.ast();
-        let expression = initializer(&named_function_body(&project, &ast, "total")[0]);
+        let expression = initializer(&ast, &named_function_body(&project, &ast, "total")[0]);
         let block = assert_catch_contract(
             expression,
             true,
             None,
             builtin_error_type_id(&project, &ast),
         );
+        let handled = handled_value(expression, block);
         assert!(matches!(
-            block.handled_value.kind,
-            ExpressionKind::Runtime(_)
+            handled.operation(),
+            ExpressionOperationView::NumericBinary { .. }
         ));
-        assert!(block.handled_value.failure_facts.checked_numeric_operation);
+        let handled_facts = failure_facts_of(handled);
+        assert!(handled_facts.checked_numeric_operation);
+        assert!(handled_facts.summary.first_numeric.is_some());
+        assert!(handled_facts.summary.first_private_call.is_none());
         assert!(
-            block
-                .handled_value
-                .failure_facts
+            failure_facts_of(expression)
                 .summary
-                .first_numeric
-                .is_some()
-        );
-        assert!(
-            block
-                .handled_value
-                .failure_facts
-                .summary
-                .first_private_call
+                .first_implicit
                 .is_none()
         );
-        assert!(expression.failure_facts.summary.first_implicit.is_none());
         let hir = project
             .lower_ast_result(ast)
             .expect("the complete arithmetic catch must lower");
@@ -1878,19 +1959,32 @@ fn implicit_failure_catch_covers_multiply_and_add_not_only_last_operand() {
 fn implicit_failure_folded_catch_preserves_eligibility_without_escaping_failure() {
     for handler in ["catch then 0", "catch |err|:\n        then 0\n    ;"] {
         let mut project = failure_project(&format!(
-            "three || -> Int:\n    value = 1 + 2 {handler}\n    return value\n;\n"
+            "three || -> I32:\n    value = 1 + 2 {handler}\n    return value\n;\n"
         ));
         let ast = project.ast();
-        let expression = initializer(&named_function_body(&project, &ast, "three")[0]);
+        let expression = initializer(&ast, &named_function_body(&project, &ast, "three")[0]);
         let block = assert_catch_contract(
             expression,
             false,
             None,
             builtin_error_type_id(&project, &ast),
         );
-        assert!(matches!(block.handled_value.kind, ExpressionKind::Int(3)));
-        assert!(block.handled_value.failure_facts.checked_numeric_operation);
-        assert!(expression.failure_facts.summary.first_implicit.is_none());
+        let handled = handled_value(expression, block);
+        assert!(matches!(
+            handled.operation(),
+            ExpressionOperationView::Constant(id)
+                if matches!(
+                    ast.const_values.payload(id),
+                    Some(ConstValuePayload::FixedScalar(value)) if *value == i32_value(3)
+                )
+        ));
+        assert!(failure_facts_of(handled).checked_numeric_operation);
+        assert!(
+            failure_facts_of(expression)
+                .summary
+                .first_implicit
+                .is_none()
+        );
 
         let hir = project
             .lower_ast_result(ast)
@@ -1911,7 +2005,7 @@ fn implicit_failure_folded_catch_still_type_checks_handler_values() {
         "catch |err|:\n        then \"wrong\"\n    ;",
     ] {
         let mut project = failure_project(&format!(
-            "three || -> Int:\n    value Int = 1 + 2 {handler}\n    return value\n;\n"
+            "three || -> I32:\n    value I32 = 1 + 2 {handler}\n    return value\n;\n"
         ));
         let messages = project
             .ast_result()
@@ -1925,7 +2019,8 @@ fn implicit_failure_folded_catch_still_type_checks_handler_values() {
         assert!(matches!(
             diagnostic.payload,
             DiagnosticPayload::TypeMismatch { expected, found, .. }
-                if expected == builtin_type_ids::INT && found == builtin_type_ids::STRING
+                if expected == builtin_type_ids::fixed_scalar(FixedScalar::I32)
+                    && found == builtin_type_ids::STRING
         ));
         assert!(diagnostic.primary_span.is_some());
     }
@@ -1934,7 +2029,7 @@ fn implicit_failure_folded_catch_still_type_checks_handler_values() {
 #[test]
 fn implicit_failure_hir_two_numeric_operations_sequence_success_and_share_one_handler() {
     let mut project = failure_project(
-        "total |left Int, right Int, offset Int| -> Int:\n\
+        "total |left I32, right I32, offset I32| -> I32:\n\
              value = left * right + offset catch then 0\n    return value\n;\n",
     );
     let ast = project.ast();
@@ -1945,19 +2040,20 @@ fn implicit_failure_hir_two_numeric_operations_sequence_success_and_share_one_ha
     let numeric_count = hir
         .blocks
         .iter()
-        .flat_map(|block| &block.statements)
-        .filter(|statement| matches!(statement.kind, HirStatementKind::NumericOp { .. }))
+        .filter(|block| matches!(&block.terminator, HirTerminator::Invoke {
+            operation: crate::compiler_frontend::hir::terminators::HirFallibleOperation::NumericOp { .. }, ..
+        }))
         .count();
     assert_eq!(
         numeric_count, 2,
         "each protected operation must execute exactly once"
     );
 
-    let (multiply, multiply_carrier) = numeric_producer(&hir, NumericOperator::Multiply);
-    let (add, add_carrier) = numeric_producer(&hir, NumericOperator::Add);
-    assert_ne!(multiply_carrier, add_carrier);
-    let (multiply_success, multiply_error) = fallible_edges(&hir, multiply, multiply_carrier);
-    let (add_success, add_error) = fallible_edges(&hir, add, add_carrier);
+    let (multiply, multiply_error_local) = numeric_producer(&hir, NumericOperator::Multiply);
+    let (add, add_error_local) = numeric_producer(&hir, NumericOperator::Add);
+    assert_ne!(multiply_error_local, add_error_local);
+    let (multiply_success, multiply_error) = fallible_edges(&hir, multiply, multiply_error_local);
+    let (add_success, add_error) = fallible_edges(&hir, add, add_error_local);
     assert_eq!(
         multiply_success, add.id,
         "addition must execute only after multiplication succeeds"
@@ -1971,11 +2067,9 @@ fn implicit_failure_hir_two_numeric_operations_sequence_success_and_share_one_ha
         .blocks
         .iter()
         .filter(|block| match &block.terminator {
-            HirTerminator::FallibleBranch {
-                success_block,
-                error_block,
-                ..
-            } => *success_block == add.id || *error_block == add.id,
+            HirTerminator::Invoke {
+                success, failure, ..
+            } => *success == add.id || *failure == add.id,
             HirTerminator::Jump { target, .. } => *target == add.id,
             _ => false,
         })
@@ -1987,89 +2081,98 @@ fn implicit_failure_hir_two_numeric_operations_sequence_success_and_share_one_ha
         "no other edge may reach the second operation"
     );
 
-    let (handler, error_local) = error_adapter(&hir, multiply_error, multiply_carrier);
+    let (handler, error_local) = error_adapter(&hir, multiply_error, multiply_error_local);
     assert_eq!(
-        error_adapter(&hir, add_error, add_carrier),
+        error_adapter(&hir, add_error, add_error_local),
         (handler, error_local)
     );
     assert_ne!(handler, multiply.id);
     assert_ne!(handler, add.id);
-    assert_ne!(error_local, multiply_carrier);
-    assert_ne!(error_local, add_carrier);
+    assert_ne!(error_local, multiply_error_local);
+    assert_ne!(error_local, add_error_local);
 
-    let add_left = add
-        .statements
-        .iter()
-        .find_map(|statement| match &statement.kind {
-            HirStatementKind::NumericOp {
+    let HirTerminator::Invoke {
+        success_results: multiply_results,
+        ..
+    } = &multiply.terminator
+    else {
+        panic!("multiplication must define a native success destination");
+    };
+    let HirTerminator::Invoke {
+        operation:
+            HirFallibleOperation::NumericOp {
                 operands: HirNumericOperands::Binary { left, .. },
                 ..
-            } => Some(left),
-            _ => None,
-        })
-        .expect("addition must consume the multiplication success value");
-    let add_left = hir.expressions.expression(*add_left);
-    let HirExpressionKind::FallibleUnwrapSuccess { result } = &add_left.kind else {
-        panic!("the first success edge must unwrap multiplication before adding");
+            },
+        success_results: add_results,
+        ..
+    } = &add.terminator
+    else {
+        panic!("addition must consume the multiplication success value");
     };
-    assert_eq!(loaded_local(&hir, result), multiply_carrier);
-    assert_eq!(add_left.ty, builtin_type_ids::INT);
+    assert_eq!(multiply_results.len(), 1);
+    assert_eq!(add_results.len(), 1);
+    assert_eq!(loaded_local(&hir, left), multiply_results[0]);
+    assert_eq!(
+        hir.expressions.expression(*left).ty,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
+    );
 
     let success = hir_block(&hir, add_success);
-    let (success_local, success_value) = success
-        .statements
-        .iter()
-        .find_map(|statement| match &statement.kind {
-            HirStatementKind::Write {
-                target: HirWriteTarget::DefineLocal(local),
-                value,
-            } if matches!(
-                hir.expressions.expression(*value).kind,
-                HirExpressionKind::FallibleUnwrapSuccess { .. }
-            ) =>
-            {
-                Some((*local, value))
-            }
-            _ => None,
-        })
-        .expect("the final success edge must initialise the catch success slot");
-    let success_value = hir.expressions.expression(*success_value);
-    let HirExpressionKind::FallibleUnwrapSuccess { result } = &success_value.kind else {
-        panic!("final success assignment must unwrap the addition carrier");
+    let HirTerminator::Jump {
+        target: success_merge,
+        args: success_args,
+    } = &success.terminator
+    else {
+        panic!("successful evaluation must transfer its slots to the catch merge");
     };
-    assert_eq!(loaded_local(&hir, result), add_carrier);
-    assert_eq!(success_value.ty, builtin_type_ids::INT);
+    let [success_argument] = success_args.as_slice() else {
+        panic!("catch success must transfer exactly one slot");
+    };
+    let success_local = success_argument.destination;
+    assert!(
+        success
+            .statements
+            .iter()
+            .any(|statement| matches!(&statement.kind,
+        HirStatementKind::Write { target: HirWriteTarget::DefineLocal(local), value }
+            if *local == success_argument.source && loaded_local(&hir, value) == add_results[0])),
+        "merge transfer must stage the native addition success value exactly once"
+    );
     assert_ne!(success_local, error_local);
-    assert_ne!(success_local, multiply_carrier);
-    assert_ne!(success_local, add_carrier);
+    assert_ne!(success_local, multiply_error_local);
+    assert_ne!(success_local, add_error_local);
 
     let handler_block = hir_block(&hir, handler);
+    let HirTerminator::Jump {
+        target: recovery_merge,
+        args: recovery_args,
+    } = &handler_block.terminator
+    else {
+        panic!("recovery must transfer its slots to the catch merge");
+    };
+    let [recovery_argument] = recovery_args.as_slice() else {
+        panic!("catch recovery must transfer exactly one slot");
+    };
+    assert_eq!(success_merge, recovery_merge);
+    assert_eq!(recovery_argument.destination, success_local);
     assert!(
         handler_block.statements.iter().any(|statement| matches!(
             &statement.kind,
             HirStatementKind::Write { target: HirWriteTarget::DefineLocal(local), value }
-                if *local == success_local && matches!(hir.expressions.expression(*value).kind, HirExpressionKind::Int(0))
+                if *local == recovery_argument.source && matches!(
+                    &hir.expressions.expression(*value).kind,
+                    HirExpressionKind::FixedScalar(value) if *value == i32_value(0)
+                )
         )),
-        "recovery must initialise the same success slot without reading a failed success payload"
+        "recovery must produce zero without reading a failed success value"
     );
-    let HirTerminator::Jump {
-        target: success_merge,
-        ..
-    } = &success.terminator
-    else {
-        panic!("successful evaluation must reach the catch merge");
-    };
-    let HirTerminator::Jump {
-        target: recovery_merge,
-        ..
-    } = &handler_block.terminator
-    else {
-        panic!("recovery must reach the catch merge");
-    };
-    assert_eq!(success_merge, recovery_merge);
 
     for (local, expected_type) in [
-        (success_local, builtin_type_ids::INT),
+        (
+            success_local,
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        ),
         (error_local, error_type),
     ] {
         let declaration = hir
@@ -2080,31 +2183,37 @@ fn implicit_failure_hir_two_numeric_operations_sequence_success_and_share_one_ha
             .expect("catch slots must be declared");
         assert_eq!(declaration.ty, expected_type);
     }
-    for (producer, carrier) in [(multiply, multiply_carrier), (add, add_carrier)] {
-        let declaration = hir
-            .blocks
-            .iter()
-            .flat_map(|block| &block.locals)
-            .find(|declaration| declaration.id == carrier)
-            .expect("numeric carrier must be declared");
-        assert_ne!(declaration.ty, builtin_type_ids::INT);
-        assert_ne!(declaration.ty, error_type);
-        let HirTerminator::FallibleBranch { result, .. } = &producer.terminator else {
-            panic!("numeric carrier must be tested before any slot is defined");
+    for producer in [multiply, add] {
+        let HirTerminator::Invoke {
+            success_results,
+            error_result,
+            ..
+        } = &producer.terminator
+        else {
+            panic!("numeric producer must have native result channels");
         };
-        assert_eq!(hir.expressions.expression(*result).ty, declaration.ty);
+        assert!(!success_results.contains(error_result));
+        for (local, expected_type) in success_results
+            .iter()
+            .map(|local| (*local, builtin_type_ids::fixed_scalar(FixedScalar::I32)))
+            .chain(std::iter::once((*error_result, error_type)))
+        {
+            let declaration = hir
+                .blocks
+                .iter()
+                .flat_map(|block| &block.locals)
+                .find(|declaration| declaration.id == local)
+                .expect("edge destination must be declared");
+            assert_eq!(declaration.ty, expected_type);
+        }
     }
-    for adapter_id in [multiply_error, add_error] {
-        let adapter = hir_block(&hir, adapter_id);
-        assert!(
-            adapter.statements.iter().all(|statement| matches!(
-                &statement.kind,
-                HirStatementKind::Write { target: HirWriteTarget::DefineLocal(local), value }
-                    if *local == error_local
-                        && hir.expressions.expression(*value).ty == error_type
-                        && matches!(hir.expressions.expression(*value).kind, HirExpressionKind::FallibleUnwrapError { .. })
-            )),
-            "error edges must define only the Error slot, never the success slot"
+    for (adapter_id, source) in [
+        (multiply_error, multiply_error_local),
+        (add_error, add_error_local),
+    ] {
+        assert_eq!(
+            error_adapter(&hir, adapter_id, source),
+            (handler, error_local)
         );
     }
     for success_block in [add, success] {
@@ -2117,7 +2226,8 @@ fn implicit_failure_hir_two_numeric_operations_sequence_success_and_share_one_ha
         handler_block.statements.iter().all(|statement| !matches!(
             &statement.kind,
             HirStatementKind::Write { value, .. }
-                if matches!(hir.expressions.expression(*value).kind, HirExpressionKind::FallibleUnwrapSuccess { .. })
+                if matches!(&hir.expressions.expression(*value).kind, HirExpressionKind::Load(place)
+                    if multiply_results.contains(&place.root) || add_results.contains(&place.root))
         )),
         "the handler must never consume a failed producer's success payload"
     );
@@ -2126,19 +2236,20 @@ fn implicit_failure_hir_two_numeric_operations_sequence_success_and_share_one_ha
 #[test]
 fn implicit_failure_nested_handler_catch_uses_its_own_error_continuation() {
     let mut project = failure_project(
-        "recover |left Int, right Int| -> Int:\n\
+        "recover |left I32, right I32| -> I32:\n\
              value = left * right catch:\n\
                  recovered = left // right catch then 7\n        then recovered\n\
              ;\n    return value\n;\n",
     );
     let hir = project.hir();
-    let (multiply, multiply_carrier) = numeric_producer(&hir, NumericOperator::Multiply);
-    let (_, multiply_error) = fallible_edges(&hir, multiply, multiply_carrier);
-    let (outer_handler, outer_error_slot) = error_adapter(&hir, multiply_error, multiply_carrier);
-    let (divide, divide_carrier) = numeric_producer(&hir, NumericOperator::IntegerDivide);
+    let (multiply, multiply_error_local) = numeric_producer(&hir, NumericOperator::Multiply);
+    let (_, multiply_error) = fallible_edges(&hir, multiply, multiply_error_local);
+    let (outer_handler, outer_error_slot) =
+        error_adapter(&hir, multiply_error, multiply_error_local);
+    let (divide, divide_error_local) = numeric_producer(&hir, NumericOperator::IntegerDivide);
     assert_eq!(divide.id, outer_handler);
-    let (_, divide_error) = fallible_edges(&hir, divide, divide_carrier);
-    let (inner_handler, inner_error_slot) = error_adapter(&hir, divide_error, divide_carrier);
+    let (_, divide_error) = fallible_edges(&hir, divide, divide_error_local);
+    let (inner_handler, inner_error_slot) = error_adapter(&hir, divide_error, divide_error_local);
     assert_ne!(
         inner_handler, outer_handler,
         "nested handler failure must not restart outer recovery"
@@ -2147,10 +2258,18 @@ fn implicit_failure_nested_handler_catch_uses_its_own_error_continuation() {
         inner_error_slot, outer_error_slot,
         "nested catches must not overwrite outer error slots"
     );
-    assert!(hir_block(&hir, inner_handler).statements.iter().any(|statement| matches!(
-        &statement.kind,
-        HirStatementKind::Write { value, .. } if matches!(hir.expressions.expression(*value).kind, HirExpressionKind::Int(7))
-    )));
+    assert!(
+        hir_block(&hir, inner_handler)
+            .statements
+            .iter()
+            .any(|statement| matches!(
+                &statement.kind,
+                HirStatementKind::Write { value, .. } if matches!(
+                    &hir.expressions.expression(*value).kind,
+                    HirExpressionKind::FixedScalar(value) if *value == i32_value(7)
+                )
+            ))
+    );
 }
 
 #[test]
@@ -2161,28 +2280,31 @@ fn implicit_failure_catch_covers_private_operands_arguments_and_typed_call() {
         "load(left * right + offset)",
     ] {
         let mut project = failure_project(&format!(
-            "multiply |left Int, right Int| -> Int:\n    return left * right\n;\n\
-             load |value Int| -> Int, Error!:\n    return value\n;\n\
-             total |left Int, right Int, offset Int| -> Int:\n\
+            "multiply |left I32, right I32| -> I32:\n    return left * right\n;\n\
+             load |value I32| -> I32, Error!:\n    return value\n;\n\
+             total |left I32, right I32, offset I32| -> I32:\n\
                  value = {protected} catch then 0\n    return value\n;\n"
         ));
         let ast = project.ast();
         let error_type_id = builtin_error_type_id(&project, &ast);
-        let expression = initializer(&named_function_body(&project, &ast, "total")[0]);
+        let expression = initializer(&ast, &named_function_body(&project, &ast, "total")[0]);
         let typed_error = protected.starts_with("load(").then_some(error_type_id);
         let block = assert_catch_contract(expression, true, typed_error, error_type_id);
         if protected.contains("multiply(") {
             assert!(
-                block
-                    .handled_value
-                    .failure_facts
+                failure_facts_of(handled_value(expression, block))
                     .summary
                     .first_private_call
                     .is_some()
             );
         }
-        assert!(expression.failure_facts.summary.first_implicit.is_none());
-        assert!(expression.failure_facts.summary.first_typed.is_none());
+        assert!(
+            failure_facts_of(expression)
+                .summary
+                .first_implicit
+                .is_none()
+        );
+        assert!(failure_facts_of(expression).summary.first_typed.is_none());
         if protected.contains("multiply(") {
             assert_catch_lowering_succeeds(&mut project, ast);
         } else {
@@ -2196,39 +2318,42 @@ fn implicit_failure_catch_covers_private_operands_arguments_and_typed_call() {
 #[test]
 fn implicit_failure_catch_covers_receiver_evaluation_and_method_arguments() {
     let mut project = failure_project(
-        "Box = | value Int |\n\
-         make |value Int| -> Box, Error!:\n    return Box(value)\n;\n\
-         amount |this Box, extra Int| -> Int, Error!:\n    return extra\n;\n\
-         total |left Int, right Int, offset Int| -> Int:\n\
+        "Box = | value I32 |\n\
+         make |value I32| -> Box, Error!:\n    return Box(value)\n;\n\
+         amount |this Box, extra I32| -> I32, Error!:\n    return extra\n;\n\
+         total |left I32, right I32, offset I32| -> I32:\n\
              value = make(left * right).amount(offset * right) catch then 0\n\
              return value\n;\n",
     );
     let ast = project.ast();
     let error_type_id = builtin_error_type_id(&project, &ast);
-    let expression = initializer(&named_function_body(&project, &ast, "total")[0]);
+    let expression = initializer(&ast, &named_function_body(&project, &ast, "total")[0]);
     assert_catch_contract(expression, true, Some(error_type_id), error_type_id);
-    assert!(expression.failure_facts.summary.first_implicit.is_none());
-    assert!(expression.failure_facts.summary.first_typed.is_none());
+    assert!(
+        failure_facts_of(expression)
+            .summary
+            .first_implicit
+            .is_none()
+    );
+    assert!(failure_facts_of(expression).summary.first_typed.is_none());
     assert_catch_lowering_succeeds(&mut project, ast);
 }
 
 #[test]
 fn implicit_failure_catch_accepts_multiple_builtin_errors_without_erasing_code_zero() {
     let mut project = failure_project(
-        "load |value Int| -> Int, Error!:\n\
+        "load |value I32| -> I32, Error!:\n\
              if value < 0:\n        return! Error(\"authored\", code = 0)\n    ;\n\
              return value\n;\n\
-         total |left Int, right Int| -> Int:\n\
+         total |left I32, right I32| -> I32:\n\
              value = load(left) + load(right) catch then 0\n    return value\n;\n",
     );
     let ast = project.ast();
     let error_type_id = builtin_error_type_id(&project, &ast);
-    let expression = initializer(&named_function_body(&project, &ast, "total")[0]);
+    let expression = initializer(&ast, &named_function_body(&project, &ast, "total")[0]);
     let block = assert_catch_contract(expression, true, Some(error_type_id), error_type_id);
     assert!(
-        block
-            .handled_value
-            .failure_facts
+        failure_facts_of(handled_value(expression, block))
             .summary
             .first_numeric
             .is_some()
@@ -2241,8 +2366,12 @@ fn implicit_failure_catch_accepts_multiple_builtin_errors_without_erasing_code_z
     let NodeKind::ReturnError(error) = &error_body[0].kind else {
         panic!("code-zero value must remain an ordinary typed error return");
     };
-    assert_eq!(error.type_id, error_type_id);
-    let ExpressionKind::StructInstance(fields) = &error.kind else {
+    let error = expression_view(&ast, *error);
+    assert_eq!(
+        error.value_type_id().expect("authored Error has a type"),
+        error_type_id
+    );
+    let ExpressionOperationView::Struct { fields } = error.operation() else {
         panic!("authored Error identity and fields must be retained");
     };
     let code = fields
@@ -2251,14 +2380,19 @@ fn implicit_failure_catch_accepts_multiple_builtin_errors_without_erasing_code_z
             project
                 .frontend
                 .path_fork
-                .component(field.id)
+                .component(field.name())
                 .is_some_and(|component| project.frontend.string_table.resolve(component) == "code")
         })
         .expect("Error.code field");
+    let code_value = code.value();
     assert!(matches!(
-        code.value.kind,
-        ExpressionKind::FixedScalar(value)
-            if Some(value) == FixedScalarValue::unsigned(FixedScalar::U32, 0)
+        code_value.operation(),
+        ExpressionOperationView::Constant(id)
+            if matches!(
+                ast.const_values.payload(id),
+                Some(ConstValuePayload::FixedScalar(value))
+                    if Some(*value) == FixedScalarValue::unsigned(FixedScalar::U32, 0)
+            )
     ));
     assert_catch_lowering_succeeds(&mut project, ast);
 }
@@ -2273,22 +2407,25 @@ fn implicit_failure_catch_accepts_one_custom_identity_without_numeric_failure() 
                  saved Failure = err\n        then false\n    ;\n    return value\n;\n",
     );
     let ast = project.ast();
-    let expression = initializer(&named_function_body(&project, &ast, "recover")[0]);
+    let expression = initializer(&ast, &named_function_body(&project, &ast, "recover")[0]);
     let block = catch_block(expression);
-    let error_type_id = block
-        .handled_value
-        .failure_facts
+    let error_type_id = failure_facts_of(handled_value(expression, block))
         .summary
         .first_typed
         .expect("custom typed producer")
         .error_type_id;
     assert_ne!(error_type_id, builtin_error_type_id(&project, &ast));
     let block = assert_catch_contract(expression, false, Some(error_type_id), error_type_id);
-    assert!(!block.handled_value.failure_facts.checked_numeric_operation);
+    assert!(!failure_facts_of(handled_value(expression, block)).checked_numeric_operation);
     let FallibleHandling::Handler { body, .. } = &block.handler else {
         panic!("custom recovery handler");
     };
-    assert_eq!(initializer(&body[0]).type_id, error_type_id);
+    assert_eq!(
+        initializer(&ast, &body[0])
+            .value_type_id()
+            .expect("custom Error binding has a type"),
+        error_type_id
+    );
     assert_catch_lowering_succeeds(&mut project, ast);
 }
 
@@ -2303,11 +2440,9 @@ fn implicit_failure_custom_catch_accepts_known_infallible_private_operand() {
                  saved Failure = err\n        then false\n    ;\n    return value\n;\n",
     );
     let ast = project.ast();
-    let expression = initializer(&named_function_body(&project, &ast, "recover")[0]);
+    let expression = initializer(&ast, &named_function_body(&project, &ast, "recover")[0]);
     let block = catch_block(expression);
-    let error_type_id = block
-        .handled_value
-        .failure_facts
+    let error_type_id = failure_facts_of(handled_value(expression, block))
         .summary
         .first_typed
         .expect("custom typed producer")
@@ -2317,7 +2452,12 @@ fn implicit_failure_custom_catch_accepts_known_infallible_private_operand() {
     let FallibleHandling::Handler { body, .. } = &block.handler else {
         panic!("custom recovery handler");
     };
-    assert_eq!(initializer(&body[0]).type_id, error_type_id);
+    assert_eq!(
+        initializer(&ast, &body[0])
+            .value_type_id()
+            .expect("custom Error binding has a type"),
+        error_type_id
+    );
     assert_catch_lowering_succeeds(&mut project, ast);
 }
 
@@ -2326,23 +2466,20 @@ fn implicit_failure_custom_catch_projects_private_compatibility_checks_into_hir(
     for protected in ["multiply(left, right)", "forward(left, right)"] {
         let mut project = failure_project(&format!(
             "Failure = | message String |\n\
-             multiply |left Int, right Int| -> Int:\n    return left * right\n;\n\
-             forward |left Int, right Int| -> Int:\n    return multiply(left, right)\n;\n\
-             load |value Int| -> Int, Failure!:\n    return value\n;\n\
-             recover |left Int, right Int| -> Int:\n\
+             multiply |left I32, right I32| -> I32:\n    return left * right\n;\n\
+             forward |left I32, right I32| -> I32:\n    return multiply(left, right)\n;\n\
+             load |value I32| -> I32, Failure!:\n    return value\n;\n\
+             recover |left I32, right I32| -> I32:\n\
                  return load({protected}) catch then 0\n;\n"
         ));
         let ast = project.ast();
-        let expression = returned_value(&named_function_body(&project, &ast, "recover")[0]);
+        let expression = returned_value(&ast, &named_function_body(&project, &ast, "recover")[0]);
         let block = catch_block(expression);
-        let check = block
-            .handled_value
-            .failure_facts
+        let facts = failure_facts_of(handled_value(expression, block));
+        let check = facts
             .deferred_custom_catch
             .expect("private call compatibility must be retained for exact callee convergence");
-        let error_type_id = block
-            .handled_value
-            .failure_facts
+        let error_type_id = facts
             .summary
             .first_typed
             .expect("custom typed producer")
@@ -2350,9 +2487,7 @@ fn implicit_failure_custom_catch_projects_private_compatibility_checks_into_hir(
         assert_eq!(check.error_type_id, error_type_id);
         assert!(check.catch_span.is_some());
         assert!(check.typed_producer_span.is_some());
-        let private_call_span = block
-            .handled_value
-            .failure_facts
+        let private_call_span = facts
             .summary
             .first_private_call
             .expect("deferred compatibility must retain the private call witness")
@@ -2390,42 +2525,36 @@ fn implicit_failure_custom_catch_projects_private_compatibility_checks_into_hir(
 fn implicit_failure_custom_catch_reports_handler_compatibility_before_protected_work() {
     let mut project = failure_project(
         "Failure = | message String |\n\
-         helper_a |value Int| -> Int:\n    return value + 1\n;\n\
-         helper_b |value Int| -> Int:\n    return value + 1\n;\n\
-         load |value Int| -> Int, Failure!:\n    return value\n;\n\
-         recover |value Int| -> Int:\n\
+         helper_a |value I32| -> I32:\n    return value + 1\n;\n\
+         helper_b |value I32| -> I32:\n    return value + 1\n;\n\
+         load |value I32| -> I32, Failure!:\n    return value\n;\n\
+         recover |value I32| -> I32:\n\
              return load(helper_a(value)) catch:\n\
                  inner = load(helper_b(value)) catch then 0\n\
                  then inner\n    ;\n;\n",
     );
     let ast = project.ast();
-    let outer = catch_block(returned_value(
-        &named_function_body(&project, &ast, "recover")[0],
-    ));
+    let outer_expression = returned_value(&ast, &named_function_body(&project, &ast, "recover")[0]);
+    let outer = catch_block(outer_expression);
     let FallibleHandling::Handler { body, .. } = &outer.handler else {
         panic!("outer recovery must retain its handler");
     };
-    let inner = catch_block(initializer(&body[0]));
-    let inner_check = inner
-        .handled_value
-        .failure_facts
+    let inner_expression = initializer(&ast, &body[0]);
+    let inner = catch_block(inner_expression);
+    let outer_handled = handled_value(outer_expression, outer);
+    let inner_handled = handled_value(inner_expression, inner);
+    let inner_check = failure_facts_of(inner_handled)
         .deferred_custom_catch
         .expect("inner custom catch must defer private compatibility");
-    let outer_check = outer
-        .handled_value
-        .failure_facts
+    let outer_check = failure_facts_of(outer_handled)
         .deferred_custom_catch
         .expect("outer custom catch must defer private compatibility");
-    let inner_private_span = inner
-        .handled_value
-        .failure_facts
+    let inner_private_span = failure_facts_of(inner_handled)
         .summary
         .first_private_call
         .expect("inner helper call must retain its authored span")
         .span;
-    let outer_private_span = outer
-        .handled_value
-        .failure_facts
+    let outer_private_span = failure_facts_of(outer_handled)
         .summary
         .first_private_call
         .expect("outer helper call must retain its authored span")
@@ -2476,8 +2605,8 @@ fn implicit_failure_custom_catch_reports_handler_compatibility_before_protected_
 fn implicit_failure_catch_rejects_custom_numeric_and_distinct_typed_errors() {
     let mut project = failure_project(
         "Failure = | message String |\n\
-         load |value Int| -> Int, Failure!:\n    return value\n;\n\
-         recover |left Int, right Int| -> Int:\n\
+         load |value I32| -> I32, Failure!:\n    return value\n;\n\
+         recover |left I32, right I32| -> I32:\n\
              return load(left) * right catch then 0\n;\n",
     );
     let messages = project
@@ -2537,49 +2666,74 @@ fn implicit_failure_cast_catch_retains_operand_and_conversion_contracts() {
     );
     let ast = project.ast();
     let error_type_id = builtin_error_type_id(&project, &ast);
-    let expression = initializer(&named_function_body(&project, &ast, "narrow")[0]);
-    let block = assert_catch_contract(expression, true, Some(error_type_id), error_type_id);
-    let ExpressionKind::Cast(cast) = &block.handled_value.kind else {
+    let expression = initializer(&ast, &named_function_body(&project, &ast, "narrow")[0]);
+    // Builtin arithmetic and conversion contribute implicit failure. The handler binds Error
+    // without manufacturing a declared typed producer, and protects both operations.
+    let block = assert_catch_contract(expression, true, None, error_type_id);
+    let handled = handled_value(expression, block);
+    let ExpressionOperationView::Cast {
+        source,
+        facts: cast,
+    } = handled.operation()
+    else {
         panic!("cast must own the complete arithmetic operand");
     };
     let u32_type = builtin_type_ids::fixed_scalar(FixedScalar::U32);
     let u8_type = builtin_type_ids::fixed_scalar(FixedScalar::U8);
-    assert_eq!(cast.source.type_id, u32_type);
+    assert_eq!(
+        source.value_type_id().expect("cast source has a type"),
+        u32_type
+    );
     assert_eq!(cast.source_type_id, u32_type);
     assert_eq!(cast.target_type_id, u8_type);
-    assert_eq!(expression.type_id, u8_type);
-    assert!(cast.source.failure_facts.checked_numeric_operation);
-    assert!(expression.failure_facts.summary.first_implicit.is_none());
+    assert_eq!(
+        expression.value_type_id().expect("cast catch has a type"),
+        u8_type
+    );
+    assert!(failure_facts_of(source).checked_numeric_operation);
+    assert!(
+        failure_facts_of(expression)
+            .summary
+            .first_implicit
+            .is_none()
+    );
     project
         .lower_ast_result(ast)
         .expect("cast catch must cover numeric operands and conversion");
 
     let mut project = failure_project(
-        "widen |left Int, right Int| -> Float:\n\
-             value Float = cast left * right catch then 0.0\n    return value\n;\n",
+        "widen |left I32, right I32| -> F64:\n\
+             value F64 = cast left * right catch then 0.0\n    return value\n;\n",
     );
     let ast = project.ast();
-    let expression = initializer(&named_function_body(&project, &ast, "widen")[0]);
+    let expression = initializer(&ast, &named_function_body(&project, &ast, "widen")[0]);
     let block = assert_catch_contract(
         expression,
         true,
         None,
         builtin_error_type_id(&project, &ast),
     );
-    let ExpressionKind::Cast(cast) = &block.handled_value.kind else {
+    let handled = handled_value(expression, block);
+    let ExpressionOperationView::Cast { facts: cast, .. } = handled.operation() else {
         panic!("infallible conversion must retain its pending numeric operand");
     };
-    assert_eq!(cast.source_type_id, builtin_type_ids::INT);
-    assert_eq!(cast.target_type_id, builtin_type_ids::FLOAT);
+    assert_eq!(
+        cast.source_type_id,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
+    );
+    assert_eq!(
+        cast.target_type_id,
+        builtin_type_ids::fixed_scalar(FixedScalar::F64)
+    );
     let hir = project
         .lower_ast_result(ast)
         .expect("infallible cast must still recover operand failures");
-    let (multiply, carrier) = numeric_producer(&hir, NumericOperator::Multiply);
-    let (_, error) = fallible_edges(&hir, multiply, carrier);
-    error_adapter(&hir, error, carrier);
+    let (multiply, producer_error_local) = numeric_producer(&hir, NumericOperator::Multiply);
+    let (_, error) = fallible_edges(&hir, multiply, producer_error_local);
+    error_adapter(&hir, error, producer_error_local);
 
     let mut project =
-        failure_project("bad |values {Int}| -> Int:\n    return cast values catch then 0\n;\n");
+        failure_project("bad |values {I32}| -> I32:\n    return cast values catch then 0\n;\n");
     let messages = project
         .ast_result()
         .err()
@@ -2601,29 +2755,41 @@ fn implicit_failure_cast_catch_retains_operand_and_conversion_contracts() {
 #[test]
 fn implicit_failure_bound_catch_has_error_fields_unbound_catch_has_no_binding() {
     let mut project = failure_project(
-        "bound |left Int, right Int| -> Int:\n\
+        "bound |left I32, right I32| -> I32:\n\
              value = left * right catch |err|:\n\
                  saved Error = err\n        code U32 = err.code\n        message String = err.message\n\
                  then 0\n    ;\n    return value\n;\n\
-         unbound |left Int, right Int| -> Int:\n\
+         unbound |left I32, right I32| -> I32:\n\
              value = left * right catch then 0\n    return value\n;\n",
     );
     let ast = project.ast();
     let error_type_id = builtin_error_type_id(&project, &ast);
-    let bound = initializer(&named_function_body(&project, &ast, "bound")[0]);
+    let bound = initializer(&ast, &named_function_body(&project, &ast, "bound")[0]);
     let block = assert_catch_contract(bound, true, None, error_type_id);
     let FallibleHandling::Handler { error, body } = &block.handler else {
         panic!("bound handler");
     };
     assert!(error.is_some());
-    assert_eq!(initializer(&body[0]).type_id, error_type_id);
     assert_eq!(
-        initializer(&body[1]).type_id,
+        initializer(&ast, &body[0])
+            .value_type_id()
+            .expect("handler binding has a type"),
+        error_type_id
+    );
+    assert_eq!(
+        initializer(&ast, &body[1])
+            .value_type_id()
+            .expect("handler binding has a type"),
         builtin_type_ids::fixed_scalar(FixedScalar::U32),
     );
-    assert_eq!(initializer(&body[2]).type_id, builtin_type_ids::STRING);
+    assert_eq!(
+        initializer(&ast, &body[2])
+            .value_type_id()
+            .expect("handler binding has a type"),
+        builtin_type_ids::STRING
+    );
 
-    let unbound = initializer(&named_function_body(&project, &ast, "unbound")[0]);
+    let unbound = initializer(&ast, &named_function_body(&project, &ast, "unbound")[0]);
     let block = assert_catch_contract(unbound, true, None, error_type_id);
     let FallibleHandling::Handler { error, body } = &block.handler else {
         panic!("unbound handler");
@@ -2646,11 +2812,11 @@ fn implicit_failure_handler_terminality_and_arity_are_checked_before_hir() {
         "if choose:\n            then 0\n        else\n            return 1\n        ;",
     ] {
         let mut project = failure_project(&format!(
-            "recover |left Int, right Int, choose Bool| -> Int:\n\
+            "recover |left I32, right I32, choose Bool| -> I32:\n\
                  value = left * right catch:\n        {handler}\n    ;\n    return value\n;\n"
         ));
         let ast = project.ast();
-        let expression = initializer(&named_function_body(&project, &ast, "recover")[0]);
+        let expression = initializer(&ast, &named_function_body(&project, &ast, "recover")[0]);
         assert_catch_contract(
             expression,
             true,
@@ -2663,7 +2829,7 @@ fn implicit_failure_handler_terminality_and_arity_are_checked_before_hir() {
     }
 
     let mut project = failure_project(
-        "recover |left Int, right Int| -> Int:\n\
+        "recover |left I32, right I32| -> I32:\n\
              value = left * right catch:\n        io.line(\"not a fallback\")\n    ;\n\
              return value\n;\n",
     );
@@ -2677,7 +2843,7 @@ fn implicit_failure_handler_terminality_and_arity_are_checked_before_hir() {
     );
 
     let mut project = failure_project(
-        "recover |left Int, right Int| -> Int:\n\
+        "recover |left I32, right I32| -> I32:\n\
              return left * right catch then 0, 1\n;\n",
     );
     let messages = project
@@ -2696,7 +2862,7 @@ fn implicit_failure_handler_terminality_and_arity_are_checked_before_hir() {
     ));
 
     let mut project = failure_project(
-        "recover |left Int, right Int| -> Int:\n\
+        "recover |left I32, right I32| -> I32:\n\
              value ~= 0\n    value = left * right catch then value\n    return value\n;\n",
     );
     let messages = project
@@ -2719,8 +2885,8 @@ fn implicit_failure_handler_terminality_and_arity_are_checked_before_hir() {
 #[test]
 fn implicit_failure_multi_success_catch_preserves_slot_order_and_required_arity() {
     let mut project = failure_project(
-        "pair |value Int| -> Int, String, Error!:\n    return value, \"ok\"\n;\n\
-         recover |left Int, right Int| -> String:\n\
+        "pair |value I32| -> I32, String, Error!:\n    return value, \"ok\"\n;\n\
+         recover |left I32, right I32| -> String:\n\
              number, label = pair(left * right) catch then 0, \"fallback\"\n    return label\n;\n",
     );
     let ast = project.ast();
@@ -2729,14 +2895,17 @@ fn implicit_failure_multi_success_catch_preserves_slot_order_and_required_arity(
         panic!("multi-success receiver must remain multi-bind");
     };
     let block = assert_catch_contract(
-        value,
+        expression_view(&ast, *value),
         true,
         Some(builtin_error_type_id(&project, &ast)),
         builtin_error_type_id(&project, &ast),
     );
     assert_eq!(
         block.result_type_ids,
-        [builtin_type_ids::INT, builtin_type_ids::STRING]
+        [
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            builtin_type_ids::STRING
+        ]
     );
     assert_eq!(
         targets
@@ -2755,7 +2924,9 @@ fn implicit_failure_multi_success_catch_preserves_slot_order_and_required_arity(
         values
             .expressions
             .iter()
-            .map(|value| value.type_id)
+            .map(|value| expression_view(&ast, *value)
+                .value_type_id()
+                .expect("fallback slot has a type"))
             .collect::<Vec<_>>(),
         block.result_type_ids
     );
@@ -2764,8 +2935,8 @@ fn implicit_failure_multi_success_catch_preserves_slot_order_and_required_arity(
         .expect("multi-success typed recovery must sequence numeric arguments");
 
     let mut project = failure_project(
-        "pair |value Int| -> Int, String, Error!:\n    return value, \"ok\"\n;\n\
-         recover |left Int, right Int| -> String:\n\
+        "pair |value I32| -> I32, String, Error!:\n    return value, \"ok\"\n;\n\
+         recover |left I32, right I32| -> String:\n\
              number, label = pair(left * right) catch then 0\n    return label\n;\n",
     );
     let messages = project
@@ -2790,8 +2961,8 @@ fn implicit_failure_multi_success_catch_preserves_slot_order_and_required_arity(
 #[test]
 fn implicit_failure_private_multi_success_catch_preserves_slot_order() {
     let mut project = failure_project(
-        "pair |left Int, right Int| -> Int, String:\n    return left * right, \"ok\"\n;\n\
-         recover |left Int, right Int| -> String:\n\
+        "pair |left I32, right I32| -> I32, String:\n    return left * right, \"ok\"\n;\n\
+         recover |left I32, right I32| -> String:\n\
              number, label = pair(left, right) catch then 0, \"fallback\"\n    return label\n;\n",
     );
     let ast = project.ast();
@@ -2799,10 +2970,18 @@ fn implicit_failure_private_multi_success_catch_preserves_slot_order() {
     let NodeKind::MultiBind { targets, value } = &body[0].kind else {
         panic!("private multi-success catch must remain multi-bind");
     };
-    let block = assert_catch_contract(value, true, None, builtin_error_type_id(&project, &ast));
+    let block = assert_catch_contract(
+        expression_view(&ast, *value),
+        true,
+        None,
+        builtin_error_type_id(&project, &ast),
+    );
     assert_eq!(
         block.result_type_ids,
-        [builtin_type_ids::INT, builtin_type_ids::STRING]
+        [
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            builtin_type_ids::STRING
+        ]
     );
     assert_eq!(
         targets
@@ -2821,7 +3000,9 @@ fn implicit_failure_private_multi_success_catch_preserves_slot_order() {
         values
             .expressions
             .iter()
-            .map(|value| value.type_id)
+            .map(|value| expression_view(&ast, *value)
+                .value_type_id()
+                .expect("fallback slot has a type"))
             .collect::<Vec<_>>(),
         block.result_type_ids
     );
@@ -2831,35 +3012,27 @@ fn implicit_failure_private_multi_success_catch_preserves_slot_order() {
 #[test]
 fn implicit_failure_in_handler_goes_outward_not_back_into_its_own_catch() {
     let mut project = failure_project(
-        "recover |left Int, right Int| -> Int, Error!:\n\
+        "recover |left I32, right I32| -> I32, Error!:\n\
              value = left * right catch:\n        then left // right\n    ;\n    return value\n;\n",
     );
     let ast = project.ast();
-    let expression = initializer(&named_function_body(&project, &ast, "recover")[0]);
+    let expression = initializer(&ast, &named_function_body(&project, &ast, "recover")[0]);
     let block = assert_catch_contract(
         expression,
         true,
         None,
         builtin_error_type_id(&project, &ast),
     );
-    assert!(
-        block
-            .handled_value
-            .failure_facts
-            .summary
-            .first_numeric
-            .is_some()
-    );
-    let handler_span = expression
-        .failure_facts
+    let handled = handled_value(expression, block);
+    assert!(failure_facts_of(handled).summary.first_numeric.is_some());
+    let handler_span = failure_facts_of(expression)
         .summary
         .first_numeric
         .expect("handler arithmetic must remain pending")
         .span;
     assert!(handler_span.is_some());
     assert_eq!(
-        expression
-            .failure_facts
+        failure_facts_of(expression)
             .summary
             .first_implicit
             .unwrap()
@@ -2867,7 +3040,7 @@ fn implicit_failure_in_handler_goes_outward_not_back_into_its_own_catch() {
         handler_span
     );
     assert_eq!(
-        expression.failure_facts.disposition,
+        failure_facts_of(expression).disposition,
         FailureDisposition::Pending
     );
     let hir = project
@@ -2886,28 +3059,28 @@ fn implicit_failure_in_handler_goes_outward_not_back_into_its_own_catch() {
     ));
     assert_eq!(contributor.span, handler_span);
     assert!(contributor.codes.contains(&BuiltinErrorCode::DivideByZero));
-    let (multiply_block, multiply_carrier) = numeric_producer(&hir, NumericOperator::Multiply);
-    let (_, multiply_error) = fallible_edges(&hir, multiply_block, multiply_carrier);
-    let (handler, _) = error_adapter(&hir, multiply_error, multiply_carrier);
-    let (divide_block, divide_carrier) = numeric_producer(&hir, NumericOperator::IntegerDivide);
+    let (multiply_block, multiply_error_local) = numeric_producer(&hir, NumericOperator::Multiply);
+    let (_, multiply_error) = fallible_edges(&hir, multiply_block, multiply_error_local);
+    let (handler, _) = error_adapter(&hir, multiply_error, multiply_error_local);
+    let (divide_block, divide_error_local) = numeric_producer(&hir, NumericOperator::IntegerDivide);
     assert_eq!(
         divide_block.id, handler,
         "handler arithmetic must execute inside the handler"
     );
-    let (_, divide_error) = fallible_edges(&hir, divide_block, divide_carrier);
+    let (_, divide_error) = fallible_edges(&hir, divide_block, divide_error_local);
     let error_block = hir_block(&hir, divide_error);
     let HirTerminator::ReturnError(error) = &error_block.terminator else {
         panic!("handler failure must return outward, not re-enter its own handler");
     };
     assert!(matches!(
         &hir.expressions.expression(*error).kind,
-        HirExpressionKind::FallibleUnwrapError { result } if loaded_local(&hir, result) == divide_carrier
+        HirExpressionKind::Load(place) if place.root == divide_error_local
     ));
 
     let mut project = failure_project(
         "Failure = | message String |\n\
-         load |value Int| -> Int, Error!:\n    return value\n;\n\
-         recover |left Int, right Int| -> Int, Failure!:\n\
+         load |value I32| -> I32, Error!:\n    return value\n;\n\
+         recover |left I32, right I32| -> I32, Failure!:\n\
              value = load(left) catch:\n        then left // right\n    ;\n    return value\n;\n",
     );
     let messages = project
@@ -2930,7 +3103,7 @@ fn implicit_failure_in_handler_goes_outward_not_back_into_its_own_catch() {
 #[test]
 fn implicit_failure_catch_keeps_comma_and_logical_line_boundaries() {
     let mut project = failure_project(
-        "recover |left Int, right Int| -> Int, Int:\n\
+        "recover |left I32, right I32| -> I32, I32:\n\
              earlier = left * right\n\
              later = left + right catch then 0\n\
              return left * right, left + right catch:\n        then 0\n    ;\n;\n",
@@ -2938,26 +3111,28 @@ fn implicit_failure_catch_keeps_comma_and_logical_line_boundaries() {
     let ast = project.ast();
     let body = named_function_body(&project, &ast, "recover");
     let error_type_id = builtin_error_type_id(&project, &ast);
-    let earlier = initializer(&body[0]);
+    let earlier = initializer(&ast, &body[0]);
     assert_eq!(
-        earlier.failure_facts.disposition,
+        failure_facts_of(earlier).disposition,
         FailureDisposition::Pending
     );
-    assert!(earlier.failure_facts.summary.first_numeric.is_some());
-    let later = initializer(&body[1]);
+    assert!(failure_facts_of(earlier).summary.first_numeric.is_some());
+    let later = initializer(&ast, &body[1]);
     assert_catch_contract(later, true, None, error_type_id);
-    assert!(later.failure_facts.summary.first_implicit.is_none());
+    assert!(failure_facts_of(later).summary.first_implicit.is_none());
     let NodeKind::Return(values) = &body[2].kind else {
         panic!("expected two independent success slots");
     };
     assert_eq!(values.len(), 2);
+    let first = expression_view(&ast, values[0]);
+    let second = expression_view(&ast, values[1]);
     assert_eq!(
-        values[0].failure_facts.disposition,
+        failure_facts_of(first).disposition,
         FailureDisposition::Pending
     );
-    assert!(values[0].failure_facts.summary.first_numeric.is_some());
-    assert_catch_contract(&values[1], true, None, error_type_id);
-    assert!(values[1].failure_facts.summary.first_implicit.is_none());
+    assert!(failure_facts_of(first).summary.first_numeric.is_some());
+    assert_catch_contract(second, true, None, error_type_id);
+    assert!(failure_facts_of(second).summary.first_implicit.is_none());
     project
         .lower_ast_result(ast)
         .expect("independently delimited numeric catches must lower");
@@ -2966,14 +3141,14 @@ fn implicit_failure_catch_keeps_comma_and_logical_line_boundaries() {
 #[test]
 fn implicit_failure_catch_rejects_inner_argument_group_condition_template_and_constant() {
     let sources = [
-        "consume |value Int| -> Int:\n    return value\n;\n\
-         bad |left Int, right Int| -> Int:\n\
+        "consume |value I32| -> I32:\n    return value\n;\n\
+         bad |left I32, right I32| -> I32:\n\
              return consume(left * right catch then 0)\n;\n",
-        "bad |left Int, right Int| -> Int:\n\
+        "bad |left I32, right I32| -> I32:\n\
              return (left * right catch then 0) + right\n;\n",
-        "bad |left Int, right Int| -> Int:\n\
+        "bad |left I32, right I32| -> I32:\n\
              if left * right > 0 catch then false:\n        return 1\n    else\n        return 0\n    ;\n;\n",
-        "bad |left Int, right Int| -> String:\n\
+        "bad |left I32, right I32| -> String:\n\
              return [:value=[left * right catch then 0]]\n;\n",
         "value #= 1 * 2 catch then 0\n",
     ];
@@ -2990,7 +3165,7 @@ fn implicit_failure_catch_rejects_inner_argument_group_condition_template_and_co
     }
 
     let mut project = failure_project(
-        "bad |left Int, right Int| -> Int:\n\
+        "bad |left I32, right I32| -> I32:\n\
              return left * right catch then\n        0\n;\n",
     );
     let messages = project
@@ -3009,8 +3184,8 @@ fn implicit_failure_catch_remains_ineligible_for_literal_or_infallible_call() {
         let closing_export = if prefix.is_empty() { "" } else { ";\n" };
         for expression in ["3", "identity(value)"] {
             let mut project = failure_project(&format!(
-                "{prefix}    identity |value Int| -> Int:\n        return value\n    ;\n{closing_export}\
-                 bad |value Int| -> Int:\n    return {expression} catch then 0\n;\n"
+                "{prefix}    identity |value I32| -> I32:\n        return value\n    ;\n{closing_export}\
+                 bad |value I32| -> I32:\n    return {expression} catch then 0\n;\n"
             ));
             let messages = project
                 .ast_result()
@@ -3022,10 +3197,10 @@ fn implicit_failure_catch_remains_ineligible_for_literal_or_infallible_call() {
 }
 
 #[test]
-fn implicit_failure_catch_preserves_bang_cast_bang_and_optional_conflicts() {
+fn implicit_failure_catch_preserves_propagation_and_optional_conflicts() {
     let mut project = failure_project(
-        "load |value Int| -> Int, Error!:\n    return value\n;\n\
-         bad |value Int| -> Int, Error!:\n    return load(value)! catch then 0\n;\n",
+        "load |value I32| -> I32, Error!:\n    return value\n;\n\
+         bad |value I32| -> I32, Error!:\n    return load(value)! catch then 0\n;\n",
     );
     let messages = project
         .ast_result()
@@ -3037,27 +3212,8 @@ fn implicit_failure_catch_preserves_bang_cast_bang_and_optional_conflicts() {
     );
 
     let mut project = failure_project(
-        "bad |text String| -> Int, Error!:\n    return cast! text catch then 0\n;\n",
-    );
-    let messages = project
-        .ast_result()
-        .err()
-        .expect("cast propagation cannot also recover");
-    let diagnostic = messages
-        .error_diagnostics()
-        .next()
-        .expect("cast propagation conflict");
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidCast {
-            reason: InvalidCastReason::PropagationAndRecoveryConflict,
-            ..
-        }
-    ));
-
-    let mut project = failure_project(
-        "maybe |value Int| -> Int?:\n    return value\n;\n\
-         bad |value Int| -> Int?:\n    return maybe(value)? catch then 0\n;\n",
+        "maybe |value I32| -> I32?:\n    return value\n;\n\
+         bad |value I32| -> I32?:\n    return maybe(value)? catch then 0\n;\n",
     );
     let messages = project
         .ast_result()
@@ -3097,7 +3253,9 @@ fn implicit_failure_catch_preserves_bang_cast_bang_and_optional_conflicts() {
 #[test]
 fn implicit_failure_compound_rhs_catch_does_not_consume_arithmetic_or_narrowing() {
     let mut project = failure_project(
-        "load |amount U8| -> U8, Error!:\n    return amount\n;\n\
+        // The wider U16 RHS keeps the compound store a genuinely mixed-domain write-back; the
+        // fallback literal materialises at the callee's U16 success slot.
+        "load |amount U8| -> U16, Error!:\n    return cast amount\n;\n\
          update |amount U8| -> U8:\n\
              value ~U8 = 200\n    value += load(amount) catch then 0\n    return value\n;\n",
     );
@@ -3106,7 +3264,12 @@ fn implicit_failure_compound_rhs_catch_does_not_consume_arithmetic_or_narrowing(
     let NodeKind::Assignment { value, .. } = &body[1].kind else {
         panic!("compound write-back must remain an assignment");
     };
-    let ExpressionKind::Cast(conversion) = &value.kind else {
+    let value = expression_view(&ast, *value);
+    let ExpressionOperationView::Cast {
+        source,
+        facts: conversion,
+    } = value.operation()
+    else {
         panic!("narrow write-back requires a distinct checked conversion");
     };
     assert!(matches!(conversion.handling, CastHandling::StoreConversion));
@@ -3116,44 +3279,47 @@ fn implicit_failure_compound_rhs_catch_does_not_consume_arithmetic_or_narrowing(
     );
     assert_eq!(
         conversion.source_type_id,
-        builtin_type_ids::fixed_scalar(FixedScalar::U32)
+        builtin_type_ids::fixed_scalar(FixedScalar::U16)
     );
-    assert_eq!(value.failure_facts.disposition, FailureDisposition::Pending);
-    assert!(value.failure_facts.summary.first_typed.is_none());
-    assert!(value.failure_facts.summary.first_numeric.is_some());
-    assert!(value.failure_facts.checked_numeric_operation);
-    assert!(conversion.source.failure_facts.checked_numeric_operation);
-    assert_eq!(
-        conversion.source.failure_facts.disposition,
-        FailureDisposition::Pending
-    );
-    let ExpressionKind::Runtime(rpn) = &conversion.source.kind else {
+    let value_facts = failure_facts_of(value);
+    assert_eq!(value_facts.disposition, FailureDisposition::Pending);
+    assert!(value_facts.summary.first_typed.is_none());
+    assert!(value_facts.summary.first_numeric.is_some());
+    assert!(value_facts.checked_numeric_operation);
+    let source_facts = failure_facts_of(source);
+    assert!(source_facts.checked_numeric_operation);
+    assert_eq!(source_facts.disposition, FailureDisposition::Pending);
+    let ExpressionOperationView::NumericBinary { left, right, .. } = source.operation() else {
         panic!("promoted arithmetic must be separate from protected RHS");
     };
-    let rhs = rpn
-        .items
-        .iter()
-        .find_map(|item| match item {
-            ExpressionRpnItem::Operand(operand)
-                if matches!(operand.kind, ExpressionKind::ValueBlock { .. }) =>
-            {
-                Some(operand)
-            }
-            _ => None,
-        })
+    let rhs = [left, right]
+        .into_iter()
+        .find(|operand| matches!(operand.operation(), ExpressionOperationView::ValueBlock(_)))
         .expect("compound arithmetic must retain one RHS catch operand");
     let error_type_id = builtin_error_type_id(&project, &ast);
     assert_catch_contract(rhs, false, Some(error_type_id), error_type_id);
-    assert!(rhs.failure_facts.summary.first_implicit.is_none());
+    assert!(failure_facts_of(rhs).summary.first_implicit.is_none());
     let hir = project
         .lower_ast_result(ast)
         .expect("existing typed RHS catch and numeric write-back must still lower");
     let update = named_hir_function(&project, &hir, "update");
-    assert!(
-        hir.function_failure_facts[&update.id]
-            .contributors
-            .iter()
-            .any(|producer| { producer.codes.contains(&BuiltinErrorCode::IntOverflow) })
+    let write_back = hir.function_failure_facts[&update.id]
+        .contributors
+        .iter()
+        .find_map(|producer| match &producer.source {
+            HirBuiltinFailureSource::CompoundWriteBack { target, .. } => Some((producer, *target)),
+            _ => None,
+        })
+        .expect("the numeric write-back must reach the function failure facts");
+    assert_eq!(
+        write_back.1,
+        builtin_type_ids::fixed_scalar(FixedScalar::U8),
+        "the write-back contributor names the canonical compound target"
+    );
+    assert_eq!(
+        write_back.0.codes,
+        [BuiltinErrorCode::IntCastOutOfRange],
+        "the narrow back into the target owns the cast range code"
     );
 }
 
@@ -3161,8 +3327,8 @@ fn implicit_failure_compound_rhs_catch_does_not_consume_arithmetic_or_narrowing(
 fn implicit_failure_error_alias_is_canonical_but_lookalike_is_not() {
     let mut project = failure_project(
         "Failure as Error\n\
-         safe_product |left Int, right Int| -> Int, Failure!:\n    return left * right\n;\n\
-         recover |left Int, right Int| -> Int:\n\
+         safe_product |left I32, right I32| -> I32, Failure!:\n    return left * right\n;\n\
+         recover |left I32, right I32| -> I32:\n\
              value = safe_product(left, right) + left catch |err|:\n\
                  saved Error = err\n        then 0\n    ;\n    return value\n;\n",
     );
@@ -3190,17 +3356,22 @@ fn implicit_failure_error_alias_is_canonical_but_lookalike_is_not() {
         signature.returns.last().expect("error slot").type_id,
         Some(error_type_id)
     );
-    let expression = initializer(&named_function_body(&project, &ast, "recover")[0]);
+    let expression = initializer(&ast, &named_function_body(&project, &ast, "recover")[0]);
     let block = assert_catch_contract(expression, true, Some(error_type_id), error_type_id);
     let FallibleHandling::Handler { body, .. } = &block.handler else {
         panic!("canonical Error handler");
     };
-    assert_eq!(initializer(&body[0]).type_id, error_type_id);
+    assert_eq!(
+        initializer(&ast, &body[0])
+            .value_type_id()
+            .expect("handler fallback has one success value"),
+        error_type_id
+    );
     assert_catch_lowering_succeeds(&mut project, ast);
 
     let mut project = failure_project(
         "Failure = | message String, code U32 = 0 |\n\
-         safe_product |left Int, right Int| -> Int, Failure!:\n    return left * right\n;\n",
+         safe_product |left I32, right I32| -> I32, Failure!:\n    return left * right\n;\n",
     );
     let messages = project
         .failure_contract_result()
@@ -3223,7 +3394,7 @@ fn implicit_failure_error_wrapper_struct_is_not_canonical() {
     // receive builtin treatment in the error slot, even though its only field is an Error.
     let mut project = failure_project(
         "Wrapped = | inner Error |\n\
-         safe_product |left Int, right Int| -> Int, Wrapped!:\n    return left * right\n;\n",
+         safe_product |left I32, right I32| -> I32, Wrapped!:\n    return left * right\n;\n",
     );
     let messages = project
         .failure_contract_result()
@@ -3250,8 +3421,8 @@ fn implicit_failure_error_wrapper_struct_is_not_canonical() {
     // producer alongside implicit failure stays a custom/implicit mix.
     let mut project = failure_project(
         "Wrapped = | inner Error |\n\
-         load |value Int| -> Int, Wrapped!:\n    return value\n;\n\
-         recover |left Int, right Int| -> Int:\n\
+         load |value I32| -> I32, Wrapped!:\n    return value\n;\n\
+         recover |left I32, right I32| -> I32:\n\
              return load(left) * right catch |err|:\n\
                  saved Wrapped = err\n        then 0\n    ;\n;\n",
     );
@@ -3286,7 +3457,7 @@ fn implicit_failure_static_invalid_arithmetic_is_not_made_valid_by_catch_or_erro
     ] {
         for suffix in ["", " catch then 0"] {
             let mut project = failure_project(&format!(
-                "bad || -> Int, Error!:\n    return {expression}{suffix}\n;\n"
+                "bad || -> I32, Error!:\n    return {expression}{suffix}\n;\n"
             ));
             let messages = project
                 .ast_result()
@@ -3310,8 +3481,8 @@ fn implicit_failure_static_invalid_arithmetic_is_not_made_valid_by_catch_or_erro
 fn implicit_failure_assertion_message_rejects_inferred_call_even_when_inactive() {
     for condition in ["ready", "true"] {
         let mut project = failure_project(&format!(
-            "message |left Int, right Int| -> String:\n    value = left * right\n    return [value]\n;\n\
-             validate |left Int, right Int, ready Bool|:\n\
+            "message |left I32, right I32| -> String:\n    value = left * right\n    return [value]\n;\n\
+             validate |left I32, right I32, ready Bool|:\n\
                  assert({condition}, message(left, right))\n;\n"
         ));
         let messages = project
@@ -3327,7 +3498,7 @@ fn implicit_failure_assertion_message_rejects_inferred_call_even_when_inactive()
 #[test]
 fn implicit_failure_assertion_message_rejects_template_range_runtime_step() {
     let mut project = failure_project(
-        "validate |ready Bool, step Int|:\n\
+        "validate |ready Bool, step I32|:\n\
              assert(ready, [loop 0 to 10 by step |i|: x])\n;\n",
     );
     let messages = project
@@ -3344,8 +3515,8 @@ fn implicit_failure_assertion_message_rejects_template_range_runtime_step() {
 fn implicit_failure_dormant_generic_assertion_message_rejects_private_failure() {
     for error_slot in ["", " -> Error!"] {
         let mut project = failure_project(&format!(
-            "message |left Int, right Int| -> String:\n    value = left * right\n    return [value]\n;\n\
-             export:\n    validate type T |marker T, left Int, right Int, ready Bool|{error_slot}:\n\
+            "message |left I32, right I32| -> String:\n    value = left * right\n    return [value]\n;\n\
+             export:\n    validate type T |marker T, left I32, right I32, ready Bool|{error_slot}:\n\
                  assert(ready, message(left, right))\n    ;\n;\n"
         ));
         let messages = project
@@ -3362,28 +3533,29 @@ fn implicit_failure_dormant_generic_assertion_message_rejects_private_failure() 
 #[test]
 fn implicit_failure_prepared_recovery_lowers_catch_with_outward_assertion() {
     let mut project = failure_project(
-        "message |left Int, right Int| -> String:\n    value = left * right\n    return [value]\n;\n\
-         validate |left Int, right Int, ready Bool|:\n\
+        "message |left I32, right I32| -> String:\n    value = left * right\n    return [value]\n;\n\
+         validate |left I32, right I32, ready Bool|:\n\
              text = message(left, right) catch then \"fallback\"\n    assert(ready, text)\n;\n",
     );
     let ast = project.ast();
     let body = named_function_body(&project, &ast, "validate");
-    let prepared = initializer(&body[0]);
+    let prepared = initializer(&ast, &body[0]);
     assert_catch_contract(prepared, true, None, builtin_error_type_id(&project, &ast));
-    assert!(prepared.failure_facts.summary.first_implicit.is_none());
+    assert!(failure_facts_of(prepared).summary.first_implicit.is_none());
     let NodeKind::Assert { message, .. } = &body[1].kind else {
         panic!("prepared message must remain an ordinary assertion");
     };
-    assert!(message.failure_facts.summary.first_implicit.is_none());
-    assert!(message.failure_facts.summary.first_typed.is_none());
+    let message = expression_view(&ast, *message);
+    assert!(failure_facts_of(message).summary.first_implicit.is_none());
+    assert!(failure_facts_of(message).summary.first_typed.is_none());
     assert_catch_lowering_succeeds(&mut project, ast);
 }
 
 #[test]
 fn implicit_failure_infallible_message_keeps_ordinary_assertion() {
     let mut project = failure_project(
-        "message |value Int| -> String:\n    return [value]\n;\n\
-         validate |value Int, ready Bool|:\n    assert(ready, message(value))\n;\n",
+        "message |value I32| -> String:\n    return [value]\n;\n\
+         validate |value I32, ready Bool|:\n    assert(ready, message(value))\n;\n",
     );
     let hir = project
         .failure_contract_result()
@@ -3404,7 +3576,7 @@ fn implicit_failure_infallible_message_keeps_ordinary_assertion() {
 #[test]
 fn implicit_failure_dormant_generic_contracts_validate_before_instantiation() {
     let mut project = failure_project(
-        "export:\n    product type T |marker T, left Int, right Int| -> Int:\n\
+        "export:\n    product type T |marker T, left I32, right I32| -> I32:\n\
                  return left * right\n    ;\n;\n",
     );
     let messages = project
@@ -3433,7 +3605,7 @@ fn implicit_failure_dormant_generic_contracts_validate_before_instantiation() {
 
     let mut project = failure_project(
         "Failure = | message String |\n\
-         product type T |marker T, left Int, right Int| -> Int, Failure!:\n\
+         product type T |marker T, left I32, right I32| -> I32, Failure!:\n\
              return left * right\n;\n",
     );
     let messages = project
@@ -3463,7 +3635,7 @@ fn implicit_failure_dormant_generic_contracts_validate_before_instantiation() {
     for (prefix, error_slot) in [("export:\n", ", Error!"), ("", "")] {
         let closing_export = if prefix.is_empty() { "" } else { ";\n" };
         let mut project = failure_project(&format!(
-            "{prefix}    product type T |marker T, left Int, right Int| -> Int{error_slot}:\n\
+            "{prefix}    product type T |marker T, left I32, right I32| -> I32{error_slot}:\n\
                  return left * right\n    ;\n{closing_export}"
         ));
         let ast = project.ast();
@@ -3518,8 +3690,8 @@ fn implicit_failure_range_loop_witnesses_carry_step_guard_codes() {
         BuiltinErrorCode::RangeStepNoProgress,
     ];
     for (scalar, end, zero, expected) in [
-        ("Int", "10", "0", &int_codes),
-        ("Float", "10.0", "0.0", &float_codes),
+        ("I32", "10", "0", &int_codes),
+        ("F64", "10.0", "0.0", &float_codes),
     ] {
         // Converged boundary: a custom error slot sees the HIR-projected contributor.
         let mut project = failure_project(&format!(
@@ -3550,8 +3722,8 @@ fn implicit_failure_range_loop_witnesses_carry_step_guard_codes() {
 #[test]
 fn implicit_failure_dormant_complete_recursive_graph_without_numeric_origin_is_infallible() {
     let mut project = failure_project(
-        "identity |value Int| -> Int:\n    return identity(value)\n;\n\
-         export:\n    wrapper type T |marker T, value Int| -> Int:\n\
+        "identity |value I32| -> I32:\n    return identity(value)\n;\n\
+         export:\n    wrapper type T |marker T, value I32| -> I32:\n\
                  return identity(value)\n    ;\n;\n",
     );
     // Match concrete HIR convergence: stack exhaustion is fatal, not numeric failure.
@@ -3606,10 +3778,10 @@ fn implicit_failure_dormant_private_generic_identity_and_transitive_chain_are_in
 fn implicit_failure_dormant_private_numeric_helper_retains_active_numeric_witness() {
     let mut project = failure_project(
         "identity type U |value U| -> U:\n    return value\n;\n\
-         multiply |left Int, right Int| -> Int:\n    return left * right\n;\n\
-         private_product type U |marker U, left Int, right Int| -> Int:\n\
+         multiply |left I32, right I32| -> I32:\n    return left * right\n;\n\
+         private_product type U |marker U, left I32, right I32| -> I32:\n\
              return multiply(left, right)\n;\n\
-         export:\n    product type T |marker T, left Int, right Int| -> Int:\n\
+         export:\n    product type T |marker T, left I32, right I32| -> I32:\n\
                  retained = identity(marker)\n        return private_product(retained, left, right)\n    ;\n;\n",
     );
     let messages = project
@@ -3635,9 +3807,9 @@ fn implicit_failure_dormant_private_numeric_helper_retains_active_numeric_witnes
 #[test]
 fn implicit_failure_dormant_recursive_chain_with_numeric_origin_is_rejected() {
     let mut project = failure_project(
-        "recursive |value Int, ready Bool| -> Int:\n\
+        "recursive |value I32, ready Bool| -> I32:\n\
              if ready:\n        return value * 2\n    ;\n    return recursive(value, ready)\n;\n\
-         export:\n    wrapper type T |marker T, value Int, ready Bool| -> Int:\n\
+         export:\n    wrapper type T |marker T, value I32, ready Bool| -> I32:\n\
                  return recursive(value, ready)\n    ;\n;\n",
     );
     let messages = project
@@ -3700,7 +3872,7 @@ fn implicit_failure_self_recursive_back_edge_keeps_overflow_origin_at_both_bound
     // WHAT: the recursive branch precedes the overflow producer in source order.
     // WHY: both witness walkers must skip only the back-edge and retain the available
     //      multiplication origin instead of reporting call-only hops with empty codes.
-    const HELPER: &str = "helper |value Int, ready Bool| -> Int:\n\
+    const HELPER: &str = "helper |value I32, ready Bool| -> I32:\n\
          if ready:\n        return helper(value, ready)\n    ;\n    return value * 2\n;\n";
     // The concrete boundary exercises HIR summary convergence through a custom error slot.
     // The harness lowers plain exports without public origins, so the slot carries the
@@ -3708,7 +3880,7 @@ fn implicit_failure_self_recursive_back_edge_keeps_overflow_origin_at_both_bound
     const FAILURE: &str = "Failure = | message String |\n";
     let mut project = failure_project(&format!(
         "{FAILURE}{HELPER}\
-         boundary |value Int, ready Bool| -> Int, Failure!:\n    return helper(value, ready)\n;\n"
+         boundary |value I32, ready Bool| -> I32, Failure!:\n    return helper(value, ready)\n;\n"
     ));
     let messages = project
         .failure_contract_result()
@@ -3726,7 +3898,7 @@ fn implicit_failure_self_recursive_back_edge_keeps_overflow_origin_at_both_bound
     // The dormant generic boundary exercises the AST finalizer over the same helper shape.
     let mut project = failure_project(&format!(
         "{HELPER}\
-         export:\n    wrapper type T |marker T, value Int, ready Bool| -> Int:\n\
+         export:\n    wrapper type T |marker T, value I32, ready Bool| -> I32:\n\
                  return helper(value, ready)\n    ;\n;\n"
     ));
     let messages = project
@@ -3746,7 +3918,7 @@ fn implicit_failure_self_recursive_back_edge_keeps_overflow_origin_at_both_bound
     // Repeated runs produce the same structured witness.
     let mut project = failure_project(&format!(
         "{FAILURE}{HELPER}\
-         boundary |value Int, ready Bool| -> Int, Failure!:\n    return helper(value, ready)\n;\n"
+         boundary |value I32, ready Bool| -> I32, Failure!:\n    return helper(value, ready)\n;\n"
     ));
     let messages = project
         .failure_contract_result()
@@ -3756,13 +3928,13 @@ fn implicit_failure_self_recursive_back_edge_keeps_overflow_origin_at_both_bound
 
 #[test]
 fn implicit_failure_mutual_recursive_back_edge_keeps_overflow_origin_at_both_boundaries() {
-    const HELPERS: &str = "first |value Int, ready Bool| -> Int:\n\
+    const HELPERS: &str = "first |value I32, ready Bool| -> I32:\n\
          if ready:\n        return second(value, ready)\n    ;\n    return value * 2\n;\n\
-         second |value Int, ready Bool| -> Int:\n    return first(value, ready)\n;\n";
+         second |value I32, ready Bool| -> I32:\n    return first(value, ready)\n;\n";
     const FAILURE: &str = "Failure = | message String |\n";
     let mut project = failure_project(&format!(
         "{FAILURE}{HELPERS}\
-         boundary |value Int, ready Bool| -> Int, Failure!:\n    return first(value, ready)\n;\n"
+         boundary |value I32, ready Bool| -> I32, Failure!:\n    return first(value, ready)\n;\n"
     ));
     let messages = project
         .failure_contract_result()
@@ -3779,7 +3951,7 @@ fn implicit_failure_mutual_recursive_back_edge_keeps_overflow_origin_at_both_bou
 
     let mut project = failure_project(&format!(
         "{HELPERS}\
-         export:\n    wrapper type T |marker T, value Int, ready Bool| -> Int:\n\
+         export:\n    wrapper type T |marker T, value I32, ready Bool| -> I32:\n\
                  return first(value, ready)\n    ;\n;\n"
     ));
     let messages = project
@@ -3798,7 +3970,7 @@ fn implicit_failure_mutual_recursive_back_edge_keeps_overflow_origin_at_both_bou
 
     let mut project = failure_project(&format!(
         "{FAILURE}{HELPERS}\
-         boundary |value Int, ready Bool| -> Int, Failure!:\n    return first(value, ready)\n;\n"
+         boundary |value I32, ready Bool| -> I32, Failure!:\n    return first(value, ready)\n;\n"
     ));
     let messages = project
         .failure_contract_result()
@@ -3814,8 +3986,8 @@ fn implicit_failure_origin_free_self_recursion_stays_infallible_at_concrete_boun
     // exports without public origins, so a custom error slot carries the concrete contract.
     let mut project = failure_project(
         "Failure = | message String |\n\
-         recurse |value Int| -> Int:\n    return recurse(value)\n;\n\
-         boundary |value Int| -> Int, Failure!:\n    return recurse(value)\n;\n",
+         recurse |value I32| -> I32:\n    return recurse(value)\n;\n\
+         boundary |value I32| -> I32, Failure!:\n    return recurse(value)\n;\n",
     );
     project
         .failure_contract_result()
@@ -3838,7 +4010,7 @@ fn implicit_failure_dormant_custom_error_generic_receiver_uses_closed_trait_requ
 #[test]
 fn implicit_failure_typed_map_catch_resolves_infallible_private_arguments_in_both_orders() {
     let helper = "key |value String| -> String:\n    return [value]\n;\n";
-    let caller = "recover |value String| -> Int:\n\
+    let caller = "recover |value String| -> I32:\n\
                       set_values ~= {\"key\" = 1}\n\
                       ~set_values.set(key(value), 2) catch:\n    ;\n\
                       get_values = {\"key\" = 1}\n\
@@ -3862,8 +4034,8 @@ fn implicit_failure_typed_map_catch_resolves_infallible_private_arguments_in_bot
 #[test]
 fn implicit_failure_typed_map_catch_recovers_failing_private_argument() {
     let mut project = failure_project(
-        "key |value Int| -> Int:\n    return value * 2\n;\n\
-         recover |value Int| -> Int:\n\
+        "key |value I32| -> I32:\n    return value * 2\n;\n\
+         recover |value I32| -> I32:\n\
              values = {0 = 1}\n    return values.get(key(value)) catch then 0\n;\n",
     );
     let ast = project.ast();
@@ -3873,49 +4045,60 @@ fn implicit_failure_typed_map_catch_recovers_failing_private_argument() {
 #[test]
 fn implicit_failure_private_catch_routes_argument_failure_before_outer_call() {
     let mut project = failure_project(
-        "double |value Int| -> Int:\n    return value * 2\n;\n\
-         combine |left Int, right Int| -> Int:\n    return left + right\n;\n\
-         recover |value Int| -> Int:\n\
+        "double |value I32| -> I32:\n    return value * 2\n;\n\
+         combine |left I32, right I32| -> I32:\n    return left + right\n;\n\
+         recover |value I32| -> I32:\n\
              return combine(double(value), value * 1000000) catch then -1\n;\n",
     );
     let ast = project.ast();
     let error_type_id = builtin_error_type_id(&project, &ast);
-    let expression = returned_value(&named_function_body(&project, &ast, "recover")[0]);
+    let expression = returned_value(&ast, &named_function_body(&project, &ast, "recover")[0]);
     assert_catch_contract(expression, true, None, error_type_id);
     let hir = project
         .lower_ast_result(ast)
         .expect("failed private arguments must lower inside the outer catch");
     let recover = named_hir_function(&project, &hir, "recover");
     let reachable = reachable_block_ids(&hir, recover.entry);
-    let argument_block = hir
+    let double = named_hir_function(&project, &hir, "double");
+    let (argument_block, argument_call, argument_results) = hir
         .blocks
         .iter()
         .filter(|block| reachable.contains(&block.id))
-        .find(|block| {
-            block.statements.iter().any(|statement| {
-                matches!(
-                    &statement.kind,
+        .find_map(|block| {
+            block
+                .statements
+                .iter()
+                .find_map(|statement| match &statement.kind {
                     HirStatementKind::Call {
-                        target: CallTarget::Local(_),
+                        target: CallTarget::Local(id),
+                        results,
                         ..
-                    }
-                )
-            })
+                    } if *id == double.id => Some((block, statement, results)),
+                    _ => None,
+                })
         })
-        .expect("the failing private argument must survive as a scalar call");
-    let HirTerminator::FallibleBranch {
-        result,
-        error_block,
+        .expect("the pending private argument must retain its ordered native call results");
+    assert_eq!(argument_results.len(), 1);
+    let pending = hir
+        .catch_protected_calls
+        .iter()
+        .find(|record| record.statement == argument_call.id)
+        .expect("pending private argument must retain its catch routing before convergence");
+    assert_eq!(pending.owner, recover.id);
+    assert!(reachable.contains(&pending.handler.block));
+    let HirTerminator::Invoke {
+        operation: HirFallibleOperation::NumericOp { op, .. },
+        failure,
+        error_result,
         ..
     } = &argument_block.terminator
     else {
-        panic!("the private argument call must branch before the outer call consumes it");
+        panic!("later arithmetic must run only after the argument call produces its value");
     };
-    let (handler, _) = error_adapter(&hir, *error_block, loaded_local(&hir, result));
-    assert!(
-        reachable.contains(&handler),
-        "the argument failure must enter the shared catch handler"
-    );
+    assert_eq!(op.operator, NumericOperator::Multiply);
+    let (handler, handler_error) = error_adapter(&hir, *failure, *error_result);
+    assert_eq!(handler, pending.handler.block);
+    assert_eq!(handler_error, pending.handler.error_local);
 
     // After summary convergence the recorded scalar call must split onto the
     // private lane with its error edge routed to the same catch handler.
@@ -3950,6 +4133,7 @@ fn implicit_failure_private_catch_routes_argument_failure_before_outer_call() {
         &mut hir,
         &report,
         &mut type_environment,
+        project.frontend.external_package_registry.as_ref(),
     )
     .expect("private failure lane must install");
     project
@@ -3967,26 +4151,20 @@ fn implicit_failure_private_catch_routes_argument_failure_before_outer_call() {
         if !reachable.contains(&block.id) {
             continue;
         }
-        if !block.statements.iter().any(|statement| {
-            matches!(
-                &statement.kind,
-                HirStatementKind::Call {
+        let HirTerminator::Invoke {
+            operation:
+                HirFallibleOperation::Call {
                     target: CallTarget::Local(_),
                     ..
-                }
-            )
-        }) {
-            continue;
-        }
-        let HirTerminator::FallibleBranch {
-            result,
-            error_block,
+                },
+            failure,
+            error_result,
             ..
         } = &block.terminator
         else {
-            panic!("every installed private call must branch before its success value is used");
+            continue;
         };
-        let (error_handler, _) = error_adapter(&hir, *error_block, loaded_local(&hir, result));
+        let (error_handler, _) = error_adapter(&hir, *failure, *error_result);
         assert!(
             reachable.contains(&error_handler),
             "the installed call failure must enter the shared catch handler"
@@ -4009,13 +4187,13 @@ fn implicit_failure_private_catch_routes_argument_failure_before_outer_call() {
 #[test]
 fn implicit_failure_catch_abandons_later_temporaries_without_handler_reads() {
     let mut project = failure_project(
-        "double |value Int| -> Int:\n    return value * 2\n;\n\
-         recover |value Int| -> Int:\n\
+        "double |value I32| -> I32:\n    return value * 2\n;\n\
+         recover |value I32| -> I32:\n\
              return double(value) + value * 1000000 catch then -1\n;\n",
     );
     let ast = project.ast();
     let error_type_id = builtin_error_type_id(&project, &ast);
-    let expression = returned_value(&named_function_body(&project, &ast, "recover")[0]);
+    let expression = returned_value(&ast, &named_function_body(&project, &ast, "recover")[0]);
     assert_catch_contract(expression, true, None, error_type_id);
     let hir = project
         .lower_ast_result(ast)
@@ -4026,7 +4204,7 @@ fn implicit_failure_catch_abandons_later_temporaries_without_handler_reads() {
     for block_id in &reachable {
         if matches!(
             hir.blocks[block_id.0 as usize].terminator,
-            HirTerminator::FallibleBranch { .. }
+            HirTerminator::Invoke { .. }
         ) {
             branch_count += 1;
         }
@@ -4070,6 +4248,7 @@ fn implicit_failure_catch_abandons_later_temporaries_without_handler_reads() {
         &mut hir,
         &report,
         &mut type_environment,
+        project.frontend.external_package_registry.as_ref(),
     )
     .expect("private failure lane must install");
     project
@@ -4088,26 +4267,20 @@ fn implicit_failure_catch_abandons_later_temporaries_without_handler_reads() {
         if !reachable.contains(&block.id) {
             continue;
         }
-        if !block.statements.iter().any(|statement| {
-            matches!(
-                &statement.kind,
-                HirStatementKind::Call {
+        let HirTerminator::Invoke {
+            operation:
+                HirFallibleOperation::Call {
                     target: CallTarget::Local(_),
                     ..
-                }
-            )
-        }) {
-            continue;
-        }
-        let HirTerminator::FallibleBranch {
-            result,
-            error_block,
+                },
+            failure,
+            error_result,
             ..
         } = &block.terminator
         else {
-            panic!("every installed private call must branch before its success value is used");
+            continue;
         };
-        let (error_handler, _) = error_adapter(&hir, *error_block, loaded_local(&hir, result));
+        let (error_handler, _) = error_adapter(&hir, *failure, *error_result);
         assert!(
             reachable.contains(&error_handler),
             "the installed call failure must enter the shared catch handler"
@@ -4131,8 +4304,10 @@ fn implicit_failure_catch_abandons_later_temporaries_without_handler_reads() {
 #[test]
 fn implicit_failure_rhs_caught_compound_update_reports_writeback_origin() {
     let mut project = failure_project(
-        "risky |amount U8| -> U8, Error!:\n    wide U32 = amount + 200\n    return cast! wide\n;\n\
-         export:\n    bump type T |marker T, extra U8| -> U8:\n\
+        // The wider U16 callee keeps the write-back a genuinely mixed-domain conversion, so
+        // the escaping failure still has a compound write-back producer.
+        "risky |amount U16| -> U16, Error!:\n    wide U32 = amount + 200\n    return cast wide\n;\n\
+         export:\n    bump type T |marker T, extra U16| -> U8:\n\
                  total ~U8 = 250\n        total += risky(extra) catch then extra\n        return total\n    ;\n;\n",
     );
     let messages = project
@@ -4148,7 +4323,9 @@ fn implicit_failure_rhs_caught_compound_update_reports_writeback_origin() {
     else {
         panic!("expected exported write-back witness, got {diagnostic:?}");
     };
-    assert_eq!(witness.codes, vec![BuiltinErrorCode::IntOverflow]);
+    // The compound update's own arithmetic yields to its write-back, so the escaping failure
+    // is the store conversion's range check into the declared target.
+    assert_eq!(witness.codes, vec![BuiltinErrorCode::IntCastOutOfRange]);
     assert!(witness.call_spans.is_empty());
     let origin_span = witness
         .origin_span
@@ -4165,22 +4342,22 @@ fn implicit_failure_rhs_caught_compound_update_reports_writeback_origin() {
         "the write-back names the canonical compound target"
     );
     let mut project = failure_project(
-        "risky |amount U8| -> U8, Error!:\n    wide U32 = amount + 200\n    return cast! wide\n;\n\
-         bump |extra U8| -> U8:\n    total ~U8 = 250\n    total += risky(extra) catch then extra\n    return total\n;\n",
+        "risky |amount U16| -> U16, Error!:\n    wide U32 = amount + 200\n    return cast wide\n;\n\
+         bump |extra U16| -> U8:\n    total ~U8 = 250\n    total += risky(extra) catch then extra\n    return total\n;\n",
     );
     let ast = project.ast();
     let body = named_function_body(&project, &ast, "bump");
     let NodeKind::Assignment { value, .. } = &body[1].kind else {
         panic!("compound write-back must remain an assignment");
     };
-    let ExpressionKind::Cast(conversion) = &value.kind else {
+    let value = expression_view(&ast, *value);
+    let ExpressionOperationView::Cast { source, .. } = value.operation() else {
         panic!("the narrow back into the target must stay a checked conversion");
     };
     // The write-back contributor is recorded at the compound value span, which
     // the cast shares; the handled RHS catch keeps a distinct inner span.
     assert_eq!(
-        value
-            .failure_facts
+        failure_facts_of(value)
             .implicit
             .iter()
             .find_map(|contributor| match contributor.source {
@@ -4188,25 +4365,20 @@ fn implicit_failure_rhs_caught_compound_update_reports_writeback_origin() {
                     Some((contributor.span, target)),
                 _ => None,
             }),
-        Some((value.span, builtin_type_ids::fixed_scalar(FixedScalar::U8))),
+        Some((
+            value.span(),
+            builtin_type_ids::fixed_scalar(FixedScalar::U8)
+        )),
         "the compound value owns the write-back contributor naming the target"
     );
-    let ExpressionKind::Runtime(rpn) = &conversion.source.kind else {
+    let ExpressionOperationView::NumericBinary { left, right, .. } = source.operation() else {
         panic!("promoted arithmetic must be separate from protected RHS");
     };
-    let rhs = rpn
-        .items
-        .iter()
-        .find_map(|item| match item {
-            ExpressionRpnItem::Operand(operand)
-                if matches!(operand.kind, ExpressionKind::ValueBlock { .. }) =>
-            {
-                Some(operand)
-            }
-            _ => None,
-        })
+    let rhs = [left, right]
+        .into_iter()
+        .find(|operand| matches!(operand.operation(), ExpressionOperationView::ValueBlock(_)))
         .expect("compound arithmetic must retain one RHS catch operand");
-    let rhs_span = rhs.span.expect("the handled RHS keeps its span");
+    let rhs_span = rhs.span().expect("the handled RHS keeps its span");
     assert_ne!(
         origin_span, rhs_span,
         "the write-back origin must not point at the handled RHS"
@@ -4226,7 +4398,9 @@ fn implicit_failure_rhs_caught_compound_update_reports_writeback_origin() {
 #[test]
 fn implicit_failure_uncaught_compound_update_reports_writeback_origin() {
     let mut project = failure_project(
-        "export:\n    bump type T |marker T, x U8, y U8| -> U8:\n\
+        // `y` is a genuinely wider U16 so the uncaught write-back stays a mixed-domain
+        // conversion with its own compound write-back producer.
+        "export:\n    bump type T |marker T, x U8, y U16| -> U8:\n\
                  total ~U8 = x\n        total += y\n        return total\n    ;\n;\n",
     );
     let messages = project
@@ -4266,7 +4440,7 @@ fn implicit_failure_uncaught_compound_update_reports_writeback_origin() {
 #[test]
 fn implicit_failure_plain_return_arithmetic_keeps_operation_origin() {
     let mut project = failure_project(
-        "export:\n    bump type T |marker T, x Int, y Int| -> Int:\n\
+        "export:\n    bump type T |marker T, x I32, y I32| -> I32:\n\
                  return x + y\n    ;\n;\n",
     );
     let messages = project
@@ -4296,9 +4470,11 @@ fn implicit_failure_plain_return_arithmetic_keeps_operation_origin() {
 #[test]
 fn implicit_failure_custom_slot_keeps_writeback_origin() {
     let mut project = failure_project(
+        // The wider U16 callee keeps the write-back a genuine mixed-domain conversion whose
+        // producer must still name the custom-slot witness.
         "Failure = | message String |\n\
-         risky |amount U8| -> U8, Error!:\n    wide U32 = amount + 200\n    return cast! wide\n;\n\
-         bump |extra U8| -> U8, Failure!:\n    total ~U8 = 250\n    total += risky(extra) catch then extra\n    return total\n;\n",
+         risky |amount U16| -> U16, Error!:\n    wide U32 = amount + 200\n    return cast wide\n;\n\
+         bump |extra U16| -> U8, Failure!:\n    total ~U8 = 250\n    total += risky(extra) catch then extra\n    return total\n;\n",
     );
     let messages = project
         .failure_contract_result()
@@ -4335,8 +4511,10 @@ fn implicit_failure_custom_slot_keeps_writeback_origin() {
 #[test]
 fn implicit_failure_failed_compound_writeback_keeps_target_after_rhs_catch() {
     let mut project = failure_project(
-        "risky |amount U8| -> U8, Error!:\n    wide U32 = amount + 200\n    return cast! wide\n;\n\
-         adjust |extra U8| -> U8:\n\
+        // The wider U16 callee keeps the narrow back into the U8 target a genuine checked
+        // conversion that stays separate from the RHS catch.
+        "risky |amount U16| -> U16, Error!:\n    wide U32 = amount + 200\n    return cast wide\n;\n\
+         adjust |extra U16| -> U8:\n\
              total ~U8 = 250\n    total += risky(extra) catch then extra\n    return total\n;\n",
     );
     let ast = project.ast();
@@ -4344,8 +4522,9 @@ fn implicit_failure_failed_compound_writeback_keeps_target_after_rhs_catch() {
     let NodeKind::Assignment { value, .. } = &body[1].kind else {
         panic!("compound write-back must remain an assignment");
     };
+    let value = expression_view(&ast, *value);
     assert!(
-        matches!(&value.kind, ExpressionKind::Cast(_)),
+        matches!(value.operation(), ExpressionOperationView::Cast { .. }),
         "the narrow back into the target must stay a checked conversion outside the RHS catch"
     );
     let hir = project
@@ -4354,19 +4533,18 @@ fn implicit_failure_failed_compound_writeback_keeps_target_after_rhs_catch() {
     let adjust = named_hir_function(&project, &hir, "adjust");
     let reachable = reachable_block_ids(&hir, adjust.entry);
     assert!(
-        reachable
-            .iter()
-            .any(|block_id| hir.blocks[block_id.0 as usize]
-                .statements
-                .iter()
-                .any(|statement| matches!(statement.kind, HirStatementKind::CastOp { .. }))),
-        "a failing narrow back into the target must keep its checked conversion carrier"
+        reachable.iter().any(|block_id| matches!(
+            &hir_block(&hir, *block_id).terminator,
+            HirTerminator::Invoke {
+                operation: HirFallibleOperation::CastOp { .. },
+                ..
+            }
+        )),
+        "a failing narrow back into the target must keep its checked conversion edge"
     );
 
-    // The RHS call targets a typed `Error!` callee, so it routes through its
-    // carrier branch at lowering time and needs no private-lane record. Lane
-    // installation must leave that routing untouched: no record appears, none
-    // survives, and the write-back conversion keeps its own carrier.
+    // The typed RHS routes through Invoke immediately and needs no private-lane record.
+    // Installation must preserve that routing and the separate write-back conversion edge.
     let ast = project.ast();
     let lowered = project
         .frontend
@@ -4383,7 +4561,7 @@ fn implicit_failure_failed_compound_writeback_keeps_target_after_rhs_catch() {
     let mut type_environment = lowered.type_environment;
     assert!(
         hir.catch_protected_calls.is_empty(),
-        "a typed callee routes through its carrier branch, not the private lane"
+        "a typed callee routes through Invoke, not the private lane"
     );
     let mut report = project
         .frontend
@@ -4398,6 +4576,7 @@ fn implicit_failure_failed_compound_writeback_keeps_target_after_rhs_catch() {
         &mut hir,
         &report,
         &mut type_environment,
+        project.frontend.external_package_registry.as_ref(),
     )
     .expect("private failure lane must install");
     project
@@ -4415,38 +4594,41 @@ fn implicit_failure_failed_compound_writeback_keeps_target_after_rhs_catch() {
         .iter()
         .filter(|block| reachable.contains(&block.id))
         .find(|block| {
-            block.statements.iter().any(|statement| {
-                matches!(
-                    &statement.kind,
-                    HirStatementKind::Call {
-                        target: CallTarget::Local(_),
-                        ..
-                    }
-                )
-            })
+            matches!(
+                &block.terminator,
+                HirTerminator::Invoke {
+                    operation:
+                        crate::compiler_frontend::hir::terminators::HirFallibleOperation::Call {
+                            target: CallTarget::Local(_),
+                            ..
+                        },
+                    ..
+                }
+            )
         })
         .expect("the typed RHS call must survive lane installation");
-    let HirTerminator::FallibleBranch {
-        result,
-        error_block,
+    let HirTerminator::Invoke {
+        failure,
+        error_result,
         ..
     } = &typed_call.terminator
     else {
         panic!("the typed RHS call must branch into the RHS catch handler");
     };
-    let (error_handler, _) = error_adapter(&hir, *error_block, loaded_local(&hir, result));
+    let (error_handler, _) = error_adapter(&hir, *failure, *error_result);
     assert!(
         reachable.contains(&error_handler),
         "the typed RHS call failure must enter the RHS catch handler"
     );
     assert!(
-        reachable
-            .iter()
-            .any(|block_id| hir.blocks[block_id.0 as usize]
-                .statements
-                .iter()
-                .any(|statement| matches!(statement.kind, HirStatementKind::CastOp { .. }))),
-        "the write-back conversion must keep its checked carrier after installation"
+        reachable.iter().any(|block_id| matches!(
+            &hir_block(&hir, *block_id).terminator,
+            HirTerminator::Invoke {
+                operation: HirFallibleOperation::CastOp { .. },
+                ..
+            }
+        )),
+        "the write-back conversion must keep its checked edge after installation"
     );
 }
 
@@ -4462,7 +4644,12 @@ fn implicit_failure_zero_success_statement_catch_covers_host_argument_evaluation
         panic!("zero-success catch must remain a statement expression");
     };
     let error_type_id = builtin_error_type_id(&project, &ast);
-    let block = assert_catch_contract(expression, false, Some(error_type_id), error_type_id);
+    let block = assert_catch_contract(
+        expression_view(&ast, *expression),
+        false,
+        Some(error_type_id),
+        error_type_id,
+    );
     assert!(block.result_type_ids.is_empty());
     let FallibleHandling::Handler { body, .. } = &block.handler else {
         panic!("zero-success recovery body");
@@ -4490,14 +4677,14 @@ fn implicit_failure_zero_success_statement_catch_covers_host_argument_evaluation
 fn implicit_failure_zero_success_host_catch_lowers_pending_numeric_argument() {
     let mut project = failure_project(
         "@test/default consume\n\
-         recover |left Int, right Int|:\n\
+         recover |left I32, right I32|:\n\
              consume(left * right) catch:\n        io.line(\"fallback\")\n    ;\n;\n",
     );
     let host_id = Arc::make_mut(&mut project.frontend.external_package_registry)
         .register_function(ExternalFunctionDef {
             name: "consume".to_owned(),
             parameters: vec![ExternalParameter {
-                language_type: ExternalSignatureType::NativeInt,
+                language_type: ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::I32)),
                 access_kind: ExternalAccessKind::Shared,
             }],
             returns: vec![],
@@ -4511,11 +4698,14 @@ fn implicit_failure_zero_success_host_catch_lowers_pending_numeric_argument() {
     else {
         panic!("zero-success host recovery must remain an expression statement");
     };
+    let expression = expression_view(&ast, *expression);
     let error_type = builtin_error_type_id(&project, &ast);
     let block = assert_catch_contract(expression, true, Some(error_type), error_type);
     assert!(matches!(
-        block.handled_value.kind,
-        ExpressionKind::HandledFallibleHostFunctionCall { .. }
+        handled_value(expression, block).operation(),
+        ExpressionOperationView::Call(call)
+            if call.handling().is_some()
+                && matches!(call.metadata().target, ResolvedCallableTarget::Host(_))
     ));
     assert!(
         block.result_type_ids.is_empty(),
@@ -4524,25 +4714,31 @@ fn implicit_failure_zero_success_host_catch_lowers_pending_numeric_argument() {
     let hir = project
         .lower_ast_result(ast)
         .expect("numeric host arguments must support local recovery");
-    let (multiply, carrier) = numeric_producer(&hir, NumericOperator::Multiply);
-    let (success, error) = fallible_edges(&hir, multiply, carrier);
-    let handler_slot = error_adapter(&hir, error, carrier);
+    let (multiply, producer_error_local) = numeric_producer(&hir, NumericOperator::Multiply);
+    let (success, error) = fallible_edges(&hir, multiply, producer_error_local);
+    let handler_slot = error_adapter(&hir, error, producer_error_local);
     let host_block = hir_block(&hir, success);
-    let host_carrier = host_block
-        .statements
-        .iter()
-        .find_map(|statement| match &statement.kind {
-            HirStatementKind::Call {
+    let HirTerminator::Invoke {
+        operation:
+            HirFallibleOperation::Call {
                 target: CallTarget::External(id),
-                result: Some(result),
                 ..
-            } if *id == host_id => Some(result.local()),
-            _ => None,
-        })
-        .expect("the protected host call must execute only after its numeric argument succeeds");
-    let (_, host_error) = fallible_edges(&hir, host_block, host_carrier);
+            },
+        success_results,
+        error_result: host_error_local,
+        ..
+    } = &host_block.terminator
+    else {
+        panic!("the protected host call must execute only after its numeric argument succeeds");
+    };
+    assert_eq!(*id, host_id);
+    assert!(
+        success_results.is_empty(),
+        "error-only host must not manufacture a success slot"
+    );
+    let (_, host_error) = fallible_edges(&hir, host_block, *host_error_local);
     assert_eq!(
-        error_adapter(&hir, host_error, host_carrier),
+        error_adapter(&hir, host_error, *host_error_local),
         handler_slot,
         "host and numeric failures must initialise the same handler Error slot"
     );
@@ -4553,20 +4749,20 @@ fn implicit_failure_catches_keep_external_float_checks_on_function_boundary() {
     let mut project = failure_project(
         "@test/default measure\n\
          Failure = | message String |\n\
-         load |value Float| -> Float, Failure!:\n    return value\n;\n\
-         recover |value Float| -> Float:\n\
+         load |value F64| -> F64, Failure!:\n    return value\n;\n\
+         recover |value F64| -> F64:\n\
              result = load(measure(value)) catch then 0.0\n    return result\n;\n",
     );
     Arc::make_mut(&mut project.frontend.external_package_registry)
         .register_function(ExternalFunctionDef {
             name: "measure".to_owned(),
             parameters: vec![ExternalParameter {
-                language_type: ExternalSignatureType::NativeFloat,
+                language_type: ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::F64)),
                 access_kind: ExternalAccessKind::Shared,
             }],
-            returns: vec![ExternalReturnSlot::fresh(
-                ExternalSignatureType::NativeFloat,
-            )],
+            returns: vec![ExternalReturnSlot::fresh(ExternalSignatureType::Abi(
+                ExternalAbiType::Fixed(FixedScalar::F64),
+            ))],
             error_return_type: None,
             lowerings: ExternalFunctionLowerings::default(),
         })
@@ -4588,20 +4784,20 @@ fn implicit_failure_catches_keep_external_float_checks_on_function_boundary() {
 
     let mut project = failure_project(
         "@test/default measure\n\
-         load |value Float| -> Float, Error!:\n    return value\n;\n\
-         recover |value Float| -> Float:\n\
+         load |value F64| -> F64, Error!:\n    return value\n;\n\
+         recover |value F64| -> F64:\n\
              result = load(measure(value)) catch then 0.0\n    return result\n;\n",
     );
     Arc::make_mut(&mut project.frontend.external_package_registry)
         .register_function(ExternalFunctionDef {
             name: "measure".to_owned(),
             parameters: vec![ExternalParameter {
-                language_type: ExternalSignatureType::NativeFloat,
+                language_type: ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::F64)),
                 access_kind: ExternalAccessKind::Shared,
             }],
-            returns: vec![ExternalReturnSlot::fresh(
-                ExternalSignatureType::NativeFloat,
-            )],
+            returns: vec![ExternalReturnSlot::fresh(ExternalSignatureType::Abi(
+                ExternalAbiType::Fixed(FixedScalar::F64),
+            ))],
             error_return_type: None,
             lowerings: ExternalFunctionLowerings::default(),
         })
@@ -4626,15 +4822,15 @@ fn implicit_failure_catches_keep_external_float_checks_on_function_boundary() {
 fn implicit_failure_builtin_catch_lowers_numeric_get_and_set_arguments() {
     for (source, statement_index, has_success) in [
         (
-            "recover |left Int, right Int| -> Int:\n\
-                 items {Int} = {9}\n\
+            "recover |left I32, right I32| -> I32:\n\
+                 items {I32} = {9}\n\
                  value = items.get(left * right) catch then 0\n    return value\n;\n",
             1,
             true,
         ),
         (
-            "recover |left Int, right Int|:\n\
-                 items ~{Int} = {9}\n\
+            "recover |left I32, right I32|:\n\
+                 items ~{I32} = {9}\n\
                  ~items.set(0, left * right) catch:\n        io.line(\"fallback\")\n    ;\n;\n",
             1,
             false,
@@ -4644,26 +4840,26 @@ fn implicit_failure_builtin_catch_lowers_numeric_get_and_set_arguments() {
         let ast = project.ast();
         let statement = &named_function_body(&project, &ast, "recover")[statement_index];
         let expression = if has_success {
-            initializer(statement)
+            initializer(&ast, statement)
         } else {
             let NodeKind::ExpressionStatement(expression) = &statement.kind else {
                 panic!("zero-success builtin recovery must remain an expression statement");
             };
-            expression
+            expression_view(&ast, *expression)
         };
         let error_type = builtin_error_type_id(&project, &ast);
         let block = assert_catch_contract(expression, true, Some(error_type), error_type);
         assert!(matches!(
-            block.handled_value.kind,
-            ExpressionKind::HandledFallibleExpression { .. }
+            handled_value(expression, block).operation(),
+            ExpressionOperationView::HandleFallible { .. }
         ));
         assert_eq!(block.result_type_ids.len(), usize::from(has_success));
         let hir = project
             .lower_ast_result(ast)
             .expect("builtin catch must sequence numeric arguments");
-        let (multiply, carrier) = numeric_producer(&hir, NumericOperator::Multiply);
-        let (_, error) = fallible_edges(&hir, multiply, carrier);
-        error_adapter(&hir, error, carrier);
+        let (multiply, producer_error_local) = numeric_producer(&hir, NumericOperator::Multiply);
+        let (_, error) = fallible_edges(&hir, multiply, producer_error_local);
+        error_adapter(&hir, error, producer_error_local);
     }
 }
 
@@ -4671,14 +4867,14 @@ fn implicit_failure_builtin_catch_lowers_numeric_get_and_set_arguments() {
 fn implicit_failure_zero_success_receiver_and_builtin_catches_keep_typed_error_contracts() {
     for (source, statement_index) in [
         (
-            "Box = | value Int |\n\
+            "Box = | value I32 |\n\
              touch |this Box| -> Error!:\n;\n\
              recover |box Box|:\n    box.touch() catch:\n        io.line(\"fallback\")\n    ;\n;\n",
             0,
         ),
         (
-            "recover |value Int|:\n\
-                 items ~{Int} = {0}\n\
+            "recover |value I32|:\n\
+                 items ~{I32} = {0}\n\
                  ~items.set(0, value) catch:\n        io.line(\"fallback\")\n    ;\n;\n",
             1,
         ),
@@ -4690,7 +4886,12 @@ fn implicit_failure_zero_success_receiver_and_builtin_catches_keep_typed_error_c
             panic!("error-only receiver recovery must remain a statement");
         };
         let error_type_id = builtin_error_type_id(&project, &ast);
-        let block = assert_catch_contract(expression, false, Some(error_type_id), error_type_id);
+        let block = assert_catch_contract(
+            expression_view(&ast, *expression),
+            false,
+            Some(error_type_id),
+            error_type_id,
+        );
         assert!(
             block.result_type_ids.is_empty(),
             "error-only handlers must not invent success slots"
@@ -4701,7 +4902,7 @@ fn implicit_failure_zero_success_receiver_and_builtin_catches_keep_typed_error_c
     }
 
     let mut project = failure_project(
-        "Box = | value Int |\n\
+        "Box = | value I32 |\n\
          touch |this Box| -> Error!:\n;\n\
          bad |box Box|:\n    box.touch()\n;\n",
     );
@@ -4722,12 +4923,12 @@ fn implicit_failure_same_module_cross_file_call_keeps_canonical_private_failure_
             (
                 "src/@page.moth",
                 "@helpers multiply\n\
-                 safe_product |left Int, right Int| -> Int, Error!:\n\
+                 safe_product |left I32, right I32| -> I32, Error!:\n\
                      return multiply(left, right)\n;\n",
             ),
             (
                 "src/helpers.moth",
-                "multiply |left Int, right Int| -> Int:\n    return left * right\n;\n",
+                "multiply |left I32, right I32| -> I32:\n    return left * right\n;\n",
             ),
         ],
         "src/@page.moth",
@@ -4752,17 +4953,32 @@ fn implicit_failure_same_module_cross_file_call_keeps_canonical_private_failure_
             _ => None,
         })
         .expect("same-module helper must retain its canonical declaration path");
-    let value = returned_value(&named_function_body(&project, &ast, "safe_product")[0]);
-    assert_eq!(value.type_id, builtin_type_ids::INT);
-    assert!(matches!(value.kind, ExpressionKind::FunctionCall { name, .. } if name == helper_path));
-    let private_call_span = value
-        .failure_facts
+    let value = returned_value(
+        &ast,
+        &named_function_body(&project, &ast, "safe_product")[0],
+    );
+    assert_eq!(
+        value
+            .value_type_id()
+            .expect("safe_product returns one success value"),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
+    );
+    assert!(matches!(
+        value.operation(),
+        ExpressionOperationView::Call(call)
+            if matches!(
+                call.metadata().target,
+                ResolvedCallableTarget::Function(path) if path == helper_path
+            )
+    ));
+    let facts = failure_facts_of(value);
+    let private_call_span = facts
         .summary
         .first_private_call
         .expect("same-module private call must retain its witness")
         .span;
     assert!(private_call_span.is_some());
-    assert!(value.failure_facts.summary.first_typed.is_none());
+    assert!(facts.summary.first_typed.is_none());
 
     let hir = project
         .lower_ast_result(ast)

@@ -86,6 +86,44 @@ pub fn assert_panics_with(expected_fragment: &str, body: impl FnOnce() + std::pa
     );
 }
 
+/// Run the exact child copy of a bounded-stack test so a native stack overflow cannot abort
+/// the parent test suite. The caller guards its worker with `child_env`.
+#[track_caller]
+pub fn run_stack_budgeted_child(
+    test_module_path: &str,
+    test_suffix: &str,
+    child_env: &str,
+    description: &str,
+) {
+    let test_name = format!(
+        "{}::{test_suffix}",
+        test_module_path
+            .split_once("::")
+            .expect("test module path should include the crate name")
+            .1
+    );
+    let output = std::process::Command::new(
+        std::env::current_exe().expect("test binary path should be available"),
+    )
+    .args([test_name.as_str(), "--exact", "--test-threads=1"])
+    .env(child_env, "1")
+    .output()
+    .expect("should spawn the stack-budgeted child test");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        output.status.success(),
+        "{description} ({}):\n{stdout}\n{stderr}",
+        output.status
+    );
+    // A filter that matched nothing would also exit successfully.
+    assert!(
+        stdout.contains("1 passed"),
+        "the child must run exactly the budgeted test {test_name}:\n{stdout}\n{stderr}"
+    );
+}
+
 // ---------------------------------------------------------------------------
 //  Worker-thread failure surfacing
 // ---------------------------------------------------------------------------

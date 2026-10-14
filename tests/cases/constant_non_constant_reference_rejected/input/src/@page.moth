@@ -1,4 +1,4 @@
-make_value || -> Int:
+make_value || -> I32:
     return 1
 ;
 

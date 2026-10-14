@@ -1,7 +1,7 @@
-pair || -> String, Int:
+pair || -> String, I32:
     return "a", 1
 ;
 
-a Int, b Int = pair()
+a I32, b I32 = pair()
 io.line([: [a]])
 io.line([: [b]])

@@ -1,0 +1,16 @@
+show_f16 |value F16| -> String:
+    return cast value
+;
+
+show_f32 |value F32| -> String:
+    return cast value
+;
+
+-- The F16 receiver rounds the raw midpoint at 1024 back to 1024. The named
+-- F16 operand remains 1024 while the F32 receiver types only the raw 0.5 as F32.
+raw_f16_text = show_f16(1024.0 + 0.5)
+named_f16 F16 = 1024.0
+named_f16_text = show_f16(named_f16)
+f32_result_text = show_f32(named_f16 + 0.5)
+
+[:scalar raw float receiver raw-f16=[raw_f16_text] named-f16=[named_f16_text] f32-result=[f32_result_text]]

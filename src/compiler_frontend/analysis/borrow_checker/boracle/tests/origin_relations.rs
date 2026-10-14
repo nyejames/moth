@@ -561,7 +561,7 @@ fn join_origin_rows_overlap_their_members_with_a_path_reason() {
 
 #[test]
 fn builder_projection_rows_never_reference_the_unknown_placeholder() {
-    let problem = super::hir_distinct_projection_problem();
+    let problem = super::hir_option_projection_problem();
     let solution =
         super::super::OriginSolver::solve(&problem).expect("HIR projection should solve");
     let unknown = problem
@@ -788,10 +788,11 @@ fn boundary_reason_problem() -> BorrowProblem {
                 EventKind::CallEffect(CallEffect {
                     call: CallId::new(0),
                     arguments: Vec::new().into_boxed_slice(),
-                    result: Some(CallResult {
+                    results: vec![CallResult {
                         destination: BindingDestination::Define(PlaceId::new(1)),
                         origin: ValueOriginId::new(1),
-                    }),
+                    }]
+                    .into_boxed_slice(),
                 }),
                 EventSource::none(),
             ),
@@ -801,10 +802,11 @@ fn boundary_reason_problem() -> BorrowProblem {
                 EventKind::CallEffect(CallEffect {
                     call: CallId::new(1),
                     arguments: Vec::new().into_boxed_slice(),
-                    result: Some(CallResult {
+                    results: vec![CallResult {
                         destination: BindingDestination::Define(PlaceId::new(2)),
                         origin: ValueOriginId::new(2),
-                    }),
+                    }]
+                    .into_boxed_slice(),
                 }),
                 EventSource::none(),
             ),
@@ -814,10 +816,11 @@ fn boundary_reason_problem() -> BorrowProblem {
                 EventKind::CallEffect(CallEffect {
                     call: CallId::new(2),
                     arguments: Vec::new().into_boxed_slice(),
-                    result: Some(CallResult {
+                    results: vec![CallResult {
                         destination: BindingDestination::Define(PlaceId::new(3)),
                         origin: ValueOriginId::new(3),
-                    }),
+                    }]
+                    .into_boxed_slice(),
                 }),
                 EventSource::none(),
             ),
@@ -910,10 +913,11 @@ fn unknown_provenance_problem() -> BorrowProblem {
                         use_id: UseId::new(0),
                     }]
                     .into_boxed_slice(),
-                    result: Some(CallResult {
+                    results: vec![CallResult {
                         destination: BindingDestination::Define(PlaceId::new(0)),
                         origin: ValueOriginId::new(2),
-                    }),
+                    }]
+                    .into_boxed_slice(),
                 }),
                 EventSource::none(),
             ),

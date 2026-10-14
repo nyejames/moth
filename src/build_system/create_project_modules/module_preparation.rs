@@ -315,7 +315,10 @@ impl ModulePreparationContext<'_> {
     /// origin-table handle, so no module or worker can allocate or copy boundary identities while
     /// preparation is in flight. Failures travel in the premerge lane; the final boundary owns
     /// the single vessel conversion.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "syntax discovery keeps stable origin, registered sources, entry path and role, owned string/path tables, mutable selected source texts and the timers-only context separate"
+    )]
     pub(super) fn begin_syntax_discovery<'a, 'texts>(
         &'a self,
         stable_origin: StableModuleOriginIdentity,
@@ -547,7 +550,7 @@ impl ModulePreparationContext<'_> {
     ///      without changing deterministic merge order or frontend ownership boundaries.
     #[allow(
         clippy::too_many_arguments,
-        reason = "module preparation keeps mutable string/path forks, prepared inputs, span builders, entry path, root role, and size threshold as separate borrows"
+        reason = "module preparation keeps shared context, mutable string/path forks, prepared inputs, span builders, entry path, root role and size threshold as separate inputs"
     )]
     fn prepare_module_files(
         &self,

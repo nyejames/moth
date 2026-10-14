@@ -1,0 +1,5 @@
+-- Split from implicit_failure_folded_catch_handler_type_rejected. The protected
+-- expression folds to a constant, so the handler never runs at runtime, but its
+-- contents are still validated: `cast true` to I32 has no cast evidence.
+
+invalid_value I32 = 1 + 2 catch then cast true

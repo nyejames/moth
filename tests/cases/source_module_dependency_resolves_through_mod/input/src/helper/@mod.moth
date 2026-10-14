@@ -1,7 +1,7 @@
 @impl/add add as internal_add
 
 export:
-    add |a Int, b Int| -> Int:
+    add |a I32, b I32| -> I32:
         return internal_add(a, b)
     ;
 ;

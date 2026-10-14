@@ -245,8 +245,8 @@ macro_rules! token_schema {
 
             /// Whether this tag is a builtin scalar type spelling in source.
             ///
-            /// WHAT: the schema-owned fact behind type-position checks for `Int`, `Uint`, `Float`,
-            ///      `Bool`, `String`, `Char` and every explicit-width spelling (`I8`..`F64`, `Byte`).
+            /// WHAT: the schema-owned fact behind type-position checks for `Bool`, `String`,
+            ///      `Char` and every exact scalar spelling (`I8`..`F64`, `Byte`).
             /// WHY: every type-position parser must accept the same builtin scalar spelling set,
             ///      so the set is derived from the taxonomy class here instead of being repeated
             ///      tag by tag at each call site. `None`, `True` and `False` share the builtin-type
@@ -610,26 +610,6 @@ token_schema! {
         None
     ),
     (
-        DatatypeInt,
-        DATATYPE_INT,
-        38,
-        "`Int`",
-        Static,
-        0,
-        TOKEN_CLASS_BUILTIN_TYPE,
-        None
-    ),
-    (
-        DatatypeFloat,
-        DATATYPE_FLOAT,
-        39,
-        "`Float`",
-        Static,
-        0,
-        TOKEN_CLASS_BUILTIN_TYPE,
-        None
-    ),
-    (
         DatatypeBool,
         DATATYPE_BOOL,
         40,
@@ -884,16 +864,6 @@ token_schema! {
     (Checked, CHECKED, 76, "`checked`", Static, 0, TOKEN_CLASS_KEYWORD, None),
     (Async, ASYNC, 77, "`async`", Static, 0, TOKEN_CLASS_KEYWORD, None),
     (Cast, CAST, 78, "`cast`", Static, 0, TOKEN_CLASS_KEYWORD, None),
-    (
-        CastBang,
-        CAST_BANG,
-        79,
-        "`cast!`",
-        Static,
-        0,
-        TOKEN_CLASS_KEYWORD,
-        None
-    ),
     (Assert, ASSERT, 80, "`assert`", Static, 0, TOKEN_CLASS_KEYWORD, None),
     (Loop, LOOP, 81, "`loop`", Static, 0, TOKEN_CLASS_KEYWORD, None),
     (By, BY, 82, "`by`", Static, 0, TOKEN_CLASS_KEYWORD, None),
@@ -1096,16 +1066,6 @@ token_schema! {
         DATATYPE_BYTE,
         106,
         "`Byte`",
-        Static,
-        0,
-        TOKEN_CLASS_BUILTIN_TYPE,
-        None
-    ),
-    (
-        DatatypeUint,
-        DATATYPE_UINT,
-        107,
-        "`Uint`",
         Static,
         0,
         TOKEN_CLASS_BUILTIN_TYPE,

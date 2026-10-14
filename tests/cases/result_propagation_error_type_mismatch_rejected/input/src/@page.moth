@@ -6,11 +6,11 @@ ErrB = |
     message String,
 |
 
-inner || -> Int, ErrA!:
+inner || -> I32, ErrA!:
     return! ErrA("failed")
 ;
 
-outer || -> Int, ErrB!:
+outer || -> I32, ErrB!:
     value = inner()!
     return value
 ;

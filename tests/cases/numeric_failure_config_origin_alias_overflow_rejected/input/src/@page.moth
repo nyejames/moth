@@ -1,5 +1,5 @@
 @facade maximum
 
-overflow || -> Int, Error!:
+overflow || -> I32, Error!:
     return maximum + 1
 ;

@@ -10,6 +10,7 @@ use super::super::config_schema::{
     ConfigFieldShape, ConfigSchema, ConfigSchemaField, ConfigSchemas, NamedConfigSectionSchema,
     ProjectFieldConfigPolicy, UnknownFieldPolicy,
 };
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 #[test]
 fn registers_root_and_fields_with_dense_ids() {
@@ -146,7 +147,10 @@ fn describes_shape_vocabulary_for_diagnostics() {
         .expect("schema is unfrozen");
 
     assert_eq!(ConfigFieldShape::String.describe(), "a string value");
-    assert_eq!(ConfigFieldShape::Int.describe(), "an integer value");
+    assert_eq!(
+        ConfigFieldShape::FixedScalar(FixedScalar::I32).describe(),
+        "a value of type I32"
+    );
     assert_eq!(ConfigFieldShape::Bool.describe(), "a boolean value");
     assert_eq!(
         ConfigFieldShape::Record(nested).describe(),
@@ -168,19 +172,23 @@ fn describes_shape_vocabulary_for_diagnostics() {
 
 #[test]
 fn validate_and_freeze_rejects_incompatible_default() {
+    use crate::compiler_frontend::folded_value::PublicFoldedValue;
+    use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+
     let mut schema = ConfigSchema::new("test record", UnknownFieldPolicy::Reject);
     let root = schema.root();
     schema
         .register_field(
             root,
-            ConfigSchemaField::string("title")
-                .default(crate::compiler_frontend::folded_value::PublicFoldedValue::Int(1)),
+            ConfigSchemaField::string("title").default(PublicFoldedValue::FixedScalar(
+                FixedScalarValue::signed(FixedScalar::I32, 1).expect("a test value fits I32"),
+            )),
         )
         .expect("schema is unfrozen");
 
     let error = schema
         .validate_and_freeze()
-        .expect_err("an Int default cannot freeze on a String field");
+        .expect_err("an exact integer default cannot freeze on a String field");
     assert!(
         error.msg.contains("default does not match"),
         "got {}",
@@ -235,7 +243,7 @@ fn validate_and_freeze_rejects_required_field_with_default() {
 fn validate_and_freeze_rejects_closed_domain_on_int_field() {
     let mut schema = ConfigSchema::new("test record", UnknownFieldPolicy::Reject);
     let root = schema.root();
-    let mut field = ConfigSchemaField::int("count");
+    let mut field = ConfigSchemaField::fixed_scalar("count", FixedScalar::I32);
     field.allowed_strings = Some(&["one"]);
     schema
         .register_field(root, field)
@@ -398,7 +406,10 @@ fn validate_and_freeze_rejects_invalid_nested_record_defaults() {
         .add_node("nested", UnknownFieldPolicy::Reject)
         .expect("schema is unfrozen");
     schema
-        .register_field(nested, ConfigSchemaField::int("count").required())
+        .register_field(
+            nested,
+            ConfigSchemaField::fixed_scalar("count", FixedScalar::I32).required(),
+        )
         .expect("schema is unfrozen");
     schema
         .register_field(
@@ -406,7 +417,9 @@ fn validate_and_freeze_rejects_invalid_nested_record_defaults() {
             ConfigSchemaField::record("site", nested).default(PublicFoldedValue::Record(vec![
                 PublicFoldedField {
                     name: "count".to_owned(),
-                    type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int),
+                    type_identity: CanonicalTypeIdentity::Builtin(
+                        CanonicalBuiltinType::FixedScalar(FixedScalar::I32),
+                    ),
                     value: PublicFoldedValue::String(OwnedFoldedString::Text("nope".to_owned())),
                 },
             ])),
@@ -421,4 +434,51 @@ fn validate_and_freeze_rejects_invalid_nested_record_defaults() {
         "got {}",
         error.msg
     );
+}
+
+#[test]
+fn scalar_defaults_require_the_declared_exact_type() {
+    use crate::compiler_frontend::folded_value::PublicFoldedValue;
+
+    for (declared, value, accepted) in [
+        (
+            FixedScalar::I32,
+            FixedScalarValue::signed(FixedScalar::I32, 1).expect("one fits I32"),
+            true,
+        ),
+        (
+            FixedScalar::I32,
+            FixedScalarValue::signed(FixedScalar::I64, 1).expect("one fits I64"),
+            false,
+        ),
+        (
+            FixedScalar::U64,
+            FixedScalarValue::unsigned(FixedScalar::U64, u64::MAX).expect("U64 owns its maximum"),
+            true,
+        ),
+        (
+            FixedScalar::F32,
+            FixedScalarValue::binary_float(FixedScalar::F32, -0.0).expect("signed zero fits F32"),
+            true,
+        ),
+        (
+            FixedScalar::F32,
+            FixedScalarValue::binary_float(FixedScalar::F64, -0.0).expect("signed zero fits F64"),
+            false,
+        ),
+    ] {
+        let mut schema = ConfigSchema::new("test record", UnknownFieldPolicy::Reject);
+        schema
+            .register_field(
+                schema.root(),
+                ConfigSchemaField::fixed_scalar("value", declared)
+                    .default(PublicFoldedValue::FixedScalar(value)),
+            )
+            .expect("schema is unfrozen");
+        assert_eq!(
+            schema.validate_and_freeze().is_ok(),
+            accepted,
+            "default {value:?} must match {declared:?} exactly"
+        );
+    }
 }

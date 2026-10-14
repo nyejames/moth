@@ -1,0 +1,18 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "full domain catch mixed=-128/382 narrow=255/0"
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0064"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0064"
+reason = "unsupported_backend_feature.checked_numeric_operations"
+path = "input/@page.moth"
+line = 6
+column = 21

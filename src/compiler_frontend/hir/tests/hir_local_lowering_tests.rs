@@ -5,11 +5,15 @@
 //! WHY: local metadata is the input to borrow analysis; drift here affects every ownership
 //!      and lifetime check downstream.
 
-use crate::compiler_frontend::ast::ast_nodes::{MultiBindTargetKind, NodeKind};
+use crate::compiler_frontend::ast::ast_nodes::{
+    AstNode, Declaration, DeclarationValue, MultiBindTargetKind, NodeKind,
+};
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::call_argument::{CallAccessMode, CallArgument};
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::hir::expression_store::{HirExpressionStore, HirProjection};
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
@@ -19,6 +23,7 @@ use crate::compiler_frontend::hir::statements::{
     HirLocalDestination, HirStatementKind, HirWriteTarget,
 };
 use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
     assignment_target, fresh_success_returns, function_node, make_test_variable, node,
@@ -26,11 +31,41 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
 };
 
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
-use crate::compiler_frontend::external_packages::ExternalFunctionId;
-use crate::compiler_frontend::hir::hir_builder::{build_ast_with_registered_types, lower_ast};
+use crate::compiler_frontend::external_packages::test_support::{
+    TestExternalAccessKind, TestExternalReturnAlias, TestExternalReturnType,
+    register_test_external_function,
+};
+use crate::compiler_frontend::external_packages::{
+    ExternalAbiType, ExternalPackageRegistry, ExternalSignatureType,
+};
+use crate::compiler_frontend::hir::hir_builder::{
+    build_ast_with_registered_types, lower_ast, setup_builder,
+};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::tests::type_id_fixture_support::multi_bind_target;
+
+/// One exact `I32` literal expression.
+///
+/// WHY: these fixtures pin the exact `I32` width explicitly at the scalar carrier.
+fn i32_literal(
+    builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    value: i64,
+    span: Option<SourceSpan>,
+    value_mode: ValueMode,
+) -> ExprId {
+    builder
+        .fixed_scalar(
+            const_values,
+            FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32"),
+            span,
+            value_mode,
+        )
+        .expect("fixture literal fits store")
+        .id()
+}
 
 #[test]
 fn direct_self_update_predicate_requires_the_same_unprojected_place_load() {
@@ -38,7 +73,7 @@ fn direct_self_update_predicate_requires_the_same_unprojected_place_load() {
     let target = HirWriteTarget::AssignPlace(HirPlace::local(local));
     let direct_place_read = HirExpression {
         kind: HirExpressionKind::Load(HirPlace::local(local)),
-        ty: builtin_type_ids::INT,
+        ty: builtin_type_ids::fixed_scalar(FixedScalar::I32),
         value_kind: ValueKind::Place,
         region: RegionId(0),
         span: None,
@@ -114,11 +149,14 @@ fn allocates_parameter_locals_and_binds_names() {
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let x = super::symbol("x", &mut path_fork, &mut string_table);
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
 
     let body = vec![node(
         NodeKind::Return(vec![reference_expr_with_type_id(
+            &mut expressions,
             x,
-            builtin_type_ids::INT,
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
             None,
             ValueMode::ImmutableReference,
         )]),
@@ -128,16 +166,32 @@ fn allocates_parameter_locals_and_binds_names() {
     let start_function = function_node(
         start_name,
         FunctionSignature {
-            parameters: vec![param_with_type_id(x, builtin_type_ids::INT, false, None)],
-            returns: fresh_success_returns(vec![builtin_type_ids::INT]),
+            parameters: vec![param_with_type_id(
+                x,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                false,
+                None,
+            )],
+            returns: fresh_success_returns(vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)]),
         },
         body,
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![start_function], entry_path);
-    let (module, _type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
+    let ast = build_ast_with_registered_types(
+        vec![start_function],
+        entry_path,
+        expressions,
+        const_values,
+        TypeEnvironment::new(),
+    );
+    let (module, _type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("HIR lowering should succeed");
 
     let start_fn = &module.functions[module
         .start_function
@@ -177,6 +231,15 @@ fn variable_declaration_emits_local_and_definition_write() {
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let x = super::symbol("x", &mut path_fork, &mut string_table);
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let init = i32_literal(
+        &mut expressions,
+        &mut const_values,
+        42,
+        None,
+        ValueMode::ImmutableOwned,
+    );
 
     let start_function = function_node(
         start_name,
@@ -185,18 +248,26 @@ fn variable_declaration_emits_local_and_definition_write() {
             returns: vec![],
         },
         vec![node(
-            NodeKind::VariableDeclaration(make_test_variable(
-                x,
-                Expression::int(42, None, ValueMode::ImmutableOwned),
-            )),
+            NodeKind::VariableDeclaration(make_test_variable(x, init, &expressions)),
             None,
         )],
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![start_function], entry_path);
-    let (module, _type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
+    let ast = build_ast_with_registered_types(
+        vec![start_function],
+        entry_path,
+        expressions,
+        const_values,
+        TypeEnvironment::new(),
+    );
+    let (module, _type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("HIR lowering should succeed");
 
     let start_fn = &module.functions[module
         .start_function
@@ -243,6 +314,58 @@ fn variable_declaration_emits_local_and_definition_write() {
 }
 
 #[test]
+fn absent_local_declaration_allocates_metadata_without_initializer_work() {
+    let mut path_fork = PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let name = super::symbol("captured", &mut path_fork, &mut string_table);
+    let type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
+    let mut builder = setup_builder(&mut string_table, &mut path_fork);
+    let expressions = AstExpressionBuilder::new()
+        .unwrap()
+        .freeze(&mut Vec::<AstNode>::new())
+        .expect("empty expression store should freeze");
+    let expressions_before = builder.module.expressions.expression_count();
+    let statements_before = builder.test_current_block_statements().len();
+    let declaration = Declaration {
+        id: name,
+        type_id,
+        diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+        value_mode: ValueMode::MutableOwned,
+        value: DeclarationValue::Absent,
+        binding_span: None,
+        config_qualifier: None,
+    };
+
+    builder
+        .lower_statement_node(
+            &expressions,
+            &node(NodeKind::VariableDeclaration(declaration), None),
+        )
+        .expect("an absent declaration should allocate its binding without lowering a value");
+
+    let entry_block = builder
+        .module
+        .blocks
+        .first()
+        .expect("the builder fixture owns an entry block");
+    let [local] = entry_block.locals.as_slice() else {
+        panic!("the absent declaration must allocate exactly one local");
+    };
+    assert_eq!(local.ty, type_id);
+    assert!(local.mutable);
+    assert_eq!(
+        builder.test_current_block_statements().len(),
+        statements_before,
+        "absence must not emit an initializer write",
+    );
+    assert_eq!(
+        builder.module.expressions.expression_count(),
+        expressions_before,
+        "absence must not manufacture an initializer expression",
+    );
+}
+
+#[test]
 fn immutable_and_mutable_place_initializers_keep_place_classification() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
@@ -252,13 +375,39 @@ fn immutable_and_mutable_place_initializers_keep_place_classification() {
     let mutable_source = super::symbol("mutable_source", &mut path_fork, &mut string_table);
     let immutable_copy = super::symbol("immutable_copy", &mut path_fork, &mut string_table);
     let mutable_copy = super::symbol("mutable_copy", &mut path_fork, &mut string_table);
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
+    let immutable_init = reference_expr_with_type_id(
+        &mut expressions,
+        immutable_source,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        None,
+        ValueMode::ImmutableReference,
+    );
+    let mutable_init = reference_expr_with_type_id(
+        &mut expressions,
+        mutable_source,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        None,
+        ValueMode::MutableReference,
+    );
 
     let start_function = function_node(
         start_name,
         FunctionSignature {
             parameters: vec![
-                param_with_type_id(immutable_source, builtin_type_ids::INT, false, None),
-                param_with_type_id(mutable_source, builtin_type_ids::INT, true, None),
+                param_with_type_id(
+                    immutable_source,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                    false,
+                    None,
+                ),
+                param_with_type_id(
+                    mutable_source,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                    true,
+                    None,
+                ),
             ],
             returns: vec![],
         },
@@ -266,24 +415,16 @@ fn immutable_and_mutable_place_initializers_keep_place_classification() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     immutable_copy,
-                    reference_expr_with_type_id(
-                        immutable_source,
-                        builtin_type_ids::INT,
-                        None,
-                        ValueMode::ImmutableReference,
-                    ),
+                    immutable_init,
+                    &expressions,
                 )),
                 None,
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     mutable_copy,
-                    reference_expr_with_type_id(
-                        mutable_source,
-                        builtin_type_ids::INT,
-                        None,
-                        ValueMode::MutableReference,
-                    ),
+                    mutable_init,
+                    &expressions,
                 )),
                 None,
             ),
@@ -291,9 +432,20 @@ fn immutable_and_mutable_place_initializers_keep_place_classification() {
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![start_function], entry_path);
-    let (module, _type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
+    let ast = build_ast_with_registered_types(
+        vec![start_function],
+        entry_path,
+        expressions,
+        const_values,
+        TypeEnvironment::new(),
+    );
+    let (module, _type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("HIR lowering should succeed");
     let start = &module.functions[module.start_function.expect("start function").0 as usize];
     let entry = &module.blocks[start.entry.0 as usize];
 
@@ -340,6 +492,22 @@ fn duplicate_local_declarations_in_same_scope_fail() {
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let var_name = super::symbol("my_var", &mut path_fork, &mut string_table);
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let first = i32_literal(
+        &mut expressions,
+        &mut const_values,
+        1,
+        None,
+        ValueMode::ImmutableOwned,
+    );
+    let second = i32_literal(
+        &mut expressions,
+        &mut const_values,
+        2,
+        None,
+        ValueMode::ImmutableOwned,
+    );
 
     let start_function = function_node(
         start_name,
@@ -349,26 +517,31 @@ fn duplicate_local_declarations_in_same_scope_fail() {
         },
         vec![
             node(
-                NodeKind::VariableDeclaration(make_test_variable(
-                    var_name,
-                    Expression::int(1, None, ValueMode::ImmutableOwned),
-                )),
+                NodeKind::VariableDeclaration(make_test_variable(var_name, first, &expressions)),
                 None,
             ),
             node(
-                NodeKind::VariableDeclaration(make_test_variable(
-                    var_name,
-                    Expression::int(2, None, ValueMode::ImmutableOwned),
-                )),
+                NodeKind::VariableDeclaration(make_test_variable(var_name, second, &expressions)),
                 None,
             ),
         ],
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![start_function], entry_path);
-    let error = lower_ast(ast, &mut string_table, &mut path_fork)
-        .expect_err("duplicate symbol should fail");
+    let ast = build_ast_with_registered_types(
+        vec![start_function],
+        entry_path,
+        expressions,
+        const_values,
+        TypeEnvironment::new(),
+    );
+    let error = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("duplicate symbol should fail");
     let error = error
         .infrastructure_error()
         .expect("HIR lowering failure should be wrapped for rendering");
@@ -387,24 +560,46 @@ fn assignment_lowers_value_prelude_before_assign() {
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let x = super::symbol("x", &mut path_fork, &mut string_table);
     let helper = super::symbol("helper", &mut path_fork, &mut string_table);
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let helper_return = i32_literal(
+        &mut expressions,
+        &mut const_values,
+        1,
+        None,
+        ValueMode::ImmutableOwned,
+    );
 
     let helper_fn = function_node(
         helper,
         FunctionSignature {
             parameters: vec![],
-            returns: fresh_success_returns(vec![builtin_type_ids::INT]),
+            returns: fresh_success_returns(vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)]),
         },
-        vec![node(
-            NodeKind::Return(vec![Expression::int(1, None, ValueMode::ImmutableOwned)]),
-            None,
-        )],
+        vec![node(NodeKind::Return(vec![helper_return]), None)],
         None,
     );
 
+    let target = assignment_target(
+        &mut expressions,
+        x,
+        DataType::FixedScalar(FixedScalar::I32),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        None,
+    );
+    let call = expressions
+        .function_call_with_typed_arguments(
+            helper,
+            vec![],
+            vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
+            None,
+        )
+        .expect("fixture call fits store")
+        .id();
     let assignment = node(
         NodeKind::Assignment {
-            target: assignment_target(x, DataType::Int, builtin_type_ids::INT, None),
-            value: Expression::function_call(helper, vec![], vec![builtin_type_ids::INT], None),
+            target,
+            value: call,
         },
         None,
     );
@@ -412,16 +607,32 @@ fn assignment_lowers_value_prelude_before_assign() {
     let start_fn = function_node(
         start_name,
         FunctionSignature {
-            parameters: vec![param_with_type_id(x, builtin_type_ids::INT, true, None)],
+            parameters: vec![param_with_type_id(
+                x,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                true,
+                None,
+            )],
             returns: vec![],
         },
         vec![assignment],
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![helper_fn, start_fn], entry_path);
-    let (module, _type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
+    let ast = build_ast_with_registered_types(
+        vec![helper_fn, start_fn],
+        entry_path,
+        expressions,
+        const_values,
+        TypeEnvironment::new(),
+    );
+    let (module, _type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("HIR lowering should succeed");
 
     let start = &module.functions[module
         .start_function
@@ -435,18 +646,14 @@ fn assignment_lowers_value_prelude_before_assign() {
         .position(|statement| {
             matches!(
                 &statement.kind,
-                HirStatementKind::Call {
-                    result: Some(_),
-                    ..
-                }
+                HirStatementKind::Call { results, .. } if results.len() == 1
             )
         })
         .expect("entry block should contain a Call statement with a result");
-    let HirStatementKind::Call {
-        result: Some(HirLocalDestination::Define(call_result)),
-        ..
-    } = &block.statements[call_pos].kind
-    else {
+    let HirStatementKind::Call { results, .. } = &block.statements[call_pos].kind else {
+        unreachable!("the call position was selected from Call statements");
+    };
+    let [HirLocalDestination::Define(call_result)] = results.as_slice() else {
         panic!("caller call results should define a fresh local binding");
     };
     let call_result = *call_result;
@@ -485,21 +692,68 @@ fn call_expression_statements_materialize_result_values() {
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let callee = super::symbol("callee", &mut path_fork, &mut string_table);
-    let alloc_id = ExternalFunctionId::Synthetic(0);
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let mut registry = ExternalPackageRegistry::new();
+    let alloc_id = register_test_external_function(
+        &mut registry,
+        "alloc",
+        vec![(
+            ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::I32)),
+            TestExternalAccessKind::Shared,
+        )],
+        TestExternalReturnAlias::Fresh,
+        TestExternalReturnType::Fixed(FixedScalar::I32),
+    )
+    .expect("synthetic external function should register");
+    let callee_return = i32_literal(
+        &mut expressions,
+        &mut const_values,
+        9,
+        None,
+        ValueMode::ImmutableOwned,
+    );
 
     let callee_fn = function_node(
         callee,
         FunctionSignature {
             parameters: vec![],
-            returns: fresh_success_returns(vec![builtin_type_ids::INT]),
+            returns: fresh_success_returns(vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)]),
         },
-        vec![node(
-            NodeKind::Return(vec![Expression::int(9, None, ValueMode::ImmutableOwned)]),
-            None,
-        )],
+        vec![node(NodeKind::Return(vec![callee_return]), None)],
         None,
     );
 
+    let callee_call = expressions
+        .function_call_with_typed_arguments(
+            callee,
+            vec![],
+            vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
+            None,
+        )
+        .expect("fixture call fits store")
+        .id();
+    let alloc_arg = i32_literal(
+        &mut expressions,
+        &mut const_values,
+        1,
+        None,
+        ValueMode::ImmutableOwned,
+    );
+    let alloc_call = expressions
+        .host_function_call_with_typed_arguments(
+            alloc_id,
+            vec![CallArgument::positional(
+                expressions.own(alloc_arg),
+                CallAccessMode::Shared,
+                None,
+            )],
+            vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
+            false,
+            None,
+        )
+        .expect("fixture call fits store")
+        .id();
     let start_fn = function_node(
         start_name,
         FunctionSignature {
@@ -507,35 +761,21 @@ fn call_expression_statements_materialize_result_values() {
             returns: vec![],
         },
         vec![
-            node(
-                NodeKind::ExpressionStatement(Expression::function_call_with_arguments(
-                    callee,
-                    vec![],
-                    vec![builtin_type_ids::INT],
-                    None,
-                )),
-                None,
-            ),
-            node(
-                NodeKind::ExpressionStatement(Expression::host_function_call_with_arguments(
-                    alloc_id,
-                    vec![CallArgument::positional(
-                        Expression::int(1, None, ValueMode::ImmutableOwned),
-                        CallAccessMode::Shared,
-                        None,
-                    )],
-                    vec![builtin_type_ids::INT],
-                    None,
-                )),
-                None,
-            ),
+            node(NodeKind::ExpressionStatement(callee_call), None),
+            node(NodeKind::ExpressionStatement(alloc_call), None),
         ],
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![callee_fn, start_fn], entry_path);
-    let (module, _type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
+    let ast = build_ast_with_registered_types(
+        vec![callee_fn, start_fn],
+        entry_path,
+        expressions,
+        const_values,
+        TypeEnvironment::new(),
+    );
+    let (module, _type_environment) = lower_ast(ast, &mut string_table, &mut path_fork, &registry)
+        .expect("HIR lowering should succeed");
 
     let start = &module.functions[module
         .start_function
@@ -546,8 +786,8 @@ fn call_expression_statements_materialize_result_values() {
     let call_results = block
         .statements
         .iter()
-        .filter_map(|statement| match statement.kind {
-            HirStatementKind::Call { result, .. } => Some(result),
+        .filter_map(|statement| match &statement.kind {
+            HirStatementKind::Call { results, .. } => Some(results),
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -556,7 +796,7 @@ fn call_expression_statements_materialize_result_values() {
     assert!(
         call_results
             .iter()
-            .all(|result| matches!(result, Some(HirLocalDestination::Define(_)))),
+            .all(|results| matches!(results.as_slice(), [HirLocalDestination::Define(_)])),
         "non-unit call expression statements should define their result before it is discarded"
     );
 }
@@ -570,28 +810,63 @@ fn multi_bind_assignment_reads_every_rhs_slot_before_updating_targets() {
     let pair_name = super::symbol("pair", &mut path_fork, &mut string_table);
     let left = super::symbol("left", &mut path_fork, &mut string_table);
     let right = super::symbol("right", &mut path_fork, &mut string_table);
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let first = i32_literal(
+        &mut expressions,
+        &mut const_values,
+        1,
+        None,
+        ValueMode::ImmutableOwned,
+    );
+    let second = i32_literal(
+        &mut expressions,
+        &mut const_values,
+        2,
+        None,
+        ValueMode::ImmutableOwned,
+    );
 
     let pair_function = function_node(
         pair_name,
         FunctionSignature {
             parameters: vec![],
-            returns: fresh_success_returns(vec![builtin_type_ids::INT, builtin_type_ids::INT]),
-        },
-        vec![node(
-            NodeKind::Return(vec![
-                Expression::int(1, None, ValueMode::ImmutableOwned),
-                Expression::int(2, None, ValueMode::ImmutableOwned),
+            returns: fresh_success_returns(vec![
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
             ]),
-            None,
-        )],
+        },
+        vec![node(NodeKind::Return(vec![first, second]), None)],
         None,
     );
+    let pair_call = expressions
+        .function_call_with_typed_arguments(
+            pair_name,
+            vec![],
+            vec![
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            ],
+            None,
+        )
+        .expect("fixture call fits store")
+        .id();
     let start_function = function_node(
         start_name,
         FunctionSignature {
             parameters: vec![
-                param_with_type_id(left, builtin_type_ids::INT, true, None),
-                param_with_type_id(right, builtin_type_ids::INT, true, None),
+                param_with_type_id(
+                    left,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                    true,
+                    None,
+                ),
+                param_with_type_id(
+                    right,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                    true,
+                    None,
+                ),
             ],
             returns: vec![],
         },
@@ -600,67 +875,65 @@ fn multi_bind_assignment_reads_every_rhs_slot_before_updating_targets() {
                 targets: vec![
                     multi_bind_target(
                         left,
-                        builtin_type_ids::INT,
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         ValueMode::MutableOwned,
                         MultiBindTargetKind::Assignment,
                         None,
                     ),
                     multi_bind_target(
                         right,
-                        builtin_type_ids::INT,
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         ValueMode::MutableOwned,
                         MultiBindTargetKind::Assignment,
                         None,
                     ),
                 ],
-                value: Expression::function_call(
-                    pair_name,
-                    vec![],
-                    vec![builtin_type_ids::INT, builtin_type_ids::INT],
-                    None,
-                ),
+                value: pair_call,
             },
             None,
         )],
         None,
     );
     let (module, _type_environment) = lower_ast(
-        build_ast_with_registered_types(vec![pair_function, start_function], entry_path),
+        build_ast_with_registered_types(
+            vec![pair_function, start_function],
+            entry_path,
+            expressions,
+            const_values,
+            TypeEnvironment::new(),
+        ),
         &mut string_table,
         &mut path_fork,
+        &ExternalPackageRegistry::new(),
     )
     .expect("multi-bind assignment lowering should succeed");
 
     let start = &module.functions[module.start_function.expect("start function").0 as usize];
     let block = &module.blocks[start.entry.0 as usize];
-    let call_result = block
-        .statements
-        .iter()
-        .find_map(|statement| match &statement.kind {
-            HirStatementKind::Call { result, .. } => *result,
-            _ => None,
-        });
-    assert!(
-        matches!(call_result, Some(HirLocalDestination::Define(_))),
-        "multi-bind RHS call result should be defined as an RValue binding"
-    );
-
-    let tuple_reads = block
+    let (call_position, call_results) = block
         .statements
         .iter()
         .enumerate()
-        .filter_map(|(index, statement)| {
-            let HirStatementKind::Write { value, .. } = &statement.kind else {
-                return None;
-            };
-            matches!(
-                &module.expressions.expression(*value).kind,
-                HirExpressionKind::TupleGet { .. }
-            )
-            .then_some(index)
+        .find_map(|(index, statement)| match &statement.kind {
+            HirStatementKind::Call { results, .. } => Some((index, results)),
+            _ => None,
+        })
+        .expect("multi-bind should execute its RHS call");
+    assert_eq!(call_results.len(), 2);
+    assert!(
+        call_results
+            .iter()
+            .all(|result| matches!(result, HirLocalDestination::Define(_))),
+        "each RHS slot should define a fresh result binding"
+    );
+    let result_locals = call_results
+        .iter()
+        .map(|result| match result {
+            HirLocalDestination::Define(local) => *local,
+            _ => unreachable!("result destinations were checked above"),
         })
         .collect::<Vec<_>>();
-    assert_eq!(tuple_reads.len(), 2, "both RHS slots should be read once");
+    assert_ne!(result_locals[0], result_locals[1]);
     let first_update = block
         .statements
         .iter()
@@ -675,8 +948,8 @@ fn multi_bind_assignment_reads_every_rhs_slot_before_updating_targets() {
         })
         .expect("assignment-only multi-bind should update existing targets");
     assert!(
-        tuple_reads.iter().all(|index| *index < first_update),
-        "all tuple slots must be read before the first existing local is updated"
+        call_position < first_update,
+        "all RHS slots must be produced before the first existing local is updated"
     );
     let updated_roots = block
         .statements
@@ -690,6 +963,56 @@ fn multi_bind_assignment_reads_every_rhs_slot_before_updating_targets() {
         })
         .collect::<Vec<_>>();
     assert_eq!(updated_roots, start.params);
+    let staged_results = result_locals
+        .iter()
+        .map(|result| {
+            let staged = block
+                .statements
+                .iter()
+                .enumerate()
+                .filter_map(|(index, statement)| {
+                    let HirStatementKind::Write {
+                        target: HirWriteTarget::DefineLocal(local),
+                        value,
+                    } = &statement.kind
+                    else {
+                        return None;
+                    };
+                    matches!(&module.expressions.expression(*value).kind,
+                HirExpressionKind::Load(place)
+                    if place.root == *result && super::is_local_place(place))
+                    .then_some((index, *local))
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(staged.len(), 1, "each RHS slot should be snapshotted once");
+            assert!(
+                call_position < staged[0].0 && staged[0].0 < first_update,
+                "snapshot every RHS slot before updating any target"
+            );
+            staged[0].1
+        })
+        .collect::<Vec<_>>();
+    let updated_values = block
+        .statements
+        .iter()
+        .filter_map(|statement| {
+            let HirStatementKind::Write {
+                target: HirWriteTarget::AssignPlace(_),
+                value,
+            } = &statement.kind
+            else {
+                return None;
+            };
+            let HirExpressionKind::Load(place) = &module.expressions.expression(*value).kind else {
+                panic!("multi-bind updates should consume native result slots");
+            };
+            Some(place.root)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        updated_values, staged_results,
+        "target writes preserve RHS slot order"
+    );
 }
 
 #[test]
@@ -703,22 +1026,44 @@ fn mixed_multi_bind_preserves_definition_and_update_destination_tags() {
     let declared = path_fork
         .try_intern_child(start_name, string_table.intern("declared"))
         .expect("test path fits");
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let first = i32_literal(
+        &mut expressions,
+        &mut const_values,
+        1,
+        None,
+        ValueMode::ImmutableOwned,
+    );
+    let second = expressions
+        .bool(&mut const_values, true, None, ValueMode::ImmutableOwned)
+        .expect("fixture literal fits store")
+        .id();
 
     let pair_function = function_node(
         pair_name,
         FunctionSignature {
             parameters: vec![],
-            returns: fresh_success_returns(vec![builtin_type_ids::INT, builtin_type_ids::BOOL]),
-        },
-        vec![node(
-            NodeKind::Return(vec![
-                Expression::int(1, None, ValueMode::ImmutableOwned),
-                Expression::bool(true, None, ValueMode::ImmutableOwned),
+            returns: fresh_success_returns(vec![
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                builtin_type_ids::BOOL,
             ]),
-            None,
-        )],
+        },
+        vec![node(NodeKind::Return(vec![first, second]), None)],
         None,
     );
+    let pair_call = expressions
+        .function_call_with_typed_arguments(
+            pair_name,
+            vec![],
+            vec![
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                builtin_type_ids::BOOL,
+            ],
+            None,
+        )
+        .expect("fixture call fits store")
+        .id();
     let start_function = function_node(
         start_name,
         FunctionSignature {
@@ -735,7 +1080,7 @@ fn mixed_multi_bind_preserves_definition_and_update_destination_tags() {
                 targets: vec![
                     multi_bind_target(
                         declared,
-                        builtin_type_ids::INT,
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         ValueMode::ImmutableOwned,
                         MultiBindTargetKind::Declaration,
                         None,
@@ -748,21 +1093,23 @@ fn mixed_multi_bind_preserves_definition_and_update_destination_tags() {
                         None,
                     ),
                 ],
-                value: Expression::function_call(
-                    pair_name,
-                    vec![],
-                    vec![builtin_type_ids::INT, builtin_type_ids::BOOL],
-                    None,
-                ),
+                value: pair_call,
             },
             None,
         )],
         None,
     );
     let (module, _type_environment) = lower_ast(
-        build_ast_with_registered_types(vec![pair_function, start_function], entry_path),
+        build_ast_with_registered_types(
+            vec![pair_function, start_function],
+            entry_path,
+            expressions,
+            const_values,
+            TypeEnvironment::new(),
+        ),
         &mut string_table,
         &mut path_fork,
+        &ExternalPackageRegistry::new(),
     )
     .expect("mixed multi-bind lowering should succeed");
 
@@ -780,22 +1127,21 @@ fn mixed_multi_bind_preserves_definition_and_update_destination_tags() {
         .expect("mixed multi-bind should create the declaration target")
         .id;
 
-    let tuple_reads = block
+    let (call_position, call_results) = block
         .statements
         .iter()
         .enumerate()
-        .filter_map(|(index, statement)| {
-            let HirStatementKind::Write { value, .. } = &statement.kind else {
-                return None;
-            };
-            matches!(
-                &module.expressions.expression(*value).kind,
-                HirExpressionKind::TupleGet { .. }
-            )
-            .then_some(index)
+        .find_map(|(index, statement)| match &statement.kind {
+            HirStatementKind::Call { results, .. } => Some((index, results)),
+            _ => None,
         })
-        .collect::<Vec<_>>();
-    assert_eq!(tuple_reads.len(), 2);
+        .expect("mixed multi-bind should execute its RHS call");
+    assert_eq!(call_results.len(), 2);
+    assert!(
+        call_results
+            .iter()
+            .all(|result| matches!(result, HirLocalDestination::Define(_)))
+    );
 
     let writes = block
         .statements
@@ -820,7 +1166,41 @@ fn mixed_multi_bind_preserves_definition_and_update_destination_tags() {
         writes[1].1,
         HirWriteTarget::AssignPlace(place) if place.root == start.params[0]
     ));
-    assert!(tuple_reads.iter().all(|index| *index < writes[1].0));
+    assert!(call_position < writes[0].0 && call_position < writes[1].0);
+    for (result, (write_position, _)) in call_results.iter().zip(&writes) {
+        let HirLocalDestination::Define(result) = result else {
+            unreachable!("call destinations were checked above");
+        };
+        let snapshots = block
+            .statements
+            .iter()
+            .enumerate()
+            .filter_map(|(index, statement)| {
+                let HirStatementKind::Write {
+                    target: HirWriteTarget::DefineLocal(local),
+                    value,
+                } = &statement.kind
+                else {
+                    return None;
+                };
+                matches!(&module.expressions.expression(*value).kind,
+                HirExpressionKind::Load(place)
+                    if place.root == *result && super::is_local_place(place))
+                .then_some((index, *local))
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(snapshots.len(), 1);
+        assert!(
+            snapshots[0].0 < writes[0].0 && snapshots[0].0 < writes[1].0,
+            "all RHS slots must be snapshotted before any target write"
+        );
+        let HirStatementKind::Write { value, .. } = &block.statements[*write_position].kind else {
+            unreachable!("target positions were selected from Write statements");
+        };
+        assert!(matches!(&module.expressions.expression(*value).kind,
+            HirExpressionKind::Load(place)
+                if place.root == snapshots[0].1 && super::is_local_place(place)));
+    }
 }
 
 #[test]
@@ -831,6 +1211,26 @@ fn return_lowering_handles_zero_one_and_many_values() {
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let one_name = super::symbol("one", &mut path_fork, &mut string_table);
     let many_name = super::symbol("many", &mut path_fork, &mut string_table);
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let one_return = i32_literal(
+        &mut expressions,
+        &mut const_values,
+        8,
+        None,
+        ValueMode::ImmutableOwned,
+    );
+    let many_first = i32_literal(
+        &mut expressions,
+        &mut const_values,
+        1,
+        None,
+        ValueMode::ImmutableOwned,
+    );
+    let many_second = expressions
+        .bool(&mut const_values, true, None, ValueMode::ImmutableOwned)
+        .expect("fixture literal fits store")
+        .id();
 
     let start_fn = function_node(
         start_name,
@@ -846,12 +1246,9 @@ fn return_lowering_handles_zero_one_and_many_values() {
         one_name,
         FunctionSignature {
             parameters: vec![],
-            returns: fresh_success_returns(vec![builtin_type_ids::INT]),
+            returns: fresh_success_returns(vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)]),
         },
-        vec![node(
-            NodeKind::Return(vec![Expression::int(8, None, ValueMode::ImmutableOwned)]),
-            None,
-        )],
+        vec![node(NodeKind::Return(vec![one_return]), None)],
         None,
     );
 
@@ -859,21 +1256,29 @@ fn return_lowering_handles_zero_one_and_many_values() {
         many_name,
         FunctionSignature {
             parameters: vec![],
-            returns: fresh_success_returns(vec![builtin_type_ids::INT, builtin_type_ids::BOOL]),
-        },
-        vec![node(
-            NodeKind::Return(vec![
-                Expression::int(1, None, ValueMode::ImmutableOwned),
-                Expression::bool(true, None, ValueMode::ImmutableOwned),
+            returns: fresh_success_returns(vec![
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                builtin_type_ids::BOOL,
             ]),
-            None,
-        )],
+        },
+        vec![node(NodeKind::Return(vec![many_first, many_second]), None)],
         None,
     );
 
-    let ast = build_ast_with_registered_types(vec![start_fn, one_fn, many_fn], entry_path);
-    let (module, _type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("HIR lowering should succeed");
+    let ast = build_ast_with_registered_types(
+        vec![start_fn, one_fn, many_fn],
+        entry_path,
+        expressions,
+        const_values,
+        TypeEnvironment::new(),
+    );
+    let (module, _type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("HIR lowering should succeed");
 
     let start_block = &module.blocks[module.functions[module
         .start_function
@@ -881,32 +1286,36 @@ fn return_lowering_handles_zero_one_and_many_values() {
         .0 as usize]
         .entry
         .0 as usize];
-    assert!(matches!(
-        &start_block.terminator,
-        HirTerminator::Return(value)
-            if matches!(
-                &module.expressions.expression(*value).kind,
-                HirExpressionKind::TupleConstruct { elements } if elements.len() == 0
-            )
-    ));
+    assert!(matches!(&start_block.terminator,
+        HirTerminator::Return(values) if module.expressions.values(*values).is_empty()));
 
     let one_block = &module.blocks[module.functions[1].entry.0 as usize];
     assert!(matches!(
         &one_block.terminator,
-        HirTerminator::Return(value)
-            if matches!(
-                &module.expressions.expression(*value).kind,
-                HirExpressionKind::Int(8)
+        HirTerminator::Return(values)
+            if values.len() == 1 && matches!(
+                &module.expressions.expression(module.expressions.values(*values)[0]).kind,
+                HirExpressionKind::FixedScalar(literal)
+                    if *literal
+                        == FixedScalarValue::signed(FixedScalar::I32, 8)
+                            .expect("I32 literal in range")
             )
     ));
 
     let many_block = &module.blocks[module.functions[2].entry.0 as usize];
+    let HirTerminator::Return(values) = &many_block.terminator else {
+        panic!("multi-result return should use ordered native values");
+    };
+    let values = module.expressions.values(*values);
+    assert_eq!(values.len(), 2);
     assert!(matches!(
-        &many_block.terminator,
-        HirTerminator::Return(value)
-            if matches!(
-                &module.expressions.expression(*value).kind,
-                HirExpressionKind::TupleConstruct { elements } if elements.len() == 2
-            )
+        &module.expressions.expression(values[0]).kind,
+        HirExpressionKind::FixedScalar(literal)
+            if *literal == FixedScalarValue::signed(FixedScalar::I32, 1)
+                .expect("I32 literal in range")
+    ));
+    assert!(matches!(
+        &module.expressions.expression(values[1]).kind,
+        HirExpressionKind::Bool(true)
     ));
 }

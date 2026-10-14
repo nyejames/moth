@@ -13,17 +13,22 @@
 //! The entry point creates one `AstBuildContext`, then each phase narrows to `AstPhaseContext`
 //! and re-borrows the `StringTable` as needed.
 //!
-//! ## TIR store ownership
+//! ## Semantic storage ownership
 //!
-//! `AstPhaseContext` allocates one module-local `TemplateIrStore`. All production
-//! parser and semantic contexts receive clones of that shared handle.
+//! One phase owns its expression builder and constant content alongside its module-local TIR.
+//! Parsing reborrows semantic builders explicitly. Only TIR construction uses the shared handle.
+//! Finalisation consumes the phase context and moves its builder into freeze after the last
+//! TIR reader has been released so no replacement builder remains beside the frozen store.
 
 use crate::compiler_frontend::FrontendBuildProfile;
 use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::build_config::{
     BuildInputName, ConfigResolutionServices, ResolvedBuildConfigMap,
 };
+use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
@@ -31,7 +36,6 @@ use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork}
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 #[cfg(feature = "timers")]
 use crate::timing::TimingMetric;
-use moth_lexical::numeric::profile::NumericProfile;
 use rustc_hash::FxHashSet;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -158,13 +162,6 @@ pub(in crate::compiler_frontend) struct AstBuildContext<'a> {
     /// Current build profile (dev/release) affecting optimization and diagnostic levels.
     pub build_profile: FrontendBuildProfile,
 
-    /// The compilation boundary's `Int` width and `Float` precision.
-    ///
-    /// WHAT: the selected builder's profile for this whole boundary, read from `FrontendOptions`.
-    /// WHY: literal materialisation, constant folding, casts and template folding all type numbers,
-    ///      so they read this one boundary fact here instead of choosing a representation.
-    pub numeric_profile: NumericProfile,
-
     /// Stage 0 file-reference outcomes and module-local structural resource identity.
     pub file_value_resolution: Option<
         Rc<crate::compiler_frontend::ast::module_ast::scope_context::FileValueResolutionServices>,
@@ -215,14 +212,16 @@ pub(crate) struct AstPhaseContext<'a> {
     pub(crate) source_build_config_contract_names: Arc<FxHashSet<BuildInputName>>,
     pub(crate) root_role: ModuleRootRole,
     pub(crate) build_profile: FrontendBuildProfile,
-    /// The compilation boundary's `Int` width and `Float` precision, copied from
-    /// [`AstBuildContext`] so every AST phase and child scope reads one boundary fact.
-    pub(crate) numeric_profile: NumericProfile,
     pub(crate) template_const_loop_iteration_limit: usize,
     pub(crate) capacity_estimate: FrontendArenaCapacityEstimate,
 
     /// Shared module-local TIR store for this AST phase.
     pub(crate) template_ir_store: Rc<RefCell<TemplateIrStore>>,
+
+    /// Completed semantic nodes in this phase's expression/TIR domain.
+    pub(crate) expression_builder: AstExpressionBuilder,
+    /// Constant content is available at declaration, default and body-fold boundaries.
+    pub(crate) const_values: ConstValueStore,
 
     /// Timer-only attribution context for this AST phase.
     #[cfg(feature = "timers")]
@@ -238,15 +237,14 @@ impl<'a> AstPhaseContext<'a> {
     ///
     /// WHAT: extracts all fields except `string_table`/`path_fork` into `AstPhaseContext` and
     ///       returns the tables as separate mutable references.
-    /// WHY: lets the caller pass the phase context and tables independently,
-    ///      resolving Rust's borrow checker constraints across phase boundaries.
+    /// WHY: lets the caller pass the phase context and tables independently.
+    /// Owner-token allocation failures retain the mutable string table's diagnostic context.
     pub(in crate::compiler_frontend) fn from_build_context(
         context: AstBuildContext<'a>,
         source_build_config_contract_names: Arc<FxHashSet<BuildInputName>>,
-    ) -> (Self, &'a mut StringTable, &'a mut PathInternerFork) {
+    ) -> Result<(Self, &'a mut StringTable, &'a mut PathInternerFork), CompilerMessages> {
         let AstBuildContext {
             build_profile,
-            numeric_profile,
             external_package_registry,
             style_directives,
             string_table,
@@ -267,14 +265,15 @@ impl<'a> AstPhaseContext<'a> {
         let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::with_capacity_estimate(
             capacity_estimate,
         )));
-        (
+        let expression_builder = AstExpressionBuilder::with_capacity_estimate(capacity_estimate)
+            .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        Ok((
             Self {
                 external_package_registry,
                 style_directives,
                 entry_dir,
                 root_role,
                 build_profile,
-                numeric_profile,
                 file_value_resolution,
                 config_resolution,
                 build_config_values,
@@ -282,6 +281,8 @@ impl<'a> AstPhaseContext<'a> {
                 template_const_loop_iteration_limit,
                 capacity_estimate,
                 template_ir_store,
+                expression_builder,
+                const_values: ConstValueStore::default(),
                 #[cfg(feature = "timers")]
                 timing_context,
                 #[cfg(feature = "timers")]
@@ -289,6 +290,6 @@ impl<'a> AstPhaseContext<'a> {
             },
             string_table,
             path_fork,
-        )
+        ))
     }
 }

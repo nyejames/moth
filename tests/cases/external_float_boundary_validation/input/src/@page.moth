@@ -1,6 +1,6 @@
 @bad_float.js unsafe_float
 
-load_code || -> Int, Error!:
+load_code || -> I32, Error!:
     value = unsafe_float()
 
     if value > 0.0:

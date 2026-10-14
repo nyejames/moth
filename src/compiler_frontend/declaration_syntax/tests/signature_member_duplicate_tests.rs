@@ -185,7 +185,7 @@ fn duplicate_function_parameters_rejected_by_shared_parser() {
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let token_stream = stream_positioned_at_open_bracket(
-        "fn | value Int, value Int | -> Int :",
+        "fn | value I32, value I32 | -> I32 :",
         &mut path_fork,
         &mut string_table,
         &mut span_builder,
@@ -220,7 +220,7 @@ fn duplicate_struct_fields_rejected_by_shared_parser() {
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let token_stream = stream_positioned_at_open_bracket(
-        "| value Int, value Int |",
+        "| value I32, value I32 |",
         &mut path_fork,
         &mut string_table,
         &mut span_builder,
@@ -256,7 +256,7 @@ fn duplicate_choice_payload_fields_rejected_by_shared_parser() {
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let token_stream = stream_positioned_at_open_bracket(
-        "| message String, message Int |",
+        "| message String, message I32 |",
         &mut path_fork,
         &mut string_table,
         &mut span_builder,
@@ -292,7 +292,7 @@ fn duplicate_trait_requirement_parameters_rejected_by_shared_parser() {
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let token_stream = stream_positioned_at_open_bracket(
-        "| This, value Int, value Int | -> Int ;",
+        "| This, value I32, value I32 | -> I32 ;",
         &mut path_fork,
         &mut string_table,
         &mut span_builder,
@@ -327,7 +327,7 @@ fn distinct_members_parse_successfully_through_shared_parser() {
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
     let token_stream = stream_positioned_at_open_bracket(
-        "| first Int, second String |",
+        "| first I32, second String |",
         &mut path_fork,
         &mut string_table,
         &mut span_builder,

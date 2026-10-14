@@ -1,6 +1,6 @@
 //! HIR function declarations.
 //!
-//! WHAT: function-level HIR metadata, including entry block, parameters, return type, and semantic
+//! WHAT: function-level HIR metadata, including entry block, parameters, result channels and semantic
 //! origin classification.
 //! WHY: backends need to distinguish regular functions from the implicit entry `start` function.
 
@@ -158,5 +158,6 @@ pub struct HirFunction {
     pub entry: BlockId,
     /// Locals defined by entering this function under its call ABI contract.
     pub params: Vec<LocalId>,
-    pub return_type: TypeId,
+    pub returns: Box<[TypeId]>,
+    pub error_return: Option<TypeId>,
 }

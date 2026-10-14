@@ -1,2 +1,1 @@
--- Test stray | in expression position
-result = 1 | 2
+#[:<h1>Rejected</h1>]

@@ -1,4 +1,4 @@
-reject_int_arithmetic |value Uint, integer Int| -> String:
-    result = value + integer
+reject_int_arithmetic |value U32, integer I32| -> String:
+    result U32 = value + integer
     return [result]
 ;

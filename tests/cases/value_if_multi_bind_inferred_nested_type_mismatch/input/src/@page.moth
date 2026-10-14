@@ -1,4 +1,4 @@
-choose |maybe_name String?, use_fallback Bool| -> String, Int:
+choose |maybe_name String?, use_fallback Bool| -> String, I32:
     first, second = if maybe_name is |name|:
         if use_fallback:
             then name, 1

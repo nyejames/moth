@@ -1,0 +1,20 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0045", "MOTH-RULE-0045"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0045"
+occurrence = 1
+reason = "invalid_multi_bind.existing_target_mutable_marker"
+path = "input/pending_numeric_target/@mod.moth"
+line = 7
+column = 7
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0045"
+occurrence = 2
+reason = "invalid_multi_bind.existing_target_mutable_marker"
+path = "input/ready_target/@mod.moth"
+line = 7
+column = 7

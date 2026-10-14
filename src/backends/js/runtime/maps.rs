@@ -16,16 +16,10 @@
 //! - Error messages are deterministic and do not render arbitrary keys.
 
 use crate::backends::js::JsEmitter;
-use crate::backends::js::numeric_carrier::JsNumericCarrier;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
-use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 
 impl<'hir> JsEmitter<'hir> {
     pub(crate) fn emit_runtime_map_helpers(&mut self) {
-        let profile = self.config.numeric_profile;
-        let int_carrier = JsNumericCarrier::for_scalar(NumericScalar::Int, profile)
-            .expect("Int always has a JavaScript numeric carrier");
-
         let invalid_map = BuiltinErrorCode::MapExpectedOrderedMap;
         let invalid_map_code = invalid_map.as_u32().to_string();
         let invalid_map_message = invalid_map.default_message();
@@ -34,16 +28,8 @@ impl<'hir> JsEmitter<'hir> {
         let key_not_found_code = key_not_found.as_u32().to_string();
         let key_not_found_message = key_not_found.default_message();
 
-        let length_value = match int_carrier {
-            JsNumericCarrier::ExactInteger { .. } => "map.map.size",
-            JsNumericCarrier::BigInteger { .. } => "BigInt(map.map.size)",
-            JsNumericCarrier::BinaryFloat { .. } => {
-                unreachable!("Int carrier cannot be a binary float")
-            }
-            JsNumericCarrier::ScaledInteger { .. } => {
-                unreachable!("Int carrier cannot be a Number")
-            }
-        };
+        // Map lengths are exactly I32, whose JS carrier is the exact Number carrier.
+        let length_value = "map.map.size";
 
         // Branded wrapper so runtime helpers can distinguish maps from arbitrary objects.
         self.emit_line("function __moth_map_new(entries) {");
@@ -117,6 +103,7 @@ impl<'hir> JsEmitter<'hir> {
                 ));
             });
             emitter.emit_line("}");
+            emitter.emit_line("if (map.map.size >= 2147483647 && !map.map.has(key)) throw new RangeError(\"Map length exceeds the I32 length carrier\");");
             emitter.emit_line("map.map.set(key, value);");
             emitter.emit_line("return { tag: \"ok\", value: null };");
         });

@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "i8_i8=4/0/4/1/1/0/4/true i16_i16=4/0/4/1/1/0/4/true i32_i32=4/0/4/1/1/0/4/true i64_i64=4/0/4/1/1/0/4/true u8_u8=4/0/4/1/1/0/4/true u16_u16=4/0/4/1/1/0/4/true u32_u32=4/0/4/1/1/0/4/true u64_u64=4/0/4/1/1/0/4/true f16_f16=4/0/4/1/0/4/true f32_f32=4/0/4/1/0/4/true f64_f64=4/0/4/1/0/4/true"

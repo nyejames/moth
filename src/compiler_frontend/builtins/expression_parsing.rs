@@ -5,10 +5,12 @@
 //! surfaces does not keep bloating the generic expression parser.
 
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
-use crate::compiler_frontend::ast::statements::collections::new_curly_literal;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
+use crate::compiler_frontend::ast::statements::collections::{CurlyLiteral, new_curly_literal};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, TypeMismatchContext};
 use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
@@ -33,12 +35,16 @@ pub(crate) fn parse_curly_literal_expression(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     expected_type: &ExpectedType,
     value_mode: &ValueMode,
+    retain_pending_numeric_fragment: bool,
     expression: &mut Vec<ExpressionRpnItem>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
+    let literal_span = Some(token_stream.current_span());
     let curly_context = match expected_type {
         ExpectedType::Known(type_id) => {
             let type_environment = type_interner.environment();
@@ -75,14 +81,25 @@ pub(crate) fn parse_curly_literal_expression(
 
         ExpectedType::NumericLiteral(_) | ExpectedType::Infer => ExpectedCurlyLiteralContext::Infer,
     };
-    expression.push(ExpressionRpnItem::Operand(new_curly_literal(
+    match new_curly_literal(
         token_stream,
         curly_context,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         value_mode,
         string_table,
         path_fork,
-    )?));
+        retain_pending_numeric_fragment,
+    )? {
+        CurlyLiteral::Ready(literal) => expression.push(ExpressionRpnItem::Operand(literal.id())),
+        CurlyLiteral::Retained(deferred) => {
+            expression.push(ExpressionRpnItem::PendingNumericExpression {
+                expression: Box::new(deferred),
+                span: literal_span,
+            })
+        }
+    }
     Ok(())
 }

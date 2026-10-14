@@ -131,7 +131,7 @@ impl ScopeArena {
         &self,
         frame_id: ScopeFrameId,
         name: &StringId,
-    ) -> Option<(Rc<Declaration>, Option<SourceSpan>)> {
+    ) -> Option<(LocalDeclarationSlot, Option<SourceSpan>)> {
         let mut steps: usize = 0;
         let mut current_id = Some(frame_id);
 
@@ -141,7 +141,7 @@ impl ScopeArena {
                 add_ast_counter(AstCounter::ScopeFrameLookupAncestorSteps, steps);
                 return indices.last().map(|index| {
                     let entry = &frame.local_declarations[*index as usize];
-                    (Rc::clone(&entry.declaration), entry.binding_span)
+                    (entry.slot.clone(), entry.binding_span)
                 });
             }
 
@@ -219,14 +219,37 @@ impl Default for ScopeArena {
 #[path = "scope_frame_tests.rs"]
 mod scope_frame_tests;
 
+/// One body-local frame slot.
+///
+/// WHAT: either the binding's current ready `Rc<Declaration>` or a compact ID into the
+///       body-owned pending numeric construction table.
+/// WHY: an unannotated numeric binding's single static type is selected from every
+///      permitted use before defaults, so no `Declaration` (and no placeholder `TypeId`)
+///      may exist while it is still pending. Lookup and the name index keep working for
+///      both states without a parallel pending-name map or per-binding allocation.
+#[derive(Clone)]
+pub(crate) enum LocalDeclarationSlot {
+    Ready(Rc<Declaration>),
+    Pending {
+        binding: crate::compiler_frontend::ast::numeric_construction::NumericBindingId,
+        /// The construction domain that owns `binding`.
+        ///
+        /// WHY: frame lookup walks parent chains, so a frame reached from another independent
+        ///      body root could otherwise expose a dense binding ID that indexes a *different*
+        ///      body's construction tables. Lookup compares this owner against the querying
+        ///      context's domain before the ID can be used.
+        domain: crate::compiler_frontend::ast::numeric_construction::NumericConstructionDomainId,
+    },
+}
+
 /// A body-local declaration paired with its authored binding-name source span.
 ///
-/// WHAT: stores the declaration alongside the exact span where the binding name was authored.
+/// WHAT: stores the frame slot alongside the exact span where the binding name was authored.
 /// WHY: immutable assignment diagnostics add a secondary label at the original binding
 ///      declaration, not at the initializer expression. Synthetic declarations use `None`.
 #[derive(Clone)]
 pub(crate) struct LocalDeclaration {
-    pub(crate) declaration: Rc<Declaration>,
+    pub(crate) slot: LocalDeclarationSlot,
     pub(crate) binding_span: Option<SourceSpan>,
 }
 
@@ -334,9 +357,74 @@ impl ScopeFrame {
                 .push(index);
         }
         self.local_declarations.push(LocalDeclaration {
-            declaration: Rc::new(declaration),
+            slot: LocalDeclarationSlot::Ready(Rc::new(declaration)),
             binding_span,
         });
+    }
+
+    /// Insert one pending numeric binding into this frame's name index.
+    ///
+    /// WHAT: appends a `Pending` slot under the binding's authored name so the existing
+    ///       name index and parent walk resolve it, exactly like a ready declaration.
+    /// WHY: an eligible unannotated numeric binding must stay visible for later uses while
+    ///      its single static type is still being collected, without a parallel pending-name
+    ///      lookup and without fabricating a `Declaration`.
+    pub(crate) fn add_pending_numeric_var(
+        &mut self,
+        binding_name: StringId,
+        binding: crate::compiler_frontend::ast::numeric_construction::NumericBindingId,
+        domain: crate::compiler_frontend::ast::numeric_construction::NumericConstructionDomainId,
+        binding_span: Option<SourceSpan>,
+    ) {
+        let index = self.local_declarations.len() as u32;
+        self.local_declarations_by_name
+            .entry(binding_name)
+            .or_default()
+            .push(index);
+        self.local_declarations.push(LocalDeclaration {
+            slot: LocalDeclarationSlot::Pending { binding, domain },
+            binding_span,
+        });
+    }
+
+    /// Upgrade one pending slot in place once the binding's declaration is ready.
+    ///
+    /// WHAT: addresses the slot through the existing name index under the binding's
+    ///       authored name, validates the candidate's pending binding/domain, then
+    ///       replaces only the slot payload; the name index, authored binding identity
+    ///       and frame position stay stable.
+    /// WHY: completion must not disturb lookup order, shadowing rules or authored spans,
+    ///      and must not rescan unrelated ready slots to reach its own pending entry.
+    pub(crate) fn upgrade_pending_numeric_var(
+        &mut self,
+        binding_name: StringId,
+        domain: crate::compiler_frontend::ast::numeric_construction::NumericConstructionDomainId,
+        binding: crate::compiler_frontend::ast::numeric_construction::NumericBindingId,
+        declaration: Declaration,
+    ) -> bool {
+        let Some(indices) = self.local_declarations_by_name.get(&binding_name) else {
+            return false;
+        };
+        let mut matched: Option<u32> = None;
+        for index in indices {
+            if let Some(entry) = self.local_declarations.get(*index as usize)
+                && let LocalDeclarationSlot::Pending {
+                    binding: slot_binding,
+                    domain: slot_domain,
+                } = &entry.slot
+                && *slot_binding == binding
+                && *slot_domain == domain
+            {
+                matched = Some(*index);
+                break;
+            }
+        }
+        let Some(matched) = matched else {
+            return false;
+        };
+        self.local_declarations[matched as usize].slot =
+            LocalDeclarationSlot::Ready(Rc::new(declaration));
+        true
     }
 
     /// Add a body-local declaration authored with `#`.
@@ -371,7 +459,7 @@ impl ScopeFrame {
             .into_iter()
             .map(|declaration| LocalDeclaration {
                 binding_span: declaration.binding_span,
-                declaration: Rc::new(declaration),
+                slot: LocalDeclarationSlot::Ready(Rc::new(declaration)),
             })
             .collect();
     }

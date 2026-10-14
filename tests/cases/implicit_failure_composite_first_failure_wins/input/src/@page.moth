@@ -1,18 +1,18 @@
-double |value Int| -> Int:
+double |value I32| -> I32:
     return value + 2147483647
 ;
 
-combine |left Int, right Int| -> Int:
-    return left + right
+combine |lhs I32, rhs I32| -> I32:
+    return lhs + rhs
 ;
 
 trace ~U32 = 0
-left |seen ~U32, value Int| -> Int:
+left |seen ~U32, value I32| -> I32:
     seen = seen + 1
     return value + 2147483647
 ;
 
-right |seen ~U32, value Int| -> Int:
+right |seen ~U32, value I32| -> I32:
     seen = seen + 10
     return value + 2147483647
 ;
@@ -32,3 +32,27 @@ second = combine(right(~trace, 2), left(~trace, 1)) catch |second_err|:
 after_second = trace
 
 [: composite first-failure first=[first] code=[first_code] spent=[after_first] second=[second] code2=[second_code] spent2=[after_second]]
+
+-- Distinct failure codes expose which arithmetic ran first, independently
+-- of fallback values. The skipped operand must not increment its trace.
+overflow_operand |seen ~U32, value I32| -> I32:
+    seen += 1
+    return value + 1
+;
+zero_operand |seen ~U32, dividend I32, divisor I32| -> I32:
+    seen += 10
+    return dividend // divisor
+;
+overflow_first_trace ~U32 = 0
+overflow_first_code ~U32 = 0
+overflow_first = overflow_operand(~overflow_first_trace, 2147483647) + zero_operand(~overflow_first_trace, 1, 0) catch |overflow_first_error|:
+    overflow_first_code = overflow_first_error.code
+    then 0
+;
+zero_first_trace ~U32 = 0
+zero_first_code ~U32 = 0
+zero_first = zero_operand(~zero_first_trace, 1, 0) + overflow_operand(~zero_first_trace, 2147483647) catch |zero_first_error|:
+    zero_first_code = zero_first_error.code
+    then 0
+;
+[:numeric order overflow-first=[overflow_first_code]/[overflow_first_trace]/[overflow_first] zero-first=[zero_first_code]/[zero_first_trace]/[zero_first]]

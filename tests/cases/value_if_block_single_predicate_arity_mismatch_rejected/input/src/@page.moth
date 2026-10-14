@@ -1,5 +1,5 @@
-pair_for |maybe_name String?| -> String, Int:
-    label String, count Int = if maybe_name is |name|:
+pair_for |maybe_name String?| -> String, I32:
+    label String, count I32 = if maybe_name is |name|:
         then name
     else
         then "guest"

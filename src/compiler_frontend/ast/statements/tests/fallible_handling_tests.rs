@@ -6,8 +6,9 @@
 
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
 use crate::compiler_frontend::ast::expressions::expression::{
-    ExpressionKind, FallibleExpressionHandling, FallibleHandling,
+    FallibleExpressionHandling, FallibleHandling,
 };
+use crate::compiler_frontend::ast::expressions::expression_store::ExpressionOperationView;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidAssignmentTargetReason, InvalidFallibleHandlingReason,
@@ -19,6 +20,156 @@ use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
+
+#[test]
+fn optional_propagation_call_argument_preserves_unwrapped_receiving_type() {
+    let (ast, paths, strings) = parse_single_file_ast(
+        "identity |text String| -> String:\n    return text\n;\nreceive |value String?| -> String?:\n    return identity(value?)\n;\n",
+    );
+    let body = function_body_by_name(&ast, &paths, &strings, "receive");
+    let NodeKind::Return(values) = &body[0].kind else {
+        panic!("expected optional return");
+    };
+    assert_eq!(values.len(), 1);
+    let returned = ast.expressions.view(values[0]).unwrap();
+    let optional_type = returned.value_type_id().unwrap();
+    assert_eq!(
+        ast.type_environment.option_inner_type(optional_type),
+        Some(builtin_type_ids::STRING)
+    );
+    let call_value = match returned.operation() {
+        ExpressionOperationView::Coerce { value, .. } => value,
+        _ => returned,
+    };
+    assert_eq!(call_value.success_types(), &[builtin_type_ids::STRING]);
+    let ExpressionOperationView::Call(call) = call_value.operation() else {
+        panic!("expected typed source-call consumer");
+    };
+    assert_eq!(call.arguments().len(), 1);
+    let argument = call.arguments().iter().next().unwrap();
+    assert_eq!(argument.metadata().parameter_slot, Some(0));
+    let propagated = argument.value();
+    assert_eq!(propagated.success_types(), &[builtin_type_ids::STRING]);
+    assert_eq!(propagated.error_type(), None);
+    let ExpressionOperationView::PropagateOption { value } = propagated.operation() else {
+        panic!("expected argument's optional exit before its consumer call");
+    };
+    assert_eq!(value.success_types(), &[optional_type]);
+    assert!(matches!(
+        value.operation(),
+        ExpressionOperationView::Reference(_)
+    ));
+}
+
+#[test]
+fn optional_propagation_context_reasons_retain_authored_operator_span() {
+    let cases = [
+        (
+            "receive |value String| -> String?:\n    return value?\n;\n",
+            InvalidFallibleHandlingReason::NotOptionExpression,
+        ),
+        (
+            "receive |value String?| -> String:\n    return value?\n;\n",
+            InvalidFallibleHandlingReason::FunctionHasNoOptionalReturn,
+        ),
+        (
+            "find || -> String?:\n    return \"Priya\"\n;\nfind()?\n",
+            InvalidFallibleHandlingReason::FunctionHasNoOptionalReturn,
+        ),
+        (
+            "receive |value String?|:\n    io.line(value?)\n;\n",
+            InvalidFallibleHandlingReason::FunctionHasNoOptionalReturn,
+        ),
+        (
+            "receive |value String?| -> String?, I32:\n    name = value?\n    return name, 1\n;\n",
+            InvalidFallibleHandlingReason::FunctionHasMultipleSuccessReturns { count: 2 },
+        ),
+        (
+            "receive |value String?| -> I32?:\n    name = value?\n    return 1\n;\n",
+            InvalidFallibleHandlingReason::OptionPropagationReturnTypeMismatch,
+        ),
+    ];
+    for (source, expected_reason) in cases {
+        let diagnostic = parse_single_file_ast_diagnostic(source);
+        assert!(matches!(
+            diagnostic.payload,
+            DiagnosticPayload::InvalidFallibleHandling { reason } if reason == expected_reason
+        ));
+        assert_postfix_span(source, '?', diagnostic.primary_span);
+    }
+}
+
+#[test]
+fn error_propagation_without_error_slot_retains_authored_operator_span() {
+    let source = "produce || -> I32, Error!:\n    return! Error(\"failed\")\n;\nreceive || -> I32:\n    return produce()!\n;\n";
+    let diagnostic = parse_single_file_ast_diagnostic(source);
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::InvalidFallibleHandling {
+            reason: InvalidFallibleHandlingReason::FunctionHasNoErrorSlot,
+        }
+    ));
+    assert_postfix_span(source, '!', diagnostic.primary_span);
+}
+
+#[test]
+fn error_propagation_incompatible_entry_retains_error_types_and_operator_span() {
+    let source = "produce || -> I32, String!:\n    return! \"failed\"\n;\nvalue = produce()!\n";
+    let diagnostic = parse_single_file_ast_diagnostic(source);
+    let expected_error = parsed_builtin_error_type();
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::InvalidFallibleHandling {
+            reason: InvalidFallibleHandlingReason::EntryHasIncompatibleError {
+                produced_error_type: builtin_type_ids::STRING,
+                entry_error_type,
+            },
+        } if entry_error_type == expected_error
+    ));
+    assert_postfix_span(source, '!', diagnostic.primary_span);
+}
+
+#[test]
+fn error_propagation_return_mismatch_retains_error_types_and_operator_span() {
+    let source = "produce || -> I32, String!:\n    return! \"failed\"\n;\nreceive || -> I32, Error!:\n    return produce()!\n;\n";
+    let diagnostic = parse_single_file_ast_diagnostic(source);
+    let expected_error = parsed_builtin_error_type();
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::TypeMismatch {
+            expected,
+            found: builtin_type_ids::STRING,
+            context: TypeMismatchContext::ErrorReturn,
+        } if expected == expected_error
+    ));
+    assert_postfix_span(source, '!', diagnostic.primary_span);
+}
+
+fn parsed_builtin_error_type() -> crate::compiler_frontend::datatypes::ids::TypeId {
+    use crate::compiler_frontend::canonical_type_identity::{
+        CanonicalBuiltinType, CanonicalTypeIdentity,
+    };
+    let (ast, _, _) = parse_single_file_ast("");
+    ast.type_environment
+        .type_id_for_canonical_identity(&CanonicalTypeIdentity::Builtin(
+            CanonicalBuiltinType::Error,
+        ))
+        .expect("entry Error contract")
+}
+
+fn assert_postfix_span(
+    source: &str,
+    operator: char,
+    actual: Option<crate::compiler_frontend::source::SourceSpan>,
+) {
+    use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
+    let start = source.rfind(operator).expect("authored postfix operator");
+    let local = LocalSpan::exact(start as u32, 1, &mut ExtendedSpanBuilder::new()).unwrap();
+    assert_eq!(
+        actual,
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, local))
+    );
+}
 
 // --------------------------
 //  Catch handler with fallback
@@ -35,18 +186,42 @@ fn parses_catch_handler_with_fallback() {
         panic!("expected declaration statement in recover()")
     };
 
-    let ExpressionKind::ValueBlock { block } = &output_decl.value.kind else {
+    let ExpressionOperationView::ValueBlock(block) = ast
+        .expressions
+        .view(
+            output_decl
+                .value
+                .initializer()
+                .expect("fixture initializer"),
+        )
+        .unwrap()
+        .operation()
+    else {
         panic!("expected catch value block in recover declaration")
     };
-    let ValueBlock::Catch(value_catch) = block.as_ref() else {
+    let ValueBlock::Catch(value_catch) = block else {
         panic!("expected catch value block")
     };
-    let ExpressionKind::HandledFallibleFunctionCall { handling, .. } =
-        &value_catch.handled_value.kind
+    let ExpressionOperationView::Call(call) = ast
+        .expressions
+        .view(value_catch.handled_value)
+        .unwrap()
+        .operation()
     else {
         panic!("expected handled call expression in catch value block")
     };
-    assert!(matches!(handling, FallibleExpressionHandling::Recover));
+    assert!(matches!(
+        call.handling().unwrap().handling,
+        FallibleExpressionHandling::Recover
+    ));
+    assert_eq!(
+        ast.expressions
+            .view(value_catch.handled_value)
+            .unwrap()
+            .success_types()
+            .len(),
+        1
+    );
     let FallibleHandling::Handler {
         body: handler_body, ..
     } = &value_catch.handler
@@ -69,18 +244,34 @@ fn parses_catch_handler_fallback_that_reads_error_binding() {
         panic!("expected declaration statement in recover()")
     };
 
-    let ExpressionKind::ValueBlock { block } = &output_decl.value.kind else {
+    let ExpressionOperationView::ValueBlock(block) = ast
+        .expressions
+        .view(
+            output_decl
+                .value
+                .initializer()
+                .expect("fixture initializer"),
+        )
+        .unwrap()
+        .operation()
+    else {
         panic!("expected catch value block in recover declaration")
     };
-    let ValueBlock::Catch(value_catch) = block.as_ref() else {
+    let ValueBlock::Catch(value_catch) = block else {
         panic!("expected catch value block")
     };
-    let ExpressionKind::HandledFallibleFunctionCall { handling, .. } =
-        &value_catch.handled_value.kind
+    let ExpressionOperationView::Call(call) = ast
+        .expressions
+        .view(value_catch.handled_value)
+        .unwrap()
+        .operation()
     else {
         panic!("expected handled call expression in catch value block")
     };
-    assert!(matches!(handling, FallibleExpressionHandling::Recover));
+    assert!(matches!(
+        call.handling().unwrap().handling,
+        FallibleExpressionHandling::Recover
+    ));
     let FallibleHandling::Handler { body, .. } = &value_catch.handler else {
         panic!("expected catch handler handling")
     };
@@ -102,27 +293,50 @@ fn preserves_u32_peer_and_fallback_literal_types_in_expression_catch() {
         panic!("expected recovered return");
     };
     let u32_type_id = builtin_type_ids::fixed_scalar(FixedScalar::U32);
-    assert_eq!(values[0].type_id, u32_type_id);
-    let ExpressionKind::ValueBlock { block } = &values[0].kind else {
+    assert_eq!(
+        ast.expressions
+            .view(values[0])
+            .unwrap()
+            .value_type_id()
+            .unwrap(),
+        u32_type_id
+    );
+    let ExpressionOperationView::ValueBlock(block) =
+        ast.expressions.view(values[0]).unwrap().operation()
+    else {
         panic!("expected expression catch");
     };
-    let ValueBlock::Catch(catch) = block.as_ref() else {
+    let ValueBlock::Catch(catch) = block else {
         panic!("expected catch value block");
     };
-    assert_eq!(catch.handled_value.type_id, u32_type_id);
+    assert_eq!(
+        ast.expressions
+            .view(catch.handled_value)
+            .unwrap()
+            .value_type_id()
+            .unwrap(),
+        u32_type_id
+    );
     let FallibleHandling::Handler { body, .. } = &catch.handler else {
         panic!("expected recovery handler");
     };
     let NodeKind::ThenValue(fallback) = &body[0].kind else {
         panic!("expected literal fallback");
     };
-    assert_eq!(fallback.expressions[0].type_id, u32_type_id);
+    assert_eq!(
+        ast.expressions
+            .view(fallback.expressions[0])
+            .unwrap()
+            .value_type_id()
+            .unwrap(),
+        u32_type_id
+    );
 }
 
 #[test]
 fn parses_inline_catch_fallback_as_value_block() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
-        "can_error || -> Int, Error!:\n    return! Error(\"boom\")\n;\n\nrecover || -> Int:\n    value = can_error() catch then 0\n    return value\n;\n",
+        "can_error || -> I32, Error!:\n    return! Error(\"boom\")\n;\n\nrecover || -> I32:\n    value = can_error() catch then 0\n    return value\n;\n",
     );
 
     let body = function_body_by_name(&ast, &path_fork, &string_table, "recover");
@@ -130,18 +344,29 @@ fn parses_inline_catch_fallback_as_value_block() {
         panic!("expected declaration statement in recover()")
     };
 
-    let ExpressionKind::ValueBlock { block } = &value_decl.value.kind else {
+    let ExpressionOperationView::ValueBlock(block) = ast
+        .expressions
+        .view(value_decl.value.initializer().expect("fixture initializer"))
+        .unwrap()
+        .operation()
+    else {
         panic!("expected inline catch to parse as a value block")
     };
-    let ValueBlock::Catch(value_catch) = block.as_ref() else {
+    let ValueBlock::Catch(value_catch) = block else {
         panic!("expected catch value block")
     };
-    let ExpressionKind::HandledFallibleFunctionCall { handling, .. } =
-        &value_catch.handled_value.kind
+    let ExpressionOperationView::Call(call) = ast
+        .expressions
+        .view(value_catch.handled_value)
+        .unwrap()
+        .operation()
     else {
         panic!("expected handled call expression in catch value block")
     };
-    assert!(matches!(handling, FallibleExpressionHandling::Recover));
+    assert!(matches!(
+        call.handling().unwrap().handling,
+        FallibleExpressionHandling::Recover
+    ));
     let FallibleHandling::Handler { body, .. } = &value_catch.handler else {
         panic!("expected catch handler handling")
     };
@@ -161,18 +386,34 @@ fn parses_inline_catch_fallback_that_reads_error_binding() {
         panic!("expected declaration statement in recover()")
     };
 
-    let ExpressionKind::ValueBlock { block } = &output_decl.value.kind else {
+    let ExpressionOperationView::ValueBlock(block) = ast
+        .expressions
+        .view(
+            output_decl
+                .value
+                .initializer()
+                .expect("fixture initializer"),
+        )
+        .unwrap()
+        .operation()
+    else {
         panic!("expected inline catch to parse as a value block")
     };
-    let ValueBlock::Catch(value_catch) = block.as_ref() else {
+    let ValueBlock::Catch(value_catch) = block else {
         panic!("expected catch value block")
     };
-    let ExpressionKind::HandledFallibleFunctionCall { handling, .. } =
-        &value_catch.handled_value.kind
+    let ExpressionOperationView::Call(call) = ast
+        .expressions
+        .view(value_catch.handled_value)
+        .unwrap()
+        .operation()
     else {
         panic!("expected handled call expression in catch value block")
     };
-    assert!(matches!(handling, FallibleExpressionHandling::Recover));
+    assert!(matches!(
+        call.handling().unwrap().handling,
+        FallibleExpressionHandling::Recover
+    ));
     let FallibleHandling::Handler { body, error } = &value_catch.handler else {
         panic!("expected catch handler handling")
     };
@@ -197,18 +438,34 @@ fn parses_catch_handler_without_fallback_when_handler_guarantees_return() {
         panic!("expected declaration statement in recover()")
     };
 
-    let ExpressionKind::ValueBlock { block } = &output_decl.value.kind else {
+    let ExpressionOperationView::ValueBlock(block) = ast
+        .expressions
+        .view(
+            output_decl
+                .value
+                .initializer()
+                .expect("fixture initializer"),
+        )
+        .unwrap()
+        .operation()
+    else {
         panic!("expected catch value block in recover declaration")
     };
-    let ValueBlock::Catch(value_catch) = block.as_ref() else {
+    let ValueBlock::Catch(value_catch) = block else {
         panic!("expected catch value block")
     };
-    let ExpressionKind::HandledFallibleFunctionCall { handling, .. } =
-        &value_catch.handled_value.kind
+    let ExpressionOperationView::Call(call) = ast
+        .expressions
+        .view(value_catch.handled_value)
+        .unwrap()
+        .operation()
     else {
         panic!("expected handled call expression in catch value block")
     };
-    assert!(matches!(handling, FallibleExpressionHandling::Recover));
+    assert!(matches!(
+        call.handling().unwrap().handling,
+        FallibleExpressionHandling::Recover
+    ));
     let FallibleHandling::Handler {
         body: handler_body, ..
     } = &value_catch.handler
@@ -230,18 +487,34 @@ fn parses_catch_handler_without_fallback_when_handler_ends_with_assert_false() {
         panic!("expected declaration statement in recover()")
     };
 
-    let ExpressionKind::ValueBlock { block } = &output_decl.value.kind else {
+    let ExpressionOperationView::ValueBlock(block) = ast
+        .expressions
+        .view(
+            output_decl
+                .value
+                .initializer()
+                .expect("fixture initializer"),
+        )
+        .unwrap()
+        .operation()
+    else {
         panic!("expected catch value block in recover declaration")
     };
-    let ValueBlock::Catch(value_catch) = block.as_ref() else {
+    let ValueBlock::Catch(value_catch) = block else {
         panic!("expected catch value block")
     };
-    let ExpressionKind::HandledFallibleFunctionCall { handling, .. } =
-        &value_catch.handled_value.kind
+    let ExpressionOperationView::Call(call) = ast
+        .expressions
+        .view(value_catch.handled_value)
+        .unwrap()
+        .operation()
     else {
         panic!("expected handled call expression in catch value block")
     };
-    assert!(matches!(handling, FallibleExpressionHandling::Recover));
+    assert!(matches!(
+        call.handling().unwrap().handling,
+        FallibleExpressionHandling::Recover
+    ));
     let FallibleHandling::Handler {
         body: handler_body, ..
     } = &value_catch.handler
@@ -264,18 +537,34 @@ fn parses_catch_handler_without_fallback_when_handler_ends_with_assert_false_no_
         panic!("expected declaration statement in recover()")
     };
 
-    let ExpressionKind::ValueBlock { block } = &output_decl.value.kind else {
+    let ExpressionOperationView::ValueBlock(block) = ast
+        .expressions
+        .view(
+            output_decl
+                .value
+                .initializer()
+                .expect("fixture initializer"),
+        )
+        .unwrap()
+        .operation()
+    else {
         panic!("expected catch value block in recover declaration")
     };
-    let ValueBlock::Catch(value_catch) = block.as_ref() else {
+    let ValueBlock::Catch(value_catch) = block else {
         panic!("expected catch value block")
     };
-    let ExpressionKind::HandledFallibleFunctionCall { handling, .. } =
-        &value_catch.handled_value.kind
+    let ExpressionOperationView::Call(call) = ast
+        .expressions
+        .view(value_catch.handled_value)
+        .unwrap()
+        .operation()
     else {
         panic!("expected handled call expression in catch value block")
     };
-    assert!(matches!(handling, FallibleExpressionHandling::Recover));
+    assert!(matches!(
+        call.handling().unwrap().handling,
+        FallibleExpressionHandling::Recover
+    ));
     let FallibleHandling::Handler {
         body: handler_body, ..
     } = &value_catch.handler
@@ -322,7 +611,7 @@ fn accepts_catch_handler_with_mixed_produce_and_return_paths() {
 #[test]
 fn rejects_assignment_target_read_inside_catch_fallback() {
     assert_invalid_assignment_target(
-        "can_error || -> Int, Error!:\n    return 1\n;\n\nrecover || -> Int:\n    value ~= 0\n    value = can_error() catch:\n        then value\n    ;\n    return value\n;\n",
+        "can_error || -> I32, Error!:\n    return 1\n;\n\nrecover || -> I32:\n    value ~= 0\n    value = can_error() catch:\n        then value\n    ;\n    return value\n;\n",
         InvalidAssignmentTargetReason::UnavailableInCatchRecovery,
     );
 }
@@ -330,7 +619,7 @@ fn rejects_assignment_target_read_inside_catch_fallback() {
 #[test]
 fn rejects_assignment_target_read_inside_inline_catch_fallback() {
     assert_invalid_assignment_target(
-        "can_error || -> Int, Error!:\n    return 1\n;\n\nrecover || -> Int:\n    value ~= 0\n    value = can_error() catch then value\n    return value\n;\n",
+        "can_error || -> I32, Error!:\n    return 1\n;\n\nrecover || -> I32:\n    value ~= 0\n    value = can_error() catch then value\n    return value\n;\n",
         InvalidAssignmentTargetReason::UnavailableInCatchRecovery,
     );
 }
@@ -338,7 +627,7 @@ fn rejects_assignment_target_read_inside_inline_catch_fallback() {
 #[test]
 fn rejects_assignment_target_mutation_inside_catch_handler() {
     assert_invalid_assignment_target(
-        "can_error || -> Int, Error!:\n    return 1\n;\n\nrecover || -> Int:\n    value ~= 0\n    value = can_error() catch |err|:\n        value = 2\n        then 0\n    ;\n    return value\n;\n",
+        "can_error || -> I32, Error!:\n    return 1\n;\n\nrecover || -> I32:\n    value ~= 0\n    value = can_error() catch |err|:\n        value = 2\n        then 0\n    ;\n    return value\n;\n",
         InvalidAssignmentTargetReason::UnavailableInCatchRecovery,
     );
 }
@@ -346,7 +635,7 @@ fn rejects_assignment_target_mutation_inside_catch_handler() {
 #[test]
 fn rejects_multiline_inline_catch_fallback_value() {
     assert_invalid_fallible_handling(
-        "can_error || -> Int, Error!:\n    return 1\n;\n\nrecover || -> Int:\n    value = can_error() catch then\n        0\n    return value\n;\n",
+        "can_error || -> I32, Error!:\n    return 1\n;\n\nrecover || -> I32:\n    value = can_error() catch then\n        0\n    return value\n;\n",
         InvalidFallibleHandlingReason::InlineCatchMultiline,
     );
 }
@@ -354,7 +643,7 @@ fn rejects_multiline_inline_catch_fallback_value() {
 #[test]
 fn rejects_bound_inline_catch_with_line_break_before_then() {
     assert_invalid_fallible_handling(
-        "can_error || -> Int, Error!:\n    return 1\n;\n\nrecover || -> Int:\n    value = can_error() catch |err|\n        then err.code\n    return value\n;\n",
+        "can_error || -> I32, Error!:\n    return 1\n;\n\nrecover || -> I32:\n    value = can_error() catch |err|\n        then err.code\n    return value\n;\n",
         InvalidFallibleHandlingReason::InlineCatchMultiline,
     );
 }
@@ -363,7 +652,7 @@ fn rejects_bound_inline_catch_with_line_break_before_then() {
 fn rejects_unbound_inline_catch_then_at_eof() {
     // A missing inline catch fallback at a real EOF boundary must report the shared
     // missing-value reason at the boundary, not the multiline recovery reason.
-    let source = "can_error || -> Int, Error!:\n    return 1\n;\n\nvalue = can_error() catch then";
+    let source = "can_error || -> I32, Error!:\n    return 1\n;\n\nvalue = can_error() catch then";
     let diagnostic = parse_single_file_ast_diagnostic(source);
 
     assert!(matches!(
@@ -379,7 +668,7 @@ fn rejects_bound_inline_catch_then_at_eof() {
     // own binding-parse path and must report the same missing-value reason at the EOF
     // boundary.
     let source =
-        "can_error || -> Int, Error!:\n    return 1\n;\n\nvalue = can_error() catch |err| then";
+        "can_error || -> I32, Error!:\n    return 1\n;\n\nvalue = can_error() catch |err| then";
     let diagnostic = parse_single_file_ast_diagnostic(source);
 
     assert!(matches!(
@@ -392,7 +681,7 @@ fn rejects_bound_inline_catch_then_at_eof() {
 #[test]
 fn rejects_string_literal_as_catch_handler_binding() {
     assert_invalid_fallible_handling(
-        "can_error || -> Int, Error!:\n    return 1\n;\n\nrecover || -> Int:\n    value = can_error() catch |\"oops\"|:\n        then 0\n    ;\n    return value\n;\n",
+        "can_error || -> I32, Error!:\n    return 1\n;\n\nrecover || -> I32:\n    value = can_error() catch |\"oops\"|:\n        then 0\n    ;\n    return value\n;\n",
         InvalidFallibleHandlingReason::ExpectedCatchHandlerIdentifier,
     );
 }
@@ -404,7 +693,7 @@ fn rejects_string_literal_as_catch_handler_binding() {
 #[test]
 fn rejects_fallback_arity_mismatch_for_multi_value_success_returns() {
     let diagnostic = parse_single_file_ast_diagnostic(
-        "pair_error |value String| -> String, Int, Error!:\n    return! Error(\"boom\")\n;\n\nrecover |value String| -> String, Int:\n    first, count = pair_error(value) catch:\n        then \"fallback\", 0, 1\n    ;\n    return first, count\n;\n",
+        "pair_error |value String| -> String, I32, Error!:\n    return! Error(\"boom\")\n;\n\nrecover |value String| -> String, I32:\n    first, count = pair_error(value) catch:\n        then \"fallback\", 0, 1\n    ;\n    return first, count\n;\n",
     );
 
     assert!(matches!(
@@ -418,7 +707,7 @@ fn rejects_fallback_arity_mismatch_for_multi_value_success_returns() {
 #[test]
 fn rejects_fallback_type_mismatch_before_hir_lowering() {
     let diagnostic = parse_single_file_ast_diagnostic(
-        "can_error || -> Int, Error!:\n    return 1\n;\n\nrecover || -> Int:\n    return can_error() catch:\n        then \"fallback\"\n    ;\n;\n",
+        "can_error || -> I32, Error!:\n    return 1\n;\n\nrecover || -> I32:\n    return can_error() catch:\n        then \"fallback\"\n    ;\n;\n",
     );
 
     assert!(matches!(
@@ -433,7 +722,7 @@ fn rejects_fallback_type_mismatch_before_hir_lowering() {
 #[test]
 fn rejects_fallback_too_few_values_for_multi_success() {
     let diagnostic = parse_single_file_ast_diagnostic(
-        "pair_error |value String| -> String, Int, Error!:\n    return! Error(\"boom\")\n;\n\nrecover |value String| -> String, Int:\n    first, count = pair_error(value) catch:\n        then \"fallback\"\n    ;\n    return first, count\n;\n",
+        "pair_error |value String| -> String, I32, Error!:\n    return! Error(\"boom\")\n;\n\nrecover |value String| -> String, I32:\n    first, count = pair_error(value) catch:\n        then \"fallback\"\n    ;\n    return first, count\n;\n",
     );
 
     assert!(matches!(
@@ -450,7 +739,7 @@ fn rejects_fallback_too_few_values_for_multi_success() {
 #[test]
 fn rejects_fallback_too_many_values_for_single_success() {
     let diagnostic = parse_single_file_ast_diagnostic(
-        "can_error || -> Int, Error!:\n    return 1\n;\n\nrecover || -> Int:\n    return can_error() catch:\n        then 0, 1\n    ;\n;\n",
+        "can_error || -> I32, Error!:\n    return 1\n;\n\nrecover || -> I32:\n    return can_error() catch:\n        then 0, 1\n    ;\n;\n",
     );
 
     assert!(matches!(
@@ -466,7 +755,7 @@ fn rejects_fallback_statement_after_then_multiline() {
     // A bare literal after `then` is still not a valid statement, even though
     // ordinary statements after `then` are now parsed as unreachable handler tails.
     let diagnostic = parse_single_file_ast_diagnostic(
-        "can_error || -> Int, Error!:\n    return 1\n;\n\nrecover || -> Int:\n    return can_error() catch:\n        then 0\n        1\n    ;\n;\n",
+        "can_error || -> I32, Error!:\n    return 1\n;\n\nrecover || -> I32:\n    return can_error() catch:\n        then 0\n        1\n    ;\n;\n",
     );
 
     assert!(matches!(
@@ -487,8 +776,8 @@ fn accepts_then_none_for_optional_success() {
     };
 
     assert!(matches!(
-        return_values[0].kind,
-        ExpressionKind::ValueBlock { .. }
+        ast.expressions.view(return_values[0]).unwrap().operation(),
+        ExpressionOperationView::ValueBlock(_)
     ));
 }
 
@@ -504,15 +793,15 @@ fn accepts_then_string_for_optional_success() {
     };
 
     assert!(matches!(
-        return_values[0].kind,
-        ExpressionKind::ValueBlock { .. }
+        ast.expressions.view(return_values[0]).unwrap().operation(),
+        ExpressionOperationView::ValueBlock(_)
     ));
 }
 
 #[test]
 fn rejects_empty_catch_on_success_producing_call_without_then() {
     assert_invalid_fallible_handling(
-        "can_error || -> Int, Error!:\n    return 1\n;\n\nrecover || -> Int:\n    return can_error() catch:\n    ;\n;\n",
+        "can_error || -> I32, Error!:\n    return 1\n;\n\nrecover || -> I32:\n    return can_error() catch:\n    ;\n;\n",
         InvalidFallibleHandlingReason::CatchHandlerCanFallThrough,
     );
 }
@@ -528,26 +817,42 @@ fn accepts_empty_catch_on_zero_success_statement() {
         panic!("expected expression statement in recover()")
     };
 
-    let ExpressionKind::ValueBlock { block } = &expression.kind else {
+    let ExpressionOperationView::ValueBlock(block) =
+        ast.expressions.view(*expression).unwrap().operation()
+    else {
         panic!("expected zero-success catch statement to parse as a catch value block");
     };
-    let ValueBlock::Catch(value_catch) = block.as_ref() else {
+    let ValueBlock::Catch(value_catch) = block else {
         panic!("expected catch value block");
     };
-    assert!(value_catch.result_type_ids.is_empty());
+    assert!(
+        ast.expressions
+            .view(*expression)
+            .unwrap()
+            .success_types()
+            .is_empty()
+    );
+    assert!(
+        ast.expressions
+            .view(value_catch.handled_value)
+            .unwrap()
+            .success_types()
+            .is_empty()
+    );
+    assert_eq!(
+        ast.expressions.view(*expression).unwrap().error_type(),
+        None
+    );
     assert!(matches!(
-        value_catch.handled_value.kind,
-        ExpressionKind::HandledFallibleFunctionCall {
-            handling: FallibleExpressionHandling::Recover,
-            ..
-        }
+        ast.expressions.view(value_catch.handled_value).unwrap().operation(),
+        ExpressionOperationView::Call(call) if matches!(call.handling().unwrap().handling, FallibleExpressionHandling::Recover)
     ));
 }
 
 #[test]
 fn accepts_nested_postfix_propagation_in_fallback() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
-        "inner || -> Int, Error!:\n    return 1\n;\n\nouter || -> Int, Error!:\n    return 2\n;\n\nrecover || -> Int, Error!:\n    return outer() catch:\n        then inner()!\n    ;\n;\n",
+        "inner || -> I32, Error!:\n    return 1\n;\n\nouter || -> I32, Error!:\n    return 2\n;\n\nrecover || -> I32, Error!:\n    return outer() catch:\n        then inner()!\n    ;\n;\n",
     );
 
     let body = function_body_by_name(&ast, &path_fork, &string_table, "recover");
@@ -556,22 +861,22 @@ fn accepts_nested_postfix_propagation_in_fallback() {
     };
 
     assert!(matches!(
-        return_values[0].kind,
-        ExpressionKind::ValueBlock { .. }
+        ast.expressions.view(return_values[0]).unwrap().operation(),
+        ExpressionOperationView::ValueBlock(_)
     ));
 }
 
 #[test]
 fn accepts_then_inside_nested_catch_branch() {
     parse_single_file_ast(
-        "can_error || -> Int, Error!:\n    return 1\n;\n\nrecover |route Bool| -> Int:\n    return can_error() catch:\n        if route:\n            then 0\n        else\n            then 1\n        ;\n    ;\n;\n",
+        "can_error || -> I32, Error!:\n    return 1\n;\n\nrecover |route Bool| -> I32:\n    return can_error() catch:\n        if route:\n            then 0\n        else\n            then 1\n        ;\n    ;\n;\n",
     );
 }
 
 #[test]
 fn accepts_statement_after_then_as_unreachable_handler_tail() {
     parse_single_file_ast(
-        "can_error || -> Int, Error!:\n    return 1\n;\n\nrecover || -> Int:\n    return can_error() catch:\n        then 0\n        io.line([: [\"late\"]])\n    ;\n;\n",
+        "can_error || -> I32, Error!:\n    return 1\n;\n\nrecover || -> I32:\n    return can_error() catch:\n        then 0\n        io.line([: [\"late\"]])\n    ;\n;\n",
     );
 }
 
@@ -590,7 +895,7 @@ fn rejects_catch_inside_function_call_argument() {
 #[test]
 fn rejects_catch_inside_parenthesized_arithmetic_expression() {
     assert_invalid_fallible_handling(
-        "can_error || -> Int, Error!:\n    return 1\n;\n\nrecover || -> Int:\n    value = 1 + (can_error() catch:\n        then 0\n    ;)\n    return value\n;\n",
+        "can_error || -> I32, Error!:\n    return 1\n;\n\nrecover || -> I32:\n    value = 1 + (can_error() catch:\n        then 0\n    ;)\n    return value\n;\n",
         InvalidFallibleHandlingReason::CatchOutsideBoundary,
     );
 }
@@ -606,7 +911,7 @@ fn rejects_catch_inside_parenthesized_field_access_base() {
 #[test]
 fn rejects_catch_inside_collection_literal_item() {
     assert_invalid_fallible_handling(
-        "can_error || -> Int, Error!:\n    return 1\n;\n\nrecover || -> {Int}:\n    return {can_error() catch:\n        then 0\n    ;}\n;\n",
+        "can_error || -> I32, Error!:\n    return 1\n;\n\nrecover || -> {I32}:\n    return {can_error() catch:\n        then 0\n    ;}\n;\n",
         InvalidFallibleHandlingReason::CatchOutsideBoundary,
     );
 }
@@ -622,7 +927,7 @@ fn rejects_catch_inside_if_condition() {
 #[test]
 fn rejects_catch_inside_loop_condition() {
     assert_invalid_fallible_handling(
-        "can_error || -> Bool, Error!:\n    return false\n;\n\nrecover || -> Int:\n    count ~= 0\n    loop can_error() catch:\n        then false\n    ;:\n        count = count + 1\n    ;\n    return count\n;\n",
+        "can_error || -> Bool, Error!:\n    return false\n;\n\nrecover || -> I32:\n    count ~= 0\n    loop can_error() catch:\n        then false\n    ;:\n        count = count + 1\n    ;\n    return count\n;\n",
         InvalidFallibleHandlingReason::CatchOutsideBoundary,
     );
 }
@@ -630,7 +935,7 @@ fn rejects_catch_inside_loop_condition() {
 #[test]
 fn rejects_catch_inside_range_loop_bound() {
     assert_invalid_fallible_handling(
-        "can_error || -> Int, Error!:\n    return 3\n;\n\nrecover || -> Int:\n    count ~= 0\n    loop 0 to can_error() catch:\n        then 3\n    ; |value|:\n        count = count + value\n    ;\n    return count\n;\n",
+        "can_error || -> I32, Error!:\n    return 3\n;\n\nrecover || -> I32:\n    count ~= 0\n    loop 0 to can_error() catch:\n        then 3\n    ; |value|:\n        count = count + value\n    ;\n    return count\n;\n",
         InvalidFallibleHandlingReason::CatchOutsideBoundary,
     );
 }
@@ -638,7 +943,7 @@ fn rejects_catch_inside_range_loop_bound() {
 #[test]
 fn rejects_catch_inside_collection_loop_source() {
     assert_invalid_fallible_handling(
-        "can_error || -> {Int}, Error!:\n    return {1, 2}\n;\n\nrecover || -> Int:\n    count ~= 0\n    loop can_error() catch:\n        then {0}\n    ; |value|:\n        count = count + value\n    ;\n    return count\n;\n",
+        "can_error || -> {I32}, Error!:\n    return {1, 2}\n;\n\nrecover || -> I32:\n    count ~= 0\n    loop can_error() catch:\n        then {0}\n    ; |value|:\n        count = count + value\n    ;\n    return count\n;\n",
         InvalidFallibleHandlingReason::CatchOutsideBoundary,
     );
 }
@@ -667,4 +972,44 @@ fn assert_invalid_assignment_target(source: &str, expected_reason: InvalidAssign
         diagnostic.payload,
         DiagnosticPayload::InvalidAssignmentTarget { reason, .. } if reason == expected_reason
     ));
+}
+
+#[test]
+fn preserves_multiple_success_slots_through_catch() {
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        "pair || -> String, I32, Error!:\n    return! Error(\"missing\")\n;\n\nrecover || -> String, I32:\n    return pair() catch:\n        then \"guest\", 0\n    ;\n;\n",
+    );
+    let body = function_body_by_name(&ast, &path_fork, &string_table, "recover");
+    let NodeKind::Return(values) = &body[0].kind else {
+        panic!("expected forwarded catch return");
+    };
+    let [expression] = values.as_slice() else {
+        panic!("expected one producer for both returned slots");
+    };
+    assert_eq!(
+        ast.expressions.view(*expression).unwrap().success_types(),
+        &[
+            builtin_type_ids::STRING,
+            builtin_type_ids::fixed_scalar(FixedScalar::I32)
+        ],
+    );
+    assert_eq!(
+        ast.expressions.view(*expression).unwrap().error_type(),
+        None
+    );
+    let ExpressionOperationView::ValueBlock(block) =
+        ast.expressions.view(*expression).unwrap().operation()
+    else {
+        panic!("expected catch value block");
+    };
+    let ValueBlock::Catch(catch) = block else {
+        panic!("expected catch value block");
+    };
+    assert_eq!(
+        ast.expressions
+            .view(catch.handled_value)
+            .unwrap()
+            .success_types(),
+        ast.expressions.view(*expression).unwrap().success_types()
+    );
 }

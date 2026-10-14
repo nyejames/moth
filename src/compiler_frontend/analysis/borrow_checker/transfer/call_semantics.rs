@@ -6,7 +6,7 @@
 
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckError;
 use crate::compiler_frontend::external_packages::{
-    CallTarget, ExternalAccessKind, ExternalFunctionDef, ExternalFunctionId, ExternalReturnAlias,
+    CallTarget, ExternalAccessKind, ExternalFunctionDef, ExternalFunctionId, ExternalHirReturnAlias,
 };
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallParameterAccess, PublicCallParameterSummary,
@@ -168,7 +168,7 @@ pub(super) fn resolve_call_semantics(
         }
 
         CallTarget::Generated(identity) => {
-            let Some(summary) = context.generated_call_summaries.get(identity) else {
+            let Some(summary) = context.generated_call_summaries.get(identity.as_ref()) else {
                 return Err(context.diagnostics.internal_error(
                     format!(
                         "Borrow checker is missing the call summary for generated function {identity:?}"
@@ -230,17 +230,18 @@ pub(super) fn resolve_call_semantics(
                 .collect::<Vec<_>>();
 
             let return_alias = match host_def.hir_return_alias() {
-                ExternalReturnAlias::Fresh => FunctionReturnAliasSummary::Fresh,
-                ExternalReturnAlias::AliasArgs(indices) => {
+                ExternalHirReturnAlias::Fresh => FunctionReturnAliasSummary::Fresh,
+                ExternalHirReturnAlias::AliasArgs(indices) => {
                     validate_alias_indices(
                         context,
-                        &indices,
+                        indices,
                         arg_len,
                         span,
                         &format!("host function '{}'", host_def.name),
                     )?;
-                    FunctionReturnAliasSummary::AliasParams(indices)
+                    FunctionReturnAliasSummary::AliasParams(indices.to_vec())
                 }
+                ExternalHirReturnAlias::Unknown => FunctionReturnAliasSummary::Unknown,
             };
 
             Ok(CallSemantics {

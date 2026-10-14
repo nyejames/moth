@@ -299,6 +299,19 @@ fn origins_for_access(
     origins.origins_for_place_after_event(problem, event, place)
 }
 
+fn call_argument_origins(
+    problem: &BorrowProblem,
+    origins: &OriginSolution,
+    graph: &EventGraph,
+    argument: &super::super::problem::CallArgument,
+) -> Box<[ValueOriginId]> {
+    let event = graph
+        .event_by_use
+        .get(&argument.use_id)
+        .expect("validated call arguments have an owning event");
+    origins_for_access(problem, origins, *event, argument.place)
+}
+
 fn jump_source_origins(
     problem: &BorrowProblem,
     origins: &OriginSolution,
@@ -547,94 +560,91 @@ fn derive_provenance_loans(
                 }
             }
             EventKind::CallEffect(effect) => {
-                let Some(result_row) = effect.result else {
-                    continue;
-                };
-                let Some(origin_row) = problem.origins().get(result_row.origin.index()) else {
-                    return Err(CompilerError::compiler_error(format!(
-                        "Boracle loan solver cannot locate call-result origin {:?}",
-                        result_row.origin
-                    )));
-                };
-                let super::super::problem::OriginKind::CallResult { provenance, .. } =
-                    &origin_row.kind
-                else {
-                    continue;
-                };
-                match provenance {
-                    super::super::problem::CallResultProvenance::Fresh => {}
-                    super::super::problem::CallResultProvenance::AliasParams(indices) => {
-                        for index in indices {
-                            let Some(argument) = effect.arguments.get(*index) else {
-                                continue;
-                            };
-                            push_provenance_loan(
+                for result_row in &effect.results {
+                    let Some(origin_row) = problem.origins().get(result_row.origin.index()) else {
+                        return Err(CompilerError::compiler_error(format!(
+                            "Boracle loan solver cannot locate call-result origin {:?}",
+                            result_row.origin
+                        )));
+                    };
+                    let super::super::problem::OriginKind::CallResult { provenance, .. } =
+                        &origin_row.kind
+                    else {
+                        continue;
+                    };
+                    match provenance {
+                        super::super::problem::CallResultProvenance::Fresh => {}
+                        super::super::problem::CallResultProvenance::AliasParams(indices) => {
+                            for index in indices {
+                                let Some(argument) = effect.arguments.get(*index) else {
+                                    continue;
+                                };
+                                push_provenance_loan(
+                                    problem,
+                                    origins,
+                                    graph,
+                                    &mut result,
+                                    first_id,
+                                    ProvenanceLoanSpec {
+                                        event,
+                                        kind: AccessKind::Shared,
+                                        source: argument.place,
+                                        holder: result_row.destination.place(),
+                                        loan_origins: call_argument_origins(
+                                            problem, origins, graph, argument,
+                                        ),
+                                        fallback_origin: None,
+                                    },
+                                )?;
+                            }
+                        }
+                        super::super::problem::CallResultProvenance::Alias(_)
+                        | super::super::problem::CallResultProvenance::Unknown(_) => {
+                            let result_origins = origins_for_access(
                                 problem,
                                 origins,
-                                graph,
-                                &mut result,
-                                first_id,
-                                ProvenanceLoanSpec {
-                                    event,
-                                    kind: AccessKind::Shared,
-                                    source: argument.place,
-                                    holder: result_row.destination.place(),
-                                    loan_origins: origins_for_access(
-                                        problem,
-                                        origins,
-                                        event.id,
-                                        argument.place,
-                                    ),
-                                    fallback_origin: None,
-                                },
-                            )?;
-                        }
-                    }
-                    super::super::problem::CallResultProvenance::Alias(_)
-                    | super::super::problem::CallResultProvenance::Unknown(_) => {
-                        let result_origins = origins_for_access(
-                            problem,
-                            origins,
-                            event.id,
-                            result_row.destination.place(),
-                        );
-                        let arguments = if effect.arguments.is_empty() {
-                            vec![None]
-                        } else {
-                            effect
+                                event.id,
+                                result_row.destination.place(),
+                            );
+                            let arguments = effect
                                 .arguments
                                 .iter()
-                                .map(|argument| Some(argument.place))
-                                .collect()
-                        };
-                        for source in arguments {
-                            let source_origins = source
-                                .map(|place| origins_for_access(problem, origins, event.id, place))
-                                .unwrap_or_else(|| result_origins.clone());
-                            let loan_origins = if matches!(
-                                provenance,
-                                super::super::problem::CallResultProvenance::Unknown(_)
-                            ) || source_origins.is_empty()
-                            {
-                                result_origins.clone()
-                            } else {
-                                source_origins
-                            };
-                            push_provenance_loan(
-                                problem,
-                                origins,
-                                graph,
-                                &mut result,
-                                first_id,
-                                ProvenanceLoanSpec {
-                                    event,
-                                    kind: AccessKind::Shared,
-                                    source: source.unwrap_or(result_row.destination.place()),
-                                    holder: result_row.destination.place(),
-                                    loan_origins,
-                                    fallback_origin: None,
-                                },
-                            )?;
+                                .map(Some)
+                                .chain(effect.arguments.is_empty().then_some(None));
+                            for argument in arguments {
+                                let source_origins = argument
+                                    .map(|argument| {
+                                        call_argument_origins(problem, origins, graph, argument)
+                                    })
+                                    .unwrap_or_else(|| result_origins.clone());
+                                let loan_origins = if matches!(
+                                    provenance,
+                                    super::super::problem::CallResultProvenance::Unknown(_)
+                                ) || source_origins.is_empty()
+                                {
+                                    result_origins.clone()
+                                } else {
+                                    source_origins
+                                };
+                                push_provenance_loan(
+                                    problem,
+                                    origins,
+                                    graph,
+                                    &mut result,
+                                    first_id,
+                                    ProvenanceLoanSpec {
+                                        event,
+                                        kind: AccessKind::Shared,
+                                        source: argument
+                                            .map_or(result_row.destination.place(), |argument| {
+                                                argument.place
+                                            }),
+                                        holder: result_row.destination.place(),
+                                        loan_origins,
+                                        fallback_origin: None,
+                                    },
+                                )?;
+                            }
                         }
                     }
                 }
@@ -876,10 +886,17 @@ fn holder_kills(
                 problem.uses().get(use_id.index()).is_some_and(|use_row| {
                     use_row.kind.is_write()
                         && use_replaces_generation(use_row)
+                        && graph.call_result_confirmation_owner(problem, event, use_row)
+                            != Some(issue_event)
                         && !origins.is_write_through_use(*use_id)
                         && places_overlap(problem, holder, use_row.place) != PlaceOverlap::Disjoint
                 })
             }
+            EventKind::CallEffect(effect) => effect.results.iter().any(|result| {
+                let destination = result.destination.place();
+                !origins.is_write_through_destination(event.id, destination)
+                    && places_overlap(problem, holder, destination) != PlaceOverlap::Disjoint
+            }),
             _ if origins.is_write_through_event(event.id) => false,
             _ => event_destination(event).is_some_and(|destination| {
                 places_overlap(problem, holder, destination) != PlaceOverlap::Disjoint
@@ -905,7 +922,6 @@ fn event_destination(event: &Event) -> Option<PlaceId> {
         | EventKind::AliasFromPlace { destination, .. }
         | EventKind::ExclusiveAlias { destination, .. }
         | EventKind::ExclusiveAliasFromPlace { destination, .. } => Some(destination.place()),
-        EventKind::CallEffect(effect) => effect.result.map(|result| result.destination.place()),
         _ => None,
     }
 }
@@ -1010,6 +1026,42 @@ impl EventGraph {
             call_argument_uses,
             exclusive_liveness,
         })
+    }
+
+    fn call_result_confirmation_owner(
+        &self,
+        problem: &BorrowProblem,
+        event: &Event,
+        use_row: &Use,
+    ) -> Option<EventId> {
+        let destination = use_row.kind.binding_destination()?;
+        let &(block, event_index) = self.event_location.get(&event.id)?;
+        let events = self.events_by_block.get(&block)?;
+        // CallEffect installs the value and its provenance before the trailing write checks.
+        // Only the first matching confirmation belongs to that installation, not a later write.
+        for previous_id in events[..event_index].iter().rev() {
+            let previous = &problem.events()[previous_id.index()];
+            match &previous.kind {
+                EventKind::Access { use_id } => {
+                    let previous_use = &problem.uses()[use_id.index()];
+                    if previous_use.kind.is_write()
+                        && places_overlap(problem, destination.place(), previous_use.place)
+                            != PlaceOverlap::Disjoint
+                    {
+                        return None;
+                    }
+                }
+                EventKind::CallEffect(effect) => {
+                    return effect
+                        .results
+                        .iter()
+                        .any(|result| result.destination == destination)
+                        .then_some(previous.id);
+                }
+                _ => return None,
+            }
+        }
+        None
     }
 
     fn explicit_loan(

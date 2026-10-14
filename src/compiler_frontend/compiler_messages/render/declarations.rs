@@ -118,6 +118,9 @@ pub(crate) fn invalid_declaration_message(
         InvalidDeclarationReason::ReservedBuiltinName => {
             format!("{name_text} is reserved as a builtin language type.")
         }
+        InvalidDeclarationReason::DeclarationRequiresModuleTopLevel => {
+            format!("Declaration {name_text} cannot appear inside an executable body. Declare it at module top level.")
+        }
         InvalidDeclarationReason::ConstantCannotBeMutable => "Constants cannot be mutable.".to_string(),
         InvalidDeclarationReason::ExternalTypeLiteralConstruction => {
             "Cannot construct external type with a struct literal. External types are opaque and can only be obtained from external function calls.".to_string()

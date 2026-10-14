@@ -1,0 +1,12 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0042"]
+message_contains = ["Inline value-producing optional checks must use"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0042"
+reason = "invalid_control_flow_statement.value_if_option_literal_predicate"
+path = "input/@page.moth"
+line = 5
+count = 1

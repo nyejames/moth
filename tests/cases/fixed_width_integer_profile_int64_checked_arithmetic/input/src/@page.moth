@@ -1,4 +1,4 @@
-profile_edges |add_value Int, subtract_value Int, multiply_left Int, multiply_right Int, negate_value Int| -> String:
+profile_edges |add_value I64, subtract_value I64, multiply_left I64, multiply_right I64, negate_value I64| -> String:
     incremented = add_value + 1
     decremented = subtract_value - 1
     product = multiply_left * multiply_right
@@ -10,8 +10,8 @@ profile_edges |add_value Int, subtract_value Int, multiply_left Int, multiply_ri
     return "int64-profile-edges-ok"
 ;
 
-profile_int_to_i64 |value Int| -> String:
-    widened I64 = cast value
+profile_int_to_i64 |value I64| -> String:
+    widened I64 = value
     assert(widened is 9223372036854775807)
     return "int64-profile-cast-ok"
 ;

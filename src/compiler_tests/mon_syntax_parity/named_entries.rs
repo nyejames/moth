@@ -12,7 +12,7 @@ use super::support::{
 };
 
 fn named_entry_fixtures() -> Vec<ParityFixture> {
-    let scalar_schema = || Schema::record(vec![Field::required("first", SchemaType::Int)]);
+    let scalar_schema = || Schema::record(vec![Field::required("first", SchemaType::I32)]);
     let mut fixtures = Vec::new();
 
     for (name, literal) in [
@@ -47,8 +47,8 @@ fn named_entry_fixtures() -> Vec<ParityFixture> {
             literal.clone(),
             "",
             Schema::record(vec![
-                Field::required("first", SchemaType::Int),
-                Field::required("later", SchemaType::Int),
+                Field::required("first", SchemaType::I32),
+                Field::required("later", SchemaType::I32),
             ]),
             source_invalid_expression(
                 InvalidExpressionReason::AnonymousRecordFieldNotNamed,
@@ -66,13 +66,13 @@ fn named_entry_fixtures() -> Vec<ParityFixture> {
         Schema::record(vec![Field::required(
             "outer",
             SchemaType::Record {
-                fields: vec![Field::required("inner", SchemaType::Int)],
+                fields: vec![Field::required("inner", SchemaType::I32)],
             },
         )]),
         SourceExpectation::Accept,
         MonExpectation::Accept(Value::Record(vec![(
             "outer".into(),
-            Value::Record(vec![("inner".into(), Value::Int(1))]),
+            Value::Record(vec![("inner".into(), Value::I32(1))]),
         )])),
     ));
 
@@ -81,18 +81,18 @@ fn named_entry_fixtures() -> Vec<ParityFixture> {
         fixture(
             "nominal_payload_newline_after_equals",
             payload_after_equals,
-            "Box = | inner Int |\n",
+            "Box = | inner I32 |\n",
             Schema::record(vec![Field::required(
                 "box",
                 SchemaType::Struct {
                     name: "Box".into(),
-                    fields: vec![Field::required("inner", SchemaType::Int)],
+                    fields: vec![Field::required("inner", SchemaType::I32)],
                 },
             )]),
             SourceExpectation::Accept,
             MonExpectation::Accept(Value::Record(vec![(
                 "box".into(),
-                Value::Record(vec![("inner".into(), Value::Int(1))]),
+                Value::Record(vec![("inner".into(), Value::I32(1))]),
             )])),
         )
         .with_source_nominal_type("box", "Box"),
@@ -106,7 +106,7 @@ fn named_entry_fixtures() -> Vec<ParityFixture> {
         Schema::record(vec![Field::required(
             "outer",
             SchemaType::Record {
-                fields: vec![Field::required("inner", SchemaType::Int)],
+                fields: vec![Field::required("inner", SchemaType::I32)],
             },
         )]),
         source_expression_assignment(in_literal(&nested_literal, "=", 2)),
@@ -121,12 +121,12 @@ fn named_entry_fixtures() -> Vec<ParityFixture> {
     fixtures.push(fixture(
         "nominal_payload_crlf",
         payload_literal.clone(),
-        "inner #= 1\nBox = | inner Int |\n",
+        "inner #= 1\nBox = | inner I32 |\n",
         Schema::record(vec![Field::required(
             "box",
             SchemaType::Struct {
                 name: "Box".into(),
-                fields: vec![Field::required("inner", SchemaType::Int)],
+                fields: vec![Field::required("inner", SchemaType::I32)],
             },
         )]),
         source_expression_assignment(in_literal(&payload_literal, "=", 2)),
@@ -143,13 +143,13 @@ fn named_entry_fixtures() -> Vec<ParityFixture> {
         implicit_positive,
         "",
         Schema::record(vec![
-            Field::required("first", SchemaType::Int),
-            Field::required("later", SchemaType::Int),
+            Field::required("first", SchemaType::I32),
+            Field::required("later", SchemaType::I32),
         ]),
         SourceExpectation::Accept,
         MonExpectation::Accept(Value::Record(vec![
-            ("first".into(), Value::Int(1)),
-            ("later".into(), Value::Int(2)),
+            ("first".into(), Value::I32(1)),
+            ("later".into(), Value::I32(2)),
         ])),
     ));
 
@@ -159,13 +159,13 @@ fn named_entry_fixtures() -> Vec<ParityFixture> {
         explicit_positive,
         "",
         Schema::record(vec![
-            Field::required("first", SchemaType::Int),
-            Field::required("later", SchemaType::Int),
+            Field::required("first", SchemaType::I32),
+            Field::required("later", SchemaType::I32),
         ]),
         SourceExpectation::Accept,
         MonExpectation::Accept(Value::Record(vec![
-            ("first".into(), Value::Int(1)),
-            ("later".into(), Value::Int(2)),
+            ("first".into(), Value::I32(1)),
+            ("later".into(), Value::I32(2)),
         ])),
     ));
 
@@ -179,7 +179,7 @@ fn named_entry_fixtures() -> Vec<ParityFixture> {
             "",
             scalar_schema(),
             SourceExpectation::Accept,
-            MonExpectation::Accept(Value::Record(vec![("first".into(), Value::Int(1))])),
+            MonExpectation::Accept(Value::Record(vec![("first".into(), Value::I32(1))])),
         ));
     }
 
@@ -190,7 +190,7 @@ fn named_entry_fixtures() -> Vec<ParityFixture> {
         "",
         scalar_schema(),
         SourceExpectation::Accept,
-        MonExpectation::Accept(Value::Record(vec![("first".into(), Value::Int(1))])),
+        MonExpectation::Accept(Value::Record(vec![("first".into(), Value::I32(1))])),
     ));
 
     for (whitespace_name, whitespace) in [
@@ -208,7 +208,7 @@ fn named_entry_fixtures() -> Vec<ParityFixture> {
             "",
             scalar_schema(),
             SourceExpectation::Accept,
-            MonExpectation::Accept(Value::Record(vec![("first".into(), Value::Int(1))])),
+            MonExpectation::Accept(Value::Record(vec![("first".into(), Value::I32(1))])),
         ));
 
         let later_literal = format!("first = 1, later{whitespace} = 2");
@@ -217,13 +217,13 @@ fn named_entry_fixtures() -> Vec<ParityFixture> {
             later_literal,
             "",
             Schema::record(vec![
-                Field::required("first", SchemaType::Int),
-                Field::required("later", SchemaType::Int),
+                Field::required("first", SchemaType::I32),
+                Field::required("later", SchemaType::I32),
             ]),
             SourceExpectation::Accept,
             MonExpectation::Accept(Value::Record(vec![
-                ("first".into(), Value::Int(1)),
-                ("later".into(), Value::Int(2)),
+                ("first".into(), Value::I32(1)),
+                ("later".into(), Value::I32(2)),
             ])),
         ));
 
@@ -235,13 +235,13 @@ fn named_entry_fixtures() -> Vec<ParityFixture> {
             Schema::record(vec![Field::required(
                 "outer",
                 SchemaType::Record {
-                    fields: vec![Field::required("inner", SchemaType::Int)],
+                    fields: vec![Field::required("inner", SchemaType::I32)],
                 },
             )]),
             SourceExpectation::Accept,
             MonExpectation::Accept(Value::Record(vec![(
                 "outer".into(),
-                Value::Record(vec![("inner".into(), Value::Int(1))]),
+                Value::Record(vec![("inner".into(), Value::I32(1))]),
             )])),
         ));
 
@@ -250,18 +250,18 @@ fn named_entry_fixtures() -> Vec<ParityFixture> {
             fixture(
                 format!("nominal_payload_label_before_equals_{whitespace_name}"),
                 nominal_literal,
-                "Box = | inner Int |\n",
+                "Box = | inner I32 |\n",
                 Schema::record(vec![Field::required(
                     "box",
                     SchemaType::Struct {
                         name: "Box".into(),
-                        fields: vec![Field::required("inner", SchemaType::Int)],
+                        fields: vec![Field::required("inner", SchemaType::I32)],
                     },
                 )]),
                 SourceExpectation::Accept,
                 MonExpectation::Accept(Value::Record(vec![(
                     "box".into(),
-                    Value::Record(vec![("inner".into(), Value::Int(1))]),
+                    Value::Record(vec![("inner".into(), Value::I32(1))]),
                 )])),
             )
             .with_source_nominal_type("box", "Box"),
@@ -271,7 +271,7 @@ fn named_entry_fixtures() -> Vec<ParityFixture> {
         fixtures.push(fixture(
             format!("choice_payload_label_before_equals_{whitespace_name}"),
             choice_literal,
-            "Theme ::\n    Ready,\n    Pair | first Int, second Int |,\n;\n",
+            "Theme ::\n    Ready,\n    Pair | first I32, second I32 |,\n;\n",
             Schema::record(vec![Field::required(
                 "status",
                 SchemaType::Choice {
@@ -281,8 +281,8 @@ fn named_entry_fixtures() -> Vec<ParityFixture> {
                         Variant::payload(
                             "Pair",
                             vec![
-                                Field::required("first", SchemaType::Int),
-                                Field::required("second", SchemaType::Int),
+                                Field::required("first", SchemaType::I32),
+                                Field::required("second", SchemaType::I32),
                             ],
                         ),
                     ],
@@ -295,8 +295,8 @@ fn named_entry_fixtures() -> Vec<ParityFixture> {
                     qualifier: Some("Theme".into()),
                     variant: "Pair".into(),
                     fields: vec![
-                        ("first".into(), Value::Int(1)),
-                        ("second".into(), Value::Int(2)),
+                        ("first".into(), Value::I32(1)),
+                        ("second".into(), Value::I32(2)),
                     ],
                 },
             )])),

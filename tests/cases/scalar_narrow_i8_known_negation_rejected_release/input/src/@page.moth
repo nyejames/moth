@@ -1,0 +1,9 @@
+-- Known invalid narrow work diagnoses at compile time: negating the I8
+-- minimum overflows at the selected I8 width instead of widening to I32.
+-- The explicit #I8 bindings are source constants, so the negation folds
+-- and diagnoses at the authored operation. Ordinary immutable bindings stay
+-- runtime work (see scalar_narrow_i8_runtime_checked_failures).
+minimum #I8 = -128
+negative #I8 = -minimum
+
+[:unreachable]

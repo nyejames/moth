@@ -3,4 +3,5 @@ entry = "."
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains = ["Hello Priya"]
+rendered_output_contains_in_order = ["Hello Priya", "Nested hello Priya"]
+rendered_output_contains_exactly_once = ["Hello Priya", "Nested hello Priya"]

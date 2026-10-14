@@ -1,0 +1,19 @@
+-- The same authored arithmetic catch is valid with and without a failure
+-- effect. Mixed I8/U8 addition fits I16 for every pair, so the export needs no
+-- error slot. Equal U8 operands keep U8 and need local recovery.
+export:
+    mixed_add |left I8, right U8| -> I16:
+        return left + right catch then -32768
+    ;
+
+    narrow_add |left U8, right U8| -> U8:
+        return left + right catch then 0
+    ;
+;
+
+mixed_min = mixed_add(-128, 0)
+mixed_max = mixed_add(127, 255)
+narrow_safe = narrow_add(200, 55)
+narrow_overflow = narrow_add(255, 1)
+
+[:full domain catch mixed=[mixed_min]/[mixed_max] narrow=[narrow_safe]/[narrow_overflow]]

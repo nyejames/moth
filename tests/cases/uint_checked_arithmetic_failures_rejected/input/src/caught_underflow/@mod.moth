@@ -1,4 +1,4 @@
-fail_caught || -> Uint, Error!:
+fail_caught || -> U32, Error!:
     return (0 - 1) catch:
         then 0
     ;

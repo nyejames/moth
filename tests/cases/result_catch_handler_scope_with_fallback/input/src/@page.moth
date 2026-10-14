@@ -1,8 +1,8 @@
-can_error |name String| -> String, Float, Error!:
+can_error |name String| -> String, F64, Error!:
     return! Error("boom")
 ;
 
-recover |name String| -> String, Float:
+recover |name String| -> String, F64:
     value, score = can_error(name) catch |err|:
         io.line([: [err.message]])
         then "guest", 0.0

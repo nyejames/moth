@@ -1,0 +1,9 @@
+-- The inferred constant defaults to I32 at its compile-time declaration boundary;
+-- a U64 struct field default cannot retype the already concrete constant.
+one #= 1
+
+Holder = |
+    wide U64 = one,
+|
+
+[:unreachable]

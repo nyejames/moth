@@ -1,0 +1,19 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "direct-choice-subject direct=4294967309 grouped=4294967310 label=grouped concrete=4294967311"
+
+# The Wasm failure block at 12:34 is bg912-observed (constructor-third-wasm-gate.json) and unverified until the parent harness run.
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0064"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0064"
+reason = "unsupported_backend_feature.fixed_width_scalar_values"
+path = "input/@page.moth"
+line = 12
+column = 34

@@ -1,3 +1,39 @@
+count_f16 |start F16, end F16, step F16| -> I32:
+    count ~I32 = 0
+    loop end to end by step:
+        count += 1
+    ;
+    assert(count is 0)
+    loop start to & end by step |value|:
+        count += 1
+    ;
+    return count
+;
+
+count_f32 |start F32, end F32, step F32| -> I32:
+    count ~I32 = 0
+    loop end to end by step:
+        count += 1
+    ;
+    assert(count is 0)
+    loop start to & end by step |value|:
+        count += 1
+    ;
+    return count
+;
+
+count_f64 |start F64, end F64, step F64| -> I32:
+    count ~I32 = 0
+    loop end to end by step:
+        count += 1
+    ;
+    assert(count is 0)
+    loop start to & end by step |value|:
+        count += 1
+    ;
+    return count
+;
+
 f64_asc_start F64 = 1.5e308
 f64_asc_end F64 = 1.6e308
 f64_asc_step F64 = 1e307
@@ -58,11 +94,11 @@ loop f32_equal_start to & f32_equal_end by f32_equal_step |value|:
     f32_equal_last = copy value
 ;
 
-float_equal_start Float = 2.0
-float_equal_end Float = 2.0
-float_equal_step Float = 1e-16
+float_equal_start F64 = 2.0
+float_equal_end F64 = 2.0
+float_equal_step F64 = 1e-16
 float_equal_count ~= 0
-float_equal_last ~Float = 0.0
+float_equal_last ~F64 = 0.0
 loop float_equal_start to & float_equal_end by float_equal_step |value|:
     float_equal_count = float_equal_count + 1
     float_equal_last = copy value
@@ -104,5 +140,16 @@ assert(float_equal_count is 1)
 assert(float_equal_last is float_equal_end)
 assert(f32_exclusive_asc_count is 2)
 assert(f32_exclusive_asc_last is f32_exclusive_asc_expected_last)
+-- Candidate overflow and finite overshoot both terminate, never become values.
+assert(count_f16(65000, 65504, 65000) is 1)
+assert(count_f32(3e38, 3.1e38, 3e38) is 1)
+assert(count_f64(1e308, 1.1e308, 1e308) is 1)
+assert(count_f16(1, 2, 3) is 1)
+assert(count_f32(1, 2, 3) is 1)
+assert(count_f64(1, 2, 3) is 1)
+-- The endpoint exits before an overflowing candidate can be calculated.
+assert(count_f16(65504, 65504, 65504) is 1)
+assert(count_f32(3e38, 3e38, 3e38) is 1)
+assert(count_f64(1e308, 1e308, 1e308) is 1)
 
 [:fixed_float_range_rounded_endpoint_runtime verified]

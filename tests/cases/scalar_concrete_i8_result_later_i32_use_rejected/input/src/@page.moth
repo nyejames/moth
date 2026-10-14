@@ -1,0 +1,11 @@
+-- A later exact receiver cannot retype concrete operands or their result.
+take_i32 |value I32| -> I32:
+    return value
+;
+
+left I8 = 1
+right I8 = 2
+sum = left + right
+received = take_i32(sum)
+
+[:unreachable]

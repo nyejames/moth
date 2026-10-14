@@ -1,0 +1,26 @@
+identity_u64 |value U64| -> U64:
+    return value
+;
+identity_f16 |value F16| -> F16:
+    return value
+;
+identity_f32 |value F32| -> F32:
+    return value
+;
+identity_f64 |value F64| -> F64:
+    return value
+;
+
+origin = 18_446_744_073_709_551_615
+selected = identity_u64(origin)
+small I8 = -128
+unsigned U32 = 4_294_967_295
+half = identity_f16(1.00048828125000000000001)
+single = identity_f32(0.1)
+double = identity_f64(0.1)
+assert(half is identity_f16(1.0009765625))
+assert(single > double)
+assert(selected is origin)
+half_marker = if half is identity_f16(1.0009765625) then "true" else "false"
+precision_marker = if single > double then "true" else "false"
+[:types i8=[small] u32=[unsigned] u64=[selected] half=[half_marker] precision=[precision_marker]]

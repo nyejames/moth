@@ -20,12 +20,12 @@ Moth doesn't allow a visible name to be redeclared.
 - Separate scopes may reuse a name when neither declaration is visible from the other.
 
 [codeblock, $code("moth"):
-    first || -> Int:
+    first || -> I32:
         value = 1
         return value
     ;
 
-    second || -> Int:
+    second || -> I32:
         value = 2
         return value
     ;

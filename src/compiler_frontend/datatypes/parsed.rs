@@ -75,18 +75,6 @@ pub enum ParsedTypeRef {
         span: Option<SourceSpan>,
     },
 
-    BuiltinInt {
-        span: Option<SourceSpan>,
-    },
-
-    BuiltinUint {
-        span: Option<SourceSpan>,
-    },
-
-    BuiltinFloat {
-        span: Option<SourceSpan>,
-    },
-
     BuiltinString {
         span: Option<SourceSpan>,
     },
@@ -172,9 +160,6 @@ impl ParsedTypeRef {
             }
 
             ParsedTypeRef::BuiltinBool { .. }
-            | ParsedTypeRef::BuiltinInt { .. }
-            | ParsedTypeRef::BuiltinUint { .. }
-            | ParsedTypeRef::BuiltinFloat { .. }
             | ParsedTypeRef::BuiltinString { .. }
             | ParsedTypeRef::BuiltinChar { .. }
             | ParsedTypeRef::BuiltinFixedScalar { .. }

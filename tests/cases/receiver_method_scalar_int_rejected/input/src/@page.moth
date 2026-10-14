@@ -1,4 +1,4 @@
-is_even |this Int| -> Bool:
+is_even |this I32| -> Bool:
     return this % 2 is 0
 ;
 

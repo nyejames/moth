@@ -1,0 +1,12 @@
+-- A bound whole-number loop item cannot be retyped by an F32 parameter receiver.
+read_f32 |value F32| -> F32:
+    return value
+;
+render || -> String:
+    loop {1} |item|:
+        selected = read_f32(item)
+        return [:selected=[selected]]
+    ;
+    return "empty"
+;
+[:[render()]]

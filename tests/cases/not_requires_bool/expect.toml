@@ -2,4 +2,4 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-TYPE-0003"]
-message_contains = ["Operator `not` requires a `Bool` operand, found `Int`."]
+message_contains = ["Operator `not` requires a `Bool` operand, found `I32`."]

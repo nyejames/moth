@@ -155,8 +155,8 @@ pub(crate) enum WasmLirStmt {
         src: WasmLirLocalId,
     },
     Call {
-        /// Optional destination local for non-void calls.
-        dst: Option<WasmLirLocalId>,
+        /// Ordered success destinations, matching the callee's native Wasm results.
+        results: Vec<WasmLirLocalId>,
         callee: WasmCalleeRef,
         args: Vec<WasmLirLocalId>,
     },
@@ -250,13 +250,13 @@ pub(crate) enum WasmLirStmt {
     CheckedIntegerOp {
         operation: WasmCheckedIntegerOperation,
     },
-    /// Trap on non-finite input and write the validated profile-precision Float to `dst`.
+    /// Trap on non-finite input and write the validated float to `dst` at its exact precision.
     ValidateFloat {
         dst: WasmLirLocalId,
         source: WasmLirLocalId,
         precision: BinaryFloatPrecision,
     },
-    /// Trap-mode checked float arithmetic in its profile-resolved semantic precision.
+    /// Trap-mode checked float arithmetic at its exact semantic precision.
     CheckedFloatOp {
         dst: WasmLirLocalId,
         operator: NumericOperator,
@@ -374,7 +374,7 @@ pub(crate) enum WasmLirTerminator {
         else_block: WasmLirBlockId,
     },
     /// Function return.
-    Return { value: Option<WasmLirLocalId> },
+    Return { values: Vec<WasmLirLocalId> },
     /// Fallback hard stop for unsupported/unreachable paths.
     Trap,
 }

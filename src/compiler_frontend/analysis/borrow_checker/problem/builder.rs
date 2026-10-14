@@ -21,7 +21,7 @@ use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern};
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirLocalDestination, HirWriteTarget};
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
-use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
 use crate::compiler_frontend::hir::utils::{collect_reachable_blocks, terminator_targets};
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
 use rustc_hash::FxHashMap;
@@ -70,7 +70,8 @@ struct CallEffectSpec<'a> {
     argument_sources: Vec<EventSource>,
     accesses: Vec<AccessKind>,
     provenance: CallResultProvenance,
-    result: Option<HirLocalDestination>,
+    results: &'a [HirLocalDestination],
+    killed_bindings: Box<[BindingId]>,
     source: &'a EventSource,
 }
 
@@ -98,6 +99,10 @@ struct FunctionProblemBuilder<'a> {
     exits: Vec<BlockId>,
     current_problem_block: Option<BlockId>,
     next_problem_block_id: u32,
+    /// Explicit stack of expression frames, reused by every expression walk.
+    expression_frames: Vec<LowerFrame>,
+    /// Shared stack of aggregate fields. Each aggregate frame owns the tail from its `field_base`.
+    aggregate_fields: Vec<AggregateField>,
 }
 
 #[derive(Clone, Copy)]
@@ -105,17 +110,56 @@ enum ExpressionPlan {
     Load(HirPlace),
     Copy(HirPlace),
     Literal,
-    TupleGet {
-        tuple: HirValueId,
-        index: usize,
-    },
     VariantPayloadGet {
         source: HirValueId,
         field_index: usize,
     },
-    FallibleUnwrap(HirValueId),
     Aggregate,
     Other,
+}
+
+/// One pending expression on the explicit lowering stack.
+///
+/// WHAT: records what an expression needs in order to resume after one child has been lowered.
+/// WHY: nested HIR can be deeper than the native stack, so this state lives on the heap.
+#[derive(Clone, Copy)]
+struct LowerFrame {
+    expression_id: HirValueId,
+    /// Source for this expression's own events, and the fallback for its children.
+    source: EventSource,
+    state: FrameState,
+    /// Next child index for operations and aggregates, or next projection index for places.
+    cursor: u32,
+    /// Set while the child requested by the last step is still owed to this frame.
+    awaiting: bool,
+}
+
+#[derive(Clone, Copy)]
+enum FrameState {
+    /// Operation children, then one fresh write. A variant payload projects its source instead.
+    Children,
+    /// A load or copy walking its projections, holding the place reached so far.
+    Place(PlaceId),
+    /// An aggregate, with its destination and the start of its fields on the shared stack.
+    Aggregate {
+        target: BindingDestination,
+        field_base: u32,
+    },
+}
+
+/// What a frame does on one step: request another child, or hand its value to the parent.
+enum Advance {
+    Child {
+        expression_id: HirValueId,
+        source: EventSource,
+    },
+    Finished(ValueRef),
+}
+
+/// One HIR place projection after resolution. Fixed indices resolve at once.
+enum PlaceProjectionStep {
+    Resolved(ProjectionElem),
+    NeedsIndex(HirValueId),
 }
 
 impl<'a> FunctionProblemBuilder<'a> {
@@ -175,6 +219,8 @@ impl<'a> FunctionProblemBuilder<'a> {
             exits: Vec::new(),
             current_problem_block: None,
             next_problem_block_id: 0,
+            expression_frames: Vec::new(),
+            aggregate_fields: Vec::new(),
         };
         builder.assign_problem_block_ids()?;
         builder.collect_bindings()?;
@@ -290,7 +336,13 @@ impl<'a> FunctionProblemBuilder<'a> {
         successors.dedup();
         // A terminator's operands are evaluated while the block's bindings are still live, so the
         // return value is read before scope retirement and the terminator event stays last.
-        let terminator_source = self.terminator_source(hir_block_id);
+        let terminator_source = match &block.terminator {
+            HirTerminator::Invoke { id, span, .. } => EventSource {
+                hir_node: Some(*id),
+                span: *span,
+            },
+            _ => self.terminator_source(hir_block_id),
+        };
         let kind = self.lower_terminator_kind(
             &block.terminator,
             hir_block_id,
@@ -312,6 +364,39 @@ impl<'a> FunctionProblemBuilder<'a> {
 
         if successors.is_empty() {
             self.exits.push(problem_block_id);
+        }
+        if let HirTerminator::Invoke {
+            success, failure, ..
+        } = &block.terminator
+        {
+            let mut targets = Vec::with_capacity(2);
+            for (successor, succeeded) in [(*success, true), (*failure, false)] {
+                let original_to = self.problem_block(successor)?;
+                let bindings = self.scope_exit_bindings(&block, successor)?;
+                let edge_block = self.new_invoke_edge_block(
+                    &block.terminator,
+                    succeeded,
+                    bindings,
+                    original_to,
+                    terminator_source,
+                )?;
+                self.edges.push(CfgEdge::new(problem_block_id, edge_block));
+                self.edges.push(CfgEdge::new(edge_block, original_to));
+                targets.push(edge_block);
+            }
+            let terminator = self
+                .blocks
+                .iter()
+                .find(|candidate| candidate.id == problem_block_id)
+                .and_then(|candidate| candidate.events.last())
+                .copied()
+                .ok_or_else(|| compiler_error("Invoke block has no normalized terminator"))?;
+            self.events[terminator.index()].kind = EventKind::Terminator {
+                kind: TerminatorEventKind::Branch {
+                    targets: targets.into_boxed_slice(),
+                },
+            };
+            return Ok(());
         }
         let mut target_blocks = BTreeMap::new();
         for successor in successors {
@@ -394,10 +479,10 @@ impl<'a> FunctionProblemBuilder<'a> {
             HirStatementKind::Call {
                 target,
                 args,
-                result,
+                results,
             } => {
                 let args = self.module.expressions.values(*args).to_vec();
-                self.lower_call(target, &args, *result, &source, event_ids)?;
+                self.lower_call(target, &args, results, &source, event_ids)?;
             }
             HirStatementKind::Expr(expression)
             | HirStatementKind::PushRuntimeFragment {
@@ -415,19 +500,6 @@ impl<'a> FunctionProblemBuilder<'a> {
                 self.lower_map_call(*op, *receiver, &args, *result, &source, event_ids)?;
             }
             HirStatementKind::Drop(_) => {}
-            HirStatementKind::CastOp {
-                source: value,
-                result,
-                ..
-            } => {
-                let target = result
-                    .map(|destination| {
-                        self.local_place(destination.local(), &source)
-                            .map(|place| binding_destination(destination, place))
-                    })
-                    .transpose()?;
-                self.lower_fresh_value(target, *value, &source, event_ids)?;
-            }
             HirStatementKind::FormatFloat {
                 source: value,
                 result,
@@ -554,16 +626,6 @@ impl<'a> FunctionProblemBuilder<'a> {
                     },
                 );
             }
-            ExpressionPlan::TupleGet { tuple, index } => {
-                let value_ref = self.lower_expression(tuple, source, event_ids)?;
-                self.emit_projection_write(
-                    target,
-                    value_ref,
-                    ProjectionElem::FixedIndex(index as u32),
-                    source,
-                    event_ids,
-                )?;
-            }
             ExpressionPlan::VariantPayloadGet {
                 source: value,
                 field_index,
@@ -573,16 +635,6 @@ impl<'a> FunctionProblemBuilder<'a> {
                     target,
                     value_ref,
                     ProjectionElem::FixedIndex(field_index as u32),
-                    source,
-                    event_ids,
-                )?;
-            }
-            ExpressionPlan::FallibleUnwrap(result) => {
-                let value_ref = self.lower_expression(result, source, event_ids)?;
-                self.emit_projection_write(
-                    target,
-                    value_ref,
-                    ProjectionElem::DynamicIndex,
                     source,
                     event_ids,
                 )?;
@@ -619,7 +671,7 @@ impl<'a> FunctionProblemBuilder<'a> {
                 let _ = self.lower_expression(expression_id, source, event_ids)?;
             }
             _ => {
-                let _ = self.lower_expression_children(expression_id, source, event_ids)?;
+                self.lower_expression_children(expression_id, source, event_ids)?;
             }
         }
         let origin = self.new_fresh_origin();
@@ -635,6 +687,10 @@ impl<'a> FunctionProblemBuilder<'a> {
         Ok(())
     }
 
+    /// Lowers an aggregate into an existing binding destination.
+    ///
+    /// Pushes one aggregate frame with the caller's destination and source, then runs it. The
+    /// fields are collected by the same frame logic as nested aggregates, so only one copy exists.
     fn lower_aggregate_into(
         &mut self,
         target: BindingDestination,
@@ -642,8 +698,505 @@ impl<'a> FunctionProblemBuilder<'a> {
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
     ) -> Result<(), CompilerError> {
-        let fields = self.lower_aggregate_children(expression_id, source, event_ids)?;
-        for field in &fields {
+        let root_depth = self.expression_frames.len();
+        self.push_aggregate_frame(expression_id, *source, target)?;
+        self.run_expression_frames(root_depth, None, event_ids)?;
+        Ok(())
+    }
+
+    /// Lowers every direct child of an expression in order, discarding the child values.
+    fn lower_expression_children(
+        &mut self,
+        expression_id: HirValueId,
+        source: &EventSource,
+        event_ids: &mut Vec<EventId>,
+    ) -> Result<(), CompilerError> {
+        let mut index = 0;
+        while let Some(child_id) = self.expression_child(expression_id, index) {
+            self.lower_expression(child_id, source, event_ids)?;
+            index += 1;
+        }
+        Ok(())
+    }
+
+    fn expression_plan(&self, expression_id: HirValueId) -> ExpressionPlan {
+        match &self.module.expressions.expression(expression_id).kind {
+            HirExpressionKind::Load(place) => ExpressionPlan::Load(*place),
+            HirExpressionKind::Copy(place) => ExpressionPlan::Copy(*place),
+            HirExpressionKind::VariantPayloadGet {
+                source,
+                field_index,
+                ..
+            } => ExpressionPlan::VariantPayloadGet {
+                source: *source,
+                field_index: *field_index,
+            },
+            HirExpressionKind::StructConstruct { .. }
+            | HirExpressionKind::Collection(_)
+            | HirExpressionKind::Range { .. }
+            | HirExpressionKind::VariantConstruct { .. }
+            | HirExpressionKind::MapLiteral(_) => ExpressionPlan::Aggregate,
+            HirExpressionKind::Number(_)
+            | HirExpressionKind::FixedScalar(_)
+            | HirExpressionKind::Bool(_)
+            | HirExpressionKind::Char(_)
+            | HirExpressionKind::StringLiteral(_)
+            | HirExpressionKind::StructuralString { .. } => ExpressionPlan::Literal,
+            _ => ExpressionPlan::Other,
+        }
+    }
+
+    /// Returns the `index`th direct child of an expression, in the order it is lowered.
+    ///
+    /// Returns `None` past the last child, which is how the walk knows it has finished.
+    fn expression_child(&self, expression_id: HirValueId, index: usize) -> Option<HirValueId> {
+        let expressions = &self.module.expressions;
+        match &expressions.expression(expression_id).kind {
+            HirExpressionKind::BinOp { left, right, .. } => [*left, *right].get(index).copied(),
+            HirExpressionKind::UnaryOp { operand, .. }
+            | HirExpressionKind::Cast {
+                source: operand, ..
+            } => (index == 0).then_some(*operand),
+            HirExpressionKind::StructConstruct { fields, .. } => expressions
+                .struct_fields(*fields)
+                .get(index)
+                .map(|(_, value)| *value),
+            HirExpressionKind::Collection(elements) => {
+                expressions.values(*elements).get(index).copied()
+            }
+            HirExpressionKind::Range { start, end } => [*start, *end].get(index).copied(),
+            HirExpressionKind::VariantPayloadGet { source, .. } => (index == 0).then_some(*source),
+            HirExpressionKind::VariantConstruct { fields, .. } => expressions
+                .variant_fields(*fields)
+                .get(index)
+                .map(|field| field.value),
+            HirExpressionKind::MapLiteral(entries) => expressions
+                .map_entries(*entries)
+                .get(index / 2)
+                .map(|entry| {
+                    if index.is_multiple_of(2) {
+                        entry.key
+                    } else {
+                        entry.value
+                    }
+                }),
+            HirExpressionKind::Load(_)
+            | HirExpressionKind::Copy(_)
+            | HirExpressionKind::Number(_)
+            | HirExpressionKind::FixedScalar(_)
+            | HirExpressionKind::Bool(_)
+            | HirExpressionKind::Char(_)
+            | HirExpressionKind::StringLiteral(_)
+            | HirExpressionKind::StructuralString { .. } => None,
+        }
+    }
+
+    /// Returns the projection that places the `index`th child inside its aggregate.
+    fn aggregate_child_projection(
+        &self,
+        expression_id: HirValueId,
+        index: usize,
+    ) -> Option<ProjectionElem> {
+        let expressions = &self.module.expressions;
+        match &expressions.expression(expression_id).kind {
+            HirExpressionKind::StructConstruct { fields, .. } => expressions
+                .struct_fields(*fields)
+                .get(index)
+                .map(|(field, _)| ProjectionElem::Field(field.0)),
+            HirExpressionKind::Collection(elements) => (index
+                < expressions.values(*elements).len())
+            .then_some(ProjectionElem::FixedIndex(index as u32)),
+            HirExpressionKind::Range { .. } => {
+                [ProjectionElem::FixedIndex(0), ProjectionElem::FixedIndex(1)]
+                    .get(index)
+                    .copied()
+            }
+            HirExpressionKind::VariantConstruct { fields, .. } => (index
+                < expressions.variant_fields(*fields).len())
+            .then_some(ProjectionElem::FixedIndex(index as u32)),
+            HirExpressionKind::MapLiteral(entries) => (index
+                < 2 * expressions.map_entries(*entries).len())
+            .then_some(ProjectionElem::MapEntry),
+            _ => None,
+        }
+    }
+
+    /// Lowers one expression as a value.
+    ///
+    /// WHAT: walks the expression on the explicit `expression_frames` stack.
+    /// WHY: a runtime-leaf chain can be far deeper than the thread stack, so each nesting level
+    /// costs one heap frame rather than one native frame.
+    fn lower_expression(
+        &mut self,
+        expression_id: HirValueId,
+        fallback_source: &EventSource,
+        event_ids: &mut Vec<EventId>,
+    ) -> Result<ValueRef, CompilerError> {
+        let root_depth = self.expression_frames.len();
+        match self.enter_expression(expression_id, fallback_source, event_ids)? {
+            Some(value) => Ok(value),
+            None => self.run_expression_frames(root_depth, None, event_ids),
+        }
+    }
+
+    /// Starts one expression. Leaves complete at once, and anything with children pushes a frame.
+    ///
+    /// Returns the value when the expression completes without a frame.
+    fn enter_expression(
+        &mut self,
+        expression_id: HirValueId,
+        fallback_source: &EventSource,
+        event_ids: &mut Vec<EventId>,
+    ) -> Result<Option<ValueRef>, CompilerError> {
+        let source = self.value_source(expression_id, fallback_source);
+        match self.expression_plan(expression_id) {
+            ExpressionPlan::Load(place) | ExpressionPlan::Copy(place) => {
+                let place_id = self.local_place(place.root, &source)?;
+                self.push_expression_frame(expression_id, source, FrameState::Place(place_id));
+                Ok(None)
+            }
+            ExpressionPlan::Literal => self
+                .lower_literal(expression_id, &source, event_ids)
+                .map(Some),
+            ExpressionPlan::Aggregate => {
+                let destination = self.synthetic_place(expression_id.0)?;
+                self.push_aggregate_frame(
+                    expression_id,
+                    source,
+                    BindingDestination::Define(destination),
+                )?;
+                Ok(None)
+            }
+            ExpressionPlan::VariantPayloadGet { .. } | ExpressionPlan::Other => {
+                self.push_expression_frame(expression_id, source, FrameState::Children);
+                Ok(None)
+            }
+        }
+    }
+
+    /// Pushes a frame for an expression whose children still need lowering.
+    fn push_expression_frame(
+        &mut self,
+        expression_id: HirValueId,
+        source: EventSource,
+        state: FrameState,
+    ) {
+        self.expression_frames.push(LowerFrame {
+            expression_id,
+            source,
+            state,
+            cursor: 0,
+            awaiting: false,
+        });
+    }
+
+    /// Pushes an aggregate frame whose fields start at the current end of the field stack.
+    fn push_aggregate_frame(
+        &mut self,
+        expression_id: HirValueId,
+        source: EventSource,
+        target: BindingDestination,
+    ) -> Result<(), CompilerError> {
+        let field_base = dense_u32(self.aggregate_fields.len(), "aggregate field stack")?;
+        self.push_expression_frame(
+            expression_id,
+            source,
+            FrameState::Aggregate { target, field_base },
+        );
+        Ok(())
+    }
+
+    /// Runs frames until the frame at `root_depth` completes, then returns its value.
+    ///
+    /// Each step advances the top frame by one child or completes it. A finished child is
+    /// always consumed by its parent on the next step, so one `completed` slot carries every
+    /// value. Children produce their events and places before the parent completes.
+    fn run_expression_frames(
+        &mut self,
+        root_depth: usize,
+        mut completed: Option<ValueRef>,
+        event_ids: &mut Vec<EventId>,
+    ) -> Result<ValueRef, CompilerError> {
+        loop {
+            if self.expression_frames.len() == root_depth {
+                return completed.ok_or_else(|| {
+                    compiler_error(
+                        "Boracle problem extraction finished an expression without a value",
+                    )
+                });
+            }
+            let Some(mut frame) = self.expression_frames.pop() else {
+                return Err(compiler_error(
+                    "Boracle problem extraction lost an expression frame",
+                ));
+            };
+            match self.advance_expression(&mut frame, completed.take(), event_ids)? {
+                Advance::Child {
+                    expression_id,
+                    source,
+                } => {
+                    self.expression_frames.push(frame);
+                    completed = self.enter_expression(expression_id, &source, event_ids)?;
+                }
+                Advance::Finished(value) => completed = Some(value),
+            }
+        }
+    }
+
+    /// Advances one frame by one step, consuming the child value it was waiting for first.
+    fn advance_expression(
+        &mut self,
+        frame: &mut LowerFrame,
+        awaited: Option<ValueRef>,
+        event_ids: &mut Vec<EventId>,
+    ) -> Result<Advance, CompilerError> {
+        match frame.state {
+            FrameState::Children => self.advance_children(frame, awaited, event_ids),
+            FrameState::Place(place_id) => self.advance_place(frame, place_id, event_ids),
+            FrameState::Aggregate { target, field_base } => {
+                self.advance_aggregate(frame, target, field_base, awaited, event_ids)
+            }
+        }
+    }
+
+    /// Requests the next child of an operation, or completes it once every child is lowered.
+    ///
+    /// A variant payload completes by projecting its single source. Other operations complete
+    /// by writing one fresh value.
+    ///
+    /// A child's value arrives as `awaited` on the next step, so this step needs no `awaiting`
+    /// marker. Places and aggregates need one, to remember which projection or field the child
+    /// feeds.
+    fn advance_children(
+        &mut self,
+        frame: &mut LowerFrame,
+        awaited: Option<ValueRef>,
+        event_ids: &mut Vec<EventId>,
+    ) -> Result<Advance, CompilerError> {
+        let expression_id = frame.expression_id;
+        let source = frame.source;
+        if let Some(child_id) = self.expression_child(expression_id, frame.cursor as usize) {
+            frame.cursor += 1;
+            return Ok(Advance::Child {
+                expression_id: child_id,
+                source,
+            });
+        }
+        let value = match self.expression_plan(expression_id) {
+            ExpressionPlan::VariantPayloadGet { field_index, .. } => {
+                let source_ref = awaited.ok_or_else(|| {
+                    compiler_error("Boracle problem extraction lost a variant payload source")
+                })?;
+                self.expression_projection(
+                    expression_id,
+                    source_ref,
+                    ProjectionElem::FixedIndex(field_index as u32),
+                    &source,
+                    event_ids,
+                )?
+            }
+            _ => self.finish_fresh_destination(expression_id, &source, event_ids)?,
+        };
+        Ok(Advance::Finished(value))
+    }
+
+    /// Walks a load or copy place, lowering each dynamic index in projection order.
+    ///
+    /// The root is interned when the frame is entered, and each projection is interned as it
+    /// is reached, which matches `lower_place`.
+    fn advance_place(
+        &mut self,
+        frame: &mut LowerFrame,
+        mut place_id: PlaceId,
+        event_ids: &mut Vec<EventId>,
+    ) -> Result<Advance, CompilerError> {
+        let expression_id = frame.expression_id;
+        let source = frame.source;
+        let (hir_place, is_copy) = match self.expression_plan(expression_id) {
+            ExpressionPlan::Load(place) => (place, false),
+            ExpressionPlan::Copy(place) => (place, true),
+            _ => {
+                return Err(compiler_error(format!(
+                    "Boracle problem extraction expected a place expression at {expression_id:?}"
+                )));
+            }
+        };
+        if std::mem::take(&mut frame.awaiting) {
+            place_id = self.project_place(place_id, ProjectionElem::DynamicIndex)?;
+        }
+        let module = self.module;
+        let projections = module.expressions.projections(hir_place.projections);
+        while let Some(projection) = projections.get(frame.cursor as usize) {
+            frame.cursor += 1;
+            match self.resolve_place_projection(projection) {
+                PlaceProjectionStep::Resolved(step) => {
+                    place_id = self.project_place(place_id, step)?;
+                }
+                PlaceProjectionStep::NeedsIndex(index_id) => {
+                    frame.awaiting = true;
+                    frame.state = FrameState::Place(place_id);
+                    return Ok(Advance::Child {
+                        expression_id: index_id,
+                        source,
+                    });
+                }
+            }
+        }
+        let value = if is_copy {
+            self.finish_copy(expression_id, place_id, &source, event_ids)?
+        } else {
+            self.finish_load(expression_id, place_id, &source, event_ids)?
+        };
+        Ok(Advance::Finished(value))
+    }
+
+    /// Collects the field written by the child just lowered, then requests the next child.
+    ///
+    /// Once every child is lowered, the collected fields are written to the destination.
+    fn advance_aggregate(
+        &mut self,
+        frame: &mut LowerFrame,
+        target: BindingDestination,
+        field_base: u32,
+        awaited: Option<ValueRef>,
+        event_ids: &mut Vec<EventId>,
+    ) -> Result<Advance, CompilerError> {
+        let expression_id = frame.expression_id;
+        if std::mem::take(&mut frame.awaiting) {
+            let child = awaited.ok_or_else(|| {
+                compiler_error("Boracle problem extraction lost an aggregate field value")
+            })?;
+            if let Some(place) = child.place {
+                let index = (frame.cursor as usize).saturating_sub(1);
+                let projection = self
+                    .aggregate_child_projection(expression_id, index)
+                    .ok_or_else(|| {
+                        compiler_error("Boracle problem extraction lost an aggregate projection")
+                    })?;
+                self.aggregate_fields.push(AggregateField {
+                    projection,
+                    source: place,
+                });
+            }
+        }
+        if let Some(child_id) = self.expression_child(expression_id, frame.cursor as usize) {
+            frame.cursor += 1;
+            frame.awaiting = true;
+            return Ok(Advance::Child {
+                expression_id: child_id,
+                source: frame.source,
+            });
+        }
+        let fields: Box<[AggregateField]> =
+            self.aggregate_fields.drain(field_base as usize..).collect();
+        let source = frame.source;
+        self.finish_aggregate(target, fields, &source, event_ids)?;
+        Ok(Advance::Finished(ValueRef {
+            place: Some(target.place()),
+        }))
+    }
+
+    /// Lowers a literal. A constant literal needs no problem value.
+    fn lower_literal(
+        &mut self,
+        expression_id: HirValueId,
+        source: &EventSource,
+        event_ids: &mut Vec<EventId>,
+    ) -> Result<ValueRef, CompilerError> {
+        if self.module.expressions.expression(expression_id).value_kind == ValueKind::Const {
+            return Ok(ValueRef { place: None });
+        }
+        self.finish_fresh_destination(expression_id, source, event_ids)
+    }
+
+    /// Writes a fresh synthetic value for an expression that produces one.
+    fn finish_fresh_destination(
+        &mut self,
+        expression_id: HirValueId,
+        source: &EventSource,
+        event_ids: &mut Vec<EventId>,
+    ) -> Result<ValueRef, CompilerError> {
+        let destination = self.synthetic_place(expression_id.0)?;
+        let origin = self.new_fresh_origin();
+        self.emit_write(destination, source, event_ids)?;
+        self.emit_event(
+            event_ids,
+            *source,
+            EventKind::Fresh {
+                destination: BindingDestination::Define(destination),
+                origin,
+            },
+        );
+        Ok(ValueRef {
+            place: Some(destination),
+        })
+    }
+
+    /// Completes a place read, either as a place alias or as a fresh value.
+    fn finish_load(
+        &mut self,
+        expression_id: HirValueId,
+        place: PlaceId,
+        source: &EventSource,
+        event_ids: &mut Vec<EventId>,
+    ) -> Result<ValueRef, CompilerError> {
+        let value_kind = self.module.expressions.expression(expression_id).value_kind;
+        if value_kind != ValueKind::Const {
+            self.emit_read(place, source, event_ids)?;
+        }
+        match value_kind {
+            ValueKind::Place => Ok(ValueRef { place: Some(place) }),
+            ValueKind::RValue => {
+                let destination = self.synthetic_place(expression_id.0)?;
+                self.emit_rebind_write(
+                    BindingDestination::Define(destination),
+                    super::events::RebindValue::AliasFromPlace(place),
+                    source,
+                    event_ids,
+                )?;
+                Ok(ValueRef {
+                    place: Some(destination),
+                })
+            }
+            ValueKind::Const => self.finish_fresh_destination(expression_id, source, event_ids),
+        }
+    }
+
+    /// Completes a copy by reading the source, then writing the copy to a synthetic destination.
+    fn finish_copy(
+        &mut self,
+        expression_id: HirValueId,
+        source_place: PlaceId,
+        source: &EventSource,
+        event_ids: &mut Vec<EventId>,
+    ) -> Result<ValueRef, CompilerError> {
+        self.emit_read(source_place, source, event_ids)?;
+        let destination = self.synthetic_place(expression_id.0)?;
+        let origin = self.new_copy_origin();
+        self.emit_write(destination, source, event_ids)?;
+        self.emit_event(
+            event_ids,
+            *source,
+            EventKind::Copy {
+                source: source_place,
+                destination: BindingDestination::Define(destination),
+                origin,
+            },
+        );
+        Ok(ValueRef {
+            place: Some(destination),
+        })
+    }
+
+    /// Writes an aggregate's fields into its destination, then records the aggregate event.
+    fn finish_aggregate(
+        &mut self,
+        target: BindingDestination,
+        fields: Box<[AggregateField]>,
+        source: &EventSource,
+        event_ids: &mut Vec<EventId>,
+    ) -> Result<(), CompilerError> {
+        for field in fields.iter() {
             self.project_place(target.place(), field.projection)?;
         }
         let origin = self.new_fresh_origin();
@@ -654,329 +1207,10 @@ impl<'a> FunctionProblemBuilder<'a> {
             EventKind::Aggregate {
                 destination: target,
                 origin,
-                fields: fields.into_boxed_slice(),
+                fields,
             },
         );
         Ok(())
-    }
-
-    fn lower_aggregate_children(
-        &mut self,
-        expression_id: HirValueId,
-        source: &EventSource,
-        event_ids: &mut Vec<EventId>,
-    ) -> Result<Vec<AggregateField>, CompilerError> {
-        let mut fields = Vec::new();
-        for (projection, child_id) in self.aggregate_expression_children(expression_id) {
-            let value_ref = self.lower_expression(child_id, source, event_ids)?;
-            if let Some(source) = value_ref.place {
-                fields.push(AggregateField { projection, source });
-            }
-        }
-        Ok(fields)
-    }
-
-    fn lower_expression_children(
-        &mut self,
-        expression_id: HirValueId,
-        source: &EventSource,
-        event_ids: &mut Vec<EventId>,
-    ) -> Result<Vec<ValueRef>, CompilerError> {
-        let child_ids = self.expression_children(expression_id);
-        let mut values = Vec::with_capacity(child_ids.len());
-        for child_id in child_ids {
-            values.push(self.lower_expression(child_id, source, event_ids)?);
-        }
-        Ok(values)
-    }
-
-    fn expression_plan(&self, expression_id: HirValueId) -> ExpressionPlan {
-        match &self.module.expressions.expression(expression_id).kind {
-            HirExpressionKind::Load(place) => ExpressionPlan::Load(*place),
-            HirExpressionKind::Copy(place) => ExpressionPlan::Copy(*place),
-            HirExpressionKind::TupleGet { tuple, index } => ExpressionPlan::TupleGet {
-                tuple: *tuple,
-                index: *index,
-            },
-            HirExpressionKind::VariantPayloadGet {
-                source,
-                field_index,
-                ..
-            } => ExpressionPlan::VariantPayloadGet {
-                source: *source,
-                field_index: *field_index,
-            },
-            HirExpressionKind::FallibleUnwrapSuccess { result }
-            | HirExpressionKind::FallibleUnwrapError { result } => {
-                ExpressionPlan::FallibleUnwrap(*result)
-            }
-            HirExpressionKind::StructConstruct { .. }
-            | HirExpressionKind::Collection(_)
-            | HirExpressionKind::Range { .. }
-            | HirExpressionKind::TupleConstruct { .. }
-            | HirExpressionKind::VariantConstruct { .. }
-            | HirExpressionKind::MapLiteral(_) => ExpressionPlan::Aggregate,
-            HirExpressionKind::Number(_)
-            | HirExpressionKind::Uint(_)
-            | HirExpressionKind::Int(_)
-            | HirExpressionKind::Float(_)
-            | HirExpressionKind::FixedScalar(_)
-            | HirExpressionKind::Bool(_)
-            | HirExpressionKind::Char(_)
-            | HirExpressionKind::StringLiteral(_)
-            | HirExpressionKind::StructuralString { .. } => ExpressionPlan::Literal,
-            _ => ExpressionPlan::Other,
-        }
-    }
-
-    fn expression_children(&self, expression_id: HirValueId) -> Vec<HirValueId> {
-        match &self.module.expressions.expression(expression_id).kind {
-            HirExpressionKind::BinOp { left, right, .. } => vec![*left, *right],
-            HirExpressionKind::UnaryOp { operand, .. }
-            | HirExpressionKind::Cast {
-                source: operand, ..
-            } => vec![*operand],
-            HirExpressionKind::StructConstruct { fields, .. } => self
-                .module
-                .expressions
-                .struct_fields(*fields)
-                .iter()
-                .map(|(_, value)| *value)
-                .collect(),
-            HirExpressionKind::Collection(elements)
-            | HirExpressionKind::TupleConstruct { elements } => {
-                self.module.expressions.values(*elements).to_vec()
-            }
-            HirExpressionKind::Range { start, end } => vec![*start, *end],
-            HirExpressionKind::TupleGet { tuple, .. }
-            | HirExpressionKind::FallibleUnwrapSuccess { result: tuple }
-            | HirExpressionKind::FallibleUnwrapError { result: tuple }
-            | HirExpressionKind::VariantPayloadGet { source: tuple, .. } => vec![*tuple],
-            HirExpressionKind::VariantConstruct { fields, .. } => self
-                .module
-                .expressions
-                .variant_fields(*fields)
-                .iter()
-                .map(|field| field.value)
-                .collect(),
-            HirExpressionKind::MapLiteral(entries) => self
-                .module
-                .expressions
-                .map_entries(*entries)
-                .iter()
-                .flat_map(|entry| [entry.key, entry.value])
-                .collect(),
-            HirExpressionKind::Load(_)
-            | HirExpressionKind::Copy(_)
-            | HirExpressionKind::Number(_)
-            | HirExpressionKind::Uint(_)
-            | HirExpressionKind::Int(_)
-            | HirExpressionKind::Float(_)
-            | HirExpressionKind::FixedScalar(_)
-            | HirExpressionKind::Bool(_)
-            | HirExpressionKind::Char(_)
-            | HirExpressionKind::StringLiteral(_)
-            | HirExpressionKind::StructuralString { .. } => Vec::new(),
-        }
-    }
-
-    fn aggregate_expression_children(
-        &self,
-        expression_id: HirValueId,
-    ) -> Vec<(ProjectionElem, HirValueId)> {
-        match &self.module.expressions.expression(expression_id).kind {
-            HirExpressionKind::StructConstruct { fields, .. } => self
-                .module
-                .expressions
-                .struct_fields(*fields)
-                .iter()
-                .map(|(field, value)| (ProjectionElem::Field(field.0), *value))
-                .collect(),
-            HirExpressionKind::Collection(elements)
-            | HirExpressionKind::TupleConstruct { elements } => self
-                .module
-                .expressions
-                .values(*elements)
-                .iter()
-                .enumerate()
-                .map(|(index, value)| (ProjectionElem::FixedIndex(index as u32), *value))
-                .collect(),
-            HirExpressionKind::Range { start, end } => vec![
-                (ProjectionElem::FixedIndex(0), *start),
-                (ProjectionElem::FixedIndex(1), *end),
-            ],
-            HirExpressionKind::VariantConstruct { fields, .. } => self
-                .module
-                .expressions
-                .variant_fields(*fields)
-                .iter()
-                .enumerate()
-                .map(|(index, field)| (ProjectionElem::FixedIndex(index as u32), field.value))
-                .collect(),
-            HirExpressionKind::MapLiteral(entries) => self
-                .module
-                .expressions
-                .map_entries(*entries)
-                .iter()
-                .flat_map(|entry| {
-                    [
-                        (ProjectionElem::MapEntry, entry.key),
-                        (ProjectionElem::MapEntry, entry.value),
-                    ]
-                })
-                .collect(),
-            _ => Vec::new(),
-        }
-    }
-
-    fn lower_expression(
-        &mut self,
-        expression_id: HirValueId,
-        fallback_source: &EventSource,
-        event_ids: &mut Vec<EventId>,
-    ) -> Result<ValueRef, CompilerError> {
-        let source = self.value_source(expression_id, fallback_source);
-        match self.expression_plan(expression_id) {
-            ExpressionPlan::Load(place) => {
-                let place = self.lower_place(&place, &source, event_ids)?;
-                let value_kind = self.module.expressions.expression(expression_id).value_kind;
-                if value_kind != ValueKind::Const {
-                    self.emit_read(place, &source, event_ids)?;
-                }
-                match value_kind {
-                    ValueKind::Place => Ok(ValueRef { place: Some(place) }),
-                    ValueKind::RValue => {
-                        let destination = self.synthetic_place(expression_id.0)?;
-                        self.emit_rebind_write(
-                            BindingDestination::Define(destination),
-                            super::events::RebindValue::AliasFromPlace(place),
-                            &source,
-                            event_ids,
-                        )?;
-                        Ok(ValueRef {
-                            place: Some(destination),
-                        })
-                    }
-                    ValueKind::Const => {
-                        let destination = self.synthetic_place(expression_id.0)?;
-                        let origin = self.new_fresh_origin();
-                        self.emit_write(destination, &source, event_ids)?;
-                        self.emit_event(
-                            event_ids,
-                            source,
-                            EventKind::Fresh {
-                                destination: BindingDestination::Define(destination),
-                                origin,
-                            },
-                        );
-                        Ok(ValueRef {
-                            place: Some(destination),
-                        })
-                    }
-                }
-            }
-            ExpressionPlan::Copy(place) => {
-                let source_place = self.lower_place(&place, &source, event_ids)?;
-                self.emit_read(source_place, &source, event_ids)?;
-                let destination = self.synthetic_place(expression_id.0)?;
-                let origin = self.new_copy_origin();
-                self.emit_write(destination, &source, event_ids)?;
-                self.emit_event(
-                    event_ids,
-                    source,
-                    EventKind::Copy {
-                        source: source_place,
-                        destination: BindingDestination::Define(destination),
-                        origin,
-                    },
-                );
-                Ok(ValueRef {
-                    place: Some(destination),
-                })
-            }
-            ExpressionPlan::Literal => {
-                if self.module.expressions.expression(expression_id).value_kind == ValueKind::Const
-                {
-                    return Ok(ValueRef { place: None });
-                }
-                let destination = self.synthetic_place(expression_id.0)?;
-                let origin = self.new_fresh_origin();
-                self.emit_write(destination, &source, event_ids)?;
-                self.emit_event(
-                    event_ids,
-                    source,
-                    EventKind::Fresh {
-                        destination: BindingDestination::Define(destination),
-                        origin,
-                    },
-                );
-                Ok(ValueRef {
-                    place: Some(destination),
-                })
-            }
-            ExpressionPlan::TupleGet { tuple, index } => {
-                let source_ref = self.lower_expression(tuple, &source, event_ids)?;
-                self.expression_projection(
-                    expression_id,
-                    source_ref,
-                    ProjectionElem::FixedIndex(index as u32),
-                    &source,
-                    event_ids,
-                )
-            }
-            ExpressionPlan::VariantPayloadGet {
-                source: value,
-                field_index,
-            } => {
-                let source_ref = self.lower_expression(value, &source, event_ids)?;
-                self.expression_projection(
-                    expression_id,
-                    source_ref,
-                    ProjectionElem::FixedIndex(field_index as u32),
-                    &source,
-                    event_ids,
-                )
-            }
-            ExpressionPlan::FallibleUnwrap(result) => {
-                let source_ref = self.lower_expression(result, &source, event_ids)?;
-                self.expression_projection(
-                    expression_id,
-                    source_ref,
-                    ProjectionElem::DynamicIndex,
-                    &source,
-                    event_ids,
-                )
-            }
-            ExpressionPlan::Aggregate => {
-                let destination = self.synthetic_place(expression_id.0)?;
-                self.lower_aggregate_into(
-                    BindingDestination::Define(destination),
-                    expression_id,
-                    &source,
-                    event_ids,
-                )?;
-                Ok(ValueRef {
-                    place: Some(destination),
-                })
-            }
-            _ => {
-                let _ = self.lower_expression_children(expression_id, &source, event_ids)?;
-                let destination = self.synthetic_place(expression_id.0)?;
-                let origin = self.new_fresh_origin();
-                self.emit_write(destination, &source, event_ids)?;
-                self.emit_event(
-                    event_ids,
-                    source,
-                    EventKind::Fresh {
-                        destination: BindingDestination::Define(destination),
-                        origin,
-                    },
-                );
-                Ok(ValueRef {
-                    place: Some(destination),
-                })
-            }
-        }
     }
 
     fn expression_projection(
@@ -1020,7 +1254,9 @@ impl<'a> FunctionProblemBuilder<'a> {
         let Some(source_place) = source_ref.place else {
             return self.emit_fresh_write(target, source, event_ids);
         };
+        let projected_source = self.project_place(source_place, projection)?;
         let origin = self.new_projection_origin(projection);
+        self.emit_read(projected_source, source, event_ids)?;
         self.emit_binding_write(target, source, event_ids)?;
         self.emit_event(
             event_ids,
@@ -1056,7 +1292,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         &mut self,
         target: &CallTarget,
         args: &[HirValueId],
-        result: Option<HirLocalDestination>,
+        results: &[HirLocalDestination],
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
     ) -> Result<(), CompilerError> {
@@ -1073,7 +1309,8 @@ impl<'a> FunctionProblemBuilder<'a> {
                 argument_sources,
                 accesses,
                 provenance,
-                result,
+                results,
+                killed_bindings: Box::new([]),
                 source,
             },
             event_ids,
@@ -1097,22 +1334,7 @@ impl<'a> FunctionProblemBuilder<'a> {
             .iter()
             .map(|argument| self.value_source(*argument, source))
             .collect();
-        let receiver_access = if op.requires_mutable_receiver() {
-            AccessKind::Exclusive
-        } else {
-            AccessKind::Shared
-        };
-        let mut accesses = vec![receiver_access];
-        accesses.extend(std::iter::repeat_n(AccessKind::Shared, args.len()));
-        let provenance = match op {
-            HirMapOp::Get => CallResultProvenance::AliasParams(vec![0].into_boxed_slice()),
-            HirMapOp::Remove => {
-                CallResultProvenance::Unknown(CallResultUnknownReason::OpaqueExternal)
-            }
-            HirMapOp::Contains | HirMapOp::Set | HirMapOp::Clear | HirMapOp::Length => {
-                CallResultProvenance::Fresh
-            }
-        };
+        let (accesses, provenance) = map_call_effect(op, args.len());
         let label = format!("map::{op:?}");
         self.emit_call_effect_with_label(
             CallEffectSpec {
@@ -1121,7 +1343,8 @@ impl<'a> FunctionProblemBuilder<'a> {
                 argument_sources,
                 accesses,
                 provenance,
-                result,
+                results: result.as_slice(),
+                killed_bindings: Box::new([]),
                 source,
             },
             event_ids,
@@ -1167,13 +1390,33 @@ impl<'a> FunctionProblemBuilder<'a> {
         }
         let CallEffectSpec {
             label,
-            arguments,
+            mut arguments,
             argument_sources,
             accesses,
             provenance,
-            result: result_local,
+            results: result_locals,
+            killed_bindings,
             source,
         } = spec;
+        for argument in &mut arguments {
+            let root = self.places[argument.index()].root;
+            if !killed_bindings.contains(&root) {
+                continue;
+            }
+            // Preserve operands rooted in reused edge destinations before retiring either outcome.
+            let binding = BindingId::new(dense_u32(self.bindings.len(), "captured call operand")?);
+            self.bindings
+                .push(Binding::new(binding, None, None, false, true, *source));
+            let captured = self.intern_place(binding, Vec::new())?;
+            self.emit_read(*argument, source, event_ids)?;
+            self.emit_rebind_write(
+                BindingDestination::Define(captured),
+                super::events::RebindValue::AliasFromPlace(*argument),
+                source,
+                event_ids,
+            )?;
+            *argument = captured;
+        }
         let call_id = self.next_call_id()?;
         self.calls.push(Call { id: call_id, label });
         let mut call_arguments = Vec::with_capacity(arguments.len());
@@ -1219,22 +1462,34 @@ impl<'a> FunctionProblemBuilder<'a> {
             ));
             event_ids.push(event_id);
         }
-        let result = result_local
-            .map(|destination| {
-                self.local_place(destination.local(), source)
-                    .map(|place| (binding_destination(destination, place), place))
-            })
-            .transpose()?;
-        let call_result = result.map(|(destination, _place)| {
-            let origin = self.new_origin(OriginKind::CallResult {
+        if !killed_bindings.is_empty() {
+            self.emit_event(
+                event_ids,
+                *source,
+                EventKind::ScopeExit {
+                    bindings: killed_bindings,
+                },
+            );
+        }
+        let mut results = Vec::with_capacity(result_locals.len());
+        // A union return summary cannot prove separate slots independent.
+        let origin = if result_locals.is_empty() {
+            None
+        } else {
+            Some(self.new_origin(OriginKind::CallResult {
                 call: call_id,
                 provenance,
-            });
-            CallResult {
+            }))
+        };
+        for destination in result_locals {
+            let place = self.local_place(destination.local(), source)?;
+            let destination = binding_destination(*destination, place);
+            let origin = origin.expect("non-empty result list has one conservative origin");
+            results.push(CallResult {
                 destination,
                 origin,
-            }
-        });
+            });
+        }
         let event_id = self.next_event_id()?;
         let point = self.new_point(self.current_problem_block()?, *source);
         self.events.push(Event::new(
@@ -1243,12 +1498,14 @@ impl<'a> FunctionProblemBuilder<'a> {
             EventKind::CallEffect(CallEffect {
                 call: call_id,
                 arguments: call_arguments.into_boxed_slice(),
-                result: call_result,
+                results: results.into_boxed_slice(),
             }),
             *source,
         ));
         event_ids.push(event_id);
-        if let Some((destination, result)) = result {
+        for destination in result_locals {
+            let result = self.local_place(destination.local(), source)?;
+            let destination = binding_destination(*destination, result);
             let point = self.new_point(self.current_problem_block()?, *source);
             let use_id = self.next_use_id()?;
             self.uses.push(Use {
@@ -1323,17 +1580,11 @@ impl<'a> FunctionProblemBuilder<'a> {
                     targets: self.sorted_problem_targets([*then_block, *else_block].into_iter())?,
                 }
             }
-            HirTerminator::FallibleBranch {
-                result,
-                success_block,
-                error_block,
-            } => {
-                self.lower_expression(*result, source, event_ids)?;
-                TerminatorEventKind::Branch {
-                    targets: self
-                        .sorted_problem_targets([*success_block, *error_block].into_iter())?,
-                }
-            }
+            HirTerminator::Invoke {
+                success, failure, ..
+            } => TerminatorEventKind::Branch {
+                targets: self.sorted_problem_targets([*success, *failure].into_iter())?,
+            },
             HirTerminator::Match { scrutinee, arms } => {
                 self.lower_expression(*scrutinee, source, event_ids)?;
                 for arm in arms {
@@ -1349,13 +1600,12 @@ impl<'a> FunctionProblemBuilder<'a> {
             HirTerminator::Continue { target } => TerminatorEventKind::Continue {
                 target: self.problem_block(*target)?,
             },
-            HirTerminator::Return(value) => {
-                self.lower_expression(*value, source, event_ids)?;
+            HirTerminator::Return(values) => {
+                let module = self.module;
+                for value in module.expressions.values(*values) {
+                    self.lower_expression(*value, source, event_ids)?;
+                }
                 TerminatorEventKind::Return
-            }
-            HirTerminator::ReturnSuccess(value) => {
-                self.lower_expression(*value, source, event_ids)?;
-                TerminatorEventKind::ReturnSuccess
             }
             HirTerminator::ReturnError(value) => {
                 self.lower_expression(*value, source, event_ids)?;
@@ -1456,6 +1706,165 @@ impl<'a> FunctionProblemBuilder<'a> {
             .collect()
     }
 
+    /// Edge blocks execute one operation outcome and retire stale destinations on loop re-entry.
+    fn new_invoke_edge_block(
+        &mut self,
+        terminator: &HirTerminator,
+        succeeded: bool,
+        exited_bindings: Box<[BindingId]>,
+        target: BlockId,
+        source: EventSource,
+    ) -> Result<BlockId, CompilerError> {
+        let HirTerminator::Invoke {
+            operation,
+            success_results,
+            error_result,
+            ..
+        } = terminator
+        else {
+            return Err(compiler_error(
+                "normalized Invoke edge requires an Invoke terminator",
+            ));
+        };
+        let id = BlockId::new(self.next_problem_block_id);
+        self.next_problem_block_id = self
+            .next_problem_block_id
+            .checked_add(1)
+            .ok_or_else(|| compiler_error("normalized CFG block table is larger than u32::MAX"))?;
+        self.current_problem_block = Some(id);
+        let entry = self.new_point(id, source);
+        let mut events = Vec::new();
+        let killed_bindings = success_results
+            .iter()
+            .copied()
+            .chain([*error_result])
+            .map(|local| self.binding_for_local(local))
+            .collect::<Result<Vec<_>, _>>()?
+            .into_boxed_slice();
+        let destinations = if succeeded {
+            success_results
+                .iter()
+                .copied()
+                .map(HirLocalDestination::Define)
+                .collect::<Vec<_>>()
+        } else {
+            vec![HirLocalDestination::Define(*error_result)]
+        };
+        match operation {
+            HirFallibleOperation::Call { target, args } => {
+                let args = self.module.expressions.values(*args).to_vec();
+                let arguments = self.lower_call_arguments(&args, &source, &mut events)?;
+                let argument_sources = args
+                    .iter()
+                    .map(|value| self.value_source(*value, &source))
+                    .collect();
+                let (accesses, provenance) = self.call_effect(target, args.len())?;
+                // Error provenance is not described by the success summary.
+                let provenance = if succeeded {
+                    provenance
+                } else {
+                    CallResultProvenance::Unknown(CallResultUnknownReason::SummaryUnknown)
+                };
+                self.emit_call_effect_with_label(
+                    CallEffectSpec {
+                        label: format!("{target:?}"),
+                        arguments,
+                        argument_sources,
+                        accesses,
+                        provenance,
+                        results: &destinations,
+                        killed_bindings,
+                        source: &source,
+                    },
+                    &mut events,
+                )?;
+            }
+            HirFallibleOperation::MapOp { op, receiver, args } => {
+                let args = self.module.expressions.values(*args);
+                let mut expression_ids = Vec::with_capacity(args.len() + 1);
+                expression_ids.push(*receiver);
+                expression_ids.extend_from_slice(args);
+                let arguments = self.lower_call_arguments(&expression_ids, &source, &mut events)?;
+                let argument_sources = expression_ids
+                    .iter()
+                    .map(|value| self.value_source(*value, &source))
+                    .collect();
+                let (accesses, provenance) = map_call_effect(*op, expression_ids.len() - 1);
+                let provenance = if succeeded {
+                    provenance
+                } else {
+                    CallResultProvenance::Fresh
+                };
+                self.emit_call_effect_with_label(
+                    CallEffectSpec {
+                        label: format!("map::{op:?}"),
+                        arguments,
+                        argument_sources,
+                        accesses,
+                        provenance,
+                        results: &destinations,
+                        killed_bindings,
+                        source: &source,
+                    },
+                    &mut events,
+                )?;
+            }
+            _ => {
+                match operation {
+                    HirFallibleOperation::CastOp { source: value, .. }
+                    | HirFallibleOperation::FormatFloat { source: value }
+                    | HirFallibleOperation::ValidateFloat { source: value } => {
+                        self.lower_expression(*value, &source, &mut events)?;
+                    }
+                    HirFallibleOperation::NumericOp { operands, .. } => {
+                        self.lower_numeric_operands(operands, &source, &mut events)?;
+                    }
+                    HirFallibleOperation::RangeStepFailure { .. } => {}
+                    HirFallibleOperation::Call { .. } | HirFallibleOperation::MapOp { .. } => {
+                        unreachable!("calls handled above")
+                    }
+                }
+                self.emit_event(
+                    &mut events,
+                    source,
+                    EventKind::ScopeExit {
+                        bindings: killed_bindings,
+                    },
+                );
+                for destination in destinations {
+                    let place = self.local_place(destination.local(), &source)?;
+                    self.emit_fresh_write(
+                        binding_destination(destination, place),
+                        &source,
+                        &mut events,
+                    )?;
+                }
+            }
+        }
+        if !exited_bindings.is_empty() {
+            self.emit_event(
+                &mut events,
+                source,
+                EventKind::ScopeExit {
+                    bindings: exited_bindings,
+                },
+            );
+        }
+        self.emit_event(
+            &mut events,
+            source,
+            EventKind::Terminator {
+                kind: TerminatorEventKind::Jump {
+                    target,
+                    arguments: Box::new([]),
+                },
+            },
+        );
+        let exit = self.new_point(id, source);
+        self.blocks.push(CfgBlock::new(id, entry, exit, events));
+        Ok(id)
+    }
+
     fn new_edge_block(
         &mut self,
         bindings: Box<[BindingId]>,
@@ -1534,7 +1943,6 @@ impl<'a> FunctionProblemBuilder<'a> {
                 }
             }
             TerminatorEventKind::Return
-            | TerminatorEventKind::ReturnSuccess
             | TerminatorEventKind::ReturnError
             | TerminatorEventKind::RuntimeFailure
             | TerminatorEventKind::AssertFailure => {}
@@ -1548,37 +1956,48 @@ impl<'a> FunctionProblemBuilder<'a> {
         source: &EventSource,
         event_ids: &mut Vec<EventId>,
     ) -> Result<PlaceId, CompilerError> {
+        let module = self.module;
         let mut place_id = self.local_place(place.root, source)?;
-        let projections = self
-            .module
-            .expressions
-            .projections(place.projections)
-            .to_vec();
-        for projection in projections {
-            let projection = match projection {
-                HirProjection::Field(field) => ProjectionElem::Field(field.0),
-                HirProjection::Index(index_id) => {
-                    let fixed_index = match &self.module.expressions.expression(index_id).kind {
-                        HirExpressionKind::Int(value) => Some(*value),
-                        _ => None,
-                    };
-                    match fixed_index {
-                        // Fixed projections need a 32-bit table id, so only values that
-                        // fit `u32` stay fixed; negatives and oversized values use the
-                        // dynamic path.
-                        Some(value) => u32::try_from(value)
-                            .map(ProjectionElem::FixedIndex)
-                            .unwrap_or(ProjectionElem::DynamicIndex),
-                        None => {
-                            self.lower_expression(index_id, source, event_ids)?;
-                            ProjectionElem::DynamicIndex
-                        }
-                    }
+        for projection in module.expressions.projections(place.projections) {
+            let projection = match self.resolve_place_projection(projection) {
+                PlaceProjectionStep::Resolved(projection) => projection,
+                PlaceProjectionStep::NeedsIndex(index_id) => {
+                    self.lower_expression(index_id, source, event_ids)?;
+                    ProjectionElem::DynamicIndex
                 }
             };
             place_id = self.project_place(place_id, projection)?;
         }
         Ok(place_id)
+    }
+
+    /// Resolves one HIR place projection without lowering its index expression.
+    ///
+    /// Callers lower a dynamic index at the point where its projection occurs, so the
+    /// evaluation order matches the source order of the place.
+    fn resolve_place_projection(&self, projection: &HirProjection) -> PlaceProjectionStep {
+        match projection {
+            HirProjection::Field(field) => {
+                PlaceProjectionStep::Resolved(ProjectionElem::Field(field.0))
+            }
+            HirProjection::Index(index_id) => {
+                let fixed_index = match &self.module.expressions.expression(*index_id).kind {
+                    HirExpressionKind::FixedScalar(value) => value.as_i64(),
+                    _ => None,
+                };
+                match fixed_index {
+                    // Fixed projections need a 32-bit table id, so only values that
+                    // fit `u32` stay fixed. Negatives and oversized values use the
+                    // dynamic path.
+                    Some(value) => PlaceProjectionStep::Resolved(
+                        u32::try_from(value)
+                            .map(ProjectionElem::FixedIndex)
+                            .unwrap_or(ProjectionElem::DynamicIndex),
+                    ),
+                    None => PlaceProjectionStep::NeedsIndex(*index_id),
+                }
+            }
+        }
     }
 
     fn local_place(
@@ -2054,6 +2473,25 @@ impl<'a> FunctionProblemBuilder<'a> {
         targets.dedup();
         Ok(targets.into_boxed_slice())
     }
+}
+
+fn map_call_effect(op: HirMapOp, argument_count: usize) -> (Vec<AccessKind>, CallResultProvenance) {
+    let receiver_access = if op.requires_mutable_receiver() {
+        AccessKind::Exclusive
+    } else {
+        AccessKind::Shared
+    };
+    let mut accesses = Vec::with_capacity(argument_count + 1);
+    accesses.push(receiver_access);
+    accesses.extend(std::iter::repeat_n(AccessKind::Shared, argument_count));
+    let provenance = match op {
+        HirMapOp::Get => CallResultProvenance::AliasParams(vec![0].into_boxed_slice()),
+        HirMapOp::Remove => CallResultProvenance::Unknown(CallResultUnknownReason::OpaqueExternal),
+        HirMapOp::Contains | HirMapOp::Set | HirMapOp::Clear | HirMapOp::Length => {
+            CallResultProvenance::Fresh
+        }
+    };
+    (accesses, provenance)
 }
 
 fn binding_destination(destination: HirLocalDestination, place: PlaceId) -> BindingDestination {

@@ -14,7 +14,7 @@
         -- nominal types
         Label = |
             text String,
-            count Int,
+            count I32,
         |
 
         -- conformances
@@ -88,7 +88,7 @@
         io = "plain variable"
         error_message #= Error("failed")
         return! value
-        cast! value
+        casted_text String = cast 'x'
 
         -- final placement, decimal scales and error markers
         parsed ParsedPost into scratch = parse_post(post)!
@@ -96,7 +96,7 @@
         legacy Dec01 = 1
         load |path String| -> String, Error!:
         fatal |message String| -> !:
-        note = "return! into Dec2" -- cast! into Dec2
+        note = "return! into Dec2" -- cast into Dec2
 
         -- template bodies are authored text around interpolations
         greeting = [: Hello, [name]! Don't panic -- really]

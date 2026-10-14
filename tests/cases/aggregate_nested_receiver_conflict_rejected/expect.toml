@@ -1,0 +1,21 @@
+entry = "."
+
+# Both exact nested receivers remain visible in traversal order: the later I64
+# receiver is primary and the earlier U64 receiver is secondary.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-TYPE-0001"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+path = "input/@page.moth"
+line = 13
+column = 27
+
+[[backends.html.diagnostic_assertions.secondary_labels]]
+occurrence = 1
+path = "input/@page.moth"
+line = 12
+column = 26

@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "f32_mixed forward_above=true reverse_above=true forward_zero=0 simple_forward=1,2.5 simple_reverse=2.5,1"

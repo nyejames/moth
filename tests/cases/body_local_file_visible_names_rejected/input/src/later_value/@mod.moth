@@ -1,0 +1,8 @@
+local_binding || -> I32:
+    later_value I32 = 1
+    return later_value
+;
+
+later_value || -> I32:
+    return 2
+;

@@ -1,25 +1,25 @@
-direct_walk |step Int| -> Int, Error!:
+direct_walk |step I32| -> I32, Error!:
     seen ~= 0
     loop 0 to 2 by step:
         seen = 99
     ;
     return seen
 ;
-private_walk |step Int| -> Int:
+private_walk |step I32| -> I32:
     seen ~= 0
     loop 0 to 2 by step:
         seen = 99
     ;
     return seen
 ;
-safe_walk |step Int| -> Int, Error!:
+safe_walk |step I32| -> I32, Error!:
     return private_walk(step)
 ;
-show_direct |step Int| -> String, Error!:
+show_direct |step I32| -> String, Error!:
     ignored = direct_walk(step)!
     return ""
 ;
-show_private |step Int| -> String, Error!:
+show_private |step I32| -> String, Error!:
     ignored = safe_walk(step)!
     return ""
 ;

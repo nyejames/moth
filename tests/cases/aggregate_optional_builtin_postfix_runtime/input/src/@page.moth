@@ -1,0 +1,38 @@
+-- Retained builtin postfix on an optional element.
+--
+-- `entries.get(0)!?` keeps the retained builtin, its authored `!` error unwrap and
+-- the element's `?` as one postfix chain. The present element yields its U64
+-- value, while the absent element returns `none` through the enclosing optional
+-- return type. Each function keeps its own pending origin, so no origin is shared
+-- between completions.
+
+-- Returns `none` for a zero origin and the origin itself otherwise.
+optional_u64 |value U64| -> U64?:
+    if value is 0:
+        return none
+    ;
+    return value
+;
+
+read_present || -> U64?, Error!:
+    origin = 4294967296
+    entries = {optional_u64(origin)}
+    return entries.get(0)!?
+;
+
+read_absent || -> U64?, Error!:
+    origin = 0
+    entries = {optional_u64(origin)}
+    return entries.get(0)!?
+;
+
+receive_u64 |value U64| -> String:
+    return cast value
+;
+
+present = read_present() catch then none
+absent = read_absent() catch then none
+present_text = if present is |found| then receive_u64(found) else "none"
+absent_text = if absent is |found| then receive_u64(found) else "none"
+
+[:aggregate optional present=[present_text] absent=[absent_text]]

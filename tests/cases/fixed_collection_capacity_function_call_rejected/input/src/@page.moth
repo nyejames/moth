@@ -1,8 +1,8 @@
-get_capacity || -> Int:
+get_capacity || -> I32:
     return 4
 ;
 
 render || -> String:
-    items {get_capacity() Int} = {}
+    items {get_capacity() I32} = {}
     return ""
 ;

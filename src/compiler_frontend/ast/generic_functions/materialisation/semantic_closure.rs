@@ -6,12 +6,13 @@ use super::nominal_blueprints::{
     NominalMaterialisationDefinition, intern_generated_canonical_type,
     intern_materialisation_type_blueprint,
 };
-use super::preparation_freeze::ModuleMaterialisationPreparation;
+use super::preparation_freeze::ModuleMaterialisationCapture;
 use super::stable_types::{
     GenericTemplateArtefact, MaterialisationNominalSource, StableCallableBinding,
     StableDeclarationBinding, StableFunctionSignature, StableFunctionTarget, StableNominalBinding,
 };
 use super::visibility::collect_namespace_source_paths;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionBody;
 use crate::compiler_frontend::ast::module_ast::environment::AstModuleEnvironment;
 use crate::compiler_frontend::ast::statements::functions::ReturnChannel;
@@ -26,7 +27,7 @@ use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget;
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
-use crate::compiler_frontend::public_interface::PublicSemanticInterface;
+use crate::compiler_frontend::public_interface::PublicDeclarationRecord;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, OriginDeclarationId,
 };
@@ -60,6 +61,41 @@ pub(super) struct StableSemanticClosure {
     evidence: Box<[StablePrivateEvidence]>,
 }
 impl StableSemanticClosure {
+    /// A generated environment is only a projection of the declaring module. Never replace its
+    /// original facts with recaptures from that projection, but retain genuinely new local facts.
+    pub(super) fn inherit_original(&mut self, original: &Self) {
+        let mut constants = original.constants.to_vec();
+        constants.extend(std::mem::take(&mut self.constants));
+        constants.sort_by_key(|row| row.local_path);
+        constants.dedup_by_key(|row| row.local_path);
+        self.constants = constants.into_boxed_slice();
+
+        let mut aliases = original.aliases.to_vec();
+        aliases.extend(std::mem::take(&mut self.aliases));
+        aliases.sort_by_key(|row| row.local_path);
+        aliases.dedup_by_key(|row| row.local_path);
+        self.aliases = aliases.into_boxed_slice();
+
+        let mut traits = original.traits.to_vec();
+        traits.extend(std::mem::take(&mut self.traits));
+        traits.sort_by(|left, right| left.identity.cmp(&right.identity));
+        traits.dedup_by(|left, right| left.identity == right.identity);
+        self.traits = traits.into_boxed_slice();
+
+        let mut evidence = original.evidence.to_vec();
+        evidence.extend(std::mem::take(&mut self.evidence));
+        evidence.sort_by(|left, right| {
+            left.target_type_identity
+                .cmp(&right.target_type_identity)
+                .then_with(|| left.trait_identity.cmp(&right.trait_identity))
+        });
+        evidence.dedup_by(|left, right| {
+            left.target_type_identity == right.target_type_identity
+                && left.trait_identity == right.trait_identity
+        });
+        self.evidence = evidence.into_boxed_slice();
+    }
+
     pub(super) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
         for constant in &mut self.constants {
             constant.local_path = remap.get(constant.local_path);
@@ -184,9 +220,17 @@ impl StableFunctionSignature {
             parameter
                 .parameter_type
                 .collect_nominal_identities(identities);
+            if let Some(default) = &parameter.folded_default {
+                default.visit_type_identities(&mut |identity| {
+                    collect_reachable_nominal_identities(identity, identities);
+                });
+            }
         }
         for returned in &self.returns {
-            returned.return_type.collect_nominal_identities(identities);
+            returned.collect_nominal_identities(identities);
+        }
+        if let Some(error_return) = &self.error_return {
+            error_return.collect_nominal_identities(identities);
         }
     }
 }
@@ -219,9 +263,9 @@ pub(super) fn stable_body_symbol_names(
 /// Collect every nominal identity one canonical type reaches, including generic-instance bases.
 ///
 /// WHY: `CanonicalTypeIdentity::visit` yields an instance and its arguments, but reconstructing
-/// `Box of Int` inside a generated sidecar also needs the blueprint of `Box` itself. Blueprint
+/// `Box of I32` inside a generated sidecar also needs the blueprint of `Box` itself. Blueprint
 /// type trees already record that base explicitly; canonical identities carry it on the instance.
-fn collect_reachable_nominal_identities(
+pub(super) fn collect_reachable_nominal_identities(
     identity: &CanonicalTypeIdentity,
     identities: &mut FxHashSet<CanonicalTypeIdentity>,
 ) {
@@ -275,7 +319,7 @@ pub(super) fn install_private_semantic_closure(
                 .map(|parameter| {
                     Ok(ResolvedTraitParameter {
                         name: parameter.name,
-                        value_mode: parameter.value_mode.clone(),
+                        value_mode: parameter.value_mode,
                         type_id: intern_stable_trait_type(
                             &parameter.parameter_type,
                             this_type,
@@ -442,29 +486,34 @@ fn intern_stable_trait_type(
         ),
     }
 }
-impl ModuleMaterialisationPreparation {
-    /// Capture local constants and transparent aliases once for the whole declaring module.
+impl ModuleMaterialisationCapture {
+    /// Capture the union of local declarations that retained artefacts actually install.
     ///
-    /// These declarations have no provider origin, so retaining only their visible paths would
-    /// leave a generated sidecar with a visibility entry but no declaration fact to resolve.
+    /// Folded values inline sibling constant values rather than retaining constant-path edges.
+    /// Nominal dependencies still use the existing blueprint closure, while private traits and
+    /// evidence retain their whole-module authority.
     pub(super) fn stable_semantic_closure(
         &self,
+        const_values: &ConstValueStore,
+        retained_local_paths: &FxHashSet<PathId>,
         resources: &ModuleResourceTable,
         path_fork: &PathInternerFork,
     ) -> Result<StableSemanticClosure, CompilerError> {
         let mut constants = Vec::new();
-        for row in self.const_values.iter_module_constant_views() {
+        for row in const_values.iter_module_constant_views() {
             let path = *row.path;
             let metadata = row.metadata;
-            if self
-                .binding_environment
-                .imported_declarations_by_local_path
-                .contains_key(&path)
+            if !retained_local_paths.contains(&path)
+                || self
+                    .binding_environment
+                    .imported_declarations_by_local_path
+                    .contains_key(&path)
             {
                 continue;
             }
             let type_identity = self.stable_type_identity(metadata.type_id)?;
-            let value = self.stable_folded_value_at_path(&path, resources, path_fork)?;
+            let value =
+                self.stable_folded_value_at_path(const_values, &path, resources, path_fork)?;
             constants.push(StableLocalConstant {
                 local_path: path,
                 type_identity,
@@ -478,10 +527,11 @@ impl ModuleMaterialisationPreparation {
             .resolved_type_aliases_by_path
             .iter()
             .filter(|(path, _)| {
-                !self
-                    .binding_environment
-                    .imported_declarations_by_local_path
-                    .contains_key(*path)
+                retained_local_paths.contains(*path)
+                    && !self
+                        .binding_environment
+                        .imported_declarations_by_local_path
+                        .contains_key(*path)
             })
             .map(|(path, alias)| {
                 let target_type_identity = self.stable_alias_target_identity(path, alias)?;
@@ -527,7 +577,7 @@ impl ModuleMaterialisationPreparation {
                         .map(|parameter| {
                             Ok(StablePrivateTraitParameter {
                                 name: parameter.name,
-                                value_mode: parameter.value_mode.clone(),
+                                value_mode: parameter.value_mode,
                                 parameter_type: self.stable_trait_type(
                                     parameter.type_id,
                                     definition.this_type,
@@ -676,12 +726,13 @@ impl ModuleMaterialisationPreparation {
 
     pub(super) fn stable_local_declaration_bindings(
         &self,
+        const_values: &ConstValueStore,
         selected_paths: &FxHashSet<PathId>,
     ) -> Box<[PathId]> {
         let mut paths = selected_paths
             .iter()
             .filter(|path| {
-                (self.const_values.value_for_path(path).is_some()
+                (const_values.value_for_path(path).is_some()
                     && !self
                         .binding_environment
                         .imported_declarations_by_local_path
@@ -753,7 +804,7 @@ impl ModuleMaterialisationPreparation {
     pub(super) fn stable_declaration_bindings(
         &self,
         selected_paths: &FxHashSet<PathId>,
-        public_interface: &PublicSemanticInterface,
+        declarations: &[PublicDeclarationRecord],
     ) -> Result<Box<[StableDeclarationBinding]>, CompilerError> {
         let mut bindings = Vec::new();
         for path in selected_paths {
@@ -774,7 +825,7 @@ impl ModuleMaterialisationPreparation {
             }
             let origin = self.public_origin_for_path(path);
             if let Some(origin) = origin
-                && public_interface.declaration(&origin).is_some()
+                && declarations.iter().any(|record| record.origin == origin)
             {
                 bindings.push(StableDeclarationBinding {
                     local_path: *path,
@@ -816,12 +867,16 @@ impl ModuleMaterialisationPreparation {
 
     pub(super) fn stable_callable_bindings(
         &self,
+        const_values: &ConstValueStore,
         selected_paths: &FxHashSet<PathId>,
         resources: &ModuleResourceTable,
         path_fork: &PathInternerFork,
     ) -> Result<Box<[StableCallableBinding]>, CompilerError> {
         let mut callables = Vec::new();
         for path in selected_paths {
+            if self.generic_function_templates_by_path.contains_key(path) {
+                continue;
+            }
             let Some(contract) = self.imported_functions_by_local_path.get(path) else {
                 continue;
             };
@@ -831,13 +886,11 @@ impl ModuleMaterialisationPreparation {
             let Some(resolved) = self.resolved_function_signatures_by_path.get(path) else {
                 continue;
             };
-            if resolved.receiver.is_some() {
-                continue;
-            }
             callables.push(StableCallableBinding {
                 local_path: *path,
                 target,
                 signature: self.stable_function_signature(
+                    const_values,
                     &resolved.signature,
                     &FxHashMap::default(),
                     resources,
@@ -851,24 +904,27 @@ impl ModuleMaterialisationPreparation {
     }
     /// Collect the nominal blueprints one template's generated sidecar can need.
     ///
-    /// WHAT: gathers every canonical identity the artefact reaches (signature, selected nominals,
-    /// selected constants and their folded values, selected alias targets, private traits and
-    /// retained evidence) and keeps the blueprint of each one that has one.
+    /// WHAT: gathers every canonical identity the artefact reaches (retained callable and receiver
+    /// signatures and defaults, selected nominals, selected constants and their folded values,
+    /// selected alias targets, private traits and retained evidence) and keeps each blueprint.
     /// WHY: this is the single owner of blueprint closure collection. Every canonical identity
     /// source runs through [`collect_reachable_nominal_identities`], because a concrete
-    /// `Box of Int` identity also needs the `Box` blueprint and canonical identities carry that
+    /// `Box of I32` identity also needs the `Box` blueprint and canonical identities carry that
     /// base on the instance rather than as a nested identity.
-    pub(super) fn stable_nominal_blueprints(
+    pub(super) fn stable_nominal_blueprints<'a>(
         &self,
+        const_values: &ConstValueStore,
         selected_paths: &FxHashSet<PathId>,
-        signature: &StableFunctionSignature,
+        signatures: impl IntoIterator<Item = &'a StableFunctionSignature>,
         semantic_closure: &StableSemanticClosure,
         resources: &ModuleResourceTable,
         path_fork: &PathInternerFork,
     ) -> Result<FxHashMap<CanonicalTypeIdentity, NominalMaterialisationBlueprint>, CompilerError>
     {
         let mut identities = FxHashSet::default();
-        signature.collect_nominal_identities(&mut identities);
+        for signature in signatures {
+            signature.collect_nominal_identities(&mut identities);
+        }
         for path in selected_paths {
             if let Some(type_id) = self.nominal_type_ids_by_path.get(path)
                 && let Some(identity) = self
@@ -877,13 +933,15 @@ impl ModuleMaterialisationPreparation {
             {
                 collect_reachable_nominal_identities(identity, &mut identities);
             }
-            if let Some(value_id) = self.const_values.value_for_path(path) {
-                if let Some(metadata) = self.const_values.metadata(value_id)
+            if let Some(value_id) = const_values.value_for_path(path) {
+                if let Some(metadata) = const_values.metadata(value_id)
                     && let Ok(identity) = self.stable_type_identity(metadata.type_id)
                 {
                     collect_reachable_nominal_identities(&identity, &mut identities);
                 }
-                if let Ok(value) = self.stable_folded_value_at_path(path, resources, path_fork) {
+                if let Ok(value) =
+                    self.stable_folded_value_at_path(const_values, path, resources, path_fork)
+                {
                     value.visit_type_identities(&mut |identity| {
                         collect_reachable_nominal_identities(identity, &mut identities);
                     });
@@ -930,12 +988,25 @@ impl ModuleMaterialisationPreparation {
                     NominalMaterialisationDefinition::Struct { fields, .. } => {
                         for field in fields {
                             field.field_type.collect_nominal_identities(&mut discovered);
+                            if let Some(default) = &field.folded_default {
+                                default.visit_type_identities(&mut |identity| {
+                                    collect_reachable_nominal_identities(identity, &mut discovered);
+                                });
+                            }
                         }
                     }
                     NominalMaterialisationDefinition::Choice { variants } => {
                         for variant in variants {
                             for field in &variant.payload_fields {
                                 field.field_type.collect_nominal_identities(&mut discovered);
+                                if let Some(default) = &field.folded_default {
+                                    default.visit_type_identities(&mut |identity| {
+                                        collect_reachable_nominal_identities(
+                                            identity,
+                                            &mut discovered,
+                                        );
+                                    });
+                                }
                             }
                         }
                     }
@@ -992,26 +1063,31 @@ impl ModuleMaterialisationPreparation {
         }
     }
 
+    /// Capture all existing lookup aliases for the retained canonical nominal closure.
+    ///
+    /// Visibility selects semantic dependencies, not the complete alias index. Signature-only
+    /// imports and inherited canonical paths still belong to the generated publication domain.
     pub(super) fn stable_nominal_bindings(
         &self,
-        selected_paths: &FxHashSet<PathId>,
+        blueprints: &FxHashMap<CanonicalTypeIdentity, NominalMaterialisationBlueprint>,
     ) -> Box<[StableNominalBinding]> {
-        let mut bindings = selected_paths
-            .iter()
-            .filter_map(|path| {
-                let type_id = self.nominal_type_ids_by_path.get(path)?;
+        let mut bindings = self
+            .type_environment
+            .nominal_path_bindings()
+            .filter_map(|(path, type_id)| {
                 let identity = self
                     .type_environment
-                    .canonical_identity_for_type_id(*type_id)?;
-                self.nominal_blueprints
+                    .canonical_identity_for_type_id(type_id)?;
+                blueprints
                     .contains_key(identity)
                     .then(|| StableNominalBinding {
-                        local_path: *path,
+                        local_path: path,
                         identity: identity.clone(),
                     })
             })
             .collect::<Vec<_>>();
         bindings.sort_by_key(|binding| binding.local_path);
+        bindings.dedup_by_key(|binding| binding.local_path);
         bindings.into_boxed_slice()
     }
 }

@@ -4,6 +4,8 @@ use super::super::slot_plan::push_runtime_slot_contribution_source;
 use super::super::store::{MalformedTirStore, TemplateIrStore};
 use super::super::summary::{TemplateIrSummary, summarize_existing_root};
 use super::super::view::TemplateTirPhase;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::templates::template::{
     Style, TemplateSegmentOrigin, TemplateType,
 };
@@ -71,7 +73,6 @@ fn record_helpers_preserve_summary_shape_contracts() {
 fn contribution_source_marker_recompute_records_the_source_count() {
     let mut store = TemplateIrStore::new();
     let plan = store.push_slot_plan(super::super::slot_plan::TemplateSlotPlan {
-        span: None,
         contribution_sources: vec![],
         slot_sites: vec![],
     });
@@ -266,6 +267,8 @@ fn formatted_markdown_root_summary_matches_recompute() {
 
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let style = Style {
         formatter: Some(markdown_formatter()),
         ..Style::default()
@@ -290,6 +293,8 @@ fn formatted_markdown_root_summary_matches_recompute() {
 
     let formatted_root = format_tir_template(
         &mut store,
+        &mut expressions,
+        &mut const_values,
         template_id,
         TemplateTirPhase::Parsed,
         TemplateViewContext::default(),
@@ -328,6 +333,8 @@ fn nested_child_formatter_publishes_derived_version_and_updates_reference() {
 
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let child_style = Style {
         formatter: Some(markdown_formatter()),
         ..Style::default()
@@ -361,6 +368,8 @@ fn nested_child_formatter_publishes_derived_version_and_updates_reference() {
 
     format_tir_template(
         &mut store,
+        &mut expressions,
+        &mut const_values,
         parent_id,
         TemplateTirPhase::Parsed,
         TemplateViewContext::default(),

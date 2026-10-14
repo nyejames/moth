@@ -2,11 +2,11 @@ INT_LABEL must:
     label |This| -> String
 ;
 
-label |this Int| -> String:
+label |this I32| -> String:
     return "int evidence"
 ;
 
-Int must INT_LABEL
+I32 must INT_LABEL
 
 value = 7
 

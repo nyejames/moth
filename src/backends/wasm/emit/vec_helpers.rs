@@ -77,6 +77,22 @@ pub(crate) fn emit_vec_helper(
             function.instruction(&Instruction::I32Add);
             function.instruction(&Instruction::LocalSet(NEW_LEN));
 
+            // Trap on a wrapped length (new_len < len) or an element count whose byte offset
+            // (new_len * 4) would wrap u32; the logical length stays on the I32 length carrier.
+            function.instruction(&Instruction::LocalGet(NEW_LEN));
+            function.instruction(&Instruction::LocalGet(VEC_HANDLE));
+            function.instruction(&Instruction::I32Load(memarg(4)));
+            function.instruction(&Instruction::I32LtU);
+            function.instruction(&Instruction::LocalGet(NEW_LEN));
+            function.instruction(&Instruction::I32Const(0x3FFF_FFFF));
+            function.instruction(&Instruction::I32GtU);
+            function.instruction(&Instruction::I32Or);
+            function.instruction(&Instruction::If(wasm_encoder::BlockType::Empty));
+            {
+                function.instruction(&Instruction::Unreachable);
+            }
+            function.instruction(&Instruction::End);
+
             // if new_len > capacity, grow backing storage
             function.instruction(&Instruction::LocalGet(NEW_LEN));
             function.instruction(&Instruction::LocalGet(VEC_HANDLE));
@@ -96,6 +112,17 @@ pub(crate) fn emit_vec_helper(
                 {
                     function.instruction(&Instruction::I32Const(4));
                     function.instruction(&Instruction::LocalSet(NEW_CAP));
+                }
+                function.instruction(&Instruction::End);
+
+                // Trap before allocation when the grown capacity's byte size (new_cap * 4) would wrap u32.
+                // Growth keeps the existing doubling policy; this bounds only the physical byte product.
+                function.instruction(&Instruction::LocalGet(NEW_CAP));
+                function.instruction(&Instruction::I32Const(0x3FFF_FFFF));
+                function.instruction(&Instruction::I32GtU);
+                function.instruction(&Instruction::If(wasm_encoder::BlockType::Empty));
+                {
+                    function.instruction(&Instruction::Unreachable);
                 }
                 function.instruction(&Instruction::End);
 
@@ -139,6 +166,21 @@ pub(crate) fn emit_vec_helper(
             function.instruction(&Instruction::LocalGet(VEC_HANDLE));
             function.instruction(&Instruction::I32Load(memarg(0)));
             function.instruction(&Instruction::LocalSet(DATA_PTR));
+
+            // Trap when data_ptr + new_len * 4 wraps u32, before the element store; the product fits
+            // because the top guard bounds new_len to 0x3FFF_FFFF.
+            function.instruction(&Instruction::LocalGet(DATA_PTR));
+            function.instruction(&Instruction::LocalGet(NEW_LEN));
+            function.instruction(&Instruction::I32Const(4));
+            function.instruction(&Instruction::I32Mul);
+            function.instruction(&Instruction::I32Add);
+            function.instruction(&Instruction::LocalGet(DATA_PTR));
+            function.instruction(&Instruction::I32LtU);
+            function.instruction(&Instruction::If(wasm_encoder::BlockType::Empty));
+            {
+                function.instruction(&Instruction::Unreachable);
+            }
+            function.instruction(&Instruction::End);
 
             // data_ptr[len * 4] = string_handle
             function.instruction(&Instruction::LocalGet(DATA_PTR));

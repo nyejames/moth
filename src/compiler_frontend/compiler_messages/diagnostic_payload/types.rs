@@ -55,6 +55,41 @@ pub enum HirCapacityResource {
     PlaceProjections,
 }
 
+/// Which compact AST expression or constant-value buffer could not represent another
+/// source-owned value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum AstCapacityResource {
+    /// Completed AST semantic expression rows.
+    ExpressionRows,
+    /// Typed AST expression ranges and semantic side records.
+    ExpressionSideEntries,
+    /// Constant value rows in the constant store.
+    ConstValues,
+    /// Choice variant tags stored on choice construction expressions.
+    ChoiceTags,
+    /// Distances between flat expression grouping markers.
+    GroupDistances,
+}
+
+/// The compact buffer that overflowed, tagged with the stage that owns it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum CapacityResource {
+    Hir(HirCapacityResource),
+    Ast(AstCapacityResource),
+}
+
+impl From<HirCapacityResource> for CapacityResource {
+    fn from(resource: HirCapacityResource) -> Self {
+        Self::Hir(resource)
+    }
+}
+
+impl From<AstCapacityResource> for CapacityResource {
+    fn from(resource: AstCapacityResource) -> Self {
+        Self::Ast(resource)
+    }
+}
+
 /// Why project-context-dependent semantic facts cannot cross a package facade boundary.
 ///
 /// The reason is intentionally independent of the rendered wording so build, check and tooling
@@ -63,6 +98,28 @@ pub enum HirCapacityResource {
 pub enum ProjectContextEscapeReason {
     ExportedDeclaration,
     ReachableExecutable,
+}
+
+/// The semantic receiving boundary that requires a producer's success slots.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ValueReceiverContext {
+    Declaration,
+    Assignment,
+    Return,
+    Then,
+    FunctionArgument,
+    ConstructorArgument,
+    OperatorOperand,
+    Condition,
+    ReceiverBase,
+    CollectionElement,
+    MapKey,
+    MapValue,
+    TemplateInterpolation,
+    CastSource,
+    MatchScrutinee,
+    AssertionArgument,
+    General,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -174,8 +231,8 @@ impl UnsupportedBackendFeatureReason {
             Self::RuntimeCasts => "runtime casts",
             Self::CheckedNumericOperations => "checked numeric operations",
             Self::RecoverableNumericFailure => "recoverable numeric failure",
-            Self::FloatFormatting => "Float formatting",
-            Self::FloatBoundaryValidation => "Float boundary validation",
+            Self::FloatFormatting => "binary-float formatting",
+            Self::FloatBoundaryValidation => "binary-float boundary validation",
             Self::GenericRuntimeValues => "generic runtime values",
             Self::FixedWidthScalarValues => "fixed-width numeric and Byte values",
             Self::CrossModuleCalls => "cross-module calls",
@@ -246,6 +303,15 @@ pub enum InvalidConfigReason {
     ConfigInputTypeMismatch {
         provided: StringId,
         expected: StringId,
+        provided_argument_index: Option<usize>,
+    },
+    /// A supplied numeric literal does not fit the exact scalar its contract selects.
+    ///
+    /// `provided_argument_index` retains command provenance, because a command value has no
+    /// source span of its own and the primary anchor is the receiving declaration.
+    ConfigInputOutOfRange {
+        literal: StringId,
+        reason: NumberLiteralErrorReason,
         provided_argument_index: Option<usize>,
     },
     /// A required declaration-owned config contract had no input, global or default.
@@ -526,6 +592,9 @@ impl InvalidConfigReason {
                 *provided = remap.get(*provided);
                 *expected = remap.get(*expected);
             }
+            Self::ConfigInputOutOfRange { literal, .. } => {
+                *literal = remap.get(*literal);
+            }
 
             Self::MissingKey
             | Self::MissingConfigFile
@@ -726,7 +795,7 @@ pub enum InvalidCollectionTypeReason {
     ShorthandCapacityNotAllowed,
     /// Fixed collection capacity must be greater than zero.
     ZeroCapacity,
-    /// Capacity expression did not fold to an `Int` value.
+    /// Capacity expression did not fold to an integer value.
     CapacityNotInt,
     /// Capacity expression references a non-constant value or contains runtime-only syntax.
     CapacityNotConstant,
@@ -1068,6 +1137,7 @@ pub enum InvalidDeclarationReason {
     TraitIncompatibilityMissingTrait,
     TraitIncompatibilitySemicolon,
     MissingInitializerExpression,
+    DeclarationRequiresModuleTopLevel,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -1127,6 +1197,9 @@ pub enum InvalidTraitConformanceReason {
         requirement_name: StringId,
         return_index: usize,
     },
+    InferredFailureInInfallibleCast {
+        requirement_name: StringId,
+    },
 }
 
 impl InvalidTraitConformanceReason {
@@ -1134,6 +1207,7 @@ impl InvalidTraitConformanceReason {
         match self {
             Self::MissingMethod { requirement_name }
             | Self::ReceiverMutabilityMismatch { requirement_name }
+            | Self::InferredFailureInInfallibleCast { requirement_name }
             | Self::ParameterCountMismatch {
                 requirement_name, ..
             }
@@ -1229,21 +1303,15 @@ pub enum InvalidCastReason {
     TargetIsGenericParameter,
     SameSourceAndTarget,
     SourceIsOptional,
-    OperandIsFallible,
     OperandArityMismatch,
     TargetArityMismatch,
-    FallibleEvidenceRequiresHandling,
-    InfallibleEvidenceCannotUseFallibleForm,
-    PropagationRequiresErrorReturn,
-    PropagationAndRecoveryConflict,
-    BangMustAttachToCast,
+    CastPropagationRemoved,
     ScalarConstructorRemoved,
     NoEvidence,
     BuiltinEvidenceNotConstFoldable,
     UserDefinedEvidenceNotConstFoldable,
     GenericBoundEvidenceNotConstFoldable,
     BuiltinCastFailedInConst,
-    CatchHandlerNotConstFoldable,
 }
 
 /// Which receiver-call surface produced a receiver-access diagnostic.
@@ -1362,8 +1430,15 @@ pub enum InvalidFallibleHandlingReason {
     BangOnNonFallible,
     BangOnOptional,
     FunctionHasNoErrorSlot,
+    EntryHasIncompatibleError {
+        produced_error_type: TypeId,
+        entry_error_type: TypeId,
+    },
     NotOptionExpression,
     FunctionHasNoOptionalReturn,
+    FunctionHasMultipleSuccessReturns {
+        count: usize,
+    },
     OptionPropagationReturnTypeMismatch,
     OptionPropagationCatchConflict,
     ExplicitPropagationCatchConflict,
@@ -1446,7 +1521,7 @@ impl InvalidFallibleHandlingReason {
             }
 
             InvalidFallibleHandlingReason::CatchOutsideBoundary => {
-                "`catch` can only handle a fallible expression at an assignment, declaration, return, or statement boundary."
+                "`catch` is only allowed at an assignment, declaration, return or statement boundary."
             }
 
             InvalidFallibleHandlingReason::ExpectedCatchBlockOrHandler => {
@@ -1482,7 +1557,8 @@ impl InvalidFallibleHandlingReason {
             }
 
             InvalidFallibleHandlingReason::CatchOnNonFallible => {
-                "`catch` handles implicit built-in failure or compatible typed errors, but this expression is not fallible."
+                "`catch` needs a compatible recoverable failure or an authored cast, arithmetic operation or \
+                 multiple calls at this expression level; this expression has none."
             }
 
             InvalidFallibleHandlingReason::CatchOnOptional => {
@@ -1501,12 +1577,20 @@ impl InvalidFallibleHandlingReason {
                 "This expression uses '!' propagation, but the surrounding function does not declare an error return slot."
             }
 
+            InvalidFallibleHandlingReason::EntryHasIncompatibleError { .. } => {
+                "This '!' propagation produces an error incompatible with the entry's built-in start Error! boundary. Handle it locally with `catch` or recover explicitly."
+            }
+
             InvalidFallibleHandlingReason::NotOptionExpression => {
                 "The '?' option-propagation suffix is only valid for optional expressions."
             }
 
             InvalidFallibleHandlingReason::FunctionHasNoOptionalReturn => {
                 "This expression uses '?' propagation, but the surrounding function does not return an optional success value."
+            }
+
+            InvalidFallibleHandlingReason::FunctionHasMultipleSuccessReturns { .. } => {
+                "This '?' propagation requires exactly one optional success return slot. Inspect the option locally or use a single optional success return slot."
             }
 
             InvalidFallibleHandlingReason::OptionPropagationReturnTypeMismatch => {
@@ -1580,7 +1664,6 @@ pub enum CompileTimeEvaluationErrorReason {
     DivideByZero,
     InvalidExponent,
     InvalidOperatorForType,
-    IntegerDivisionOnlyIntInt,
     ConstantSelfReference,
     ConstantNotVisible,
     NonConstantReferenceInConstant,
@@ -1593,16 +1676,6 @@ pub enum CompileTimeEvaluationErrorReason {
     ExternalTypeConstructionNotSupported,
     StructFieldDefaultNotFoldable,
     StructuralStringRequiresFinalText,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum UnsupportedOperatorCategory {
-    Arithmetic,
-    Comparison,
-    Range,
-    Logical,
-    Unary,
-    Other,
 }
 
 /// Diagnostic-owned exact source operator for unsupported-operand diagnostics.
@@ -1686,11 +1759,6 @@ impl DiagnosticCompoundAssignmentOperator {
             Self::Exponent => "^=",
         }
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum InvalidFallibleOperandReason {
-    FallibleValueNotHandled,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -1895,7 +1963,7 @@ pub enum InvalidLoopHeaderReason {
     TooManyBindings,
     DuplicateBindingName,
     BindingAlreadyDeclared,
-    CollectionSourceNotCollection { found_type: TypeId },
+    CollectionSourceNotCollection { found_type: Option<TypeId> },
     MissingRangeSeparator,
     MissingRangeEndBound,
     MissingRangeStep,

@@ -4,14 +4,19 @@
 //! WHY: loop header refactors must preserve control-flow semantics and loop-target routing.
 
 use crate::compiler_frontend::ast::ast_nodes::{
-    AstNode, Declaration, LoopBindings, NodeKind, RangeEndKind, RangeLoopSpec,
+    LoopBindings, NodeKind, RangeEndKind, RangeLoopSpec,
 };
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::expressions::HirExpressionKind;
+use crate::compiler_frontend::hir::hir_builder::{
+    assert_no_placeholder_terminators, build_ast_with_registered_types, lower_ast,
+};
 use crate::compiler_frontend::hir::ids::BlockId;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::{
@@ -24,35 +29,17 @@ use crate::compiler_frontend::hir::terminators::HirTerminator;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    reference_expr_with_type_id, test_if_branch_metadata,
+    function_node, make_test_variable, node, reference_expr_with_type_id, test_if_branch_metadata,
 };
-use crate::compiler_frontend::tests::type_id_fixture_support::{
-    loop_binding_with_type_id as loop_binding, runtime_expr, runtime_operand_item,
-};
+use crate::compiler_frontend::tests::type_id_fixture_support::loop_binding_with_type_id as loop_binding;
 use crate::compiler_frontend::value_mode::ValueMode;
-
-fn node(kind: NodeKind, span: Option<crate::compiler_frontend::source::SourceSpan>) -> AstNode {
-    AstNode {
-        kind,
-        span,
-        scope: crate::compiler_frontend::symbols::path_interner::PathId::ROOT,
-    }
-}
-
-fn function_node(
-    name: PathId,
-    signature: FunctionSignature,
-    body: Vec<AstNode>,
-    span: Option<crate::compiler_frontend::source::SourceSpan>,
-) -> AstNode {
-    node(NodeKind::Function(name, signature, body), span)
-}
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 fn range_loop_spec(
-    start: Expression,
-    end: Expression,
+    start: ExprId,
+    end: ExprId,
     end_kind: RangeEndKind,
-    step: Option<Expression>,
+    step: Option<ExprId>,
 ) -> Box<RangeLoopSpec> {
     Box::new(RangeLoopSpec {
         start,
@@ -61,10 +48,6 @@ fn range_loop_spec(
         step,
     })
 }
-
-use crate::compiler_frontend::hir::hir_builder::{
-    assert_no_placeholder_terminators, build_ast_with_registered_types, lower_ast,
-};
 
 fn range_loop_cfg_blocks(module: &HirModule) -> (BlockId, BlockId, BlockId) {
     let start = &module.functions[module
@@ -99,16 +82,45 @@ fn range_loop_cfg_blocks(module: &HirModule) -> (BlockId, BlockId, BlockId) {
     )
 }
 
-fn collection_literal(span: Option<crate::compiler_frontend::source::SourceSpan>) -> Expression {
+fn collection_literal(
+    builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    type_environment: &mut TypeEnvironment,
+    span: Option<crate::compiler_frontend::source::SourceSpan>,
+) -> ExprId {
+    let items = vec![
+        i32_literal(builder, const_values, 1, span, ValueMode::ImmutableOwned),
+        i32_literal(builder, const_values, 2, span, ValueMode::ImmutableOwned),
+        i32_literal(builder, const_values, 3, span, ValueMode::ImmutableOwned),
+    ];
     crate::compiler_frontend::tests::type_id_fixture_support::collection_expr(
-        vec![
-            Expression::int(1, span, ValueMode::ImmutableOwned),
-            Expression::int(2, span, ValueMode::ImmutableOwned),
-            Expression::int(3, span, ValueMode::ImmutableOwned),
-        ],
+        builder,
+        items,
         span,
         ValueMode::ImmutableOwned,
+        type_environment,
     )
+}
+
+/// One exact `I32` literal expression.
+///
+/// WHY: these fixtures pin the exact `I32` width explicitly at the scalar carrier.
+fn i32_literal(
+    builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    value: i64,
+    span: Option<crate::compiler_frontend::source::SourceSpan>,
+    value_mode: ValueMode,
+) -> ExprId {
+    builder
+        .fixed_scalar(
+            const_values,
+            FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32"),
+            span,
+            value_mode,
+        )
+        .expect("fixture literal fits store")
+        .id()
 }
 
 #[test]
@@ -118,16 +130,33 @@ fn lowers_range_loop_with_new_syntax() {
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let location = None;
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
 
     let range_loop = node(
         NodeKind::RangeLoop {
             bindings: Box::new(LoopBindings {
-                item: Some(loop_binding(PathId::ROOT, builtin_type_ids::INT)),
+                item: Some(loop_binding(
+                    PathId::ROOT,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                )),
                 index: None,
             }),
             range: range_loop_spec(
-                Expression::int(0, location, ValueMode::ImmutableOwned),
-                Expression::int(3, location, ValueMode::ImmutableOwned),
+                i32_literal(
+                    &mut expressions,
+                    &mut const_values,
+                    0,
+                    location,
+                    ValueMode::ImmutableOwned,
+                ),
+                i32_literal(
+                    &mut expressions,
+                    &mut const_values,
+                    3,
+                    location,
+                    ValueMode::ImmutableOwned,
+                ),
                 RangeEndKind::Exclusive,
                 None,
             ),
@@ -147,9 +176,16 @@ fn lowers_range_loop_with_new_syntax() {
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast_with_registered_types(vec![start_fn], entry_path),
+        build_ast_with_registered_types(
+            vec![start_fn],
+            entry_path,
+            expressions,
+            const_values,
+            TypeEnvironment::new(),
+        ),
         &mut string_table,
         &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
     )
     .expect("range loop lowering should succeed");
 
@@ -188,7 +224,8 @@ fn lowers_range_loop_without_user_bindings() {
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let location = None;
-
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let range_loop = node(
         NodeKind::RangeLoop {
             bindings: Box::new(LoopBindings {
@@ -196,8 +233,20 @@ fn lowers_range_loop_without_user_bindings() {
                 index: None,
             }),
             range: range_loop_spec(
-                Expression::int(0, location, ValueMode::ImmutableOwned),
-                Expression::int(3, location, ValueMode::ImmutableOwned),
+                i32_literal(
+                    &mut expressions,
+                    &mut const_values,
+                    0,
+                    location,
+                    ValueMode::ImmutableOwned,
+                ),
+                i32_literal(
+                    &mut expressions,
+                    &mut const_values,
+                    3,
+                    location,
+                    ValueMode::ImmutableOwned,
+                ),
                 RangeEndKind::Exclusive,
                 None,
             ),
@@ -217,9 +266,16 @@ fn lowers_range_loop_without_user_bindings() {
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast_with_registered_types(vec![start_fn], entry_path),
+        build_ast_with_registered_types(
+            vec![start_fn],
+            entry_path,
+            expressions,
+            const_values,
+            TypeEnvironment::new(),
+        ),
         &mut string_table,
         &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
     )
     .expect("range loop lowering without user bindings should succeed");
 
@@ -243,18 +299,38 @@ fn lowers_range_loop_with_index_binding() {
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let location = None;
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
 
     let item_symbol = super::symbol("item", &mut path_fork, &mut string_table);
     let index_symbol = super::symbol("index", &mut path_fork, &mut string_table);
     let range_loop = node(
         NodeKind::RangeLoop {
             bindings: Box::new(LoopBindings {
-                item: Some(loop_binding(item_symbol, builtin_type_ids::INT)),
-                index: Some(loop_binding(index_symbol, builtin_type_ids::INT)),
+                item: Some(loop_binding(
+                    item_symbol,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                )),
+                index: Some(loop_binding(
+                    index_symbol,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                )),
             }),
             range: range_loop_spec(
-                Expression::int(0, location, ValueMode::ImmutableOwned),
-                Expression::int(4, location, ValueMode::ImmutableOwned),
+                i32_literal(
+                    &mut expressions,
+                    &mut const_values,
+                    0,
+                    location,
+                    ValueMode::ImmutableOwned,
+                ),
+                i32_literal(
+                    &mut expressions,
+                    &mut const_values,
+                    4,
+                    location,
+                    ValueMode::ImmutableOwned,
+                ),
                 RangeEndKind::Exclusive,
                 None,
             ),
@@ -274,9 +350,16 @@ fn lowers_range_loop_with_index_binding() {
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast_with_registered_types(vec![start_fn], entry_path),
+        build_ast_with_registered_types(
+            vec![start_fn],
+            entry_path,
+            expressions,
+            const_values,
+            TypeEnvironment::new(),
+        ),
         &mut string_table,
         &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
     )
     .expect("range loop lowering with index should succeed");
 
@@ -314,14 +397,17 @@ fn lowers_range_loop_with_index_binding() {
                     op:
                         HirNumericOp {
                             operator: NumericOperator::Add,
-                            domain: NumericScalar::Int,
+                            domain: NumericScalar::Fixed(FixedScalar::I32),
                         },
                     operands: HirNumericOperands::Binary { right, .. },
                     result: HirLocalDestination::Update(_),
                     ..
                 } => matches!(
                     &module.expressions.expression(*right).kind,
-                    HirExpressionKind::Int(1)
+                    HirExpressionKind::FixedScalar(literal)
+                        if *literal
+                            == FixedScalarValue::signed(FixedScalar::I32, 1)
+                                .expect("I32 literal in range")
                 ),
                 _ => false,
             })
@@ -340,31 +426,51 @@ fn preserves_runtime_zero_step_guard_for_dynamic_step() {
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let location = None;
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
 
     let step_symbol = super::symbol("step", &mut path_fork, &mut string_table);
+    let step_value = i32_literal(
+        &mut expressions,
+        &mut const_values,
+        2,
+        location,
+        ValueMode::ImmutableOwned,
+    );
     let step_decl = node(
-        NodeKind::VariableDeclaration(Declaration {
-            id: step_symbol,
-            value: Expression::int(2, location, ValueMode::ImmutableOwned),
-            binding_span: None,
-            config_qualifier: None,
-        }),
+        NodeKind::VariableDeclaration(make_test_variable(step_symbol, step_value, &expressions)),
         location,
     );
 
     let range_loop = node(
         NodeKind::RangeLoop {
             bindings: Box::new(LoopBindings {
-                item: Some(loop_binding(PathId::ROOT, builtin_type_ids::INT)),
+                item: Some(loop_binding(
+                    PathId::ROOT,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                )),
                 index: None,
             }),
             range: range_loop_spec(
-                Expression::int(0, location, ValueMode::ImmutableOwned),
-                Expression::int(10, location, ValueMode::ImmutableOwned),
+                i32_literal(
+                    &mut expressions,
+                    &mut const_values,
+                    0,
+                    location,
+                    ValueMode::ImmutableOwned,
+                ),
+                i32_literal(
+                    &mut expressions,
+                    &mut const_values,
+                    10,
+                    location,
+                    ValueMode::ImmutableOwned,
+                ),
                 RangeEndKind::Exclusive,
                 Some(reference_expr_with_type_id(
+                    &mut expressions,
                     step_symbol,
-                    builtin_type_ids::INT,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     location,
                     ValueMode::ImmutableReference,
                 )),
@@ -385,9 +491,16 @@ fn preserves_runtime_zero_step_guard_for_dynamic_step() {
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast_with_registered_types(vec![start_fn], entry_path),
+        build_ast_with_registered_types(
+            vec![start_fn],
+            entry_path,
+            expressions,
+            const_values,
+            TypeEnvironment::new(),
+        ),
         &mut string_table,
         &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
     )
     .expect("dynamic-step range loop lowering should succeed");
 
@@ -421,14 +534,25 @@ fn lowers_collection_loop_to_explicit_cfg() {
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let location = None;
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let mut type_environment = TypeEnvironment::new();
 
     let collection_loop = node(
         NodeKind::CollectionLoop {
             bindings: Box::new(LoopBindings {
-                item: Some(loop_binding(PathId::ROOT, builtin_type_ids::INT)),
+                item: Some(loop_binding(
+                    PathId::ROOT,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                )),
                 index: None,
             }),
-            iterable: collection_literal(location),
+            iterable: collection_literal(
+                &mut expressions,
+                &mut const_values,
+                &mut type_environment,
+                location,
+            ),
             body: vec![],
         },
         location,
@@ -445,9 +569,16 @@ fn lowers_collection_loop_to_explicit_cfg() {
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast_with_registered_types(vec![start_fn], entry_path),
+        build_ast_with_registered_types(
+            vec![start_fn],
+            entry_path,
+            expressions,
+            const_values,
+            type_environment,
+        ),
         &mut string_table,
         &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
     )
     .expect("collection loop lowering should succeed");
 
@@ -492,6 +623,9 @@ fn lowers_collection_loop_without_user_bindings() {
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let location = None;
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let mut type_environment = TypeEnvironment::new();
 
     let collection_loop = node(
         NodeKind::CollectionLoop {
@@ -499,7 +633,12 @@ fn lowers_collection_loop_without_user_bindings() {
                 item: None,
                 index: None,
             }),
-            iterable: collection_literal(location),
+            iterable: collection_literal(
+                &mut expressions,
+                &mut const_values,
+                &mut type_environment,
+                location,
+            ),
             body: vec![],
         },
         location,
@@ -516,9 +655,16 @@ fn lowers_collection_loop_without_user_bindings() {
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast_with_registered_types(vec![start_fn], entry_path),
+        build_ast_with_registered_types(
+            vec![start_fn],
+            entry_path,
+            expressions,
+            const_values,
+            type_environment,
+        ),
         &mut string_table,
         &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
     )
     .expect("collection loop lowering without user bindings should succeed");
 
@@ -549,14 +695,25 @@ fn lowers_collection_loop_item_binding_from_indexed_place() {
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let location = None;
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let mut type_environment = TypeEnvironment::new();
 
     let collection_loop = node(
         NodeKind::CollectionLoop {
             bindings: Box::new(LoopBindings {
-                item: Some(loop_binding(PathId::ROOT, builtin_type_ids::INT)),
+                item: Some(loop_binding(
+                    PathId::ROOT,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                )),
                 index: None,
             }),
-            iterable: collection_literal(location),
+            iterable: collection_literal(
+                &mut expressions,
+                &mut const_values,
+                &mut type_environment,
+                location,
+            ),
             body: vec![],
         },
         location,
@@ -573,9 +730,16 @@ fn lowers_collection_loop_item_binding_from_indexed_place() {
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast_with_registered_types(vec![start_fn], entry_path),
+        build_ast_with_registered_types(
+            vec![start_fn],
+            entry_path,
+            expressions,
+            const_values,
+            type_environment,
+        ),
         &mut string_table,
         &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
     )
     .expect("collection loop lowering should succeed");
 
@@ -620,16 +784,30 @@ fn lowers_collection_loop_optional_index_binding() {
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let location = None;
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let mut type_environment = TypeEnvironment::new();
 
     let item_symbol = super::symbol("item", &mut path_fork, &mut string_table);
     let index_symbol = super::symbol("index", &mut path_fork, &mut string_table);
     let collection_loop = node(
         NodeKind::CollectionLoop {
             bindings: Box::new(LoopBindings {
-                item: Some(loop_binding(item_symbol, builtin_type_ids::INT)),
-                index: Some(loop_binding(index_symbol, builtin_type_ids::INT)),
+                item: Some(loop_binding(
+                    item_symbol,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                )),
+                index: Some(loop_binding(
+                    index_symbol,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                )),
             }),
-            iterable: collection_literal(location),
+            iterable: collection_literal(
+                &mut expressions,
+                &mut const_values,
+                &mut type_environment,
+                location,
+            ),
             body: vec![],
         },
         location,
@@ -646,9 +824,16 @@ fn lowers_collection_loop_optional_index_binding() {
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast_with_registered_types(vec![start_fn], entry_path),
+        build_ast_with_registered_types(
+            vec![start_fn],
+            entry_path,
+            expressions,
+            const_values,
+            type_environment,
+        ),
         &mut string_table,
         &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
     )
     .expect("collection loop lowering with index should succeed");
 
@@ -698,15 +883,35 @@ fn lowers_range_loop_user_bindings_as_immutable_locals() {
     let item_symbol = super::symbol("item", &mut path_fork, &mut string_table);
     let index_symbol = super::symbol("index", &mut path_fork, &mut string_table);
     let location = None;
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let range_loop = node(
         NodeKind::RangeLoop {
             bindings: Box::new(LoopBindings {
-                item: Some(loop_binding(item_symbol, builtin_type_ids::INT)),
-                index: Some(loop_binding(index_symbol, builtin_type_ids::INT)),
+                item: Some(loop_binding(
+                    item_symbol,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                )),
+                index: Some(loop_binding(
+                    index_symbol,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                )),
             }),
             range: range_loop_spec(
-                Expression::int(0, location, ValueMode::ImmutableOwned),
-                Expression::int(4, location, ValueMode::ImmutableOwned),
+                i32_literal(
+                    &mut expressions,
+                    &mut const_values,
+                    0,
+                    location,
+                    ValueMode::ImmutableOwned,
+                ),
+                i32_literal(
+                    &mut expressions,
+                    &mut const_values,
+                    4,
+                    location,
+                    ValueMode::ImmutableOwned,
+                ),
                 RangeEndKind::Exclusive,
                 None,
             ),
@@ -725,9 +930,16 @@ fn lowers_range_loop_user_bindings_as_immutable_locals() {
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast_with_registered_types(vec![start_fn], entry_path),
+        build_ast_with_registered_types(
+            vec![start_fn],
+            entry_path,
+            expressions,
+            const_values,
+            TypeEnvironment::new(),
+        ),
         &mut string_table,
         &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
     )
     .expect("range loop lowering should succeed");
 
@@ -751,16 +963,30 @@ fn lowers_collection_loop_user_bindings_as_immutable_locals() {
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let location = None;
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let mut type_environment = TypeEnvironment::new();
 
     let item_symbol = super::symbol("item", &mut path_fork, &mut string_table);
     let index_symbol = super::symbol("index", &mut path_fork, &mut string_table);
     let collection_loop = node(
         NodeKind::CollectionLoop {
             bindings: Box::new(LoopBindings {
-                item: Some(loop_binding(item_symbol, builtin_type_ids::INT)),
-                index: Some(loop_binding(index_symbol, builtin_type_ids::INT)),
+                item: Some(loop_binding(
+                    item_symbol,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                )),
+                index: Some(loop_binding(
+                    index_symbol,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                )),
             }),
-            iterable: collection_literal(location),
+            iterable: collection_literal(
+                &mut expressions,
+                &mut const_values,
+                &mut type_environment,
+                location,
+            ),
             body: vec![],
         },
         location,
@@ -777,9 +1003,16 @@ fn lowers_collection_loop_user_bindings_as_immutable_locals() {
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast_with_registered_types(vec![start_fn], entry_path),
+        build_ast_with_registered_types(
+            vec![start_fn],
+            entry_path,
+            expressions,
+            const_values,
+            type_environment,
+        ),
         &mut string_table,
         &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
     )
     .expect("collection loop lowering should succeed");
 
@@ -811,26 +1044,44 @@ fn break_targets_exit_block_in_collection_loop() {
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let location = None;
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let mut type_environment = TypeEnvironment::new();
+    let flag = super::symbol("flag", &mut path_fork, &mut string_table);
+    let flag_value = expressions
+        .bool(&mut const_values, true, location, ValueMode::ImmutableOwned)
+        .expect("fixture literal fits store")
+        .id();
+    let flag_decl = node(
+        NodeKind::VariableDeclaration(make_test_variable(flag, flag_value, &expressions)),
+        location,
+    );
+    let condition = reference_expr_with_type_id(
+        &mut expressions,
+        flag,
+        builtin_type_ids::BOOL,
+        location,
+        ValueMode::ImmutableReference,
+    );
 
     let collection_loop = node(
         NodeKind::CollectionLoop {
             bindings: Box::new(LoopBindings {
-                item: Some(loop_binding(PathId::ROOT, builtin_type_ids::INT)),
+                item: Some(loop_binding(
+                    PathId::ROOT,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                )),
                 index: None,
             }),
-            iterable: collection_literal(location),
+            iterable: collection_literal(
+                &mut expressions,
+                &mut const_values,
+                &mut type_environment,
+                location,
+            ),
             body: vec![node(
                 NodeKind::If(
-                    runtime_expr(
-                        vec![runtime_operand_item(Expression::bool(
-                            true,
-                            location,
-                            ValueMode::ImmutableOwned,
-                        ))],
-                        builtin_type_ids::BOOL,
-                        location,
-                        ValueMode::ImmutableOwned,
-                    ),
+                    condition,
                     vec![node(NodeKind::Break, location)],
                     None,
                     test_if_branch_metadata(false),
@@ -847,14 +1098,21 @@ fn break_targets_exit_block_in_collection_loop() {
             parameters: vec![],
             returns: vec![],
         },
-        vec![collection_loop],
+        vec![flag_decl, collection_loop],
         None,
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast_with_registered_types(vec![start_fn], entry_path),
+        build_ast_with_registered_types(
+            vec![start_fn],
+            entry_path,
+            expressions,
+            const_values,
+            type_environment,
+        ),
         &mut string_table,
         &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
     )
     .expect("collection loop lowering should succeed");
 
@@ -897,14 +1155,25 @@ fn direct_break_in_collection_loop_does_not_leave_unreachable_step_block() {
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let location = None;
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let mut type_environment = TypeEnvironment::new();
 
     let collection_loop = node(
         NodeKind::CollectionLoop {
             bindings: Box::new(LoopBindings {
-                item: Some(loop_binding(PathId::ROOT, builtin_type_ids::INT)),
+                item: Some(loop_binding(
+                    PathId::ROOT,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                )),
                 index: None,
             }),
-            iterable: collection_literal(location),
+            iterable: collection_literal(
+                &mut expressions,
+                &mut const_values,
+                &mut type_environment,
+                location,
+            ),
             body: vec![node(NodeKind::Break, location)],
         },
         location,
@@ -921,9 +1190,16 @@ fn direct_break_in_collection_loop_does_not_leave_unreachable_step_block() {
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast_with_registered_types(vec![start_fn], entry_path),
+        build_ast_with_registered_types(
+            vec![start_fn],
+            entry_path,
+            expressions,
+            const_values,
+            type_environment,
+        ),
         &mut string_table,
         &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
     )
     .expect("direct break collection loop lowering should succeed");
 
@@ -937,16 +1213,33 @@ fn direct_break_in_range_loop_does_not_leave_unreachable_step_block() {
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let location = None;
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
 
     let range_loop = node(
         NodeKind::RangeLoop {
             bindings: Box::new(LoopBindings {
-                item: Some(loop_binding(PathId::ROOT, builtin_type_ids::INT)),
+                item: Some(loop_binding(
+                    PathId::ROOT,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                )),
                 index: None,
             }),
             range: range_loop_spec(
-                Expression::int(0, location, ValueMode::ImmutableOwned),
-                Expression::int(3, location, ValueMode::ImmutableOwned),
+                i32_literal(
+                    &mut expressions,
+                    &mut const_values,
+                    0,
+                    location,
+                    ValueMode::ImmutableOwned,
+                ),
+                i32_literal(
+                    &mut expressions,
+                    &mut const_values,
+                    3,
+                    location,
+                    ValueMode::ImmutableOwned,
+                ),
                 RangeEndKind::Exclusive,
                 None,
             ),
@@ -966,9 +1259,16 @@ fn direct_break_in_range_loop_does_not_leave_unreachable_step_block() {
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast_with_registered_types(vec![start_fn], entry_path),
+        build_ast_with_registered_types(
+            vec![start_fn],
+            entry_path,
+            expressions,
+            const_values,
+            TypeEnvironment::new(),
+        ),
         &mut string_table,
         &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
     )
     .expect("direct break range loop lowering should succeed");
 
@@ -982,14 +1282,25 @@ fn continue_targets_step_block_in_collection_loop() {
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
     let location = None;
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let mut type_environment = TypeEnvironment::new();
 
     let collection_loop = node(
         NodeKind::CollectionLoop {
             bindings: Box::new(LoopBindings {
-                item: Some(loop_binding(PathId::ROOT, builtin_type_ids::INT)),
+                item: Some(loop_binding(
+                    PathId::ROOT,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                )),
                 index: None,
             }),
-            iterable: collection_literal(location),
+            iterable: collection_literal(
+                &mut expressions,
+                &mut const_values,
+                &mut type_environment,
+                location,
+            ),
             body: vec![node(NodeKind::Continue, location)],
         },
         location,
@@ -1006,9 +1317,16 @@ fn continue_targets_step_block_in_collection_loop() {
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast_with_registered_types(vec![start_fn], entry_path),
+        build_ast_with_registered_types(
+            vec![start_fn],
+            entry_path,
+            expressions,
+            const_values,
+            type_environment,
+        ),
         &mut string_table,
         &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
     )
     .expect("collection loop lowering should succeed");
 
@@ -1043,6 +1361,9 @@ fn nested_loop_targets_remain_correct() {
     let mut path_fork = super::PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let location = None;
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let mut type_environment = TypeEnvironment::new();
 
     let (entry_path, start_name) =
         super::entry_path_and_start_name(&mut path_fork, &mut string_table);
@@ -1050,10 +1371,18 @@ fn nested_loop_targets_remain_correct() {
     let inner_loop = node(
         NodeKind::CollectionLoop {
             bindings: Box::new(LoopBindings {
-                item: Some(loop_binding(inner_item_symbol, builtin_type_ids::INT)),
+                item: Some(loop_binding(
+                    inner_item_symbol,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                )),
                 index: None,
             }),
-            iterable: collection_literal(location),
+            iterable: collection_literal(
+                &mut expressions,
+                &mut const_values,
+                &mut type_environment,
+                location,
+            ),
             body: vec![node(NodeKind::Continue, location)],
         },
         location,
@@ -1063,10 +1392,18 @@ fn nested_loop_targets_remain_correct() {
     let outer_loop = node(
         NodeKind::CollectionLoop {
             bindings: Box::new(LoopBindings {
-                item: Some(loop_binding(outer_item_symbol, builtin_type_ids::INT)),
+                item: Some(loop_binding(
+                    outer_item_symbol,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                )),
                 index: None,
             }),
-            iterable: collection_literal(location),
+            iterable: collection_literal(
+                &mut expressions,
+                &mut const_values,
+                &mut type_environment,
+                location,
+            ),
             body: vec![inner_loop, node(NodeKind::Continue, location)],
         },
         location,
@@ -1083,9 +1420,16 @@ fn nested_loop_targets_remain_correct() {
     );
 
     let (module, _type_environment) = lower_ast(
-        build_ast_with_registered_types(vec![start_fn], entry_path),
+        build_ast_with_registered_types(
+            vec![start_fn],
+            entry_path,
+            expressions,
+            const_values,
+            type_environment,
+        ),
         &mut string_table,
         &mut path_fork,
+        &super::ExternalPackageRegistry::new(),
     )
     .expect("nested collection loop lowering should succeed");
 

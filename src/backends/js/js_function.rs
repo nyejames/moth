@@ -47,39 +47,11 @@ impl<'hir> JsEmitter<'hir> {
 
         let strategy = self.choose_control_flow_strategy(function)?;
         self.current_function = Some(function.id);
-        let emit_body_result: Result<(), CompilerError> = if self.function_is_fallible(function) {
-            self.emit_line("try {");
-            self.indent += 1;
-            match strategy {
-                ControlFlowStrategy::Structured => {
-                    self.emit_structured_function_body(function)?;
-                }
-                ControlFlowStrategy::Dispatcher => {
-                    self.emit_dispatcher_for_function(function, &reachable_blocks)?;
-                }
+        let emit_body_result = match strategy {
+            ControlFlowStrategy::Structured => self.emit_structured_function_body(function),
+            ControlFlowStrategy::Dispatcher => {
+                self.emit_dispatcher_for_function(function, &reachable_blocks)
             }
-            self.indent -= 1;
-            self.emit_line("} catch (__moth_err) {");
-            self.indent += 1;
-            self.emit_line("if (__moth_err && __moth_err.__moth_result_propagate === true) {");
-            self.indent += 1;
-            self.emit_line("return { tag: \"err\", value: __moth_err.value };");
-            self.indent -= 1;
-            self.emit_line("}");
-            self.emit_line("throw __moth_err;");
-            self.indent -= 1;
-            self.emit_line("}");
-            Ok(())
-        } else {
-            match strategy {
-                ControlFlowStrategy::Structured => {
-                    self.emit_structured_function_body(function)?;
-                }
-                ControlFlowStrategy::Dispatcher => {
-                    self.emit_dispatcher_for_function(function, &reachable_blocks)?;
-                }
-            }
-            Ok(())
         };
         self.current_function = None;
         emit_body_result?;
@@ -125,8 +97,7 @@ impl<'hir> JsEmitter<'hir> {
     }
 
     pub(crate) fn function_is_fallible(&self, function: &HirFunction) -> bool {
-        self.type_environment
-            .is_fallible_carrier(function.return_type)
+        function.error_return.is_some()
     }
 
     fn emit_parameter_binding_setup(
@@ -275,25 +246,16 @@ impl<'hir> JsEmitter<'hir> {
                 else_block,
             } => self.emit_structured_if(*condition, *then_block, *else_block, emitted_blocks),
 
-            HirTerminator::FallibleBranch {
-                result,
-                success_block,
-                error_block,
-            } => self.emit_structured_fallible_branch(
-                *result,
-                *success_block,
-                *error_block,
-                emitted_blocks,
-            ),
+            HirTerminator::Invoke { .. } => {
+                self.emit_structured_invoke(&block.terminator, None, emitted_blocks)?;
+                Ok(())
+            }
 
             HirTerminator::Match { scrutinee, arms } => {
                 self.emit_structured_match(*scrutinee, arms, emitted_blocks)
             }
 
-            HirTerminator::Return(expression) => self.emit_return_terminator(*expression),
-            HirTerminator::ReturnSuccess(expression) => {
-                self.emit_success_return_terminator(*expression)
-            }
+            HirTerminator::Return(expressions) => self.emit_return_terminator(*expressions),
             HirTerminator::ReturnError(expression) => {
                 self.emit_error_return_terminator(*expression)
             }
@@ -348,38 +310,69 @@ impl<'hir> JsEmitter<'hir> {
         Ok(())
     }
 
-    fn emit_structured_fallible_branch(
+    fn emit_structured_invoke(
         &mut self,
-        result: HirValueId,
-        success_block: BlockId,
-        error_block: BlockId,
+        terminator: &HirTerminator,
+        expected_merge_target: Option<BlockId>,
         emitted_blocks: &mut HashSet<BlockId>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<BranchTermination, CompilerError> {
+        let HirTerminator::Invoke {
+            id,
+            operation,
+            success: success_block,
+            success_results,
+            failure: error_block,
+            error_result,
+            ..
+        } = terminator
+        else {
+            return Err(CompilerError::compiler_error(
+                "JavaScript backend: expected Invoke",
+            ));
+        };
+        let success_block = *success_block;
+        let error_block = *error_block;
         let mut branch_blocks = HashSet::new();
         let success_termination =
             self.inspect_branch_termination(success_block, &mut branch_blocks)?;
         let error_termination = self.inspect_branch_termination(error_block, &mut branch_blocks)?;
         let merge_target =
             Self::resolve_branch_merge_target(success_termination, error_termination)?;
-
-        let condition = self.lower_fallible_success_condition(result)?;
+        if expected_merge_target.is_some()
+            && merge_target != expected_merge_target
+            && merge_target.is_some()
+        {
+            return Err(CompilerError::compiler_error(
+                "JavaScript backend: Invoke unexpected merge",
+            ));
+        }
+        let (captured, proven) =
+            self.prepare_invoke(*id, operation, success_results, *error_result)?;
+        let condition = if proven {
+            "true".to_owned()
+        } else {
+            format!("{captured}.tag === \"ok\"")
+        };
 
         self.emit_line(&format!("if ({condition}) {{"));
         self.indent += 1;
+        self.emit_invoke_success_transfer(&captured, proven, success_results)?;
         self.emit_branch_block(success_block, merge_target, emitted_blocks)?;
         self.indent -= 1;
 
         self.emit_line("} else {");
         self.indent += 1;
+        self.emit_invoke_error_transfer(&captured, *error_result)?;
         self.emit_branch_block(error_block, merge_target, emitted_blocks)?;
         self.indent -= 1;
         self.emit_line("}");
 
-        if let Some(merge_target) = merge_target {
+        if expected_merge_target.is_none()
+            && let Some(merge_target) = merge_target
+        {
             self.emit_structured_block(merge_target, emitted_blocks)?;
         }
-
-        Ok(())
+        Ok(merge_target.map_or(BranchTermination::Terminated, BranchTermination::Jump))
     }
 
     fn emit_structured_match(
@@ -478,28 +471,14 @@ impl<'hir> JsEmitter<'hir> {
                 )
             }
 
-            HirTerminator::FallibleBranch {
-                result,
-                success_block,
-                error_block,
-            } => {
-                let condition = self.lower_fallible_success_condition(*result)?;
-                self.emit_nested_branch(
-                    &condition,
-                    *success_block,
-                    *error_block,
-                    expected_merge_target,
-                    emitted_blocks,
-                )
-            }
+            HirTerminator::Invoke { .. } => self.emit_structured_invoke(
+                &block.terminator,
+                expected_merge_target,
+                emitted_blocks,
+            ),
 
             HirTerminator::Return(expression) => {
                 self.emit_return_terminator(*expression)?;
-                Ok(BranchTermination::Terminated)
-            }
-
-            HirTerminator::ReturnSuccess(expression) => {
-                self.emit_success_return_terminator(*expression)?;
                 Ok(BranchTermination::Terminated)
             }
 
@@ -578,9 +557,9 @@ impl<'hir> JsEmitter<'hir> {
                 else_block: error_block,
                 ..
             }
-            | HirTerminator::FallibleBranch {
-                success_block,
-                error_block,
+            | HirTerminator::Invoke {
+                success: success_block,
+                failure: error_block,
                 ..
             } => {
                 let success_termination =
@@ -594,7 +573,6 @@ impl<'hir> JsEmitter<'hir> {
             }
 
             HirTerminator::Return(_)
-            | HirTerminator::ReturnSuccess(_)
             | HirTerminator::ReturnError(_)
             | HirTerminator::RuntimeFailure { .. }
             | HirTerminator::AssertFailure { .. } => Ok(BranchTermination::Terminated),

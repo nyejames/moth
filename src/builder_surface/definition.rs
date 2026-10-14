@@ -18,6 +18,7 @@ use crate::compiler_frontend::build_config::{
     BuildInputName, BuilderConfigGlobalError, BuilderConfigGlobalSet, PrimitiveBuildValue,
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
@@ -152,7 +153,10 @@ fn compiler_project_record_schema() -> ConfigSchema {
     schema
         .register_field(
             root,
-            ConfigSchemaField::int("template_const_loop_iteration_limit"),
+            ConfigSchemaField::fixed_scalar(
+                "template_const_loop_iteration_limit",
+                FixedScalar::I32,
+            ),
         )
         .expect("project schema is under construction");
     schema

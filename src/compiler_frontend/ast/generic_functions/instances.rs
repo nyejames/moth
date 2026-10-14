@@ -25,12 +25,12 @@ pub(crate) struct GenericFunctionInstance {
     pub(crate) key: GenericFunctionInstanceKey,
 }
 
-/// Request emitted by call parsing and consumed by AST emission.
+/// Concrete generic demand retained by the ordered AST request ledger.
 ///
-/// WHAT: records that one concrete generic function instance must be materialized as a
-/// normal AST function before HIR lowering.
-/// WHY: expression parsing can infer the concrete call target, but only the emitter owns the
-/// module-level AST node list where the specialized function body belongs.
+/// WHAT: owns the declaration, selected arguments and evidence needed by the shared
+/// provider materialisation route before HIR failure-summary convergence.
+/// WHY: executable calls and inert assertion witnesses need the same concrete semantic
+/// identity, while only executable reachability publishes a generated sidecar.
 #[derive(Debug, Clone)]
 pub(crate) struct GenericFunctionInstantiationRequest {
     /// Imported public contracts already carry their origin. Local requests receive either a
@@ -103,4 +103,38 @@ impl GenericRequestRange {
 pub(crate) struct IfGenericRequestRanges {
     pub(crate) then_branch: GenericRequestRange,
     pub(crate) else_branch: GenericRequestRange,
+}
+
+/// One position in the body-local ordered generic-request ledger.
+///
+/// WHAT: numeric-dependent calls reserve a pending slot and complete it only after exact types
+///       and bound evidence validate. Known-true assertions retain validation-only candidates in
+///       the same slots, while unrelated inactive work is marked `Dropped`.
+/// WHY: slots are never removed or reused, so checkpoints, static-if ranges and pending tickets
+///      keep one meaning for the whole body. An inactive continuation can only mark its own
+///      tombstone and therefore cannot publish into a later call's slot.
+// Concrete states keep the owned request inline: boxing would add one allocation per request.
+// Pending states and `Dropped` carry no payload.
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug)]
+pub(crate) enum GenericRequestSlot {
+    Pending,
+    AssertionValidationPending,
+    Concrete(GenericFunctionInstantiationRequest),
+    AssertionValidation(GenericFunctionInstantiationRequest),
+    Dropped,
+}
+
+/// Stable index of a pending slot in the ordered generic-request ledger.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct GenericRequestTicket(usize);
+
+impl GenericRequestTicket {
+    pub(crate) fn new(index: usize) -> Self {
+        Self(index)
+    }
+
+    pub(crate) fn index(self) -> usize {
+        self.0
+    }
 }

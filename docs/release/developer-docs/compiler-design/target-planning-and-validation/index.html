@@ -994,26 +994,6 @@ const located = __moth_error_with_location(error, nextLocation);
 return __moth_error_push_trace(located, frame);
 }
 
-function __moth_result_propagate(result) {
-if (result && result.tag === "ok") {
-return result.value;
-}
-if (result && result.tag === "err") {
-throw { __moth_result_propagate: true, value: result.value };
-}
-throw new Error("Expected internal Result carrier during propagation");
-}
-
-function __moth_result_fallback(result, fallback) {
-if (result && result.tag === "ok") {
-return result.value;
-}
-if (result && result.tag === "err") {
-return fallback();
-}
-throw new Error("Expected internal Result carrier during fallback handling");
-}
-
 function __moth_fixed_collection(items, fixedCapacity) {
     return {
         __moth_kind: "fixed_collection",
@@ -1078,6 +1058,7 @@ function __moth_collection_set(collection, index, value) {
 }
 
 function __moth_collection_push_growable(collection, value) {
+    if (collection.length >= 2147483647) throw new RangeError("Collection length exceeds the I32 length carrier");
     collection.push(value);
 }
 

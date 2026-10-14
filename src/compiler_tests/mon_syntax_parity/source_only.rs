@@ -17,9 +17,9 @@ fn source_expressions_and_nominal_construction_are_not_mon_calls() {
     let reference = "result = base";
     let template = "result = [:Hello[name]]";
     let call_literal = "value = measure(x = 1)";
-    let call_declarations = "measure |x Int| -> Int:\n    return x\n;\n\n";
+    let call_declarations = "measure |x I32| -> I32:\n    return x\n;\n\n";
     let call_source = concat!(
-        "measure |x Int| -> Int:\n",
+        "measure |x I32| -> I32:\n",
         "    return x\n",
         ";\n\n",
         "data #= (value = 1)\n",
@@ -30,10 +30,10 @@ fn source_expressions_and_nominal_construction_are_not_mon_calls() {
             "source_only_arithmetic_expression",
             arithmetic,
             "",
-            Schema::record(vec![Field::required("result", SchemaType::Int)]),
+            Schema::record(vec![Field::required("result", SchemaType::I32)]),
             SourceExpectation::AcceptObserved(Value::Record(vec![(
                 "result".into(),
-                Value::Int(5),
+                Value::I32(5),
             )])),
             MonExpectation::Reject {
                 code: MonErrorCode::MissingComma,
@@ -45,11 +45,11 @@ fn source_expressions_and_nominal_construction_are_not_mon_calls() {
         fixture(
             "source_only_constant_reference",
             reference,
-            "base #Int = 12\n",
-            Schema::record(vec![Field::required("result", SchemaType::Int)]),
+            "base #I32 = 12\n",
+            Schema::record(vec![Field::required("result", SchemaType::I32)]),
             SourceExpectation::AcceptObserved(Value::Record(vec![(
                 "result".into(),
-                Value::Int(12),
+                Value::I32(12),
             )])),
             MonExpectation::Reject {
                 code: MonErrorCode::UnexpectedToken,
@@ -77,18 +77,18 @@ fn source_expressions_and_nominal_construction_are_not_mon_calls() {
         fixture(
             "qualified_nominal_constructor_is_record_data",
             "point = Point(x = 1)",
-            "Point = | x Int |\n",
+            "Point = | x I32 |\n",
             Schema::record(vec![Field::required(
                 "point",
                 SchemaType::Struct {
                     name: "Point".into(),
-                    fields: vec![Field::required("x", SchemaType::Int)],
+                    fields: vec![Field::required("x", SchemaType::I32)],
                 },
             )]),
             SourceExpectation::Accept,
             MonExpectation::Accept(Value::Record(vec![(
                 "point".into(),
-                Value::Record(vec![("x".into(), Value::Int(1))]),
+                Value::Record(vec![("x".into(), Value::I32(1))]),
             )])),
         )
         .with_source_nominal_type("point", "Point"),
@@ -96,8 +96,8 @@ fn source_expressions_and_nominal_construction_are_not_mon_calls() {
             "source_only_ordinary_function_call",
             call_literal,
             call_declarations,
-            Schema::record(vec![Field::required("value", SchemaType::Int)]),
-            SourceExpectation::AcceptObserved(Value::Record(vec![("value".into(), Value::Int(1))])),
+            Schema::record(vec![Field::required("value", SchemaType::I32)]),
+            SourceExpectation::AcceptObserved(Value::Record(vec![("value".into(), Value::I32(1))])),
             MonExpectation::Reject {
                 code: MonErrorCode::TypeMismatch,
                 span: mon_span(call_literal, "measure(x = 1)", 1),
@@ -112,11 +112,7 @@ fn source_expressions_and_nominal_construction_are_not_mon_calls() {
         assert_fixture(fixture);
     }
 
-    let arguments = observe_start_body_call_arguments(
-        call_source,
-        crate::mon::NumericProfile::STANDARD,
-        "measure",
-    );
+    let arguments = observe_start_body_call_arguments(call_source, "measure");
     assert_eq!(arguments.len(), 1, "call literal {call_literal:?}");
     assert_eq!(
         arguments[0].parameter_slot, 0,
@@ -127,7 +123,7 @@ fn source_expressions_and_nominal_construction_are_not_mon_calls() {
         "call literal {call_literal:?}"
     );
     assert_source_matches(
-        &Value::Int(1),
+        &Value::I32(1),
         &arguments[0].value,
         "source_only_ordinary_function_call",
         "x",

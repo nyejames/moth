@@ -10,6 +10,8 @@ fn markdown_formatter_output_text_uses_authored_tir_spans() {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let file_tokens = template_tokens_from_source(
         "[$md:\n# Hello\n]",
         &mut string_table,
@@ -34,6 +36,8 @@ fn markdown_formatter_output_text_uses_authored_tir_spans() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -137,6 +141,8 @@ fn markdown_formatter_produces_formatted_tir_output() {
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let file_tokens = template_tokens_from_source(
         "[$md:\n# Hello\n]",
         &mut string_table,
@@ -161,6 +167,8 @@ fn markdown_formatter_produces_formatted_tir_output() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,

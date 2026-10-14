@@ -1,4 +1,4 @@
-Response :: Success, Err | items {Int} |;
+Response :: Success, Err | items {I32} |;
 
 a = Response::Err({1, 2})
 b = Response::Err({1, 2})

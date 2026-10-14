@@ -1,0 +1,24 @@
+-- Forwarded `left + right` is pushed into one collection and set into another.
+-- The later U64 receivers witness the operands after those writes.
+
+read_u64 |value U64| -> U64:
+    return value
+;
+
+render || -> String, Error!:
+    left = 4_294_967_296
+    right = 1
+    pushed ~= {1}
+    replaced ~= {1}
+    ~pushed.push(left + right)
+    ~replaced.set(0, left + right)!
+    left_text String = cast read_u64(left)
+    right_text String = cast read_u64(right)
+    push_first = pushed.get(0)!
+    push_second = pushed.get(1)!
+    set_first = replaced.get(0)!
+    return [:named_forward_writes push_first=[push_first] push_second=[push_second] set_first=[set_first] left=[left_text] right=[right_text]]
+;
+
+text = render() catch then "failed"
+[:[text]]

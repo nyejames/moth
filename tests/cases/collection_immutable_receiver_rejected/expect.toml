@@ -4,4 +4,10 @@ entry = "."
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0047"]
-message_contains = ["requires a mutable collection receiver", "Declare `values` as mutable"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0047"
+reason = "invalid_receiver_call.immutable_receiver_mutable_method"
+path = "input/@page.moth"
+line = 2
+column = 8

@@ -1,5 +1,5 @@
 -- dynamic assert does not satisfy non-Void fallthrough
 
-returns_int || -> Int:
+returns_int || -> I32:
     assert(true)
 ;

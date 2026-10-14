@@ -7,12 +7,12 @@
 //!
 //! WHY: production finalization folds through stable store-backed `TirView`s,
 //!      so the final-view entry point needs focused coverage for those surfaces.
-use crate::compiler_frontend::ast::const_values::store::{ConstStringPiece, ConstStringValue};
-
-use crate::compiler_frontend::ast::ast_nodes::{
-    Declaration, LoopBindings, RangeEndKind, RangeLoopSpec,
+use crate::compiler_frontend::ast::const_values::store::{
+    ConstStringPiece, ConstStringValue, ConstValuePayload, ConstValueStore,
 };
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+
+use crate::compiler_frontend::ast::ast_nodes::{LoopBindings, RangeEndKind, RangeLoopSpec};
+use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::styles::markdown::markdown_formatter;
@@ -20,7 +20,7 @@ use crate::compiler_frontend::ast::templates::template::{
     SlotKey, Style, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_control_flow::{
-    ConstRangeCursor, ConstRangeIterationValue, TemplateBranchSelector, TemplateLoopHeader,
+    ConstRangeCursor, TemplateBranchSelector, TemplateLoopHeader,
 };
 use crate::compiler_frontend::ast::templates::template_folding::{
     TemplateEmission, TemplateFoldResult, TirFoldContext,
@@ -46,7 +46,6 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidTemplateStructureReason,
 };
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::folded_value::OwnedFoldedString;
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
@@ -60,43 +59,128 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
+use crate::compiler_frontend::tests::ast_fixture_support::{
+    make_test_variable, runtime_slot_application_handoff_expr,
+};
 use crate::compiler_frontend::value_mode::ValueMode;
-use moth_lexical::numeric::profile::{FloatPrecision, NumericProfile};
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use std::path::Path;
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
-fn build_test_fold_context<'a>(string_table: &'a mut StringTable) -> TirFoldContext<'a> {
-    build_test_fold_context_with_profile(string_table, NumericProfile::STANDARD)
-}
-
-fn build_test_fold_context_with_profile<'a>(
+fn build_test_fold_context<'a>(
     string_table: &'a mut StringTable,
-    numeric_profile: NumericProfile,
+    expressions: &'a mut AstExpressionBuilder,
+    const_values: &'a mut ConstValueStore,
 ) -> TirFoldContext<'a> {
     TirFoldContext {
         string_table,
+        expression_builder: expressions,
+        const_values,
         template_const_loop_iteration_limit:
             crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile,
         bindings: vec![],
         source_scope: None,
     }
 }
 
-fn int_expression(value: i64) -> Expression {
-    Expression::int(value, None, ValueMode::ImmutableOwned)
-}
-fn uint_expression(value: u64) -> Expression {
-    Expression::uint(value, None, ValueMode::ImmutableOwned)
-}
-fn float_expression(value: f64) -> Expression {
-    Expression::float(value, None, ValueMode::ImmutableOwned)
+fn i32_value(value: i64) -> FixedScalarValue {
+    FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32")
 }
 
-fn bool_expression(value: bool) -> Expression {
-    Expression::bool(value, None, ValueMode::ImmutableOwned)
+fn i32_expression(
+    expressions: &mut AstExpressionBuilder,
+    constants: &mut ConstValueStore,
+    value: i64,
+) -> ExprId {
+    expressions
+        .fixed_scalar(constants, i32_value(value), None, ValueMode::ImmutableOwned)
+        .expect("test i32 literal constructs")
+        .id()
+}
+
+fn u64_expression(
+    expressions: &mut AstExpressionBuilder,
+    constants: &mut ConstValueStore,
+    value: u64,
+) -> ExprId {
+    expressions
+        .fixed_scalar(
+            constants,
+            FixedScalarValue::unsigned(FixedScalar::U64, value).expect("test literal fits U64"),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("test u64 literal constructs")
+        .id()
+}
+
+fn float_expression(
+    expressions: &mut AstExpressionBuilder,
+    constants: &mut ConstValueStore,
+    value: f64,
+) -> ExprId {
+    float_expression_at(expressions, constants, FixedScalar::F64, value)
+}
+
+fn float32_expression(
+    expressions: &mut AstExpressionBuilder,
+    constants: &mut ConstValueStore,
+    value: f32,
+) -> ExprId {
+    float_expression_at(expressions, constants, FixedScalar::F32, f64::from(value))
+}
+
+/// One exact binary-float literal; the caller supplies a value already representable at the scalar.
+fn float_expression_at(
+    expressions: &mut AstExpressionBuilder,
+    constants: &mut ConstValueStore,
+    scalar: FixedScalar,
+    value: f64,
+) -> ExprId {
+    expressions
+        .fixed_scalar(
+            constants,
+            FixedScalarValue::binary_float(scalar, value)
+                .expect("test float is exactly representable at its scalar"),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("test float literal constructs")
+        .id()
+}
+
+fn bool_expression(
+    expressions: &mut AstExpressionBuilder,
+    constants: &mut ConstValueStore,
+    value: bool,
+) -> ExprId {
+    expressions
+        .bool(constants, value, None, ValueMode::ImmutableOwned)
+        .expect("test bool literal constructs")
+        .id()
+}
+
+/// Test-only structural string over the given pieces; mirrors the production
+/// `structural_string` constructor (resolved text content plus a constant site).
+fn structural_string_expression(
+    expressions: &mut AstExpressionBuilder,
+    constants: &mut ConstValueStore,
+    pieces: Vec<ConstStringPiece>,
+    value_mode: ValueMode,
+) -> ExprId {
+    let value = constants
+        .insert_resolved(
+            builtin_type_ids::STRING,
+            ConstValuePayload::String(ConstStringValue::Pieces(pieces)),
+            None,
+        )
+        .expect("test structural string content inserts");
+    expressions
+        .constant(value, builtin_type_ids::STRING, None, value_mode)
+        .expect("test structural string constructs")
+        .id()
 }
 
 fn emission_to_string(emission: TemplateEmission, string_table: &StringTable) -> String {
@@ -117,6 +201,8 @@ struct FinalViewFoldFixture {
     store: Rc<RefCell<TemplateIrStore>>,
     template_id: crate::compiler_frontend::ast::templates::tir::ids::TemplateIrId,
     context: crate::compiler_frontend::ast::templates::tir::overlays::TemplateViewContext,
+    expressions: AstExpressionBuilder,
+    const_values: ConstValueStore,
 }
 
 fn build_final_view_fixture<F>(
@@ -127,62 +213,63 @@ where
     F: FnOnce(
         &mut StringTable,
         &mut TemplateIrStore,
+        &mut AstExpressionBuilder,
+        &mut ConstValueStore,
     ) -> crate::compiler_frontend::ast::templates::tir::ids::TemplateIrId,
 {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
 
     let template_id = {
         let mut store_borrow = store.borrow_mut();
-        build_template(string_table, &mut store_borrow)
+        build_template(
+            string_table,
+            &mut store_borrow,
+            &mut expressions,
+            &mut const_values,
+        )
     };
 
     FinalViewFoldFixture {
         store,
         template_id,
         context,
+        expressions,
+        const_values,
     }
 }
 
 fn fold_final_view_fixture(
-    fixture: &FinalViewFoldFixture,
+    fixture: &mut FinalViewFoldFixture,
     string_table: &mut StringTable,
     phase: TemplateTirPhase,
 ) -> Result<TemplateEmission, TemplateError> {
-    let store = fixture.store.borrow();
-    let view = TirView::new(&store, fixture.template_id, phase, fixture.context)
+    let FinalViewFoldFixture {
+        store,
+        template_id,
+        context,
+        expressions,
+        const_values,
+    } = fixture;
+    let store_ref = store.borrow();
+    let view = TirView::new(&store_ref, *template_id, phase, *context)
         .expect("test view should construct");
 
-    let mut fold_context = build_test_fold_context(string_table);
-
-    let prepared = prepare_tir_view(&view, TemplatePreparationMode::Value)?;
+    let prepared = prepare_tir_view(
+        &view,
+        expressions,
+        const_values,
+        TemplatePreparationMode::Value,
+    )?;
     if !matches!(prepared.outcome, TemplatePreparationOutcome::Foldable) {
         return Err(TemplateError::Infrastructure(Box::new(
             CompilerError::compiler_error("test view was not foldable"),
         )));
     }
+    let mut fold_context = build_test_fold_context(string_table, expressions, const_values);
     // Existing final-view text assertions do not own semantic provenance.
-    let TemplateFoldResult { emission, .. } =
-        fold_prepared_template(&prepared, view, &mut fold_context)?;
-    Ok(emission)
-}
-
-fn fold_final_view_fixture_with_profile(
-    fixture: &FinalViewFoldFixture,
-    string_table: &mut StringTable,
-    phase: TemplateTirPhase,
-    numeric_profile: NumericProfile,
-) -> Result<TemplateEmission, TemplateError> {
-    let store = fixture.store.borrow();
-    let view = TirView::new(&store, fixture.template_id, phase, fixture.context)
-        .expect("test view should construct");
-    let mut fold_context = build_test_fold_context_with_profile(string_table, numeric_profile);
-    let prepared = prepare_tir_view(&view, TemplatePreparationMode::Value)?;
-    if !matches!(prepared.outcome, TemplatePreparationOutcome::Foldable) {
-        return Err(TemplateError::Infrastructure(Box::new(
-            CompilerError::compiler_error("test view was not foldable"),
-        )));
-    }
     let TemplateFoldResult { emission, .. } =
         fold_prepared_template(&prepared, view, &mut fold_context)?;
     Ok(emission)
@@ -192,6 +279,8 @@ fn project_pattern_for_template(
     store: &TemplateIrStore,
     template_id: crate::compiler_frontend::ast::templates::tir::ids::TemplateIrId,
     string_table: &mut StringTable,
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
 ) -> Result<Vec<FoldedConstTemplatePiece>, TemplateError> {
     let view = TirView::with_minimum_phase(
         store,
@@ -200,8 +289,13 @@ fn project_pattern_for_template(
         TemplateTirPhase::Composed,
         TemplateViewContext::default(),
     )?;
-    let prepared = prepare_tir_view(&view, TemplatePreparationMode::ConstRequired)?;
-    let mut fold_context = build_test_fold_context(string_table);
+    let prepared = prepare_tir_view(
+        &view,
+        expressions,
+        const_values,
+        TemplatePreparationMode::ConstRequired,
+    )?;
+    let mut fold_context = build_test_fold_context(string_table, expressions, const_values);
     Ok(fold_prepared_const_template_pattern(prepared, view, &mut fold_context)?.pieces)
 }
 
@@ -223,9 +317,17 @@ fn const_template_fold_keeps_resource_as_text_run_boundary() -> Result<(), Templ
     );
     let mut resource_table = ModuleResourceTable::new();
     let resource = resource_table.intern_origin(resource_origin, None);
-    let structural_expression = Expression::new(crate::compiler_frontend::ast::expressions::expression_kind::ExpressionKind::StructuralString {
-        pieces: vec![ConstStringPiece::Resource(resource), ConstStringPiece::SiteRoot],
-    }, None, builtin_type_ids::STRING, DataType::StringSlice, ValueMode::ImmutableOwned);
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let structural_expression = structural_string_expression(
+        &mut expressions,
+        &mut const_values,
+        vec![
+            ConstStringPiece::Resource(resource),
+            ConstStringPiece::SiteRoot,
+        ],
+        ValueMode::ImmutableOwned,
+    );
 
     let template_id = {
         let mut builder = TemplateIrBuilder::new(&mut store);
@@ -255,12 +357,18 @@ fn const_template_fold_keeps_resource_as_text_run_boundary() -> Result<(), Templ
         TemplateTirPhase::Composed,
         TemplateViewContext::default(),
     )?;
-    let prepared = prepare_tir_view(&view, TemplatePreparationMode::ConstRequired)?;
+    let prepared = prepare_tir_view(
+        &view,
+        &expressions,
+        &const_values,
+        TemplatePreparationMode::ConstRequired,
+    )?;
     assert!(matches!(
         prepared.outcome,
         TemplatePreparationOutcome::Foldable
     ));
-    let mut fold_context = build_test_fold_context(&mut string_table);
+    let mut fold_context =
+        build_test_fold_context(&mut string_table, &mut expressions, &mut const_values);
     let pattern = fold_prepared_const_template_pattern(prepared, view, &mut fold_context)?;
 
     assert_eq!(
@@ -290,6 +398,8 @@ fn const_template_projection_preserves_structured_slot_order() -> Result<(), Tem
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let before = string_table.intern("before");
     let after = string_table.intern("after");
     let location = None;
@@ -331,8 +441,14 @@ fn const_template_projection_preserves_structured_slot_order() -> Result<(), Tem
         TemplateViewContext::default(),
     )
     .expect("slot-insert view should construct");
-    let prepared = prepare_tir_view(&view, TemplatePreparationMode::ConstRequired)?;
-    let mut fold_context = build_test_fold_context(&mut string_table);
+    let prepared = prepare_tir_view(
+        &view,
+        &expressions,
+        &const_values,
+        TemplatePreparationMode::ConstRequired,
+    )?;
+    let mut fold_context =
+        build_test_fold_context(&mut string_table, &mut expressions, &mut const_values);
 
     let pattern = fold_prepared_const_template_pattern(prepared, view, &mut fold_context)?;
     assert_eq!(
@@ -352,6 +468,8 @@ fn const_template_projection_preserves_nested_child_slot_order() -> Result<(), T
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let location = None;
     let before = string_table.intern("before");
     let after = string_table.intern("after");
@@ -403,7 +521,13 @@ fn const_template_projection_preserves_nested_child_slot_order() -> Result<(), T
     };
 
     assert_eq!(
-        project_pattern_for_template(&store, parent_template_id, &mut string_table)?,
+        project_pattern_for_template(
+            &store,
+            parent_template_id,
+            &mut string_table,
+            &mut expressions,
+            &mut const_values
+        )?,
         vec![
             FoldedConstTemplatePiece::Text("before".to_owned()),
             FoldedConstTemplatePiece::Slot(child_occurrence),
@@ -419,13 +543,17 @@ fn const_template_projection_preserves_selected_conditional_slot() -> Result<(),
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let location = None;
+
+    let condition = bool_expression(&mut expressions, &mut const_values, true);
 
     let build_conditional_template = |store: &mut TemplateIrStore| {
         let mut builder = TemplateIrBuilder::new(store);
         let selected_slot = builder.push_slot_node(SlotKey::Default, location);
         let root = builder.push_conditional_node(
-            TemplateBranchSelector::Bool(bool_expression(true)),
+            TemplateBranchSelector::Bool(condition),
             selected_slot,
             location,
         );
@@ -449,7 +577,13 @@ fn const_template_projection_preserves_selected_conditional_slot() -> Result<(),
 
     let (selected_template, selected_occurrence) = build_conditional_template(&mut store);
     assert_eq!(
-        project_pattern_for_template(&store, selected_template, &mut string_table)?,
+        project_pattern_for_template(
+            &store,
+            selected_template,
+            &mut string_table,
+            &mut expressions,
+            &mut const_values
+        )?,
         vec![FoldedConstTemplatePiece::Slot(selected_occurrence)]
     );
     Ok(())
@@ -460,6 +594,8 @@ fn const_template_projection_repeats_slots_in_const_loops() -> Result<(), Templa
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let location = None;
     let (template_id, occurrence) = {
         let mut builder = TemplateIrBuilder::new(&mut store);
@@ -470,8 +606,8 @@ fn const_template_projection_repeats_slots_in_const_loops() -> Result<(), Templa
                 index: None,
             }),
             range: Box::new(RangeLoopSpec {
-                start: int_expression(0),
-                end: int_expression(2),
+                start: i32_expression(&mut expressions, &mut const_values, 0),
+                end: i32_expression(&mut expressions, &mut const_values, 2),
                 step: None,
                 end_kind: RangeEndKind::Exclusive,
             }),
@@ -492,7 +628,13 @@ fn const_template_projection_repeats_slots_in_const_loops() -> Result<(), Templa
     };
 
     assert_eq!(
-        project_pattern_for_template(&store, template_id, &mut string_table)?,
+        project_pattern_for_template(
+            &store,
+            template_id,
+            &mut string_table,
+            &mut expressions,
+            &mut const_values
+        )?,
         vec![
             FoldedConstTemplatePiece::Slot(occurrence),
             FoldedConstTemplatePiece::Slot(occurrence),
@@ -507,6 +649,8 @@ fn const_template_projection_preserves_slot_in_child_wrapper() -> Result<(), Tem
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let location = None;
     let named_key = SlotKey::Named(string_table.intern("named"));
 
@@ -560,7 +704,13 @@ fn const_template_projection_preserves_slot_in_child_wrapper() -> Result<(), Tem
     };
 
     assert_eq!(
-        project_pattern_for_template(&store, parent_template_id, &mut string_table)?,
+        project_pattern_for_template(
+            &store,
+            parent_template_id,
+            &mut string_table,
+            &mut expressions,
+            &mut const_values
+        )?,
         vec![
             FoldedConstTemplatePiece::Slot(wrapper_occurrence),
             FoldedConstTemplatePiece::Text("child".to_owned()),
@@ -575,6 +725,8 @@ fn const_template_projection_preserves_loop_aggregate_content() -> Result<(), Te
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let location = None;
     let (template_id, body_occurrence) = {
         let mut builder = TemplateIrBuilder::new(&mut store);
@@ -585,8 +737,8 @@ fn const_template_projection_preserves_loop_aggregate_content() -> Result<(), Te
                 index: None,
             }),
             range: Box::new(RangeLoopSpec {
-                start: int_expression(0),
-                end: int_expression(2),
+                start: i32_expression(&mut expressions, &mut const_values, 0),
+                end: i32_expression(&mut expressions, &mut const_values, 2),
                 step: None,
                 end_kind: RangeEndKind::Exclusive,
             }),
@@ -630,7 +782,13 @@ fn const_template_projection_preserves_loop_aggregate_content() -> Result<(), Te
     };
 
     assert_eq!(
-        project_pattern_for_template(&store, template_id, &mut string_table)?,
+        project_pattern_for_template(
+            &store,
+            template_id,
+            &mut string_table,
+            &mut expressions,
+            &mut const_values
+        )?,
         vec![
             FoldedConstTemplatePiece::Text("<".to_owned()),
             FoldedConstTemplatePiece::Slot(body_occurrence),
@@ -647,13 +805,19 @@ fn const_template_projection_keeps_structural_no_output_empty() -> Result<(), Te
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let location = None;
 
     let false_conditional_template = {
         let mut builder = TemplateIrBuilder::new(&mut store);
         let hidden_slot = builder.push_slot_node(SlotKey::Default, location);
         let root = builder.push_conditional_node(
-            TemplateBranchSelector::Bool(bool_expression(false)),
+            TemplateBranchSelector::Bool(bool_expression(
+                &mut expressions,
+                &mut const_values,
+                false,
+            )),
             hidden_slot,
             location,
         );
@@ -666,8 +830,14 @@ fn const_template_projection_keeps_structural_no_output_empty() -> Result<(), Te
         )
     };
     assert!(
-        project_pattern_for_template(&store, false_conditional_template, &mut string_table,)?
-            .is_empty()
+        project_pattern_for_template(
+            &store,
+            false_conditional_template,
+            &mut string_table,
+            &mut expressions,
+            &mut const_values
+        )?
+        .is_empty()
     );
 
     let zero_iteration_template = {
@@ -679,8 +849,8 @@ fn const_template_projection_keeps_structural_no_output_empty() -> Result<(), Te
                 index: None,
             }),
             range: Box::new(RangeLoopSpec {
-                start: int_expression(0),
-                end: int_expression(0),
+                start: i32_expression(&mut expressions, &mut const_values, 0),
+                end: i32_expression(&mut expressions, &mut const_values, 0),
                 step: None,
                 end_kind: RangeEndKind::Exclusive,
             }),
@@ -695,8 +865,14 @@ fn const_template_projection_keeps_structural_no_output_empty() -> Result<(), Te
         )
     };
     assert!(
-        project_pattern_for_template(&store, zero_iteration_template, &mut string_table,)?
-            .is_empty()
+        project_pattern_for_template(
+            &store,
+            zero_iteration_template,
+            &mut string_table,
+            &mut expressions,
+            &mut const_values
+        )?
+        .is_empty()
     );
 
     Ok(())
@@ -710,27 +886,31 @@ fn const_template_projection_keeps_structural_no_output_empty() -> Result<(), Te
 fn final_view_fold_true_conditional_selects_body() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
-        let mut builder = TemplateIrBuilder::new(store);
-        let yes_text = string_table.intern("yes");
-        let yes_node = builder.push_text_node(yes_text, 3, TemplateSegmentOrigin::Body, None);
-        let root = builder.push_conditional_node(
-            TemplateBranchSelector::Bool(bool_expression(true)),
-            yes_node,
-            None,
-        );
+    let mut fixture = build_final_view_fixture(
+        &mut string_table,
+        |string_table, store, expressions, const_values| {
+            let mut builder = TemplateIrBuilder::new(store);
+            let yes_text = string_table.intern("yes");
+            let yes_node = builder.push_text_node(yes_text, 3, TemplateSegmentOrigin::Body, None);
+            let root = builder.push_conditional_node(
+                TemplateBranchSelector::Bool(bool_expression(expressions, const_values, true)),
+                yes_node,
+                None,
+            );
 
-        builder.finish_template(
-            root,
-            Style::default(),
-            TemplateType::String,
-            TemplateIrSummary::empty(),
-            None,
-        )
-    });
+            builder.finish_template(
+                root,
+                Style::default(),
+                TemplateType::String,
+                TemplateIrSummary::empty(),
+                None,
+            )
+        },
+    );
 
-    let emission = fold_final_view_fixture(&fixture, &mut string_table, TemplateTirPhase::Composed)
-        .expect("final view fold should succeed");
+    let emission =
+        fold_final_view_fixture(&mut fixture, &mut string_table, TemplateTirPhase::Composed)
+            .expect("final view fold should succeed");
 
     assert_eq!(
         emission_to_string(emission, &string_table),
@@ -743,27 +923,31 @@ fn final_view_fold_true_conditional_selects_body() {
 fn final_view_fold_false_conditional_is_no_output() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
-        let mut builder = TemplateIrBuilder::new(store);
-        let yes_text = string_table.intern("yes");
-        let yes_node = builder.push_text_node(yes_text, 3, TemplateSegmentOrigin::Body, None);
-        let root = builder.push_conditional_node(
-            TemplateBranchSelector::Bool(bool_expression(false)),
-            yes_node,
-            None,
-        );
+    let mut fixture = build_final_view_fixture(
+        &mut string_table,
+        |string_table, store, expressions, const_values| {
+            let mut builder = TemplateIrBuilder::new(store);
+            let yes_text = string_table.intern("yes");
+            let yes_node = builder.push_text_node(yes_text, 3, TemplateSegmentOrigin::Body, None);
+            let root = builder.push_conditional_node(
+                TemplateBranchSelector::Bool(bool_expression(expressions, const_values, false)),
+                yes_node,
+                None,
+            );
 
-        builder.finish_template(
-            root,
-            Style::default(),
-            TemplateType::String,
-            TemplateIrSummary::empty(),
-            None,
-        )
-    });
+            builder.finish_template(
+                root,
+                Style::default(),
+                TemplateType::String,
+                TemplateIrSummary::empty(),
+                None,
+            )
+        },
+    );
 
-    let emission = fold_final_view_fixture(&fixture, &mut string_table, TemplateTirPhase::Composed)
-        .expect("final view fold should succeed");
+    let emission =
+        fold_final_view_fixture(&mut fixture, &mut string_table, TemplateTirPhase::Composed)
+            .expect("final view fold should succeed");
 
     assert_eq!(
         emission,
@@ -776,9 +960,15 @@ fn final_view_fold_false_conditional_is_no_output() {
 //  Loop bodies
 // -------------------------
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "test helper keeps range bounds, body root, and aggregate wrapper as separate inputs"
+)]
 fn build_range_loop_template(
     _string_table: &mut StringTable,
     store: &mut TemplateIrStore,
+    expressions: &mut AstExpressionBuilder,
+    constants: &mut ConstValueStore,
     start: i64,
     end: i64,
     body_root: crate::compiler_frontend::ast::templates::tir::ids::TemplateIrNodeId,
@@ -791,8 +981,8 @@ fn build_range_loop_template(
             index: None,
         }),
         range: Box::new(RangeLoopSpec {
-            start: int_expression(start),
-            end: int_expression(end),
+            start: i32_expression(expressions, constants, start),
+            end: i32_expression(expressions, constants, end),
             step: None,
             end_kind: RangeEndKind::Exclusive,
         }),
@@ -808,8 +998,15 @@ fn build_range_loop_template(
     )
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "test helper keeps the scalar kind, bounds, step, and body root as separate inputs"
+)]
 fn build_float_range_loop_template(
     store: &mut TemplateIrStore,
+    expressions: &mut AstExpressionBuilder,
+    constants: &mut ConstValueStore,
+    scalar: FixedScalar,
     start: f64,
     end: f64,
     step: f64,
@@ -822,9 +1019,9 @@ fn build_float_range_loop_template(
             index: None,
         }),
         range: Box::new(RangeLoopSpec {
-            start: float_expression(start),
-            end: float_expression(end),
-            step: Some(float_expression(step)),
+            start: float_expression_at(expressions, constants, scalar, start),
+            end: float_expression_at(expressions, constants, scalar, end),
+            step: Some(float_expression_at(expressions, constants, scalar, step)),
             end_kind: RangeEndKind::Exclusive,
         }),
     };
@@ -842,15 +1039,28 @@ fn build_float_range_loop_template(
 fn final_view_fold_loop_body_concatenates_iterations() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
-        let mut builder = TemplateIrBuilder::new(store);
-        let dot_text = string_table.intern(".");
-        let dot_node = builder.push_text_node(dot_text, 1, TemplateSegmentOrigin::Body, None);
-        build_range_loop_template(string_table, store, 0, 3, dot_node, None)
-    });
+    let mut fixture = build_final_view_fixture(
+        &mut string_table,
+        |string_table, store, expressions, constants| {
+            let mut builder = TemplateIrBuilder::new(store);
+            let dot_text = string_table.intern(".");
+            let dot_node = builder.push_text_node(dot_text, 1, TemplateSegmentOrigin::Body, None);
+            build_range_loop_template(
+                string_table,
+                store,
+                expressions,
+                constants,
+                0,
+                3,
+                dot_node,
+                None,
+            )
+        },
+    );
 
-    let emission = fold_final_view_fixture(&fixture, &mut string_table, TemplateTirPhase::Composed)
-        .expect("final view fold should succeed");
+    let emission =
+        fold_final_view_fixture(&mut fixture, &mut string_table, TemplateTirPhase::Composed)
+            .expect("final view fold should succeed");
 
     assert_eq!(
         emission_to_string(emission, &string_table),
@@ -873,62 +1083,90 @@ fn final_view_fold_loop_binding_and_body_provenance_reach_exact_result() {
         "render",
         "loop_body_value",
     );
-    let fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
-        let item_path = path_fork
-            .try_intern_portable_path("item", string_table)
-            .expect("test path fits");
-        let mut builder = TemplateIrBuilder::new(store);
-        let item_value = builder.push_dynamic_expression_node(
-            Expression::reference_with_type_id(
-                item_path,
-                DataType::Int,
-                builtin_type_ids::INT,
+    let mut fixture = build_final_view_fixture(
+        &mut string_table,
+        |string_table, store, expressions, const_values| {
+            let item_path = path_fork
+                .try_intern_portable_path("item", string_table)
+                .expect("test path fits");
+            let mut builder = TemplateIrBuilder::new(store);
+            let item_expression = expressions
+                .reference_with_type_id(
+                    item_path,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                    None,
+                    ValueMode::ImmutableReference,
+                    ConstRecordState::RuntimeValue,
+                )
+                .expect("loop binding reference should construct")
+                .id();
+            let item_value = builder.push_dynamic_expression_node(
+                item_expression,
+                TemplateSegmentOrigin::Body,
                 None,
-                ValueMode::ImmutableReference,
-                ConstRecordState::RuntimeValue,
-            ),
-            TemplateSegmentOrigin::Body,
-            None,
-        );
-        let body_text = string_table.intern("body");
-        let body_value = builder.push_dynamic_expression_node(
-            Expression::string_slice(body_text, None, ValueMode::ImmutableOwned)
-                .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
-                    body_member.clone(),
-                )),
-            TemplateSegmentOrigin::Body,
-            None,
-        );
-        let body = builder.push_sequence_node(vec![item_value, body_value], None);
-        let range_provenance = SyntheticInterfaceProvenance::single(header_member.clone());
-        let header = TemplateLoopHeader::Range {
-            bindings: Box::new(LoopBindings {
-                item: Some(Declaration {
-                    id: item_path,
-                    value: Expression::int(0, None, ValueMode::ImmutableOwned),
-                    binding_span: None,
-                    config_qualifier: None,
+            );
+            let body_text = string_table.intern("body");
+            let body_expression = expressions
+                .string_slice(const_values, body_text, None, ValueMode::ImmutableOwned)
+                .expect("loop body string should construct")
+                .id();
+            let body_expression = expressions
+                .with_synthetic_interface_provenance(
+                    expressions.own(body_expression),
+                    SyntheticInterfaceProvenance::single(body_member.clone()),
+                )
+                .expect("loop body provenance should attach")
+                .id();
+            let body_value = builder.push_dynamic_expression_node(
+                body_expression,
+                TemplateSegmentOrigin::Body,
+                None,
+            );
+            let body = builder.push_sequence_node(vec![item_value, body_value], None);
+            let range_provenance = SyntheticInterfaceProvenance::single(header_member.clone());
+            let header = TemplateLoopHeader::Range {
+                bindings: Box::new(LoopBindings {
+                    item: Some({
+                        let value = i32_expression(expressions, const_values, 0);
+                        make_test_variable(item_path, value, expressions)
+                    }),
+                    index: None,
                 }),
-                index: None,
-            }),
-            range: Box::new(RangeLoopSpec {
-                start: Expression::int(0, None, ValueMode::ImmutableOwned)
-                    .with_synthetic_interface_provenance(range_provenance.clone()),
-                end: Expression::int(2, None, ValueMode::ImmutableOwned)
-                    .with_synthetic_interface_provenance(range_provenance),
-                step: None,
-                end_kind: RangeEndKind::Exclusive,
-            }),
-        };
-        let root = builder.push_loop_node(header, body, None, None);
-        builder.finish_template(
-            root,
-            Style::default(),
-            TemplateType::String,
-            TemplateIrSummary::empty(),
-            None,
-        )
-    });
+                range: Box::new(RangeLoopSpec {
+                    start: {
+                        let start = i32_expression(expressions, const_values, 0);
+                        expressions
+                            .with_synthetic_interface_provenance(
+                                expressions.own(start),
+                                range_provenance.clone(),
+                            )
+                            .expect("range start provenance should attach")
+                            .id()
+                    },
+                    end: {
+                        let end = i32_expression(expressions, const_values, 2);
+                        expressions
+                            .with_synthetic_interface_provenance(
+                                expressions.own(end),
+                                range_provenance,
+                            )
+                            .expect("range end provenance should attach")
+                            .id()
+                    },
+                    step: None,
+                    end_kind: RangeEndKind::Exclusive,
+                }),
+            };
+            let root = builder.push_loop_node(header, body, None, None);
+            builder.finish_template(
+                root,
+                Style::default(),
+                TemplateType::String,
+                TemplateIrSummary::empty(),
+                None,
+            )
+        },
+    );
 
     let store = fixture.store.borrow();
     let view = TirView::new(
@@ -938,13 +1176,22 @@ fn final_view_fold_loop_binding_and_body_provenance_reach_exact_result() {
         fixture.context,
     )
     .expect("range loop view should construct");
-    let prepared = prepare_tir_view(&view, TemplatePreparationMode::Value)
-        .expect("range loop view should prepare");
+    let prepared = prepare_tir_view(
+        &view,
+        &fixture.expressions,
+        &fixture.const_values,
+        TemplatePreparationMode::Value,
+    )
+    .expect("range loop view should prepare");
     assert!(matches!(
         prepared.outcome,
         TemplatePreparationOutcome::Foldable
     ));
-    let mut fold_context = build_test_fold_context(&mut string_table);
+    let mut fold_context = build_test_fold_context(
+        &mut string_table,
+        &mut fixture.expressions,
+        &mut fixture.const_values,
+    );
     let result = fold_prepared_template(&prepared, view, &mut fold_context)
         .expect("range loop exact fold should succeed");
 
@@ -976,46 +1223,54 @@ fn final_view_fold_loop_preserves_visited_no_output_selector_provenance() {
         "render",
         "hidden_body_selector",
     );
-    let build_loop_template =
-        |string_table: &mut StringTable, store: &mut TemplateIrStore, end: i64| {
-            let mut builder = TemplateIrBuilder::new(store);
-            let hidden_text = string_table.intern("hidden");
-            let hidden_body = builder.push_text_node(
-                hidden_text,
-                "hidden".len(),
-                TemplateSegmentOrigin::Body,
-                None,
-            );
-            let selector = bool_expression(false).with_synthetic_interface_provenance(
+    let build_loop_template = |string_table: &mut StringTable,
+                               store: &mut TemplateIrStore,
+                               expressions: &mut AstExpressionBuilder,
+                               constants: &mut ConstValueStore,
+                               end: i64| {
+        let mut builder = TemplateIrBuilder::new(store);
+        let hidden_text = string_table.intern("hidden");
+        let hidden_body = builder.push_text_node(
+            hidden_text,
+            "hidden".len(),
+            TemplateSegmentOrigin::Body,
+            None,
+        );
+        let selector = bool_expression(expressions, constants, false);
+        let selector = expressions
+            .with_synthetic_interface_provenance(
+                expressions.own(selector),
                 SyntheticInterfaceProvenance::single(body_member.clone()),
-            );
-            let no_output_body = builder.push_conditional_node(
-                TemplateBranchSelector::Bool(selector),
-                hidden_body,
-                None,
-            );
-            let header = TemplateLoopHeader::Range {
-                bindings: Box::new(LoopBindings {
-                    item: None,
-                    index: None,
-                }),
-                range: Box::new(RangeLoopSpec {
-                    start: int_expression(0),
-                    end: int_expression(end),
-                    step: None,
-                    end_kind: RangeEndKind::Exclusive,
-                }),
-            };
-            let root = builder.push_loop_node(header, no_output_body, None, None);
-            builder.finish_template(
-                root,
-                Style::default(),
-                TemplateType::String,
-                TemplateIrSummary::empty(),
-                None,
             )
+            .expect("selector provenance should attach")
+            .id();
+        let no_output_body = builder.push_conditional_node(
+            TemplateBranchSelector::Bool(selector),
+            hidden_body,
+            None,
+        );
+        let header = TemplateLoopHeader::Range {
+            bindings: Box::new(LoopBindings {
+                item: None,
+                index: None,
+            }),
+            range: Box::new(RangeLoopSpec {
+                start: i32_expression(expressions, constants, 0),
+                end: i32_expression(expressions, constants, end),
+                step: None,
+                end_kind: RangeEndKind::Exclusive,
+            }),
         };
-    let fold_exact_view = |fixture: &FinalViewFoldFixture, string_table: &mut StringTable| {
+        let root = builder.push_loop_node(header, no_output_body, None, None);
+        builder.finish_template(
+            root,
+            Style::default(),
+            TemplateType::String,
+            TemplateIrSummary::empty(),
+            None,
+        )
+    };
+    let fold_exact_view = |fixture: &mut FinalViewFoldFixture, string_table: &mut StringTable| {
         let store = fixture.store.borrow();
         let view = TirView::new(
             &store,
@@ -1024,21 +1279,33 @@ fn final_view_fold_loop_preserves_visited_no_output_selector_provenance() {
             fixture.context,
         )
         .expect("range loop view should construct");
-        let prepared = prepare_tir_view(&view, TemplatePreparationMode::Value)
-            .expect("range loop view should prepare");
+        let prepared = prepare_tir_view(
+            &view,
+            &fixture.expressions,
+            &fixture.const_values,
+            TemplatePreparationMode::Value,
+        )
+        .expect("range loop view should prepare");
         assert!(matches!(
             prepared.outcome,
             TemplatePreparationOutcome::Foldable
         ));
-        let mut fold_context = build_test_fold_context(string_table);
+        let mut fold_context = build_test_fold_context(
+            string_table,
+            &mut fixture.expressions,
+            &mut fixture.const_values,
+        );
         fold_prepared_template(&prepared, view, &mut fold_context)
             .expect("range loop exact fold should succeed")
     };
 
-    let visited_fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
-        build_loop_template(string_table, store, 2)
-    });
-    let visited_result = fold_exact_view(&visited_fixture, &mut string_table);
+    let mut visited_fixture = build_final_view_fixture(
+        &mut string_table,
+        |string_table, store, expressions, constants| {
+            build_loop_template(string_table, store, expressions, constants, 2)
+        },
+    );
+    let visited_result = fold_exact_view(&mut visited_fixture, &mut string_table);
     assert_eq!(
         visited_result.emission,
         TemplateEmission::NoOutput,
@@ -1050,11 +1317,13 @@ fn final_view_fold_loop_preserves_visited_no_output_selector_provenance() {
         "a consumed selector dependency should survive visited no-output iterations"
     );
 
-    let zero_iteration_fixture =
-        build_final_view_fixture(&mut string_table, |string_table, store| {
-            build_loop_template(string_table, store, 0)
-        });
-    let zero_iteration_result = fold_exact_view(&zero_iteration_fixture, &mut string_table);
+    let mut zero_iteration_fixture = build_final_view_fixture(
+        &mut string_table,
+        |string_table, store, expressions, constants| {
+            build_loop_template(string_table, store, expressions, constants, 0)
+        },
+    );
+    let zero_iteration_result = fold_exact_view(&mut zero_iteration_fixture, &mut string_table);
     assert_eq!(
         zero_iteration_result.emission,
         TemplateEmission::NoOutput,
@@ -1070,15 +1339,28 @@ fn final_view_fold_loop_preserves_visited_no_output_selector_provenance() {
 fn final_view_fold_zero_iteration_loop_is_no_output() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
-        let mut builder = TemplateIrBuilder::new(store);
-        let dot_text = string_table.intern(".");
-        let dot_node = builder.push_text_node(dot_text, 1, TemplateSegmentOrigin::Body, None);
-        build_range_loop_template(string_table, store, 0, 0, dot_node, None)
-    });
+    let mut fixture = build_final_view_fixture(
+        &mut string_table,
+        |string_table, store, expressions, constants| {
+            let mut builder = TemplateIrBuilder::new(store);
+            let dot_text = string_table.intern(".");
+            let dot_node = builder.push_text_node(dot_text, 1, TemplateSegmentOrigin::Body, None);
+            build_range_loop_template(
+                string_table,
+                store,
+                expressions,
+                constants,
+                0,
+                0,
+                dot_node,
+                None,
+            )
+        },
+    );
 
-    let emission = fold_final_view_fixture(&fixture, &mut string_table, TemplateTirPhase::Composed)
-        .expect("final view fold should succeed");
+    let emission =
+        fold_final_view_fixture(&mut fixture, &mut string_table, TemplateTirPhase::Composed)
+            .expect("final view fold should succeed");
 
     assert_eq!(
         emission,
@@ -1091,19 +1373,25 @@ fn final_view_fold_zero_iteration_loop_is_no_output() {
 fn final_view_fold_zero_iteration_loop_rejects_missing_body_authority() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
-        build_range_loop_template(
-            string_table,
-            store,
-            0,
-            0,
-            crate::compiler_frontend::ast::templates::tir::ids::TemplateIrNodeId::new(999),
-            None,
-        )
-    });
+    let mut fixture = build_final_view_fixture(
+        &mut string_table,
+        |string_table, store, expressions, constants| {
+            build_range_loop_template(
+                string_table,
+                store,
+                expressions,
+                constants,
+                0,
+                0,
+                crate::compiler_frontend::ast::templates::tir::ids::TemplateIrNodeId::new(999),
+                None,
+            )
+        },
+    );
 
-    let error = fold_final_view_fixture(&fixture, &mut string_table, TemplateTirPhase::Composed)
-        .expect_err("zero-iteration loops must not hide malformed body authority");
+    let error =
+        fold_final_view_fixture(&mut fixture, &mut string_table, TemplateTirPhase::Composed)
+            .expect_err("zero-iteration loops must not hide malformed body authority");
 
     let TemplateError::Infrastructure(error) = error else {
         panic!("missing loop-body authority should remain on the infrastructure lane");
@@ -1119,17 +1407,18 @@ fn final_view_fold_zero_iteration_loop_rejects_missing_body_authority() {
 //  Range cursor precision
 // -------------------------
 
-/// Collects float counters from a range cursor at the given boundary precision.
+/// Collects exact float counters from a range cursor to completion.
 ///
-/// WHAT: drives `ConstRangeCursor` directly so precision behavior is pinned without
+/// WHAT: drives `ConstRangeCursor` directly so precision behaviour is pinned without
 ///       template rendering in the way.
-/// WHY: Float32 stepping must round every accumulation like a Bits32 literal; this
-///      helper is the single place these tests advance a cursor to completion.
+/// WHY: every counter keeps its range's selected precision, so this helper is the
+///      single place these tests advance a float cursor to completion.
 fn collect_float_counters(
-    start: Expression,
-    end: Expression,
-    step: Option<Expression>,
-    float_precision: FloatPrecision,
+    expressions: &AstExpressionBuilder,
+    constants: &ConstValueStore,
+    start: ExprId,
+    end: ExprId,
+    step: Option<ExprId>,
 ) -> Vec<f64> {
     let range = RangeLoopSpec {
         start,
@@ -1139,123 +1428,196 @@ fn collect_float_counters(
     };
     let mut cursor = ConstRangeCursor::new(
         &range,
+        expressions,
+        constants,
         crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         None,
-        float_precision,
     )
     .expect("range cursor should construct");
     let mut counters = Vec::new();
     while let Some(counter) = cursor.next_counter().expect("range cursor should advance") {
-        match counter {
-            ConstRangeIterationValue::Float(value) => counters.push(value),
-            ConstRangeIterationValue::Int(value) => {
-                panic!("expected a float counter, got int {value}")
-            }
-            ConstRangeIterationValue::Uint(value) => {
-                panic!("expected a float counter, got uint {value}")
-            }
-            ConstRangeIterationValue::Fixed(value) => {
-                panic!("expected a float counter, got fixed value {value}")
-            }
-        }
+        counters.push(
+            counter
+                .as_f64()
+                .expect("float ranges must emit binary-float counters"),
+        );
     }
     counters
 }
 
 #[test]
 fn range_cursor_rounds_float32_step_accumulation() {
-    let counters = collect_float_counters(
-        float_expression(0.0),
-        float_expression(1.0),
-        Some(float_expression(0.1)),
-        FloatPrecision::Bits32,
-    );
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let start = float32_expression(&mut expressions, &mut constants, 0.0);
+    let end = float32_expression(&mut expressions, &mut constants, 1.0);
+    let step = float32_expression(&mut expressions, &mut constants, 0.1);
+    let counters = collect_float_counters(&expressions, &constants, start, end, Some(step));
 
     assert_eq!(
         counters.len(),
         10,
-        "Float32 0.0 to 1.0 by 0.1 should still take ten const iterations"
+        "F32 0.0 to 1.0 by 0.1 should still take ten const iterations"
     );
     assert_eq!(
         counters[3],
         f64::from(0.1_f32 + 0.1_f32 + 0.1_f32),
-        "Float32 counters must accumulate with f32 rounding, not f64 drift"
+        "F32 counters must accumulate with f32 rounding, not f64 drift"
     );
 }
 
 #[test]
-fn range_cursor_rejects_non_progressing_float32_mixed_range() {
-    // 16777217 widens to 16777216 at Float32 precision, and a step of 1.0 rounds
-    // back to 16777216. The source-level bounds diagnostic may occur during
-    // construction or cursor advancement, so consume up to the normal template
-    // iteration limit without pinning its timing.
+fn range_cursor_rounds_float16_step_accumulation() {
+    // F16(0.1) is 0.099_975_585_937_5; every accumulation rounds back to F16, and the
+    // third F16 accumulation is 0.299_804_687_5.
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let start = float_expression_at(&mut expressions, &mut constants, FixedScalar::F16, 0.0);
+    let end = float_expression_at(&mut expressions, &mut constants, FixedScalar::F16, 1.0);
+    let step = float_expression_at(
+        &mut expressions,
+        &mut constants,
+        FixedScalar::F16,
+        0.099_975_585_937_5,
+    );
+    let counters = collect_float_counters(&expressions, &constants, start, end, Some(step));
+
+    assert_eq!(
+        counters.len(),
+        10,
+        "F16 0.0 to 1.0 by 0.1 should take ten const iterations, unlike F64"
+    );
+    assert_eq!(
+        counters[3], 0.299_804_687_5,
+        "F16 counters must accumulate with F16 rounding, not an F32 or f64 carrier"
+    );
+}
+
+#[test]
+fn range_cursor_rejects_non_progressing_float32_range() {
+    // 16777217 is not representable at F32 precision, so a step of 1.0 rounds back to
+    // 16777216. The source-level bounds diagnostic may occur during construction or
+    // cursor advancement, so consume up to the normal template iteration limit without
+    // pinning its timing.
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let range = RangeLoopSpec {
-        start: int_expression(16_777_217),
-        end: float_expression(16_777_218.5),
+        start: float_expression_at(
+            &mut expressions,
+            &mut constants,
+            FixedScalar::F32,
+            16_777_216.0,
+        ),
+        end: float_expression_at(
+            &mut expressions,
+            &mut constants,
+            FixedScalar::F32,
+            16_777_218.0,
+        ),
         end_kind: RangeEndKind::Exclusive,
-        step: Some(float_expression(1.0)),
+        step: Some(float_expression_at(
+            &mut expressions,
+            &mut constants,
+            FixedScalar::F32,
+            1.0,
+        )),
     };
-    let error = match ConstRangeCursor::new(
+    let error =
+        expect_non_progressing_range(&expressions, &constants, range, "a stalled F32 update");
+    assert_non_progressing_bounds_diagnostic(error, "a stalled F32 update");
+}
+
+#[test]
+fn range_cursor_rejects_non_progressing_float16_range() {
+    // 2049 is not representable at F16 precision, so a step of 1.0 from 2048 rounds back
+    // to 2048. An F32 carrier would advance, which is exactly the removed floor.
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let range = RangeLoopSpec {
+        start: float_expression_at(&mut expressions, &mut constants, FixedScalar::F16, 2048.0),
+        end: float_expression_at(&mut expressions, &mut constants, FixedScalar::F16, 2052.0),
+        end_kind: RangeEndKind::Exclusive,
+        step: Some(float_expression_at(
+            &mut expressions,
+            &mut constants,
+            FixedScalar::F16,
+            1.0,
+        )),
+    };
+    let error =
+        expect_non_progressing_range(&expressions, &constants, range, "a stalled F16 update");
+    assert_non_progressing_bounds_diagnostic(error, "a stalled F16 update");
+}
+
+/// Advances one range cursor to its non-progressing source diagnostic.
+///
+/// WHAT: accepts either construction or advancement failure because both carry the
+///       same source-level bounds reason.
+/// WHY: the range owns its endpoint and no-progress rules, so the test must not pin
+///      which stage detects the stall.
+fn expect_non_progressing_range(
+    expressions: &AstExpressionBuilder,
+    constants: &ConstValueStore,
+    range: RangeLoopSpec,
+    context: &str,
+) -> TemplateError {
+    let mut cursor = match ConstRangeCursor::new(
         &range,
+        expressions,
+        constants,
         crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         None,
-        FloatPrecision::Bits32,
     ) {
-        Err(error) => error,
-        Ok(mut cursor) => {
-            let mut error = None;
-            for _ in
-                0..crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS
-            {
-                match cursor.next_counter() {
-                    Err(next_error) => {
-                        error = Some(next_error);
-                        break;
-                    }
-                    Ok(Some(_)) => {}
-                    Ok(None) => {
-                        panic!("a stalled Float32 update must not exhaust the range normally")
-                    }
-                }
-            }
-            error.expect("a stalled Float32 update must fail within the template iteration limit")
-        }
+        Err(error) => return error,
+        Ok(cursor) => cursor,
     };
+    for _ in 0..crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS
+    {
+        match cursor.next_counter() {
+            Err(error) => return error,
+            Ok(Some(_)) => {}
+            Ok(None) => panic!("{context} must not exhaust the range normally"),
+        }
+    }
+    panic!("{context} must fail within the template iteration limit")
+}
+
+fn assert_non_progressing_bounds_diagnostic(error: TemplateError, context: &str) {
     let TemplateError::Diagnostic(diagnostic) = error else {
-        panic!("a stalled Float32 range must stay on the source diagnostic lane");
+        panic!("{context} must stay on the source diagnostic lane");
     };
     match &diagnostic.payload {
         DiagnosticPayload::InvalidTemplateStructure { reason } => assert_eq!(
             *reason,
             InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst,
-            "a stalled Float32 update must report non-progressing bounds"
+            "{context} must report non-progressing bounds"
         ),
         payload => panic!("expected invalid template structure payload, found {payload:?}"),
     }
 }
 
 #[test]
-fn range_cursor_keeps_standard_float64_step_accumulation() {
-    let counters = collect_float_counters(
-        float_expression(0.0),
-        float_expression(1.0),
-        Some(float_expression(0.1)),
-        FloatPrecision::Bits64,
-    );
+fn range_cursor_keeps_float64_step_accumulation() {
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let start = float_expression(&mut expressions, &mut constants, 0.0);
+    let end = float_expression(&mut expressions, &mut constants, 1.0);
+    let step = float_expression(&mut expressions, &mut constants, 0.1);
+    let counters = collect_float_counters(&expressions, &constants, start, end, Some(step));
 
     assert_eq!(
         counters.len(),
         11,
-        "STANDARD Float64 0.0 to 1.0 by 0.1 keeps eleven const iterations"
+        "F64 0.0 to 1.0 by 0.1 keeps eleven const iterations"
     );
     assert_eq!(
         counters[3],
         0.1 + 0.1 + 0.1,
-        "STANDARD counters must keep f64 accumulation unchanged"
+        "F64 range counters must keep f64 accumulation unchanged"
     );
 }
 
-/// Collects Uint counters from a const range cursor to completion.
+/// Collects `U64` counters from a const range cursor to completion.
 ///
 /// WHAT: drives `ConstRangeCursor` directly so unsigned iteration is pinned
 ///       without template rendering in the way.
@@ -1263,9 +1625,11 @@ fn range_cursor_keeps_standard_float64_step_accumulation() {
 ///      through the in-range exit without ever materialising an out-of-range
 ///      `u64` successor.
 fn collect_uint_counters(
-    start: Expression,
-    end: Expression,
-    step: Option<Expression>,
+    expressions: &AstExpressionBuilder,
+    constants: &ConstValueStore,
+    start: ExprId,
+    end: ExprId,
+    step: Option<ExprId>,
     end_kind: RangeEndKind,
 ) -> Vec<u64> {
     let range = RangeLoopSpec {
@@ -1276,34 +1640,34 @@ fn collect_uint_counters(
     };
     let mut cursor = ConstRangeCursor::new(
         &range,
+        expressions,
+        constants,
         crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         None,
-        FloatPrecision::Bits64,
     )
     .expect("range cursor should construct");
     let mut counters = Vec::new();
     while let Some(counter) = cursor.next_counter().expect("range cursor should advance") {
-        match counter {
-            ConstRangeIterationValue::Uint(value) => counters.push(value),
-            ConstRangeIterationValue::Int(value) => {
-                panic!("expected a uint counter, got int {value}")
-            }
-            ConstRangeIterationValue::Float(value) => {
-                panic!("expected a uint counter, got float {value}")
-            }
-            ConstRangeIterationValue::Fixed(value) => {
-                panic!("expected a uint counter, got fixed value {value}")
-            }
-        }
+        counters.push(
+            counter
+                .as_u64()
+                .expect("unsigned ranges must emit unsigned counters"),
+        );
     }
     counters
 }
 
 #[test]
 fn range_cursor_terminates_at_inclusive_uint_maximum() {
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let start = u64_expression(&mut expressions, &mut constants, u64::MAX - 2);
+    let end = u64_expression(&mut expressions, &mut constants, u64::MAX);
     let counters = collect_uint_counters(
-        uint_expression(u64::MAX - 2),
-        uint_expression(u64::MAX),
+        &expressions,
+        &constants,
+        start,
+        end,
         None,
         RangeEndKind::Inclusive,
     );
@@ -1311,15 +1675,21 @@ fn range_cursor_terminates_at_inclusive_uint_maximum() {
     assert_eq!(
         counters,
         vec![u64::MAX - 2, u64::MAX - 1, u64::MAX],
-        "an inclusive Uint range must emit the maximum and stop without a successor"
+        "an inclusive U64 range must emit the maximum and stop without a successor"
     );
 }
 
 #[test]
 fn range_cursor_terminates_descending_at_uint_zero() {
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let start = u64_expression(&mut expressions, &mut constants, 2);
+    let end = u64_expression(&mut expressions, &mut constants, 0);
     let counters = collect_uint_counters(
-        uint_expression(2),
-        uint_expression(0),
+        &expressions,
+        &constants,
+        start,
+        end,
         None,
         RangeEndKind::Inclusive,
     );
@@ -1327,165 +1697,172 @@ fn range_cursor_terminates_descending_at_uint_zero() {
     assert_eq!(
         counters,
         vec![2, 1, 0],
-        "a descending Uint range must reach zero and stop without underflowing"
+        "a descending U64 range must reach zero and stop without underflowing"
     );
 }
 
 #[test]
 fn range_cursor_rejects_zero_uint_step() {
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let range = RangeLoopSpec {
-        start: uint_expression(0),
-        end: uint_expression(10),
+        start: u64_expression(&mut expressions, &mut constants, 0),
+        end: u64_expression(&mut expressions, &mut constants, 10),
         end_kind: RangeEndKind::Inclusive,
-        step: Some(uint_expression(0)),
+        step: Some(u64_expression(&mut expressions, &mut constants, 0)),
     };
     let error = match ConstRangeCursor::new(
         &range,
+        &expressions,
+        &constants,
         crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         None,
-        FloatPrecision::Bits64,
     ) {
         Err(error) => error,
-        Ok(_) => panic!("a zero Uint step must not construct a const cursor"),
+        Ok(_) => panic!("a zero U64 step must not construct a const cursor"),
     };
-    let TemplateError::Diagnostic(diagnostic) = error else {
-        panic!("a zero Uint step must stay on the source diagnostic lane");
-    };
-    match &diagnostic.payload {
-        DiagnosticPayload::InvalidTemplateStructure { reason } => assert_eq!(
-            *reason,
-            InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst,
-            "a zero Uint step must report non-const bounds"
-        ),
-        payload => panic!("expected invalid template structure payload, found {payload:?}"),
-    }
+    assert_non_progressing_bounds_diagnostic(error, "a zero U64 step");
 }
 
 #[test]
-fn final_view_fold_float_range_loop_follows_the_fold_context_precision() {
-    let float32_profile = NumericProfile {
-        float_precision: FloatPrecision::Bits32,
-        ..NumericProfile::STANDARD
-    };
-
-    // Float32 accumulation through the production `fold_tir_loop` path reaches
-    // 1.0 in ten const iterations; an f64-ignoring cursor would emit eleven dots.
+fn final_view_fold_float_range_loop_follows_operand_precision() {
+    // F32 accumulation through the production `fold_tir_loop` path reaches 1.0 in
+    // ten const iterations; an f64-ignoring cursor would emit eleven dots.
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let narrow_fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
-        let mut builder = TemplateIrBuilder::new(store);
-        let dot_text = string_table.intern(".");
-        let dot_node = builder.push_text_node(dot_text, 1, TemplateSegmentOrigin::Body, None);
-        build_float_range_loop_template(store, 0.0, 1.0, 0.1, dot_node)
-    });
-    let narrow_emission = fold_final_view_fixture_with_profile(
-        &narrow_fixture,
+    let mut narrow_fixture = build_final_view_fixture(
+        &mut string_table,
+        |string_table, store, expressions, constants| {
+            let mut builder = TemplateIrBuilder::new(store);
+            let dot_text = string_table.intern(".");
+            let dot_node = builder.push_text_node(dot_text, 1, TemplateSegmentOrigin::Body, None);
+            build_float_range_loop_template(
+                store,
+                expressions,
+                constants,
+                FixedScalar::F32,
+                0.0,
+                f64::from(1.0_f32),
+                f64::from(0.1_f32),
+                dot_node,
+            )
+        },
+    );
+    let narrow_emission = fold_final_view_fixture(
+        &mut narrow_fixture,
         &mut string_table,
         TemplateTirPhase::Composed,
-        float32_profile,
     )
-    .expect("Float32 range loop should fold through the TIR fold");
+    .expect("F32 range loop should fold through the TIR fold");
     assert_eq!(
         emission_to_string(narrow_emission, &string_table),
         "..........",
-        "Float32 0.0 to 1.0 by 0.1 must fold to ten iterations through the TIR fold"
+        "F32 0.0 to 1.0 by 0.1 must fold to ten iterations through the TIR fold"
     );
 
-    // The same loop under STANDARD keeps eleven f64 iterations; a fold context
-    // stuck at Bits32 would emit ten dots here instead.
+    // The F64 loop keeps eleven f64 iterations; a cursor stuck at F32 precision
+    // would emit ten dots here instead.
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let standard_fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
-        let mut builder = TemplateIrBuilder::new(store);
-        let dot_text = string_table.intern(".");
-        let dot_node = builder.push_text_node(dot_text, 1, TemplateSegmentOrigin::Body, None);
-        build_float_range_loop_template(store, 0.0, 1.0, 0.1, dot_node)
-    });
-    let standard_emission = fold_final_view_fixture_with_profile(
-        &standard_fixture,
+    let mut standard_fixture = build_final_view_fixture(
+        &mut string_table,
+        |string_table, store, expressions, constants| {
+            let mut builder = TemplateIrBuilder::new(store);
+            let dot_text = string_table.intern(".");
+            let dot_node = builder.push_text_node(dot_text, 1, TemplateSegmentOrigin::Body, None);
+            build_float_range_loop_template(
+                store,
+                expressions,
+                constants,
+                FixedScalar::F64,
+                0.0,
+                1.0,
+                0.1,
+                dot_node,
+            )
+        },
+    );
+    let standard_emission = fold_final_view_fixture(
+        &mut standard_fixture,
         &mut string_table,
         TemplateTirPhase::Composed,
-        NumericProfile::STANDARD,
     )
-    .expect("STANDARD range loop should fold through the TIR fold");
+    .expect("F64 range loop should fold through the TIR fold");
     assert_eq!(
         emission_to_string(standard_emission, &string_table),
         "...........",
-        "STANDARD 0.0 to 1.0 by 0.1 must keep eleven f64 iterations through the TIR fold"
+        "F64 0.0 to 1.0 by 0.1 must keep eleven f64 iterations through the TIR fold"
     );
 }
 
 #[test]
-fn final_view_fold_float_interpolation_uses_the_fold_context_precision() {
-    let float32_profile = NumericProfile {
-        float_precision: FloatPrecision::Bits32,
-        ..NumericProfile::STANDARD
-    };
-    // Carrier as Float32 materialisation leaves it: the f32 value widened to f64.
+fn final_view_fold_float_interpolation_uses_value_precision() {
+    // An F32 value renders its shortest f32 text, while the same numeric carrier at
+    // F64 keeps the long expansion. The value's own precision decides.
     let carrier = f64::from(0.1f32);
 
-    // The reducer formats at the fold context precision, so the Float32 fold
-    // renders the shortest f32 text instead of the long f64 expansion.
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let narrow_fixture = build_final_view_fixture(&mut string_table, |_string_table, store| {
-        let mut builder = TemplateIrBuilder::new(store);
-        let float_node = builder.push_dynamic_expression_node(
-            float_expression(carrier),
-            TemplateSegmentOrigin::Body,
-            None,
-        );
-        builder.finish_template(
-            float_node,
-            Style::default(),
-            TemplateType::String,
-            TemplateIrSummary::empty(),
-            None,
-        )
-    });
-    let narrow_emission = fold_final_view_fixture_with_profile(
-        &narrow_fixture,
+    let mut narrow_fixture = build_final_view_fixture(
+        &mut string_table,
+        |_string_table, store, expressions, constants| {
+            let mut builder = TemplateIrBuilder::new(store);
+            let float_node = builder.push_dynamic_expression_node(
+                float_expression_at(expressions, constants, FixedScalar::F32, carrier),
+                TemplateSegmentOrigin::Body,
+                None,
+            );
+            builder.finish_template(
+                float_node,
+                Style::default(),
+                TemplateType::String,
+                TemplateIrSummary::empty(),
+                None,
+            )
+        },
+    );
+    let narrow_emission = fold_final_view_fixture(
+        &mut narrow_fixture,
         &mut string_table,
         TemplateTirPhase::Composed,
-        float32_profile,
     )
-    .expect("Float32 interpolation should fold through the TIR fold");
+    .expect("F32 interpolation should fold through the TIR fold");
     assert_eq!(
         emission_to_string(narrow_emission, &string_table),
         "0.1",
-        "a Float32 0.1 must render its shortest f32 text through the TIR fold"
+        "an F32 0.1 must render its shortest f32 text through the TIR fold"
     );
 
-    // The same carrier under STANDARD must not collapse to f32 text; a reducer
-    // ignoring the profile precision would render "0.1" here as well.
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let standard_fixture = build_final_view_fixture(&mut string_table, |_string_table, store| {
-        let mut builder = TemplateIrBuilder::new(store);
-        let float_node = builder.push_dynamic_expression_node(
-            float_expression(carrier),
-            TemplateSegmentOrigin::Body,
-            None,
-        );
-        builder.finish_template(
-            float_node,
-            Style::default(),
-            TemplateType::String,
-            TemplateIrSummary::empty(),
-            None,
-        )
-    });
-    let standard_emission = fold_final_view_fixture_with_profile(
-        &standard_fixture,
+    let mut standard_fixture = build_final_view_fixture(
+        &mut string_table,
+        |_string_table, store, expressions, constants| {
+            let mut builder = TemplateIrBuilder::new(store);
+            let float_node = builder.push_dynamic_expression_node(
+                float_expression(expressions, constants, carrier),
+                TemplateSegmentOrigin::Body,
+                None,
+            );
+            builder.finish_template(
+                float_node,
+                Style::default(),
+                TemplateType::String,
+                TemplateIrSummary::empty(),
+                None,
+            )
+        },
+    );
+    let standard_emission = fold_final_view_fixture(
+        &mut standard_fixture,
         &mut string_table,
         TemplateTirPhase::Composed,
-        NumericProfile::STANDARD,
     )
-    .expect("STANDARD interpolation should fold through the TIR fold");
+    .expect("F64 interpolation should fold through the TIR fold");
     assert_ne!(
         emission_to_string(standard_emission, &string_table),
         "0.1",
-        "the same carrier under STANDARD must keep its f64 expansion"
+        "the same carrier at F64 must keep its full f64 expansion"
     );
 }
 
@@ -1497,28 +1874,42 @@ fn final_view_fold_float_interpolation_uses_the_fold_context_precision() {
 fn final_view_fold_aggregate_wrapper_preserves_aggregate_output_position() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
-        let aggregate_node = store.push_node(TemplateIrNode::new(
-            TemplateIrNodeKind::AggregateOutput,
-            None,
-        ));
+    let mut fixture = build_final_view_fixture(
+        &mut string_table,
+        |string_table, store, expressions, constants| {
+            let aggregate_node = store.push_node(TemplateIrNode::new(
+                TemplateIrNodeKind::AggregateOutput,
+                None,
+            ));
 
-        let mut builder = TemplateIrBuilder::new(store);
-        let open_text = string_table.intern("[");
-        let close_text = string_table.intern("]");
-        let x_text = string_table.intern("x");
+            let mut builder = TemplateIrBuilder::new(store);
+            let open_text = string_table.intern("[");
+            let close_text = string_table.intern("]");
+            let x_text = string_table.intern("x");
 
-        let open_node = builder.push_text_node(open_text, 1, TemplateSegmentOrigin::Body, None);
-        let close_node = builder.push_text_node(close_text, 1, TemplateSegmentOrigin::Body, None);
-        let wrapper_root =
-            builder.push_sequence_node(vec![open_node, aggregate_node, close_node], None);
+            let open_node = builder.push_text_node(open_text, 1, TemplateSegmentOrigin::Body, None);
+            let close_node =
+                builder.push_text_node(close_text, 1, TemplateSegmentOrigin::Body, None);
+            let wrapper_root =
+                builder.push_sequence_node(vec![open_node, aggregate_node, close_node], None);
 
-        let body_node = builder.push_text_node(x_text, 1, TemplateSegmentOrigin::Body, None);
-        build_range_loop_template(string_table, store, 0, 3, body_node, Some(wrapper_root))
-    });
+            let body_node = builder.push_text_node(x_text, 1, TemplateSegmentOrigin::Body, None);
+            build_range_loop_template(
+                string_table,
+                store,
+                expressions,
+                constants,
+                0,
+                3,
+                body_node,
+                Some(wrapper_root),
+            )
+        },
+    );
 
-    let emission = fold_final_view_fixture(&fixture, &mut string_table, TemplateTirPhase::Composed)
-        .expect("final view fold should succeed");
+    let emission =
+        fold_final_view_fixture(&mut fixture, &mut string_table, TemplateTirPhase::Composed)
+            .expect("final view fold should succeed");
 
     assert_eq!(
         emission_to_string(emission, &string_table),
@@ -1531,21 +1922,31 @@ fn final_view_fold_aggregate_wrapper_preserves_aggregate_output_position() {
 fn final_view_fold_validates_present_aggregate_wrapper_without_body_output() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let fixture = build_final_view_fixture(&mut string_table, |string_table, store| {
-        let mut builder = TemplateIrBuilder::new(store);
-        let empty_body = builder.push_sequence_node(vec![], None);
-        build_range_loop_template(
-            string_table,
-            store,
-            0,
-            1,
-            empty_body,
-            Some(crate::compiler_frontend::ast::templates::tir::ids::TemplateIrNodeId::new(999)),
-        )
-    });
+    let mut fixture = build_final_view_fixture(
+        &mut string_table,
+        |string_table, store, expressions, constants| {
+            let mut builder = TemplateIrBuilder::new(store);
+            let empty_body = builder.push_sequence_node(vec![], None);
+            build_range_loop_template(
+                string_table,
+                store,
+                expressions,
+                constants,
+                0,
+                1,
+                empty_body,
+                Some(
+                    crate::compiler_frontend::ast::templates::tir::ids::TemplateIrNodeId::new(999),
+                ),
+            )
+        },
+    );
 
-    let error = fold_final_view_fixture(&fixture, &mut string_table, TemplateTirPhase::Composed)
-        .expect_err("a present aggregate wrapper must be validated even when the body is empty");
+    let error =
+        fold_final_view_fixture(&mut fixture, &mut string_table, TemplateTirPhase::Composed)
+            .expect_err(
+                "a present aggregate wrapper must be validated even when the body is empty",
+            );
 
     let TemplateError::Infrastructure(error) = error else {
         panic!("missing aggregate-wrapper authority should remain on the infrastructure lane");
@@ -1561,21 +1962,24 @@ fn final_view_fold_validates_present_aggregate_wrapper_without_body_output() {
 fn final_view_aggregate_output_outside_wrapper_classifies_as_runtime() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let fixture = build_final_view_fixture(&mut string_table, |_string_table, store| {
-        let aggregate_node = store.push_node(TemplateIrNode::new(
-            TemplateIrNodeKind::AggregateOutput,
-            None,
-        ));
+    let fixture = build_final_view_fixture(
+        &mut string_table,
+        |_string_table, store, _expressions, _constants| {
+            let aggregate_node = store.push_node(TemplateIrNode::new(
+                TemplateIrNodeKind::AggregateOutput,
+                None,
+            ));
 
-        let mut builder = TemplateIrBuilder::new(store);
-        builder.finish_template(
-            aggregate_node,
-            Style::default(),
-            TemplateType::String,
-            TemplateIrSummary::empty(),
-            None,
-        )
-    });
+            let mut builder = TemplateIrBuilder::new(store);
+            builder.finish_template(
+                aggregate_node,
+                Style::default(),
+                TemplateType::String,
+                TemplateIrSummary::empty(),
+                None,
+            )
+        },
+    );
 
     // AggregateOutput outside an aggregate wrapper is not foldable: preparation
     // classifies it as runtime so the fold path is never reached.
@@ -1587,8 +1991,13 @@ fn final_view_aggregate_output_outside_wrapper_classifies_as_runtime() {
         fixture.context,
     )
     .expect("view should construct");
-    let prepared = prepare_tir_view(&view, TemplatePreparationMode::Value)
-        .expect("preparation should classify AggregateOutput outside a wrapper");
+    let prepared = prepare_tir_view(
+        &view,
+        &fixture.expressions,
+        &fixture.const_values,
+        TemplatePreparationMode::Value,
+    )
+    .expect("preparation should classify AggregateOutput outside a wrapper");
     assert!(
         matches!(
             prepared.outcome,
@@ -1605,6 +2014,8 @@ fn final_view_aggregate_output_outside_wrapper_classifies_as_runtime() {
 fn build_formatted_markdown_fixture(string_table: &mut StringTable) -> FinalViewFoldFixture {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let style = Style {
         formatter: Some(markdown_formatter()),
         ..Style::default()
@@ -1633,6 +2044,8 @@ fn build_formatted_markdown_fixture(string_table: &mut StringTable) -> FinalView
         let mut store_borrow = store.borrow_mut();
         crate::compiler_frontend::ast::templates::tir::formatter_view::format_tir_template(
             &mut store_borrow,
+            &mut expressions,
+            &mut const_values,
             template_id,
             TemplateTirPhase::Parsed,
             context,
@@ -1658,6 +2071,8 @@ fn build_formatted_markdown_fixture(string_table: &mut StringTable) -> FinalView
         store,
         template_id: formatted_template_id,
         context,
+        expressions,
+        const_values,
     }
 }
 
@@ -1665,9 +2080,9 @@ fn build_formatted_markdown_fixture(string_table: &mut StringTable) -> FinalView
 fn final_view_fold_formatted_markdown_text() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let fixture = build_formatted_markdown_fixture(&mut string_table);
+    let mut fixture = build_formatted_markdown_fixture(&mut string_table);
     let emission =
-        fold_final_view_fixture(&fixture, &mut string_table, TemplateTirPhase::Formatted)
+        fold_final_view_fixture(&mut fixture, &mut string_table, TemplateTirPhase::Formatted)
             .expect("formatted final view should fold");
 
     let output = emission_to_string(emission, &string_table);
@@ -1686,29 +2101,35 @@ fn final_view_fold_formatted_markdown_text() {
 fn final_view_runtime_slot_application_requires_handoff() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let fixture = build_final_view_fixture(&mut string_table, |_string_table, store| {
-        let mut builder = TemplateIrBuilder::new(store);
-        let handoff = OwnedRuntimeSlotApplicationHandoff {
-            wrapper: OwnedRuntimeTemplateNode::Text {
-                text: OwnedFoldedString::Text("<shell>".to_owned()),
-            },
-            contribution_sources: Vec::new(),
-            slot_sites: Vec::new(),
-            span: None,
-        };
-        let expression =
-            Expression::runtime_slot_application_handoff(handoff, ValueMode::ImmutableOwned);
-        let dynamic_node =
-            builder.push_dynamic_expression_node(expression, TemplateSegmentOrigin::Body, None);
+    let fixture = build_final_view_fixture(
+        &mut string_table,
+        |_string_table, store, expressions, _constants| {
+            let mut builder = TemplateIrBuilder::new(store);
+            let handoff = OwnedRuntimeSlotApplicationHandoff {
+                wrapper: OwnedRuntimeTemplateNode::Text {
+                    text: OwnedFoldedString::Text("<shell>".to_owned()),
+                },
+                contribution_sources: Vec::new(),
+                slot_sites: Vec::new(),
+            };
+            let expression = runtime_slot_application_handoff_expr(
+                expressions,
+                handoff,
+                None,
+                ValueMode::ImmutableOwned,
+            );
+            let dynamic_node =
+                builder.push_dynamic_expression_node(expression, TemplateSegmentOrigin::Body, None);
 
-        builder.finish_template(
-            dynamic_node,
-            Style::default(),
-            TemplateType::String,
-            TemplateIrSummary::empty(),
-            None,
-        )
-    });
+            builder.finish_template(
+                dynamic_node,
+                Style::default(),
+                TemplateType::String,
+                TemplateIrSummary::empty(),
+                None,
+            )
+        },
+    );
 
     let store = fixture.store.borrow();
     let view = TirView::new(
@@ -1718,15 +2139,25 @@ fn final_view_runtime_slot_application_requires_handoff() {
         fixture.context,
     )
     .expect("final view should construct");
-    let first = prepare_tir_view(&view, TemplatePreparationMode::Value)
-        .expect("runtime slot application should prepare as runtime");
+    let first = prepare_tir_view(
+        &view,
+        &fixture.expressions,
+        &fixture.const_values,
+        TemplatePreparationMode::Value,
+    )
+    .expect("runtime slot application should prepare as runtime");
     assert!(matches!(
         first.outcome,
         TemplatePreparationOutcome::Runtime(_)
     ));
 
-    let second = prepare_tir_view(&view, TemplatePreparationMode::Value)
-        .expect("runtime slot application should remain a runtime result");
+    let second = prepare_tir_view(
+        &view,
+        &fixture.expressions,
+        &fixture.const_values,
+        TemplatePreparationMode::Value,
+    )
+    .expect("runtime slot application should remain a runtime result");
     assert!(matches!(
         second.outcome,
         TemplatePreparationOutcome::Runtime(_)

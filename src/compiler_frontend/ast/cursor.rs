@@ -168,6 +168,14 @@ impl<'a> AstCursor<'a> {
         self.visible_at(index, token)
     }
 
+    /// Borrow one token by canonical source index, without parser-coordinate translation.
+    ///
+    /// Canonical ranges such as declaration initializer ranges carry raw source indexes. Segmented
+    /// start-body cursors index parser coordinates densely, so `token_ref_at` is wrong for them.
+    pub(crate) fn canonical_token_ref_at(&self, index: TokenIndex) -> Option<TokenRef<'a>> {
+        self.cursor.source_tokens().token(index).ok()
+    }
+
     /// Borrow one token at an offset from the current parser position.
     pub(crate) fn token_ref_at_offset(&self, offset: usize) -> Option<TokenRef<'a>> {
         self.position()

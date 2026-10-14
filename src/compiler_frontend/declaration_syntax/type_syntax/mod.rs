@@ -9,7 +9,7 @@
 //! - token-to-type annotation parsing for declaration/signature contexts
 //! - the single builtin-scalar spelling owner: token tag to `FixedScalar` identity and back
 //! - optional suffix (`?`) annotation rules
-//! - collection type parsing with fixed-capacity syntax (e.g. `{64 Int}`, `{T}`)
+//! - collection type parsing with fixed-capacity syntax (e.g. `{64 I32}`, `{T}`)
 //! - `parsed_ref_to_data_type` syntax-to-diagnostic spelling
 //! - parsed-ref walkers used by header dependency extraction
 //!
@@ -43,11 +43,9 @@ pub(crate) use walk::*;
 /// Maps a builtin scalar keyword tag to its explicit-width identity.
 ///
 /// WHAT: the one owner of `TokenTag -> FixedScalar`. It covers only the explicit-width
-///       spellings (`I8`..`F64`) and `Byte`, which are profile-independent identities.
+///       spellings (`I8`..`F64`) and `Byte`, which are the only bounded numeric identities.
 /// WHY: parsing, expression diagnostics and header classification all need this mapping, and a
-///      second copy would let the keyword set and the identity set drift apart. `Int`, `Uint`
-///      and `Float` deliberately return `None`: they are profile-dependent identities with no
-///      fixed width (`Uint` follows the profile-selected `Int` width).
+///      second copy would let the keyword set and the identity set drift apart.
 pub(crate) fn fixed_scalar_for_builtin_type_tag(tag: TokenTag) -> Option<FixedScalar> {
     match tag {
         TokenTag::DATATYPE_I8 => Some(FixedScalar::I8),
@@ -68,15 +66,11 @@ pub(crate) fn fixed_scalar_for_builtin_type_tag(tag: TokenTag) -> Option<FixedSc
 
 /// Returns the source spelling of a builtin scalar type keyword tag.
 ///
-/// WHAT: covers `Int`, `Uint`, `Float`, `Bool`, `String`, `Char` and every explicit-width
-///       spelling.
+/// WHAT: covers `Bool`, `String`, `Char` and every explicit-width spelling.
 /// WHY: diagnostics and receiver surfaces must spell builtin scalar types exactly as authored, so
 ///      the spelling comes from `FixedScalar::name` for fixed scalars instead of a second table.
 pub(crate) fn builtin_scalar_type_name_for_tag(tag: TokenTag) -> Option<&'static str> {
     match tag {
-        TokenTag::DATATYPE_INT => Some("Int"),
-        TokenTag::DATATYPE_UINT => Some("Uint"),
-        TokenTag::DATATYPE_FLOAT => Some("Float"),
         TokenTag::DATATYPE_BOOL => Some("Bool"),
         TokenTag::DATATYPE_STRING => Some("String"),
         TokenTag::DATATYPE_CHAR => Some("Char"),
@@ -93,9 +87,6 @@ pub(crate) fn parsed_ref_to_data_type(parsed: &ParsedTypeRef) -> DataType {
     match parsed {
         ParsedTypeRef::Inferred => DataType::Inferred,
         ParsedTypeRef::BuiltinBool { .. } => DataType::Bool,
-        ParsedTypeRef::BuiltinInt { .. } => DataType::Int,
-        ParsedTypeRef::BuiltinUint { .. } => DataType::Uint,
-        ParsedTypeRef::BuiltinFloat { .. } => DataType::Float,
         ParsedTypeRef::BuiltinString { .. } => DataType::StringSlice,
         ParsedTypeRef::BuiltinChar { .. } => DataType::Char,
         ParsedTypeRef::BuiltinFixedScalar { scalar, .. } => DataType::FixedScalar(*scalar),

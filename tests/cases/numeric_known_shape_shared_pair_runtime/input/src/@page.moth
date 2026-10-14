@@ -1,0 +1,29 @@
+Pair type A, B = |first A, second B|
+
+-- Duplicate children share one shape at every level, rather than forming a tree.
+-- Keep runtime depth at 16: concrete type materialisation still expands outside
+-- numeric inference. The depth-40 no-producer unit case owns deeper DAG coverage.
+read_leaf || -> U64:
+    value_0 = 4_294_967_296
+    value_1 = Pair(value_0, value_0)
+    value_2 = Pair(value_1, value_1)
+    value_3 = Pair(value_2, value_2)
+    value_4 = Pair(value_3, value_3)
+    value_5 = Pair(value_4, value_4)
+    value_6 = Pair(value_5, value_5)
+    value_7 = Pair(value_6, value_6)
+    value_8 = Pair(value_7, value_7)
+    value_9 = Pair(value_8, value_8)
+    value_10 = Pair(value_9, value_9)
+    value_11 = Pair(value_10, value_10)
+    value_12 = Pair(value_11, value_11)
+    value_13 = Pair(value_12, value_12)
+    value_14 = Pair(value_13, value_13)
+    value_15 = Pair(value_14, value_14)
+    value_16 = Pair(value_15, value_15)
+
+    return value_16.first.first.first.first.first.first.first.first.first.first.first.first.first.first.first.first
+;
+
+leaf = read_leaf()
+[:shared_pair=[leaf]]

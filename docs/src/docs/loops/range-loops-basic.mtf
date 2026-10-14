@@ -52,7 +52,7 @@ The direction comes from the bounds. You do not need a `reverse` keyword.
     ;
 ]
 
-Any range that uses `Float` needs an explicit step:
+Any range using `F16`, `F32` or `F64` needs an explicit step:
 
 [codeblock, $code("moth"):
     loop 0.0 to 1.0 by 0.1 |amount|:
@@ -60,9 +60,12 @@ Any range that uses `Float` needs an explicit step:
     ;
 ]
 
-The value binding takes the range's numeric type, and the optional index binding
-is always `Int`, including in an all-`Uint` range.
+The value binding uses the selected range type. The optional position binding
+always has type `I32`, even when the range counter uses another exact type.
 
-Fixed-width bounds and steps promote to a common type before the loop runs, and a
-fixed binary float range also needs an explicit step. An all-`Uint` range binds
-`Uint`. Invalid steps and counter updates produce implicit failure through the enclosing handler or function contract. Ranges run on HTML-JS; HTML-Wasm rejects recoverable range failure with a capability diagnostic. See @../progress (Progress) for current support.
+Fixed-width bounds and steps use the exact numeric domain rules. All omitted
+zero and default one values materialise in the selected counter type. Invalid
+steps and counter updates produce implicit failure through the enclosing
+handler or function contract. Ranges run on HTML-JS; HTML-Wasm rejects
+recoverable range failure with a capability diagnostic. See @../progress
+(Progress) for current support.

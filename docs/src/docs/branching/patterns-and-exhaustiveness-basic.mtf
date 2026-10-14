@@ -36,4 +36,4 @@ Options have two complete shapes: absent and present.
 ]
 
 Most other value matches need `else =>` because the compiler cannot list every
-possible `Int`, `String` or other scalar value.
+possible `I32`, `String` or other scalar value.

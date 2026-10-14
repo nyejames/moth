@@ -14,13 +14,14 @@
 
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::const_facts::HirConstFacts;
 use crate::compiler_frontend::hir::constants::HirModuleConst;
 use crate::compiler_frontend::hir::expression_store::HirExpressionStore;
 use crate::compiler_frontend::hir::failure_facts::HirFunctionFailureFacts;
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
-use crate::compiler_frontend::hir::hir_builder::CatchProtectedCall;
+use crate::compiler_frontend::hir::hir_builder::{CatchHandlerRecord, CatchProtectedCall};
 use crate::compiler_frontend::hir::hir_side_table::HirSideTable;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId};
 use crate::compiler_frontend::hir::regions::HirRegion;
@@ -79,9 +80,21 @@ pub struct HirChoiceField {
 //  HIR Module Container
 // -------------------------
 
+/// Native result signature for imported or generated source calls whose defining
+/// function owner is unavailable to this HIR consumer. Local functions and binding-backed
+/// calls use their original function or registry signature instead of a mirrored record.
+#[derive(Debug, Clone)]
+pub(crate) struct HirCallResultContract {
+    pub returns: Box<[TypeId]>,
+    pub error_return: Option<TypeId>,
+}
+
 #[derive(Debug, Clone)]
 pub struct HirModule {
     pub expressions: HirExpressionStore,
+    /// Only nonlocal source/generated targets lacking an accessible defining signature owner.
+    /// Imported producer contracts supply these types in this module's TypeEnvironment.
+    pub(crate) call_result_contracts: FxHashMap<CallTarget, HirCallResultContract>,
     pub blocks: Vec<HirBlock>,
     pub functions: Vec<HirFunction>,
     pub structs: Vec<HirStruct>,
@@ -136,6 +149,24 @@ pub struct HirModule {
     /// coverage as `CompilerError`.
     pub function_provenance: FxHashMap<FunctionId, SyntheticInterfaceProvenance>,
 
+    /// Construction-only provenance grouped by the HIR block that lowered each expression.
+    ///
+    /// A row keyed with `None` preserves provenance lowered before an active block was selected.
+    /// The private failure convergence owner finalizes the retained function facts and then
+    /// releases this projection, so it is never part of the published executable.
+    pub(crate) function_provenance_by_block:
+        FxHashMap<(FunctionId, Option<BlockId>), SyntheticInterfaceProvenance>,
+
+    /// Whether the construction block projection has owned the per-function aggregate facts.
+    ///
+    /// WHAT: set the first time HIR construction supplied block rows and `function_provenance`
+    ///       was rebuilt from them.
+    /// WHY: an empty projection is ambiguous. When it is construction-owned, finalization must
+    ///      rebuild the aggregate to explicit empty facts for every retained function even after
+    ///      catch pruning removed the last block row; a directly constructed module that never
+    ///      used the projection keeps facts assigned outside it.
+    pub(crate) function_provenance_projection_used: bool,
+
     /// Direct unhandled failure producers and source boundary for every local function.
     /// Summary convergence consumes this read-only projection rather than AST or CFG rescans.
     pub(crate) function_failure_facts: FxHashMap<FunctionId, HirFunctionFailureFacts>,
@@ -148,11 +179,14 @@ pub struct HirModule {
     /// WHY: the installer runs after summary convergence and cannot re-derive protection from
     ///      the HIR alone, so lowering records the route once and the installer acts on it.
     pub(crate) catch_protected_calls: Vec<CatchProtectedCall>,
+    /// Every lowered catch handler, including handlers with no protected calls.
+    pub(crate) catch_handlers: Vec<CatchHandlerRecord>,
 }
 
 impl HirModule {
     pub fn new() -> Self {
         Self {
+            call_result_contracts: FxHashMap::default(),
             expressions: HirExpressionStore::default(),
             blocks: vec![],
             functions: vec![],
@@ -171,14 +205,66 @@ impl HirModule {
             regions: vec![],
             const_facts: HirConstFacts::default(),
             function_provenance: FxHashMap::default(),
+            function_provenance_by_block: FxHashMap::default(),
+            function_provenance_projection_used: false,
             function_failure_facts: FxHashMap::default(),
             catch_protected_calls: vec![],
+            catch_handlers: vec![],
         }
     }
 
     pub(crate) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
         self.side_table.remap_path_ids(remap);
         self.const_facts.remap_path_ids(remap);
+    }
+
+    /// Rebuild function provenance from retained HIR construction blocks.
+    ///
+    /// WHAT: recomputes one fact per function as the union of the surviving block rows and reports
+    ///       whether the aggregate changed.
+    /// WHY: block pruning can remove the last row of a projection that still owns the aggregate,
+    ///      so a construction-produced empty projection must settle to explicit empty facts for
+    ///      every retained function instead of leaving the pre-pruning aggregate in place. Directly
+    ///      constructed modules that never used the projection keep their own facts.
+    pub(crate) fn refresh_function_provenance_from_blocks(
+        &mut self,
+    ) -> Result<bool, CompilerError> {
+        if self.function_provenance_by_block.is_empty() && !self.function_provenance_projection_used
+        {
+            return Ok(false);
+        }
+        self.function_provenance_projection_used = true;
+        let mut provenance_by_function = self
+            .functions
+            .iter()
+            .map(|function| (function.id, SyntheticInterfaceProvenance::empty()))
+            .collect::<FxHashMap<_, _>>();
+        for ((function_id, _), provenance) in &self.function_provenance_by_block {
+            let Some(function_provenance) = provenance_by_function.get_mut(function_id) else {
+                return Err(CompilerError::compiler_error(format!(
+                    "HIR block provenance references unknown function {function_id:?}"
+                )));
+            };
+            function_provenance.merge(provenance);
+        }
+        let changed = self.function_provenance != provenance_by_function;
+        self.function_provenance = provenance_by_function;
+        Ok(changed)
+    }
+
+    /// Rebuild final function provenance from retained HIR construction blocks.
+    ///
+    /// WHAT: rebuilds the aggregate, then replaces the construction-only projection with a fresh
+    ///       empty map.
+    /// WHY: construction is complete and the projection has no later reader, so dropping the map
+    ///      releases its backing allocation instead of retaining capacity for rows that can never
+    ///      be added again.
+    pub(crate) fn finalize_function_provenance_after_rewrites(
+        &mut self,
+    ) -> Result<bool, CompilerError> {
+        let changed = self.refresh_function_provenance_from_blocks()?;
+        self.function_provenance_by_block = FxHashMap::default();
+        Ok(changed)
     }
 
     /// Renumber blocks so `blocks[index].id == BlockId(index)`.
@@ -220,6 +306,22 @@ impl HirModule {
                 .copied()
                 .unwrap_or(record.handler.block);
         }
+        for record in &mut self.catch_handlers {
+            record.handler.block = remap
+                .get(&record.handler.block)
+                .copied()
+                .unwrap_or(record.handler.block);
+        }
+        self.function_provenance_by_block = std::mem::take(&mut self.function_provenance_by_block)
+            .into_iter()
+            .filter_map(|((function_id, block_id), provenance)| {
+                let block_id = match block_id {
+                    Some(block_id) => remap.get(&block_id).copied().map(Some)?,
+                    None => None,
+                };
+                Some(((function_id, block_id), provenance))
+            })
+            .collect();
         self.side_table.remap_block_ids(&remap);
     }
 

@@ -1,0 +1,21 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-TYPE-0001", "MOTH-TYPE-0001"]
+message_contains = ["expected U64, found U8"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+occurrence = 1
+path = "input/binding_boundary/@mod.moth"
+line = 12
+column = 16
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+occurrence = 2
+path = "input/later_receiver/@mod.moth"
+line = 13
+column = 15

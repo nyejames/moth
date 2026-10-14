@@ -1,5 +1,5 @@
 render || -> String:
-    capacity Int = 2
-    items {capacity Int} = {}
+    capacity I32 = 2
+    items {capacity I32} = {}
     return ""
 ;

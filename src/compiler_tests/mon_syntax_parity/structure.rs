@@ -5,6 +5,7 @@
 
 use crate::compiler_frontend::compiler_messages::InvalidExpressionReason;
 use crate::compiler_frontend::instrumentation::lock_counter_test;
+use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_build_result;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::mon::{
     Field, MonErrorCode, PathSegment, Schema, SchemaType, Span, Value, decode_document,
@@ -32,9 +33,9 @@ fn structure_fixtures() -> Vec<ParityFixture> {
         "single_field_const_record",
         "(answer = 42)",
         "",
-        Schema::record(vec![Field::required("answer", SchemaType::Int)]),
+        Schema::record(vec![Field::required("answer", SchemaType::I32)]),
         SourceExpectation::Accept,
-        MonExpectation::Accept(Value::Record(vec![("answer".into(), Value::Int(42))])),
+        MonExpectation::Accept(Value::Record(vec![("answer".into(), Value::I32(42))])),
     ));
 
     fixtures.push(fixture(
@@ -47,7 +48,7 @@ fn structure_fixtures() -> Vec<ParityFixture> {
                 fields: vec![Field::required(
                     "inner",
                     SchemaType::Record {
-                        fields: vec![Field::required("leaf", SchemaType::Int)],
+                        fields: vec![Field::required("leaf", SchemaType::I32)],
                     },
                 )],
             },
@@ -57,7 +58,7 @@ fn structure_fixtures() -> Vec<ParityFixture> {
             "outer".into(),
             Value::Record(vec![(
                 "inner".into(),
-                Value::Record(vec![("leaf".into(), Value::Int(7))]),
+                Value::Record(vec![("leaf".into(), Value::I32(7))]),
             )]),
         )])),
     ));
@@ -67,7 +68,7 @@ fn structure_fixtures() -> Vec<ParityFixture> {
         "duplicate_record_labels",
         duplicate.clone(),
         "",
-        Schema::record(vec![Field::required("value", SchemaType::Int)]),
+        Schema::record(vec![Field::required("value", SchemaType::I32)]),
         SourceExpectation::Reject {
             code: "MOTH-RULE-0002",
             reason: SourceReason::DuplicateDeclaration,
@@ -86,8 +87,8 @@ fn structure_fixtures() -> Vec<ParityFixture> {
         missing_value.clone(),
         "",
         Schema::record(vec![
-            Field::required("value", SchemaType::Int),
-            Field::required("other", SchemaType::Int),
+            Field::required("value", SchemaType::I32),
+            Field::required("other", SchemaType::I32),
         ]),
         source_invalid_expression(
             InvalidExpressionReason::AnonymousRecordFieldNotNamed,
@@ -106,8 +107,8 @@ fn structure_fixtures() -> Vec<ParityFixture> {
         missing_comma.clone(),
         "",
         Schema::record(vec![
-            Field::required("first", SchemaType::Int),
-            Field::required("second", SchemaType::Int),
+            Field::required("first", SchemaType::I32),
+            Field::required("second", SchemaType::I32),
         ]),
         SourceExpectation::Reject {
             code: "MOTH-SYNTAX-0001",
@@ -126,7 +127,7 @@ fn structure_fixtures() -> Vec<ParityFixture> {
         "trailing_input_after_explicit_mon_root",
         trailing.clone(),
         "",
-        Schema::record(vec![Field::required("first", SchemaType::Int)]),
+        Schema::record(vec![Field::required("first", SchemaType::I32)]),
         source_invalid_expression(
             InvalidExpressionReason::ExpectedOperatorBeforeExpression,
             in_literal(&trailing, "tail", 1),
@@ -143,7 +144,7 @@ fn structure_fixtures() -> Vec<ParityFixture> {
         "anonymous_records_have_no_positional_fields",
         positional.clone(),
         "",
-        Schema::record(vec![Field::required("first", SchemaType::Int)]),
+        Schema::record(vec![Field::required("first", SchemaType::I32)]),
         source_invalid_expression(
             InvalidExpressionReason::AnonymousRecordFieldNotNamed,
             in_literal(&positional, "2", 1),
@@ -171,11 +172,7 @@ fn grouped_source_scalar_is_not_mon_document_data() {
     let _guard = lock_counter_test();
     let case = "grouped_source_scalar_is_not_mon_document_data";
     let source = "data #= ((1))\n";
-    let (build_result, path_fork, string_table) =
-        crate::compiler_frontend::tests::parse_support::parse_single_file_ast_build_result_with_profile(
-            source,
-            crate::mon::NumericProfile::STANDARD,
-        )
+    let (build_result, path_fork, string_table) = parse_single_file_ast_build_result(source)
         .unwrap_or_else(|diagnostic| {
             panic!(
                 "source rejected grouped scalar case '{case}' with {} {:?}",
@@ -185,7 +182,7 @@ fn grouped_source_scalar_is_not_mon_document_data() {
         });
     let observed = observe_data_value(&build_result, &path_fork, &string_table)
         .unwrap_or_else(|| panic!("source case '{case}' had no observable data value"));
-    assert_source_matches(&Value::Int(1), &observed, case, "", &[], &[]);
+    assert_source_matches(&Value::I32(1), &observed, case, "", &[], &[]);
 
     // Source parentheses group an expression; MON's framed root record requires named entries.
     let schema = Schema::record(Vec::new())

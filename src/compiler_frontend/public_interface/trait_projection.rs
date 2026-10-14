@@ -364,7 +364,7 @@ fn project_trait_requirement(
             )?;
             Ok(PublicTraitRequirementParameter {
                 name,
-                value_mode: parameter.value_mode.clone(),
+                value_mode: parameter.value_mode,
                 type_identity,
             })
         })

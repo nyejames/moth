@@ -1,0 +1,19 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0083"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0083"
+reason = "invalid_cast.same_source_and_target"
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0083"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0083"
+reason = "invalid_cast.same_source_and_target"

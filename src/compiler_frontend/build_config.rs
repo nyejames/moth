@@ -11,17 +11,15 @@
 //!       or platform identity and never depend on build-system or project settings, so build
 //!       and project code constructs and consumes them without owning compiler semantics.
 //!
-//! Command-input value inference lives here so build, check and dev share one immediate
-//! primitive-inference path. [`PrimitiveBuildValue::from_command_text`] composes the ordinary
-//! Moth literal grammar and the shared `moth_lexical` materialisation helpers under one boundary
-//! [`NumericProfile`] — it never consults a project or source contract and never re-implements a
-//! literal grammar.
+//! Command-input value classification lives here so build, check and dev share one immediate
+//! path. [`BuildConfigInputValue::from_command_text`] classifies the authored text from the Moth
+//! literal grammar alone: it never consults a project or source contract and never materialises
+//! a number. A numeric literal stays deferred until the contract that receives it is known.
 //!
-//! [`PrimitiveBuildValue::checked_for_numeric_profile`] is the one acceptance rule for numeric
-//! values: `Int` fits the profile's width and `Float` stays finite after rounding to the profile's
-//! precision. Values authored before a profile was known (source-config defaults and programmatic
-//! typed inputs) pass through it wherever they resolve, while command inputs are materialised at
-//! the profile in the first place.
+//! [`BuildConfigInputValue::materialise_for`] is the one acceptance rule for supplied values. A
+//! deferred literal materialises directly at its contract's exact scalar through the shared
+//! `moth_lexical` numeric helpers, so no intermediate width or precision exists. Typed values must
+//! match the contract's exact primitive type.
 //!
 //! Exclusions: no `--input` argument parser or `#Config` grammar lives here. Command layers
 //! split each argument at the first `=`, validate names and insert the resulting entries.
@@ -32,7 +30,7 @@
 
 use crate::compiler_frontend::canonical_type_identity::CanonicalTypeIdentity;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::folded_value::{FiniteFloat, PublicFoldedValue};
+use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceId, SourceSpan};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identifier_policy::is_lowercase_with_underscores_name;
@@ -41,9 +39,12 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable}
 use crate::compiler_frontend::tokenizer::lexer::{TokenizeFailure, tokenize};
 use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenTag, TokenizerEntryMode};
 use moth_lexical::identifier::is_identifier;
-use moth_lexical::numeric::parse::NumberLiteralErrorReason;
-use moth_lexical::numeric::parse::{parse_numeric_text_to_float, parse_numeric_text_to_int};
-use moth_lexical::numeric::profile::NumericProfile;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarClass, FixedScalarValue};
+use moth_lexical::numeric::grammar::NumericLiteralKind;
+use moth_lexical::numeric::parse::{
+    NumberLiteralErrorReason, literal_kind_initialises, materialize_normalized_fixed_scalar,
+    parse_numeric_literal,
+};
 
 use crate::builder_surface::config_schema::ProjectFieldConfigPolicy;
 use rustc_hash::FxHashMap;
@@ -205,23 +206,23 @@ impl BuildConfigInputDuplicate {
     }
 }
 
-/// One explicit build-config input: a typed value plus where the caller supplied it.
+/// One explicit build-config input: a supplied value plus where the caller supplied it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct BuildConfigInputEntry {
     name: BuildInputName,
-    value: PrimitiveBuildValue,
+    value: BuildConfigInputValue,
     location: BuildConfigValueLocation,
 }
 
 impl BuildConfigInputEntry {
     pub(crate) fn new(
         name: BuildInputName,
-        value: PrimitiveBuildValue,
+        value: impl Into<BuildConfigInputValue>,
         location: BuildConfigValueLocation,
     ) -> Self {
         Self {
             name,
-            value,
+            value: value.into(),
             location,
         }
     }
@@ -230,7 +231,7 @@ impl BuildConfigInputEntry {
         &self.name
     }
 
-    pub(crate) fn value(&self) -> &PrimitiveBuildValue {
+    pub(crate) fn value(&self) -> &BuildConfigInputValue {
         &self.value
     }
 
@@ -239,165 +240,215 @@ impl BuildConfigInputEntry {
     }
 }
 
-/// One normalised typed primitive build-config value.
+/// One explicit input value before its receiving contract is known.
 ///
-/// WHAT: the only value vocabulary build inputs and `#Config` resolution transport: one exact
-///       typed primitive per value, with `Float` reusing the frontend's validated
-///       [`FiniteFloat`] wrapper so non-finite values cannot enter resolution.
-/// WHY:  there is deliberately no raw, untyped or `none` variant. Optional absence is an
-///       omitted input resolved through project and default rules, never a value, and String
-///       fallback is decided by command-text inference before a value is constructed, so no
-///       string-backed marker survives into the typed vocabulary. Authored String and Char
-///       content is preserved exactly, without backend conversion.
+/// WHAT: a typed value when the authored text already fixes its type (`Bool`, `String` or `Char`),
+///       or a deferred numeric literal whose exact scalar is chosen only by the contract it reaches.
+/// WHY:  a command number has no intrinsic width or precision. Choosing one first would reject
+///       `4294967296` for an unsigned contract or round a decimal for a float contract, so the
+///       literal waits until its contract is known.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum PrimitiveBuildValue {
-    String(String),
-    Int(i64),
-    Float(FiniteFloat),
-    Bool(bool),
-    Char(char),
+pub(crate) enum BuildConfigInputValue {
+    Typed(PrimitiveBuildValue),
+    Deferred(DeferredNumericLiteral),
 }
 
-impl PrimitiveBuildValue {
-    /// Construct a finite `Float` value. Non-finite input is rejected; command parsing turns
-    /// that rejection into a command-input diagnostic.
-    pub(crate) fn float(value: f64) -> Result<Self, CompilerError> {
-        Ok(Self::Float(FiniteFloat::new(value)?))
+impl From<PrimitiveBuildValue> for BuildConfigInputValue {
+    fn from(value: PrimitiveBuildValue) -> Self {
+        Self::Typed(value)
     }
+}
 
-    /// Return this value when it satisfies one boundary numeric profile.
+/// One authored numeric literal that materialises only at its contract's exact scalar.
+///
+/// WHAT: the authored text for diagnostics, the normalized digits without separators, the authored
+///       leading sign and the literal kind that decides which scalar families it can initialise.
+/// WHY:  materialisation reuses the shared `moth_lexical` helpers, which take exactly these parts.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct DeferredNumericLiteral {
+    authored_text: String,
+    normalized: String,
+    negative: bool,
+    kind: NumericLiteralKind,
+}
+
+impl BuildConfigInputValue {
+    /// Classify one command-input value from its authored text without materialising a number.
     ///
-    /// WHAT: the one acceptance rule for a numeric value: `Int` must fit the profile's `Int`
-    ///       width, and `Float` is rounded to the profile's precision and must stay finite.
-    /// WHY:  command inputs materialise at the profile and source-authored defaults materialise
-    ///       when the boundary fact is built, but programmatic typed inputs enter resolution from
-    ///       carriers built before a profile was known. Every resolved value therefore passes this
-    ///       rule here rather than each entry point re-deriving a width or precision check.
-    pub(crate) fn checked_for_numeric_profile(
-        self,
-        numeric_profile: NumericProfile,
-    ) -> Result<Self, NumericProfileViolation> {
-        match self {
-            Self::Int(value) if !numeric_profile.int_width.contains(value) => {
-                Err(NumericProfileViolation::IntOutOfRange { value })
-            }
-            Self::Float(value) => {
-                let rounded = numeric_profile.float_precision.round(value.value());
-                if !rounded.is_finite() {
-                    return Err(NumericProfileViolation::NonFiniteFloat {
-                        value: value.value(),
-                    });
-                }
-
-                // The rounded value is finite by the check above, so the carrier cannot reject it.
-                Ok(Self::Float(
-                    FiniteFloat::new(rounded).expect("rounded finite Float satisfies the carrier"),
-                ))
-            }
-            other => Ok(other),
-        }
-    }
-
-    /// Infer one typed primitive value from raw command-input text under one numeric profile.
-    ///
-    /// WHAT: the one immediate inference path every command variant shares. Exact lowercase
-    ///       `true`/`false` infers Bool; a complete valid signed whole-number literal infers
-    ///       Int at the profile's width; a complete valid decimal-point or exponent literal
-    ///       infers Float at the profile's precision; a single-quote-leading value must be one
-    ///       complete ordinary Moth Char literal; a double-quote-leading value must be one
-    ///       complete ordinary Moth String literal; and every other value — including the empty
-    ///       value, bare `none`, `+1`, `NaN`, `Infinity`, backtick text and malformed
-    ///       numeric-looking text — falls back to String with its exact authored remainder
-    ///       preserved.
-    /// WHY:  a command value's primitive type is decided immediately from the authored text,
-    ///       never by waiting for a project or source contract, and the selected builder has
-    ///       already settled the profile the command will compile under. Numeric materialisation
-    ///       and quoted literal parsing compose the shared `moth_lexical` numeric service and
-    ///       ordinary literal-grammar owners, so no second grammar exists, and whole-number Int
-    ///       overflow and non-finite Float results are diagnostics rather than fallbacks.
-    pub(crate) fn from_command_text(
-        value: &str,
-        numeric_profile: NumericProfile,
-    ) -> Result<Self, BuildInputValueError> {
+    /// WHAT: exact lowercase `true` and `false` infer Bool. An optional leading `-` followed by a
+    ///       complete numeric literal defers the number with its literal kind. A single-quote- or
+    ///       double-quote-leading value must be one complete ordinary Moth Char or String literal.
+    ///       Every other value, including the empty value, `+1`, `NaN`, backtick text and malformed
+    ///       numeric-looking text, falls back to String with its exact authored text preserved.
+    /// WHY:  the primitive shape of a command value is decided from the authored text alone, so no
+    ///       project or source contract is consulted and no second literal grammar exists.
+    pub(crate) fn from_command_text(value: &str) -> Result<Self, BuildInputValueError> {
         if value == "true" {
-            return Ok(Self::Bool(true));
+            return Ok(Self::Typed(PrimitiveBuildValue::Bool(true)));
         }
         if value == "false" {
-            return Ok(Self::Bool(false));
+            return Ok(Self::Typed(PrimitiveBuildValue::Bool(false)));
         }
 
-        match parse_numeric_text_to_int(value, numeric_profile.int_width) {
-            Ok(materialised) => return Ok(Self::Int(materialised)),
-            Err(NumberLiteralErrorReason::OutsideIntRange) => {
-                return Err(BuildInputValueError::IntOutOfRange {
-                    text: value.to_owned(),
-                });
-            }
-            Err(_) => {}
-        }
-
-        match parse_numeric_text_to_float(value, numeric_profile.float_precision) {
-            Ok(materialised) => {
-                return Self::float(materialised).map_err(|_| {
-                    BuildInputValueError::NonFiniteFloat {
-                        text: value.to_owned(),
-                    }
-                });
-            }
-            Err(
-                NumberLiteralErrorReason::NonFiniteFloat | NumberLiteralErrorReason::ParseOverflow,
-            ) => {
-                return Err(BuildInputValueError::NonFiniteFloat {
-                    text: value.to_owned(),
-                });
-            }
-            Err(_) => {}
+        let (negative, unsigned) = match value.strip_prefix('-') {
+            Some(rest) => (true, rest),
+            None => (false, value),
+        };
+        if unsigned.starts_with(|character: char| character.is_ascii_digit())
+            && let Ok(literal) = parse_numeric_literal(unsigned)
+        {
+            return Ok(Self::Deferred(DeferredNumericLiteral {
+                authored_text: value.to_owned(),
+                normalized: literal.normalized_text,
+                negative,
+                kind: literal.kind,
+            }));
         }
 
         if value.starts_with('\'') || value.starts_with('"') {
             let literal = parse_ordinary_quoted_literal(value)?;
 
-            return Ok(match literal {
-                OrdinaryCommandLiteral::String(text) => Self::String(text),
-                OrdinaryCommandLiteral::Char(character) => Self::Char(character),
-            });
+            return Ok(Self::Typed(match literal {
+                OrdinaryCommandLiteral::String(text) => PrimitiveBuildValue::String(text),
+                OrdinaryCommandLiteral::Char(character) => PrimitiveBuildValue::Char(character),
+            }));
         }
 
-        Ok(Self::String(value.to_owned()))
+        Ok(Self::Typed(PrimitiveBuildValue::String(value.to_owned())))
     }
 
-    /// The exact primitive type this value carries.
-    pub(crate) fn primitive_type(&self) -> PrimitiveBuildInputType {
+    /// Materialise this supplied value at the contract it initialises.
+    ///
+    /// WHAT: a typed value must match the contract's exact primitive type. A deferred literal becomes
+    ///       the contract's exact scalar when its kind initialises that scalar and its text fits the
+    ///       scalar's range.
+    /// WHY:  the contract is the only thing that chooses a numeric scalar, so every supplied value
+    ///       reaches the scalar it is stored and fingerprinted at without an intermediate width.
+    pub(crate) fn materialise_for(
+        &self,
+        contract: BuildInputType,
+    ) -> Result<PrimitiveBuildValue, ContractValueError> {
         match self {
-            Self::String(_) => PrimitiveBuildInputType::String,
-            Self::Int(_) => PrimitiveBuildInputType::Int,
-            Self::Float(_) => PrimitiveBuildInputType::Float,
-            Self::Bool(_) => PrimitiveBuildInputType::Bool,
-            Self::Char(_) => PrimitiveBuildInputType::Char,
+            Self::Typed(value) => value.accept_for(contract),
+            Self::Deferred(literal) => literal.materialise_for(contract),
         }
     }
 }
 
-/// Why a command-input value was rejected instead of inferred.
+impl DeferredNumericLiteral {
+    /// The scalar this literal's kind takes when no contract selects one.
+    ///
+    /// WHAT: whole numbers name `I32`, and decimal-point or exponent literals name `F64`.
+    /// WHY:  this names the literal's type in a mismatch diagnostic only. It never materialises.
+    fn default_scalar(&self) -> FixedScalar {
+        match self.kind {
+            NumericLiteralKind::WholeNumber => FixedScalar::I32,
+            NumericLiteralKind::DecimalPoint | NumericLiteralKind::Exponent => FixedScalar::F64,
+        }
+    }
+
+    /// Build a deferred literal from its parsed parts.
+    ///
+    /// WHAT: the authored text, normalized digits, authored sign and literal kind as the lexer
+    ///       reports them.
+    /// WHY:  the command and header paths both hold these parts, and materialisation needs
+    ///       nothing else.
+    pub(crate) fn new(
+        authored_text: String,
+        normalized: String,
+        negative: bool,
+        kind: NumericLiteralKind,
+    ) -> Self {
+        Self {
+            authored_text,
+            normalized,
+            negative,
+            kind,
+        }
+    }
+
+    /// Materialise this literal at the exact scalar of a fixed-scalar contract.
+    ///
+    /// WHAT: the literal kind must be able to initialise the contract's scalar, and the digits
+    ///       must fit its range. Any other contract is a type mismatch.
+    /// WHY:  a command number has no intrinsic width, so the receiving contract is the only
+    ///       thing that chooses its scalar.
+    pub(crate) fn materialise_for(
+        &self,
+        contract: BuildInputType,
+    ) -> Result<PrimitiveBuildValue, ContractValueError> {
+        let mismatch = || ContractValueError::TypeMismatch {
+            provided: PrimitiveBuildInputType::Fixed(self.default_scalar()),
+        };
+        let PrimitiveBuildInputType::Fixed(scalar) = contract.primitive() else {
+            return Err(mismatch());
+        };
+        if !literal_kind_initialises(self.kind, scalar) {
+            return Err(mismatch());
+        }
+
+        materialize_normalized_fixed_scalar(&self.normalized, self.negative, scalar)
+            .map(PrimitiveBuildValue::Fixed)
+            .map_err(|reason| ContractValueError::LiteralOutOfRange {
+                text: self.authored_text.clone(),
+                reason,
+            })
+    }
+}
+
+/// One exact typed build-config value.
 ///
-/// WHAT: one rejection vocabulary for immediate command-input inference. Whole-number Int
-///       overflow and non-finite Float materialisation are diagnostics; a quote-leading value
-///       that is not one complete ordinary Moth literal is rejected with the ordinary
+/// WHAT: the only resolved value vocabulary build inputs and `#Config` resolution transport. Every
+///       numeric value is one exact fixed scalar, never an untyped or widened carrier.
+/// WHY:  there is deliberately no raw, untyped or `none` variant. Optional absence is an omitted
+///       input resolved through project and default rules, never a value. Authored String and Char
+///       content is preserved exactly, without backend conversion.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum PrimitiveBuildValue {
+    String(String),
+    Fixed(FixedScalarValue),
+    Bool(bool),
+    Char(char),
+}
+
+impl PrimitiveBuildValue {
+    /// The exact primitive type this value carries.
+    pub(crate) fn primitive_type(&self) -> PrimitiveBuildInputType {
+        match self {
+            Self::String(_) => PrimitiveBuildInputType::String,
+            Self::Fixed(value) => PrimitiveBuildInputType::Fixed(value.scalar()),
+            Self::Bool(_) => PrimitiveBuildInputType::Bool,
+            Self::Char(_) => PrimitiveBuildInputType::Char,
+        }
+    }
+
+    /// Accept this typed value at one contract, or report the exact type that does not fit.
+    ///
+    /// WHAT: the contract's own compatibility rule, so an optional contract accepts its primitive
+    ///       as a present value.
+    /// WHY:  a typed value is never converted, so acceptance is only an exact type check.
+    pub(crate) fn accept_for(&self, contract: BuildInputType) -> Result<Self, ContractValueError> {
+        let provided = self.primitive_type();
+        if contract.accepts_primitive(provided) {
+            Ok(self.clone())
+        } else {
+            Err(ContractValueError::TypeMismatch { provided })
+        }
+    }
+}
+
+/// Why a command-input value was rejected instead of classified.
+///
+/// WHAT: one rejection vocabulary for immediate command-input classification. A quote-leading
+///       value that is not one complete ordinary Moth literal is rejected with the ordinary
 ///       tokenizer's stable diagnostic title. Infrastructure failures retain their separate
-///       carrier until the command boundary renders them.
+///       carrier until the command boundary renders them. Numeric range is decided later, when the
+///       receiving contract is known.
 /// WHY:  every command variant renders the same concrete rejection without a second wording
 ///       owner, and the compiler owns the inference semantics behind the message.
 #[derive(Debug)]
 pub(crate) enum BuildInputValueError {
     Infrastructure(Box<CompilerError>),
-    /// A whole-number-shaped value is outside the Int range.
-    IntOutOfRange {
-        text: String,
-    },
-    /// A decimal-point or exponent-shaped value did not materialise as a finite Float.
-    NonFiniteFloat {
-        text: String,
-    },
     /// A single-quote-leading value is not one complete ordinary Moth Char literal.
     MalformedCharLiteral {
         text: String,
@@ -416,15 +467,6 @@ impl fmt::Display for BuildInputValueError {
             Self::Infrastructure(error) => {
                 write!(formatter, "input tokenization failed: {}", error.msg)
             }
-            Self::IntOutOfRange { text } => {
-                write!(
-                    formatter,
-                    "whole-number value '{text}' is outside the Int range"
-                )
-            }
-            Self::NonFiniteFloat { text } => {
-                write!(formatter, "float value '{text}' is not finite")
-            }
             Self::MalformedCharLiteral { text, reason } => write!(
                 formatter,
                 "value '{text}' is not a complete Moth Char literal ({reason})"
@@ -433,40 +475,6 @@ impl fmt::Display for BuildInputValueError {
                 formatter,
                 "value '{text}' is not a complete Moth String literal ({reason})"
             ),
-        }
-    }
-}
-
-/// Why one typed numeric value does not satisfy a boundary numeric profile.
-///
-/// WHAT: a whole-number value outside the profile's `Int` width, or a value that is not finite
-///       after rounding to the profile's `Float` precision.
-/// WHY:  every resolution lane reports a refused profile value through the existing
-///       number-literal diagnostic, so this carrier keeps the raw refused value and lets each lane
-///       render its own reason code and value text without duplicating the acceptance rule.
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) enum NumericProfileViolation {
-    IntOutOfRange { value: i64 },
-    NonFiniteFloat { value: f64 },
-}
-
-impl NumericProfileViolation {
-    /// The existing number-literal reason code this violation reports.
-    pub(crate) fn reason(&self) -> NumberLiteralErrorReason {
-        match self {
-            Self::IntOutOfRange { .. } => NumberLiteralErrorReason::OutsideIntRange,
-            Self::NonFiniteFloat { .. } => NumberLiteralErrorReason::NonFiniteFloat,
-        }
-    }
-
-    /// The normalized value text the number-literal diagnostic reports.
-    ///
-    /// A `Float` value that only overflows the narrower precision has no authored spelling left
-    /// at this point, so it reports its exponent form rather than a long digit run.
-    pub(crate) fn value_text(&self) -> String {
-        match self {
-            Self::IntOutOfRange { value } => value.to_string(),
-            Self::NonFiniteFloat { value } => format!("{value:e}"),
         }
     }
 }
@@ -651,19 +659,24 @@ impl BuildInputType {
     /// True when a typed value of `primitive` satisfies this contract.
     ///
     /// The one build-input compatibility rule: exact primitive types match, and a concrete
-    /// value satisfies the matching optional as a present value. No other coercion exists —
-    /// `Int` does not satisfy `Float`, and no primitive satisfies `String` implicitly.
+    /// value satisfies the matching optional as a present value. No other coercion exists: a
+    /// numeric literal materialises only at the contract's exact scalar, and no primitive
+    /// satisfies `String` implicitly.
     pub(crate) fn accepts_primitive(&self, primitive: PrimitiveBuildInputType) -> bool {
         self.primitive() == primitive
     }
 }
 
 /// The primitive types a build-config contract accepts.
+///
+/// WHAT: `Fixed` carries one exact fixed scalar, so `I32`, `U8`, `F64` and the other admitted
+///       scalars are distinct contract types that never share a width or precision.
+/// WHY:  a contract's numeric identity is its scalar, and a supplied numeric literal materialises at
+///       exactly that scalar rather than at a width chosen elsewhere.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum PrimitiveBuildInputType {
     String,
-    Int,
-    Float,
+    Fixed(FixedScalar),
     Bool,
     Char,
 }
@@ -673,10 +686,24 @@ impl PrimitiveBuildInputType {
     pub(crate) fn name(&self) -> &'static str {
         match self {
             Self::String => "String",
-            Self::Int => "Int",
-            Self::Float => "Float",
+            Self::Fixed(scalar) => scalar.name(),
             Self::Bool => "Bool",
             Self::Char => "Char",
+        }
+    }
+
+    /// The build-input primitive for one fixed scalar, or `None` when the contract excludes it.
+    ///
+    /// WHAT: every signed and unsigned integer width and every binary float width is admitted.
+    ///       The `Byte` octet is not a numeric build-input type.
+    /// WHY:  build inputs accept the exact fixed-width numeric domain of the plan, and each
+    ///       admitted scalar keeps its own identity rather than widening to one shared carrier.
+    pub(crate) fn from_fixed_scalar(scalar: FixedScalar) -> Option<Self> {
+        match scalar.class() {
+            FixedScalarClass::SignedInteger
+            | FixedScalarClass::UnsignedInteger
+            | FixedScalarClass::BinaryFloat => Some(Self::Fixed(scalar)),
+            FixedScalarClass::Octet => None,
         }
     }
 }
@@ -799,55 +826,46 @@ pub(crate) fn build_config_fingerprint(
     field_name: &str,
     contract: BuildInputType,
     value: Option<&PrimitiveBuildValue>,
-    numeric_profile: NumericProfile,
 ) -> BuildConfigFingerprint {
     const OFFSET_BASIS: u64 = 0xcbf29ce484222325;
     let mut hash = OFFSET_BASIS;
 
     fingerprint_feed_string(&mut hash, field_name);
     fingerprint_feed(&mut hash, &[u8::from(contract.is_optional())]);
-    fingerprint_feed(
-        &mut hash,
-        &[match contract.primitive() {
-            PrimitiveBuildInputType::String => 0,
-            PrimitiveBuildInputType::Int => 1,
-            PrimitiveBuildInputType::Float => 2,
-            PrimitiveBuildInputType::Bool => 3,
-            PrimitiveBuildInputType::Char => 4,
-        }],
-    );
-
-    // Only `Int` width and `Float` precision change what a resolved value means, so the profile's
-    // stable byte participates for those two contract primitives alone. A `String` contract
-    // fingerprint must stay independent of the profile.
     match contract.primitive() {
-        PrimitiveBuildInputType::Int | PrimitiveBuildInputType::Float => {
-            fingerprint_feed(&mut hash, &[numeric_profile.fingerprint_byte()]);
+        PrimitiveBuildInputType::String => fingerprint_feed(&mut hash, &[0]),
+        PrimitiveBuildInputType::Fixed(scalar) => {
+            fingerprint_feed(&mut hash, &[1]);
+            fingerprint_feed_string(&mut hash, scalar.name());
         }
-        PrimitiveBuildInputType::String
-        | PrimitiveBuildInputType::Bool
-        | PrimitiveBuildInputType::Char => {}
+        PrimitiveBuildInputType::Bool => fingerprint_feed(&mut hash, &[2]),
+        PrimitiveBuildInputType::Char => fingerprint_feed(&mut hash, &[3]),
     }
 
+    // Exact scalar identity and the canonical value bits are the whole numeric meaning of a value.
+    // Binary-float bits keep the sign of zero, so `-0.0` and `0.0` remain distinct authored values.
     match value {
         None => fingerprint_feed(&mut hash, &[0]),
         Some(PrimitiveBuildValue::String(value)) => {
             fingerprint_feed(&mut hash, &[1]);
             fingerprint_feed_string(&mut hash, value);
         }
-        Some(PrimitiveBuildValue::Int(value)) => {
+        Some(PrimitiveBuildValue::Fixed(value)) => {
             fingerprint_feed(&mut hash, &[2]);
-            fingerprint_feed(&mut hash, &value.to_le_bytes());
-        }
-        Some(PrimitiveBuildValue::Float(value)) => {
-            fingerprint_feed(&mut hash, &[3]);
-            fingerprint_feed_u64(&mut hash, value.value().to_bits());
+            fingerprint_feed_string(&mut hash, value.scalar().name());
+            if let Some(value) = value.as_i64() {
+                fingerprint_feed(&mut hash, &value.to_le_bytes());
+            } else if let Some(value) = value.as_u64() {
+                fingerprint_feed(&mut hash, &value.to_le_bytes());
+            } else if let Some(value) = value.as_f64() {
+                fingerprint_feed_u64(&mut hash, value.to_bits());
+            }
         }
         Some(PrimitiveBuildValue::Bool(value)) => {
-            fingerprint_feed(&mut hash, &[4, u8::from(*value)]);
+            fingerprint_feed(&mut hash, &[3, u8::from(*value)]);
         }
         Some(PrimitiveBuildValue::Char(value)) => {
-            fingerprint_feed(&mut hash, &[5]);
+            fingerprint_feed(&mut hash, &[4]);
             fingerprint_feed_u64(&mut hash, u64::from(u32::from(*value)));
         }
     }
@@ -1172,17 +1190,17 @@ pub(crate) enum BuildConfigResolutionError {
     MissingRequiredValue {
         contract: Box<BuildConfigContractFact>,
     },
-    /// A selected or default value does not satisfy the boundary numeric profile.
+    /// A supplied numeric literal is outside the range of the exact scalar its contract selects.
     ///
-    /// WHAT: the contract whose value was refused, the normalized value text and the existing
-    ///       number-literal reason code.
-    /// WHY:  `Int` width and `Float` precision are boundary facts, so a resolution that selected a
-    ///       value outside the profile reports the same out-of-range or non-finite diagnostic a
-    ///       source literal of that width uses.
-    NumericProfileViolation {
+    /// WHAT: the contract whose value was refused, the normalized literal text, the existing
+    ///       number-literal reason code and where the supplied value came from.
+    /// WHY:  the scalar's range is part of the contract, so a literal that does not fit reports the
+    ///       existing number-literal reason, and a command value keeps its argument position.
+    NumericLiteralOutOfRange {
         contract: Box<BuildConfigContractFact>,
         text: String,
         reason: NumberLiteralErrorReason,
+        value_location: Option<BuildConfigValueLocation>,
     },
     /// A declaration-owned config contract reached the barrier without its folded provider payload.
     ///
@@ -1213,7 +1231,7 @@ impl BuildConfigResolutionError {
             | Self::MissingRequiredValue {
                 contract: source, ..
             }
-            | Self::NumericProfileViolation {
+            | Self::NumericLiteralOutOfRange {
                 contract: source, ..
             }
             | Self::DirectProjectProviderMissing {
@@ -1240,7 +1258,7 @@ impl BuildConfigResolutionError {
             | Self::MissingRequiredValue {
                 contract: source, ..
             }
-            | Self::NumericProfileViolation {
+            | Self::NumericLiteralOutOfRange {
                 contract: source, ..
             }
             | Self::DirectProjectProviderMissing {
@@ -1253,7 +1271,8 @@ impl BuildConfigResolutionError {
     /// Return the command or source location of a supplied value, if one exists.
     pub(crate) fn value_location(&self) -> Option<&BuildConfigValueLocation> {
         match self {
-            Self::ValueTypeMismatch { value_location, .. } => value_location.as_ref(),
+            Self::ValueTypeMismatch { value_location, .. }
+            | Self::NumericLiteralOutOfRange { value_location, .. } => value_location.as_ref(),
             Self::UnknownExplicitInput { input } => Some(input.location()),
             Self::SourceContractConflict { .. }
             | Self::DuplicateProjectContract { .. }
@@ -1261,7 +1280,6 @@ impl BuildConfigResolutionError {
             | Self::FixedProjectSourceTypeMismatch { .. }
             | Self::DefaultTypeMismatch { .. }
             | Self::MissingRequiredValue { .. }
-            | Self::NumericProfileViolation { .. }
             | Self::DirectProjectProviderMissing { .. } => None,
         }
     }
@@ -1287,7 +1305,7 @@ impl BuildConfigResolutionError {
             Self::DefaultTypeMismatch { .. }
             | Self::ValueTypeMismatch { .. }
             | Self::MissingRequiredValue { .. }
-            | Self::NumericProfileViolation { .. }
+            | Self::NumericLiteralOutOfRange { .. }
             | Self::DirectProjectProviderMissing { .. }
             | Self::UnknownExplicitInput { .. } => None,
         }
@@ -1307,7 +1325,7 @@ impl BuildConfigResolutionError {
             | Self::MissingRequiredValue {
                 contract: source, ..
             }
-            | Self::NumericProfileViolation {
+            | Self::NumericLiteralOutOfRange {
                 contract: source, ..
             }
             | Self::DirectProjectProviderMissing {
@@ -1503,7 +1521,6 @@ impl<'a> BuildConfigResolutionIndex<'a> {
         transient_source_facts: &[BuildConfigContractFact],
         explicit_inputs: &BuildConfigInputSet,
         builder_globals: &BuilderConfigGlobalSet,
-        numeric_profile: NumericProfile,
     ) -> Result<ResolvedBuildConfigMap, BuildConfigResolutionError> {
         // Source-contract conflicts are checked over canonical-then-transient authored order before
         // defaults or project compatibility, matching the owning boundary resolver without
@@ -1551,7 +1568,6 @@ impl<'a> BuildConfigResolutionIndex<'a> {
                 Some(*source),
                 explicit_inputs,
                 builder_globals,
-                numeric_profile,
             )?;
             resolved.entries.insert((*name).clone(), value);
         }
@@ -1612,7 +1628,6 @@ pub(crate) fn resolve_build_config_values(
     direct_project_facts: &[BuildConfigContractFact],
     explicit_inputs: &BuildConfigInputSet,
     builder_globals: &BuilderConfigGlobalSet,
-    numeric_profile: NumericProfile,
 ) -> Result<ResolvedBuildConfigMap, BuildConfigResolutionError> {
     let source_by_name = collect_source_facts(source_facts)?;
     let fixed_project_by_name = collect_project_facts(fixed_project_facts)?;
@@ -1646,7 +1661,6 @@ pub(crate) fn resolve_build_config_values(
             source_by_name.get(&name),
             explicit_inputs,
             builder_globals,
-            numeric_profile,
         )?;
         resolved.insert(name, value);
     }
@@ -1803,6 +1817,48 @@ fn contract_conflict_reason(
     None
 }
 
+/// Why one supplied value cannot initialise the contract it reaches.
+///
+/// WHAT: a value whose exact primitive type does not match the contract, or a numeric literal
+///       outside the range of the contract's exact scalar.
+/// WHY:  the boundary and the AST resolver must materialise a supplied value by the same rule, and
+///       each lane renders the refusal in its own diagnostic.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum ContractValueError {
+    TypeMismatch {
+        provided: PrimitiveBuildInputType,
+    },
+    LiteralOutOfRange {
+        text: String,
+        reason: NumberLiteralErrorReason,
+    },
+}
+
+/// Map one refused supplied value to the resolution error for the contract it reached.
+fn contract_value_failure(
+    error: ContractValueError,
+    contract: &BuildConfigContractFact,
+    value_location: Option<BuildConfigValueLocation>,
+) -> BuildConfigResolutionError {
+    match error {
+        ContractValueError::TypeMismatch { provided } => {
+            BuildConfigResolutionError::ValueTypeMismatch {
+                contract: Box::new(contract.clone()),
+                provided,
+                value_location,
+            }
+        }
+        ContractValueError::LiteralOutOfRange { text, reason } => {
+            BuildConfigResolutionError::NumericLiteralOutOfRange {
+                contract: Box::new(contract.clone()),
+                text,
+                reason,
+                value_location,
+            }
+        }
+    }
+}
+
 fn resolve_one_build_config_value(
     name: &BuildInputName,
     fixed_project: Option<&BuildConfigContractFact>,
@@ -1810,10 +1866,9 @@ fn resolve_one_build_config_value(
     source: Option<&BuildConfigContractFact>,
     explicit_inputs: &BuildConfigInputSet,
     builder_globals: &BuilderConfigGlobalSet,
-    numeric_profile: NumericProfile,
 ) -> Result<ResolvedBuildConfigValue, BuildConfigResolutionError> {
     if let (Some(fixed_project), Some(source)) = (fixed_project, source) {
-        return resolved_fixed_project_value(source, fixed_project, numeric_profile);
+        return Ok(resolved_fixed_project_value(source, fixed_project));
     }
 
     if let Some(direct_project) = direct_project {
@@ -1841,33 +1896,22 @@ fn resolve_one_build_config_value(
     })?;
 
     let (value, origin, value_location) = if let Some(input) = explicit_inputs.get(name) {
-        let value_type = input.value().primitive_type();
-        if !contract.value_type().accepts_primitive(value_type) {
-            return Err(BuildConfigResolutionError::ValueTypeMismatch {
-                contract: Box::new(contract.clone()),
-                provided: value_type,
-                value_location: Some(input.location().clone()),
-            });
-        }
+        let value = input
+            .value()
+            .materialise_for(contract.value_type())
+            .map_err(|error| {
+                contract_value_failure(error, contract, Some(input.location().clone()))
+            })?;
         (
-            Some(input.value().clone()),
+            Some(value),
             BuildConfigValueOrigin::ExplicitInput,
             Some(input.location().clone()),
         )
     } else if let Some(value) = builder_globals.get(name) {
-        let value_type = value.primitive_type();
-        if !contract.value_type().accepts_primitive(value_type) {
-            return Err(BuildConfigResolutionError::ValueTypeMismatch {
-                contract: Box::new(contract.clone()),
-                provided: value_type,
-                value_location: None,
-            });
-        }
-        (
-            Some(value.clone()),
-            BuildConfigValueOrigin::BuilderGlobal,
-            None,
-        )
+        let value = value
+            .accept_for(contract.value_type())
+            .map_err(|error| contract_value_failure(error, contract, None))?;
+        (Some(value), BuildConfigValueOrigin::BuilderGlobal, None)
     } else if let Some(value) = contract.default_value() {
         (
             Some(value.clone()),
@@ -1882,20 +1926,23 @@ fn resolve_one_build_config_value(
         (None, BuildConfigValueOrigin::DeclarationDefault, None)
     };
 
-    resolved_value_from_contract(contract, value, origin, value_location, numeric_profile)
+    Ok(resolved_value_from_contract(
+        contract,
+        value,
+        origin,
+        value_location,
+    ))
 }
 
 fn resolved_fixed_project_value(
     source: &BuildConfigContractFact,
     fixed_project: &BuildConfigContractFact,
-    numeric_profile: NumericProfile,
-) -> Result<ResolvedBuildConfigValue, BuildConfigResolutionError> {
+) -> ResolvedBuildConfigValue {
     resolved_value_from_contract(
         source,
         fixed_project.default.clone(),
         BuildConfigValueOrigin::FixedProjectField,
         fixed_project.span.map(BuildConfigValueLocation::Source),
-        numeric_profile,
     )
 }
 
@@ -1916,39 +1963,27 @@ fn resolved_value_from_provider(
     }
 }
 
-/// Build one resolved value, accepting its value under the boundary numeric profile.
+/// Build one resolved value and fingerprint it under its exact contract.
 ///
-/// WHAT: the single point where a selected value becomes a resolved value: it re-establishes the
-///       profile rule for the value, then fingerprints the field over the profile.
-/// WHY:  source-authored defaults materialise at the profile when their boundary fact is built and
-///       command inputs materialise at the profile in the command layer, but programmatic typed
-///       inputs arrive from carriers built before a profile was known. Checking here keeps one
-///       acceptance rule for every resolved value instead of trusting each entry point.
+/// WHAT: the single point where a selected value becomes a resolved value. Every selected value
+///       already has its contract's exact primitive type: explicit inputs materialise against the
+///       contract, and declaration and fixed-field defaults materialised when their contract facts
+///       were built.
+/// WHY:  the fingerprint then depends only on exact type identity and the canonical value, never on
+///       origin or location.
 fn resolved_value_from_contract(
     contract: &BuildConfigContractFact,
     value: Option<PrimitiveBuildValue>,
     origin: BuildConfigValueOrigin,
     value_location: Option<BuildConfigValueLocation>,
-    numeric_profile: NumericProfile,
-) -> Result<ResolvedBuildConfigValue, BuildConfigResolutionError> {
-    let value = match value {
-        Some(value) => Some(value.checked_for_numeric_profile(numeric_profile).map_err(
-            |violation| BuildConfigResolutionError::NumericProfileViolation {
-                contract: Box::new(contract.clone()),
-                text: violation.value_text(),
-                reason: violation.reason(),
-            },
-        )?),
-        None => None,
-    };
+) -> ResolvedBuildConfigValue {
     let fingerprint = build_config_fingerprint(
         contract.name().as_str(),
         contract.value_type(),
         value.as_ref(),
-        numeric_profile,
     );
 
-    Ok(ResolvedBuildConfigValue {
+    ResolvedBuildConfigValue {
         name: contract.name().clone(),
         value_type: contract.value_type(),
         required: contract.required(),
@@ -1958,5 +1993,5 @@ fn resolved_value_from_contract(
         fingerprint,
         span: contract.span,
         value_location,
-    })
+    }
 }

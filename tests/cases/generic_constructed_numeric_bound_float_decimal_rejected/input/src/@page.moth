@@ -1,0 +1,13 @@
+-- A bound binary float leaf inside a direct generic constructor cannot
+-- become a Dec2 receiver through the constructed field.
+
+Packet type T = |value T|
+
+read_decimal |value Dec2| -> String:
+    return cast value
+;
+
+ratio = 1.25
+packet = Packet(ratio)
+text = read_decimal(packet.value)
+[:[text]]

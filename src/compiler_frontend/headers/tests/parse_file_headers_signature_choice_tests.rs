@@ -5,7 +5,7 @@ use crate::compiler_frontend::tokenizer::tokens::{TestSourceTokensBuilder, Token
 #[test]
 fn function_signature_reports_missing_arrow_before_return_type() {
     let result = parse_single_file_headers_with_entry(
-        "f|x Int| Int:\n;\n",
+        "f|x I32| I32:\n;\n",
         "src/@page.moth",
         "src/@page.moth",
     );
@@ -26,7 +26,7 @@ fn function_signature_reports_missing_arrow_before_return_type() {
 #[test]
 fn function_signature_reports_missing_colon_after_return_list() {
     let result =
-        parse_single_file_headers_with_entry("f|| -> Int\n;\n", "src/@page.moth", "src/@page.moth");
+        parse_single_file_headers_with_entry("f|| -> I32\n;\n", "src/@page.moth", "src/@page.moth");
     assert!(
         result.is_err(),
         "missing ':' after return declarations must fail"
@@ -152,11 +152,11 @@ fn trait_requirement_reports_missing_return_type_after_arrow_newline() {
 #[test]
 fn duplicate_top_level_function_names_error_during_header_parsing() {
     let result = parse_single_file_headers_with_entry(
-        "simple_function |count Int| -> Int:\n\
+        "simple_function |count I32| -> I32:\n\
              return count + 1\n\
          ;\n\
          \n\
-         simple_function |value Int| -> Int:\n\
+         simple_function |value I32| -> I32:\n\
              return value + 2\n\
          ;\n",
         "src/@page.moth",
@@ -339,7 +339,7 @@ fn choice_headers_reject_invalid_payload_forms() {
 #[test]
 fn choice_headers_accept_record_payload_variants() {
     let (headers, string_table) =
-        parse_single_file_headers_with_table("Status :: Pending |\n    RetryCount Int,\n|;\n");
+        parse_single_file_headers_with_table("Status :: Pending |\n    RetryCount I32,\n|;\n");
 
     let choice_header = headers
         .headers

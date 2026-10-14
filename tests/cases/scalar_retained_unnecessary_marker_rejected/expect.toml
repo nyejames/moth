@@ -1,0 +1,27 @@
+entry = "."
+
+# The frontend owns the same receiver-access diagnostic for both backends.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0047"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0047"
+reason = "invalid_receiver_call.unneeded_mutable_access_marker"
+path = "input/@page.moth"
+line = 12
+column = 1
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0047"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0047"
+reason = "invalid_receiver_call.unneeded_mutable_access_marker"
+path = "input/@page.moth"
+line = 12
+column = 1

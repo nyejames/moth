@@ -1,6 +1,7 @@
 //! Unit tests for generic parameter metadata and TypeId-native generic helpers.
 
 use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::definitions::{StructTypeDefinition, TypeDefinition};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_bindings::GenericTypeBindings;
@@ -17,6 +18,7 @@ use crate::compiler_frontend::datatypes::ids::{
 use crate::compiler_frontend::symbols::path_interner::PathInternerBuilder;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::traits::ids::TraitId;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 fn register_environment_parameter(
@@ -209,7 +211,7 @@ fn type_identity_keys_distinguish_nominal_generic_arguments() {
     let pair_path = path_builder
         .try_intern_portable_path("Pair", &mut string_table)
         .expect("test path fits");
-    let int_key = TypeIdentityKey::Builtin(BuiltinTypeKey::Int);
+    let int_key = TypeIdentityKey::Builtin(BuiltinTypeKey::FixedScalar(FixedScalar::I32));
     let string_key = TypeIdentityKey::Builtin(BuiltinTypeKey::String);
 
     let int_instance = TypeIdentityKey::GenericInstance(GenericInstantiationKey {
@@ -227,7 +229,7 @@ fn type_identity_keys_distinguish_nominal_generic_arguments() {
     let pair_int_string = TypeIdentityKey::GenericInstance(GenericInstantiationKey {
         base_path: pair_path.to_owned(),
         arguments: vec![
-            TypeIdentityKey::Builtin(BuiltinTypeKey::Int),
+            TypeIdentityKey::Builtin(BuiltinTypeKey::FixedScalar(FixedScalar::I32)),
             TypeIdentityKey::Builtin(BuiltinTypeKey::String),
         ],
     });
@@ -235,7 +237,7 @@ fn type_identity_keys_distinguish_nominal_generic_arguments() {
         base_path: pair_path,
         arguments: vec![
             TypeIdentityKey::Builtin(BuiltinTypeKey::String),
-            TypeIdentityKey::Builtin(BuiltinTypeKey::Int),
+            TypeIdentityKey::Builtin(BuiltinTypeKey::FixedScalar(FixedScalar::I32)),
         ],
     });
 
@@ -382,7 +384,7 @@ fn type_id_bindings_unify_generic_parameter_with_concrete_type() {
     let parameter_id = GenericParameterId(0);
     let parameter_type_id =
         register_environment_parameter(&mut type_environment, &mut string_table, parameter_id, "T");
-    let int_type_id = type_environment.builtins().int;
+    let int_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let mut bindings = GenericTypeBindings::new();
 
     assert!(
@@ -404,7 +406,7 @@ fn type_id_bindings_accept_repeated_identical_unification() {
     let parameter_id = GenericParameterId(0);
     let parameter_type_id =
         register_environment_parameter(&mut type_environment, &mut string_table, parameter_id, "T");
-    let int_type_id = type_environment.builtins().int;
+    let int_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let mut bindings = GenericTypeBindings::new();
 
     assert!(
@@ -435,7 +437,7 @@ fn type_id_bindings_reject_conflicting_unification() {
     let parameter_id = GenericParameterId(0);
     let parameter_type_id =
         register_environment_parameter(&mut type_environment, &mut string_table, parameter_id, "T");
-    let int_type_id = type_environment.builtins().int;
+    let int_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let string_type_id = type_environment.builtins().string;
     let mut bindings = GenericTypeBindings::new();
 
@@ -467,7 +469,7 @@ fn type_id_bindings_unify_collection_arguments() {
     let parameter_id = GenericParameterId(0);
     let parameter_type_id =
         register_environment_parameter(&mut type_environment, &mut string_table, parameter_id, "T");
-    let int_type_id = type_environment.builtins().int;
+    let int_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let template_collection = type_environment.intern_constructed(
         TypeConstructor::Builtin(BuiltinTypeConstructor::Collection {
             fixed_capacity: None,
@@ -548,7 +550,7 @@ fn type_id_bindings_unify_generic_instances_only_when_base_matches() {
         "Wrapper",
         parameter_list,
     );
-    let int_type_id = type_environment.builtins().int;
+    let int_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let template_box =
         type_environment.intern_generic_instance(box_nominal, Box::new([parameter_type_id]));
@@ -590,7 +592,7 @@ fn substitute_type_id_rewrites_constructed_function_and_nominal_instances() {
     let parameter_id = GenericParameterId(0);
     let parameter_type_id =
         register_environment_parameter(&mut type_environment, &mut string_table, parameter_id, "T");
-    let int_type_id = type_environment.builtins().int;
+    let int_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let parameter_list =
         register_single_parameter_list(&mut type_environment, &mut string_table, "T");
@@ -614,12 +616,10 @@ fn substitute_type_id_rewrites_constructed_function_and_nominal_instances() {
         TypeConstructor::Builtin(BuiltinTypeConstructor::Option),
         Box::new([parameter_type_id]),
     );
-    let tuple_with_parameter =
-        type_environment.intern_tuple(vec![parameter_type_id, option_of_parameter]);
     let function_with_parameter = type_environment.intern_function(FunctionTypeKey {
         parameters: Box::new([box_of_parameter, collection_of_parameter]),
-        returns: Box::new([tuple_with_parameter]),
-        error_return: None,
+        returns: Box::new([parameter_type_id, option_of_parameter]),
+        error_return: Some(parameter_type_id),
     });
 
     let mut mapping = FxHashMap::default();
@@ -646,16 +646,6 @@ fn substitute_type_id_rewrites_constructed_function_and_nominal_instances() {
     assert_eq!(instance.base, box_nominal);
     assert_eq!(instance.arguments.as_ref(), &[int_type_id]);
 
-    let substituted_tuple = type_environment.substitute_type_id(tuple_with_parameter, &mapping);
-    let tuple_fields = type_environment
-        .tuple_field_ids(substituted_tuple)
-        .expect("substitution should preserve tuple identity");
-    assert_eq!(tuple_fields[0], int_type_id);
-    assert_eq!(
-        type_environment.option_inner_type(tuple_fields[1]),
-        Some(int_type_id)
-    );
-
     let substituted_function =
         type_environment.substitute_type_id(function_with_parameter, &mapping);
     let substituted_function_again =
@@ -676,7 +666,11 @@ fn substitute_type_id_rewrites_constructed_function_and_nominal_instances() {
         type_environment.collection_element_type(function_definition.parameters[1].type_id),
         Some(int_type_id)
     );
-    assert_eq!(function_definition.returns[0], substituted_tuple);
+    assert_eq!(
+        function_definition.returns.as_ref(),
+        &[int_type_id, substituted_option]
+    );
+    assert_eq!(function_definition.error_return, Some(int_type_id));
 }
 
 #[test]
@@ -722,6 +716,63 @@ fn trait_bounds_lookup_succeeds_after_registration() {
     assert_eq!(
         type_environment.trait_bounds_for_generic_parameter(canonical_u),
         Some(&[TraitId(2)][..]),
+    );
+}
+
+/// Callable bounds must remain independent even when exported nominal parameter identity is shared.
+#[test]
+fn receiver_contract_lists_isolate_bounds_without_allocating_parameter_types() {
+    let mut type_environment = TypeEnvironment::new();
+    let mut string_table = StringTable::new();
+    let local_id = TypeParameterId(0);
+    let nominal_name = string_table.intern("Item");
+    let mut nominal_bounds = FxHashMap::default();
+    nominal_bounds.insert(local_id, vec![TraitId(0)]);
+    let nominal = type_environment
+        .register_generic_parameter_list([(local_id, nominal_name)].into_iter(), &nominal_bounds);
+    let parameter_id = nominal.canonical_by_local[&local_id];
+    let parameter_type_id = type_environment
+        .type_id_for_generic_parameter(parameter_id)
+        .expect("registered nominal parameter has a type");
+    let mut contracts = Vec::new();
+    for (name, bound) in [("LeftItem", TraitId(1)), ("RightItem", TraitId(2))] {
+        let mut bounds = FxHashMap::default();
+        bounds.insert(local_id, vec![bound]);
+        let name = string_table.intern(name);
+        let contract = type_environment
+            .register_generic_parameter_contract(
+                nominal.list_id,
+                [(local_id, name)].into_iter(),
+                &bounds,
+            )
+            .expect("receiver contract aligns with its nominal owner");
+        assert_eq!(contract.canonical_by_local[&local_id], parameter_id);
+        contracts.push((contract.list_id, name, bound));
+    }
+    assert_ne!(contracts[0].0, contracts[1].0);
+    for (list_id, name, bound) in contracts {
+        assert_ne!(list_id, nominal.list_id);
+        let parameter = &type_environment
+            .generic_parameters(list_id)
+            .expect("receiver contract list is retained")
+            .parameters[0];
+        assert_eq!(parameter.id, parameter_id);
+        assert_eq!(parameter.name, name);
+        assert_eq!(parameter.trait_bounds, [bound]);
+        assert_eq!(
+            type_environment.type_id_for_generic_parameter(parameter.id),
+            Some(parameter_type_id),
+        );
+    }
+    let nominal_parameter = &type_environment
+        .generic_parameters(nominal.list_id)
+        .expect("nominal list is retained")
+        .parameters[0];
+    assert_eq!(nominal_parameter.name, nominal_name);
+    assert_eq!(nominal_parameter.trait_bounds, [TraitId(0)]);
+    assert_eq!(
+        type_environment.trait_bounds_for_generic_parameter(parameter_id),
+        Some(&[TraitId(0)][..]),
     );
 }
 
@@ -791,7 +842,7 @@ fn type_id_to_type_identity_key_preserves_fixed_capacity() {
     };
 
     let mut type_environment = TypeEnvironment::new();
-    let int = type_environment.builtins().int;
+    let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     // Round-trip a fixed-capacity collection
     let fixed_64 = type_environment.intern_collection(int, Some(64));
@@ -821,7 +872,7 @@ fn type_id_to_type_identity_key_preserves_growable_collection() {
     };
 
     let mut type_environment = TypeEnvironment::new();
-    let int = type_environment.builtins().int;
+    let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let growable = type_environment.intern_collection(int, None);
     let key = type_environment
@@ -847,7 +898,7 @@ fn data_type_fixed_collection_bridge_preserves_capacity() {
         data_type_to_type_identity_key, type_identity_key_to_type_id,
     };
 
-    let data_type = DataType::fixed_collection(DataType::Int, 64);
+    let data_type = DataType::fixed_collection(DataType::FixedScalar(FixedScalar::I32), 64);
     let key = data_type_to_type_identity_key(&data_type).expect("fixed collection should bridge");
 
     match &key {
@@ -858,7 +909,7 @@ fn data_type_fixed_collection_bridge_preserves_capacity() {
             assert_eq!(*fixed_capacity, Some(64));
             assert_eq!(
                 element.as_ref(),
-                &TypeIdentityKey::Builtin(BuiltinTypeKey::Int)
+                &TypeIdentityKey::Builtin(BuiltinTypeKey::FixedScalar(FixedScalar::I32))
             );
         }
         _ => panic!("expected Collection key"),
@@ -871,7 +922,10 @@ fn data_type_fixed_collection_bridge_preserves_capacity() {
         .collection_shape(type_id)
         .expect("resolved type should be a collection");
 
-    assert_eq!(shape.element_type, type_environment.builtins().int);
+    assert_eq!(
+        shape.element_type,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
+    );
     assert_eq!(shape.fixed_capacity, Some(64));
 }
 
@@ -884,12 +938,12 @@ fn substitute_preserves_fixed_capacity() {
     let parameter_id = GenericParameterId(0);
     let parameter_type_id =
         register_environment_parameter(&mut type_environment, &mut string_table, parameter_id, "T");
-    let int_type_id = type_environment.builtins().int;
+    let int_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     // Build a fixed-capacity collection parameterized by T
     let template_fixed = type_environment.intern_collection(parameter_type_id, Some(64));
 
-    // Substitute T -> Int
+    // Substitute T -> I32
     let mut mapping = FxHashMap::default();
     mapping.insert(parameter_id, int_type_id);
 
@@ -978,10 +1032,10 @@ fn type_id_bindings_rollback_constructed_mismatch_after_partial_binding() {
         second_parameter_id,
         "U",
     );
-    let int_type_id = type_environment.builtins().int;
+    let int_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
-    // Template: OrderedMap<T, Collection<U>>; concrete: OrderedMap<Int, Option<Int>>.
-    // The first argument binds T -> Int, the second is a structural non-match
+    // Template: OrderedMap<T, Collection<U>>; concrete: OrderedMap<I32, Option<I32>>.
+    // The first argument binds T -> I32, the second is a structural non-match
     // (Collection vs Option) which makes the whole walk return Ok(false).
     let template_inner_collection = type_environment.intern_constructed(
         TypeConstructor::Builtin(BuiltinTypeConstructor::Collection {
@@ -1062,10 +1116,10 @@ fn type_id_bindings_rollback_generic_instance_mismatch_after_partial_binding() {
         "Wrapper",
         wrapper_list,
     );
-    let int_type_id = type_environment.builtins().int;
+    let int_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
-    // Template: Pair<T, Box<T>>; concrete: Pair<Int, Wrapper<Int>>.
-    // The first argument binds T -> Int, the second is a base mismatch
+    // Template: Pair<T, Box<T>>; concrete: Pair<I32, Wrapper<I32>>.
+    // The first argument binds T -> I32, the second is a base mismatch
     // (Box vs Wrapper) which makes the whole walk return Ok(false).
     let template_inner_box =
         type_environment.intern_generic_instance(box_nominal, Box::new([parameter_type_id]));
@@ -1108,11 +1162,11 @@ fn type_id_bindings_rollback_preserves_repeated_parameter_conflict_within_one_wa
     let parameter_id = GenericParameterId(0);
     let parameter_type_id =
         register_environment_parameter(&mut type_environment, &mut string_table, parameter_id, "T");
-    let int_type_id = type_environment.builtins().int;
+    let int_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let string_type_id = type_environment.builtins().string;
 
-    // Template: OrderedMap<T, T>; concrete: OrderedMap<Int, String>.
-    // The first argument stages T -> Int, the second stages T -> String and conflicts.
+    // Template: OrderedMap<T, T>; concrete: OrderedMap<I32, String>.
+    // The first argument stages T -> I32, the second stages T -> String and conflicts.
     let template = type_environment.intern_constructed(
         TypeConstructor::Builtin(BuiltinTypeConstructor::OrderedMap),
         Box::new([parameter_type_id, parameter_type_id]),

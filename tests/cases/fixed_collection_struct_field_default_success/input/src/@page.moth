@@ -1,16 +1,30 @@
+capacity #I32 = 4
+
 Buffer = |
-    items {4 Int} = {},
+    items {4 I32} = {},
+    named_items {capacity I32} = {},
 |
 
 render_struct_field || -> String:
     buffer ~= Buffer()
     ~buffer.items.push(1) catch:
     ;
+    ~buffer.named_items.push(1) catch:
+    ;
+    ~buffer.named_items.push(2) catch:
+    ;
+    ~buffer.named_items.push(3) catch:
+    ;
+    ~buffer.named_items.push(4) catch:
+    ;
+    ~buffer.named_items.push(5) catch:
+    ;
     first = buffer.items.get(0) catch:
         then 0
     ;
     len = buffer.items.length()
-    return [:fixed_collection_struct_field_default_success length=[len] value=[first]]
+    named_len = buffer.named_items.length()
+    return [:fixed_collection_struct_field_default_success length=[len] value=[first] named_length=[named_len]]
 ;
 
 [:[render_struct_field()]]

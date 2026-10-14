@@ -1,4 +1,4 @@
-foo |value Int as Alias|:
+foo |value I32 as Alias|:
     io.line("ok")
 ;
 

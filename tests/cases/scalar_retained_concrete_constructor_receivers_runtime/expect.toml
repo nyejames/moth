@@ -1,0 +1,22 @@
+entry = "."
+
+# The rendered line observes each retained concrete constructor exactly once:
+# `field`/`origin` show the field-receiver-selected full U64 value, `choice` and
+# `nested` show the concrete payload and nested-constructor results, `code` shows
+# the builtin Error's full U32 code, and `order`/`marked` show the ordinary
+# side-effecting field argument ran exactly once, in field order.
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "field=4294967296 origin=4294967296 choice=5000000000 nested=6000000000 code=3000000000 order=7 marked=1"
+
+# HTML-Wasm has no representation for user aggregates containing fixed scalars,
+# so this fixture's reachable `CountBox`/`OrderedBox`/`CodeChoice` values are a
+# target capability rejection before the retention behaviour under test runs.
+# Only the stable capability code is pinned here; the reason is the fixed-width
+# scalar gate (observed with the same aggregate shape in
+# compound_assignment_atomicity_runtime), not the retention contract itself.
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0064"]

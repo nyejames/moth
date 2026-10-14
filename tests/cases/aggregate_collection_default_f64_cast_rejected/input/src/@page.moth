@@ -1,0 +1,17 @@
+-- The collection element is used only through explicit casts, so no cast target
+-- constrains its origin. Its decimal origin defaults to F64, which the final F64
+-- cast exposes as an invalid same-type cast (invalid_cast.same_source_and_target).
+-- If a cast target wrongly constrained the element, the earlier integer cast would
+-- make the final cast a valid conversion and this diagnostic would vanish.
+values = {1.5, 2.5}
+narrow I32 = cast values.get(0) catch:
+    then 0
+;
+text String = cast values.get(0) catch:
+    then ""
+;
+same_default F64 = cast values.get(0) catch:
+    then 0.0
+;
+
+[:unreachable]

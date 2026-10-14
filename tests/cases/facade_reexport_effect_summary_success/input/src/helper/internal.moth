@@ -2,7 +2,7 @@
 -- The facade (@mod.moth) re-exports these declarations across the module boundary.
 
 Counter = |
-    step Int,
+    step I32,
 |
 
 -- Returns an alias of the shared parameter. Aliasing is inferred from the return expression.

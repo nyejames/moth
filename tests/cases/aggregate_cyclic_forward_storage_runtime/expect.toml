@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "cyclic_forward default_first=1 default_second=2 u64_first=18446744073709551614 u64_second=18446744073709551615"

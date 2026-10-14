@@ -1,0 +1,14 @@
+# Authored for Phase 5B.2 and unobserved until the parent harness run. Parent bg925 observed the grouped known-none predicate as MOTH-RULE-0042 at 2:19; this fixture pins that line. No html_wasm block is declared.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0042"]
+message_contains = ["Optional `none` checks are statement-only here."]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0042"
+reason = "invalid_control_flow_statement.value_if_option_none_predicate"
+path = "input/@page.moth"
+line = 2
+count = 1

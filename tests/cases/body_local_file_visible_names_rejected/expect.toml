@@ -1,0 +1,41 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0038", "MOTH-RULE-0038", "MOTH-RULE-0038", "MOTH-RULE-0038", "MOTH-RULE-0039"]
+message_contains = ["'CASTABLE_TO_I32'", "reserved core trait"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0038"
+occurrence = 1
+path = "input/later_type/@mod.moth"
+line = 2
+column = 5
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0038"
+occurrence = 2
+path = "input/later_value/@mod.moth"
+line = 2
+column = 5
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0038"
+occurrence = 3
+path = "input/source_alias/@mod.moth"
+line = 2
+column = 5
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0038"
+occurrence = 4
+path = "input/source_trait/@mod.moth"
+line = 2
+column = 5
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0039"
+path = "input/core_trait/@mod.moth"
+line = 2
+column = 5

@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "nested_known_numeric full=row=18446744073709551615 rows=2 name=18446744073709551614 names=1 maybe=2 sparse=row=5 rows=1 name=0 names=1 maybe=0"

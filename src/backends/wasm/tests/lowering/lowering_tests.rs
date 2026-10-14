@@ -1,3 +1,4 @@
+use crate::backends::error_types::BackendErrorType;
 use crate::backends::wasm::backend::lower_hir_to_wasm_lir;
 use crate::backends::wasm::hir_to_lir::context::lower_type_to_abi;
 use crate::backends::wasm::lir::function::WasmLirFunctionOrigin;
@@ -13,11 +14,13 @@ use crate::backends::wasm::request::{
 };
 use crate::backends::wasm::tests::lowering::test_support::{
     bool_expression, borrow_facts_with_drop_site, build_module, build_type_environment,
-    default_borrow_facts, default_numeric_proofs, expression, int_expression, load_local, local,
-    statement, string_expression, unit_expression,
+    default_borrow_facts, default_numeric_proofs, expression, fixed_scalar_expression,
+    fixed_scalar_type, i32_expression, load_local, local, statement, string_expression,
 };
 use crate::compiler_frontend::analysis::borrow_checker::BorrowDropSiteKind;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
+use crate::compiler_frontend::compiler_messages::compiler_errors::ErrorType;
+use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::CallTarget;
@@ -31,7 +34,6 @@ use crate::compiler_frontend::hir::expressions::{
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use moth_lexical::numeric::precision::BinaryFloatPrecision;
-use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
 
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId};
 use crate::compiler_frontend::hir::numeric::NumericFailureMode;
@@ -54,7 +56,6 @@ fn assertion_failure_module(
     message_evaluation: HirAssertionMessageEvaluation,
 ) -> crate::compiler_frontend::hir::module::HirModule {
     let string_type = type_environment.builtins().string;
-    let unit_type = type_environment.builtins().none;
     let option_string = type_environment.intern_option(string_type);
     let path = path_fork
         .try_intern_portable_path("assertion_failure", string_table)
@@ -140,7 +141,8 @@ fn assertion_failure_module(
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: unit_type,
+        returns: vec![].into_boxed_slice(),
+        error_return: None,
     };
     let block = HirBlock {
         id: BlockId(0),
@@ -209,10 +211,10 @@ fn wasm_assertion_lowering_calls_host_before_trap_and_rejects_runtime_messages()
         assert!(matches!(
             function.blocks[0].statements.last(),
             Some(WasmLirStmt::Call {
-                dst: None,
+                results,
                 callee: WasmCalleeRef::Import(id),
                 args,
-            }) if *id == import.id && args.len() == 1
+            }) if *id == import.id && args.len() == 1 && results.is_empty()
         ));
     }
 
@@ -248,7 +250,8 @@ fn wasm_write_definition_and_update_have_the_same_physical_lowering() {
         let mut string_table = StringTable::new();
         let mut path_fork = PathInternerFork::empty();
         let mut expressions = HirExpressionStore::default();
-        let (type_environment, types) = build_type_environment();
+        let (type_environment, _) = build_type_environment();
+        let int_type = fixed_scalar_type(FixedScalar::I32);
         let function_path = path_fork
             .try_intern_portable_path("write_equivalence", &mut string_table)
             .expect("test path fits");
@@ -256,26 +259,23 @@ fn wasm_write_definition_and_update_have_the_same_physical_lowering() {
             1,
             HirStatementKind::Write {
                 target,
-                value: int_expression(7, types.int, RegionId(0), &mut expressions),
+                value: i32_expression(7, RegionId(0), &mut expressions),
             },
             1,
         );
         let block = HirBlock {
             id: BlockId(0),
             region: RegionId(0),
-            locals: vec![local(0, types.int, RegionId(0))],
+            locals: vec![local(0, int_type, RegionId(0))],
             statements: vec![write],
-            terminator: HirTerminator::Return(unit_expression(
-                types.unit,
-                RegionId(0),
-                &mut expressions,
-            )),
+            terminator: HirTerminator::Return(HirValueRange::empty()),
         };
         let function = HirFunction {
             id: FunctionId(0),
             entry: BlockId(0),
             params: if is_update { vec![LocalId(0)] } else { vec![] },
-            return_type: types.unit,
+            returns: vec![].into_boxed_slice(),
+            error_return: None,
         };
         let module = build_module(
             &mut path_fork,
@@ -316,7 +316,8 @@ fn wasm_parallel_jump_cycle_uses_explicit_destinations() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut expressions = HirExpressionStore::default();
-    let (type_environment, types) = build_type_environment();
+    let (type_environment, _) = build_type_environment();
+    let int_type = fixed_scalar_type(FixedScalar::I32);
     let function_path = path_fork
         .try_intern_portable_path("parallel_jump_cycle", &mut string_table)
         .expect("test path fits");
@@ -324,21 +325,22 @@ fn wasm_parallel_jump_cycle_uses_explicit_destinations() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: vec![].into_boxed_slice(),
+        error_return: None,
     };
     let source_block = HirBlock {
         id: BlockId(0),
         region: RegionId(0),
         locals: vec![
-            local(0, types.int, RegionId(0)),
-            local(1, types.int, RegionId(0)),
+            local(0, int_type, RegionId(0)),
+            local(1, int_type, RegionId(0)),
         ],
         statements: vec![
             statement(
                 1,
                 HirStatementKind::Write {
                     target: HirWriteTarget::DefineLocal(LocalId(0)),
-                    value: int_expression(10, types.int, RegionId(0), &mut expressions),
+                    value: i32_expression(10, RegionId(0), &mut expressions),
                 },
                 1,
             ),
@@ -346,7 +348,7 @@ fn wasm_parallel_jump_cycle_uses_explicit_destinations() {
                 2,
                 HirStatementKind::Write {
                     target: HirWriteTarget::DefineLocal(LocalId(1)),
-                    value: int_expression(20, types.int, RegionId(0), &mut expressions),
+                    value: i32_expression(20, RegionId(0), &mut expressions),
                 },
                 2,
             ),
@@ -428,11 +430,192 @@ fn wasm_parallel_jump_cycle_uses_explicit_destinations() {
 }
 
 #[test]
+fn native_multiple_call_results_preserve_types_and_destinations_through_lowering() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut expressions = HirExpressionStore::default();
+    let (type_environment, _) = build_type_environment();
+    let region = RegionId(0);
+    let scalars = [
+        FixedScalar::I32,
+        FixedScalar::F32,
+        FixedScalar::I64,
+        FixedScalar::F64,
+    ];
+    let types = scalars.map(fixed_scalar_type);
+    let expected_abi = [
+        WasmAbiType::I32,
+        WasmAbiType::F32,
+        WasmAbiType::I64,
+        WasmAbiType::F64,
+    ];
+    let callee_path = path_fork
+        .try_intern_portable_path("mixed_results", &mut string_table)
+        .expect("test path fits");
+    let caller_path = path_fork
+        .try_intern_portable_path("main", &mut string_table)
+        .expect("test path fits");
+    let values = [
+        FixedScalarValue::signed(FixedScalar::I32, 7).expect("test integer fits"),
+        FixedScalarValue::binary_float(FixedScalar::F32, 1.25).expect("test float fits"),
+        FixedScalarValue::signed(FixedScalar::I64, 9_007_199_254_740_993)
+            .expect("test integer fits"),
+        FixedScalarValue::binary_float(FixedScalar::F64, -9.5).expect("test float fits"),
+    ]
+    .map(|value| fixed_scalar_expression(value, region, &mut expressions));
+    let callee_block = HirBlock {
+        id: BlockId(0),
+        region,
+        locals: vec![],
+        statements: vec![],
+        terminator: HirTerminator::Return(
+            expressions
+                .append_values(&values, None)
+                .expect("test values fit"),
+        ),
+    };
+    // Deliberately permuted source locals make slot order independent of local allocation order.
+    let destinations = [LocalId(2), LocalId(0), LocalId(3), LocalId(1)];
+    let returned_values = destinations
+        .iter()
+        .zip(types)
+        .map(|(destination, ty)| load_local(&mut expressions, *destination, ty, region))
+        .collect::<Vec<_>>();
+    let caller_block = HirBlock {
+        id: BlockId(1),
+        region,
+        locals: vec![
+            local(0, types[1], region),
+            local(1, types[3], region),
+            local(2, types[0], region),
+            local(3, types[2], region),
+        ],
+        statements: vec![statement(
+            0,
+            HirStatementKind::Call {
+                target: CallTarget::Local(FunctionId(0)),
+                args: HirValueRange::empty(),
+                results: destinations.map(HirLocalDestination::Define).to_vec(),
+            },
+            0,
+        )],
+        terminator: HirTerminator::Return(
+            expressions
+                .append_values(&returned_values, None)
+                .expect("test return values fit"),
+        ),
+    };
+    let functions = vec![
+        (
+            HirFunction {
+                id: FunctionId(0),
+                entry: BlockId(0),
+                params: vec![],
+                returns: types.to_vec().into_boxed_slice(),
+                error_return: None,
+            },
+            callee_path,
+            HirFunctionOrigin::Normal,
+        ),
+        (
+            HirFunction {
+                id: FunctionId(1),
+                entry: BlockId(1),
+                params: vec![],
+                returns: types.to_vec().into_boxed_slice(),
+                error_return: None,
+            },
+            caller_path,
+            HirFunctionOrigin::EntryStart,
+        ),
+    ];
+    let module = build_module(
+        &mut path_fork,
+        &mut string_table,
+        expressions,
+        functions,
+        vec![callee_block, caller_block],
+        FunctionId(1),
+    );
+    let request = WasmBackendRequest::default();
+    assert!(!request.target_features.enable_multi_value);
+    let lowered = lower_hir_to_wasm_lir(
+        &module,
+        &default_borrow_facts(),
+        &default_numeric_proofs(),
+        &request,
+        &string_table,
+        &type_environment,
+        &path_fork.snapshot_table(),
+    )
+    .expect("native mixed scalar results should lower with default target features");
+    let callee = &lowered.lir_module.functions[0];
+    let caller = &lowered.lir_module.functions[1];
+    assert_eq!(callee.signature.params, []);
+    assert_eq!(callee.signature.results, expected_abi);
+    assert_eq!(caller.signature, callee.signature);
+    let native_calls = caller
+        .blocks
+        .iter()
+        .flat_map(|block| &block.statements)
+        .filter(|statement| {
+            matches!(
+                statement,
+                WasmLirStmt::Call {
+                    callee: WasmCalleeRef::Function(WasmLirFunctionId(0)),
+                    ..
+                }
+            )
+        })
+        .count();
+    assert_eq!(
+        native_calls, 1,
+        "capturing four slots must invoke the producer once"
+    );
+    let block = &caller.blocks[0];
+    let WasmLirStmt::Call {
+        results,
+        callee,
+        args,
+    } = &block.statements[0]
+    else {
+        panic!("caller should lower to a native call");
+    };
+    assert_eq!(*callee, WasmCalleeRef::Function(WasmLirFunctionId(0)));
+    assert!(args.is_empty());
+    let expected_destinations = destinations.map(|destination| {
+        let name = format!("local_{}", destination.0);
+        caller
+            .locals
+            .iter()
+            .find(|local| {
+                local.role == WasmLocalRole::UserLocal && local.name.as_deref() == Some(&name)
+            })
+            .expect("each source destination should have a user local")
+            .id
+    });
+    assert_eq!(results, &expected_destinations);
+    for (destination, expected_type) in results.iter().zip(expected_abi) {
+        let local = caller
+            .locals
+            .iter()
+            .find(|local| local.id == *destination)
+            .expect("call destination should exist");
+        assert_eq!(local.ty, expected_type);
+    }
+    let WasmLirTerminator::Return { values } = &block.terminator else {
+        panic!("caller should return the captured slots");
+    };
+    assert_eq!(values, results);
+}
+
+#[test]
 fn lowers_calls_and_cfg_with_resolvable_branch_targets() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut expressions = HirExpressionStore::default();
     let (type_environment, types) = build_type_environment();
+    let int_type = fixed_scalar_type(FixedScalar::I32);
 
     let callee_path = path_fork
         .try_intern_portable_path("callee", &mut string_table)
@@ -446,12 +629,12 @@ fn lowers_calls_and_cfg_with_resolvable_branch_targets() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(int_expression(
-            7,
-            types.int,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return({
+            let value = i32_expression(7, RegionId(0), &mut expressions);
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     };
 
     let main_entry = HirBlock {
@@ -459,7 +642,7 @@ fn lowers_calls_and_cfg_with_resolvable_branch_targets() {
         region: RegionId(0),
         locals: vec![
             local(0, types.boolean, RegionId(0)),
-            local(1, types.int, RegionId(0)),
+            local(1, int_type, RegionId(0)),
         ],
         statements: vec![
             statement(
@@ -475,7 +658,7 @@ fn lowers_calls_and_cfg_with_resolvable_branch_targets() {
                 HirStatementKind::Call {
                     target: CallTarget::Local(FunctionId(0)),
                     args: HirValueRange::empty(),
-                    result: Some(HirLocalDestination::Define(LocalId(1))),
+                    results: vec![HirLocalDestination::Define(LocalId(1))],
                 },
                 2,
             ),
@@ -492,12 +675,12 @@ fn lowers_calls_and_cfg_with_resolvable_branch_targets() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(load_local(
-            &mut expressions,
-            LocalId(1),
-            types.int,
-            RegionId(0),
-        )),
+        terminator: HirTerminator::Return({
+            let value = load_local(&mut expressions, LocalId(1), int_type, RegionId(0));
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     };
 
     let else_block = HirBlock {
@@ -505,25 +688,27 @@ fn lowers_calls_and_cfg_with_resolvable_branch_targets() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(int_expression(
-            0,
-            types.int,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return({
+            let value = i32_expression(0, RegionId(0), &mut expressions);
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     };
 
     let callee = HirFunction {
         id: FunctionId(0),
         entry: BlockId(10),
         params: vec![],
-        return_type: types.int,
+        returns: vec![int_type].into_boxed_slice(),
+        error_return: None,
     };
     let main = HirFunction {
         id: FunctionId(1),
         entry: BlockId(30),
         params: vec![],
-        return_type: types.int,
+        returns: vec![int_type].into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -644,14 +829,20 @@ fn lowers_runtime_template_with_literal_and_handle_chunks_in_order() {
         region: RegionId(0),
         locals: vec![local(0, types.string, RegionId(0))],
         statements: vec![],
-        terminator: HirTerminator::Return(concat),
+        terminator: HirTerminator::Return({
+            let value = concat;
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     };
 
     let runtime_function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![LocalId(0)],
-        return_type: types.string,
+        returns: vec![types.string].into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -704,12 +895,13 @@ fn lowers_runtime_template_with_cfg_before_final_return() {
     let mut path_fork = PathInternerFork::empty();
     let mut expressions = HirExpressionStore::default();
     let (type_environment, types) = build_type_environment();
+    let int_type = fixed_scalar_type(FixedScalar::I32);
     let runtime_path = path_fork
         .try_intern_portable_path("__moth_frag_cfg", &mut string_table)
         .expect("test path fits");
-    let initial_value = int_expression(0, types.int, RegionId(0), &mut expressions);
-    let loop_value = load_local(&mut expressions, LocalId(0), types.int, RegionId(0));
-    let limit_value = int_expression(2, types.int, RegionId(0), &mut expressions);
+    let initial_value = i32_expression(0, RegionId(0), &mut expressions);
+    let loop_value = load_local(&mut expressions, LocalId(0), int_type, RegionId(0));
+    let limit_value = i32_expression(2, RegionId(0), &mut expressions);
     let condition = expression(
         HirExpressionKind::BinOp {
             left: loop_value,
@@ -721,7 +913,7 @@ fn lowers_runtime_template_with_cfg_before_final_return() {
         ValueKind::RValue,
         &mut expressions,
     );
-    let increment_value = load_local(&mut expressions, LocalId(0), types.int, RegionId(0));
+    let increment_value = load_local(&mut expressions, LocalId(0), int_type, RegionId(0));
     let return_value = string_expression(
         "runtime loop done",
         types.string,
@@ -732,7 +924,7 @@ fn lowers_runtime_template_with_cfg_before_final_return() {
     let entry_block = HirBlock {
         id: BlockId(0),
         region: RegionId(0),
-        locals: vec![local(0, types.int, RegionId(0))],
+        locals: vec![local(0, int_type, RegionId(0))],
         statements: vec![statement(
             300,
             HirStatementKind::Write {
@@ -782,14 +974,20 @@ fn lowers_runtime_template_with_cfg_before_final_return() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(return_value),
+        terminator: HirTerminator::Return({
+            let value = return_value;
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     };
 
     let runtime_function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.string,
+        returns: vec![types.string].into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -829,8 +1027,8 @@ fn lowers_runtime_template_with_cfg_before_final_return() {
         WasmLirTerminator::Branch { .. }
     ));
     assert!(matches!(
-        runtime_lir.blocks[3].terminator,
-        WasmLirTerminator::Return { value: Some(_) }
+        &runtime_lir.blocks[3].terminator,
+        WasmLirTerminator::Return { values } if values.len() == 1
     ));
 }
 
@@ -863,13 +1061,19 @@ fn lowers_internal_string_append_as_buffer_concat() {
         region: RegionId(0),
         locals: vec![local(0, types.string, RegionId(0))],
         statements: vec![],
-        terminator: HirTerminator::Return(concat),
+        terminator: HirTerminator::Return({
+            let value = concat;
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     };
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![LocalId(0)],
-        return_type: types.string,
+        returns: vec![types.string].into_boxed_slice(),
+        error_return: None,
     };
     let module = build_module(
         &mut path_fork,
@@ -917,12 +1121,13 @@ fn lowers_internal_string_append_with_i64_chunk_via_string_from_i64() {
     let mut path_fork = PathInternerFork::empty();
     let mut expressions = HirExpressionStore::default();
     let (type_environment, types) = build_type_environment();
+    let int64_type = fixed_scalar_type(FixedScalar::I64);
     let function_path = path_fork
         .try_intern_portable_path("render_runtime_int", &mut string_table)
         .expect("test path fits");
 
     let prefix = string_expression("", types.string, RegionId(0), &mut expressions);
-    let handle = load_local(&mut expressions, LocalId(0), types.int, RegionId(0));
+    let handle = load_local(&mut expressions, LocalId(0), int64_type, RegionId(0));
     let concat = expression(
         HirExpressionKind::BinOp {
             left: prefix,
@@ -937,15 +1142,21 @@ fn lowers_internal_string_append_with_i64_chunk_via_string_from_i64() {
     let block = HirBlock {
         id: BlockId(0),
         region: RegionId(0),
-        locals: vec![local(0, types.int, RegionId(0))],
+        locals: vec![local(0, int64_type, RegionId(0))],
         statements: vec![],
-        terminator: HirTerminator::Return(concat),
+        terminator: HirTerminator::Return({
+            let value = concat;
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     };
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![LocalId(0)],
-        return_type: types.string,
+        returns: vec![types.string].into_boxed_slice(),
+        error_return: None,
     };
     let module = build_module(
         &mut path_fork,
@@ -1045,18 +1256,19 @@ fn lowers_string_equality_by_content_comparison_operations() {
                 1327,
             ),
         ],
-        terminator: HirTerminator::Return(load_local(
-            &mut expressions,
-            LocalId(3),
-            types.boolean,
-            RegionId(0),
-        )),
+        terminator: HirTerminator::Return({
+            let value = load_local(&mut expressions, LocalId(3), types.boolean, RegionId(0));
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     };
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![LocalId(0), LocalId(1)],
-        return_type: types.boolean,
+        returns: vec![types.boolean].into_boxed_slice(),
+        error_return: None,
     };
     let module = build_module(
         &mut path_fork,
@@ -1112,12 +1324,13 @@ fn lowers_ordered_comparison_and_control_flow() {
     let mut path_fork = PathInternerFork::empty();
     let mut expressions = HirExpressionStore::default();
     let (type_environment, types) = build_type_environment();
+    let int_type = fixed_scalar_type(FixedScalar::I32);
     let function_path = path_fork
         .try_intern_portable_path("loop_like_fn", &mut string_table)
         .expect("test path fits");
 
-    let comparison_left = load_local(&mut expressions, LocalId(0), types.int, RegionId(0));
-    let comparison_right = int_expression(5, types.int, RegionId(0), &mut expressions);
+    let comparison_left = load_local(&mut expressions, LocalId(0), int_type, RegionId(0));
+    let comparison_right = i32_expression(5, RegionId(0), &mut expressions);
     let condition = expression(
         HirExpressionKind::BinOp {
             left: comparison_left,
@@ -1133,12 +1346,12 @@ fn lowers_ordered_comparison_and_control_flow() {
     let entry_block = HirBlock {
         id: BlockId(0),
         region: RegionId(0),
-        locals: vec![local(0, types.int, RegionId(0))],
+        locals: vec![local(0, int_type, RegionId(0))],
         statements: vec![statement(
             1,
             HirStatementKind::Write {
                 target: HirWriteTarget::DefineLocal(LocalId(0)),
-                value: int_expression(0, types.int, RegionId(0), &mut expressions),
+                value: i32_expression(0, RegionId(0), &mut expressions),
             },
             1,
         )],
@@ -1153,30 +1366,31 @@ fn lowers_ordered_comparison_and_control_flow() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(load_local(
-            &mut expressions,
-            LocalId(0),
-            types.int,
-            RegionId(0),
-        )),
+        terminator: HirTerminator::Return({
+            let value = load_local(&mut expressions, LocalId(0), int_type, RegionId(0));
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     };
     let else_block = HirBlock {
         id: BlockId(2),
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(int_expression(
-            0,
-            types.int,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return({
+            let value = i32_expression(0, RegionId(0), &mut expressions);
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     };
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.int,
+        returns: vec![int_type].into_boxed_slice(),
+        error_return: None,
     };
     let module = build_module(
         &mut path_fork,
@@ -1218,7 +1432,7 @@ fn lowers_ordered_comparison_and_control_flow() {
                     ..
                 }
             )),
-        "entry block should include profile-aware signed scalar comparison lowering"
+        "entry block should include exact signed scalar comparison lowering"
     );
     assert!(
         matches!(
@@ -1264,18 +1478,15 @@ fn deduplicates_static_utf8_segments() {
                 2,
             ),
         ],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let start_function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: vec![].into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -1304,7 +1515,7 @@ fn deduplicates_static_utf8_segments() {
 fn maps_advisory_drop_sites_to_drop_if_owned_statements() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut expressions = HirExpressionStore::default();
+    let expressions = HirExpressionStore::default();
     let (type_environment, types) = build_type_environment();
     let start_path = path_fork
         .try_intern_portable_path("main", &mut string_table)
@@ -1315,17 +1526,14 @@ fn maps_advisory_drop_sites_to_drop_if_owned_statements() {
         region: RegionId(0),
         locals: vec![local(0, types.string, RegionId(0))],
         statements: vec![],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
     let start_function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: vec![].into_boxed_slice(),
+        error_return: None,
     };
     let module = build_module(
         &mut path_fork,
@@ -1379,7 +1587,8 @@ fn synthesizes_export_wrappers_with_stable_names() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut expressions = HirExpressionStore::default();
-    let (type_environment, types) = build_type_environment();
+    let (type_environment, _) = build_type_environment();
+    let int_type = fixed_scalar_type(FixedScalar::I32);
     let start_path = path_fork
         .try_intern_portable_path("main", &mut string_table)
         .expect("test path fits");
@@ -1389,18 +1598,19 @@ fn synthesizes_export_wrappers_with_stable_names() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(int_expression(
-            123,
-            types.int,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return({
+            let value = i32_expression(123, RegionId(0), &mut expressions);
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     };
     let start_function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.int,
+        returns: vec![int_type].into_boxed_slice(),
+        error_return: None,
     };
     let module = build_module(
         &mut path_fork,
@@ -1429,7 +1639,6 @@ fn synthesizes_export_wrappers_with_stable_names() {
         external_package_registry: Default::default(),
         structural_string_urls: None,
         function_emission_policy: Default::default(),
-        numeric_profile: NumericProfile::STANDARD,
     };
 
     let result = lower_hir_to_wasm_lir(
@@ -1480,7 +1689,8 @@ fn exported_f16_parameters_are_rounded_before_the_internal_call() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut expressions = HirExpressionStore::default();
-    let (type_environment, types) = build_type_environment();
+    let (type_environment, _) = build_type_environment();
+    let int_type = fixed_scalar_type(FixedScalar::I32);
     let f16_type = builtin_type_ids::fixed_scalar(FixedScalar::F16);
     let start_path = path_fork
         .try_intern_portable_path("main", &mut string_table)
@@ -1493,16 +1703,24 @@ fn exported_f16_parameters_are_rounded_before_the_internal_call() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.int,
+        returns: vec![int_type].into_boxed_slice(),
+        error_return: None,
     };
     let exported_function = HirFunction {
         id: FunctionId(1),
         entry: BlockId(1),
         params: vec![LocalId(10)],
-        return_type: f16_type,
+        returns: vec![f16_type].into_boxed_slice(),
+        error_return: None,
     };
-    let start_value = int_expression(0, types.int, RegionId(0), &mut expressions);
+    let start_value = i32_expression(0, RegionId(0), &mut expressions);
     let exported_value = load_local(&mut expressions, LocalId(10), f16_type, RegionId(0));
+    let start_values = expressions
+        .append_values(&[start_value], None)
+        .expect("fixture return values should fit");
+    let exported_values = expressions
+        .append_values(&[exported_value], None)
+        .expect("fixture return values should fit");
     let module = build_module(
         &mut path_fork,
         &mut string_table,
@@ -1517,14 +1735,14 @@ fn exported_f16_parameters_are_rounded_before_the_internal_call() {
                 region: RegionId(0),
                 locals: vec![],
                 statements: vec![],
-                terminator: HirTerminator::Return(start_value),
+                terminator: HirTerminator::Return(start_values),
             },
             HirBlock {
                 id: BlockId(1),
                 region: RegionId(0),
                 locals: vec![local(10, f16_type, RegionId(0))],
                 statements: vec![],
-                terminator: HirTerminator::Return(exported_value),
+                terminator: HirTerminator::Return(exported_values),
             },
         ],
         FunctionId(0),
@@ -1577,7 +1795,7 @@ fn exported_f16_parameters_are_rounded_before_the_internal_call() {
     };
     assert_eq!(*source, WasmLirLocalId(0));
     let WasmLirStmt::Call {
-        dst: Some(call_result),
+        results: call_results,
         args,
         ..
     } = &statements[call_index]
@@ -1588,7 +1806,7 @@ fn exported_f16_parameters_are_rounded_before_the_internal_call() {
     assert!(
         matches!(
             &wrapper.blocks[0].terminator,
-            WasmLirTerminator::Return { value: Some(value) } if *value == *call_result
+            WasmLirTerminator::Return { values } if values == call_results && values.len() == 1
         ),
         "the wrapper should return the callee's canonical F32 carrier unchanged"
     );
@@ -1599,7 +1817,8 @@ fn rejects_invalid_export_request_with_structured_diagnostic() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut expressions = HirExpressionStore::default();
-    let (type_environment, types) = build_type_environment();
+    let (type_environment, _) = build_type_environment();
+    let int_type = fixed_scalar_type(FixedScalar::I32);
     let start_path = path_fork
         .try_intern_portable_path("main", &mut string_table)
         .expect("test path fits");
@@ -1609,18 +1828,19 @@ fn rejects_invalid_export_request_with_structured_diagnostic() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(int_expression(
-            1,
-            types.int,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return({
+            let value = i32_expression(1, RegionId(0), &mut expressions);
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     };
     let start_function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.int,
+        returns: vec![int_type].into_boxed_slice(),
+        error_return: None,
     };
     let module = build_module(
         &mut path_fork,
@@ -1663,20 +1883,25 @@ fn rejects_invalid_export_request_with_structured_diagnostic() {
 fn validate_float_test_module(
     path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
-    type_environment: &crate::compiler_frontend::datatypes::environment::TypeEnvironment,
+    validated_type: TypeId,
 ) -> crate::compiler_frontend::hir::module::HirModule {
     let mut expressions = HirExpressionStore::default();
-    let int_type = type_environment.builtins().int;
-    let float_type = type_environment.builtins().float;
+    let int_type = fixed_scalar_type(FixedScalar::I32);
     let start_path = path_fork
         .try_intern_portable_path("main", string_table)
         .expect("test path fits");
     let validator_path = path_fork
         .try_intern_portable_path("validate_float", string_table)
         .expect("test path fits");
-    let start_value = int_expression(0, int_type, RegionId(0), &mut expressions);
-    let source = load_local(&mut expressions, LocalId(10), float_type, RegionId(0));
-    let result = load_local(&mut expressions, LocalId(20), float_type, RegionId(0));
+    let start_value = i32_expression(0, RegionId(0), &mut expressions);
+    let source = load_local(&mut expressions, LocalId(10), validated_type, RegionId(0));
+    let result = load_local(&mut expressions, LocalId(20), validated_type, RegionId(0));
+    let start_values = expressions
+        .append_values(&[start_value], None)
+        .expect("fixture return values should fit");
+    let result_values = expressions
+        .append_values(&[result], None)
+        .expect("fixture return values should fit");
 
     build_module(
         path_fork,
@@ -1688,7 +1913,8 @@ fn validate_float_test_module(
                     id: FunctionId(0),
                     entry: BlockId(0),
                     params: vec![],
-                    return_type: int_type,
+                    returns: vec![int_type].into_boxed_slice(),
+                    error_return: None,
                 },
                 start_path,
                 HirFunctionOrigin::EntryStart,
@@ -1698,7 +1924,8 @@ fn validate_float_test_module(
                     id: FunctionId(1),
                     entry: BlockId(1),
                     params: vec![LocalId(10)],
-                    return_type: float_type,
+                    returns: vec![validated_type].into_boxed_slice(),
+                    error_return: None,
                 },
                 validator_path,
                 HirFunctionOrigin::Normal,
@@ -1710,14 +1937,14 @@ fn validate_float_test_module(
                 region: RegionId(0),
                 locals: vec![],
                 statements: vec![],
-                terminator: HirTerminator::Return(start_value),
+                terminator: HirTerminator::Return(start_values),
             },
             HirBlock {
                 id: BlockId(1),
                 region: RegionId(0),
                 locals: vec![
-                    local(10, float_type, RegionId(0)),
-                    local(20, float_type, RegionId(0)),
+                    local(10, validated_type, RegionId(0)),
+                    local(20, validated_type, RegionId(0)),
                 ],
                 statements: vec![statement(
                     102,
@@ -1728,40 +1955,42 @@ fn validate_float_test_module(
                     },
                     2,
                 )],
-                terminator: HirTerminator::Return(result),
+                terminator: HirTerminator::Return(result_values),
             },
         ],
         FunctionId(0),
     )
 }
 
+/// Verifies that the Wasm binary-float guard lowers the validated source's exact carrier and precision.
+///
+/// WHAT: an exact F32 source lowers to an F32 carrier with binary32 precision and an exact F64
+///       source lowers to F64 with binary64 precision along the local value path.
+/// WHY: the validated source type owns the precision, so the fixture's subject is the source
+///      scalar.
 #[test]
-fn lowers_validate_float_with_profile_precision_and_local_value_path() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let (type_environment, _) = build_type_environment();
-    let module = validate_float_test_module(&mut path_fork, &mut string_table, &type_environment);
-
-    for (float_precision, expected_carrier, expected_precision) in [
+fn lowers_validate_float_with_exact_source_precision_and_local_value_path() {
+    for (scalar, expected_carrier, expected_precision) in [
         (
-            FloatPrecision::Bits32,
+            FixedScalar::F32,
             WasmAbiType::F32,
             BinaryFloatPrecision::Binary32,
         ),
         (
-            FloatPrecision::Bits64,
+            FixedScalar::F64,
             WasmAbiType::F64,
             BinaryFloatPrecision::Binary64,
         ),
     ] {
-        let profile = NumericProfile {
-            int_width: IntWidth::Bits64,
-            float_precision,
-        };
-        let request = WasmBackendRequest {
-            numeric_profile: profile,
-            ..Default::default()
-        };
+        let mut string_table = StringTable::new();
+        let mut path_fork = PathInternerFork::empty();
+        let (type_environment, _) = build_type_environment();
+        let module = validate_float_test_module(
+            &mut path_fork,
+            &mut string_table,
+            fixed_scalar_type(scalar),
+        );
+        let request = WasmBackendRequest::default();
         let lowered = lower_hir_to_wasm_lir(
             &module,
             &default_borrow_facts(),
@@ -1771,36 +2000,36 @@ fn lowers_validate_float_with_profile_precision_and_local_value_path() {
             &type_environment,
             &path_fork.snapshot_table(),
         )
-        .unwrap_or_else(|error| panic!("{profile} should lower: {error:?}"));
+        .unwrap_or_else(|error| panic!("{scalar:?} should lower: {error:?}"));
         let function = lowered
             .lir_module
             .functions
             .iter()
             .find(|function| function.id == WasmLirFunctionId(1))
-            .expect("Float validator should be lowered");
+            .expect("binary-float validator should be lowered");
         let source_local = function
             .locals
             .iter()
             .find(|local| local.role == WasmLocalRole::Param)
-            .expect("source Float parameter should have a LIR local");
+            .expect("source binary-float parameter should have a LIR local");
         let result_local = function
             .locals
             .iter()
             .find(|local| local.role == WasmLocalRole::UserLocal)
-            .expect("result Float local should have a LIR local");
+            .expect("result binary-float local should have a LIR local");
 
         assert_eq!(
             function.signature.params,
             vec![expected_carrier],
-            "{profile}"
+            "{scalar:?}"
         );
         assert_eq!(
             function.signature.results,
             vec![expected_carrier],
-            "{profile}"
+            "{scalar:?}"
         );
-        assert_eq!(source_local.ty, expected_carrier, "{profile}");
-        assert_eq!(result_local.ty, expected_carrier, "{profile}");
+        assert_eq!(source_local.ty, expected_carrier, "{scalar:?}");
+        assert_eq!(result_local.ty, expected_carrier, "{scalar:?}");
         assert_eq!(
             function
                 .blocks
@@ -1809,7 +2038,7 @@ fn lowers_validate_float_with_profile_precision_and_local_value_path() {
                 .filter(|statement| matches!(statement, WasmLirStmt::ValidateFloat { .. }))
                 .count(),
             1,
-            "{profile} should lower exactly one validation"
+            "{scalar:?} should lower exactly one validation"
         );
 
         let validation_block = function
@@ -1835,44 +2064,212 @@ fn lowers_validate_float_with_profile_precision_and_local_value_path() {
         else {
             unreachable!("the selected statement is ValidateFloat")
         };
-        assert_eq!(*source, source_local.id, "{profile}");
-        assert_eq!(*dst, result_local.id, "{profile}");
-        assert_eq!(*precision, expected_precision, "{profile}");
+        assert_eq!(*source, source_local.id, "{scalar:?}");
+        assert_eq!(*dst, result_local.id, "{scalar:?}");
+        assert_eq!(*precision, expected_precision, "{scalar:?}");
         assert!(
             matches!(
                 &validation_block.terminator,
-                WasmLirTerminator::Return { value: Some(value) } if *value == *dst
+                WasmLirTerminator::Return { values } if values.as_slice() == [*dst]
             ),
-            "{profile} should return the validated destination unchanged"
+            "{scalar:?} should return the validated destination unchanged"
         );
     }
 }
 
+/// Verifies that the Wasm binary-float guard lowers the exact source type's carrier and precision.
+///
+/// WHAT: a fixed F64 source lowers to an F64 carrier with binary64 precision, and a fixed F32
+///       source lowers to F32 with binary32 precision.
+/// WHY: the validated source type owns the precision, so a fixed boundary value must never be
+///      checked through the neighbouring carrier.
 #[test]
-fn lowers_trap_format_float_with_profile_precision_and_single_source_evaluation() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+fn lowers_validated_fixed_float_guard_with_the_exact_source_precision() {
+    for (scalar, expected_carrier, expected_precision) in [
+        (
+            FixedScalar::F64,
+            WasmAbiType::F64,
+            BinaryFloatPrecision::Binary64,
+        ),
+        (
+            FixedScalar::F32,
+            WasmAbiType::F32,
+            BinaryFloatPrecision::Binary32,
+        ),
+    ] {
+        let mut string_table = StringTable::new();
+        let mut path_fork = PathInternerFork::empty();
+        let (type_environment, _) = build_type_environment();
+        let source_type = builtin_type_ids::fixed_scalar(scalar);
+        let module = validate_float_test_module(&mut path_fork, &mut string_table, source_type);
+        let request = WasmBackendRequest::default();
+        let lowered = lower_hir_to_wasm_lir(
+            &module,
+            &default_borrow_facts(),
+            &default_numeric_proofs(),
+            &request,
+            &string_table,
+            &type_environment,
+            &path_fork.snapshot_table(),
+        )
+        .unwrap_or_else(|error| panic!("{scalar:?} should lower: {error:?}"));
+        let function = lowered
+            .lir_module
+            .functions
+            .iter()
+            .find(|function| function.id == WasmLirFunctionId(1))
+            .expect("fixed binary-float validator should be lowered");
+
+        assert_eq!(
+            function.signature.params,
+            vec![expected_carrier],
+            "{scalar:?}"
+        );
+        assert_eq!(
+            function.signature.results,
+            vec![expected_carrier],
+            "{scalar:?}"
+        );
+        let validation = function
+            .blocks
+            .iter()
+            .flat_map(|block| &block.statements)
+            .find_map(|statement| match statement {
+                WasmLirStmt::ValidateFloat {
+                    dst,
+                    source,
+                    precision,
+                } => Some((*dst, *source, *precision)),
+                _ => None,
+            })
+            .expect("fixed binary-float validation should lower one guard");
+        assert_eq!(validation.2, expected_precision, "{scalar:?}");
+    }
+}
+
+/// Verifies that the Wasm binary-float guard rejects unsupported source types as lowering failures.
+///
+/// WHAT: an F16 source (which shares the F32 carrier but keeps binary16 precision) and a fixed
+///       integer source both fail as lowering transformation errors, while the paired F64 and F32
+///       sources in the identical fixture shape lower a guard with their own precision.
+/// WHY: the guard supports exactly the F32 and F64 carriers at their exact precision, so a
+///      permissive carrier check would silently validate F16 at the wrong precision. The paired
+///      controls keep the rejection tied to the source type rather than to the fixture shape.
+#[test]
+fn rejects_validated_float_guards_with_unsupported_source_types() {
+    for (unsupported, supported_control, control_precision) in [
+        (
+            FixedScalar::F16,
+            FixedScalar::F64,
+            BinaryFloatPrecision::Binary64,
+        ),
+        (
+            FixedScalar::I32,
+            FixedScalar::F32,
+            BinaryFloatPrecision::Binary32,
+        ),
+    ] {
+        let mut string_table = StringTable::new();
+        let mut path_fork = PathInternerFork::empty();
+        let (type_environment, _) = build_type_environment();
+        let request = WasmBackendRequest::default();
+
+        let unsupported_module = validate_float_test_module(
+            &mut path_fork,
+            &mut string_table,
+            builtin_type_ids::fixed_scalar(unsupported),
+        );
+        let error = lower_hir_to_wasm_lir(
+            &unsupported_module,
+            &default_borrow_facts(),
+            &default_numeric_proofs(),
+            &request,
+            &string_table,
+            &type_environment,
+            &path_fork.snapshot_table(),
+        )
+        .expect_err("unsupported binary-float validation sources must fail lowering");
+        let error = error
+            .infrastructure_error()
+            .expect("Wasm lowering failure should be wrapped for rendering");
+        assert_eq!(
+            error.error_type,
+            ErrorType::Backend(BackendErrorType::LirTransformation),
+            "{unsupported:?} must be rejected as a lowering transformation failure"
+        );
+
+        let control_module = validate_float_test_module(
+            &mut path_fork,
+            &mut string_table,
+            builtin_type_ids::fixed_scalar(supported_control),
+        );
+        let lowered = lower_hir_to_wasm_lir(
+            &control_module,
+            &default_borrow_facts(),
+            &default_numeric_proofs(),
+            &request,
+            &string_table,
+            &type_environment,
+            &path_fork.snapshot_table(),
+        )
+        .expect("the paired supported source must lower");
+        let guard_precision = lowered
+            .lir_module
+            .functions
+            .iter()
+            .flat_map(|function| &function.blocks)
+            .flat_map(|block| &block.statements)
+            .find_map(|statement| match statement {
+                WasmLirStmt::ValidateFloat { precision, .. } => Some(*precision),
+                _ => None,
+            })
+            .expect("the paired supported source must lower one guard");
+        assert_eq!(
+            guard_precision, control_precision,
+            "{supported_control:?} must keep lowering at its own precision"
+        );
+    }
+}
+
+/// Builds one formatter module whose trap-mode binary-float source is one exact fixed scalar.
+///
+/// WHY: the formatted source's exact type owns the carrier and `StringFromFloat` precision, so
+///      the fixture materialises one module per exact scalar.
+fn format_float_test_module(
+    path_fork: &mut PathInternerFork,
+    string_table: &mut StringTable,
+    string_type: TypeId,
+    scalar: FixedScalar,
+) -> crate::compiler_frontend::hir::module::HirModule {
     let mut expressions = HirExpressionStore::default();
-    let (type_environment, types) = build_type_environment();
-    let float_type = type_environment.builtins().float;
+    let int_type = fixed_scalar_type(FixedScalar::I32);
     let start_path = path_fork
-        .try_intern_portable_path("main", &mut string_table)
+        .try_intern_portable_path("main", string_table)
         .expect("test path fits");
     let formatter_path = path_fork
-        .try_intern_portable_path("format_float", &mut string_table)
+        .try_intern_portable_path("format_float", string_table)
         .expect("test path fits");
-    let start_value = int_expression(0, types.int, RegionId(0), &mut expressions);
+    let start_value = i32_expression(0, RegionId(0), &mut expressions);
     let float_source = expression(
-        HirExpressionKind::Float(1.5),
-        float_type,
+        HirExpressionKind::FixedScalar(
+            FixedScalarValue::binary_float(scalar, 1.5).expect("valid test value"),
+        ),
+        fixed_scalar_type(scalar),
         RegionId(0),
         ValueKind::Const,
         &mut expressions,
     );
-    let formatted_value = load_local(&mut expressions, LocalId(20), types.string, RegionId(0));
-    let module = build_module(
-        &mut path_fork,
-        &mut string_table,
+    let formatted_value = load_local(&mut expressions, LocalId(20), string_type, RegionId(0));
+    let start_values = expressions
+        .append_values(&[start_value], None)
+        .expect("fixture return values should fit");
+    let formatted_values = expressions
+        .append_values(&[formatted_value], None)
+        .expect("fixture return values should fit");
+
+    build_module(
+        path_fork,
+        string_table,
         expressions,
         vec![
             (
@@ -1880,7 +2277,8 @@ fn lowers_trap_format_float_with_profile_precision_and_single_source_evaluation(
                     id: FunctionId(0),
                     entry: BlockId(0),
                     params: vec![],
-                    return_type: types.int,
+                    returns: vec![int_type].into_boxed_slice(),
+                    error_return: None,
                 },
                 start_path,
                 HirFunctionOrigin::EntryStart,
@@ -1890,7 +2288,8 @@ fn lowers_trap_format_float_with_profile_precision_and_single_source_evaluation(
                     id: FunctionId(1),
                     entry: BlockId(1),
                     params: vec![],
-                    return_type: types.string,
+                    returns: vec![string_type].into_boxed_slice(),
+                    error_return: None,
                 },
                 formatter_path,
                 HirFunctionOrigin::Normal,
@@ -1902,12 +2301,12 @@ fn lowers_trap_format_float_with_profile_precision_and_single_source_evaluation(
                 region: RegionId(0),
                 locals: vec![],
                 statements: vec![],
-                terminator: HirTerminator::Return(start_value),
+                terminator: HirTerminator::Return(start_values),
             },
             HirBlock {
                 id: BlockId(1),
                 region: RegionId(0),
-                locals: vec![local(20, types.string, RegionId(0))],
+                locals: vec![local(20, string_type, RegionId(0))],
                 statements: vec![statement(
                     202,
                     HirStatementKind::FormatFloat {
@@ -1917,31 +2316,40 @@ fn lowers_trap_format_float_with_profile_precision_and_single_source_evaluation(
                     },
                     2,
                 )],
-                terminator: HirTerminator::Return(formatted_value),
+                terminator: HirTerminator::Return(formatted_values),
             },
         ],
         FunctionId(0),
-    );
+    )
+}
 
-    for (float_precision, expected_carrier, expected_precision) in [
+/// Verifies that trap-mode binary-float formatting lowers through the formatted source's exact precision.
+///
+/// WHAT: an exact F32 source formats through a ConstF32 carrier with binary32 precision and an
+///       exact F64 source through ConstF64 with binary64 precision; the source expression is
+///       lowered exactly once.
+/// WHY: the formatted source type owns its precision, so the fixture's subject is the source
+///      scalar.
+#[test]
+fn lowers_trap_format_float_with_exact_source_precision_and_single_source_evaluation() {
+    for (scalar, expected_carrier, expected_precision) in [
         (
-            FloatPrecision::Bits32,
+            FixedScalar::F32,
             WasmAbiType::F32,
             BinaryFloatPrecision::Binary32,
         ),
         (
-            FloatPrecision::Bits64,
+            FixedScalar::F64,
             WasmAbiType::F64,
             BinaryFloatPrecision::Binary64,
         ),
     ] {
-        let request = WasmBackendRequest {
-            numeric_profile: NumericProfile {
-                int_width: IntWidth::Bits64,
-                float_precision,
-            },
-            ..Default::default()
-        };
+        let mut string_table = StringTable::new();
+        let mut path_fork = PathInternerFork::empty();
+        let (type_environment, types) = build_type_environment();
+        let module =
+            format_float_test_module(&mut path_fork, &mut string_table, types.string, scalar);
+        let request = WasmBackendRequest::default();
         let lowered = lower_hir_to_wasm_lir(
             &module,
             &default_borrow_facts(),
@@ -1951,7 +2359,7 @@ fn lowers_trap_format_float_with_profile_precision_and_single_source_evaluation(
             &type_environment,
             &path_fork.snapshot_table(),
         )
-        .unwrap_or_else(|error| panic!("{float_precision:?} FormatFloat should lower: {error:?}"));
+        .unwrap_or_else(|error| panic!("{scalar:?} FormatFloat should lower: {error:?}"));
         let function = lowered
             .lir_module
             .functions
@@ -1971,7 +2379,7 @@ fn lowers_trap_format_float_with_profile_precision_and_single_source_evaluation(
         assert_eq!(
             float_constants.len(),
             1,
-            "{float_precision:?} source expression should be lowered exactly once"
+            "{scalar:?} source expression should be lowered exactly once"
         );
         assert_eq!(
             statements
@@ -1979,7 +2387,7 @@ fn lowers_trap_format_float_with_profile_precision_and_single_source_evaluation(
                 .filter(|statement| matches!(statement, WasmLirStmt::StringFromFloat { .. }))
                 .count(),
             1,
-            "{float_precision:?} should emit one StringFromFloat"
+            "{scalar:?} should emit one StringFromFloat"
         );
         let formatted = statements
             .iter()
@@ -2060,7 +2468,13 @@ fn lowers_fixed_float_to_string_with_source_precision_and_single_evaluation() {
             ValueKind::RValue,
             &mut expressions,
         );
-        let start_value = int_expression(0, types.int, RegionId(0), &mut expressions);
+        let start_value = i32_expression(0, RegionId(0), &mut expressions);
+        let start_values = expressions
+            .append_values(&[start_value], None)
+            .expect("fixture return values should fit");
+        let cast_values = expressions
+            .append_values(&[cast], None)
+            .expect("fixture return values should fit");
         let module = build_module(
             &mut path_fork,
             &mut string_table,
@@ -2071,7 +2485,8 @@ fn lowers_fixed_float_to_string_with_source_precision_and_single_evaluation() {
                         id: FunctionId(0),
                         entry: BlockId(0),
                         params: vec![],
-                        return_type: types.int,
+                        returns: vec![fixed_scalar_type(FixedScalar::I32)].into_boxed_slice(),
+                        error_return: None,
                     },
                     start_path,
                     HirFunctionOrigin::EntryStart,
@@ -2081,7 +2496,8 @@ fn lowers_fixed_float_to_string_with_source_precision_and_single_evaluation() {
                         id: FunctionId(1),
                         entry: BlockId(1),
                         params: vec![],
-                        return_type: types.string,
+                        returns: vec![types.string].into_boxed_slice(),
+                        error_return: None,
                     },
                     formatter_path,
                     HirFunctionOrigin::Normal,
@@ -2093,14 +2509,14 @@ fn lowers_fixed_float_to_string_with_source_precision_and_single_evaluation() {
                     region: RegionId(0),
                     locals: vec![],
                     statements: vec![],
-                    terminator: HirTerminator::Return(start_value),
+                    terminator: HirTerminator::Return(start_values),
                 },
                 HirBlock {
                     id: BlockId(1),
                     region: RegionId(0),
                     locals: vec![],
                     statements: vec![],
-                    terminator: HirTerminator::Return(cast),
+                    terminator: HirTerminator::Return(cast_values),
                 },
             ],
             FunctionId(0),
@@ -2177,62 +2593,59 @@ fn lowers_fixed_float_to_string_with_source_precision_and_single_evaluation() {
     }
 }
 
+/// Verifies that each exact integer scalar's literal and result use its own Wasm carrier.
+///
+/// WHAT: an I32-typed start function returns 123 through `ConstI32` with an I32 result signature,
+///       and an I64-typed start function returns 123 through `ConstI64` with an I64 signature.
+/// WHY: carrier selection follows the HIR value's exact scalar, so each scalar is checked once.
 #[test]
-fn lowers_every_numeric_profile_with_selected_int_carrier() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut expressions = HirExpressionStore::default();
-    let (type_environment, types) = build_type_environment();
-    let start_path = path_fork
-        .try_intern_portable_path("main", &mut string_table)
-        .expect("test path fits");
-
-    let start_block = HirBlock {
-        id: BlockId(0),
-        region: RegionId(0),
-        locals: vec![],
-        statements: vec![],
-        terminator: HirTerminator::Return(int_expression(
-            123,
-            types.int,
-            RegionId(0),
-            &mut expressions,
-        )),
-    };
-    let start_function = HirFunction {
-        id: FunctionId(0),
-        entry: BlockId(0),
-        params: vec![],
-        return_type: types.int,
-    };
-    let module = build_module(
-        &mut path_fork,
-        &mut string_table,
-        expressions,
-        vec![(start_function, start_path, HirFunctionOrigin::EntryStart)],
-        vec![start_block],
-        FunctionId(0),
-    );
-
-    for profile in [
-        NumericProfile::STANDARD,
-        NumericProfile {
-            int_width: IntWidth::Bits32,
-            float_precision: FloatPrecision::Bits32,
-        },
-        NumericProfile {
-            int_width: IntWidth::Bits64,
-            float_precision: FloatPrecision::Bits64,
-        },
-        NumericProfile {
-            int_width: IntWidth::Bits64,
-            float_precision: FloatPrecision::Bits32,
-        },
+fn lowers_every_exact_integer_scalar_with_its_own_carrier() {
+    for (scalar, expected) in [
+        (FixedScalar::I32, WasmAbiType::I32),
+        (FixedScalar::I64, WasmAbiType::I64),
     ] {
-        let request = WasmBackendRequest {
-            numeric_profile: profile,
-            ..Default::default()
+        let mut string_table = StringTable::new();
+        let mut path_fork = PathInternerFork::empty();
+        let mut expressions = HirExpressionStore::default();
+        let (type_environment, _) = build_type_environment();
+        let int_type = fixed_scalar_type(scalar);
+        let start_path = path_fork
+            .try_intern_portable_path("main", &mut string_table)
+            .expect("test path fits");
+
+        let start_block = HirBlock {
+            id: BlockId(0),
+            region: RegionId(0),
+            locals: vec![],
+            statements: vec![],
+            terminator: HirTerminator::Return({
+                let value = fixed_scalar_expression(
+                    FixedScalarValue::signed(scalar, 123).expect("valid test value"),
+                    RegionId(0),
+                    &mut expressions,
+                );
+                expressions
+                    .append_values(&[value], None)
+                    .expect("fixture return values should fit")
+            }),
         };
+        let start_function = HirFunction {
+            id: FunctionId(0),
+            entry: BlockId(0),
+            params: vec![],
+            returns: vec![int_type].into_boxed_slice(),
+            error_return: None,
+        };
+        let module = build_module(
+            &mut path_fork,
+            &mut string_table,
+            expressions,
+            vec![(start_function, start_path, HirFunctionOrigin::EntryStart)],
+            vec![start_block],
+            FunctionId(0),
+        );
+
+        let request = WasmBackendRequest::default();
         let lowered = lower_hir_to_wasm_lir(
             &module,
             &default_borrow_facts(),
@@ -2242,25 +2655,21 @@ fn lowers_every_numeric_profile_with_selected_int_carrier() {
             &type_environment,
             &path_fork.snapshot_table(),
         )
-        .unwrap_or_else(|error| panic!("{profile} should lower: {error:?}"));
+        .unwrap_or_else(|error| panic!("{scalar:?} should lower: {error:?}"));
         let start = lowered
             .lir_module
             .functions
             .iter()
             .find(|function| function.origin == WasmLirFunctionOrigin::EntryStart)
             .expect("the start function should be lowered");
-        let expected = match profile.int_width {
-            IntWidth::Bits32 => WasmAbiType::I32,
-            IntWidth::Bits64 => WasmAbiType::I64,
-        };
-        assert_eq!(start.signature.results, vec![expected], "{profile}");
+        assert_eq!(start.signature.results, vec![expected], "{scalar:?}");
         assert!(
             start.blocks[0].statements.iter().any(|statement| matches!(
                 (expected, statement),
                 (WasmAbiType::I32, WasmLirStmt::ConstI32 { value: 123, .. })
                     | (WasmAbiType::I64, WasmLirStmt::ConstI64 { value: 123, .. })
             )),
-            "{profile} Int literal must use the selected carrier"
+            "{scalar:?} literal must use its own carrier"
         );
     }
 }
@@ -2269,8 +2678,8 @@ fn lowers_every_numeric_profile_with_selected_int_carrier() {
 fn rejects_unsupported_host_call_with_diagnostic() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut expressions = HirExpressionStore::default();
-    let (type_environment, types) = build_type_environment();
+    let expressions = HirExpressionStore::default();
+    let (type_environment, _) = build_type_environment();
     let start_path = path_fork
         .try_intern_portable_path("main", &mut string_table)
         .expect("test path fits");
@@ -2286,22 +2695,19 @@ fn rejects_unsupported_host_call_with_diagnostic() {
             HirStatementKind::Call {
                 target: CallTarget::External(unknown_id),
                 args: HirValueRange::empty(),
-                result: None,
+                results: vec![],
             },
             1,
         )],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let start_function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: vec![].into_boxed_slice(),
+        error_return: None,
     };
     let module = build_module(
         &mut path_fork,
@@ -2347,11 +2753,7 @@ fn selected_function_policy_ignores_unselected_host_calls_and_assertions() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let unsupported_id =
@@ -2365,7 +2767,7 @@ fn selected_function_policy_ignores_unselected_host_calls_and_assertions() {
             HirStatementKind::Call {
                 target: CallTarget::External(unsupported_id),
                 args: HirValueRange::empty(),
-                result: None,
+                results: vec![],
             },
             1,
         )],
@@ -2389,13 +2791,15 @@ fn selected_function_policy_ignores_unselected_host_calls_and_assertions() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: vec![].into_boxed_slice(),
+        error_return: None,
     };
     let unused_function = HirFunction {
         id: FunctionId(1),
         entry: BlockId(10),
         params: vec![],
-        return_type: types.unit,
+        returns: vec![].into_boxed_slice(),
+        error_return: None,
     };
     let module = build_module(
         &mut path_fork,
@@ -2493,18 +2897,19 @@ fn lower_type_to_abi_maps_all_hir_types_correctly() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(int_expression(
-            0,
-            types.int,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return({
+            let value = i32_expression(0, RegionId(0), &mut expressions);
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     };
     let start_function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.int,
+        returns: vec![fixed_scalar_type(FixedScalar::I32)].into_boxed_slice(),
+        error_return: None,
     };
     let module = build_module(
         &mut path_fork,
@@ -2517,80 +2922,60 @@ fn lower_type_to_abi_maps_all_hir_types_correctly() {
 
     // Additional builtin types to test all ABI mappings.
     let builtins = type_environment.builtins();
-    let float_id = builtins.float;
     let char_id = builtins.char;
     let range_id = builtins.range;
 
     let borrow_facts = default_borrow_facts();
     let path_table = path_fork.snapshot_table();
-    for profile in [
-        NumericProfile::STANDARD,
-        NumericProfile {
-            int_width: IntWidth::Bits32,
-            float_precision: FloatPrecision::Bits32,
-        },
-        NumericProfile {
-            int_width: IntWidth::Bits64,
-            float_precision: FloatPrecision::Bits64,
-        },
-        NumericProfile {
-            int_width: IntWidth::Bits64,
-            float_precision: FloatPrecision::Bits32,
-        },
-    ] {
-        let request = WasmBackendRequest {
-            numeric_profile: profile,
-            ..Default::default()
-        };
-        let proofs = default_numeric_proofs();
-        let context = crate::backends::wasm::hir_to_lir::context::WasmLirLoweringContext::new(
-            &module,
-            &borrow_facts,
-            &proofs,
-            &request,
-            &string_table,
-            &path_table,
-            &type_environment,
-        );
+    let request = WasmBackendRequest::default();
+    let proofs = default_numeric_proofs();
+    let context = crate::backends::wasm::hir_to_lir::context::WasmLirLoweringContext::new(
+        &module,
+        &borrow_facts,
+        &proofs,
+        &request,
+        &string_table,
+        &path_table,
+        &type_environment,
+    );
 
+    assert_eq!(
+        lower_type_to_abi(&context, fixed_scalar_type(FixedScalar::I32)),
+        WasmAbiType::I32
+    );
+    assert_eq!(
+        lower_type_to_abi(&context, fixed_scalar_type(FixedScalar::I64)),
+        WasmAbiType::I64
+    );
+    assert_eq!(
+        lower_type_to_abi(&context, fixed_scalar_type(FixedScalar::F32)),
+        WasmAbiType::F32
+    );
+    assert_eq!(
+        lower_type_to_abi(&context, fixed_scalar_type(FixedScalar::F64)),
+        WasmAbiType::F64
+    );
+    for scalar in FixedScalar::ALL {
+        let expected = match scalar {
+            FixedScalar::I64 | FixedScalar::U64 => WasmAbiType::I64,
+            FixedScalar::F64 => WasmAbiType::F64,
+            FixedScalar::F16 | FixedScalar::F32 => WasmAbiType::F32,
+            _ => WasmAbiType::I32,
+        };
         assert_eq!(
-            lower_type_to_abi(&context, types.int),
-            match profile.int_width {
-                IntWidth::Bits32 => WasmAbiType::I32,
-                IntWidth::Bits64 => WasmAbiType::I64,
-            },
-            "{profile}"
+            lower_type_to_abi(&context, builtin_type_ids::fixed_scalar(scalar)),
+            expected,
+            "{scalar:?}"
         );
-        assert_eq!(
-            lower_type_to_abi(&context, float_id),
-            match profile.float_precision {
-                FloatPrecision::Bits32 => WasmAbiType::F32,
-                FloatPrecision::Bits64 => WasmAbiType::F64,
-            },
-            "{profile}"
-        );
-        for scalar in FixedScalar::ALL {
-            let expected = match scalar {
-                FixedScalar::I64 | FixedScalar::U64 => WasmAbiType::I64,
-                FixedScalar::F64 => WasmAbiType::F64,
-                FixedScalar::F16 | FixedScalar::F32 => WasmAbiType::F32,
-                _ => WasmAbiType::I32,
-            };
-            assert_eq!(
-                lower_type_to_abi(&context, builtin_type_ids::fixed_scalar(scalar)),
-                expected,
-                "{profile} {scalar:?}"
-            );
-        }
-        assert_eq!(lower_type_to_abi(&context, types.boolean), WasmAbiType::I32);
-        assert_eq!(
-            lower_type_to_abi(&context, types.string),
-            WasmAbiType::Handle
-        );
-        assert_eq!(lower_type_to_abi(&context, types.unit), WasmAbiType::Void);
-        assert_eq!(lower_type_to_abi(&context, char_id), WasmAbiType::I32);
-        assert_eq!(lower_type_to_abi(&context, range_id), WasmAbiType::Handle);
     }
+    assert_eq!(lower_type_to_abi(&context, types.boolean), WasmAbiType::I32);
+    assert_eq!(
+        lower_type_to_abi(&context, types.string),
+        WasmAbiType::Handle
+    );
+    assert_eq!(lower_type_to_abi(&context, types.unit), WasmAbiType::Void);
+    assert_eq!(lower_type_to_abi(&context, char_id), WasmAbiType::I32);
+    assert_eq!(lower_type_to_abi(&context, range_id), WasmAbiType::Handle);
 }
 
 #[test]
@@ -2664,14 +3049,20 @@ fn multi_fragment_template_produces_all_push_operations() {
             local(1, types.string, RegionId(0)),
         ],
         statements: vec![],
-        terminator: HirTerminator::Return(full_concat),
+        terminator: HirTerminator::Return({
+            let value = full_concat;
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     };
 
     let runtime_function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![LocalId(0), LocalId(1)],
-        return_type: types.string,
+        returns: vec![types.string].into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -2721,7 +3112,8 @@ fn debug_name_uses_source_name_when_available() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut expressions = HirExpressionStore::default();
-    let (type_environment, types) = build_type_environment();
+    let (type_environment, _) = build_type_environment();
+    let int_type = fixed_scalar_type(FixedScalar::I32);
     let fn_path = path_fork
         .try_intern_portable_path("my_helper", &mut string_table)
         .expect("test path fits");
@@ -2731,18 +3123,19 @@ fn debug_name_uses_source_name_when_available() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(int_expression(
-            0,
-            types.int,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return({
+            let value = i32_expression(0, RegionId(0), &mut expressions);
+            expressions
+                .append_values(&[value], None)
+                .expect("fixture return values should fit")
+        }),
     };
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.int,
+        returns: vec![int_type].into_boxed_slice(),
+        error_return: None,
     };
     let module = build_module(
         &mut path_fork,
@@ -2806,7 +3199,7 @@ fn io_console_functions_are_unsupported_in_wasm() {
                 crate::compiler_frontend::external_packages::ExternalFunctionId::IoLine,
             ),
             args: arguments,
-            result: None,
+            results: vec![],
         },
         1,
     );
@@ -2816,18 +3209,15 @@ fn io_console_functions_are_unsupported_in_wasm() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![io_call],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: vec![].into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(

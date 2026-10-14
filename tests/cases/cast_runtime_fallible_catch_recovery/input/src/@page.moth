@@ -1,19 +1,19 @@
-try_float |text String| -> Float, Error!:
-    return cast! text
+try_float |text String| -> F64, Error!:
+    return cast text
 ;
 
 code_for_float |text String| -> U32:
     code ~U32 = 0
-    ignored Float = cast text catch |err|:
+    ignored F64 = cast text catch |err|:
         code = err.code
         then 0.0
     ;
     return code
 ;
 
-capture_float_int_code |value Float| -> U32:
+capture_float_int_code |value F64| -> U32:
     code ~U32 = 0
-    ignored Int = cast value catch |err|:
+    ignored I32 = cast value catch |err|:
         code = err.code
         then 0
     ;
@@ -29,7 +29,7 @@ code_for_char |text String| -> U32:
     return code
 ;
 
-code_for_int_char |value Int| -> U32:
+code_for_int_char |value I32| -> U32:
     code ~U32 = 0
     ignored Char = cast value catch |err|:
         code = err.code
@@ -40,7 +40,7 @@ code_for_int_char |value Int| -> U32:
 
 bad_float_fmt = code_for_float("not a number")
 
-big Float = try_float("1e100") catch |err|:
+big F64 = try_float("1e100") catch |err|:
     then 0.0
 ;
 oor_float = capture_float_int_code(big)

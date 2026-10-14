@@ -9,7 +9,7 @@ fn single_file_remaps_module_type_environment_nominal_fields() {
     let moth_path = dir.join("test.moth");
     fs::write(
         &moth_path,
-        "Point = |\n    value Int,\n|\npoint = Point(1)\n",
+        "Point = |\n    value I32,\n|\npoint = Point(1)\n",
     )
     .expect("should write .moth");
 
@@ -80,7 +80,7 @@ fn single_file_remaps_module_type_environment_nominal_fields() {
             &string_table,
             &module.executable.path_table,
         ),
-        "Int"
+        "I32"
     );
 }
 
@@ -198,7 +198,7 @@ fn single_file_without_source_package_dependencies_skips_registered_package_mate
     fs::create_dir_all(&package_root).expect("should create registered package root");
     fs::write(
         package_root.join("@mod.moth"),
-        "export:\n    unused || -> Int:\n        return missing_package_value\n    ;\n;\n",
+        "export:\n    unused || -> I32:\n        return missing_package_value\n    ;\n;\n",
     )
     .expect("should write semantically invalid unused package");
 
@@ -296,12 +296,12 @@ fn directory_project_remaps_delta_collisions_across_modules() {
     .expect("should write config");
     fs::write(
         dir.join("first/@a.moth"),
-        "Item = |\n    shared Int,\n    first_only String,\n|\nitem = Item(1, \"first\")\n",
+        "Item = |\n    shared I32,\n    first_only String,\n|\nitem = Item(1, \"first\")\n",
     )
     .expect("should write first entry");
     fs::write(
         dir.join("second/@b.moth"),
-        "Item = |\n    shared Int,\n    second_only String,\n|\nitem = Item(1, \"second\")\n",
+        "Item = |\n    shared I32,\n    second_only String,\n|\nitem = Item(1, \"second\")\n",
     )
     .expect("should write second entry");
 

@@ -1,3 +1,3 @@
--- Prove Int() constructor-style conversion is rejected with removed-constructor diagnostic.
+-- Prove I32() constructor-style conversion is rejected with removed-constructor diagnostic.
 
-value = Int("42")
+value = I32("42")

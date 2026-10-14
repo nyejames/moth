@@ -1,15 +1,15 @@
 //! Immutable declaring-module context for generated generic functions.
 //!
-//! WHAT: retains the resolved, TIR-free semantic tables required to reparse one validated
-//! generic body after a consumer emits a concrete request.
+//! WHAT: captures stable syntax and canonical callable/value inputs before executable AST
+//! lowering. Same-module requests and published providers reconstruct from those owned facts.
 //! WHY: generated sidecars must compile in an independent type environment without reopening
-//! source or borrowing the mutable requester or declaring-module environment.
+//! source or retaining declaration/default expression graphs through summary convergence.
 //!
 //! The lane map is explicit: stable capture contracts are in `stable_types`,
 //! frozen artefact reconstruction in `artefact_emit`, visibility/namespace capture in
-//! `visibility`, declaring-module freeze in `preparation_freeze`, and sidecar build/evidence in
-//! `sidecar_build`. The pre-existing children own syntax, file-reference, nominal-blueprint,
-//! semantic-closure and alias projection details.
+//! `visibility`, pre-HIR detachment and publication in `preparation_freeze`, and sidecar
+//! emission/evidence in `sidecar_build`. The remaining children own syntax, file-reference,
+//! nominal-blueprint, semantic-closure and alias projection details.
 mod alias_projection;
 mod artefact_emit;
 mod frozen_file_references;
@@ -30,16 +30,16 @@ use crate::compiler_frontend::semantic_identity::GeneratedFunctionIdentity;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathId;
-use moth_lexical::numeric::profile::NumericProfile;
 
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 pub(crate) use artefact_emit::ModuleMaterialisationContext;
-pub(crate) use frozen_syntax::SharedDonorIdentity;
 pub(crate) use preparation_freeze::{
-    ModuleMaterialisationEnvironmentInput, ModuleMaterialisationPreparation,
-    ModuleMaterialisationPreparationBuilder,
+    ModuleMaterialisationCapture, ModuleMaterialisationEnvironmentInput,
+    ModuleMaterialisationPreparation, ModuleMaterialisationPreparationBuilder,
+    ModuleMaterialisationPreparedBuilder,
 };
 pub(crate) use sidecar_build::bootstrap_call_summary_from_signature;
+pub(crate) use stable_types::StableFunctionTarget;
 
 pub(crate) struct MaterialisedGenericAst {
     pub(crate) build_result: AstBuildResult,
@@ -66,11 +66,6 @@ pub(crate) struct ModuleMaterialisationInput<'a> {
         &'a mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
     pub(crate) style_directives: &'a StyleDirectiveRegistry,
     pub(crate) build_profile: FrontendBuildProfile,
-    /// The requester boundary's `Int` width and `Float` precision.
-    ///
-    /// WHY: a generated body materialises its own AST outside the requester's compiler instance, so
-    ///      it must carry the same boundary numeric profile rather than defaulting one.
-    pub(crate) numeric_profile: NumericProfile,
     pub(crate) template_const_loop_iteration_limit: usize,
     /// The requesting module owns generated work in current-schema attribution.
     #[cfg(feature = "timers")]

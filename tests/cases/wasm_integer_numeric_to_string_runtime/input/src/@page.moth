@@ -1,4 +1,4 @@
-stringify_integers |i8_value I8, u8_value U8, i16_value I16, u16_value U16, i32_value I32, u32_value U32, i64_value I64, u64_value U64, profile_value Int, dynamic_value I8| -> String:
+stringify_integers |i8_value I8, u8_value U8, i16_value I16, u16_value U16, i32_value I32, u32_value U32, i64_value I64, u64_value U64, profile_value I32, dynamic_value I8| -> String:
     return render(cast i8_value, cast u8_value, cast i16_value, cast u16_value, cast i32_value, cast u32_value, cast i64_value, cast u64_value, cast profile_value, cast dynamic_value)
 ;
 

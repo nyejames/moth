@@ -5,7 +5,8 @@
 //! them in a focused unit test makes the contract explicit without duplicating integration coverage.
 
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, MatchExhaustiveness, NodeKind};
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::const_values::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::statements::match_patterns::{MatchArm, MatchPattern};
 use crate::compiler_frontend::ast::statements::terminality::{
@@ -14,73 +15,103 @@ use crate::compiler_frontend::ast::statements::terminality::{
 use crate::compiler_frontend::compiler_messages::InvalidReturnShapeReason;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    fresh_success_returns, node, test_if_branch_metadata, test_source_location,
+    fresh_success_returns, node, test_if_branch_metadata,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
-
-fn int_return(line: i32) -> AstNode {
-    node(
-        NodeKind::Return(vec![Expression::int(
-            i64::from(line),
-            test_source_location(line),
-            ValueMode::ImmutableOwned,
-        )]),
-        None,
-    )
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+/// Fixture-owned expression/content pair: terminality views bind IDs here directly.
+struct TestExpressions {
+    builder: AstExpressionBuilder,
+    constants: ConstValueStore,
 }
 
-fn assert_bool(condition: bool, _line: i32) -> AstNode {
-    node(
-        NodeKind::Assert {
-            condition: Expression::bool(condition, None, ValueMode::ImmutableOwned),
-            // Terminality only inspects the condition; this fixture keeps a typed expression
-            // placeholder because parsed assertions always carry the canonical optional value.
-            message: Box::new(Expression::bool(true, None, ValueMode::ImmutableOwned)),
-        },
-        None,
-    )
-}
-
-fn expression_statement(line: i32) -> AstNode {
-    node(
-        NodeKind::ExpressionStatement(Expression::int(
-            i64::from(line),
+impl TestExpressions {
+    fn bool(&mut self, value: bool) -> ExprId {
+        self.builder
+            .bool(&mut self.constants, value, None, ValueMode::ImmutableOwned)
+            .expect("terminality bool fixture")
+            .id()
+    }
+    fn int(&mut self, value: i64) -> ExprId {
+        self.builder
+            .fixed_scalar(
+                &mut self.constants,
+                FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32"),
+                None,
+                ValueMode::ImmutableOwned,
+            )
+            .expect("terminality I32 fixture")
+            .id()
+    }
+    fn require(
+        &self,
+        body: &[AstNode],
+    ) -> Option<crate::compiler_frontend::compiler_messages::CompilerDiagnostic> {
+        validate_function_body_terminality(
+            body,
+            FunctionTerminalityPolicy::RequireExplicitReturn,
             None,
-            ValueMode::ImmutableOwned,
-        )),
-        None,
-    )
+            &self.builder,
+            &self.constants,
+        )
+        .expect("terminality fixtures are structurally valid")
+    }
+    fn require_policy(
+        &self,
+        body: &[AstNode],
+        policy: FunctionTerminalityPolicy,
+    ) -> Option<crate::compiler_frontend::compiler_messages::CompilerDiagnostic> {
+        validate_function_body_terminality(body, policy, None, &self.builder, &self.constants)
+            .expect("terminality fixtures are structurally valid")
+    }
+}
+
+fn int_return(expressions: &mut TestExpressions, line: i64) -> AstNode {
+    node(NodeKind::Return(vec![expressions.int(line)]), None)
+}
+
+fn assert_bool(expressions: &mut TestExpressions, condition: bool) -> AstNode {
+    let condition = expressions.bool(condition);
+    let message = expressions.bool(true);
+    node(NodeKind::Assert { condition, message }, None)
+}
+
+fn expression_statement(expressions: &mut TestExpressions, line: i64) -> AstNode {
+    node(NodeKind::ExpressionStatement(expressions.int(line)), None)
 }
 
 fn non_unit_signature() -> FunctionSignature {
     FunctionSignature {
         parameters: vec![],
-        returns: fresh_success_returns(vec![builtin_type_ids::INT]),
+        returns: fresh_success_returns(vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)]),
     }
 }
 
 #[test]
 fn allow_implicit_unit_ignores_terminality() {
+    let expressions = TestExpressions {
+        builder: AstExpressionBuilder::new().unwrap(),
+        constants: ConstValueStore::default(),
+    };
     let empty_body: Vec<AstNode> = vec![];
-    let diagnostic = validate_function_body_terminality(
-        &empty_body,
-        FunctionTerminalityPolicy::AllowImplicitUnit,
-        None,
-    );
+    let diagnostic =
+        expressions.require_policy(&empty_body, FunctionTerminalityPolicy::AllowImplicitUnit);
 
     assert!(
         diagnostic.is_none(),
         "empty-body unit function may fall through"
     );
 }
-
 #[test]
 fn entry_start_implicit_return_ignores_terminality() {
+    let expressions = TestExpressions {
+        builder: AstExpressionBuilder::new().unwrap(),
+        constants: ConstValueStore::default(),
+    };
     let empty_body: Vec<AstNode> = vec![];
-    let diagnostic = validate_function_body_terminality(
+    let diagnostic = expressions.require_policy(
         &empty_body,
         FunctionTerminalityPolicy::EntryStartImplicitReturn,
-        None,
     );
 
     assert!(
@@ -88,15 +119,14 @@ fn entry_start_implicit_return_ignores_terminality() {
         "entry start must not require an explicit return"
     );
 }
-
 #[test]
 fn require_explicit_return_rejects_empty_body() {
+    let expressions = TestExpressions {
+        builder: AstExpressionBuilder::new().unwrap(),
+        constants: ConstValueStore::default(),
+    };
     let empty_body: Vec<AstNode> = vec![];
-    let diagnostic = validate_function_body_terminality(
-        &empty_body,
-        FunctionTerminalityPolicy::RequireExplicitReturn,
-        None,
-    );
+    let diagnostic = expressions.require(&empty_body);
 
     assert!(
         diagnostic.is_some(),
@@ -113,25 +143,23 @@ fn require_explicit_return_rejects_empty_body() {
 
 #[test]
 fn direct_return_terminates() {
-    let body = vec![int_return(1)];
-    let diagnostic = validate_function_body_terminality(
-        &body,
-        FunctionTerminalityPolicy::RequireExplicitReturn,
-        None,
-    );
-
+    let mut expressions = TestExpressions {
+        builder: AstExpressionBuilder::new().unwrap(),
+        constants: ConstValueStore::default(),
+    };
+    let body = vec![int_return(&mut expressions, 1)];
+    let diagnostic = expressions.require(&body);
     assert!(diagnostic.is_none());
 }
 
 #[test]
 fn assert_false_terminates_non_unit_function() {
-    let body = vec![assert_bool(false, 1)];
-    let diagnostic = validate_function_body_terminality(
-        &body,
-        FunctionTerminalityPolicy::RequireExplicitReturn,
-        None,
-    );
-
+    let mut expressions = TestExpressions {
+        builder: AstExpressionBuilder::new().unwrap(),
+        constants: ConstValueStore::default(),
+    };
+    let body = vec![assert_bool(&mut expressions, false)];
+    let diagnostic = expressions.require(&body);
     assert!(
         diagnostic.is_none(),
         "assert(false) should be statically terminal"
@@ -140,13 +168,12 @@ fn assert_false_terminates_non_unit_function() {
 
 #[test]
 fn assert_dynamic_does_not_terminate() {
-    let body = vec![assert_bool(true, 1)];
-    let diagnostic = validate_function_body_terminality(
-        &body,
-        FunctionTerminalityPolicy::RequireExplicitReturn,
-        None,
-    );
-
+    let mut expressions = TestExpressions {
+        builder: AstExpressionBuilder::new().unwrap(),
+        constants: ConstValueStore::default(),
+    };
+    let body = vec![assert_bool(&mut expressions, true)];
+    let diagnostic = expressions.require(&body);
     assert!(
         diagnostic.is_some(),
         "assert(true) must not be treated as terminal"
@@ -155,13 +182,15 @@ fn assert_dynamic_does_not_terminate() {
 
 #[test]
 fn terminal_statement_after_fallthrough_statement_is_terminal() {
-    let body = vec![expression_statement(1), int_return(2)];
-    let diagnostic = validate_function_body_terminality(
-        &body,
-        FunctionTerminalityPolicy::RequireExplicitReturn,
-        None,
-    );
-
+    let mut expressions = TestExpressions {
+        builder: AstExpressionBuilder::new().unwrap(),
+        constants: ConstValueStore::default(),
+    };
+    let body = vec![
+        expression_statement(&mut expressions, 1),
+        int_return(&mut expressions, 2),
+    ];
+    let diagnostic = expressions.require(&body);
     assert!(
         diagnostic.is_none(),
         "a later terminal statement should satisfy the check"
@@ -170,213 +199,169 @@ fn terminal_statement_after_fallthrough_statement_is_terminal() {
 
 #[test]
 fn if_requires_both_branches_to_terminate() {
+    let mut expressions = TestExpressions {
+        builder: AstExpressionBuilder::new().unwrap(),
+        constants: ConstValueStore::default(),
+    };
     let terminal_both = node(
         NodeKind::If(
-            Expression::bool(true, None, ValueMode::ImmutableOwned),
-            vec![int_return(2)],
-            Some(vec![int_return(3)]),
+            expressions.bool(true),
+            vec![int_return(&mut expressions, 2)],
+            Some(vec![int_return(&mut expressions, 3)]),
             test_if_branch_metadata(true),
         ),
         None,
     );
-
     let terminal_then_only = node(
         NodeKind::If(
-            Expression::bool(true, None, ValueMode::ImmutableOwned),
-            vec![int_return(5)],
-            Some(vec![expression_statement(6)]),
+            expressions.bool(true),
+            vec![int_return(&mut expressions, 5)],
+            Some(vec![expression_statement(&mut expressions, 6)]),
             test_if_branch_metadata(true),
         ),
         None,
     );
-
     let no_else = node(
         NodeKind::If(
-            Expression::bool(true, None, ValueMode::ImmutableOwned),
-            vec![int_return(8)],
+            expressions.bool(true),
+            vec![int_return(&mut expressions, 8)],
             None,
             test_if_branch_metadata(false),
         ),
         None,
     );
-
-    assert!(
-        validate_function_body_terminality(
-            &[terminal_both],
-            FunctionTerminalityPolicy::RequireExplicitReturn,
-            test_source_location(1),
-        )
-        .is_none()
-    );
-
-    assert!(
-        validate_function_body_terminality(
-            &[terminal_then_only],
-            FunctionTerminalityPolicy::RequireExplicitReturn,
-            test_source_location(1),
-        )
-        .is_some()
-    );
-
-    assert!(
-        validate_function_body_terminality(
-            &[no_else],
-            FunctionTerminalityPolicy::RequireExplicitReturn,
-            test_source_location(1),
-        )
-        .is_some()
-    );
+    assert!(expressions.require(&[terminal_both]).is_none());
+    assert!(expressions.require(&[terminal_then_only]).is_some());
+    assert!(expressions.require(&[no_else]).is_some());
 }
 
 #[test]
 fn match_requires_all_arms_and_default_to_terminate() {
+    use crate::compiler_frontend::ast::statements::match_patterns::PatternValue;
+    let mut expressions = TestExpressions {
+        builder: AstExpressionBuilder::new().unwrap(),
+        constants: ConstValueStore::default(),
+    };
+    let scrutinee = expressions.int(1);
+    let pattern_value = PatternValue::from_expression(
+        expressions
+            .builder
+            .view(scrutinee)
+            .expect("terminality scrutinee"),
+    )
+    .expect("terminality pattern value");
     let terminal_match = node(
         NodeKind::Match {
-            scrutinee: Expression::int(1, None, ValueMode::ImmutableOwned),
+            scrutinee,
             arms: vec![MatchArm {
-                pattern: MatchPattern::Literal(Expression::int(
-                    1,
-                    test_source_location(2),
-                    ValueMode::ImmutableOwned,
-                )),
+                pattern: MatchPattern::Literal(pattern_value),
                 guard: None,
-                body: vec![int_return(3)],
+                body: vec![int_return(&mut expressions, 3)],
             }],
-            default: Some(vec![int_return(4)]),
+            default: Some(vec![int_return(&mut expressions, 4)]),
             exhaustiveness: MatchExhaustiveness::HasDefault,
         },
         None,
     );
-
     let non_terminal_default = node(
         NodeKind::Match {
-            scrutinee: Expression::int(1, None, ValueMode::ImmutableOwned),
+            scrutinee,
             arms: vec![MatchArm {
-                pattern: MatchPattern::Literal(Expression::int(
-                    1,
-                    test_source_location(6),
-                    ValueMode::ImmutableOwned,
-                )),
+                pattern: MatchPattern::Literal(pattern_value),
                 guard: None,
-                body: vec![int_return(7)],
+                body: vec![int_return(&mut expressions, 7)],
             }],
-            default: Some(vec![expression_statement(8)]),
+            default: Some(vec![expression_statement(&mut expressions, 8)]),
             exhaustiveness: MatchExhaustiveness::HasDefault,
         },
         None,
     );
-
-    assert!(
-        validate_function_body_terminality(
-            &[terminal_match],
-            FunctionTerminalityPolicy::RequireExplicitReturn,
-            test_source_location(1),
-        )
-        .is_none()
-    );
-
-    assert!(
-        validate_function_body_terminality(
-            &[non_terminal_default],
-            FunctionTerminalityPolicy::RequireExplicitReturn,
-            test_source_location(1),
-        )
-        .is_some()
-    );
+    assert!(expressions.require(&[terminal_match]).is_none());
+    assert!(expressions.require(&[non_terminal_default]).is_some());
 }
 
 #[test]
 fn exhaustive_choice_match_does_not_require_default() {
+    use crate::compiler_frontend::ast::statements::match_patterns::PatternValue;
+    let mut expressions = TestExpressions {
+        builder: AstExpressionBuilder::new().unwrap(),
+        constants: ConstValueStore::default(),
+    };
+    let scrutinee = expressions.int(1);
+    let pattern_value = PatternValue::from_expression(
+        expressions
+            .builder
+            .view(scrutinee)
+            .expect("terminality scrutinee"),
+    )
+    .expect("terminality pattern value");
     let terminal_match = node(
         NodeKind::Match {
-            scrutinee: Expression::int(1, None, ValueMode::ImmutableOwned),
+            scrutinee,
             arms: vec![MatchArm {
-                pattern: MatchPattern::Literal(Expression::int(
-                    1,
-                    test_source_location(2),
-                    ValueMode::ImmutableOwned,
-                )),
+                pattern: MatchPattern::Literal(pattern_value),
                 guard: None,
-                body: vec![int_return(3)],
+                body: vec![int_return(&mut expressions, 3)],
             }],
             default: None,
             exhaustiveness: MatchExhaustiveness::ExhaustiveChoice,
         },
         None,
     );
-
-    assert!(
-        validate_function_body_terminality(
-            &[terminal_match],
-            FunctionTerminalityPolicy::RequireExplicitReturn,
-            test_source_location(1),
-        )
-        .is_none()
-    );
+    assert!(expressions.require(&[terminal_match]).is_none());
 }
 
 #[test]
 fn match_marked_has_default_without_default_body_is_not_terminal() {
+    use crate::compiler_frontend::ast::statements::match_patterns::PatternValue;
+    let mut expressions = TestExpressions {
+        builder: AstExpressionBuilder::new().unwrap(),
+        constants: ConstValueStore::default(),
+    };
+    let scrutinee = expressions.int(1);
+    let pattern_value = PatternValue::from_expression(
+        expressions
+            .builder
+            .view(scrutinee)
+            .expect("terminality scrutinee"),
+    )
+    .expect("terminality pattern value");
     let malformed_match = node(
         NodeKind::Match {
-            scrutinee: Expression::int(1, None, ValueMode::ImmutableOwned),
+            scrutinee,
             arms: vec![MatchArm {
-                pattern: MatchPattern::Literal(Expression::int(
-                    1,
-                    test_source_location(2),
-                    ValueMode::ImmutableOwned,
-                )),
+                pattern: MatchPattern::Literal(pattern_value),
                 guard: None,
-                body: vec![int_return(3)],
+                body: vec![int_return(&mut expressions, 3)],
             }],
             default: None,
             exhaustiveness: MatchExhaustiveness::HasDefault,
         },
         None,
     );
-
-    assert!(
-        validate_function_body_terminality(
-            &[malformed_match],
-            FunctionTerminalityPolicy::RequireExplicitReturn,
-            test_source_location(1),
-        )
-        .is_some()
-    );
+    assert!(expressions.require(&[malformed_match]).is_some());
 }
 
 #[test]
 fn lexical_scope_terminates_when_body_terminates() {
+    let mut expressions = TestExpressions {
+        builder: AstExpressionBuilder::new().unwrap(),
+        constants: ConstValueStore::default(),
+    };
     let terminal_block = node(
         NodeKind::LexicalScope {
-            body: vec![int_return(2)],
+            body: vec![int_return(&mut expressions, 2)],
         },
         None,
     );
     let fallthrough_block = node(
         NodeKind::LexicalScope {
-            body: vec![expression_statement(2)],
+            body: vec![expression_statement(&mut expressions, 2)],
         },
         None,
     );
-
-    assert!(
-        validate_function_body_terminality(
-            &[terminal_block],
-            FunctionTerminalityPolicy::RequireExplicitReturn,
-            test_source_location(1),
-        )
-        .is_none()
-    );
-
-    assert!(
-        validate_function_body_terminality(
-            &[fallthrough_block],
-            FunctionTerminalityPolicy::RequireExplicitReturn,
-            test_source_location(1),
-        )
-        .is_some()
-    );
+    assert!(expressions.require(&[terminal_block]).is_none());
+    assert!(expressions.require(&[fallthrough_block]).is_some());
 }
 
 #[test]

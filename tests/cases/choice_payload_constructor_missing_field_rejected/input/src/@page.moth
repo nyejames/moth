@@ -1,4 +1,4 @@
-Response :: Success, Pending | retry_count Int, message String |;
+Response :: Success, Pending | retry_count I32, message String |;
 
 p = Response::Pending(3)
 io.line("ok")

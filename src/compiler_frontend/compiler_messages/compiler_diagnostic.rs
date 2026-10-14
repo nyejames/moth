@@ -5,17 +5,18 @@
 
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::compiler_messages::BuiltinFailureWitness;
 use crate::compiler_frontend::compiler_messages::{
-    BorrowAccessKind, BorrowDiagnosticKind, BuiltinFailureOriginKind, ChoiceVariantSeparatorGap,
-    CommonSyntaxMistakeReason, ConfigDiagnosticKind, DeferredFeatureDiagnosticKind,
-    DeferredFeatureReason, DependencyClauseKind, DiagnosticBag, DiagnosticIdentity, DiagnosticKind,
-    DiagnosticLabel, DiagnosticLabelMessage, DiagnosticOperator, DiagnosticPayload,
-    DiagnosticPlace, DiagnosticSeverity, DiagnosticToken, GenericApplicationErrorReason,
-    GenericInferenceSubject, HirCapacityResource, ImportDiagnosticKind, ImportPublicSurfaceType,
-    IncompatibleChoiceComparisonReason, InvalidCastReason, InvalidChoiceVariantReason,
-    InvalidCollectionTypeReason, InvalidCompileTimePathReason, InvalidConfigReason,
-    InvalidDependencyClauseReason, InvalidExpressionReason, InvalidExternalModuleReason,
-    InvalidFallibleHandlingReason, InvalidFallibleOperandReason, InvalidFunctionSignatureReason,
+    BorrowAccessKind, BorrowDiagnosticKind, BuiltinFailureOriginKind, CapacityResource,
+    ChoiceVariantSeparatorGap, CommonSyntaxMistakeReason, ConfigDiagnosticKind,
+    DeferredFeatureDiagnosticKind, DeferredFeatureReason, DependencyClauseKind, DiagnosticBag,
+    DiagnosticIdentity, DiagnosticKind, DiagnosticLabel, DiagnosticLabelMessage,
+    DiagnosticOperator, DiagnosticPayload, DiagnosticPlace, DiagnosticSeverity, DiagnosticToken,
+    GenericApplicationErrorReason, GenericInferenceSubject, ImportDiagnosticKind,
+    ImportPublicSurfaceType, IncompatibleChoiceComparisonReason, InvalidCastReason,
+    InvalidChoiceVariantReason, InvalidCollectionTypeReason, InvalidCompileTimePathReason,
+    InvalidConfigReason, InvalidDependencyClauseReason, InvalidExpressionReason,
+    InvalidExternalModuleReason, InvalidFallibleHandlingReason, InvalidFunctionSignatureReason,
     InvalidGenericParameterReason, InvalidImportPathReason, InvalidLoopHeaderReason,
     InvalidMapLiteralReason, InvalidMapTypeReason, InvalidMatchArmReason,
     InvalidMutableAccessReason, InvalidPageMetadataReason, InvalidRangeOperandReason,
@@ -26,8 +27,7 @@ use crate::compiler_frontend::compiler_messages::{
     MalformedTemplateReason, NameNamespace, NamespaceTypeValueMisuseKind, NamingConvention,
     OperatorOperandPosition, PathKind, ProjectContextEscapeReason, RangeOperandKind,
     RuleDiagnosticKind, SourceSpanCapacityResource, SyntaxDiagnosticKind, TypeAnnotationContext,
-    TypeDiagnosticKind, TypeMismatchContext, UnsupportedBackendFeatureReason,
-    UnsupportedOperatorCategory,
+    TypeDiagnosticKind, TypeMismatchContext, UnsupportedBackendFeatureReason, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::generic_bindings::BindingConflict;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -37,8 +37,8 @@ use crate::compiler_frontend::source::{
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 use crate::compiler_frontend::tokenizer::tokens::{TokenRef, TokenTag, TokenViewError};
+use crate::compiler_frontend::traits::evidence::environment::InfallibleCastEvidenceContract;
 use moth_lexical::numeric::parse::NumberLiteralErrorReason;
-use moth_lexical::numeric::profile::NumericProfile;
 #[derive(Clone, Debug, PartialEq)]
 pub struct CompilerDiagnostic {
     pub kind: DiagnosticKind,
@@ -893,15 +893,28 @@ impl CompilerDiagnostic {
         )
     }
 
-    /// Report authored input that exhausted one bounded dense HIR row or side store.
+    /// Report authored input that exhausted a bounded HIR or AST store or grouping distance.
     pub(crate) fn compiler_capacity_exceeded(
-        resource: HirCapacityResource,
+        resource: impl Into<CapacityResource>,
         span: Option<SourceSpan>,
     ) -> Self {
         Self::new(
             DiagnosticKind::Syntax(SyntaxDiagnosticKind::CompilerCapacityExceeded),
             span,
-            DiagnosticPayload::CompilerCapacityExceeded { resource },
+            DiagnosticPayload::CompilerCapacityExceeded {
+                resource: resource.into(),
+            },
+        )
+    }
+
+    /// Whether this diagnostic reports exhausted compiler capacity rather than authored source.
+    ///
+    /// WHY: a speculative probe that read capacity as a rejected candidate would report a parse
+    /// mismatch and hide the exhausted builder.
+    pub(crate) fn is_compiler_capacity_exceeded(&self) -> bool {
+        matches!(
+            self.payload,
+            DiagnosticPayload::CompilerCapacityExceeded { .. }
         )
     }
 
@@ -1489,6 +1502,44 @@ impl CompilerDiagnostic {
         )
     }
 
+    pub(crate) fn infallible_cast_evidence_failure(
+        contract: &InfallibleCastEvidenceContract,
+        witness: &BuiltinFailureWitness,
+    ) -> Self {
+        let mut labels = Vec::with_capacity(witness.call_spans.len() + 1);
+        for span in &witness.call_spans {
+            if span.is_some() {
+                labels.push(DiagnosticLabel::secondary(
+                    *span,
+                    Some(DiagnosticLabelMessage::BuiltinFailureCall),
+                ));
+            }
+        }
+        if witness.origin_span.is_some() {
+            let message = match witness.origin {
+                BuiltinFailureOriginKind::Operation => DiagnosticLabelMessage::BuiltinFailureOrigin,
+                BuiltinFailureOriginKind::CompoundWriteBack { target } => {
+                    DiagnosticLabelMessage::BuiltinWriteBackOrigin {
+                        target_type_id: target,
+                    }
+                }
+            };
+            labels.push(DiagnosticLabel::secondary(
+                witness.origin_span,
+                Some(message),
+            ));
+        }
+        Self::invalid_trait_conformance(
+            contract.target_name,
+            Some(contract.trait_name),
+            InvalidTraitConformanceReason::InferredFailureInInfallibleCast {
+                requirement_name: contract.requirement_name,
+            },
+            contract.span,
+        )
+        .with_labels(labels)
+    }
+
     pub(crate) fn invalid_trait_incompatibility(
         subject_name: StringId,
         incompatible_trait_name: Option<StringId>,
@@ -1545,15 +1596,18 @@ impl CompilerDiagnostic {
         first_span: Option<SourceSpan>,
         duplicate_span: Option<SourceSpan>,
     ) -> Self {
-        Self::new(
+        let diagnostic = Self::new(
             DiagnosticKind::Rule(RuleDiagnosticKind::ShadowedName),
             duplicate_span,
             DiagnosticPayload::ShadowedName { name },
-        )
-        .with_labels(vec![DiagnosticLabel::secondary(
-            first_span,
-            Some(DiagnosticLabelMessage::PreviousDeclaration),
-        )])
+        );
+        match first_span {
+            Some(span) => diagnostic.with_labels(vec![DiagnosticLabel::secondary(
+                Some(span),
+                Some(DiagnosticLabelMessage::PreviousDeclaration),
+            )]),
+            None => diagnostic,
+        }
     }
 
     pub(crate) fn reserved_name_collision(
@@ -1698,6 +1752,24 @@ impl CompilerDiagnostic {
             },
         )
         .with_labels(labels)
+    }
+
+    /// Reports arity at the authored producer rather than a synthetic receiving node.
+    pub(crate) fn invalid_value_receiver(
+        receiver: ValueReceiverContext,
+        target_count: usize,
+        produced_count: usize,
+        span: Option<SourceSpan>,
+    ) -> Self {
+        Self::new(
+            DiagnosticKind::Rule(RuleDiagnosticKind::InvalidValueReceiver),
+            span,
+            DiagnosticPayload::InvalidValueReceiver {
+                receiver,
+                target_count,
+                produced_count,
+            },
+        )
     }
 
     pub(crate) fn invalid_multi_bind(
@@ -1948,16 +2020,11 @@ impl CompilerDiagnostic {
         reason: crate::compiler_frontend::compiler_messages::CompileTimeEvaluationErrorReason,
         operation: Option<StringId>,
         span: Option<SourceSpan>,
-        numeric_profile: Option<NumericProfile>,
     ) -> Self {
         Self::new(
             DiagnosticKind::Rule(RuleDiagnosticKind::CompileTimeEvaluationError),
             span,
-            DiagnosticPayload::CompileTimeEvaluationError {
-                reason,
-                operation,
-                numeric_profile,
-            },
+            DiagnosticPayload::CompileTimeEvaluationError { reason, operation },
         )
     }
 
@@ -1979,23 +2046,6 @@ impl CompilerDiagnostic {
             DiagnosticKind::Type(TypeDiagnosticKind::UnsupportedOperatorTypes),
             span,
             DiagnosticPayload::UnsupportedOperatorTypes { operator, lhs, rhs },
-        )
-    }
-
-    pub(crate) fn invalid_fallible_operand(
-        reason: InvalidFallibleOperandReason,
-        category: UnsupportedOperatorCategory,
-        operand_type: TypeId,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        Self::new(
-            DiagnosticKind::Type(TypeDiagnosticKind::InvalidFallibleOperand),
-            span,
-            DiagnosticPayload::InvalidFallibleOperand {
-                reason,
-                category,
-                operand_type,
-            },
         )
     }
 

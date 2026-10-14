@@ -1,0 +1,74 @@
+-- Runtime I8 operands stay in the selected I8 result domain: overflow,
+-- underflow, signed-minimum negation and signed-minimum integer division fail
+-- at that width, while remainder by minus one stays zero. Operands arrive
+-- through parameters so nothing folds.
+add_i8 |left I8, right I8| -> I8, Error!:
+    return left + right
+;
+
+subtract_i8 |left I8, right I8| -> I8, Error!:
+    return left - right
+;
+
+multiply_i8 |left I8, right I8| -> I8, Error!:
+    return left * right
+;
+
+negate_i8 |value I8| -> I8, Error!:
+    return -value
+;
+
+divide_i8 |dividend I8, divisor I8| -> I8, Error!:
+    return dividend // divisor
+;
+
+remainder_i8 |dividend I8, divisor I8| -> I8, Error!:
+    return dividend % divisor
+;
+
+ok_sum = add_i8(126, 1) catch:
+    then 0
+;
+ok_sum_text String = cast ok_sum
+
+add_code ~U32 = 0
+add_value = add_i8(127, 1) catch |add_error|:
+    add_code = add_error.code
+    then 0
+;
+add_text String = cast add_value
+
+subtract_code ~U32 = 0
+subtract_value = subtract_i8(-128, 1) catch |subtract_error|:
+    subtract_code = subtract_error.code
+    then 0
+;
+subtract_text String = cast subtract_value
+
+multiply_code ~U32 = 0
+multiply_value = multiply_i8(16, 8) catch |multiply_error|:
+    multiply_code = multiply_error.code
+    then 0
+;
+multiply_text String = cast multiply_value
+
+negate_code ~U32 = 0
+negate_value = negate_i8(-128) catch |negate_error|:
+    negate_code = negate_error.code
+    then 0
+;
+negate_text String = cast negate_value
+
+divide_code ~U32 = 0
+divide_value = divide_i8(-128, -1) catch |divide_error|:
+    divide_code = divide_error.code
+    then 0
+;
+divide_text String = cast divide_value
+
+remainder_value = remainder_i8(-128, -1) catch:
+    then 99
+;
+remainder_text String = cast remainder_value
+
+[:scalar i8 checked ok=[ok_sum_text] add=[add_code]/[add_text] subtract=[subtract_code]/[subtract_text] multiply=[multiply_code]/[multiply_text] negate=[negate_code]/[negate_text] divide=[divide_code]/[divide_text] remainder=[remainder_text]]

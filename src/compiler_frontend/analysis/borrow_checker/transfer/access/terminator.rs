@@ -9,7 +9,7 @@ use super::*;
 pub(crate) fn transfer_terminator(
     context: &BorrowTransferContext<'_>,
     layout: &FunctionLayout,
-    state: &BorrowState,
+    state: &mut BorrowState,
     block_id: BlockId,
     terminator: &HirTerminator,
     stats: &mut BlockTransferStats,
@@ -45,23 +45,20 @@ pub(crate) fn transfer_terminator(
             )?;
         }
 
-        HirTerminator::FallibleBranch { result, .. } => {
-            let mut read_env = SharedReadEnv {
-                context,
-                layout,
-                state,
-                block_id,
-                tracker: &mut tracker,
-                location,
-                current_order: terminator_order,
-                stats,
-                value_fact_buffer,
-            };
-            record_shared_reads_in_expression(
-                &mut read_env,
-                *result,
-                location,
-                &mut RootSet::empty(layout.local_count()),
+        HirTerminator::Invoke { .. } => {
+            super::statement::transfer_invoke(
+                &mut super::statement::CallTransferContext {
+                    context,
+                    layout,
+                    state,
+                    block_id,
+                    current_order: terminator_order,
+                    tracker: &mut tracker,
+                    location,
+                    stats,
+                    value_fact_buffer,
+                },
+                terminator,
             )?;
         }
 
@@ -102,9 +99,28 @@ pub(crate) fn transfer_terminator(
             }
         }
 
-        HirTerminator::Return(value)
-        | HirTerminator::ReturnSuccess(value)
-        | HirTerminator::ReturnError(value) => {
+        HirTerminator::Return(values) => {
+            let mut read_env = SharedReadEnv {
+                context,
+                layout,
+                state,
+                block_id,
+                tracker: &mut tracker,
+                location,
+                current_order: terminator_order,
+                stats,
+                value_fact_buffer,
+            };
+            for value in context.expressions.values(*values) {
+                record_shared_reads_in_expression(
+                    &mut read_env,
+                    *value,
+                    location,
+                    &mut RootSet::empty(layout.local_count()),
+                )?;
+            }
+        }
+        HirTerminator::ReturnError(value) => {
             let mut read_env = SharedReadEnv {
                 context,
                 layout,

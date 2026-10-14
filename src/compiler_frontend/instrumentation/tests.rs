@@ -7,10 +7,9 @@
 
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
 use super::{
-    AstCounter, FrontendCounter, add_ast_counter, add_frontend_counter,
-    capture_frontend_counters_for_test, frontend_counter_test_values, log_ast_counters,
-    log_frontend_counters, record_ast_counter_max, reset_ast_counters, reset_frontend_counters,
-    with_expression_census_counters,
+    AstCounter, FrontendCounter, add_ast_counter, add_frontend_counter, capture_counters_for_test,
+    frontend_counter_test_values, log_ast_counters, log_frontend_counters, record_ast_counter_max,
+    reset_ast_counters, reset_frontend_counters, with_expression_census_counters,
 };
 
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
@@ -23,6 +22,7 @@ use std::sync::{Arc, Barrier};
 #[test]
 fn ast_counters_record_stable_metrics_when_stdout_is_suppressed() {
     let _guard = super::lock_counter_test();
+    let _counter_capture = capture_counters_for_test();
 
     reset_ast_counters();
     let timing_session = start_benchmark_collection(true).expect("timing session should start");
@@ -201,6 +201,64 @@ fn ast_counters_record_stable_metrics_when_stdout_is_suppressed() {
 
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
 #[test]
+fn expression_storage_census_records_issuing_owner_buffers() {
+    use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
+    use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
+    use crate::compiler_frontend::datatypes::builtin_type_ids;
+    use crate::compiler_frontend::symbols::path_interner::PathId;
+    use crate::compiler_frontend::value_mode::ValueMode;
+
+    let _guard = super::lock_counter_test();
+    let _capture = capture_counters_for_test();
+    reset_ast_counters();
+    let session = start_benchmark_collection(true).expect("timing session should start");
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    builder
+        .reference_with_type_id(
+            PathId::ROOT,
+            builtin_type_ids::BOOL,
+            None,
+            ValueMode::ImmutableReference,
+            ConstRecordState::RuntimeValue,
+        )
+        .expect("single fixture reference fits store");
+    let statistics = builder.storage_statistics();
+    let expected = [
+        ("ast_census_expression_rows", statistics.rows),
+        (
+            "ast_census_expression_row_capacity",
+            statistics.row_capacity,
+        ),
+        ("ast_census_expression_row_bytes", statistics.row_bytes),
+        (
+            "ast_census_expression_row_capacity_bytes",
+            statistics.row_capacity_bytes,
+        ),
+        (
+            "ast_census_expression_side_entries",
+            statistics.side_entries,
+        ),
+        (
+            "ast_census_expression_side_capacity",
+            statistics.side_capacity,
+        ),
+        ("ast_census_expression_side_bytes", statistics.side_bytes),
+        (
+            "ast_census_expression_side_capacity_bytes",
+            statistics.side_capacity_bytes,
+        ),
+    ];
+    with_expression_census_counters(|| {
+        super::ast_counters::record_expression_storage_census(statistics);
+    });
+    let observations = session.finish();
+    for (name, value) in expected {
+        assert_counter_value(&observations.counters, name, value as f64);
+    }
+}
+
+#[cfg(all(feature = "timers", feature = "benchmark_counters"))]
+#[test]
 fn ast_counters_are_isolated_per_thread() {
     let _guard = super::lock_counter_test();
 
@@ -215,6 +273,7 @@ fn ast_counters_are_isolated_per_thread() {
     let barrier_b = Arc::clone(&barrier);
 
     let thread_a = std::thread::spawn(move || {
+        let _counter_capture = capture_counters_for_test();
         reset_ast_counters();
         add_ast_counter(AstCounter::ScopeContextsCreated, 3);
         barrier_a.wait();
@@ -222,6 +281,7 @@ fn ast_counters_are_isolated_per_thread() {
     });
 
     let thread_b = std::thread::spawn(move || {
+        let _counter_capture = capture_counters_for_test();
         reset_ast_counters();
         add_ast_counter(AstCounter::ScopeContextsCreated, 5);
         barrier_b.wait();
@@ -231,25 +291,37 @@ fn ast_counters_are_isolated_per_thread() {
     thread_a.join().expect("thread A panicked");
     thread_b.join().expect("thread B panicked");
 
+    // An unrelated AST build logs on its own thread without opting into capture,
+    // as an unguarded parser test does while this session is active.
+    std::thread::spawn(|| {
+        add_ast_counter(AstCounter::ScopeContextsCreated, 7);
+        log_ast_counters();
+    })
+    .join()
+    .expect("unopted thread should not panic");
+
     let observations = timing_session.finish();
 
-    let scope_values: Vec<f64> = observations
+    let mut scope_values: Vec<f64> = observations
         .counters
         .iter()
         .filter(|counter| counter.name == "ast_scope_contexts_created")
         .map(|counter| counter.value)
         .collect();
+    scope_values.sort_by(f64::total_cmp);
 
-    assert_eq!(scope_values.len(), 2, "expected both threads to log");
-    assert!(scope_values.contains(&3.0), "thread A value missing");
-    assert!(scope_values.contains(&5.0), "thread B value missing");
+    assert_eq!(
+        scope_values,
+        vec![3.0, 5.0],
+        "each capturing thread logs only its own value and unopted threads log nothing"
+    );
 }
 
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
 #[test]
 fn frontend_counters_record_scheduling_and_path_ownership_metrics_when_stdout_is_suppressed() {
     let _guard = super::lock_counter_test();
-    let _counter_capture = capture_frontend_counters_for_test();
+    let _counter_capture = capture_counters_for_test();
 
     reset_frontend_counters();
     let timing_session = start_benchmark_collection(true).expect("timing session should start");
@@ -390,7 +462,7 @@ fn frontend_counters_record_scheduling_and_path_ownership_metrics_when_stdout_is
 #[test]
 fn ast_body_root_and_scope_counters_record_stable_metrics() {
     let _guard = super::lock_counter_test();
-    let _counter_capture = capture_frontend_counters_for_test();
+    let _counter_capture = capture_counters_for_test();
 
     reset_frontend_counters();
     let timing_session = start_benchmark_collection(true).expect("timing session should start");
@@ -418,7 +490,7 @@ fn ast_body_root_and_scope_counters_record_stable_metrics() {
 #[test]
 fn reset_and_log_ignore_threads_without_counter_capture() {
     let _guard = super::lock_counter_test();
-    let _counter_capture = capture_frontend_counters_for_test();
+    let _counter_capture = capture_counters_for_test();
 
     reset_frontend_counters();
     let timing_session = start_benchmark_collection(true).expect("timing session should start");
@@ -461,6 +533,7 @@ fn reset_and_log_ignore_threads_without_counter_capture() {
 #[test]
 fn expression_census_snapshots_preserve_main_and_sidecar_without_overlay_contamination() {
     let _guard = super::lock_counter_test();
+    let _counter_capture = capture_counters_for_test();
 
     reset_ast_counters();
     let timing_session = start_benchmark_collection(true).expect("timing session should start");
@@ -471,8 +544,8 @@ fn expression_census_snapshots_preserve_main_and_sidecar_without_overlay_contami
 
     // Main-module snapshot.
     with_expression_census_counters(|| {
-        add_ast_counter(AstCounter::CensusExpressions, 4);
-        record_ast_counter_max(AstCounter::CensusCallArgsLengthMax, 10);
+        add_ast_counter(AstCounter::CensusExpressionRows, 4);
+        record_ast_counter_max(AstCounter::CensusExpressionRowCapacity, 10);
         // Observer read performed while collecting.
         add_ast_counter(AstCounter::TirOverlayLookups, 100);
     });
@@ -488,8 +561,8 @@ fn expression_census_snapshots_preserve_main_and_sidecar_without_overlay_contami
     // maximum (a stale gauge left over from the main snapshot would surface
     // here as 10 instead of 6).
     with_expression_census_counters(|| {
-        add_ast_counter(AstCounter::CensusExpressions, 9);
-        record_ast_counter_max(AstCounter::CensusCallArgsLengthMax, 6);
+        add_ast_counter(AstCounter::CensusExpressionRows, 9);
+        record_ast_counter_max(AstCounter::CensusExpressionRowCapacity, 6);
         add_ast_counter(AstCounter::TirOverlayLookups, 50);
     });
 
@@ -511,12 +584,12 @@ fn expression_census_snapshots_preserve_main_and_sidecar_without_overlay_contami
     // module-only logger would either lose the sidecar (single row) or
     // duplicate rows from the between/after logs (four rows).
     assert_eq!(
-        values_for("ast_census_expressions"),
+        values_for("ast_census_expression_rows"),
         vec![4.0, 9.0],
         "main and sidecar expression snapshots must both publish"
     );
     assert_eq!(
-        values_for("ast_census_call_args_length_max"),
+        values_for("ast_census_expression_row_capacity"),
         vec![10.0, 6.0],
         "each snapshot must emit its own maximum without stale carryover"
     );

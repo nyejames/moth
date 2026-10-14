@@ -1,0 +1,8 @@
+-- An I64 sum cannot retarget the collection's I32 self-source.
+render || -> Error!:
+    wide I64 = 1
+    values ~= {1}
+    ~values.push(values.get(0)! + wide)
+;
+render() catch:
+;

@@ -12,15 +12,15 @@ set_fill_style |this ~Canvas, color String|:
     raw_set_fill_style(~this.context, color)
 ;
 
-fill_rect |this ~Canvas, x Float, y Float, width Float, height Float|:
+fill_rect |this ~Canvas, x F64, y F64, width F64, height F64|:
     raw_fill_rect(~this.context, x, y, width, height)
 ;
 
-clear_rect |this ~Canvas, x Float, y Float, width Float, height Float|:
+clear_rect |this ~Canvas, x F64, y F64, width F64, height F64|:
     raw_clear_rect(~this.context, x, y, width, height)
 ;
 
-stroke_rect |this ~Canvas, x Float, y Float, width Float, height Float|:
+stroke_rect |this ~Canvas, x F64, y F64, width F64, height F64|:
     raw_stroke_rect(~this.context, x, y, width, height)
 ;
 

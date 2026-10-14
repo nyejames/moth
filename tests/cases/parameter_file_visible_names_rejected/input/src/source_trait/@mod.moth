@@ -1,0 +1,6 @@
+parameter_binding |ACTIVE I32| -> I32:
+    return ACTIVE
+;
+
+ACTIVE must:
+;

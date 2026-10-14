@@ -7,9 +7,11 @@
 //! fold and handoff paths.
 //! WHY: wrapper context is a TIR view dimension and must not require a second
 //! store or a structural fallback.
-use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
+use crate::compiler_frontend::ast::const_values::store::{ConstStringValue, ConstValueStore};
 
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, ExpressionOperationView,
+};
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::TemplateConstValueKind;
 use crate::compiler_frontend::ast::templates::template::{
@@ -51,39 +53,74 @@ use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
 };
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::tests::ast_fixture_support::reference_expr_with_type_id;
 use crate::compiler_frontend::value_mode::ValueMode;
-use moth_lexical::numeric::profile::NumericProfile;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-fn fold_context<'a>(string_table: &'a mut StringTable) -> TirFoldContext<'a> {
+fn fold_context<'a>(
+    string_table: &'a mut StringTable,
+    expression_builder: &'a mut AstExpressionBuilder,
+    const_values: &'a mut ConstValueStore,
+) -> TirFoldContext<'a> {
     TirFoldContext {
         string_table,
+        expression_builder,
+        const_values,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         source_scope: None,
         bindings: vec![],
     }
 }
 
-fn bool_expression(value: bool) -> Expression {
-    Expression::bool(value, None, ValueMode::ImmutableOwned)
+fn bool_expression(
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    value: bool,
+) -> ExprId {
+    expressions
+        .bool(const_values, value, None, ValueMode::ImmutableOwned)
+        .expect("bool fixture expression should construct")
+        .id()
 }
 
 /// Builds a runtime (non-const) string reference expression.
-fn runtime_string_expression() -> Expression {
-    Expression::new(
-        ExpressionKind::Reference(PathId::ROOT),
-        None,
+fn runtime_string_expression(expressions: &mut AstExpressionBuilder) -> ExprId {
+    reference_expr_with_type_id(
+        expressions,
+        PathId::ROOT,
         builtin_type_ids::STRING,
-        DataType::StringSlice,
+        None,
         ValueMode::ImmutableOwned,
     )
+}
+
+/// Builds a const string-slice expression for `text`.
+fn string_slice_expression(
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    text: StringId,
+) -> ExprId {
+    expressions
+        .string_slice(const_values, text, None, ValueMode::ImmutableOwned)
+        .expect("string slice fixture expression should construct")
+        .id()
+}
+
+/// Reads a string literal's text id through the typed store; other shapes yield `None`.
+fn string_literal_text(
+    expressions: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
+    id: ExprId,
+) -> Option<StringId> {
+    let ExpressionOperationView::Constant(value) = expressions.view(id).ok()?.operation() else {
+        return None;
+    };
+    const_values.string_value(value)
 }
 
 fn build_text_template(
@@ -172,7 +209,7 @@ fn build_two_slot_wrapper_template(
 /// returning the template ID and the expression site ID.
 fn build_expression_wrapper_template_with_expression(
     store: &mut TemplateIrStore,
-    expression: Expression,
+    expression: ExprId,
 ) -> (TemplateIrId, ExpressionSiteId) {
     let mut builder = TemplateIrBuilder::new(store);
     let dynamic_node =
@@ -201,16 +238,14 @@ fn build_expression_wrapper_template_with_expression(
 fn build_false_conditional_no_output_template(
     store: &mut TemplateIrStore,
     string_table: &mut StringTable,
+    condition: ExprId,
 ) -> TemplateIrId {
     let body_text = string_table.intern("hidden");
     let mut builder = TemplateIrBuilder::new(store);
     let body_node =
         builder.push_text_node(body_text, "hidden".len(), TemplateSegmentOrigin::Body, None);
-    let root = builder.push_conditional_node(
-        TemplateBranchSelector::Bool(bool_expression(false)),
-        body_node,
-        None,
-    );
+    let root =
+        builder.push_conditional_node(TemplateBranchSelector::Bool(condition), body_node, None);
     builder.finish_template(
         root,
         Style::default(),
@@ -333,8 +368,8 @@ fn build_wrapper_context_fixture(
 /// optional outer expression override on the same site.
 fn build_expression_wrapper_fixture(
     string_table: &mut StringTable,
-    wrapper_expression: Expression,
-    outer_expression: Option<Expression>,
+    wrapper_expression: ExprId,
+    outer_expression: Option<ExprId>,
 ) -> (WrapperContextFixture, ExpressionSiteId) {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let (parent, wrapper_template_id, wrapper_set_id, site_id, context) = {
@@ -342,7 +377,7 @@ fn build_expression_wrapper_fixture(
         let empty_overlay = TemplateViewContext::default();
         let child_template_id = build_text_template(&mut tir, string_table, "child");
         let (wrapper_template_id, site_id) =
-            build_expression_wrapper_template_with_expression(&mut tir, wrapper_expression.clone());
+            build_expression_wrapper_template_with_expression(&mut tir, wrapper_expression);
 
         let mut builder = TemplateIrBuilder::new(&mut tir);
         let child_node = builder.push_child_template_node_with_reference(
@@ -364,7 +399,7 @@ fn build_expression_wrapper_fixture(
 
         let wrapper_expression_overlay_id = tir
             .allocate_expression_overlay(TirExpressionOverlay {
-                overrides: vec![(site_id, Box::new(wrapper_expression))],
+                overrides: vec![(site_id, wrapper_expression)],
             })
             .expect("test overlay allocation");
         let wrapper_context = TemplateViewContext {
@@ -391,7 +426,7 @@ fn build_expression_wrapper_fixture(
                 .expect("test overlay allocation");
             let outer_expression_overlay_id = tir
                 .allocate_expression_overlay(TirExpressionOverlay {
-                    overrides: vec![(site_id, Box::new(outer_expression))],
+                    overrides: vec![(site_id, outer_expression)],
                 })
                 .expect("test overlay allocation");
             TemplateViewContext {
@@ -512,7 +547,11 @@ fn build_slot_resolution_wrapper_fixture(
 /// Builds nested wrapper contexts whose outer wrapper also carries an
 /// expression override. The nested occurrence must enter the outer wrapper's
 /// exact view before applying its own inherited wrapper.
-fn build_nested_virtual_wrapper_fixture(string_table: &mut StringTable) -> WrapperContextFixture {
+fn build_nested_virtual_wrapper_fixture(
+    string_table: &mut StringTable,
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+) -> WrapperContextFixture {
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let empty_context = TemplateViewContext::default();
 
@@ -538,10 +577,12 @@ fn build_nested_virtual_wrapper_fixture(string_table: &mut StringTable) -> Wrapp
             )]);
 
         let outer_expression = string_table.intern("outer-structural");
+        let outer_structural_expression =
+            string_slice_expression(expressions, const_values, outer_expression);
         let outer_dynamic_node = {
             let mut builder = TemplateIrBuilder::new(&mut tir);
             builder.push_dynamic_expression_node(
-                Expression::string_slice(outer_expression, None, ValueMode::ImmutableOwned),
+                outer_structural_expression,
                 TemplateSegmentOrigin::Body,
                 None,
             )
@@ -661,17 +702,15 @@ fn build_nested_virtual_wrapper_fixture(string_table: &mut StringTable) -> Wrapp
         })
         .expect("test overlay allocation")
     };
+    let outer_overlay_expression = string_slice_expression(
+        expressions,
+        const_values,
+        string_table.intern("outer-overlay"),
+    );
     let outer_expression_overlay_id = {
         let mut tir = store.borrow_mut();
         tir.allocate_expression_overlay(TirExpressionOverlay {
-            overrides: vec![(
-                outer_expression_site_id,
-                Box::new(Expression::string_slice(
-                    string_table.intern("outer-overlay"),
-                    None,
-                    ValueMode::ImmutableOwned,
-                )),
-            )],
+            overrides: vec![(outer_expression_site_id, outer_overlay_expression)],
         })
         .expect("test overlay allocation")
     };
@@ -730,25 +769,37 @@ fn fixture_parent_view(
 fn fold_fixture_result(
     fixture: &WrapperContextFixture,
     string_table: &mut StringTable,
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
 ) -> Result<TemplateEmission, TemplateError> {
-    prepared_fold_fixture_result(fixture, string_table)
+    prepared_fold_fixture_result(fixture, string_table, expressions, const_values)
 }
 
 fn fold_fixture(
     fixture: &WrapperContextFixture,
     string_table: &mut StringTable,
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
 ) -> TemplateEmission {
-    fold_fixture_result(fixture, string_table).expect("fold should succeed")
+    fold_fixture_result(fixture, string_table, expressions, const_values)
+        .expect("fold should succeed")
 }
 
 fn prepared_fold_fixture_result(
     fixture: &WrapperContextFixture,
     string_table: &mut StringTable,
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
 ) -> Result<TemplateEmission, TemplateError> {
     let (phase, store) = fixture_parent_view(fixture);
     let view = TirView::new(&store, fixture.parent, phase, fixture.context)
         .expect("test view should construct");
-    let preparation = prepare_tir_view(&view, TemplatePreparationMode::Value)?;
+    let preparation = prepare_tir_view(
+        &view,
+        expressions,
+        const_values,
+        TemplatePreparationMode::Value,
+    )?;
     if let TemplatePreparationOutcome::Runtime(reason) = preparation.outcome {
         return Err(CompilerError::compiler_error(format!(
             "supported wrapper fixture unexpectedly requires runtime: {:?}",
@@ -762,7 +813,7 @@ fn prepared_fold_fixture_result(
         )
         .into());
     }
-    let mut context = fold_context(string_table);
+    let mut context = fold_context(string_table, expressions, const_values);
     // Wrapper-context tests here assert rendered text; provenance is not owned by this helper.
     let TemplateFoldResult { emission, .. } =
         fold_prepared_template(&preparation, view, &mut context)?;
@@ -772,6 +823,8 @@ fn prepared_fold_fixture_result(
 fn handoff_fixture_result(
     fixture: &WrapperContextFixture,
     string_table: &mut StringTable,
+    expressions: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
 ) -> Result<OwnedRuntimeTemplateHandoff, TemplateError> {
     let (phase, store) = fixture_parent_view(fixture);
     let view = TirView::new(&store, fixture.parent, phase, fixture.context)
@@ -786,15 +839,25 @@ fn handoff_fixture_result(
         },
         outcome: TemplatePreparationOutcome::Runtime(RuntimeTemplateReason::RuntimeExpression),
     };
-    owned_runtime_template_handoff_for_prepared_view(&prepared, view, string_table, None)
-        .map_err(Into::into)
+    owned_runtime_template_handoff_for_prepared_view(
+        &prepared,
+        view,
+        expressions,
+        const_values,
+        string_table,
+        None,
+    )
+    .map_err(Into::into)
 }
 
 fn handoff_fixture(
     fixture: &WrapperContextFixture,
     string_table: &mut StringTable,
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
 ) -> OwnedRuntimeTemplateHandoff {
-    handoff_fixture_result(fixture, string_table).expect("handoff should succeed")
+    handoff_fixture_result(fixture, string_table, expressions, const_values)
+        .expect("handoff should succeed")
 }
 
 fn assert_text_node(node: &OwnedRuntimeTemplateNode, expected: &str, _string_table: &StringTable) {
@@ -878,12 +941,19 @@ fn text_child_builder(
 fn wrapper_context_overlay_folds_inherited_wrapper() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let fixture = build_wrapper_context_fixture(
         &mut string_table,
         TirWrapperContext::default(),
         text_child_builder("child"),
     );
-    let emission = fold_fixture(&fixture, &mut string_table);
+    let emission = fold_fixture(
+        &fixture,
+        &mut string_table,
+        &mut expressions,
+        &mut const_values,
+    );
     let TemplateEmission::Output(output_id) = emission else {
         panic!("expected Output emission, got {:?}", emission);
     };
@@ -902,6 +972,8 @@ fn wrapper_context_fold_applies_inherited_wrapper_set_innermost_to_outermost() {
     // wrapper directly around the child and the outermost wrapper last.
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
 
     let (parent, wrapper_set_id, context) = {
@@ -958,7 +1030,12 @@ fn wrapper_context_fold_applies_inherited_wrapper_set_innermost_to_outermost() {
         context,
     };
 
-    let emission = fold_fixture(&fixture, &mut string_table);
+    let emission = fold_fixture(
+        &fixture,
+        &mut string_table,
+        &mut expressions,
+        &mut const_values,
+    );
     let TemplateEmission::Output(output_id) = emission else {
         panic!("expected Output emission, got {emission:?}");
     };
@@ -973,10 +1050,21 @@ fn wrapper_context_fold_applies_inherited_wrapper_set_innermost_to_outermost() {
 fn prepared_fold_keeps_parent_expression_authority_through_nested_wrappers() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let fixture = build_nested_virtual_wrapper_fixture(&mut string_table);
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let fixture = build_nested_virtual_wrapper_fixture(
+        &mut string_table,
+        &mut expressions,
+        &mut const_values,
+    );
 
-    let emission = prepared_fold_fixture_result(&fixture, &mut string_table)
-        .expect("supported nested wrapper should pass the production fold gate");
+    let emission = prepared_fold_fixture_result(
+        &fixture,
+        &mut string_table,
+        &mut expressions,
+        &mut const_values,
+    )
+    .expect("supported nested wrapper should pass the production fold gate");
     let TemplateEmission::Output(output_id) = emission else {
         panic!("expected Output emission, got {emission:?}");
     };
@@ -986,7 +1074,12 @@ fn prepared_fold_keeps_parent_expression_authority_through_nested_wrappers() {
         "nested structural wrappers must retain the parent expression authority"
     );
 
-    let handoff = handoff_fixture(&fixture, &mut string_table);
+    let handoff = handoff_fixture(
+        &fixture,
+        &mut string_table,
+        &mut expressions,
+        &mut const_values,
+    );
     let outer = expect_single_render_child(&handoff.body);
     let OwnedRuntimeTemplateNode::Sequence { children, .. } = outer else {
         panic!("expected the outer wrapper sequence, got {outer:?}");
@@ -997,8 +1090,8 @@ fn prepared_fold_keeps_parent_expression_authority_through_nested_wrappers() {
         panic!("expected the structural outer expression in the handoff");
     };
     assert!(matches!(
-        expression.kind,
-        ExpressionKind::StringSlice(text) if string_table.resolve(text) == "outer-structural"
+        string_literal_text(&expressions, &const_values, *expression),
+        Some(text) if string_table.resolve(text) == "outer-structural"
     ));
 
     let OwnedRuntimeTemplateNode::Sequence {
@@ -1020,6 +1113,8 @@ fn prepared_fold_keeps_parent_expression_authority_through_nested_wrappers() {
 fn wrapper_context_overlay_honors_fresh_suppression() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let fixture = build_wrapper_context_fixture(
         &mut string_table,
         TirWrapperContext {
@@ -1029,7 +1124,12 @@ fn wrapper_context_overlay_honors_fresh_suppression() {
         },
         text_child_builder("child"),
     );
-    let emission = fold_fixture(&fixture, &mut string_table);
+    let emission = fold_fixture(
+        &fixture,
+        &mut string_table,
+        &mut expressions,
+        &mut const_values,
+    );
     let TemplateEmission::Output(output_id) = emission else {
         panic!("expected Output emission, got {:?}", emission);
     };
@@ -1045,6 +1145,9 @@ fn prepared_fold_applies_if_child_emits_only_when_the_child_emits_output() {
     // A child that structurally outputs receives the inherited wrapper.
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let condition = bool_expression(&mut expressions, &mut const_values, false);
     let fixture = build_wrapper_context_fixture(
         &mut string_table,
         TirWrapperContext {
@@ -1054,7 +1157,12 @@ fn prepared_fold_applies_if_child_emits_only_when_the_child_emits_output() {
         },
         text_child_builder("child"),
     );
-    let emission = fold_fixture(&fixture, &mut string_table);
+    let emission = fold_fixture(
+        &fixture,
+        &mut string_table,
+        &mut expressions,
+        &mut const_values,
+    );
     let TemplateEmission::Output(output_id) = emission else {
         panic!(
             "expected Output emission for an emitting child, got {:?}",
@@ -1075,9 +1183,14 @@ fn prepared_fold_applies_if_child_emits_only_when_the_child_emits_output() {
             skip_parent_child_wrappers: false,
             application_mode: TirWrapperApplicationMode::IfChildEmits,
         },
-        build_false_conditional_no_output_template,
+        |store, table| build_false_conditional_no_output_template(store, table, condition),
     );
-    let silent_emission = fold_fixture(&silent_fixture, &mut string_table);
+    let silent_emission = fold_fixture(
+        &silent_fixture,
+        &mut string_table,
+        &mut expressions,
+        &mut const_values,
+    );
     assert_eq!(
         silent_emission,
         TemplateEmission::NoOutput,
@@ -1093,13 +1206,17 @@ fn prepared_fold_applies_if_child_emits_only_when_the_child_emits_output() {
 fn prepared_fold_applies_wrapper_expression_overlay() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let wrapper_text = string_table.intern("wrapper-overlay");
-    let (fixture, _) = build_expression_wrapper_fixture(
+    let wrapper_local = string_slice_expression(&mut expressions, &mut const_values, wrapper_text);
+    let (fixture, _) = build_expression_wrapper_fixture(&mut string_table, wrapper_local, None);
+    let emission = fold_fixture(
+        &fixture,
         &mut string_table,
-        Expression::string_slice(wrapper_text, None, ValueMode::ImmutableOwned),
-        None,
+        &mut expressions,
+        &mut const_values,
     );
-    let emission = fold_fixture(&fixture, &mut string_table);
     let TemplateEmission::Output(output_id) = emission else {
         panic!("expected Output emission, got {:?}", emission);
     };
@@ -1116,20 +1233,22 @@ fn preparation_classifies_outer_override_by_const_vs_runtime_expression() {
     // whole wrapper folds to a constant result.
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let outer_text = string_table.intern("outer-const");
-    let (const_outer_fixture, _) = build_expression_wrapper_fixture(
+    let wrapper_local = runtime_string_expression(&mut expressions);
+    let outer_const = string_slice_expression(&mut expressions, &mut const_values, outer_text);
+    let (const_outer_fixture, _) =
+        build_expression_wrapper_fixture(&mut string_table, wrapper_local, Some(outer_const));
+    let emission = prepared_fold_fixture_result(
+        &const_outer_fixture,
         &mut string_table,
-        runtime_string_expression(),
-        Some(Expression::string_slice(
-            outer_text,
-            None,
-            ValueMode::ImmutableOwned,
-        )),
-    );
-    let emission = prepared_fold_fixture_result(&const_outer_fixture, &mut string_table)
-        .unwrap_or_else(|error| {
-            panic!("const outer override should make the wrapper foldable: {error:?}")
-        });
+        &mut expressions,
+        &mut const_values,
+    )
+    .unwrap_or_else(|error| {
+        panic!("const outer override should make the wrapper foldable: {error:?}")
+    });
     let TemplateEmission::Output(output_id) = emission else {
         panic!("expected Output emission, got {:?}", emission);
     };
@@ -1142,11 +1261,10 @@ fn preparation_classifies_outer_override_by_const_vs_runtime_expression() {
     // A runtime outer override keeps the wrapper on the runtime handoff path and
     // survives into the owned handoff as the effective expression.
     let wrapper_text = string_table.intern("wrapper-local");
-    let (runtime_outer_fixture, _) = build_expression_wrapper_fixture(
-        &mut string_table,
-        Expression::string_slice(wrapper_text, None, ValueMode::ImmutableOwned),
-        Some(runtime_string_expression()),
-    );
+    let wrapper_local = string_slice_expression(&mut expressions, &mut const_values, wrapper_text);
+    let runtime_outer = runtime_string_expression(&mut expressions);
+    let (runtime_outer_fixture, _) =
+        build_expression_wrapper_fixture(&mut string_table, wrapper_local, Some(runtime_outer));
 
     let preparation = {
         let (phase, store) = fixture_parent_view(&runtime_outer_fixture);
@@ -1157,15 +1275,25 @@ fn preparation_classifies_outer_override_by_const_vs_runtime_expression() {
             runtime_outer_fixture.context,
         )
         .expect("parent view should construct");
-        prepare_tir_view(&view, TemplatePreparationMode::Value)
-            .expect("outer runtime wrapper override should be a valid runtime result")
+        prepare_tir_view(
+            &view,
+            &expressions,
+            &const_values,
+            TemplatePreparationMode::Value,
+        )
+        .expect("outer runtime wrapper override should be a valid runtime result")
     };
     assert!(
         matches!(preparation.outcome, TemplatePreparationOutcome::Runtime(_)),
         "a runtime outer override must not be classified as a const wrapper"
     );
 
-    let handoff = handoff_fixture(&runtime_outer_fixture, &mut string_table);
+    let handoff = handoff_fixture(
+        &runtime_outer_fixture,
+        &mut string_table,
+        &mut expressions,
+        &mut const_values,
+    );
     let wrapped = expect_single_render_child(&handoff.body);
     let OwnedRuntimeTemplateNode::Sequence { children, .. } = wrapped else {
         panic!(
@@ -1190,7 +1318,13 @@ fn preparation_classifies_outer_override_by_const_vs_runtime_expression() {
         );
     };
     assert!(
-        matches!(expression.kind, ExpressionKind::Reference(_)),
+        matches!(
+            expressions
+                .view(*expression)
+                .expect("handoff expression should resolve")
+                .operation(),
+            ExpressionOperationView::Reference(_)
+        ),
         "the outer runtime expression must override the const wrapper-local expression"
     );
 }
@@ -1199,17 +1333,17 @@ fn preparation_classifies_outer_override_by_const_vs_runtime_expression() {
 fn preparation_ignores_runtime_referenced_wrapper_expression_overlay() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let wrapper_text = string_table.intern("wrapper-overlay");
-    let (fixture, site_id) = build_expression_wrapper_fixture(
-        &mut string_table,
-        Expression::string_slice(wrapper_text, None, ValueMode::ImmutableOwned),
-        None,
-    );
+    let wrapper_local = string_slice_expression(&mut expressions, &mut const_values, wrapper_text);
+    let (fixture, site_id) =
+        build_expression_wrapper_fixture(&mut string_table, wrapper_local, None);
     let runtime_context = {
         let mut tir = fixture.store.borrow_mut();
         let expression_overlay_id = tir
             .allocate_expression_overlay(TirExpressionOverlay {
-                overrides: vec![(site_id, Box::new(runtime_string_expression()))],
+                overrides: vec![(site_id, runtime_string_expression(&mut expressions))],
             })
             .expect("test overlay allocation");
         TemplateViewContext {
@@ -1238,15 +1372,25 @@ fn preparation_ignores_runtime_referenced_wrapper_expression_overlay() {
         let (phase, store) = fixture_parent_view(&fixture);
         let view = TirView::new(&store, fixture.parent, phase, fixture.context)
             .expect("parent view should construct");
-        prepare_tir_view(&view, TemplatePreparationMode::Value)
-            .expect("referenced wrapper expression should be ignored by the structural transition")
+        prepare_tir_view(
+            &view,
+            &expressions,
+            &const_values,
+            TemplatePreparationMode::Value,
+        )
+        .expect("referenced wrapper expression should be ignored by the structural transition")
     };
     assert!(
         matches!(preparation.outcome, TemplatePreparationOutcome::Foldable),
         "a referenced wrapper expression must not change the parent fold decision"
     );
 
-    let handoff = handoff_fixture(&fixture, &mut string_table);
+    let handoff = handoff_fixture(
+        &fixture,
+        &mut string_table,
+        &mut expressions,
+        &mut const_values,
+    );
     let wrapped = expect_single_render_child(&handoff.body);
     let OwnedRuntimeTemplateNode::Sequence { children, .. } = wrapped else {
         panic!("expected wrapper handoff sequence, got {wrapped:?}");
@@ -1263,7 +1407,10 @@ fn preparation_ignores_runtime_referenced_wrapper_expression_overlay() {
         panic!("expected wrapper expression node, got {expression_node:?}");
     };
     assert!(
-        matches!(expression.kind, ExpressionKind::StringSlice(text) if text == wrapper_text),
+        matches!(
+            string_literal_text(&expressions, &const_values, *expression),
+            Some(text) if text == wrapper_text
+        ),
         "owned handoff must retain the structural wrapper expression"
     );
 }
@@ -1276,8 +1423,15 @@ fn preparation_ignores_runtime_referenced_wrapper_expression_overlay() {
 fn prepared_fold_injects_child_before_resolving_other_wrapper_slots() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let (fixture, _) = build_slot_resolution_wrapper_fixture(&mut string_table);
-    let emission = fold_fixture(&fixture, &mut string_table);
+    let emission = fold_fixture(
+        &fixture,
+        &mut string_table,
+        &mut expressions,
+        &mut const_values,
+    );
     let TemplateEmission::Output(output_id) = emission else {
         panic!("expected Output emission, got {:?}", emission);
     };
@@ -1292,6 +1446,8 @@ fn prepared_fold_injects_child_before_resolving_other_wrapper_slots() {
 fn preparation_falls_back_for_runtime_non_injected_slot_source() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let resolved_text = string_table.intern("resolved");
     let (fixture, source_template_id) = build_slot_resolution_wrapper_fixture(&mut string_table);
 
@@ -1300,7 +1456,6 @@ fn preparation_falls_back_for_runtime_non_injected_slot_source() {
         let slot_plan_id = tir.push_slot_plan(TemplateSlotPlan {
             contribution_sources: Vec::new(),
             slot_sites: Vec::new(),
-            span: None,
         });
         tir.attach_runtime_slot_plan(source_template_id, slot_plan_id)
             .expect("source template should accept the committed slot plan");
@@ -1316,8 +1471,13 @@ fn preparation_falls_back_for_runtime_non_injected_slot_source() {
             fixture.context,
         )
         .expect("parent view should construct");
-        prepare_tir_view(&view, TemplatePreparationMode::Value)
-            .expect("runtime slot source should be an eligible runtime result")
+        prepare_tir_view(
+            &view,
+            &expressions,
+            &const_values,
+            TemplatePreparationMode::Value,
+        )
+        .expect("runtime slot source should be an eligible runtime result")
     };
     assert_eq!(
         match preparation.outcome {
@@ -1328,7 +1488,12 @@ fn preparation_falls_back_for_runtime_non_injected_slot_source() {
         Some(RuntimeTemplateReason::InheritedWrapperApplication),
         "a runtime source in a non-injected wrapper slot must stay on the handoff path"
     );
-    let handoff = handoff_fixture(&fixture, &mut string_table);
+    let handoff = handoff_fixture(
+        &fixture,
+        &mut string_table,
+        &mut expressions,
+        &mut const_values,
+    );
     assert!(
         format!("{:?}", handoff.body).contains("RuntimeSlotApplication"),
         "owned handoff must retain the runtime slot source instead of losing it during folding"
@@ -1343,6 +1508,8 @@ fn preparation_falls_back_for_runtime_non_injected_slot_source() {
 fn below_composed_wrapper_reference_uses_structural_root_without_overlay_lookup() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let fixture = build_wrapper_context_fixture(
         &mut string_table,
         TirWrapperContext::default(),
@@ -1367,13 +1534,23 @@ fn below_composed_wrapper_reference_uses_structural_root_without_overlay_lookup(
         });
     }
 
-    let emission = fold_fixture(&fixture, &mut string_table);
+    let emission = fold_fixture(
+        &fixture,
+        &mut string_table,
+        &mut expressions,
+        &mut const_values,
+    );
     let TemplateEmission::Output(output_id) = emission else {
         panic!("expected Output emission, got {:?}", emission);
     };
     assert_eq!(emission_text(output_id, &string_table), "beforechildafter");
 
-    let handoff = handoff_fixture(&fixture, &mut string_table);
+    let handoff = handoff_fixture(
+        &fixture,
+        &mut string_table,
+        &mut expressions,
+        &mut const_values,
+    );
     let wrapped = expect_single_render_child(&handoff.body);
     let OwnedRuntimeTemplateNode::Sequence { children, .. } = wrapped else {
         panic!("expected structural wrapper sequence, got {:?}", wrapped);
@@ -1392,6 +1569,8 @@ fn below_composed_wrapper_reference_uses_structural_root_without_overlay_lookup(
 fn prepared_fold_rejects_slot_insert_from_wrapper_context_set() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
     let fixture = build_wrapper_context_fixture(
         &mut string_table,
         TirWrapperContext::default(),
@@ -1410,8 +1589,13 @@ fn prepared_fold_rejects_slot_insert_from_wrapper_context_set() {
     let (phase, store) = fixture_parent_view(&fixture);
     let view = TirView::new(&store, fixture.parent, phase, fixture.context)
         .expect("test view should construct");
-    let preparation = prepare_tir_view(&view, TemplatePreparationMode::Value)
-        .expect("slot insert helper should prepare without folding");
+    let preparation = prepare_tir_view(
+        &view,
+        &expressions,
+        &const_values,
+        TemplatePreparationMode::Value,
+    )
+    .expect("slot insert helper should prepare without folding");
     assert!(!matches!(
         preparation.outcome,
         TemplatePreparationOutcome::Foldable
@@ -1422,6 +1606,8 @@ fn prepared_fold_rejects_slot_insert_from_wrapper_context_set() {
 fn prepared_fold_rejects_slot_insert_from_effective_slot_source() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let (wrapper_template_id, source_template_id, context) = {
         let mut tir = store.borrow_mut();
@@ -1454,8 +1640,13 @@ fn prepared_fold_rejects_slot_insert_from_effective_slot_source() {
         context,
     )
     .expect("slot-overlay view should construct");
-    let preparation = prepare_tir_view(&view, TemplatePreparationMode::Value)
-        .expect("slot insert source should prepare without folding");
+    let preparation = prepare_tir_view(
+        &view,
+        &expressions,
+        &const_values,
+        TemplatePreparationMode::Value,
+    )
+    .expect("slot insert source should prepare without folding");
     assert!(!matches!(
         preparation.outcome,
         TemplatePreparationOutcome::Foldable
@@ -1470,6 +1661,8 @@ fn prepared_fold_rejects_slot_insert_from_effective_slot_source() {
 fn preparation_terminates_for_cyclic_nested_wrapper_contexts() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let (parent_template_id, parent_context) = {
         let mut tir = store.borrow_mut();
@@ -1566,7 +1759,12 @@ fn preparation_terminates_for_cyclic_nested_wrapper_contexts() {
         parent_context,
     )
     .expect("cyclic wrapper view should construct");
-    let error = match prepare_tir_view(&view, TemplatePreparationMode::Value) {
+    let error = match prepare_tir_view(
+        &view,
+        &expressions,
+        &const_values,
+        TemplatePreparationMode::Value,
+    ) {
         Err(error) => error,
         Ok(prepared) => panic!("cyclic wrapper contexts must be CompilerError, got {prepared:?}"),
     };
@@ -1587,12 +1785,19 @@ fn preparation_terminates_for_cyclic_nested_wrapper_contexts() {
 fn handoff_tir_view_applies_inherited_wrapper_context_overlay() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let fixture = build_wrapper_context_fixture(
         &mut string_table,
         TirWrapperContext::default(),
         text_child_builder("child"),
     );
-    let handoff = handoff_fixture(&fixture, &mut string_table);
+    let handoff = handoff_fixture(
+        &fixture,
+        &mut string_table,
+        &mut expressions,
+        &mut const_values,
+    );
 
     let wrapped = expect_single_render_child(&handoff.body);
     let OwnedRuntimeTemplateNode::Sequence { children, .. } = wrapped else {
@@ -1612,6 +1817,8 @@ fn handoff_tir_view_applies_inherited_wrapper_context_overlay() {
 fn handoff_tir_view_honors_fresh_suppression_in_wrapper_context_overlay() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let fixture = build_wrapper_context_fixture(
         &mut string_table,
         TirWrapperContext {
@@ -1621,7 +1828,12 @@ fn handoff_tir_view_honors_fresh_suppression_in_wrapper_context_overlay() {
         },
         text_child_builder("child"),
     );
-    let handoff = handoff_fixture(&fixture, &mut string_table);
+    let handoff = handoff_fixture(
+        &fixture,
+        &mut string_table,
+        &mut expressions,
+        &mut const_values,
+    );
     let child_node = expect_single_render_child(&handoff.body);
     assert_child_or_text_node(child_node, "child", &string_table);
 }
@@ -1630,6 +1842,8 @@ fn handoff_tir_view_honors_fresh_suppression_in_wrapper_context_overlay() {
 fn handoff_tir_view_materializes_if_child_emits_as_conditional_wrapper() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let fixture = build_wrapper_context_fixture(
         &mut string_table,
         TirWrapperContext {
@@ -1639,7 +1853,12 @@ fn handoff_tir_view_materializes_if_child_emits_as_conditional_wrapper() {
         },
         text_child_builder("child"),
     );
-    let handoff = handoff_fixture(&fixture, &mut string_table);
+    let handoff = handoff_fixture(
+        &fixture,
+        &mut string_table,
+        &mut expressions,
+        &mut const_values,
+    );
 
     let wrapped = expect_single_render_child(&handoff.body);
     let OwnedRuntimeTemplateNode::ConditionalWrapper { child, wrapper, .. } = wrapped else {

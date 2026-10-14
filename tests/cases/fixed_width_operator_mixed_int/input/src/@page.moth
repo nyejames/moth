@@ -1,6 +1,6 @@
 hidden ||:
-    small U8 = 1
-    natural Int = 1
+    small U64 = 1
+    natural I32 = 1
     value = small + natural
 ;
 

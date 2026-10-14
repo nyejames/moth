@@ -1,8 +1,8 @@
-identity_int |value Int| -> Int:
+identity_int |value I64| -> I64:
     return value
 ;
 
-identity_float |value Float| -> Float:
+identity_float |value F32| -> F32:
     return value
 ;
 
@@ -61,7 +61,7 @@ f16_from_i16 |value I16| -> F16:
     return converted
 ;
 
-add_f16 |left F16, right F16| -> F32:
+add_f16 |left F16, right F16| -> F16:
     return left + right
 ;
 
@@ -85,16 +85,19 @@ equal_u64_i64 |unsigned U64, signed I64| -> Bool:
     return unsigned is signed
 ;
 
-profile_integer_equals_float |integer Int, real Float| -> Bool:
-    return integer is real
+profile_integer_equals_float |integer I64, real F32| -> Bool:
+    converted F32 = cast integer
+    return converted is real
 ;
 
-int_greater_than_float |integer Int, real Float| -> Bool:
-    return integer > real
+int_greater_than_float |integer I64, real F32| -> Bool:
+    converted F32 = cast integer
+    return converted > real
 ;
 
-float_less_than_int |real Float, integer Int| -> Bool:
-    return real < integer
+float_less_than_int |real F32, integer I64| -> Bool:
+    converted F32 = cast integer
+    return real < converted
 ;
 
 less_i8 |left I8, right I8| -> Bool:
@@ -129,40 +132,40 @@ equal_byte |left Byte, right Byte| -> Bool:
     return left is right
 ;
 
-profile_float_add |left Float, right Float| -> Float:
+profile_float_add |left F32, right F32| -> F32:
     return left + right
 ;
 
-profile_float_subtract |left Float, right Float| -> Float:
+profile_float_subtract |left F32, right F32| -> F32:
     return left - right
 ;
 
-profile_float_multiply |left Float, right Float| -> Float:
+profile_float_multiply |left F32, right F32| -> F32:
     return left * right
 ;
 
-profile_float_divide |left Float, right Float| -> Float:
+profile_float_divide |left F32, right F32| -> F32:
     return left / right
 ;
 
-profile_float_remainder |left Float, right Float| -> Float:
+profile_float_remainder |left F32, right F32| -> F32:
     return left % right
 ;
 
-profile_float_power |base Float, exponent Float| -> Float:
+profile_float_power |base F32, exponent F32| -> F32:
     return base ^ exponent
 ;
 
-profile_float_negate |value Float| -> Float:
+profile_float_negate |value F32| -> F32:
     return -value
 ;
 
-profile_int_to_float |value Int| -> Float:
-    converted Float = cast value
+profile_int_to_float |value I64| -> F32:
+    converted F32 = cast value
     return converted
 ;
 
-profile_int_divide |numerator Int, denominator Int| -> Float:
+profile_int_divide |numerator I64, denominator I64| -> F64:
     return numerator / denominator
 ;
 
@@ -243,7 +246,7 @@ assert(profile_float_power(2.0, -2.0) is 0.25)
 assert(profile_float_negate(1.5) is -1.5)
 assert(profile_float_negate(-1.5) is 1.5)
 assert(profile_int_to_float(16777217) is 16777216.0)
-assert(profile_int_divide(float32_int_probe, identity_int(1)) is 1152921642045800448.0)
+assert(profile_int_divide(float32_int_probe, identity_int(1)) is 1152921573326323712.0)
 assert(fixed_u64_u32_divide(18446744073709551615, 3) is identity_f64(6148914691236516864.0))
 assert(profile_int_divide(3, 2) is 1.5)
 
@@ -264,10 +267,24 @@ f16_from_2051 = f16_from_i16(2051)
 f16_integer_cast_marker = if equal_f16(f16_from_2049, identity_f16(2048.0)) and equal_f16(f16_from_2051, identity_f16(2052.0)) then [:i16-to-f16-ties-even] else [:failed-i16-to-f16-ties-even]
 
 f16_sum = add_f16(f16_one, f16_expected_above)
-f16_arithmetic_marker = if f16_sum is identity_f32(2.0009765625) and f16_sum is not identity_f32(2.0) then [:f16-f16-add-stays-f32] else [:failed-f16-f16-add-f32-result]
+f16_arithmetic_marker = if f16_sum is identity_f16(2.0) and widened_f16_add(f16_one, f16_expected_above) is identity_f32(2.0009765625) then [:f16-f16-add-rounds-f16/f32-widened-f16-add] else [:failed-f16-f32-arithmetic-results]
 
 f16_min_subnormal = identity_f16(0.000000059604644775390625)
 f16_next_subnormal = identity_f16(0.00000011920928955078125)
 f16_subnormal_marker = if f16_min_subnormal is not identity_f16(0.0) and less_f16(f16_min_subnormal, f16_next_subnormal) then [:f16-min-subnormal-preserved] else [:failed-f16-min-subnormal]
 
 [:f16-profile=[f16_direct_marker]/[f16_midpoint_marker]/[f16_rebind_marker]/[f16_integer_cast_marker]/[f16_arithmetic_marker]/[f16_subnormal_marker]]
+
+widened_f16_add |left F16, right F16| -> F32:
+    widened_left F32 = cast left
+    widened_right F32 = cast right
+    return widened_left + widened_right
+;
+
+explicit_f32_divide |numerator I64, denominator I64| -> F32:
+    single_numerator F32 = cast numerator
+    single_denominator F32 = cast denominator
+    return single_numerator / single_denominator
+;
+
+assert(explicit_f32_divide(float32_int_probe, identity_int(1)) is 1152921642045800448.0)

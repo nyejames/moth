@@ -1,10 +1,9 @@
 entry = "."
-numeric_profile = "Int32/Float64"
 
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = " generic writeback target=200 code=242 recovered=200 exact=250 exact-target=250"
+rendered_output_exact = " generic writeback target=200 code=301 recovered=200 exact=250 exact-target=250 mixed-target=200 mixed-code=242 mixed-recovered=200 mixed-exact=250 mixed-exact-target=250"
 
 [backends.html_wasm]
 mode = "failure"

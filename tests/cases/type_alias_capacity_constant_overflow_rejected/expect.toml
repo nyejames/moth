@@ -7,4 +7,5 @@ diagnostic_codes = ["MOTH-SYNTAX-0016"]
 code = "MOTH-SYNTAX-0016"
 path = "input/@page.moth"
 line = 6
+column = 19
 count = 1

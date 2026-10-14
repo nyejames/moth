@@ -1,0 +1,112 @@
+-- Generic struct and choice constructors keep raw optional payloads pending
+-- until exact U64 receivers select their type. Each path uses a distinct value.
+
+Slot type T = |value T?|
+Branch type T ::
+    Some |value T?|,
+    Empty,
+;
+Packet type T = |value T|
+WidePacket as Packet of U64
+CollectionSlot type T = |values {T?}|
+MapSlot type T = |values {String = T?}|
+ChoiceSlots type T ::
+    Some |values {T?}|,
+    Empty,
+;
+NestedSlot type T = |values {{T?}}|
+NestedMapSlot type T = |values {String = {T?}}|
+Sibling type T = |value T?, marker U64|
+Tagged type T = |value T?, marker T|
+
+read_u64 |value U64| -> String:
+    return cast value
+;
+read_i32 |value I32| -> String:
+    return cast value
+;
+read_optional_u64 |value U64?| -> String:
+    return if value is:
+        |present| => then read_u64(present)
+        none => then "missing"
+    ;
+;
+read_branch_u64 |branch Branch of U64| -> String:
+    return if branch is:
+        Some(value as payload) => then read_optional_u64(payload)
+        Empty => then "missing"
+    ;
+;
+read_packet_optional |packet WidePacket?| -> String:
+    return if packet is:
+        |present| => then read_u64(present.value)
+        none => then "missing"
+    ;
+;
+read_collection_u64 |values {U64?}| -> String:
+    element = values.get(0) catch:
+        then none
+    ;
+    return read_optional_u64(element)
+;
+read_map_u64 |values {String = U64?}| -> String:
+    element = values.get("value") catch:
+        then none
+    ;
+    return read_optional_u64(element)
+;
+read_choice_u64 |choice ChoiceSlots of U64| -> String:
+    return if choice is:
+        Some(values as payload) => then read_collection_u64(payload)
+        Empty => then "missing"
+    ;
+;
+read_nested_u64 |values {{U64?}}| -> String:
+    inner_values {U64?} = values.get(0) catch:
+        then {}
+    ;
+    return read_collection_u64(inner_values)
+;
+read_nested_map_u64 |values {String = {U64?}}| -> String:
+    inner_values {U64?} = values.get("values") catch:
+        then {}
+    ;
+    return read_collection_u64(inner_values)
+;
+
+slot = Slot(4294967319)
+slot_text String = if slot.value is |payload| then read_u64(payload) else "none"
+branch = Branch::Some(4294967320)
+branch_text = read_branch_u64(branch)
+packet_origin = Packet(4294967321)
+packet_text = read_packet_optional(packet_origin)
+immediate_packet WidePacket? = Packet(4294967322)
+immediate_text String = if immediate_packet is |present| then read_u64(present.value) else "missing"
+field_origin = Slot(4294967323)
+field_text = read_optional_u64(field_origin.value)
+ready_value I32 = 1
+ready_slot = Slot(ready_value)
+ready_text String = if ready_slot.value is |payload| then read_i32(payload) else "none"
+collection_origin = CollectionSlot({4294967327})
+collection_text = read_collection_u64(collection_origin.values)
+map_origin = MapSlot({"value" = 4294967328})
+map_text = read_map_u64(map_origin.values)
+choice_origin = ChoiceSlots::Some({4294967329})
+choice_collection_text = read_choice_u64(choice_origin)
+nested_origin = NestedSlot({{4294967330}})
+nested_text = read_nested_u64(nested_origin.values)
+nested_map_origin = NestedMapSlot({"values" = {4294967331}})
+nested_map_text = read_nested_map_u64(nested_map_origin.values)
+seeded_collection CollectionSlot of U64 = CollectionSlot({4294967338})
+seeded_collection_text = read_collection_u64(seeded_collection.values)
+seeded_choice ChoiceSlots of U64 = ChoiceSlots::Some({4294967339})
+seeded_choice_text = read_choice_u64(seeded_choice)
+sibling_origin Sibling of U64 = Sibling(4294967340, 4294967341)
+sibling_text = read_optional_u64(sibling_origin.value)
+marker_text = read_u64(sibling_origin.marker)
+ready_marker U64 = 4294967342
+tagged_origin = Tagged(4294967343, ready_marker)
+tagged_text = read_optional_u64(tagged_origin.value)
+tagged_marker_text = read_u64(tagged_origin.marker)
+
+[:generic_constructed_numeric_optional_envelopes struct=[slot_text] choice=[branch_text] packet=[packet_text] immediate=[immediate_text] field=[field_text] ready=[ready_text] collection=[collection_text] map=[map_text] choice_collection=[choice_collection_text] nested=[nested_text] nested_map=[nested_map_text] seeded_collection=[seeded_collection_text] seeded_choice=[seeded_choice_text] sibling=[sibling_text] marker=[marker_text] tagged=[tagged_text] tagged_marker=[tagged_marker_text]]

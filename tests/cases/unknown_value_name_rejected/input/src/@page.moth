@@ -1,4 +1,4 @@
-foo || -> Int:
+foo || -> I32:
     result = unknown_var
     return result
 ;

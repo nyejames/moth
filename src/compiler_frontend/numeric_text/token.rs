@@ -46,7 +46,10 @@ impl NumericLiteralToken {
     /// WHY: the constructor intentionally takes all lexical fields as arguments
     ///      so callers cannot accidentally omit `source_text` or `normalized_text`.
     ///      The argument count is stable because the token shape is finalized.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the finalised lexical token requires sign, source and normalised text, numeric kind, digit/fractional/exponent counts and exponent sign as explicit construction inputs"
+    )]
     pub fn new(
         sign: NumericLiteralSign,
         source_text: StringId,

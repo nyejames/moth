@@ -1,0 +1,3 @@
+target #U8 = 255
+step #U16 = 1
+replacement #U8 = cast (target + step)

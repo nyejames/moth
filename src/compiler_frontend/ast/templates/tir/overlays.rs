@@ -20,7 +20,7 @@
 use std::fmt;
 use std::num::NonZeroU32;
 
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression_store::ExprId;
 use crate::compiler_frontend::ast::templates::template::SlotKey;
 use crate::compiler_frontend::ast::templates::tir::ids::{
     ChildTemplateOccurrenceId, ExpressionSiteId, SlotOccurrenceId, TemplateIrId,
@@ -166,29 +166,27 @@ impl TirSlotResolution {
 ///      overrides as a keyed list lets `TirView` resolve effective expressions
 ///      for a site without traversing the structural tree.
 ///
-/// Entries are stored as a flat list rather than a hash map because
-/// `Expression` does not implement `Hash` or `Eq`, and realistic overlays
-/// contain few entries. Linear lookup is sufficient for the overlay sizes
-/// expected in template composition.
+/// Realistic overlays contain few entries, so a flat list preserves source order
+/// without a separately allocated lookup table.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct TirExpressionOverlay {
     /// Expression overrides, keyed by document-order `ExpressionSiteId`.
-    pub(crate) overrides: Vec<(ExpressionSiteId, Box<Expression>)>,
+    pub(crate) overrides: Vec<(ExpressionSiteId, ExprId)>,
 }
 
 impl TirExpressionOverlay {
     /// Looks up the override expression for a site, if one exists in this overlay.
     ///
-    /// WHAT: linear scan of the override list. Returns the boxed expression
-    ///       reference when the site has an override, or `None` when it does not.
+    /// WHAT: linear scan of the override list. Returns the committed expression
+    ///       ID when the site has an override, or `None` when it does not.
     /// WHY: `TirView` calls this to resolve effective expressions for a site;
     ///      keeping the lookup on the payload centralizes the scan logic.
-    pub(crate) fn expression_for_site(&self, site_id: ExpressionSiteId) -> Option<&Expression> {
+    pub(crate) fn expression_for_site(&self, site_id: ExpressionSiteId) -> Option<ExprId> {
         increment_ast_counter(AstCounter::TirOverlayLookups);
         self.overrides
             .iter()
             .find(|(id, _)| *id == site_id)
-            .map(|(_, expression)| expression.as_ref())
+            .map(|(_, expression)| *expression)
     }
 }
 

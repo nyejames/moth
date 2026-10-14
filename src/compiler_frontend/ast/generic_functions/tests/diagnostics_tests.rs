@@ -24,6 +24,7 @@ use crate::compiler_frontend::source::{
     SourceId, SourceSpan,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -88,7 +89,7 @@ fn with_generic_instantiation_context_changes_primary_span_to_call_site() {
     let body_span = make_span(1, 10, 1);
     let call_span = make_span(2, 20, 1);
     let diagnostic = CompilerDiagnostic::type_mismatch(
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         builtin_type_ids::STRING,
         TypeMismatchContext::FunctionArgument,
         Some(body_span),
@@ -111,7 +112,7 @@ fn with_generic_instantiation_context_without_call_span_retains_body_primary() {
     let declaration_span = make_span(2, 20, 1);
     let body_owner = FrozenIdentityHandle::new();
     let mut diagnostic = CompilerDiagnostic::type_mismatch(
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         builtin_type_ids::STRING,
         TypeMismatchContext::FunctionArgument,
         Some(body_span),
@@ -160,7 +161,7 @@ fn with_generic_instantiation_context_retains_exact_extended_call_span() {
         LocalSpan::exact(17, 4096, &mut span_builder).unwrap(),
     );
     let diagnostic = CompilerDiagnostic::type_mismatch(
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         builtin_type_ids::STRING,
         TypeMismatchContext::FunctionArgument,
         Some(body_span),
@@ -246,7 +247,7 @@ fn generic_reanchoring_does_not_deduplicate_distinct_domainless_label_owners() {
     let body_owner = FrozenIdentityHandle::new();
     let existing_owner = FrozenIdentityHandle::new();
     let mut diagnostic = CompilerDiagnostic::type_mismatch(
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         builtin_type_ids::STRING,
         TypeMismatchContext::FunctionArgument,
         Some(body_span),
@@ -296,7 +297,7 @@ fn generic_reanchoring_deduplicates_same_domainless_label_owner() {
     let call_span = make_span(2, 20, 1);
     let body_owner = FrozenIdentityHandle::new();
     let mut diagnostic = CompilerDiagnostic::type_mismatch(
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         builtin_type_ids::STRING,
         TypeMismatchContext::FunctionArgument,
         Some(body_span),
@@ -336,7 +337,7 @@ fn with_generic_instantiation_context_adds_declaration_span_label() {
     let call_span = make_span(2, 20, 1);
     let declaration_span = make_span(3, 30, 1);
     let diagnostic = CompilerDiagnostic::type_mismatch(
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         builtin_type_ids::STRING,
         TypeMismatchContext::FunctionArgument,
         Some(body_span),
@@ -362,7 +363,7 @@ fn with_generic_instantiation_context_adds_structured_substitution_label() {
     let declaration_span = make_span(3, 30, 1);
     let parameter_name = string_table.intern("T");
     let diagnostic = CompilerDiagnostic::type_mismatch(
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         builtin_type_ids::STRING,
         TypeMismatchContext::FunctionArgument,
         Some(body_span),
@@ -409,7 +410,7 @@ fn conflicting_generic_function_argument_keeps_current_evidence_primary_span() {
         Some(function_name),
         BindingConflict {
             parameter_id: GenericParameterId(0),
-            existing_type_id: builtin_type_ids::INT,
+            existing_type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
             replacement_type_id: builtin_type_ids::STRING,
         },
         parameter_name,
@@ -437,7 +438,7 @@ fn conflicting_generic_function_argument_retains_evidence_spans() {
         Some(function_name),
         BindingConflict {
             parameter_id: GenericParameterId(0),
-            existing_type_id: builtin_type_ids::INT,
+            existing_type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
             replacement_type_id: builtin_type_ids::STRING,
         },
         parameter_name,
@@ -500,7 +501,7 @@ fn same_domain_generic_labels_remain_ownerless() {
     let body_span = make_span(1, 10, 1);
     let call_span = make_span(2, 20, 1);
     let diagnostic = CompilerDiagnostic::type_mismatch(
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         builtin_type_ids::STRING,
         TypeMismatchContext::FunctionArgument,
         Some(body_span),
@@ -580,7 +581,7 @@ fn generic_reanchoring_preserves_mixed_domain_label_owners() {
     let call_site_owner =
         FrozenIdentityHandle::for_domain(StablePackageIdentity::project_local("requester"));
     let mut diagnostic = CompilerDiagnostic::type_mismatch(
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         builtin_type_ids::STRING,
         TypeMismatchContext::FunctionArgument,
         Some(body_span),

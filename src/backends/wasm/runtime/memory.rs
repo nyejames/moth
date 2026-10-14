@@ -3,7 +3,6 @@
 use crate::backends::wasm::lir::types::WasmAbiType;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
-use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
 
 /// Physical Wasm scalar-memory representation, separate from semantic identity.
 ///
@@ -77,25 +76,13 @@ impl WasmScalarStorageKind {
         }
     }
 
-    /// Resolve profile-dependent numeric identity to physical scalar storage.
+    /// Resolve canonical numeric identity to physical scalar storage.
+    ///
+    /// Every bounded numeric identity is an exact fixed scalar, so the scalar owns its storage
+    /// and its storage follows from the scalar alone.
     #[allow(dead_code)] // The production HIR scalar-place path is not in this change.
-    pub(crate) const fn for_numeric_scalar(
-        scalar: NumericScalar,
-        profile: NumericProfile,
-    ) -> Option<Self> {
+    pub(crate) const fn for_numeric_scalar(scalar: NumericScalar) -> Option<Self> {
         match scalar {
-            NumericScalar::Int => Some(match profile.int_width {
-                IntWidth::Bits32 => Self::I32,
-                IntWidth::Bits64 => Self::I64,
-            }),
-            NumericScalar::Uint => Some(match profile.int_width {
-                IntWidth::Bits32 => Self::I32,
-                IntWidth::Bits64 => Self::I64,
-            }),
-            NumericScalar::Float => Some(match profile.float_precision {
-                FloatPrecision::Bits32 => Self::F32,
-                FloatPrecision::Bits64 => Self::F64,
-            }),
             NumericScalar::Fixed(scalar) => Self::from_fixed_scalar(scalar),
             NumericScalar::Number(_) => None,
         }

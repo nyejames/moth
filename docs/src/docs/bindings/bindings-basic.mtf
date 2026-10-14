@@ -5,13 +5,16 @@ A binding names a value.
     player_name = "Priya"
 ]
 
-Moth usually infers the type from the value.
+An unannotated numeric origin can stay unresolved while Moth considers eligible
+exact uses in its function body. If none resolves it, whole-number bindings
+default to `I32` and decimal/exponent bindings to `F64`. Other values keep their
+own inferred types.
 
 Write the type when it makes the code clearer or gives the compiler needed
 context:
 
 [codeblock, $code("moth"):
-    score Int = 10
+    score I32 = 10
     player_name String = "Priya"
 ]
 

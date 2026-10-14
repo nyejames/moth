@@ -1,0 +1,12 @@
+entry = "."
+
+# HTML-only by design: this fixture asserts exact runtime values through the
+# retained sibling-operand custom-error binding path. Typed runnable custom
+# `E!` recovery has no observed Wasm success fixture under the capability
+# validation, so only the backend whose output is asserted is declared rather
+# than pinning an unobserved Wasm disposition.
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "scalar retained sibling custom failure=true success=false"

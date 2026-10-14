@@ -1,5 +1,5 @@
 Point = |
-    x Int,
+    x I32,
 |
 
 pair |left Point, right Point| -> Point, Point:

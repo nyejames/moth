@@ -1,0 +1,65 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-TYPE-0003", "MOTH-TYPE-0003", "MOTH-TYPE-0003", "MOTH-TYPE-0003"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 1
+path = "input/i32_f64_equality/@mod.moth"
+line = 3
+column = 14
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 2
+path = "input/u32_f32_ordering/@mod.moth"
+line = 3
+column = 15
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 3
+path = "input/u64_f32_equality/@mod.moth"
+line = 3
+column = 14
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 4
+path = "input/u64_f64_ordering/@mod.moth"
+line = 3
+column = 15
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-TYPE-0003", "MOTH-TYPE-0003", "MOTH-TYPE-0003", "MOTH-TYPE-0003"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 1
+path = "input/i32_f64_equality/@mod.moth"
+line = 3
+column = 14
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 2
+path = "input/u32_f32_ordering/@mod.moth"
+line = 3
+column = 15
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 3
+path = "input/u64_f32_equality/@mod.moth"
+line = 3
+column = 14
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+occurrence = 4
+path = "input/u64_f64_ordering/@mod.moth"
+line = 3
+column = 15

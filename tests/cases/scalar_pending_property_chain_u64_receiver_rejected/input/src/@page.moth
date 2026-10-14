@@ -1,0 +1,18 @@
+-- A rejected member occurrence must keep consuming further authored property steps
+-- after its own name, so the chain's nested real call `render_count(count)` is still
+-- parsed and registers `count`'s exact U64 receiver before the delayed ordinary
+-- diagnostic is issued.
+--
+-- `count.unsupported` has no argument list of its own; stopping at that rejected name
+-- would drop the following `.next(...)` step. The nested argument is the only real U64
+-- use of `count` in this body, so a skipped witness would report the literal's I32 range
+-- or the defaulted receiver instead.
+
+render_count |value U64| -> String:
+    return cast value
+;
+
+count = 4_294_967_296
+result = count.unsupported.next(render_count(count))
+
+[:unreachable]

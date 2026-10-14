@@ -1,0 +1,12 @@
+receive_u64 |value U64| -> String:
+    return cast value
+;
+
+full = 18_446_744_073_709_551_615
+received = receive_u64(full)
+
+-- The same spelling is rejected at the default boundary in integer_literal_overflow.
+above_i32 = 2147483648
+above_i32_received = receive_u64(above_i32)
+
+[:scalar late u64 received=[received] above_i32=[above_i32_received]]

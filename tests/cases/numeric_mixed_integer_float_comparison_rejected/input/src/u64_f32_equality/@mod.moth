@@ -1,0 +1,3 @@
+whole U64 = 1
+fraction F32 = 1.0
+same = whole is fraction

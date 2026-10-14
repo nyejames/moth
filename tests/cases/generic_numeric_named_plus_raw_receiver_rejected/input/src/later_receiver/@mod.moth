@@ -1,0 +1,15 @@
+-- A raw leaf beside a named operand is not retyped by a later U64 receiver,
+-- even when the operand passes through a generic result.
+-- base is typed U8 by its own receiver, so value keeps the natural U8 result.
+
+identity type T |value T| -> T:
+    return value
+;
+
+reject_later_receiver || -> String:
+    base = 1
+    value = identity(base + 1)
+    base_u8 U8 = base
+    value_u64 U64 = value
+    return [value_u64]
+;

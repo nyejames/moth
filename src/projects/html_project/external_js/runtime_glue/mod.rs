@@ -21,7 +21,6 @@ use crate::compiler_frontend::external_packages::{
     ExternalFunctionId, ExternalPackageId, ExternalPackageRegistry,
 };
 use crate::compiler_frontend::module_compilation::{Module, ModuleExternalImport};
-use moth_lexical::numeric::profile::NumericProfile;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
@@ -54,7 +53,6 @@ pub(crate) fn generate_module_glue(
     registry: &ExternalPackageRegistry,
     html_output_path: &Path,
     release_build: bool,
-    numeric_profile: NumericProfile,
 ) -> Result<ModuleGlueResult, CompilerError> {
     let referenced_exports =
         exports::collect_referenced_exports(referenced_external_functions, registry)?;
@@ -76,7 +74,6 @@ pub(crate) fn generate_module_glue(
         &referenced_exports,
         &package_asset_paths,
         release_build,
-        numeric_profile,
     )?;
 
     let glue_output_path = paths::glue_module_output_path(module);

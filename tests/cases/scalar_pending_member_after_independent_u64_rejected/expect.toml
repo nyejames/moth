@@ -1,0 +1,26 @@
+entry = "."
+
+# The member occurrence is authored before `count`'s direct U64 receiver, so the
+# diagnostic must be the ordinary unknown-member error once `count` resolves
+# independently, never a premature default, the whole literal's I32 range or an
+# infrastructure failure. The resolved receiver identity is part of this diagnostic contract.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0048"]
+message_contains = ["'U64'"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0048"
+reason = "invalid_field_access.unknown_member"
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0048"]
+message_contains = ["'U64'"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0048"
+reason = "invalid_field_access.unknown_member"

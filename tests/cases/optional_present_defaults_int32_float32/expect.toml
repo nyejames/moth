@@ -1,7 +1,12 @@
 entry = "."
-numeric_profile = "Int32/Float32"
 
 [backends.html]
-mode = "success"
+mode = "failure"
 warnings = "forbid"
-rendered_output_exact = "int32-float32-default=16777216"
+diagnostic_codes = ["MOTH-TYPE-0001"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+path = "input/@page.moth"
+line = 3
+column = 27

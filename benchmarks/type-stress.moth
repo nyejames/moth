@@ -9,7 +9,7 @@
 -- - Cross-type dependencies
 
 -- Type alias chains
-Id as Int
+Id as I32
 UserId as Id
 AdminId as UserId
 GuestId as UserId
@@ -19,35 +19,35 @@ PublicKey as String
 
 -- Collection type aliases
 Names as {String}
-Scores as {Int}
-Values as {Float}
+Scores as {I32}
+Values as {F64}
 Records as {Record}
 
 -- Option type aliases
-MaybeInt as Int?
+MaybeInt as I32?
 MaybeString as String?
 MaybeUser as Person?
 
 -- Simple structs
 Simple = |
-    value Int,
+    value I32,
 |
 
 Pair = |
-    first Int,
-    second Int,
+    first I32,
+    second I32,
 |
 
 Triple = |
-    a Int,
-    b Float,
+    a I32,
+    b F64,
     c String,
 |
 
 -- Medium complexity structs
 Person = |
     name String,
-    age Int,
+    age I32,
     email String,
     active Bool,
 |
@@ -60,9 +60,9 @@ Address = |
 |
 
 Coordinates = |
-    latitude Float,
-    longitude Float,
-    altitude Float,
+    latitude F64,
+    longitude F64,
+    altitude F64,
 |
 
 -- Large structs
@@ -74,33 +74,33 @@ UserProfile = |
     bio String,
     avatar_url String,
     verified Bool,
-    follower_count Int,
-    following_count Int,
-    post_count Int,
+    follower_count I32,
+    following_count I32,
+    post_count I32,
 |
 
 Configuration = |
     debug_mode Bool,
-    max_retries Int,
-    timeout_ms Int,
+    max_retries I32,
+    timeout_ms I32,
     base_url String,
     api_key String,
     cache_enabled Bool,
-    cache_ttl_seconds Int,
+    cache_ttl_seconds I32,
     log_level String,
 |
 
 MetricSnapshot = |
-    timestamp Int,
-    cpu_percent Float,
-    memory_mb Float,
-    disk_read_bytes Int,
-    disk_write_bytes Int,
-    network_rx_bytes Int,
-    network_tx_bytes Int,
-    process_count Int,
-    thread_count Int,
-    uptime_seconds Int,
+    timestamp I32,
+    cpu_percent F64,
+    memory_mb F64,
+    disk_read_bytes I32,
+    disk_write_bytes I32,
+    network_rx_bytes I32,
+    network_tx_bytes I32,
+    process_count I32,
+    thread_count I32,
+    uptime_seconds I32,
 |
 
 -- Structs with type alias fields
@@ -109,28 +109,28 @@ Document = |
     title String,
     content String,
     author UserId,
-    created_at Int,
-    updated_at Int,
+    created_at I32,
+    updated_at I32,
 |
 
 Session = |
     id SessionId,
     user_id UserId,
     token TokenHash,
-    expires_at Int,
-    created_at Int,
+    expires_at I32,
+    created_at I32,
 |
 
 -- Cross-dependent structs
 Node = |
-    id Int,
+    id I32,
     value String,
 |
 
 Edge = |
-    from_id Int,
-    to_id Int,
-    weight Float,
+    from_id I32,
+    to_id I32,
+    weight F64,
 |
 
 Graph = |
@@ -141,7 +141,7 @@ Graph = |
 Record = |
     key String,
     value String,
-    timestamp Int,
+    timestamp I32,
     metadata String,
 |
 
@@ -153,7 +153,7 @@ Direction :: North, South, East, West;
 -- Choice types - single payload variants
 OptionalInt ::
     Missing,
-    Some | value Int |,
+    Some | value I32 |,
 ;
 
 OptionalString ::
@@ -165,23 +165,23 @@ OptionalString ::
 Result ::
     Success,
     Error | message String |,
-    Timeout | duration_ms Int |,
+    Timeout | duration_ms I32 |,
     InvalidInput | field String, reason String |,
 ;
 
 Event ::
-    Click | x Int, y Int |,
+    Click | x I32, y I32 |,
     KeyPress | key String, modifiers String |,
-    Scroll | delta_x Float, delta_y Float |,
-    Resize | width Int, height Int |,
+    Scroll | delta_x F64, delta_y F64 |,
+    Resize | width I32, height I32 |,
 ;
 
 Message ::
     Text | content String |,
-    Image | url String, alt String, width Int, height Int |,
-    Video | url String, duration_ms Int |,
-    File | name String, size_bytes Int, mime_type String |,
-    Location | latitude Float, longitude Float, label String |,
+    Image | url String, alt String, width I32, height I32 |,
+    Video | url String, duration_ms I32 |,
+    File | name String, size_bytes I32, mime_type String |,
+    Location | latitude F64, longitude F64, label String |,
 ;
 
 -- Complex choice with many variants
@@ -201,17 +201,17 @@ Expression ::
 Pattern ::
     Wildcard,
     Exact | value String |,
-    Range | min Int, max Int |,
+    Range | min I32, max I32 |,
     Regex | pattern String |,
     Compound | patterns {String} |,
 ;
 
 -- Receiver methods - immutable
-get_area |this Rectangle| -> Float:
+get_area |this Rectangle| -> F64:
     return this.width * this.height
 ;
 
-get_perimeter |this Rectangle| -> Float:
+get_perimeter |this Rectangle| -> F64:
     return 2.0 * (this.width + this.height)
 ;
 
@@ -223,7 +223,7 @@ get_center |this Coordinates| -> Coordinates:
     return Coordinates(this.latitude, this.longitude, 0.0)
 ;
 
-distance_to |this Coordinates, other Coordinates| -> Float:
+distance_to |this Coordinates, other Coordinates| -> F64:
     lat_diff = other.latitude - this.latitude
     lon_diff = other.longitude - this.longitude
     return (lat_diff * lat_diff) + (lon_diff * lon_diff)
@@ -255,7 +255,7 @@ bump |this ~Counter|:
     this.value = this.value + 1
 ;
 
-add |this ~Counter, amount Int|:
+add |this ~Counter, amount I32|:
     this.value = this.value + amount
 ;
 
@@ -263,12 +263,12 @@ reset |this ~Counter|:
     this.value = 0
 ;
 
-scale |this ~Rectangle, factor Float|:
+scale |this ~Rectangle, factor F64|:
     this.width = this.width * factor
     this.height = this.height * factor
 ;
 
-translate |this ~Coordinates, lat_offset Float, lon_offset Float|:
+translate |this ~Coordinates, lat_offset F64, lon_offset F64|:
     this.latitude = this.latitude + lat_offset
     this.longitude = this.longitude + lon_offset
 ;
@@ -279,15 +279,15 @@ update_email |this ~Person, new_email String|:
 
 -- Method call chains
 Container = |
-    items {Int},
-    count Int,
+    items {I32},
+    count I32,
 |
 
-add_item |this ~Container, item Int|:
+add_item |this ~Container, item I32|:
     this.count = this.count + 1
 ;
 
-get_sum |this Container| -> Int:
+get_sum |this Container| -> I32:
     total ~= 0
     loop this.items |item|:
         total = total + item
@@ -295,7 +295,7 @@ get_sum |this Container| -> Int:
     return total
 ;
 
-get_average |this Container| -> Float:
+get_average |this Container| -> F64:
     if this.count is 0:
         return 0.0
     ;
@@ -307,7 +307,7 @@ NestedContainer = |
     containers {Container},
 |
 
-add_to_first |this ~NestedContainer, value Int|:
+add_to_first |this ~NestedContainer, value I32|:
     first ~= this.containers.get(0) catch:
         then Container({0}, 0)
     ;
@@ -316,15 +316,15 @@ add_to_first |this ~NestedContainer, value Int|:
 
 -- Struct constructor patterns
 Rectangle = |
-    width Float,
-    height Float,
+    width F64,
+    height F64,
 |
 
 Counter = |
-    value Int,
+    value I32,
 |
 
-make_square |size Float| -> Rectangle:
+make_square |size F64| -> Rectangle:
     return Rectangle(size, size)
 ;
 
@@ -365,7 +365,7 @@ NodeLookup = |
     nodes {Node},
 |
 
-find_node |this NodeLookup, id Int| -> Node?:
+find_node |this NodeLookup, id I32| -> Node?:
     loop this.nodes |node|:
         if node.id is id:
             return node
@@ -383,7 +383,7 @@ EdgeLookup = |
     edges {Edge},
 |
 
-find_edges_from |this EdgeLookup, from_id Int| -> {Edge}:
+find_edges_from |this EdgeLookup, from_id I32| -> {Edge}:
     result ~{Edge} = {}
     loop this.edges |edge|:
         if edge.from_id is from_id:

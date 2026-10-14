@@ -1,11 +1,11 @@
--- Task 5A (Int32 profile): typed Uint ranges reuse the unsigned
+-- Typed U32 ranges reuse the unsigned
 -- candidate/termination shape. Ascending/descending, implicit/explicit steps,
--- empty/equal/inclusive bounds, a Uint value binding with an Int iteration
--- index, break/continue, and the zero and Uint32-max terminal endpoints.
+-- empty/equal/inclusive bounds, a U32 value binding with an I32 iteration
+-- index, break/continue, and the zero and U32-max terminal endpoints.
 
-asc_lo Uint = 0
-asc_hi Uint = 5
-asc_total ~Uint = 0
+asc_lo U32 = 0
+asc_hi U32 = 5
+asc_total ~U32 = 0
 asc_count ~= 0
 asc_last_index ~= 0
 loop asc_lo to & asc_hi |value, index|:
@@ -14,18 +14,18 @@ loop asc_lo to & asc_hi |value, index|:
     asc_last_index = copy index
 ;
 
-step_two Uint = 2
-stepped_total ~Uint = 0
+step_two U32 = 2
+stepped_total ~U32 = 0
 stepped_count ~= 0
 loop asc_lo to & asc_hi by step_two |value|:
     stepped_total = stepped_total + value
     stepped_count = stepped_count + 1
 ;
 
-desc_total ~Uint = 0
+desc_total ~U32 = 0
 desc_count ~= 0
-desc_last ~Uint = 99
-desc_first_val ~Uint = 99
+desc_last ~U32 = 99
+desc_first_val ~U32 = 99
 loop asc_hi to & asc_lo |item, idx|:
     desc_total = desc_total + item
     desc_count = desc_count + 1
@@ -34,7 +34,7 @@ loop asc_hi to & asc_lo |item, idx|:
         desc_first_val = copy item
     ;
 ;
-desc_step_total ~Uint = 0
+desc_step_total ~U32 = 0
 desc_step_count ~= 0
 loop asc_hi to & asc_lo by step_two |value|:
     desc_step_total = desc_step_total + value
@@ -50,37 +50,38 @@ loop asc_hi to & asc_hi |value|:
     equal_inclusive_count = equal_inclusive_count + 1
 ;
 
-zero_terminal ~Uint = 99
+zero_terminal ~U32 = 99
 zero_count ~= 0
 loop step_two to & asc_lo by step_two |value|:
     zero_terminal = copy value
     zero_count = zero_count + 1
 ;
 
-max_lo Uint = 4294967293
-max_hi Uint = 4294967295
-max_last ~Uint = 0
+max_lo U32 = 4294967293
+max_hi U32 = 4294967295
+max_last ~U32 = 0
 max_count ~= 0
 loop max_lo to & max_hi |value|:
     max_last = copy value
     max_count = max_count + 1
 ;
 
-mixed_lo Uint = 0
-mixed_hi Int = 3
-mixed_step Float = 1.0
-mixed_total ~Float = 0.0
+mixed_lo U32 = 0
+mixed_hi F64 = 3.0
+mixed_step F64 = 1.0
+mixed_total ~F64 = 0.0
 mixed_count ~= 0
-loop mixed_lo to & mixed_hi by mixed_step |value|:
+mixed_lower F64 = cast mixed_lo
+loop mixed_lower to & mixed_hi by mixed_step |value|:
     mixed_total = mixed_total + value
     mixed_count = mixed_count + 1
 ;
 
-float_end Float = 3.0
-bound_step Uint = 1
-bound_total ~Float = 0.0
+float_end F64 = 3.0
+bound_step F64 = 1.0
+bound_total ~F64 = 0.0
 bound_count ~= 0
-loop mixed_lo to & float_end by bound_step |value|:
+loop mixed_lower to & float_end by bound_step |value|:
     bound_total = bound_total + value
     bound_count = bound_count + 1
 ;
@@ -93,7 +94,7 @@ loop asc_lo to & asc_hi |value|:
     ;
     broken_count = broken_count + 10
 ;
-continued_total ~Uint = 0
+continued_total ~U32 = 0
 loop asc_lo to & asc_hi |value|:
     if value is 2:
         continue
@@ -101,7 +102,7 @@ loop asc_lo to & asc_hi |value|:
     continued_total = continued_total + value
 ;
 
-render |asc_total Uint, asc_count Int, asc_last_index Int, stepped_total Uint, stepped_count Int, desc_total Uint, desc_count Int, desc_last Uint, desc_first_val Uint, desc_step_total Uint, desc_step_count Int, empty_count Int, equal_inclusive_count Int, zero_terminal Uint, zero_count Int, max_last Uint, max_count Int, mixed_total Float, mixed_count Int, bound_total Float, bound_count Int, broken_count Int, continued_total Uint| -> String:
+render |asc_total U32, asc_count I32, asc_last_index I32, stepped_total U32, stepped_count I32, desc_total U32, desc_count I32, desc_last U32, desc_first_val U32, desc_step_total U32, desc_step_count I32, empty_count I32, equal_inclusive_count I32, zero_terminal U32, zero_count I32, max_last U32, max_count I32, mixed_total F64, mixed_count I32, bound_total F64, bound_count I32, broken_count I32, continued_total U32| -> String:
     assert(asc_count is 6)
     assert(asc_last_index is 5)
     assert(stepped_total is 6)

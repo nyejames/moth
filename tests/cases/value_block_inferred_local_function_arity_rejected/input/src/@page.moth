@@ -1,6 +1,6 @@
 -- An inferred local receives one value, even inside a function with two
 -- success results.
-describe |count Int| -> String, Int:
+describe |count I32| -> String, I32:
     label = if count > 2:
         then "many", count
     else

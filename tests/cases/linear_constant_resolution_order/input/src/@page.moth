@@ -3,6 +3,6 @@
 
 @helper b
 
-a #Int = b + 1
+a #I32 = b + 1
 
 [:[a]]

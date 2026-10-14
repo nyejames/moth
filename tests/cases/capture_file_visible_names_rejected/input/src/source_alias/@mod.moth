@@ -1,0 +1,5 @@
+capture_binding |maybe I32?| -> I32:
+    return if maybe is |AccountId| then AccountId else 0
+;
+
+AccountId as I32

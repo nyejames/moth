@@ -207,14 +207,30 @@ fn parsed_type_to_signature_type(
     >,
 ) -> Result<ExternalSignatureType, CompilerError> {
     match type_name {
-        "Int" => Ok(ExternalSignatureType::NativeInt),
-        "Uint" => Ok(ExternalSignatureType::NativeUint),
-        "Float" => Ok(ExternalSignatureType::NativeFloat),
+        // The delivered foreign subset: only the fixed scalars the JS glue has an adapter for
+        // (`FixedScalarAdapter::for_scalar`). Any other fixed scalar is an ordinary unknown name
+        // here, so the annotation vocabulary stays inside the adapter capability instead of
+        // deferring the rejection to the glue.
+        //
+        // The retired `Int`, `Uint` and `Float` spellings are ordinary unknown names too; they
+        // gain no alias, and `I32`/`U32`/`F64` are their exact replacements.
+        "I32" => Ok(ExternalSignatureType::Abi(ExternalAbiType::Fixed(
+            FixedScalar::I32,
+        ))),
+        "I64" => Ok(ExternalSignatureType::Abi(ExternalAbiType::Fixed(
+            FixedScalar::I64,
+        ))),
         "U32" => Ok(ExternalSignatureType::Abi(ExternalAbiType::Fixed(
             FixedScalar::U32,
         ))),
+        "U64" => Ok(ExternalSignatureType::Abi(ExternalAbiType::Fixed(
+            FixedScalar::U64,
+        ))),
         "F32" => Ok(ExternalSignatureType::Abi(ExternalAbiType::Fixed(
             FixedScalar::F32,
+        ))),
+        "F64" => Ok(ExternalSignatureType::Abi(ExternalAbiType::Fixed(
+            FixedScalar::F64,
         ))),
         "Bool" => Ok(ExternalSignatureType::Abi(ExternalAbiType::Bool)),
         "String" => Ok(ExternalSignatureType::Abi(ExternalAbiType::Utf8Str)),

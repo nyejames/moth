@@ -7,7 +7,8 @@
 //!      rendered strings.
 
 use super::{RuntimeWrapperSitePlanBuilder, inject_runtime_slot_fill};
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::TemplateSegmentOrigin;
 use crate::compiler_frontend::ast::templates::template::{SlotKey, Style, TemplateType};
@@ -29,8 +30,15 @@ use crate::compiler_frontend::compiler_errors::ErrorType;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
 
-fn bool_expression(value: bool) -> Expression {
-    Expression::bool(value, None, ValueMode::ImmutableOwned)
+fn bool_expression(
+    expressions: &mut AstExpressionBuilder,
+    values: &mut ConstValueStore,
+    value: bool,
+) -> ExprId {
+    expressions
+        .bool(values, value, None, ValueMode::ImmutableOwned)
+        .expect("test bool is a valid single completed expression")
+        .id()
 }
 
 fn assert_authority_error(
@@ -58,7 +66,6 @@ fn push_slot_plan(store: &mut TemplateIrStore) -> TemplateSlotPlanId {
     store.push_slot_plan(TemplateSlotPlan {
         contribution_sources: vec![],
         slot_sites: vec![],
-        span: None,
     })
 }
 
@@ -441,11 +448,13 @@ fn versioned_wrapper_keeps_keyed_wrapper_context_on_nested_child() {
 
 #[test]
 fn repeated_wrapper_applications_preserve_versioned_expression_site_ids() {
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut values = ConstValueStore::default();
     let mut store = TemplateIrStore::new();
     let mut builder = TemplateIrBuilder::new(&mut store);
     let slot_node = builder.push_slot_node(SlotKey::Default, None);
     let conditional_root = builder.push_conditional_node(
-        TemplateBranchSelector::Bool(bool_expression(true)),
+        TemplateBranchSelector::Bool(bool_expression(&mut expressions, &mut values, true)),
         slot_node,
         None,
     );
@@ -518,6 +527,8 @@ fn copied_conditional_selector_site(
 
 #[test]
 fn wrapper_fill_injects_through_conditional_loop_and_child() {
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut values = ConstValueStore::default();
     let mut store = TemplateIrStore::new();
     let plan = push_slot_plan(&mut store);
     let fill_root = contribution_fill(&mut store, plan);
@@ -525,7 +536,7 @@ fn wrapper_fill_injects_through_conditional_loop_and_child() {
     let mut builder = TemplateIrBuilder::new(&mut store);
     let conditional_slot = builder.push_slot_node(SlotKey::Default, None);
     let conditional_root = builder.push_conditional_node(
-        TemplateBranchSelector::Bool(bool_expression(true)),
+        TemplateBranchSelector::Bool(bool_expression(&mut expressions, &mut values, true)),
         conditional_slot,
         None,
     );
@@ -533,7 +544,7 @@ fn wrapper_fill_injects_through_conditional_loop_and_child() {
     let aggregate_slot = builder.push_slot_node(SlotKey::Default, None);
     let loop_root = builder.push_loop_node(
         TemplateLoopHeader::Conditional {
-            condition: Box::new(bool_expression(true)),
+            condition: bool_expression(&mut expressions, &mut values, true),
         },
         loop_slot,
         Some(aggregate_slot),

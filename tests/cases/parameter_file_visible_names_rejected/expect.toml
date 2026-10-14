@@ -1,0 +1,28 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "exact"
+warning_codes = ["MOTH-RULE-0021", "MOTH-RULE-0021", "MOTH-RULE-0021"]
+diagnostic_codes = ["MOTH-RULE-0038", "MOTH-RULE-0038", "MOTH-RULE-0038"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0038"
+occurrence = 1
+path = "input/import_alias/@mod.moth"
+line = 3
+column = 20
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0038"
+occurrence = 2
+path = "input/source_alias/@mod.moth"
+line = 1
+column = 20
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0038"
+occurrence = 3
+path = "input/source_trait/@mod.moth"
+line = 1
+column = 20

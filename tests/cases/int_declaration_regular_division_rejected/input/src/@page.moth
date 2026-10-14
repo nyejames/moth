@@ -1,1 +1,1 @@
-value Int = 5 / 2
+value I32 = 5 / 2

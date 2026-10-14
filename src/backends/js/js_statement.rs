@@ -28,7 +28,9 @@ use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{
     HirLocalDestination, HirStatement, HirStatementKind, HirWriteTarget,
 };
-use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
+use crate::compiler_frontend::hir::terminators::{
+    HirAssertionMessageEvaluation, HirFallibleOperation, HirTerminator,
+};
 
 impl<'hir> JsEmitter<'hir> {
     pub(crate) fn emit_block_statements(
@@ -51,24 +53,9 @@ impl<'hir> JsEmitter<'hir> {
             HirStatementKind::Call {
                 target,
                 args,
-                result,
+                results,
             } => {
-                self.emit_call_statement(target, *args, result)?;
-            }
-
-            HirStatementKind::CastOp {
-                policy,
-                source,
-                result,
-            } => {
-                let source_expr = self.lower_expr(*source)?;
-                let cast_expression =
-                    self.lower_cast_op_expression(*policy, &source_expr, statement.id)?;
-                if let Some(result) = result {
-                    self.emit_value_destination(*result, &cast_expression)?;
-                } else {
-                    self.emit_line(&format!("{cast_expression};"));
-                }
+                self.emit_call_statement(target, *args, results)?;
             }
 
             HirStatementKind::MapOp {
@@ -92,7 +79,7 @@ impl<'hir> JsEmitter<'hir> {
             } => {
                 // WHAT: dispatch a checked operation through the helper family selected from its
                 //       semantic result domain.
-                // WHY: the profile's carrier determines both JS arithmetic and domain bounds.
+                // WHY: the domain's carrier determines both JS arithmetic and the domain bounds.
                 self.emit_numeric_op_statement(
                     *op,
                     *failure_mode,
@@ -138,10 +125,8 @@ impl<'hir> JsEmitter<'hir> {
                 failure_mode,
                 result,
             } => {
-                // WHAT: dispatch a finite-Float formatting operation to the JS runtime helper that
-                //       implements Moth's formatting contract, then either wrap the carrier for
-                //       trap mode or assign the carrier directly for builtin-Error recovery mode.
-                // WHY: Float formatting is a language builtin with an explicit failure mode; the
+                // WHAT: format at the source precision and consume the helper's ABI envelope.
+                // WHY: binary-float formatting is a language builtin with an explicit failure mode; the
                 //      backend must map it to the helper that normalizes JS number text to the
                 //      Moth contract instead of using target-native stringification directly.
                 self.emit_format_float_statement(*failure_mode, *source, *result)?;
@@ -152,8 +137,8 @@ impl<'hir> JsEmitter<'hir> {
                 failure_mode,
                 result,
             } => {
-                // WHAT: validates a finite Float at its selected profile precision.
-                // WHY: external values enter the same finite, rounded carrier as every other Float.
+                // WHAT: validates a finite binary-float at its exact binary precision.
+                // WHY: external values enter the same finite, rounded carrier as other binary floats.
                 self.emit_validate_float_statement(*failure_mode, *source, *result)?;
             }
 
@@ -180,13 +165,7 @@ impl<'hir> JsEmitter<'hir> {
         Ok(())
     }
 
-    /// Lower a `HirStatementKind::MapOp` into the appropriate runtime helper call.
-    ///
-    /// WHAT: dispatches `get`, `contains`, `set`, `remove`, `clear`, and `length` to their
-    /// corresponding `__moth_map_*` helpers, validates arity against the HIR contract, and emits
-    /// a result assignment when the statement carries a destination local.
-    /// WHY: map operations are language builtins, not external calls; the backend must map them
-    ///      to the JS runtime helpers that enforce the branded-map representation.
+    /// Emit an infallible map operation using the existing runtime ABI.
     fn emit_map_op_statement(
         &mut self,
         op: HirMapOp,
@@ -194,6 +173,21 @@ impl<'hir> JsEmitter<'hir> {
         args: HirValueRange,
         result: &Option<HirLocalDestination>,
     ) -> Result<(), CompilerError> {
+        let call = self.lower_map_operation(op, receiver, args)?;
+        if let Some(result) = result {
+            self.emit_value_destination(*result, &call)?;
+        } else {
+            self.emit_line(&format!("{call};"));
+        }
+        Ok(())
+    }
+
+    fn lower_map_operation(
+        &mut self,
+        op: HirMapOp,
+        receiver: HirValueId,
+        args: HirValueRange,
+    ) -> Result<String, CompilerError> {
         let hir = self.hir;
         let args = hir.expressions.values(args);
         // Lower the receiver map first so helper-call argument order mirrors HIR order.
@@ -234,17 +228,10 @@ impl<'hir> JsEmitter<'hir> {
             )
         };
 
-        // Emit either an assignment to a destination local or a standalone call.
-        if let Some(result) = result {
-            self.emit_value_destination(*result, &call)?;
-        } else {
-            self.emit_line(&format!("{call};"));
-        }
-
-        Ok(())
+        Ok(call)
     }
 
-    /// Lower a checked HIR numeric operation through its profile-selected carrier family.
+    /// Lower a checked HIR numeric operation through its domain-selected carrier family.
     ///
     /// WHAT: validates HIR arity, lowers operands, selects the operation helper and appends
     ///       semantic integer bounds when that family uses an integer carrier.
@@ -258,6 +245,20 @@ impl<'hir> JsEmitter<'hir> {
         result: HirLocalDestination,
         statement: HirNodeId,
     ) -> Result<(), CompilerError> {
+        let (value, proven) = self.lower_numeric_operation(op, operands, statement)?;
+        if proven {
+            self.emit_value_destination(result, &value)
+        } else {
+            self.emit_numeric_carrier_assignment(value, failure_mode, result)
+        }
+    }
+
+    fn lower_numeric_operation(
+        &mut self,
+        op: HirNumericOp,
+        operands: &HirNumericOperands,
+        statement: HirNodeId,
+    ) -> Result<(String, bool), CompilerError> {
         // Guard against arity mismatch between HIR and the backend.
         let is_unary = op.is_unary();
         let operands_are_unary = matches!(operands, HirNumericOperands::Unary { .. });
@@ -275,38 +276,22 @@ impl<'hir> JsEmitter<'hir> {
             }
         };
 
-        let carrier = JsNumericCarrier::for_scalar(op.domain, self.config.numeric_profile)
-            .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "JS backend has no numeric carrier for {:?}",
-                    op.domain
-                ))
-            })?;
+        let carrier = JsNumericCarrier::for_scalar(op.domain).ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "JS backend has no numeric carrier for {:?}",
+                op.domain
+            ))
+        })?;
 
-        // WHAT: proven-safe integer operations skip the checked helper and its runtime range
-        //       predicate entirely. Trap mode assigns the raw scalar result; ReturnError mode
-        //       assigns the same native result inside the existing `{tag, value}` success
-        //       carrier its unchanged HIR consumers branch on.
-        // WHY: the numeric proof table guarantees every relevant failure is impossible, so the
-        //       checked machinery would be unreachable at runtime while the carrier itself stays
-        //       required for recovery-mode consumers.
-        if self
-            .numeric_proofs
-            .integer_operation_is_safe(statement, self.config.numeric_profile)
+        // A proof removes only checked helper machinery, never the Invoke's failure edge.
+        if self.numeric_proofs.integer_operation_is_safe(statement)
             && let Some(proven_expression) =
                 self.proven_integer_operation_expression(op, &carrier, &lowered_args)
         {
-            let assigned_value = match failure_mode {
-                NumericFailureMode::Trap | NumericFailureMode::Infallible => proven_expression,
-                NumericFailureMode::ReturnError => {
-                    format!("{{ tag: \"ok\", value: {proven_expression} }}")
-                }
-            };
-            self.emit_value_destination(result, &assigned_value)?;
-            return Ok(());
+            return Ok((proven_expression, true));
         }
 
-        let (helper_name, bounds) = js_numeric_helper_for_op(op, self.config.numeric_profile)?;
+        let (helper_name, bounds) = js_numeric_helper_for_op(op)?;
         if let NumericScalar::Number(scale) = op.domain
             && matches!(
                 op.operator,
@@ -320,19 +305,13 @@ impl<'hir> JsEmitter<'hir> {
             lowered_args.push(max);
         }
 
-        let helper_call = format!("{helper_name}({})", lowered_args.join(", "));
-        self.emit_numeric_carrier_assignment(helper_call, failure_mode, result)
+        Ok((format!("{helper_name}({})", lowered_args.join(", ")), false))
     }
 
     /// Renders exact native-carrier arithmetic for one proven-safe integer operation.
     ///
-    /// WHAT: proven operations evaluate their already-lowered operands once, in source order, and
-    ///       produce the raw scalar with no checked helper call. Trap mode assigns that raw
-    ///       scalar directly; ReturnError mode wraps it in the existing `{tag, value}` success
-    ///       carrier. Number carriers use exact JS Number arithmetic because the proven result
-    ///       lies inside its semantic domain (at most U32 wide, well below the exact-Number
-    ///       limit); 64-bit carriers stay on exact BigInt arithmetic with the same truncating
-    ///       division and dividend-signed remainder semantics the checked helpers implement.
+    /// Proven operations evaluate operands once and preserve their exact Number or BigInt
+    /// domain, including truncating division and dividend-signed remainder.
     /// WHY: JS still produces `-0` on the Number carrier where Moth has one canonical integer
     ///       zero — `0 * negative`, `0 / negative`, `negative % divisor` dividing evenly and
     ///       negating `0` — so those operations renormalise with `+ 0` without re-evaluating any
@@ -394,32 +373,7 @@ impl<'hir> JsEmitter<'hir> {
         }
     }
 
-    /// Lowers one CastOp policy, eliding the checked-narrowing helpers when the proof table
-    /// proves the narrowing safe.
-    fn lower_cast_op_expression(
-        &mut self,
-        policy: BuiltinCastPolicyId,
-        value: &str,
-        statement: HirNodeId,
-    ) -> Result<String, CompilerError> {
-        if let Some(proven_expression) =
-            self.proven_narrowing_expression(policy, value, statement)?
-        {
-            return Ok(proven_expression);
-        }
-
-        js_cast_expression_for_policy(policy, value, self.config.numeric_profile)
-    }
-
-    /// Renders the carrier-only conversion for one proven-safe fallible integer narrowing.
-    ///
-    /// WHAT: proven narrowing keeps the original Number/BigInt carrier conversion and the
-    ///       `{tag, value}` success-carrier shape the unchanged HIR requires for branch and
-    ///       unwrap consumers, and omits only the range predicate the checked cast helper
-    ///       performs.
-    /// WHY: the proof table guarantees the source value is inside the target range, so the
-    ///       checked helper's runtime range test is unreachable machinery, while the carrier
-    ///       itself is still consumed downstream.
+    /// Render the raw carrier conversion for a proven-safe fallible integer narrowing.
     fn proven_narrowing_expression(
         &self,
         policy: BuiltinCastPolicyId,
@@ -433,26 +387,21 @@ impl<'hir> JsEmitter<'hir> {
         let BuiltinCastPolicyId::NumericConversion { source, target } = policy else {
             return Ok(None);
         };
-        let conversion = JsNumericConversion::classify(source, target, self.config.numeric_profile)
+        let conversion = JsNumericConversion::classify(source, target)
             .expect("proven narrowing policy must classify");
-        let source_carrier = JsNumericCarrier::for_scalar(source, self.config.numeric_profile)
+        let source_carrier = JsNumericCarrier::for_scalar(source)
             .expect("classified narrowing source has a JS carrier");
         let proven = conversion
             .proven_safe_integer_narrowing(source_carrier)
             .expect("proven narrowing applies to checked integer conversions");
 
-        Ok(Some(format!(
-            "{{ tag: \"ok\", value: {} }}",
-            proven.expression(value, source, target)
-        )))
+        Ok(Some(proven.expression(value, source, target)))
     }
 
-    /// Whether one CastOp statement's numeric conversion is a proven-safe integer narrowing.
+    /// Whether one Invoke cast's numeric conversion is a proven-safe integer narrowing.
     ///
-    /// WHAT: mirrors the statement lowering gate — only fallible integer-to-integer numeric
-    ///       conversions whose statement the proof table proves are eligible.
-    /// WHY: the demand scan and the statement lowering must agree exactly on which cast policies
-    ///       no longer need their checked runtime helpers.
+    /// WHAT: only fallible integer-to-integer conversions proven at their Invoke node qualify.
+    /// WHY: demand scans and operation lowering must agree on elided checked helpers.
     pub(crate) fn integer_narrowing_is_proven(
         &self,
         statement: HirNodeId,
@@ -461,9 +410,7 @@ impl<'hir> JsEmitter<'hir> {
         let BuiltinCastPolicyId::NumericConversion { source, target } = policy else {
             return false;
         };
-        let Ok(conversion) =
-            JsNumericConversion::classify(source, target, self.config.numeric_profile)
-        else {
+        let Ok(conversion) = JsNumericConversion::classify(source, target) else {
             return false;
         };
         if !matches!(
@@ -473,8 +420,7 @@ impl<'hir> JsEmitter<'hir> {
             return false;
         }
 
-        self.numeric_proofs
-            .integer_narrowing_is_safe(statement, self.config.numeric_profile)
+        self.numeric_proofs.integer_narrowing_is_safe(statement)
     }
 
     /// Emit the range candidate into JS-local scratch, then commit only a finite in-bound value.
@@ -492,13 +438,11 @@ impl<'hir> JsEmitter<'hir> {
         let step_expr = self.lower_expr(step)?;
         let end_expr = self.lower_expr(end)?;
         let ascending_expr = self.lower_expr(ascending)?;
-        let precision = domain
-            .binary_float_precision(self.config.numeric_profile)
-            .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "JS backend received a non-float range candidate domain {domain:?}"
-                ))
-            })?;
+        let precision = domain.binary_float_precision().ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "JS backend received a non-float range candidate domain {domain:?}"
+            ))
+        })?;
 
         let direction_name = self.next_temp_identifier("__float_range_ascending");
         let candidate_name = self.next_temp_identifier("__float_range_candidate");
@@ -506,14 +450,12 @@ impl<'hir> JsEmitter<'hir> {
         let unrounded_candidate = format!(
             "({direction_name} ? ({current_expr} + {step_expr}) : ({current_expr} - {step_expr}))"
         );
+        // D15: an F16 range step completes at F16 at each candidate, so the selected domain
+        // keeps its precision instead of widening to F32.
         let candidate_expr = match precision {
+            BinaryFloatPrecision::Binary16 => format!("Math.f16round({unrounded_candidate})"),
             BinaryFloatPrecision::Binary32 => format!("Math.fround({unrounded_candidate})"),
             BinaryFloatPrecision::Binary64 => unrounded_candidate,
-            BinaryFloatPrecision::Binary16 => {
-                return Err(CompilerError::compiler_error(
-                    "JS backend does not support F16 range candidates",
-                ));
-            }
         };
         let (ascending_comparison, descending_comparison) =
             if inclusive { ("<=", ">=") } else { ("<", ">") };
@@ -538,11 +480,12 @@ impl<'hir> JsEmitter<'hir> {
         Ok(())
     }
 
-    /// Lower a `HirStatementKind::FormatFloat` into the profile-precision binary-float formatter.
+    /// Lower a `HirStatementKind::FormatFloat` into the exact-precision binary-float formatter.
     ///
-    /// WHAT: emits `__moth_format_float(source, precision, "Float")` and assigns either the scalar
-    ///       formatted string (trap mode) or the fallible carrier (return-error mode).
-    /// WHY: template and cast formatting share one precision-aware helper and result contract.
+    /// WHAT: derives the source precision and canonical name, then consumes the runtime
+    /// formatter's ABI envelope as a scalar string.
+    /// WHY: template and cast formatting share one precision-aware helper and result contract,
+    ///      and the source row owns the resolved precision.
     fn emit_format_float_statement(
         &mut self,
         failure_mode: NumericFailureMode,
@@ -550,13 +493,20 @@ impl<'hir> JsEmitter<'hir> {
         result: HirLocalDestination,
     ) -> Result<(), CompilerError> {
         let source_expr = self.lower_expr(source)?;
-        let precision =
-            binary_float_precision_bits(self.config.numeric_profile.float_precision.into());
-        let helper_call = format!("__moth_format_float({source_expr}, {precision}, \"Float\")");
+        let (scalar, precision) = self.float_source_scalar(source, "FormatFloat")?;
+        let helper_call = format!(
+            "__moth_format_float({source_expr}, {}, \"{scalar}\")",
+            binary_float_precision_bits(precision)
+        );
         self.emit_numeric_carrier_assignment(helper_call, failure_mode, result)
     }
 
-    /// Lower a `HirStatementKind::ValidateFloat` into the profile-aware finite-Float helper call.
+    /// Lower a `HirStatementKind::ValidateFloat` into the exact-precision finite binary-float helper.
+    ///
+    /// WHAT: derives the validated source's own binary-float precision and emits it as the
+    ///       helper's precision argument.
+    /// WHY: a validated boundary value carries a fixed `F16`/`F32`/`F64` type, so the exact
+    ///      source type owns the rounding step.
     fn emit_validate_float_statement(
         &mut self,
         failure_mode: NumericFailureMode,
@@ -564,17 +514,43 @@ impl<'hir> JsEmitter<'hir> {
         result: HirLocalDestination,
     ) -> Result<(), CompilerError> {
         let source_expr = self.lower_expr(source)?;
-        let helper_call = format!("__moth_float_validate({source_expr})");
+        let (_scalar, precision) = self.float_source_scalar(source, "binary-float validation")?;
+        let helper_call = format!(
+            "__moth_float_validate({source_expr}, {})",
+            binary_float_precision_bits(precision)
+        );
         self.emit_numeric_carrier_assignment(helper_call, failure_mode, result)
     }
 
-    /// Emit the result assignment shared by checked numeric helper calls.
+    /// The exact binary-float domain and precision of one float statement's source expression.
     ///
-    /// WHAT: wraps `helper_call` in `__moth_numeric_trap` for trap mode or assigns the carrier
-    ///       directly for return-error mode, then assigns the value to `result`.
-    /// WHY: `NumericOp`, `FormatFloat`, and `ValidateFloat` all use the same result-local carrier
-    ///      contract; keeping the assignment logic in one helper prevents near-duplicate lowering
-    ///      code for each statement kind.
+    /// WHAT: derives the domain from the source row's own type through the canonical
+    ///       `TypeId`-to-domain owner.
+    /// WHY: FormatFloat, ValidateFloat and the prelude demand scan must agree on one precision
+    ///      source, and an exact `F16`/`F32`/`F64` value is never rounded to another precision.
+    pub(crate) fn float_source_scalar(
+        &self,
+        source: HirValueId,
+        statement_name: &'static str,
+    ) -> Result<(NumericScalar, BinaryFloatPrecision), CompilerError> {
+        let source_type = self.hir.expressions.expression(source).ty;
+        let scalar = NumericScalar::from_type_id(source_type, self.type_environment).ok_or_else(
+            || {
+                CompilerError::compiler_error(format!(
+                    "JS backend received {statement_name} source with non-binary-float type {source_type:?}"
+                ))
+            },
+        )?;
+        let precision = scalar.binary_float_precision().ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "JS backend received {statement_name} source with non-binary-float type {source_type:?}"
+            ))
+        })?;
+
+        Ok((scalar, precision))
+    }
+
+    /// Runtime helpers return ABI envelopes; trap statements consume them immediately.
     fn emit_numeric_carrier_assignment(
         &mut self,
         helper_call: String,
@@ -585,7 +561,6 @@ impl<'hir> JsEmitter<'hir> {
             NumericFailureMode::Trap | NumericFailureMode::Infallible => {
                 format!("__moth_numeric_trap({helper_call})")
             }
-            NumericFailureMode::ReturnError => helper_call,
         };
 
         self.emit_value_destination(result, &assigned_value)
@@ -685,55 +660,151 @@ impl<'hir> JsEmitter<'hir> {
         Ok(())
     }
 
-    pub(crate) fn emit_return_terminator(
+    /// Consume helper/call ABI envelopes at the boundary and define only the selected edge.
+    pub(crate) fn prepare_invoke(
         &mut self,
-        expression: HirValueId,
-    ) -> Result<(), CompilerError> {
-        if self.is_unit_expression(expression) {
-            self.emit_line("return;");
-            return Ok(());
+        id: HirNodeId,
+        operation: &HirFallibleOperation,
+        success_results: &[LocalId],
+        error_result: LocalId,
+    ) -> Result<(String, bool), CompilerError> {
+        let (value, proven) = match operation {
+            HirFallibleOperation::Call { target, args } => {
+                (self.lower_call_expression(target, *args)?, false)
+            }
+            HirFallibleOperation::MapOp { op, receiver, args } => {
+                (self.lower_map_operation(*op, *receiver, *args)?, false)
+            }
+            HirFallibleOperation::NumericOp { op, operands } => {
+                self.lower_numeric_operation(*op, operands, id)?
+            }
+            HirFallibleOperation::CastOp { policy, source } => {
+                let source = self.lower_expr(*source)?;
+                if let Some(value) = self.proven_narrowing_expression(*policy, &source, id)? {
+                    (value, true)
+                } else {
+                    (js_cast_expression_for_policy(*policy, &source)?, false)
+                }
+            }
+            HirFallibleOperation::RangeStepFailure { cause } => {
+                let code = cause.builtin_error_code();
+                (
+                    format!(
+                        "__moth_error_result({:?}, {})",
+                        code.default_message(),
+                        code.as_u32()
+                    ),
+                    false,
+                )
+            }
+            HirFallibleOperation::FormatFloat { source } => {
+                let value = self.lower_expr(*source)?;
+                let (scalar, precision) = self.float_source_scalar(*source, "FormatFloat")?;
+                (
+                    format!(
+                        "__moth_format_float({value}, {}, \"{scalar}\")",
+                        binary_float_precision_bits(precision)
+                    ),
+                    false,
+                )
+            }
+            HirFallibleOperation::ValidateFloat { source } => {
+                let value = self.lower_expr(*source)?;
+                let (_, precision) = self.float_source_scalar(*source, "ValidateFloat")?;
+                (
+                    format!(
+                        "__moth_float_validate({value}, {})",
+                        binary_float_precision_bits(precision)
+                    ),
+                    false,
+                )
+            }
+        };
+        let captured = self.next_temp_identifier("__invoke_result");
+        self.emit_line(&format!("const {captured} = {value};"));
+        // Clear both outcomes on every execution, including repeated loop visits. Capture the
+        // operation first because its operands may read a previous edge-local binding.
+        for local in success_results.iter().chain(std::iter::once(&error_result)) {
+            let name = self.local_name(*local)?.to_owned();
+            self.emit_line(&format!("{name} = undefined;"));
         }
+        Ok((captured, proven))
+    }
 
-        let value = self.lower_moth_return_value(expression)?;
-        self.emit_line(&format!("return {value};"));
+    pub(crate) fn emit_invoke_success_transfer(
+        &mut self,
+        captured: &str,
+        proven: bool,
+        results: &[LocalId],
+    ) -> Result<(), CompilerError> {
+        for (index, result) in results.iter().enumerate() {
+            let value = if proven {
+                captured.to_owned()
+            } else if results.len() == 1 {
+                format!("{captured}.value")
+            } else {
+                format!("{captured}.value[{index}]")
+            };
+            self.emit_value_destination(HirLocalDestination::Define(*result), &value)?;
+        }
         Ok(())
     }
 
-    pub(crate) fn emit_success_return_terminator(
+    pub(crate) fn emit_invoke_error_transfer(
         &mut self,
-        expression: HirValueId,
+        captured: &str,
+        result: LocalId,
     ) -> Result<(), CompilerError> {
-        let Some(function_id) = self.current_function else {
-            return Err(CompilerError::compiler_error(
-                "JavaScript backend: ReturnSuccess emitted outside a function",
-            ));
-        };
+        self.emit_value_destination(
+            HirLocalDestination::Define(result),
+            &format!("{captured}.value"),
+        )
+    }
+
+    pub(crate) fn emit_return_terminator(
+        &mut self,
+        values: HirValueRange,
+    ) -> Result<(), CompilerError> {
+        let hir = self.hir;
+        let expressions = hir.expressions.values(values);
+        let function_id = self.current_function.ok_or_else(|| {
+            CompilerError::compiler_error("JavaScript backend: Return outside a function")
+        })?;
         let function = self
             .hir
             .functions
             .iter()
             .find(|function| function.id == function_id)
             .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "JavaScript backend: current function {function_id:?} is missing"
-                ))
+                CompilerError::compiler_error("JavaScript backend: missing current function")
             })?;
-        let Some((success_type, _)) = self
-            .type_environment
-            .fallible_carrier_slots(function.return_type)
-        else {
+        if expressions.len() != function.returns.len()
+            || expressions
+                .iter()
+                .zip(function.returns.iter())
+                .any(|(value, ty)| self.hir.expressions.expression(*value).ty != *ty)
+        {
             return Err(CompilerError::compiler_error(
-                "JavaScript backend: ReturnSuccess emitted in a non-fallible function",
-            ));
-        };
-        if self.hir.expressions.expression(expression).ty != success_type {
-            return Err(CompilerError::compiler_error(
-                "JavaScript backend: ReturnSuccess value type does not match function success slot",
+                "JavaScript backend: Return slots mismatch",
             ));
         }
-
-        let value = self.lower_moth_return_value(expression)?;
-        self.emit_line(&format!("return {{ tag: \"ok\", value: {value} }};"));
+        let fallible = function.error_return.is_some();
+        let values = expressions
+            .iter()
+            .map(|value| self.lower_moth_return_value(*value))
+            .collect::<Result<Vec<_>, _>>()?;
+        let value = match values.as_slice() {
+            [] => "undefined".to_owned(),
+            [value] => value.to_owned(),
+            _ => format!("[{}]", values.join(", ")),
+        };
+        if fallible {
+            self.emit_line(&format!("return {{ tag: \"ok\", value: {value} }};"));
+        } else if values.is_empty() {
+            self.emit_line("return;");
+        } else {
+            self.emit_line(&format!("return {value};"));
+        }
         Ok(())
     }
 
@@ -756,10 +827,7 @@ impl<'hir> JsEmitter<'hir> {
                     "JavaScript backend: current function {function_id:?} is missing"
                 ))
             })?;
-        let Some((_, error_type)) = self
-            .type_environment
-            .fallible_carrier_slots(function.return_type)
-        else {
+        let Some(error_type) = function.error_return else {
             return Err(CompilerError::compiler_error(
                 "JavaScript backend: ReturnError emitted in a non-fallible function",
             ));
@@ -892,20 +960,32 @@ impl<'hir> JsEmitter<'hir> {
                 self.emit_line("continue;");
             }
 
-            HirTerminator::FallibleBranch {
-                result,
-                success_block,
-                error_block,
+            HirTerminator::Invoke {
+                id,
+                operation,
+                success,
+                success_results,
+                failure,
+                error_result,
+                ..
             } => {
-                let condition = self.lower_fallible_success_condition(*result)?;
+                let (captured, proven) =
+                    self.prepare_invoke(*id, operation, success_results, *error_result)?;
+                let condition = if proven {
+                    "true".to_owned()
+                } else {
+                    format!("{captured}.tag === \"ok\"")
+                };
                 self.emit_line(&format!("if ({condition}) {{"));
-                self.with_indent(|emitter| {
-                    emitter.emit_line(&format!("{state_identifier} = {};", success_block.0));
-                });
+                self.indent += 1;
+                self.emit_invoke_success_transfer(&captured, proven, success_results)?;
+                self.emit_line(&format!("{state_identifier} = {};", success.0));
+                self.indent -= 1;
                 self.emit_line("} else {");
-                self.with_indent(|emitter| {
-                    emitter.emit_line(&format!("{state_identifier} = {};", error_block.0));
-                });
+                self.indent += 1;
+                self.emit_invoke_error_transfer(&captured, *error_result)?;
+                self.emit_line(&format!("{state_identifier} = {};", failure.0));
+                self.indent -= 1;
                 self.emit_line("}");
                 self.emit_line("continue;");
             }
@@ -979,10 +1059,6 @@ impl<'hir> JsEmitter<'hir> {
 
             HirTerminator::Return(value) => {
                 self.emit_return_terminator(*value)?;
-            }
-
-            HirTerminator::ReturnSuccess(value) => {
-                self.emit_success_return_terminator(*value)?;
             }
 
             HirTerminator::ReturnError(value) => {
@@ -1088,9 +1164,8 @@ impl<'hir> JsEmitter<'hir> {
 /// Selects the checked JS helper family and domain bounds for one HIR numeric operation.
 fn js_numeric_helper_for_op(
     op: HirNumericOp,
-    numeric_profile: moth_lexical::numeric::profile::NumericProfile,
 ) -> Result<(String, Option<(String, String)>), CompilerError> {
-    let carrier = JsNumericCarrier::for_scalar(op.domain, numeric_profile).ok_or_else(|| {
+    let carrier = JsNumericCarrier::for_scalar(op.domain).ok_or_else(|| {
         CompilerError::compiler_error(format!(
             "JS backend has no numeric carrier for {:?}",
             op.domain

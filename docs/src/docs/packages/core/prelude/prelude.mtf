@@ -43,7 +43,17 @@ The prelude does not expose `@core/collections` directly. Collection methods wor
 
 ### Builder ownership
 
-The builder provides the prelude. The HTML builder registers the `io` namespace alias through the Core prelude registration. The prelude surface forms the minimal universal starting point. Builders must provide it, but the actual implementations live in specific Core packages such as `@core/io`.
+The compiler defines the prelude's meaning and reserved names. Builders use the
+canonical registration, so `io` remains reserved even when a custom environment
+implements none of its operations. Namespace visibility does not supply an
+executable host capability. Calls still require the selected target's documented
+implementation or unsupported outcome.
+
+Official environments provide the Core catalogue under its capability contracts.
+Custom builders may implement any subset for local code without claiming official
+Core certification. Merely having the unused prelude does not make a managed
+package Core-dependent. The @../../../lappet (Lappet) reference explains the
+separate package-admission policy.
 
 ### Unsupported source forms
 

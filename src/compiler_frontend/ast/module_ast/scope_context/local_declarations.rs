@@ -9,24 +9,44 @@ impl ScopeContext {
 
     /// Replace the declarations in the current scope frame.
     ///
-    /// WHAT: rebuilds the frame-local name index and declaration vec. Used when a
-    ///       function or start body frame is initialised with parameter declarations.
+    /// WHAT: validates every parameter's name collision before atomically replacing the frame's
+    ///       declarations and rebuilding its name index for a function or start body.
     pub(crate) fn set_local_declarations(
         &mut self,
         declarations: Vec<Declaration>,
         path_fork: &PathInternerFork,
-    ) {
+        string_table: &StringTable,
+    ) -> Result<(), CompilerDiagnostic> {
+        // Check every parameter before publishing the frame so a rejected signature installs none.
+        for declaration in &declarations {
+            let Some(name) = path_fork.component(declaration.id) else {
+                continue;
+            };
+            if let Some(reference) = self.get_reference(&name) {
+                return Err(CompilerDiagnostic::shadowed_name(
+                    name,
+                    reference.binding_span(),
+                    declaration.binding_span,
+                ));
+            }
+            if let Some(diagnostic) =
+                self.check_body_binding_visibility(name, declaration.binding_span, string_table)
+            {
+                return Err(diagnostic);
+            }
+        }
         self.arena
             .borrow_mut()
             .frame_mut(self.current_frame_id)
             .set_local_declarations(declarations, path_fork);
+        Ok(())
     }
 
     pub(crate) fn with_pending_catch_assignment_targets(
         &self,
         target_names: &[StringId],
     ) -> ScopeContext {
-        let mut context = self.clone();
+        let mut context = self.new_expression_policy_context();
         context
             .pending_catch_assignment_targets
             .extend(target_names.iter().copied());
@@ -34,7 +54,7 @@ impl ScopeContext {
     }
 
     pub(crate) fn activate_pending_catch_assignment_targets(&self) -> ScopeContext {
-        let mut context = self.clone();
+        let mut context = self.new_expression_policy_context();
         context
             .unavailable_assignment_targets
             .extend(self.pending_catch_assignment_targets.iter().copied());

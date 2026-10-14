@@ -5,7 +5,7 @@
 //!      domain before HIR lowering.
 
 use crate::compiler_frontend::ast::expressions::eval_expression::typing_error::ExpressionTypingError;
-use crate::compiler_frontend::ast::expressions::expression::Operator;
+use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;

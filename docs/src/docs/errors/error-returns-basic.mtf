@@ -1,7 +1,7 @@
 A function with an explicit typed error path adds one final return marked with `!`.
 
 [codeblock, $code("moth"):
-    parse_number |text String| -> Int, Error!:
+    parse_number |text String| -> I32, Error!:
         if text is "":
             return! Error("Missing number")
         ;

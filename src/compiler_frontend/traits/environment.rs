@@ -53,7 +53,7 @@ pub(crate) enum CoreTraitKind {
 ///
 /// WHAT: stores resolved trait definitions indexed by canonical path, a
 ///      `core_traits_by_name` table that resolves compiler-owned trait
-///      names (such as `DISPLAYABLE`, `CASTABLE_TO_INT`, ...) without
+///      names (such as `DISPLAYABLE`, `CASTABLE_TO_I32`, ...) without
 ///      touching the user-visible `visible_trait_names` binding map, a
 ///      `core_trait_kinds` side table that classifies core traits so the
 ///      AST environment builder can wire builtin cast evidence rows, an
@@ -442,8 +442,8 @@ impl TraitEnvironment {
     /// Resolves a compiler-owned core trait by source spelling.
     ///
     /// WHAT: maps a `StringId` to the canonical `TraitId` for any registered
-    ///      core trait (currently `DISPLAYABLE` and the twelve core cast
-    ///      traits). Returns `None` for user-authored trait names.
+    ///      core trait (currently `DISPLAYABLE` and thirty core cast traits).
+    ///      Returns `None` for user-authored trait names.
     /// WHY: core trait metadata is not registered through normal file
     ///      visibility, but user source still refers to it with the ordinary
     ///      trait name in conformances and static bounds. Centralising the

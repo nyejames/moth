@@ -1,0 +1,21 @@
+receive_u64 |value U64| -> String:
+    return cast value
+;
+
+-- The raw-literal initializer, the concrete U64 compound updates and the
+-- branch writes must all share one static U64 type. Both reads observe the
+-- binding between writes, so an early default or per-write type version
+-- cannot satisfy both receivers.
+steady #= true
+step U64 = 2
+limit U64 = 10
+count ~= 1
+count += step
+before_text = receive_u64(count)
+if steady:
+    count = copy limit
+    count += step
+;
+after_text = receive_u64(count)
+
+[:scalar mutable binding before=[before_text] after=[after_text]]

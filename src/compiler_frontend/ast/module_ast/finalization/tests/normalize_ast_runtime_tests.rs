@@ -1,18 +1,24 @@
 use super::*;
-use crate::compiler_frontend::symbols::path_interner::PathId;
-use moth_lexical::numeric::profile::NumericProfile;
 
-fn runtime_template_handoff_from_expression(expression: Expression) -> OwnedRuntimeTemplateHandoff {
-    let ExpressionKind::RuntimeTemplateHandoff(handoff) = expression.kind else {
+fn runtime_template_handoff_from_expression(
+    expressions: &AstExpressionBuilder,
+    expression: ExprId,
+) -> OwnedRuntimeTemplateHandoff {
+    let ExpressionOperationView::RuntimeTemplate(handoff) = expressions
+        .view(expression)
+        .expect("validated runtime handoff")
+        .operation()
+    else {
         panic!("expected expression normalization to return an owned runtime-template handoff");
     };
-
-    *handoff
+    handoff.clone()
 }
 
 #[test]
 fn conditional_tir_root_normalizes_into_owned_runtime_handoff() {
     let mut string_table = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let mut path_fork = PathInternerFork::empty();
     let location = None;
     let body_text = string_table.intern("conditional body");
@@ -20,24 +26,33 @@ fn conditional_tir_root_normalizes_into_owned_runtime_handoff() {
     let context = TemplateViewContext::default();
     let template_id = {
         let mut store = template_ir_store.borrow_mut();
-        let mut builder = TemplateIrBuilder::new(&mut store);
-        let body = builder.push_text_node(
-            body_text,
-            "conditional body".len(),
-            TemplateSegmentOrigin::Body,
-            location,
-        );
-        let root = builder.push_conditional_node(
-            TemplateBranchSelector::Bool(Expression::reference_with_type_id(
-                path_fork
-                    .try_intern_portable_path("show_conditional", &mut string_table)
-                    .expect("test path fits"),
-                DataType::Bool,
+        let body = {
+            let mut builder = TemplateIrBuilder::new(&mut store);
+            builder.push_text_node(
+                body_text,
+                "conditional body".len(),
+                TemplateSegmentOrigin::Body,
+                location,
+            )
+        };
+        let condition_path = path_fork
+            .try_intern_portable_path("show_conditional", &mut string_table)
+            .expect("test path fits");
+        drop(store);
+        let condition_expression = expressions
+            .reference_with_type_id(
+                condition_path,
                 builtin_type_ids::BOOL,
                 location,
                 ValueMode::ImmutableReference,
                 ConstRecordState::RuntimeValue,
-            )),
+            )
+            .expect("reference expression")
+            .id();
+        let mut store = template_ir_store.borrow_mut();
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let root = builder.push_conditional_node(
+            TemplateBranchSelector::Bool(condition_expression),
             body,
             location,
         );
@@ -59,19 +74,25 @@ fn conditional_tir_root_normalizes_into_owned_runtime_handoff() {
         None,
     );
 
-    let mut expression = Expression::template(template, ValueMode::ImmutableOwned);
+    let mut expression = expressions
+        .template(template, ValueMode::ImmutableOwned)
+        .expect("template expression")
+        .id();
     let mut context = TemplateNormalizationContext {
+        expression_builder: &mut expressions,
+        const_values: &mut constants,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
         module_resources: None,
+        expression_pending: Vec::new(),
+        expression_results: Vec::new(),
     };
 
     normalize_expression_templates(&mut expression, &mut context)
         .expect("conditional TIR root should normalize through the finalized effective view");
 
-    let handoff = runtime_template_handoff_from_expression(expression);
+    let handoff = runtime_template_handoff_from_expression(&expressions, expression);
     let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Conditional {
         selector,
         body,
@@ -90,6 +111,8 @@ fn conditional_tir_root_normalizes_into_owned_runtime_handoff() {
 #[test]
 fn loop_tir_root_normalizes_into_owned_runtime_handoff() {
     let mut string_table = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let mut path_fork = PathInternerFork::empty();
     let location = None;
     let loop_text = string_table.intern("loop body");
@@ -103,28 +126,39 @@ fn loop_tir_root_normalizes_into_owned_runtime_handoff() {
             TemplateIrNodeKind::AggregateOutput,
             location,
         ));
-        let mut builder = TemplateIrBuilder::new(&mut store);
-        let body = builder.push_text_node(
-            loop_text,
-            "loop body".len(),
-            TemplateSegmentOrigin::Body,
-            location,
-        );
-        let open = builder.push_text_node(open_text, 1, TemplateSegmentOrigin::Body, location);
-        let close = builder.push_text_node(close_text, 1, TemplateSegmentOrigin::Body, location);
-        let aggregate_wrapper =
-            builder.push_sequence_node(vec![open, aggregate_output, close], location);
-        let header = TemplateLoopHeader::Conditional {
-            condition: Box::new(Expression::reference_with_type_id(
-                path_fork
-                    .try_intern_portable_path("keep_looping", &mut string_table)
-                    .expect("test path fits"),
-                DataType::Bool,
+        let (body, aggregate_wrapper) = {
+            let mut builder = TemplateIrBuilder::new(&mut store);
+            let body = builder.push_text_node(
+                loop_text,
+                "loop body".len(),
+                TemplateSegmentOrigin::Body,
+                location,
+            );
+            let open = builder.push_text_node(open_text, 1, TemplateSegmentOrigin::Body, location);
+            let close =
+                builder.push_text_node(close_text, 1, TemplateSegmentOrigin::Body, location);
+            let aggregate_wrapper =
+                builder.push_sequence_node(vec![open, aggregate_output, close], location);
+            (body, aggregate_wrapper)
+        };
+        drop(store);
+        let loop_path = path_fork
+            .try_intern_portable_path("keep_looping", &mut string_table)
+            .expect("test path fits");
+        let condition_expression = expressions
+            .reference_with_type_id(
+                loop_path,
                 builtin_type_ids::BOOL,
                 location,
                 ValueMode::ImmutableReference,
                 ConstRecordState::RuntimeValue,
-            )),
+            )
+            .expect("reference expression")
+            .id();
+        let mut store = template_ir_store.borrow_mut();
+        let mut builder = TemplateIrBuilder::new(&mut store);
+        let header = TemplateLoopHeader::Conditional {
+            condition: condition_expression,
         };
         let root = builder.push_loop_node(header, body, Some(aggregate_wrapper), location);
         builder.finish_template(
@@ -145,87 +179,156 @@ fn loop_tir_root_normalizes_into_owned_runtime_handoff() {
         None,
     );
 
-    let mut expression = Expression::template(template, ValueMode::ImmutableOwned);
+    let mut expression = expressions
+        .template(template, ValueMode::ImmutableOwned)
+        .expect("template expression")
+        .id();
     let mut context = TemplateNormalizationContext {
+        expression_builder: &mut expressions,
+        const_values: &mut constants,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
         module_resources: None,
+        expression_pending: Vec::new(),
+        expression_results: Vec::new(),
     };
 
     normalize_expression_templates(&mut expression, &mut context)
         .expect("loop TIR root should normalize through the finalized effective view");
 
-    let handoff = runtime_template_handoff_from_expression(expression);
+    let handoff = runtime_template_handoff_from_expression(&expressions, expression);
     let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Loop { .. }) = handoff.body
     else {
         panic!("expected a loop runtime handoff");
     };
 }
 
-fn collect_owned_handoff_string_slice_expressions(
+fn collect_owned_handoff_string_slice_expressions_with_owners(
+    expressions: &AstExpressionBuilder,
+    constants: &ConstValueStore,
     handoff: &OwnedRuntimeTemplateHandoff,
     string_slices: &mut Vec<crate::compiler_frontend::symbols::string_interning::StringId>,
 ) {
     match &handoff.body {
         OwnedRuntimeTemplateBody::Render(root) => {
-            collect_owned_node_string_slice_expressions(root, string_slices);
+            collect_owned_node_string_slice_expressions(
+                expressions,
+                constants,
+                root,
+                string_slices,
+            );
         }
-
         OwnedRuntimeTemplateBody::RuntimeSlotApplication(slot_handoff) => {
-            collect_owned_node_string_slice_expressions(&slot_handoff.wrapper, string_slices);
+            collect_owned_node_string_slice_expressions(
+                expressions,
+                constants,
+                &slot_handoff.wrapper,
+                string_slices,
+            );
             for source in &slot_handoff.contribution_sources {
-                collect_owned_node_string_slice_expressions(&source.render_root, string_slices);
+                collect_owned_node_string_slice_expressions(
+                    expressions,
+                    constants,
+                    &source.render_root,
+                    string_slices,
+                );
             }
             for site in &slot_handoff.slot_sites {
-                collect_owned_node_string_slice_expressions(&site.render_root, string_slices);
+                collect_owned_node_string_slice_expressions(
+                    expressions,
+                    constants,
+                    &site.render_root,
+                    string_slices,
+                );
             }
         }
     }
 }
 
 fn collect_owned_node_string_slice_expressions(
+    expressions: &AstExpressionBuilder,
+    constants: &ConstValueStore,
     node: &OwnedRuntimeTemplateNode,
     string_slices: &mut Vec<crate::compiler_frontend::symbols::string_interning::StringId>,
 ) {
     match node {
         OwnedRuntimeTemplateNode::DynamicExpression { expression, .. } => {
-            if let ExpressionKind::StringSlice(text) = &expression.kind {
+            if let ExpressionOperationView::Constant(value) = expressions
+                .view(*expression)
+                .expect("validated handoff leaf")
+                .operation()
+                && let Some(
+                    crate::compiler_frontend::ast::const_values::store::ConstValuePayload::String(
+                        crate::compiler_frontend::ast::const_values::store::ConstStringValue::Text(
+                            text,
+                        ),
+                    ),
+                ) = constants.payload(value)
+            {
                 string_slices.push(*text);
             }
         }
-
         OwnedRuntimeTemplateNode::Sequence { children, .. } => {
             for child in children {
-                collect_owned_node_string_slice_expressions(child, string_slices);
+                collect_owned_node_string_slice_expressions(
+                    expressions,
+                    constants,
+                    child,
+                    string_slices,
+                );
             }
         }
-
         OwnedRuntimeTemplateNode::Conditional { body, .. } => {
-            collect_owned_node_string_slice_expressions(body, string_slices);
+            collect_owned_node_string_slice_expressions(
+                expressions,
+                constants,
+                body,
+                string_slices,
+            );
         }
-
         OwnedRuntimeTemplateNode::Loop {
             body,
             aggregate_wrapper,
             ..
         } => {
-            collect_owned_node_string_slice_expressions(body, string_slices);
+            collect_owned_node_string_slice_expressions(
+                expressions,
+                constants,
+                body,
+                string_slices,
+            );
             if let Some(wrapper) = aggregate_wrapper {
-                collect_owned_node_string_slice_expressions(wrapper, string_slices);
+                collect_owned_node_string_slice_expressions(
+                    expressions,
+                    constants,
+                    wrapper,
+                    string_slices,
+                );
             }
         }
-
         OwnedRuntimeTemplateNode::ChildTemplate { template, .. } => {
-            collect_owned_handoff_string_slice_expressions(template, string_slices);
+            collect_owned_handoff_string_slice_expressions_with_owners(
+                expressions,
+                constants,
+                template,
+                string_slices,
+            );
         }
-
         OwnedRuntimeTemplateNode::ConditionalWrapper { child, wrapper, .. } => {
-            collect_owned_node_string_slice_expressions(child, string_slices);
-            collect_owned_node_string_slice_expressions(wrapper, string_slices);
+            collect_owned_node_string_slice_expressions(
+                expressions,
+                constants,
+                child,
+                string_slices,
+            );
+            collect_owned_node_string_slice_expressions(
+                expressions,
+                constants,
+                wrapper,
+                string_slices,
+            );
         }
-
         OwnedRuntimeTemplateNode::Text { .. }
         | OwnedRuntimeTemplateNode::AggregateOutput
         | OwnedRuntimeTemplateNode::RuntimeSlotSite { .. }
@@ -247,20 +350,23 @@ fn registered_runtime_template(
     context: TemplateViewContext,
     template_ir_store: &Rc<RefCell<TemplateIrStore>>,
     string_table: &mut StringTable,
+    expressions: &mut AstExpressionBuilder,
 ) -> Template {
     let mut path_fork = PathInternerFork::empty();
     let byte_len = string_table.resolve(text).len();
     let reference_path = path_fork
         .try_intern_portable_path(reference_name, string_table)
         .expect("test path fits");
-    let reference_expression = Expression::reference_with_type_id(
-        reference_path,
-        DataType::StringSlice,
-        builtin_type_ids::STRING,
-        None,
-        ValueMode::ImmutableReference,
-        ConstRecordState::RuntimeValue,
-    );
+    let reference_expression = expressions
+        .reference_with_type_id(
+            reference_path,
+            builtin_type_ids::STRING,
+            None,
+            ValueMode::ImmutableReference,
+            ConstRecordState::RuntimeValue,
+        )
+        .expect("reference expression")
+        .id();
     let template_id = {
         let mut store = template_ir_store.borrow_mut();
         let mut builder = TemplateIrBuilder::new(&mut store);
@@ -292,29 +398,43 @@ fn registered_runtime_template(
 #[test]
 fn ordinary_runtime_template_handoff_uses_module_tir_store() {
     let mut string_table = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let _path_fork = PathInternerFork::empty();
     let text = string_table.intern("hello ");
 
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
 
-    let template =
-        registered_runtime_template(text, "name", context, &template_ir_store, &mut string_table);
+    let template = registered_runtime_template(
+        text,
+        "name",
+        context,
+        &template_ir_store,
+        &mut string_table,
+        &mut expressions,
+    );
 
-    let mut expression = Expression::template(template, ValueMode::ImmutableOwned);
+    let mut expression = expressions
+        .template(template, ValueMode::ImmutableOwned)
+        .expect("template expression")
+        .id();
 
     let mut context = TemplateNormalizationContext {
+        expression_builder: &mut expressions,
+        const_values: &mut constants,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
         module_resources: None,
+        expression_pending: Vec::new(),
+        expression_results: Vec::new(),
     };
 
     normalize_expression_templates(&mut expression, &mut context)
         .expect("ordinary runtime template expression normalization should succeed");
 
-    let handoff = runtime_template_handoff_from_expression(expression);
+    let handoff = runtime_template_handoff_from_expression(&expressions, expression);
     assert!(
         matches!(handoff.body, OwnedRuntimeTemplateBody::Render(_)),
         "ordinary runtime templates must materialize a render body handoff"
@@ -324,6 +444,8 @@ fn ordinary_runtime_template_handoff_uses_module_tir_store() {
 #[test]
 fn folded_template_preserves_selected_effective_dynamic_provenance() {
     let mut string_table = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let _path_fork = PathInternerFork::empty();
     let unselected_text = string_table.intern("unselected");
     let selected_structural_text = string_table.intern("selected structural");
@@ -341,42 +463,78 @@ fn folded_template_preserves_selected_effective_dynamic_provenance() {
         "render",
         "selected",
     );
+    let unselected_expression = {
+        let value = expressions
+            .string_slice(
+                &mut constants,
+                unselected_text,
+                location,
+                ValueMode::ImmutableOwned,
+            )
+            .expect("string expression")
+            .id();
+        expressions
+            .with_synthetic_interface_provenance(
+                expressions.own(value),
+                SyntheticInterfaceProvenance::single(unselected_member),
+            )
+            .expect("expression provenance")
+            .id()
+    };
+    let selected_expression = expressions
+        .string_slice(
+            &mut constants,
+            selected_structural_text,
+            location,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("string expression")
+        .id();
+    let unselected_condition = expressions
+        .bool(&mut constants, false, location, ValueMode::ImmutableOwned)
+        .expect("bool expression")
+        .id();
+    let selected_condition = expressions
+        .bool(&mut constants, true, location, ValueMode::ImmutableOwned)
+        .expect("bool expression")
+        .id();
+    let overlay_expression = expressions
+        .string_slice(
+            &mut constants,
+            selected_effective_text,
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("string expression")
+        .id();
+    let overlay_expression = expressions
+        .with_synthetic_interface_provenance(
+            expressions.own(overlay_expression),
+            SyntheticInterfaceProvenance::single(selected_member.clone()),
+        )
+        .expect("expression provenance")
+        .id();
 
     let (template_id, selected_site_id) = {
         let mut store = template_ir_store.borrow_mut();
         let mut builder = TemplateIrBuilder::new(&mut store);
         let unselected_node = builder.push_dynamic_expression_node(
-            Expression::string_slice(unselected_text, location, ValueMode::ImmutableOwned)
-                .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
-                    unselected_member,
-                )),
+            unselected_expression,
             TemplateSegmentOrigin::Body,
             location,
         );
         let selected_node = builder.push_dynamic_expression_node(
-            Expression::string_slice(
-                selected_structural_text,
-                location,
-                ValueMode::ImmutableOwned,
-            ),
+            selected_expression,
             TemplateSegmentOrigin::Body,
             location,
         );
         let unselected_conditional = builder.push_conditional_node(
-            TemplateBranchSelector::Bool(Expression::bool(
-                false,
-                location,
-                ValueMode::ImmutableOwned,
-            )),
+            TemplateBranchSelector::Bool(unselected_condition),
             unselected_node,
             location,
         );
         let selected_conditional = builder.push_conditional_node(
-            TemplateBranchSelector::Bool(Expression::bool(
-                true,
-                location,
-                ValueMode::ImmutableOwned,
-            )),
+            TemplateBranchSelector::Bool(selected_condition),
             selected_node,
             location,
         );
@@ -403,21 +561,10 @@ fn folded_template_preserves_selected_effective_dynamic_provenance() {
     let overlay_id = template_ir_store
         .borrow_mut()
         .allocate_expression_overlay(TirExpressionOverlay {
-            overrides: vec![(
-                selected_site_id,
-                Box::new(
-                    Expression::string_slice(
-                        selected_effective_text,
-                        None,
-                        ValueMode::ImmutableOwned,
-                    )
-                    .with_synthetic_interface_provenance(
-                        SyntheticInterfaceProvenance::single(selected_member.clone()),
-                    ),
-                ),
-            )],
+            overrides: vec![(selected_site_id, overlay_expression)],
         })
         .expect("test overlay allocation");
+
     let template = template_with_reference(
         TemplateTirReference {
             root: template_id,
@@ -429,23 +576,31 @@ fn folded_template_preserves_selected_effective_dynamic_provenance() {
         },
         None,
     );
-    let constant_expression = Expression::template(template.clone(), ValueMode::ImmutableOwned);
+    let constant_expression = expressions
+        .template(template.clone(), ValueMode::ImmutableOwned)
+        .expect("template expression")
+        .id();
+    let constant_view = expressions
+        .view(constant_expression)
+        .expect("validated template root");
     assert!(
-        constant_expression
-            .synthetic_interface_provenance
-            .is_empty(),
+        constant_view
+            .occurrence_facts()
+            .is_none_or(|facts| facts.provenance.is_empty()),
         "the outer template must start without injected provenance"
     );
 
-    let ExpressionKind::Template(constant_template) = &constant_expression.kind else {
+    let ExpressionOperationView::Template(constant_template) = constant_view.operation() else {
         panic!("module constant regression must start from a template expression");
     };
+    let constant_template = constant_template.clone();
     let projected_constant = project_const_template_value(
-        constant_template,
+        &constant_template,
         &template_ir_store.borrow(),
+        &mut expressions,
+        &mut constants,
         &mut string_table,
         DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        NumericProfile::STANDARD,
         None,
     )
     .expect("selected exact TIR fold should project module constants");
@@ -455,25 +610,35 @@ fn folded_template_preserves_selected_effective_dynamic_provenance() {
         "module constant projection must retain selected folded provenance"
     );
 
-    let mut expression = Expression::template(template, ValueMode::ImmutableOwned);
+    let mut expression = expressions
+        .template(template, ValueMode::ImmutableOwned)
+        .expect("template expression")
+        .id();
     let mut context = TemplateNormalizationContext {
+        expression_builder: &mut expressions,
+        const_values: &mut constants,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
         module_resources: None,
+        expression_pending: Vec::new(),
+        expression_results: Vec::new(),
     };
 
     normalize_expression_templates(&mut expression, &mut context)
         .expect("selected exact TIR fold should normalize");
 
+    let normalized = expressions.view(expression).expect("validated folded root");
     assert!(matches!(
-        expression.kind,
-        ExpressionKind::StringSlice(value) if value == selected_effective_text
+        normalized.operation(),
+        ExpressionOperationView::Constant(_)
     ));
     assert_eq!(
-        expression.synthetic_interface_provenance.members(),
-        &[selected_member],
+        normalized
+            .occurrence_facts()
+            .map(|facts| facts.provenance.members().to_vec())
+            .unwrap_or_default(),
+        vec![selected_member],
         "only the selected effective dynamic payload may reach the folded value"
     );
 }
@@ -481,14 +646,22 @@ fn folded_template_preserves_selected_effective_dynamic_provenance() {
 #[test]
 fn runtime_template_expression_normalization_replaces_template_with_owned_handoff() {
     let mut string_table = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let _path_fork = PathInternerFork::empty();
     let text = string_table.intern("hello ");
 
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
 
-    let template =
-        registered_runtime_template(text, "name", context, &template_ir_store, &mut string_table);
+    let template = registered_runtime_template(
+        text,
+        "name",
+        context,
+        &template_ir_store,
+        &mut string_table,
+        &mut expressions,
+    );
 
     // This test covers preservation of metadata already carried by the outer runtime template
     // expression. Nested effective-fold provenance is covered by the folded-template test above.
@@ -497,59 +670,110 @@ fn runtime_template_expression_normalization_replaces_template_with_owned_handof
         "render",
         "html",
     );
-    let mut expression = Expression::template(template, ValueMode::ImmutableOwned)
-        .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
-            provenance_member.clone(),
-        ));
+    let template_expression = expressions
+        .template(template, ValueMode::ImmutableOwned)
+        .expect("template expression")
+        .id();
+    let mut expression = expressions
+        .with_synthetic_interface_provenance(
+            expressions.own(template_expression),
+            SyntheticInterfaceProvenance::single(provenance_member.clone()),
+        )
+        .expect("expression provenance")
+        .id();
+    let expression_span = expressions
+        .view(expression)
+        .expect("expression provenance view")
+        .span();
 
     let mut context = TemplateNormalizationContext {
+        expression_builder: &mut expressions,
+        const_values: &mut constants,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
         module_resources: None,
+        expression_pending: Vec::new(),
+        expression_results: Vec::new(),
     };
 
     normalize_expression_templates(&mut expression, &mut context)
         .expect("runtime template expression normalization should succeed");
 
-    let ExpressionKind::RuntimeTemplateHandoff(handoff) = &expression.kind else {
+    let ExpressionOperationView::RuntimeTemplate(handoff) = expressions
+        .view(expression)
+        .expect("validated runtime handoff")
+        .operation()
+    else {
         panic!("runtime template expression should be replaced with an owned handoff");
     };
     assert!(
         matches!(handoff.body, OwnedRuntimeTemplateBody::Render(_)),
         "ordinary runtime templates must keep using the render handoff body"
     );
-    assert_eq!(expression.diagnostic_type, DataType::Template);
-    assert_eq!(expression.value_mode, ValueMode::ImmutableOwned);
     assert_eq!(
-        expression.synthetic_interface_provenance.members(),
-        &[provenance_member]
+        expressions
+            .view(expression)
+            .expect("validated runtime handoff")
+            .span(),
+        expression_span,
+    );
+    assert_eq!(
+        expressions
+            .view(expression)
+            .expect("validated runtime handoff")
+            .value_mode(),
+        ValueMode::ImmutableOwned,
+    );
+    assert_eq!(
+        expressions
+            .view(expression)
+            .expect("validated runtime handoff")
+            .occurrence_facts()
+            .map(|facts| facts.provenance.members().to_vec())
+            .unwrap_or_default(),
+        vec![provenance_member],
     );
 }
 
 #[test]
 fn runtime_template_expression_handoff_uses_finalized_expression_overlay_view() {
     let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let _path_fork = PathInternerFork::empty();
     let overlay_text = string_table.intern("normalized overlay text");
-    let runtime_path = path_fork
-        .try_intern_portable_path("runtime_name", &mut string_table)
-        .expect("test path fits");
 
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let empty_context = TemplateViewContext::default();
-    let nested_template_expression = Expression::template(
-        registered_text_template(
-            overlay_text,
-            empty_context,
-            &template_ir_store,
-            &string_table,
-        ),
-        ValueMode::ImmutableOwned,
-    );
+    let nested_template_expression = expressions
+        .template(
+            registered_text_template(
+                overlay_text,
+                empty_context,
+                &template_ir_store,
+                &string_table,
+            ),
+            ValueMode::ImmutableOwned,
+        )
+        .expect("template expression")
+        .id();
 
     let template_id = {
+        let mut local_paths = PathInternerFork::empty();
+        let runtime_path = local_paths
+            .try_intern_portable_path("runtime_name", &mut string_table)
+            .expect("test path fits");
+        let runtime_expression = expressions
+            .reference_with_type_id(
+                runtime_path,
+                builtin_type_ids::STRING,
+                None,
+                ValueMode::ImmutableReference,
+                ConstRecordState::RuntimeValue,
+            )
+            .expect("reference expression")
+            .id();
         let mut store = template_ir_store.borrow_mut();
         let mut builder = TemplateIrBuilder::new(&mut store);
         let normalized_dynamic_node = builder.push_dynamic_expression_node(
@@ -558,14 +782,7 @@ fn runtime_template_expression_handoff_uses_finalized_expression_overlay_view() 
             None,
         );
         let runtime_dynamic_node = builder.push_dynamic_expression_node(
-            Expression::reference_with_type_id(
-                runtime_path,
-                DataType::StringSlice,
-                builtin_type_ids::STRING,
-                None,
-                ValueMode::ImmutableReference,
-                ConstRecordState::RuntimeValue,
-            ),
+            runtime_expression,
             TemplateSegmentOrigin::Body,
             None,
         );
@@ -588,25 +805,40 @@ fn runtime_template_expression_handoff_uses_finalized_expression_overlay_view() 
         },
         None,
     );
-    let mut expression = Expression::template(template, ValueMode::ImmutableOwned);
+    let mut expression = expressions
+        .template(template, ValueMode::ImmutableOwned)
+        .expect("template expression")
+        .id();
 
     let mut context = TemplateNormalizationContext {
+        expression_builder: &mut expressions,
+        const_values: &mut constants,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
         module_resources: None,
+        expression_pending: Vec::new(),
+        expression_results: Vec::new(),
     };
 
     normalize_expression_templates(&mut expression, &mut context)
         .expect("runtime template normalization should use the finalized view handoff");
 
-    let ExpressionKind::RuntimeTemplateHandoff(handoff) = &expression.kind else {
+    let ExpressionOperationView::RuntimeTemplate(handoff) = expressions
+        .view(expression)
+        .expect("validated runtime handoff")
+        .operation()
+    else {
         panic!("runtime template expression should be replaced with an owned handoff");
     };
 
     let mut string_slices = Vec::new();
-    collect_owned_handoff_string_slice_expressions(handoff, &mut string_slices);
+    collect_owned_handoff_string_slice_expressions_with_owners(
+        &expressions,
+        &constants,
+        handoff,
+        &mut string_slices,
+    );
     assert!(
         string_slices.contains(&overlay_text),
         "runtime handoff must materialize normalized dynamic expressions from the final effective TirView"
@@ -618,6 +850,8 @@ fn runtime_template_expression_handoff_uses_finalized_expression_overlay_view() 
 #[test]
 fn nested_runtime_template_normalizes_through_final_view() {
     let mut string_table = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let _path_fork = PathInternerFork::empty();
     let nested_text = string_table.intern("nested runtime text");
 
@@ -632,14 +866,19 @@ fn nested_runtime_template_normalizes_through_final_view() {
         context,
         &template_ir_store,
         &mut string_table,
+        &mut expressions,
     );
+    let nested_template_expression = expressions
+        .template(nested_template, ValueMode::ImmutableOwned)
+        .expect("template expression")
+        .id();
 
     let template_id = {
         let mut store = template_ir_store.borrow_mut();
         let mut builder = TemplateIrBuilder::new(&mut store);
 
         let dynamic_node = builder.push_dynamic_expression_node(
-            Expression::template(nested_template, ValueMode::ImmutableOwned),
+            nested_template_expression,
             TemplateSegmentOrigin::Body,
             None,
         );
@@ -661,20 +900,30 @@ fn nested_runtime_template_normalizes_through_final_view() {
         },
         None,
     );
-    let mut expression = Expression::template(template, ValueMode::ImmutableOwned);
+    let mut expression = expressions
+        .template(template, ValueMode::ImmutableOwned)
+        .expect("template expression")
+        .id();
 
     let mut context = TemplateNormalizationContext {
+        expression_builder: &mut expressions,
+        const_values: &mut constants,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
         module_resources: None,
+        expression_pending: Vec::new(),
+        expression_results: Vec::new(),
     };
 
     normalize_expression_templates(&mut expression, &mut context)
         .expect("nested runtime template normalization should succeed through the final TIR view");
 
-    let ExpressionKind::RuntimeTemplateHandoff(handoff) = &expression.kind else {
+    let ExpressionOperationView::RuntimeTemplate(handoff) = expressions
+        .view(expression)
+        .expect("validated runtime handoff")
+        .operation()
+    else {
         panic!("outer template expression should be replaced with an owned handoff");
     };
 
@@ -682,7 +931,7 @@ fn nested_runtime_template_normalizes_through_final_view() {
     // DynamicExpression node, proving the overlay path normalized it.
     let mut found_nested_handoff = false;
     if let OwnedRuntimeTemplateBody::Render(root) = &handoff.body {
-        find_runtime_handoff_in_node(root, &mut found_nested_handoff);
+        find_runtime_handoff_in_node(&expressions, root, &mut found_nested_handoff);
     }
     assert!(
         found_nested_handoff,
@@ -692,37 +941,47 @@ fn nested_runtime_template_normalizes_through_final_view() {
 
 /// Recursively checks whether any DynamicExpression node in the owned handoff
 /// tree carries a RuntimeTemplateHandoff expression kind.
-fn find_runtime_handoff_in_node(node: &OwnedRuntimeTemplateNode, found: &mut bool) {
+fn find_runtime_handoff_in_node(
+    expressions: &AstExpressionBuilder,
+    node: &OwnedRuntimeTemplateNode,
+    found: &mut bool,
+) {
     if *found {
         return;
     }
     match node {
         OwnedRuntimeTemplateNode::DynamicExpression { expression, .. } => {
-            if matches!(expression.kind, ExpressionKind::RuntimeTemplateHandoff(_)) {
+            if matches!(
+                expressions
+                    .view(*expression)
+                    .expect("validated handoff leaf")
+                    .operation(),
+                ExpressionOperationView::RuntimeTemplate(_)
+            ) {
                 *found = true;
             }
         }
         OwnedRuntimeTemplateNode::Sequence { children, .. } => {
             for child in children {
-                find_runtime_handoff_in_node(child, found);
+                find_runtime_handoff_in_node(expressions, child, found);
             }
         }
         OwnedRuntimeTemplateNode::Conditional { body, .. } => {
-            find_runtime_handoff_in_node(body, found);
+            find_runtime_handoff_in_node(expressions, body, found);
         }
         OwnedRuntimeTemplateNode::Loop {
             body,
             aggregate_wrapper,
             ..
         } => {
-            find_runtime_handoff_in_node(body, found);
+            find_runtime_handoff_in_node(expressions, body, found);
             if let Some(wrapper) = aggregate_wrapper {
-                find_runtime_handoff_in_node(wrapper, found);
+                find_runtime_handoff_in_node(expressions, wrapper, found);
             }
         }
         OwnedRuntimeTemplateNode::ConditionalWrapper { child, wrapper, .. } => {
-            find_runtime_handoff_in_node(child, found);
-            find_runtime_handoff_in_node(wrapper, found);
+            find_runtime_handoff_in_node(expressions, child, found);
+            find_runtime_handoff_in_node(expressions, wrapper, found);
         }
         _ => {}
     }
@@ -733,6 +992,8 @@ fn find_runtime_handoff_in_node(node: &OwnedRuntimeTemplateNode, found: &mut boo
 #[test]
 fn nested_const_template_folds_through_final_view() {
     let mut string_table = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let _path_fork = PathInternerFork::empty();
     let child_text_str = "child folded text";
     let child_text = string_table.intern(child_text_str);
@@ -785,9 +1046,10 @@ fn nested_const_template_folds_through_final_view() {
         finalize_template_value(
             &template,
             TemplateValueFinalizationInputs {
+                expression_builder: &mut expressions,
+                const_values: &mut constants,
                 string_table: &mut string_table,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-                numeric_profile: NumericProfile::STANDARD,
                 template_ir_store: &template_ir_store,
             },
             TemplatePreparationMode::Value,
@@ -806,6 +1068,8 @@ fn nested_const_template_folds_through_final_view() {
 #[test]
 fn helper_artifact_rejected_after_final_view_traversal() {
     let mut string_table = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let _path_fork = PathInternerFork::empty();
     let text = string_table.intern("slot insert content");
 
@@ -842,14 +1106,20 @@ fn helper_artifact_rejected_after_final_view_traversal() {
         None,
     );
 
-    let mut expression = Expression::template(template, ValueMode::ImmutableOwned);
+    let mut expression = expressions
+        .template(template, ValueMode::ImmutableOwned)
+        .expect("template expression")
+        .id();
 
     let mut context = TemplateNormalizationContext {
+        expression_builder: &mut expressions,
+        const_values: &mut constants,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         string_table: &mut string_table,
         template_ir_store: Rc::clone(&template_ir_store),
         module_resources: None,
+        expression_pending: Vec::new(),
+        expression_results: Vec::new(),
     };
 
     let result = normalize_expression_templates(&mut expression, &mut context);
@@ -877,53 +1147,12 @@ fn helper_artifact_rejected_after_final_view_traversal() {
 }
 
 #[test]
-fn retained_signature_default_normalizes_template_to_string_slice() {
-    // Proves the retained-only generic default normalization path exercised by generic
-    // declarations without an emitted node: a `FunctionSignature` parameter whose default is a
-    // live TIR template normalizes to a TIR-free `StringSlice` through the real
-    // `normalize_retained_signature_defaults` helper used by
-    // `synchronize_normalized_public_defaults`, not through a direct
-    // `normalize_expression_templates` call labelled generic.
-    let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
-    let context = TemplateViewContext::default();
-    let text = string_table.intern("generic default text");
-    let template = registered_text_template(text, context, &template_ir_store, &string_table);
-
-    let parameter_default = Expression::template(template, ValueMode::ImmutableOwned);
-    let mut signature = FunctionSignature {
-        parameters: vec![Declaration {
-            id: PathId::ROOT,
-            value: parameter_default,
-            binding_span: None,
-            config_qualifier: None,
-        }],
-        returns: Vec::new(),
-    };
-
-    normalize_retained_signature_defaults(
-        &mut signature,
-        DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        NumericProfile::STANDARD,
-        &template_ir_store,
-        &mut string_table,
-    )
-    .expect("a const text template default should normalize to a folded string");
-
-    assert!(
-        matches!(
-            &signature.parameters[0].value.kind,
-            ExpressionKind::StringSlice(normalized) if *normalized == text,
-        ),
-        "a retained template default must normalize to a TIR-free StringSlice, got {:?}",
-        signature.parameters[0].value.kind
-    );
-}
-
-#[test]
 fn static_true_assertion_discards_normalized_runtime_template_message_after_validation() {
     let mut string_table = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let mut type_environment = TypeEnvironment::new();
+    let option_string_type_id = type_environment.intern_option(builtin_type_ids::STRING);
     let _path_fork = PathInternerFork::empty();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let template = registered_runtime_template(
@@ -932,54 +1161,64 @@ fn static_true_assertion_discards_normalized_runtime_template_message_after_vali
         TemplateViewContext::default(),
         &template_ir_store,
         &mut string_table,
+        &mut expressions,
     );
-    let template_expression = Expression::template(template, ValueMode::ImmutableOwned);
-
-    let mut type_environment = TypeEnvironment::new();
-    let option_string_type_id = type_environment.intern_option(builtin_type_ids::STRING);
-    let message = Expression::new(
-        ExpressionKind::Coerced {
-            value: Box::new(template_expression),
-            to_type: option_string_type_id,
-        },
-        None,
-        option_string_type_id,
-        DataType::Option(Box::new(DataType::StringSlice)),
-        ValueMode::ImmutableOwned,
-    );
+    let template_expression = expressions
+        .template(template, ValueMode::ImmutableOwned)
+        .expect("template expression")
+        .id();
+    let template_expression = expressions.own(template_expression);
+    let message = expressions
+        .coerced(template_expression, option_string_type_id)
+        .expect("message coercion");
     let mut node = AstNode {
         kind: NodeKind::Assert {
-            condition: Expression::bool(true, None, ValueMode::ImmutableOwned),
-            message: Box::new(message),
+            condition: expressions
+                .bool(&mut constants, true, None, ValueMode::ImmutableOwned)
+                .expect("bool expression")
+                .id(),
+            message: message.id(),
         },
         span: None,
         scope: PathId::ROOT,
     };
     let mut context = TemplateNormalizationContext {
+        expression_builder: &mut expressions,
+        const_values: &mut constants,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         string_table: &mut string_table,
         template_ir_store,
         module_resources: None,
+        expression_pending: Vec::new(),
+        expression_results: Vec::new(),
     };
 
     normalize_ast_node_templates(&mut node, &mut context)
         .expect("static-true assertion messages should normalize before discard");
     // The production finalizer calls this cleanup immediately after its authoritative type/TIR
     // validation pass. This unit test exercises the same post-validation boundary directly.
-    discard_inactive_assertion_messages(std::slice::from_mut(&mut node))
-        .expect("normalized inactive assertion messages should discard successfully");
+    discard_inactive_assertion_messages(
+        std::slice::from_mut(&mut node),
+        &mut expressions,
+        &mut constants,
+    )
+    .expect("normalized inactive assertion messages should discard successfully");
 
     let NodeKind::Assert { message, .. } = node.kind else {
         panic!("expected the test node to remain an assertion");
     };
+    let normalized = expressions.view(message).expect("validated inert message");
+    assert!(matches!(
+        normalized.operation(),
+        ExpressionOperationView::Constant(_)
+    ));
     assert!(
-        matches!(message.kind, ExpressionKind::OptionNone),
-        "inactive assertion messages must be replaced with typed none, got {:?}",
-        message.kind
+        normalized
+            .value_type_id()
+            .expect("typed none keeps its result")
+            == option_string_type_id
     );
-    assert_eq!(message.type_id, option_string_type_id);
-    assert!(message.synthetic_interface_provenance.is_empty());
+    assert!(normalized.occurrence_facts().is_none());
 }
 
 // ---------------------------------------------------------------------------
@@ -995,7 +1234,7 @@ fn static_true_assertion_discards_normalized_runtime_template_message_after_vali
 // parameters use authored foldable constant template joins so the joined value must read as one
 // folded string. Aligned generic receivers cannot yet author an extra defaulted parameter (the
 // `of` argument list consumes the following comma), so the retained generic default is covered
-// through an exported generic free function sharing `normalize_retained_signature_defaults`.
+// through an exported generic free function sharing `synchronize_normalized_public_defaults`.
 
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_build_result;
@@ -1058,37 +1297,17 @@ fn signature_parameter<'a>(
     path_fork: &PathInternerFork,
     string_table: &StringTable,
     name: &str,
-) -> Option<&'a Declaration> {
+) -> Option<&'a crate::compiler_frontend::ast::statements::functions::FunctionParameter> {
     signature.parameters.iter().find(|parameter| {
         path_display_name(parameter.id, path_fork, string_table).as_deref() == Some(name)
-    })
-}
-
-fn body_method_call_args<'a>(
-    body: &'a [AstNode],
-    method_path: &PathId,
-) -> Option<&'a [CallArgument]> {
-    body.iter().find_map(|node| {
-        let NodeKind::ExpressionStatement(expression) = &node.kind else {
-            return None;
-        };
-        let ExpressionKind::MethodCall {
-            method_path: call_path,
-            args,
-            ..
-        } = &expression.kind
-        else {
-            return None;
-        };
-        (call_path == method_path).then_some(args.as_slice())
     })
 }
 
 #[test]
 fn finalization_synchronizes_ordinary_receiver_root_entry_with_emitted_signature() {
     // Receiver ownership publishes this private method through Counter's public surface.
-    let source = "export:\n    Counter = | count Int = 0 |\n    run || -> Int:\n        counter = Counter()\n        counter.bump()\n        return counter.count\n    ;\n;\nbump |this Counter, label String = [\"joined \", \"default\"]| -> Int:\n    return this.count\n;\n";
-    let (build_result, path_fork, string_table) = parse_single_file_ast_build_result(source)
+    let source = "export:\n    Counter = | count I32 = 0 |\n    run || -> I32:\n        counter = Counter()\n        counter.bump()\n        return counter.count\n    ;\n;\nbump |this Counter, label String = [\"joined \", \"default\"]| -> I32:\n    return this.count\n;\n";
+    let (build_result, path_fork, mut string_table) = parse_single_file_ast_build_result(source)
         .expect("an ordinary receiver method with a template default should finalize");
     let nodes = &build_result.ast.nodes;
     let receiver_entries = &build_result
@@ -1135,39 +1354,34 @@ fn finalization_synchronizes_ordinary_receiver_root_entry_with_emitted_signature
             "the root entry must join the emitted parameters in order"
         );
         assert_eq!(
-            entry_parameter.value.type_id, emitted_parameter.value.type_id,
+            entry_parameter.type_id, emitted_parameter.type_id,
             "the joined parameter must keep the emitted semantic type"
         );
         assert_eq!(
-            entry_parameter.value.span, emitted_parameter.value.span,
-            "the joined parameter must keep the authored default span"
-        );
-        assert_eq!(
-            entry_parameter.value.synthetic_interface_provenance,
-            emitted_parameter.value.synthetic_interface_provenance,
-            "the joined parameter must keep the normalized default provenance"
+            entry_parameter.default, emitted_parameter.default,
+            "the joined parameter must keep the canonical folded default"
         );
     }
 
     let entry_label = signature_parameter(&entry.signature, &path_fork, &string_table, "label")
         .expect("the receiver signature must retain its defaulted label parameter");
-    let ExpressionKind::StringSlice(entry_label_text) = &entry_label.value.kind else {
-        panic!(
-            "the authored template default must reach the root table folded, got {:?}",
-            entry_label.value.kind
-        );
-    };
+    let entry_default = entry_label.default.expect("canonical folded default");
     assert_eq!(
-        string_table.resolve(*entry_label_text),
-        "joined default",
+        build_result.ast.const_values.string_value(entry_default),
+        Some(string_table.intern("joined default")),
         "the root default must carry the folded template text"
     );
+    let entry_metadata = build_result
+        .ast
+        .const_values
+        .metadata(entry_default)
+        .expect("canonical default metadata");
     assert!(
-        entry_label.value.span.is_some(),
+        entry_metadata.span.is_some(),
         "the folded root default must keep an authored span"
     );
     assert!(
-        entry_label.value.synthetic_interface_provenance.is_empty(),
+        entry_metadata.synthetic_interface_provenance.is_empty(),
         "a template join over portable literals must stay portable"
     );
 
@@ -1175,20 +1389,37 @@ fn finalization_synchronizes_ordinary_receiver_root_entry_with_emitted_signature
     // and normalized with the caller's body into the same concrete folded value.
     let (_, _, run_body) = emitted_function(nodes, &path_fork, &string_table, "run")
         .expect("the exported free function must emit an ordinary declaration node");
-    let call_args = body_method_call_args(run_body, &entry.function_path)
-        .expect("the receiver call inside run must be a method call node");
-    let [filled] = call_args else {
-        panic!("the receiver call must fill exactly its defaulted parameter")
+    let call_expression = run_body
+        .iter()
+        .find_map(|node| match &node.kind {
+            NodeKind::ExpressionStatement(expression) => Some(*expression),
+            _ => None,
+        })
+        .expect("the receiver call inside run must be an expression statement");
+    let ExpressionOperationView::MethodCall { receiver: _, call } = build_result
+        .ast
+        .expressions
+        .view(call_expression)
+        .expect("bound receiver call")
+        .operation()
+    else {
+        panic!("the receiver call inside run must be a method call node");
     };
-    let ExpressionKind::StringSlice(filled_text) = &filled.value.kind else {
-        panic!(
-            "the omitted template default must fill as a folded string, got {:?}",
-            filled.value.kind
-        );
+    assert!(
+        call.arguments().len() == 1,
+        "the receiver call must fill exactly its defaulted parameter"
+    );
+    let filled = call
+        .arguments()
+        .iter()
+        .next()
+        .expect("filled defaulted argument");
+    let ExpressionOperationView::Constant(filled_value) = filled.value().operation() else {
+        panic!("the omitted template default must fill as a folded string");
     };
     assert_eq!(
-        string_table.resolve(*filled_text),
-        "joined default",
+        build_result.ast.const_values.string_value(filled_value),
+        Some(string_table.intern("joined default")),
         "the omitted default must fill with the declared folded value"
     );
 }
@@ -1198,9 +1429,9 @@ fn finalization_normalizes_generic_receiver_root_entry_and_retained_function_def
     // Generic declarations do not emit ordinary declaration nodes, so their root-table
     // signatures are the retained normalization owner. Aligned generic receivers cannot yet
     // author an extra defaulted parameter, so the retained template default rides the
-    // supported exported generic free function sharing `normalize_retained_signature_defaults`.
+    // supported exported generic free function sharing `synchronize_normalized_public_defaults`.
     let source = "export:\n    Cell type T = |\n        value T,\n    |\n    pick type T |value T, tag String = [\"joined \", \"n/a\"]| -> T:\n        return value\n    ;\n;\ncell_value type T |this Cell of T| -> T:\n    return this.value\n;\nbox = Cell(\"v\")\n";
-    let (build_result, path_fork, string_table) = parse_single_file_ast_build_result(source)
+    let (build_result, path_fork, mut string_table) = parse_single_file_ast_build_result(source)
         .expect("generic receiver and function roots with retained defaults should finalize");
     let nodes = &build_result.ast.nodes;
     let root_table = &build_result.public_interface_projection_input.root_table;
@@ -1254,30 +1485,30 @@ fn finalization_normalizes_generic_receiver_root_entry_and_retained_function_def
         .expect("the exported generic function must retain a generic function root");
     let tag = signature_parameter(function_signature, &path_fork, &string_table, "tag")
         .expect("the generic function signature must retain its defaulted tag parameter");
-    let ExpressionKind::StringSlice(tag_text) = &tag.value.kind else {
-        panic!(
-            "the retained generic template default must normalize to a folded string, got {:?}",
-            tag.value.kind
-        );
-    };
+    let tag_default = tag.default.expect("canonical folded default");
     assert_eq!(
-        string_table.resolve(*tag_text),
-        "joined n/a",
+        build_result.ast.const_values.string_value(tag_default),
+        Some(string_table.intern("joined n/a")),
         "the retained generic default must carry the folded template text"
     );
+    let tag_metadata = build_result
+        .ast
+        .const_values
+        .metadata(tag_default)
+        .expect("canonical default metadata");
     assert!(
-        tag.value.span.is_some(),
+        tag_metadata.span.is_some(),
         "the normalized generic default must keep an authored span"
     );
     assert!(
-        tag.value.synthetic_interface_provenance.is_empty(),
+        tag_metadata.synthetic_interface_provenance.is_empty(),
         "a template join over portable literals must stay portable"
     );
 }
 
 #[test]
 fn finalization_keeps_private_receiver_methods_out_of_public_roots_and_fills_call_defaults() {
-    let source = "Counter = | count Int = 0 |\nbump |this Counter, step Int = 7| -> Int:\n    return this.count + step\n;\nexport:\n    run || -> Int:\n        counter = Counter()\n        counter.bump()\n        return counter.count\n    ;\n;\n";
+    let source = "Counter = | count I32 = 0 |\nbump |this Counter, step I32 = 7| -> I32:\n    return this.count + step\n;\nexport:\n    run || -> I32:\n        counter = Counter()\n        counter.bump()\n        return counter.count\n    ;\n;\n";
     let (build_result, path_fork, string_table) = parse_single_file_ast_build_result(source)
         .expect("a private receiver method on a private struct should finalize and stay callable");
     let nodes = &build_result.ast.nodes;
@@ -1294,28 +1525,57 @@ fn finalization_keeps_private_receiver_methods_out_of_public_roots_and_fills_cal
     );
 
     // The private method still emits and its retained signature keeps the authored default.
-    let (bump_path, bump_signature, _) = emitted_function(nodes, &path_fork, &string_table, "bump")
+    let (_, bump_signature, _) = emitted_function(nodes, &path_fork, &string_table, "bump")
         .expect("the private receiver method must emit an ordinary declaration node");
     let step = signature_parameter(bump_signature, &path_fork, &string_table, "step")
         .expect("the private method signature must retain its step parameter");
+    let step_default = step.default.expect("canonical folded default");
     assert!(
-        matches!(step.value.kind, ExpressionKind::Int(7)),
-        "the private method's authored default must survive finalization, got {:?}",
-        step.value.kind
+        matches!(
+            build_result.ast.const_values.payload(step_default),
+            Some(crate::compiler_frontend::ast::const_values::store::ConstValuePayload::FixedScalar(value))
+                if value.scalar() == moth_lexical::numeric::fixed_scalar::FixedScalar::I32
+                    && value.as_i64() == Some(7)
+        ),
+        "the private method's authored default must survive finalization"
     );
 
     // The equivalent lane for non-root receiver defaults lives at the real consumer: the call
     // site fills the defaulted argument from the retained signature with the declared value.
     let (_, _, run_body) = emitted_function(nodes, &path_fork, &string_table, "run")
         .expect("the exported free function must emit an ordinary declaration node");
-    let call_args = body_method_call_args(run_body, &bump_path)
-        .expect("the receiver call inside run must be a method call node");
-    let [filled] = call_args else {
-        panic!("the receiver call must fill exactly its defaulted parameter")
+    let call_expression = run_body
+        .iter()
+        .find_map(|node| match &node.kind {
+            NodeKind::ExpressionStatement(expression) => Some(*expression),
+            _ => None,
+        })
+        .expect("the receiver call inside run must be an expression statement");
+    let ExpressionOperationView::MethodCall { receiver: _, call } = build_result
+        .ast
+        .expressions
+        .view(call_expression)
+        .expect("bound receiver call")
+        .operation()
+    else {
+        panic!("the receiver call inside run must be a method call node");
+    };
+    assert!(call.arguments().len() == 1);
+    let filled = call
+        .arguments()
+        .iter()
+        .next()
+        .expect("filled defaulted argument");
+    let ExpressionOperationView::Constant(filled_value) = filled.value().operation() else {
+        panic!("the omitted default must fill with the declared value at the call site");
     };
     assert!(
-        matches!(filled.value.kind, ExpressionKind::Int(7)),
-        "the omitted default must fill with the declared value at the call site, got {:?}",
-        filled.value.kind
+        matches!(
+            build_result.ast.const_values.payload(filled_value),
+            Some(crate::compiler_frontend::ast::const_values::store::ConstValuePayload::FixedScalar(value))
+                if value.scalar() == moth_lexical::numeric::fixed_scalar::FixedScalar::I32
+                    && value.as_i64() == Some(7)
+        ),
+        "the omitted default must fill with the declared value at the call site"
     );
 }

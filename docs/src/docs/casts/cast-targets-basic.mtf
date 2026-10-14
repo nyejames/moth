@@ -1,37 +1,19 @@
-A cast needs a clear destination type.
+Builtin cast targets include eleven fixed numeric types:
 
-These are supported cast targets:
+- `I8`, `I16`, `I32`, `I64`
+- `U8`, `U16`, `U32`, `U64`
+- `F16`, `F32`, `F64`
 
-- `Bool`
-- the numeric types: `Int`, `Uint`, `Float`, the fixed-width integers and binary floats, `Byte`, and the exact `Dec` family
-- `String`
-- `Char`
-- `Error`
+`Byte`, `Dec` and `Dec0` through `Dec256` remain separate targets. `Bool`,
+`String`, `Char` and `Error` also have builtin conversion policies.
 
-`Uint` converts implicitly to `Float` at value-receiving and mixed-operator
-boundaries, and explicitly with `cast` in both directions with `Int`,
-`Float`, fixed integers and the `Dec` family. `Uint` and `Int` need an
-explicit cast between each other even when the values would fit.
+Same-type casts are invalid. `Byte` remains distinct from `U8`, and no cast
+silently changes one into the other.
 
-Not every source type can convert to every target. `Byte` and `U8` convert in
-both directions without failing, and other `Byte` numeric conversions go through
-`U8`. HTML-JS executes casts to these targets. Wasm still gates fallible casts
-and other remaining conversions. See @../progress (Progress) for current support.
+The target comes from an immediate typed destination such as an annotation,
+return slot, concrete parameter, field or typed collection entry. An
+unresolved generic slot and a distant later use cannot supply it.
 
-An annotation gives the cast its target:
-
-[codeblock, $code("moth"):
-    count Int = cast! text
-    label String = cast count
-]
-
-Without that annotation, the compiler cannot know which conversion you want:
-
-[codeblock, $code("moth"):
-    count = cast text
-]
-
-The second form is invalid.
-
-Casts can also receive a target from a function parameter, return slot, field or
-another immediate typed destination.
+Not every source-target pair can convert. Numeric pairs follow their complete
+types, not a value the compiler happens to know. See @./#cast-targets (Cast
+targets) for exactness, rounding and failure rules.

@@ -2,7 +2,7 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0057"]
-message_contains = ["Generic parameter 'T'", "Int", "String"]
+message_contains = ["Generic parameter 'T'", "I32", "String"]
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0057"

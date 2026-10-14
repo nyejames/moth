@@ -15,9 +15,11 @@ use leaf_resolution::{LeafDispatchContext, resolve_namespace_value_member};
 use traversal::{NamespaceMemberLookup, lookup_namespace_member};
 
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidFieldAccessReason, NamespaceTypeValueMisuseKind,
@@ -38,6 +40,8 @@ pub(super) struct NamespaceAccessInput<'a, 'env, 'tokens> {
     pub(super) token_stream: &'a mut AstCursor<'tokens>,
     pub(super) context: &'a ScopeContext,
     pub(super) type_interner: &'a mut AstTypeInterner<'env>,
+    pub(super) expression_builder: &'a mut AstExpressionBuilder,
+    pub(super) const_values: &'a mut ConstValueStore,
     pub(super) expression: &'a mut Vec<ExpressionRpnItem>,
     pub(super) allow_boundary_catch: bool,
     pub(super) expected_result_evidence_allowed: bool,
@@ -64,6 +68,8 @@ pub(super) fn parse_namespace_access(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         expression,
         allow_boundary_catch,
         expected_result_evidence_allowed,
@@ -154,6 +160,8 @@ pub(super) fn parse_namespace_access(
                     token_stream,
                     context,
                     type_interner,
+                    expression_builder,
+                    const_values,
                     expression,
                     allow_boundary_catch,
                     string_table,

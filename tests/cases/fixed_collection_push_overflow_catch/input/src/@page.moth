@@ -1,4 +1,4 @@
-push_overflow_message |items ~{1 Int}| -> String:
+push_overflow_message |items ~{1 I32}| -> String:
     ~items.push(2) catch |err|:
         return err.message
     ;
@@ -7,7 +7,7 @@ push_overflow_message |items ~{1 Int}| -> String:
 ;
 
 render_overflow || -> String:
-    items ~{1 Int} = {}
+    items ~{1 I32} = {}
     ~items.push(1) catch:
     ;
     message = push_overflow_message(~items)

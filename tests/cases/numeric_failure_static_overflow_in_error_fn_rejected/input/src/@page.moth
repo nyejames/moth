@@ -1,4 +1,4 @@
-overflow || -> Int, Error!:
+overflow || -> I32, Error!:
     return 2147483647 + 1
 ;
 

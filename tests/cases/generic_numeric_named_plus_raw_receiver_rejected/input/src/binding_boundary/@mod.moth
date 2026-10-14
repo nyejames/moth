@@ -1,0 +1,14 @@
+-- The immediate U64 result of the second identity call owns only its own
+-- argument text, so it cannot retype the earlier initializer of value.
+
+identity type T |value T| -> T:
+    return value
+;
+
+reject_binding_boundary || -> String:
+    base = 1
+    value = identity(base + 1)
+    base_u8 U8 = base
+    wide U64 = identity(value)
+    return [wide]
+;

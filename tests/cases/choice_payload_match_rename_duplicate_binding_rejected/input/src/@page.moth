@@ -1,7 +1,7 @@
 Pair ::
     Pair |
-        left Int,
-        right Int,
+        left I32,
+        right I32,
     |,
 ;
 

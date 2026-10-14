@@ -1,9 +1,10 @@
 //! Expression result-type resolution for AST evaluation.
 //!
 //! Indexes authored RPN structure before materialising literals. Iterative resolution lets Dec
-//! and Uint receivers and local peers reach literal-only arithmetic without natural-type
-//! intermediates. Operator policy remains canonical, and failure facts are recorded afterwards
-//! in RPN order.
+//! and exact fixed-scalar receivers and local peers reach literal-only arithmetic without
+//! natural-type intermediates. The resolving owner annotates transient operator entries with
+//! canonical facts for fixed-edge node construction. Summaries follow authored RPN order even
+//! when peer typing runs first.
 
 use super::evaluator::{
     PendingLiteralDestination, materialize_pending_literal, pending_expression_item_bug,
@@ -11,32 +12,48 @@ use super::evaluator::{
 };
 use super::operator_policy::{resolve_binary_operator_type, resolve_unary_operator_type};
 use super::typing_error::ExpressionTypingError;
-use crate::compiler_frontend::ast::ScopeContext;
-use crate::compiler_frontend::ast::expressions::expression::Operator;
-use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
+use crate::compiler_frontend::ast::expressions::expression_rpn::{
+    ExpressionRpnItem, ResolvedComparisonOperation, ResolvedNumericOperation, ResolvedOperation,
+    ResolvedOperationKind,
+};
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::expressions::failure_facts::ExpressionFailureFacts;
+use crate::compiler_frontend::ast::expressions::failure_facts::{
+    ImplicitFailureContributor, ImplicitFailureSource,
+};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidExpressionReason, OperatorOperandPosition,
+    CompilerDiagnostic, InvalidExpressionReason, OperatorOperandPosition, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_operators::{
+    NumericComparisonDomain, NumericOperator, comparison_domain, numeric_failure_codes,
+    numeric_operation_cannot_fail, range_iteration_domain,
+};
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
-pub(super) struct ResolvedExpressionType {
-    pub(super) type_id: TypeId,
-    pub(super) failure_facts: ExpressionFailureFacts,
+pub(crate) struct ResolvedExpressionType {
+    pub(crate) type_id: TypeId,
+    pub(crate) failure_facts: ExpressionFailureFacts,
 }
 
-pub(super) fn resolve_expression_result_type(
+#[allow(
+    clippy::too_many_arguments,
+    reason = "result-type resolution keeps the output queue, span, literal destination, expression builder, const store, string table, type environment, and path fork as separate borrows"
+)]
+pub(crate) fn resolve_expression_result_type(
     output_queue: &mut [ExpressionRpnItem],
     expression_span: Option<SourceSpan>,
     literal_destination: Option<PendingLiteralDestination>,
-    context: &ScopeContext,
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     type_environment: &TypeEnvironment,
     path_fork: &PathInternerFork,
@@ -57,7 +74,8 @@ pub(super) fn resolve_expression_result_type(
             &mut nodes,
             root,
             destination,
-            context,
+            expressions,
+            const_values,
             string_table,
             type_environment,
             path_fork,
@@ -71,9 +89,9 @@ pub(super) fn resolve_expression_result_type(
         .into());
     };
 
-    // Peer selection can resolve the right subtree first. Failure witnesses must still follow
-    // authored RPN order, independently of the order in which their types became known.
-    let failure_facts = collect_numeric_failure_facts(output_queue, &nodes, type_environment)?;
+    // Peer selection can resolve the right subtree first. Summaries must still follow authored
+    // RPN order; each contributor remains on the operation that introduces it.
+    let failure_facts = collect_operation_summaries(output_queue);
     Ok(ResolvedExpressionType {
         type_id: resolved_type(&nodes, *root)?,
         failure_facts,
@@ -114,58 +132,67 @@ fn index_expression_nodes(
                 literal_only: true,
                 type_id: None,
             },
-            ExpressionRpnItem::PendingGroup { .. } => {
+            // Group markers are consumed by ordering, so result typing never sees one.
+            ExpressionRpnItem::GroupOpen { .. }
+            | ExpressionRpnItem::GroupClose { .. }
+            | ExpressionRpnItem::PendingNumericBinding { .. }
+            | ExpressionRpnItem::PendingNumericCall { .. }
+            | ExpressionRpnItem::PendingNumericCast { .. }
+            | ExpressionRpnItem::PendingNumericExpression { .. } => {
                 return Err(pending_expression_item_bug("expression result typing").into());
             }
-            ExpressionRpnItem::Operator { operator, span } => match operator.required_values() {
-                1 => {
-                    let child = stack.pop().ok_or_else(|| {
-                        missing_operand_error(
-                            operator,
-                            OperatorOperandPosition::Unary,
-                            *span,
-                            string_table,
-                        )
-                    })?;
-                    IndexedExpressionNode {
-                        children: ExpressionChildren::Unary(child),
-                        literal_only: matches!(operator, Operator::Negate)
-                            && nodes[child].literal_only,
-                        type_id: None,
+            ExpressionRpnItem::Operator { operator, span }
+            | ExpressionRpnItem::ResolvedOperator(ResolvedOperation { operator, span, .. }) => {
+                match operator.required_values() {
+                    1 => {
+                        let child = stack.pop().ok_or_else(|| {
+                            missing_operand_error(
+                                operator,
+                                OperatorOperandPosition::Unary,
+                                *span,
+                                string_table,
+                            )
+                        })?;
+                        IndexedExpressionNode {
+                            children: ExpressionChildren::Unary(child),
+                            literal_only: matches!(operator, Operator::Negate)
+                                && nodes[child].literal_only,
+                            type_id: None,
+                        }
+                    }
+                    2 => {
+                        let right = stack.pop().ok_or_else(|| {
+                            missing_operand_error(
+                                operator,
+                                OperatorOperandPosition::BinaryRight,
+                                *span,
+                                string_table,
+                            )
+                        })?;
+                        let left = stack.pop().ok_or_else(|| {
+                            missing_operand_error(
+                                operator,
+                                OperatorOperandPosition::BinaryLeft,
+                                *span,
+                                string_table,
+                            )
+                        })?;
+                        IndexedExpressionNode {
+                            children: ExpressionChildren::Binary { left, right },
+                            literal_only: operator.numeric_operator().is_some()
+                                && nodes[left].literal_only
+                                && nodes[right].literal_only,
+                            type_id: None,
+                        }
+                    }
+                    _ => {
+                        return Err(CompilerError::compiler_error(format!(
+                            "Unsupported operator arity during expression typing: {operator:?}",
+                        ))
+                        .into());
                     }
                 }
-                2 => {
-                    let right = stack.pop().ok_or_else(|| {
-                        missing_operand_error(
-                            operator,
-                            OperatorOperandPosition::BinaryRight,
-                            *span,
-                            string_table,
-                        )
-                    })?;
-                    let left = stack.pop().ok_or_else(|| {
-                        missing_operand_error(
-                            operator,
-                            OperatorOperandPosition::BinaryLeft,
-                            *span,
-                            string_table,
-                        )
-                    })?;
-                    IndexedExpressionNode {
-                        children: ExpressionChildren::Binary { left, right },
-                        literal_only: operator.numeric_operator().is_some()
-                            && nodes[left].literal_only
-                            && nodes[right].literal_only,
-                        type_id: None,
-                    }
-                }
-                _ => {
-                    return Err(CompilerError::compiler_error(format!(
-                        "Unsupported operator arity during expression typing: {operator:?}",
-                    ))
-                    .into());
-                }
-            },
+            }
         };
         nodes.push(node);
         stack.push(index);
@@ -210,7 +237,8 @@ fn resolve_indexed_expression(
     nodes: &mut [IndexedExpressionNode],
     root: usize,
     destination: Option<PendingLiteralDestination>,
-    context: &ScopeContext,
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     type_environment: &TypeEnvironment,
     path_fork: &PathInternerFork,
@@ -223,21 +251,35 @@ fn resolve_indexed_expression(
         match frame {
             ResolutionFrame::Visit { index, destination } => match &items[index] {
                 ExpressionRpnItem::Operand(expression) => {
-                    nodes[index].type_id = Some(expression.type_id);
+                    nodes[index].type_id = Some(
+                        expressions
+                            .view(*expression)?
+                            .require_single(ValueReceiverContext::OperatorOperand)?,
+                    );
                 }
                 ExpressionRpnItem::PendingNumericLiteral { .. } => {
                     nodes[index].type_id = Some(materialize_pending_literal(
                         items,
                         index,
                         destination,
-                        context,
+                        expressions,
+                        const_values,
                         string_table,
                     )?);
                 }
-                ExpressionRpnItem::PendingGroup { .. } => {
+                // Group markers are consumed by ordering, so typed evaluation never sees one.
+                ExpressionRpnItem::GroupOpen { .. }
+                | ExpressionRpnItem::GroupClose { .. }
+                | ExpressionRpnItem::PendingNumericBinding { .. }
+                | ExpressionRpnItem::PendingNumericCall { .. }
+                | ExpressionRpnItem::PendingNumericCast { .. }
+                | ExpressionRpnItem::PendingNumericExpression { .. } => {
+                    // Construction-only items are replaced by body completion before typed
+                    // evaluation; any later stage reports their presence as a broken invariant.
                     return Err(pending_expression_item_bug("expression result typing").into());
                 }
-                ExpressionRpnItem::Operator { operator, .. } => {
+                ExpressionRpnItem::Operator { operator, .. }
+                | ExpressionRpnItem::ResolvedOperator(ResolvedOperation { operator, .. }) => {
                     frames.push(ResolutionFrame::CompleteOperator(index));
                     match nodes[index].children {
                         ExpressionChildren::Unary(child) => frames.push(ResolutionFrame::Visit {
@@ -250,21 +292,16 @@ fn resolve_indexed_expression(
                         }),
                         ExpressionChildren::Binary { left, right } => {
                             let exponent = matches!(operator, Operator::Exponent);
-                            if matches!(
-                                destination,
-                                Some(
-                                    PendingLiteralDestination::Number { .. }
-                                        | PendingLiteralDestination::Uint
-                                )
-                            ) && operator.numeric_operator().is_some()
-                            {
-                                // Uint exponents share the Uint domain, while a Dec exponent
-                                // stays in profile Int. A Dec receiver cannot decide the
-                                // exponent edge from its destination alone: a typed Uint
-                                // base must route its exponent through Uint context so the
-                                // power stays a Uint input to the exact Dec mixed rule.
-                                // Resolve the base first, then route a lone or literal-only
-                                // exponent through the peer path; a Dec base keeps Int.
+                            // Any eligible exact numeric destination types raw literal leaves
+                            // through unresolved arithmetic and grouping. A named operand
+                            // keeps its identity; a completed result is never retagged.
+                            if destination.is_some() && operator.numeric_operator().is_some() {
+                                // A Dec exponent stays in I32: the exact exponent contract is
+                                // `DecN ^ I32 -> DecN`. A typed fixed-integer base routes its
+                                // exponent through that same integer context so the power stays a
+                                // fixed-integer input to the exact Dec mixed rule. Resolve the
+                                // base first, then route a lone or literal-only exponent through
+                                // the peer path; a Dec base keeps the I32 exponent edge.
                                 let on_dec_exponent_edge = exponent
                                     && matches!(
                                         destination,
@@ -359,8 +396,8 @@ fn resolve_indexed_expression(
                     Some(PendingLiteralDestination::Number { .. })
                 );
                 // Baseline immediate-peer rule: any numeric peer selects a lone literal, except
-                // a Dec peer on the power exponent edge which keeps profile Int. A Uint peer
-                // types its exponent the same as any other operand.
+                // a Dec peer on the power exponent edge which keeps the I32 exponent contract.
+                // Every other numeric peer types its exponent the same as any other operand.
                 let destination = if exponent_edge && peer_is_dec {
                     None
                 } else {
@@ -376,15 +413,10 @@ fn resolve_indexed_expression(
                 let peer_type = resolved_type(nodes, peer)?;
                 let peer_destination =
                     pending_literal_destination_for_type_id(peer_type, type_environment);
-                // Compound literal-only subtrees take context only from a Dec or Uint peer,
-                // except on the Dec power exponent edge. Uint exponents share the Uint domain,
-                // so only a Dec peer drops context there. Other peers resolve naturally.
-                let peer_supplies_arithmetic_context = matches!(
-                    peer_destination,
-                    Some(
-                        PendingLiteralDestination::Number { .. } | PendingLiteralDestination::Uint
-                    )
-                );
+                // Compound literal-only subtrees take context from any exact numeric peer,
+                // except on the Dec power exponent edge, which keeps the I32 exponent contract.
+                // Other peers resolve naturally.
+                let peer_supplies_arithmetic_context = peer_destination.is_some();
                 let on_dec_exponent_edge = exponent_edge
                     && matches!(
                         peer_destination,
@@ -399,9 +431,9 @@ fn resolve_indexed_expression(
             }
             ResolutionFrame::VisitReceiverExponent { base, exponent } => {
                 // The base resolved first under the receiver destination, so the
-                // exponent edge follows the base type: a Uint base routes the
-                // exponent through the Uint peer path, while any other base
-                // (Dec included) keeps the profile-Int exponent edge. The
+                // exponent edge follows the base type: a fixed-integer base routes the
+                // exponent through the fixed-integer peer path, while any other base
+                // (Dec included) keeps the I32 exponent edge. The
                 // operator's own CompleteOperator frame is already queued
                 // beneath this one, so only the children are scheduled here.
                 // A resolved peer is never re-queued: the base visit queued by
@@ -445,6 +477,10 @@ fn resolve_indexed_expression(
                 }
             }
             ResolutionFrame::CompleteOperator(index) => {
+                if let ExpressionRpnItem::ResolvedOperator(operation) = &items[index] {
+                    nodes[index].type_id = Some(operation.result_type);
+                    continue;
+                }
                 let ExpressionRpnItem::Operator { operator, span } = &items[index] else {
                     return Err(CompilerError::compiler_error(
                         "Expression typing lost an indexed operator.",
@@ -474,6 +510,23 @@ fn resolve_indexed_expression(
                     }
                 };
                 nodes[index].type_id = Some(type_id);
+                let (left_type, right_type) = match nodes[index].children {
+                    ExpressionChildren::Unary(child) => (resolved_type(nodes, child)?, None),
+                    ExpressionChildren::Binary { left, right } => (
+                        resolved_type(nodes, left)?,
+                        Some(resolved_type(nodes, right)?),
+                    ),
+                    ExpressionChildren::Leaf => unreachable!("operator children validated above"),
+                };
+                let operation = resolved_operation(
+                    *operator,
+                    *span,
+                    type_id,
+                    left_type,
+                    right_type,
+                    type_environment,
+                )?;
+                items[index] = ExpressionRpnItem::ResolvedOperator(operation);
             }
         }
     }
@@ -492,43 +545,98 @@ fn resolved_type(
     })
 }
 
-fn collect_numeric_failure_facts(
-    items: &[ExpressionRpnItem],
-    nodes: &[IndexedExpressionNode],
-    type_environment: &TypeEnvironment,
-) -> Result<ExpressionFailureFacts, ExpressionTypingError> {
+fn collect_operation_summaries(items: &[ExpressionRpnItem]) -> ExpressionFailureFacts {
     let mut facts = ExpressionFailureFacts::default();
-    for (index, item) in items.iter().enumerate() {
-        let ExpressionRpnItem::Operator { operator, span } = item else {
-            continue;
-        };
-        let Some(numeric_operator) = operator.numeric_operator() else {
-            continue;
-        };
-        let scalar = |index| {
-            resolved_type(nodes, index)
-                .map(|type_id| NumericScalar::from_type_id(type_id, type_environment))
-        };
-        // A binary operation records a witness only when both operands are numeric scalars.
-        let operands = match nodes[index].children {
-            ExpressionChildren::Unary(child) => scalar(child)?.map(|left| (left, None)),
-            ExpressionChildren::Binary { left, right } => scalar(left)?
-                .zip(scalar(right)?)
-                .map(|(left, right)| (left, Some(right))),
-            ExpressionChildren::Leaf => {
-                return Err(CompilerError::compiler_error(
-                    "Numeric failure recording found an operator without children.",
-                )
-                .into());
+    for item in items {
+        if let ExpressionRpnItem::ResolvedOperator(operation) = item {
+            facts.checked_numeric_operation |=
+                matches!(operation.kind, ResolvedOperationKind::Numeric(_));
+            if let Some(contributor) = operation.failure {
+                facts.summary.record_implicit(contributor);
             }
-        };
-        if let Some((left, right)) = operands
-            && let Some(domain) = scalar(index)?
-        {
-            facts.record_numeric_operation(numeric_operator, left, right, domain, *span);
         }
     }
-    Ok(facts)
+    facts
+}
+
+/// Captures selected numeric semantics while canonical operand and result types are available.
+pub(crate) fn resolved_operation(
+    operator: Operator,
+    span: Option<SourceSpan>,
+    result_type: TypeId,
+    left_type: TypeId,
+    right_type: Option<TypeId>,
+    environment: &TypeEnvironment,
+) -> Result<ResolvedOperation, ExpressionTypingError> {
+    let left = NumericScalar::from_type_id(left_type, environment);
+    let right = right_type.and_then(|type_id| NumericScalar::from_type_id(type_id, environment));
+    let mut failure = None;
+    let kind = if let Some(numeric_operator) = operator.numeric_operator() {
+        let left_domain = left.ok_or_else(|| {
+            CompilerError::compiler_error("Resolved arithmetic lost its canonical operand domain.")
+        })?;
+        let domain = NumericScalar::from_type_id(result_type, environment).ok_or_else(|| {
+            CompilerError::compiler_error("Resolved arithmetic lost its canonical result domain.")
+        })?;
+        let discharged =
+            numeric_operation_cannot_fail(numeric_operator, left_domain, right, domain);
+        let codes = numeric_failure_codes(numeric_operator, domain);
+        if !discharged && !codes.is_empty() {
+            failure = Some(ImplicitFailureContributor {
+                span,
+                codes,
+                source: ImplicitFailureSource::NumericOperation,
+            });
+        }
+        let exponent_edge = numeric_operator == NumericOperator::Power
+            && matches!(domain, NumericScalar::Number(_));
+        ResolvedOperationKind::Numeric(ResolvedNumericOperation {
+            operator: numeric_operator,
+            left_domain,
+            right_domain: right,
+            domain,
+            left_conversion: (left_domain != domain).then_some(domain),
+            right_conversion: right
+                .filter(|right| *right != domain && !exponent_edge)
+                .map(|_| domain),
+            discharged,
+        })
+    } else if matches!(operator, Operator::Range) {
+        let domain = left
+            .zip(right)
+            .and_then(|(left, right)| range_iteration_domain(left, right, None))
+            .ok_or_else(|| {
+                CompilerError::compiler_error("Resolved range lost its iteration domain.")
+            })?;
+        ResolvedOperationKind::Range { domain }
+    } else if let Some((left_domain, right_domain, domain)) =
+        left.zip(right).and_then(|(left, right)| {
+            comparison_domain(left, right).map(|domain| (left, right, domain))
+        })
+    {
+        let conversion_domain = match domain {
+            NumericComparisonDomain::Number(scale) => Some(NumericScalar::Number(scale)),
+            NumericComparisonDomain::ExactInteger | NumericComparisonDomain::BinaryFloat => None,
+        };
+        ResolvedOperationKind::Comparison(ResolvedComparisonOperation {
+            left_domain,
+            right_domain,
+            domain,
+            left_conversion: conversion_domain.filter(|domain| *domain != left_domain),
+            right_conversion: conversion_domain.filter(|domain| *domain != right_domain),
+        })
+    } else {
+        ResolvedOperationKind::NonNumeric
+    };
+    Ok(ResolvedOperation {
+        operator,
+        span,
+        result_type,
+        left_type,
+        right_type,
+        kind,
+        failure,
+    })
 }
 
 fn operator_accepts_peer_literal(operator: &Operator) -> bool {
@@ -550,10 +658,10 @@ fn operator_accepts_peer_literal(operator: &Operator) -> bool {
 ///
 /// A lone `PendingNumericLiteral` always reads its peer through the baseline immediate-peer
 /// rule: the peer side resolves first with no destination, so a compound literal-only peer
-/// infers its natural type (for example Float) before the lone literal materialises. A
+/// infers its natural type (for example F64) before the lone literal materialises. A
 /// compound literal-only subtree against a typed operand resolves operand-first, letting the
-/// compound frame apply Dec or Uint context before folding. Every other shape resolves
-/// naturally.
+/// compound frame apply Dec or exact fixed-scalar context before folding. Every other shape
+/// resolves naturally.
 fn literal_peer_shape(
     nodes: &[IndexedExpressionNode],
     items: &[ExpressionRpnItem],

@@ -97,7 +97,7 @@ impl TokenStats {
                 self.return_tokens += 1;
             }
 
-            TokenTag::CAST | TokenTag::CAST_BANG => {
+            TokenTag::CAST => {
                 self.cast_tokens += 1;
             }
 

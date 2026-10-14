@@ -1,0 +1,12 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0033"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0033"
+reason = "invalid_map_literal.duplicate_known_key"
+path = "input/@page.moth"
+line = 8

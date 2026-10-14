@@ -1,4 +1,18 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["MOTH-SYNTAX-0002"]
+diagnostic_codes = ["MOTH-SYNTAX-0002", "MOTH-SYNTAX-0002"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0002"
+occurrence = 1
+path = "input/plain_initializer/@mod.moth"
+line = 2
+column = 12
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0002"
+occurrence = 2
+path = "input/retained_value_block/@mod.moth"
+line = 4
+column = 46

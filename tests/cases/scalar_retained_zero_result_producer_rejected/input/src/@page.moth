@@ -1,0 +1,22 @@
+-- A zero-success source call retained through a pending numeric argument.
+--
+-- `origin` stays unannotated, so `touch(origin)` is retained until its I32
+-- parameter resolves the origin. `touch` returns nothing, so the first `then`
+-- value of the inferred multi-bind has no success slot to produce. Retention
+-- must reach the ordinary source diagnostic for that shape rather than panic
+-- while it projects the empty result list.
+
+touch |value I32|:
+;
+
+zero_result_producer |ready Bool| -> String:
+    origin = 1
+    first, second = if ready:
+        then touch(origin), 0
+    else
+        then "fallback", 0
+    ;
+    return first
+;
+
+[: [zero_result_producer(true)]]

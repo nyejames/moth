@@ -1,5 +1,6 @@
 small #U8 = 200
-sum #= small + 100
+wide_small #U16 = cast small
+sum #U16 = wide_small + 100
 sum_text #String = cast sum
 
 signed_min #I8 = -128
@@ -25,7 +26,8 @@ quarter #F32 = 0.25
 float_sum #= half_precision + quarter
 float_sum_text #String = cast float_sum
 
-flipped #= -signed_min
+wide_signed_min #I16 = cast signed_min
+flipped #I16 = -wide_signed_min
 flipped_text #String = cast flipped
 
 raw #Byte = 200

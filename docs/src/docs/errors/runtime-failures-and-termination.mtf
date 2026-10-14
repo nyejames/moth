@@ -1,9 +1,9 @@
-**Development note.** This advanced reference records accepted design. JS/HTML
-supports the implicit-failure and entry-error contract below; HTML-Wasm rejects
-recoverable numeric failure with a structured capability diagnostic. Check the
-@../progress (progress matrix) for per-target support. This catalogue may miss
-cases while Moth is changing rapidly. Update it when operations, runtime limits
-or backend contracts change.
+This reference records the accepted boundary between recoverable Moth failures
+and termination that prevents a handler from running. The Progress matrix owns
+current compiler and backend support: @../progress (Progress).
+
+Update the semantic catalogue when an operation, resource limit or failure
+contract changes.
 
 ### Recoverable failure and termination
 
@@ -101,9 +101,10 @@ and message.
     ]
 ]
 
-`304` (`FloatBoundaryNonFinite`) is external Float boundary validation and
-`305` (`FloatFormatInvariant`) is a defensive formatting check. Neither is
-implicit failure; their delivery follows separately declared API contracts.
+`304` (`FloatBoundaryNonFinite`) marks a non-finite external binary-float
+boundary and `305` (`FloatFormatInvariant`) marks a defensive formatting
+check. Neither is ordinary implicit failure; each follows its declared
+integrity contract.
 
 The catalogue is closed. Extend it only with a documented code plus backend
 parity tests that keep JS and Wasm message and code behaviour consistent. There
@@ -176,11 +177,11 @@ operations **without Moth's semantic checks**. It is not an unchecked Moth mode
 or a catalogue of exact generated instructions. Helpers and representations may
 differ. A backend must preserve Moth semantics wherever it supports the feature.
 
-Arithmetic checks the promoted result domain, not an operand's storage width.
-For example, `U8 + U8` yielding `256` is valid `U32`, not overflow.
-Narrowing that result back into `U8` is a separate checked boundary. Moth `/`
-produces a binary floating-point result for integer operands, while `//` is
-integer division.
+Arithmetic checks the selected semantic result domain, not an operand's storage
+width. `U8 + U8` stays `U8`, so `255 + 1` overflows rather than producing a
+`U32`. A later conversion back to a different target is a separate checked
+boundary. Fixed-integer `/` produces `F64` after common-integer eligibility;
+`//` stays integer division.
 
 JavaScript's `Number` below means its binary64 primitive, not Moth's
 arbitrary-precision `Dec` family. A bare JavaScript `Number` operation does
@@ -232,25 +233,25 @@ overflow limit, but still depend on host resources.
     ]
     [td:
         [: Integer narrowing cannot represent the value, including compound-assignment write-back]
-        [: Explicit fallible cast error, or built-in failure for implicit compound narrowing. The target is written only on success.]
+        [: Plain `cast` follows ordinary failure delivery. Compound write-back produces implicit failure. The target changes only on success.]
         [: Integer wrapping conversions and narrow stores discard high bits rather than range-checking the value.]
         [: Ordinary assignment does not narrow. Integer coercions and integer typed-array stores can wrap to their selected widths.]
     ]
     [td:
-        [: Float-to-integer conversion has an out-of-range truncated result]
-        [: Explicit fallible cast error, or built-in failure for implicit compound narrowing]
+        [: Binary-float-to-integer conversion has an out-of-range truncated result]
+        [: Plain `cast` follows ordinary failure delivery. Compound write-back produces implicit failure.]
         [: Trapping truncation traps on an invalid conversion. Saturating conversion clamps instead.]
         [: Math.trunc does not enforce the destination range. Subsequent fixed-width coercion can wrap.]
     ]
     [td:
-        [: Binary float narrowing rounds to a non-finite value]
-        [: Explicit fallible cast error, or built-in failure for implicit compound narrowing]
+        [: Binary-float narrowing rounds to a non-finite value]
+        [: Plain `cast` follows ordinary failure delivery. F16 operations check at F16 precision.]
         [: f32.demote_f64 can produce infinity. F16 needs its separate representation contract.]
         [: Math.fround can produce infinity when rounding to binary32.]
     ]
     [td:
         [: Runtime numeric text parsing is invalid, or an exact Dec conversion loses required information]
-        [: Explicit fallible cast error]
+        [: Plain `cast` follows ordinary failure delivery]
         [: No general text or decimal-scale conversion instruction. Language helpers define the checks.]
         [: Number accepts some spellings Moth rejects. parseInt and parseFloat can accept a prefix. Decimal-scale exactness needs helpers.]
     ]
@@ -275,10 +276,10 @@ overflow limit, but still depend on host resources.
 ]
 
 Finite floating-point rounding is permitted. Underflow to a finite subnormal or
-zero is not an overflow failure. Float-to-integer conversion truncates before
-checking the integer range. Dec scale narrowing instead requires exactness.
-The @../numbers/ (numeric reference) and @../casts/ (cast reference) own the
-complete operator, promotion and conversion rules.
+zero is not an overflow failure. Binary-float-to-integer conversion truncates
+before checking the integer range. `Dec` scale narrowing instead requires
+exactness. The @../numbers/ (numeric reference) and @../casts/ (cast reference)
+own the complete operator, arithmetic and conversion rules.
 
 The raw comparisons use the
 @https://webassembly.github.io/spec/core/exec/numerics.html (Wasm numeric semantics),

@@ -65,7 +65,7 @@ pub(super) fn requirement_and_method_labels(
                 .signature
                 .parameters
                 .first()
-                .and_then(|parameter| parameter.value.span),
+                .and_then(|parameter| parameter.binding_span),
             Some(DiagnosticLabelMessage::RenderedText(
                 string_table.intern("receiver method"),
             )),

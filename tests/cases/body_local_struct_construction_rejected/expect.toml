@@ -1,0 +1,11 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0023"]
+message_contains = ["Expected an operator before this expression."]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0023"
+path = "input/@page.moth"
+line = 5
+column = 14

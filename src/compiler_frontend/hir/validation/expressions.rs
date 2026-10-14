@@ -185,10 +185,7 @@ impl<'a> HirValidator<'a> {
         let expression = self.expression_row(expression_id, anchor)?;
         if !matches!(
             expression.kind,
-            HirExpressionKind::Uint(_)
-                | HirExpressionKind::Int(_)
-                | HirExpressionKind::Float(_)
-                | HirExpressionKind::FixedScalar(_)
+            HirExpressionKind::FixedScalar(_)
                 | HirExpressionKind::Number(_)
                 | HirExpressionKind::Char(_)
         ) {
@@ -222,10 +219,7 @@ impl<'a> HirValidator<'a> {
 
         if !matches!(
             expression.kind,
-            HirExpressionKind::Uint(_)
-                | HirExpressionKind::Int(_)
-                | HirExpressionKind::Float(_)
-                | HirExpressionKind::FixedScalar(_)
+            HirExpressionKind::FixedScalar(_)
                 | HirExpressionKind::Number(_)
                 | HirExpressionKind::Bool(_)
                 | HirExpressionKind::Char(_)
@@ -273,17 +267,55 @@ impl<'a> HirValidator<'a> {
             ));
         }
 
-        let result = self.validate_expression_contents(expression_id, expression, anchor);
+        // Keep the root in this frame so ordinary expressions and a single Not need no
+        // traversal allocation. Only further consecutive Not rows enter the heap stack.
+        let mut entered_not_rows = Vec::new();
+        let result = (|| {
+            let mut next_operand =
+                self.validate_expression_contents(expression_id, expression, anchor)?;
+            while let Some(operand) = next_operand {
+                let operand_expression = self.expression_row(operand, anchor)?;
+                if !matches!(
+                    operand_expression.kind,
+                    HirExpressionKind::UnaryOp {
+                        op: HirUnaryOp::Not,
+                        ..
+                    }
+                ) {
+                    // Preserve the existing depth-first traversal at the chain boundary.
+                    return self.validate_expression(operand, anchor);
+                }
+
+                let operand_index = operand.0 as usize;
+                if self.active_expression_rows[operand_index].replace(true) {
+                    return Err(self.error_with_hir(
+                        format!("HIR expression graph contains a cycle at {operand:?}"),
+                        anchor,
+                    ));
+                }
+                entered_not_rows.push(operand_index);
+                next_operand =
+                    self.validate_expression_contents(operand, operand_expression, anchor)?;
+            }
+            Ok(())
+        })();
+
+        // Unwind only rows entered here, including on error. An already-active cycle
+        // target belongs to an enclosing traversal and must stay marked until it unwinds.
+        for operand_index in entered_not_rows.into_iter().rev() {
+            self.active_expression_rows[operand_index].set(false);
+        }
         self.active_expression_rows[expression_index].set(false);
         result
     }
 
+    /// Returns a logical-not operand to visit iteratively after this row's local checks.
     fn validate_expression_contents(
         &self,
         expression_id: HirValueId,
         expression: &HirExpression,
         anchor: Option<HirLocation>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<Option<HirValueId>, CompilerError> {
         let value_location = HirLocation::Value(expression_id);
         if expression.span.is_some() {
             if self
@@ -343,25 +375,16 @@ impl<'a> HirValidator<'a> {
                 }
             }
 
-            // Leaf literals carry no sub-expressions; no further validation needed.
-            HirExpressionKind::Uint(_)
-            | HirExpressionKind::Int(_)
-            | HirExpressionKind::FixedScalar(_)
+            // Leaf literals carry no sub-expressions; no further validation needed. The fixed
+            // scalar carrier guarantees finite binary floats and exact-bit payloads at
+            // construction, so HIR never consumes an invalid numeric value.
+            HirExpressionKind::FixedScalar(_)
             | HirExpressionKind::Bool(_)
             | HirExpressionKind::Char(_)
             | HirExpressionKind::StringLiteral(_) => {}
 
             HirExpressionKind::StructuralString { pieces } => {
                 let _ = self.string_pieces(*pieces, anchor)?;
-            }
-
-            // Float precision follows the numeric profile, while HIR stores literals in f64.
-            // Literal materialisation and folding own rounding. Reject non-finite payloads
-            // here so backend lowerers never consume an invalid Moth Float value.
-            HirExpressionKind::Float(value) => {
-                if !value.is_finite() {
-                    return Err(self.error_with_hir("HIR Float literal must be finite", anchor));
-                }
             }
 
             HirExpressionKind::VariantConstruct {
@@ -456,26 +479,6 @@ impl<'a> HirValidator<'a> {
                                     anchor,
                                 ));
                             }
-                        }
-                    }
-                    #[cfg(test)]
-                    HirVariantCarrier::Fallible => {
-                        if *variant_index > 1 {
-                            return Err(self.error_with_hir(
-                                format!(
-                                    "VariantConstruct(Result) variant index {variant_index} out of range (valid: 0..=1)"
-                                ),
-                                anchor,
-                            ));
-                        }
-                        if fields.len() != 1 {
-                            return Err(self.error_with_hir(
-                                format!(
-                                    "VariantConstruct(Result) field count {} does not match expected 1 for variant index {}",
-                                    fields.len(), variant_index
-                                ),
-                                anchor,
-                            ));
                         }
                     }
                 }
@@ -579,7 +582,7 @@ impl<'a> HirValidator<'a> {
                         anchor,
                     ));
                 }
-                self.validate_expression(*operand, anchor)?;
+                return Ok(Some(*operand));
             }
 
             HirExpressionKind::StructConstruct {
@@ -623,20 +626,6 @@ impl<'a> HirValidator<'a> {
                     self.validate_expression(entry.key, anchor)?;
                     self.validate_expression(entry.value, anchor)?;
                 }
-            }
-
-            // Tuple construction: validate each element sub-expression.
-            HirExpressionKind::TupleConstruct {
-                elements: element_range,
-            } => {
-                for element in self.value_ids(*element_range, anchor)? {
-                    self.validate_expression(*element, anchor)?;
-                }
-            }
-
-            HirExpressionKind::TupleGet { tuple, .. } => {
-                // Tuple field access: validate the tuple sub-expression.
-                self.validate_expression(*tuple, anchor)?;
             }
 
             HirExpressionKind::Range { start, end } => {
@@ -699,31 +688,7 @@ impl<'a> HirValidator<'a> {
                             ));
                         }
                     }
-                    #[cfg(test)]
-                    HirVariantCarrier::Fallible => {
-                        if *variant_index > 1 {
-                            return Err(self.error_with_hir(
-                                format!(
-                                    "VariantPayloadGet variant index {variant_index} out of range for Result (valid: 0..=1)",
-                                ),
-                                anchor,
-                            ));
-                        }
-                        if *field_index >= 1 {
-                            return Err(self.error_with_hir(
-                                format!(
-                                    "VariantPayloadGet field index {field_index} out of range for Result variant {variant_index} with 1 field",
-                                ),
-                                anchor,
-                            ));
-                        }
-                    }
                 }
-            }
-
-            HirExpressionKind::FallibleUnwrapSuccess { result }
-            | HirExpressionKind::FallibleUnwrapError { result } => {
-                self.validate_expression(*result, anchor)?;
             }
 
             HirExpressionKind::Cast { source, policy } => {
@@ -745,7 +710,7 @@ impl<'a> HirValidator<'a> {
             }
         }
 
-        Ok(())
+        Ok(None)
     }
 
     // -------------------------

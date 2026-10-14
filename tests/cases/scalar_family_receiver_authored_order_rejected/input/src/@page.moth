@@ -1,0 +1,10 @@
+receive_f32 |value F32| -> String:
+    return cast value
+;
+
+value = 1 + 2
+first = receive_f32(value)
+duplicate = copy value
+second = receive_f32(duplicate)
+
+[:unreachable]

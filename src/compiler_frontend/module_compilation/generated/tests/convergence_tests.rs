@@ -1,11 +1,18 @@
 use super::*;
 
+use crate::build_system::BuildProfile;
+use crate::build_system::create_project_modules::ProjectFrontendCompilation;
+use crate::build_system::create_project_modules::compile_project_frontend;
+use crate::builder_surface::BuilderSurface;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
-use crate::compiler_frontend::compiler_messages::DiagnosticPayload;
+use crate::compiler_frontend::compiler_messages::render::{
+    DiagnosticRenderContext, diagnostic_type_name,
+};
+use crate::compiler_frontend::compiler_messages::{DiagnosticLabelMessage, DiagnosticPayload};
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::{CallTarget, ExternalFunctionId};
 use crate::compiler_frontend::hir::blocks::HirBlock;
@@ -17,8 +24,13 @@ use crate::compiler_frontend::hir::reachability::{
     HirModuleLinkFacts, collect_module_function_link_facts,
 };
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
-use crate::compiler_frontend::hir::terminators::HirTerminator;
-use crate::compiler_frontend::module_compilation::generated::test_fixtures::PublishedBoundary;
+use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
+use crate::compiler_frontend::module_compilation::generated::test_fixtures::{
+    PublishedBoundary, test_sidecar,
+};
+use crate::compiler_frontend::module_compilation::generated::transaction::{
+    GeneratedFunctionTransaction, GeneratedRequestEntry, GeneratedRequestFacts,
+};
 use crate::compiler_frontend::public_call_summary::{
     FunctionReturnAliasSummary, PublicCallSummary,
 };
@@ -28,7 +40,12 @@ use crate::compiler_frontend::semantic_identity::{
     StablePackageIdentity,
 };
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
+use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
+use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::projects::settings::Config;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use std::collections::VecDeque;
+use std::fs;
 
 fn module_origin() -> StableModuleOriginIdentity {
     StableModuleOriginIdentity::from_portable_path(
@@ -47,7 +64,9 @@ fn generated_identity(name: &str) -> GeneratedFunctionIdentity {
             name.to_owned(),
             None,
         )),
-        Box::new([CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)]),
+        Box::new([CanonicalTypeIdentity::Builtin(
+            CanonicalBuiltinType::FixedScalar(FixedScalar::I32),
+        )]),
         Box::new([]),
     )
 }
@@ -80,7 +99,8 @@ fn link_facts_for_calls(targets: Vec<CallTarget>) -> HirModuleLinkFacts {
         id: FunctionId(0),
         entry: BlockId(0),
         params: Vec::new(),
-        return_type: TypeId(0),
+        returns: Box::new([]),
+        error_return: None,
     });
     module
         .function_provenance
@@ -97,7 +117,7 @@ fn link_facts_for_calls(targets: Vec<CallTarget>) -> HirModuleLinkFacts {
                 kind: HirStatementKind::Call {
                     target,
                     args: crate::compiler_frontend::hir::expression_store::HirValueRange::empty(),
-                    result: None,
+                    results: Vec::new(),
                 },
                 span: None,
             })
@@ -121,7 +141,8 @@ fn base_hir(
             id: FunctionId(index as u32),
             entry: BlockId(0),
             params: Vec::new(),
-            return_type: TypeId(0),
+            returns: Box::new([]),
+            error_return: None,
         });
         hir.function_provenance
             .insert(FunctionId(index as u32), Default::default());
@@ -156,16 +177,16 @@ fn convergence_model_sorts_nodes_and_classifies_validated_call_targets() {
     let cross_module = OriginFunctionId::new_free(module_origin(), "cross".to_owned());
 
     let base_facts = link_facts_for_calls(vec![
-        CallTarget::Generated(alpha.clone()),
-        CallTarget::Generated(unknown),
+        CallTarget::Generated(Box::new(alpha.clone())),
+        CallTarget::Generated(Box::new(unknown)),
         CallTarget::ModulePrivate(private.clone()),
         CallTarget::Local(FunctionId(0)),
         CallTarget::CrossModule(cross_module),
         CallTarget::External(ExternalFunctionId::Synthetic(1)),
     ]);
-    let alpha_facts = link_facts_for_calls(vec![CallTarget::Generated(beta.clone())]);
+    let alpha_facts = link_facts_for_calls(vec![CallTarget::Generated(Box::new(beta.clone()))]);
     let beta_facts = link_facts_for_calls(vec![
-        CallTarget::Generated(alpha.clone()),
+        CallTarget::Generated(Box::new(alpha.clone())),
         CallTarget::ModulePrivate(private),
     ]);
 
@@ -643,11 +664,13 @@ fn builtin_failure_inference_requires_semantic_facts_and_call_summary() {
 
 fn failure_contributor(source: HirBuiltinFailureSource) -> HirBuiltinFailureContributor {
     let codes = match &source {
-        HirBuiltinFailureSource::NumericOperation
-        | HirBuiltinFailureSource::CompoundWriteBack { .. } => {
-            vec![BuiltinErrorCode::IntOverflow]
+        HirBuiltinFailureSource::NumericOperation => vec![BuiltinErrorCode::IntOverflow],
+        HirBuiltinFailureSource::CompoundWriteBack { .. } => {
+            vec![BuiltinErrorCode::IntCastOutOfRange]
         }
-        HirBuiltinFailureSource::Call(_) => vec![],
+        HirBuiltinFailureSource::AuthoredCastConversion | HirBuiltinFailureSource::Call(_) => {
+            vec![]
+        }
     };
     HirBuiltinFailureContributor {
         source,
@@ -666,6 +689,7 @@ fn failure_facts(
         contributors: sources.into_iter().map(failure_contributor).collect(),
         assertion_message_calls: vec![],
         deferred_custom_catches: vec![],
+        infallible_cast_evidence: None,
     }
 }
 
@@ -674,6 +698,7 @@ fn numeric_failure_contributor_rejects_empty_or_non_implicit_catalog_codes() {
     for codes in [
         vec![],
         vec![BuiltinErrorCode::Unsupported],
+        vec![BuiltinErrorCode::IntParseInvalidFormat],
         vec![BuiltinErrorCode::FloatBoundaryNonFinite],
         vec![BuiltinErrorCode::FloatFormatInvariant],
         vec![
@@ -690,6 +715,31 @@ fn numeric_failure_contributor_rejects_empty_or_non_implicit_catalog_codes() {
         hir.function_failure_facts.insert(FunctionId(0), facts);
         let mut report = report([(FunctionId(0), summary(FunctionReturnAliasSummary::Fresh))]);
         assert!(infer_builtin_failure_summaries(&hir, &mut report).is_err());
+    }
+}
+
+#[test]
+fn authored_cast_failure_contributor_accepts_cast_policy_codes_only() {
+    for (code, accepted) in [
+        (BuiltinErrorCode::IntParseInvalidFormat, true),
+        (BuiltinErrorCode::IntCastOutOfRange, true),
+        (BuiltinErrorCode::IntOverflow, false),
+        (BuiltinErrorCode::FloatFormatInvariant, false),
+    ] {
+        let mut hir = base_hir(&[], &[private_identity("producer")]);
+        let mut facts = failure_facts(
+            HirBuiltinFailureBoundary::InferPrivate,
+            vec![HirBuiltinFailureSource::AuthoredCastConversion],
+        );
+        facts.contributors[0].codes = vec![code];
+        hir.function_failure_facts.insert(FunctionId(0), facts);
+        let mut report = report([(FunctionId(0), summary(FunctionReturnAliasSummary::Fresh))]);
+
+        assert_eq!(
+            infer_builtin_failure_summaries(&hir, &mut report).is_ok(),
+            accepted,
+            "unexpected implicit cast classification for {code:?}"
+        );
     }
 }
 
@@ -805,7 +855,7 @@ fn builtin_failure_witness_resolves_local_private_and_generated_hops_in_order() 
     let sources = [
         HirBuiltinFailureSource::Call(CallTarget::Local(FunctionId(1))),
         HirBuiltinFailureSource::Call(CallTarget::ModulePrivate(private.clone())),
-        HirBuiltinFailureSource::Call(CallTarget::Generated(generated.clone())),
+        HirBuiltinFailureSource::Call(CallTarget::Generated(Box::new(generated.clone()))),
         HirBuiltinFailureSource::NumericOperation,
     ];
     for (index, source) in sources.into_iter().enumerate() {
@@ -1362,7 +1412,7 @@ fn builtin_failure_call_resolution_preserves_exact_summary_bits() {
         CallTarget::Local(FunctionId(0)),
         CallTarget::CrossModule(imported),
         CallTarget::ModulePrivate(private),
-        CallTarget::Generated(generated),
+        CallTarget::Generated(Box::new(generated)),
     ] {
         assert!(call_escapes_builtin_failure(&hir, &report, &target).unwrap());
     }
@@ -1373,7 +1423,7 @@ fn builtin_failure_call_resolution_preserves_exact_summary_bits() {
         call_escapes_builtin_failure(
             &hir,
             &report,
-            &CallTarget::Generated(generated_identity("missing")),
+            &CallTarget::Generated(Box::new(generated_identity("missing"))),
         )
         .is_err()
     );
@@ -1384,8 +1434,10 @@ fn convergence_callers_queue_reaches_generated_cycle_without_duplicate_entries()
     let generated_a = generated_identity("generated_a");
     let generated_b = generated_identity("generated_b");
     let base_facts = link_facts_for_calls(Vec::new());
-    let generated_a_facts = link_facts_for_calls(vec![CallTarget::Generated(generated_b.clone())]);
-    let generated_b_facts = link_facts_for_calls(vec![CallTarget::Generated(generated_a.clone())]);
+    let generated_a_facts =
+        link_facts_for_calls(vec![CallTarget::Generated(Box::new(generated_b.clone()))]);
+    let generated_b_facts =
+        link_facts_for_calls(vec![CallTarget::Generated(Box::new(generated_a.clone()))]);
     let model = ConvergenceModel::from_link_facts(
         &base_facts,
         vec![
@@ -1461,13 +1513,13 @@ fn counter_test_module() -> crate::compiler_frontend::module_compilation::Module
 #[test]
 fn unchanged_generated_summary_counts_comparison_without_change() {
     use crate::compiler_frontend::instrumentation::{
-        capture_frontend_counters_for_test, log_frontend_counters, reset_frontend_counters,
+        capture_counters_for_test, log_frontend_counters, reset_frontend_counters,
     };
     use crate::compiler_frontend::module_compilation::GeneratedFunctionSidecar;
     use crate::timing::start_benchmark_collection;
 
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let _counter_capture = capture_frontend_counters_for_test();
+    let _counter_capture = capture_counters_for_test();
     reset_frontend_counters();
     let timing_session = start_benchmark_collection(true).expect("timing session should start");
 
@@ -1627,3 +1679,657 @@ fn builtin_failure_witness_skipped_back_edge_keeps_writeback_origin() {
 // renderer; the synthetic harness here cannot vary declaration order or workers
 // (its `Local`-call branch never reads `function_ids_by_private_origin`, and
 // semantic jobs stay serial).
+
+#[test]
+fn reachable_generated_sidecars_follow_final_live_call_edges() {
+    let alpha = generated_identity("alpha");
+    let beta = generated_identity("beta");
+    let orphan = generated_identity("orphan");
+    let base_facts = link_facts_for_calls(vec![CallTarget::Generated(Box::new(alpha.clone()))]);
+    let alpha_facts = link_facts_for_calls(vec![CallTarget::Generated(Box::new(beta.clone()))]);
+    let beta_facts = link_facts_for_calls(vec![CallTarget::Generated(Box::new(alpha.clone()))]);
+    let orphan_facts = link_facts_for_calls(vec![CallTarget::Generated(Box::new(
+        generated_identity("orphan_child"),
+    ))]);
+    let known = PublishedBoundary::empty();
+    let mut transaction = GeneratedFunctionTransaction::new(known.view());
+    let request = |identity: GeneratedFunctionIdentity, display_name: &str| GeneratedRequestFacts {
+        identity,
+        display_name: display_name.to_owned(),
+        call_span: None,
+    };
+    let request_ids = transaction.register_requests([
+        request(alpha.clone(), "alpha"),
+        request(beta.clone(), "beta"),
+        request(orphan.clone(), "orphan"),
+    ]);
+
+    for request_id in request_ids {
+        let identity = transaction.identity(request_id).unwrap().clone();
+        assert_eq!(
+            transaction.enter(request_id).unwrap(),
+            GeneratedRequestEntry::Materialise
+        );
+        let mut sidecar =
+            test_sidecar(identity.clone(), summary(FunctionReturnAliasSummary::Fresh));
+        sidecar.module.link_facts.functions = if identity == alpha {
+            alpha_facts.clone()
+        } else if identity == beta {
+            beta_facts.clone()
+        } else {
+            orphan_facts.clone()
+        };
+        sidecar.module.executable.hir.expressions.freeze();
+        transaction
+            .complete(
+                request_id,
+                summary(FunctionReturnAliasSummary::Fresh),
+                sidecar,
+            )
+            .unwrap();
+    }
+
+    let reachable = reachable_generated_sidecars(&base_facts, &transaction);
+    assert_eq!(
+        reachable,
+        FxHashSet::from_iter([alpha.clone(), beta.clone()])
+    );
+
+    let mut hir = HirModule::new();
+    let expected_summary = summary(FunctionReturnAliasSummary::Fresh);
+    hir.generated_call_summaries
+        .insert(alpha.clone(), expected_summary.clone());
+    hir.generated_call_summaries
+        .insert(orphan.clone(), expected_summary);
+    retain_live_call_summaries(&mut hir, &base_facts);
+    assert_eq!(hir.generated_call_summaries.len(), 1);
+    assert!(hir.generated_call_summaries.contains_key(&alpha));
+
+    transaction.retain_reachable_sidecars(&reachable).unwrap();
+    assert!(transaction.sidecar_mut(&orphan).is_err());
+    let delta = transaction.finish().unwrap();
+    assert_eq!(delta.records().len(), 2);
+}
+
+fn compile_owned_service_fixture(
+    source: &str,
+    single_file: bool,
+) -> (ProjectFrontendCompilation, StringTable) {
+    let directory = tempfile::tempdir().expect("the service fixture directory should exist");
+    let source_root = directory.path().join("src");
+    fs::create_dir_all(&source_root).expect("the service source root should exist");
+    let source_path = source_root.join("@page.moth");
+    fs::write(&source_path, source).expect("the retained-fact fixture should be written");
+    fs::write(
+        directory.path().join("config.moth"),
+        "project #= (name = \"release\", entry_root = \"src\")\nhtml #= ()\n",
+    )
+    .expect("the directory fixture config should be written");
+    let entry = if single_file {
+        source_path.clone()
+    } else {
+        directory.path().to_path_buf()
+    };
+    let mut config = Config::new(entry);
+    let mut strings = StringTable::new();
+    let frontend = compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &StyleDirectiveRegistry::built_ins(),
+        &mut BuilderSurface::with_mandatory_core(),
+        &mut strings,
+    )
+    .expect("the canonical service should return its complete retained-fact outcome");
+    fs::write(&source_path, "no semantic source remains\n")
+        .expect("the original source should be replaced");
+    (frontend, strings)
+}
+
+#[test]
+fn module_and_single_file_results_reconverge_recursive_failure_facts_after_service_exit() {
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    const SOURCE: &str = "helper |value I32, ready Bool| -> I32:\n\
+        if ready:\n        return helper(value, ready)\n    ;\n    return value * 2\n;\n\
+        last |value I32, ready Bool| -> I32:\n    return helper(value, ready)\n;\n\
+        inner |value I32, ready Bool| -> I32:\n    return last(value, ready)\n;\n\
+        middle |value I32, ready Bool| -> I32:\n    return inner(value, ready)\n;\n\
+        outer |value I32, ready Bool| -> I32:\n    return middle(value, ready)\n;\n\
+        forward type T |marker T, value I32, ready Bool| -> I32:\n\
+            return outer(value, ready)\n;\n\
+        Failure = | message String |\n\
+        message type T |value T| -> T:\n    return value\n;\n\
+        check |value String|:\n    assert(true, message(value))\n;\n\
+        operand type T |value T| -> T:\n    return value\n;\n\
+        load |value I32| -> I32, Failure!:\n    return value\n;\n\
+        recover |value I32| -> I32:\n\
+            return load(operand(value)) catch |failure| then 0\n;\n\
+        check(\"safe\")\n\
+        recovered = recover(1)\n\
+        result = forward(1, recovered, false) catch then 0\n[: result=[result]]\n";
+
+    for single_file in [false, true] {
+        let (frontend, strings) = compile_owned_service_fixture(SOURCE, single_file);
+        assert!(!frontend.has_diagnosed_or_blocked());
+
+        let modules = frontend
+            .project
+            .successful_artefacts_in_module_id_order()
+            .map(|artefact| &artefact.module)
+            .collect::<Vec<_>>();
+        assert_eq!(modules.len(), 1);
+        let base = &modules[0].executable.hir;
+        let helper = base
+            .function_ids_by_private_origin
+            .iter()
+            .find(|(identity, _)| identity.defining_name() == "helper")
+            .map(|(_, function)| *function)
+            .expect("the base module retains its recursive helper identity");
+        let facts = &base.function_failure_facts[&helper];
+        assert_eq!(facts.contributors.len(), 2);
+        assert!(matches!(
+            facts.contributors[0].source,
+            HirBuiltinFailureSource::Call(CallTarget::Local(function)) if function == helper
+        ));
+        assert!(matches!(
+            facts.contributors[1].source,
+            HirBuiltinFailureSource::NumericOperation
+        ));
+        assert_eq!(facts.contributors[1].codes, [BuiltinErrorCode::IntOverflow]);
+        let recursive_span = facts.contributors[0]
+            .span
+            .expect("the retained recursive call has an authored span");
+        let origin_span = facts.contributors[1]
+            .span
+            .expect("the retained arithmetic origin has an authored span");
+        let recursive_range = recursive_span
+            .resolve_with(ExtendedSpanBuilder::new().resolver_for(recursive_span.source()));
+        let origin_range =
+            origin_span.resolve_with(ExtendedSpanBuilder::new().resolver_for(origin_span.source()));
+        assert!(recursive_range.start() < origin_range.start());
+        assert_eq!(
+            &SOURCE[origin_range.start() as usize..origin_range.end() as usize],
+            "*"
+        );
+
+        // Fresh false failure bits force the owned semantic facts to establish the recursive
+        // fixed point again. Neither preparation, AST nor TIR is available after the service.
+        let mut base_report = report(
+            base.functions
+                .iter()
+                .map(|function| (function.id, summary(FunctionReturnAliasSummary::Fresh))),
+        );
+        infer_builtin_failure_summaries(base, &mut base_report)
+            .expect("retained base facts should reconverge");
+        assert!(base_report.analysis.public_call_summaries[&helper].escapes_builtin_failure);
+        let named_base_function = |name: &str| {
+            base.function_ids_by_private_origin
+                .iter()
+                .find(|(identity, _)| identity.defining_name() == name)
+                .map(|(_, function)| *function)
+                .unwrap_or_else(|| panic!("the owned base module retains {name}"))
+        };
+        let outer = named_base_function("outer");
+        let witness = builtin_failure_witness(
+            base,
+            &base_report,
+            outer,
+            &base.function_failure_facts[&outer].contributors[0],
+        )
+        .expect("the retained private chain should select its concrete recursive origin");
+        assert_eq!(
+            witness.call_spans,
+            ["outer", "middle", "inner"].map(|name| base.function_failure_facts
+                [&named_base_function(name)]
+                .contributors[0]
+                .span)
+        );
+        assert_eq!(witness.origin_span, Some(origin_span));
+        assert_eq!(witness.codes, [BuiltinErrorCode::IntOverflow]);
+        assert_eq!(witness.elided_call_hops, 1);
+        assert!(!witness.call_spans.contains(&Some(recursive_span)));
+
+        let check = named_base_function("check");
+        assert!(!base_report.analysis.public_call_summaries[&check].escapes_builtin_failure);
+        assert!(
+            builtin_failure_diagnostic(base, &base_report, check)
+                .expect("the concrete inactive message should be validated")
+                .is_none()
+        );
+        assert!(
+            !modules[0]
+                .link_facts
+                .functions
+                .direct_call_targets()
+                .into_iter()
+                .any(|(_, target)| {
+                    matches!(target, CallTarget::Generated(identity)
+                if identity.declaration().defining_name() == "message")
+                })
+        );
+        let recover = named_base_function("recover");
+        assert!(!base_report.analysis.public_call_summaries[&recover].escapes_builtin_failure);
+        assert!(
+            builtin_failure_diagnostic(base, &base_report, recover)
+                .expect("the infallible concrete operand should remain lawful with a custom catch")
+                .is_none()
+        );
+        let load = named_base_function("load");
+        let custom_type = base
+            .functions
+            .iter()
+            .find(|function| function.id == load)
+            .expect("the typed producer survives the service")
+            .error_return
+            .expect("load retains its custom failure channel");
+        let type_context = DiagnosticRenderContext::new(&strings)
+            .with_optional_type_environment(Some(&modules[0].executable.type_environment))
+            .with_path_table(&modules[0].executable.path_table);
+        assert_eq!(diagnostic_type_name(custom_type, type_context), "Failure");
+        let (typed_span, failure_block, error_local) = base
+            .blocks
+            .iter()
+            .find_map(|block| match &block.terminator {
+                HirTerminator::Invoke {
+                    span,
+                    operation:
+                        HirFallibleOperation::Call {
+                            target: CallTarget::Local(function),
+                            ..
+                        },
+                    failure,
+                    error_result,
+                    ..
+                } if *function == load => Some((
+                    span.expect("the typed producer retains its authored site"),
+                    *failure,
+                    *error_result,
+                )),
+                _ => None,
+            })
+            .expect("the lawful custom catch retains load's routed typed error edge");
+        let typed_range =
+            typed_span.resolve_with(ExtendedSpanBuilder::new().resolver_for(typed_span.source()));
+        assert_eq!(
+            typed_range.start() as usize,
+            SOURCE
+                .find("load(operand(value))")
+                .expect("the fixture contains one typed producer")
+        );
+        let error = base
+            .blocks
+            .iter()
+            .flat_map(|block| &block.locals)
+            .find(|local| local.id == error_local)
+            .expect("the typed failure edge retains its error local");
+        assert_eq!(error.ty, custom_type);
+        let private_span = base
+            .blocks
+            .iter()
+            .flat_map(|block| &block.statements)
+            .find_map(|statement| match &statement.kind {
+                HirStatementKind::Call {
+                    target: CallTarget::Generated(identity),
+                    ..
+                } if identity.declaration().defining_name() == "operand" => statement.span,
+                _ => None,
+            })
+            .expect("the infallible protected operand remains a plain native call");
+        let private_range = private_span
+            .resolve_with(ExtendedSpanBuilder::new().resolver_for(private_span.source()));
+        assert_eq!(
+            private_range.start() as usize,
+            SOURCE
+                .find("operand(value)")
+                .expect("the fixture contains one protected private call")
+        );
+        assert_ne!(private_span, typed_span);
+        let fallback_start = SOURCE
+            .find("catch |failure| then 0")
+            .expect("the fixture contains one authored custom handler")
+            + "catch |failure| then ".len();
+        let mut handler_block = failure_block;
+        let mut visited = FxHashSet::default();
+        let handler_span = loop {
+            assert!(
+                visited.insert(handler_block),
+                "the fallback route must not loop"
+            );
+            let block = base
+                .blocks
+                .iter()
+                .find(|block| block.id == handler_block)
+                .expect("the typed error route retains each target block");
+            let fallback = block.statements.iter().find_map(|statement| {
+                let HirStatementKind::Write { value, .. } = statement.kind else {
+                    return None;
+                };
+                let span = base.expressions.expression(value).span?;
+                let range =
+                    span.resolve_with(ExtendedSpanBuilder::new().resolver_for(span.source()));
+                (range.start() as usize == fallback_start).then_some(span)
+            });
+            if let Some(span) = fallback {
+                break span;
+            }
+            let HirTerminator::Jump { target, .. } = block.terminator else {
+                panic!("the custom failure route must reach its authored fallback");
+            };
+            handler_block = target;
+        };
+        assert_ne!(handler_span, typed_span);
+        assert_ne!(handler_span, private_span);
+
+        let sidecars = frontend.project.generated.sidecars().collect::<Vec<_>>();
+        assert_eq!(sidecars.len(), 2);
+        assert!(
+            !sidecars
+                .iter()
+                .any(|sidecar| { sidecar.identity.declaration().defining_name() == "message" })
+        );
+        let operand = sidecars
+            .iter()
+            .find(|sidecar| sidecar.identity.declaration().defining_name() == "operand")
+            .expect("the protected generic operand has completed concrete work");
+        let operand_root =
+            operand.module.executable.hir.function_ids_by_generated[&operand.identity];
+        assert!(
+            !operand
+                .module
+                .executable
+                .borrow_analysis
+                .analysis
+                .public_call_summaries[&operand_root]
+                .escapes_builtin_failure
+        );
+        assert!(
+            operand
+                .module
+                .executable
+                .hir
+                .functions
+                .iter()
+                .find(|function| function.id == operand_root)
+                .expect("the concrete operand retains its native contract")
+                .error_return
+                .is_none()
+        );
+        let sidecar = sidecars
+            .iter()
+            .find(|sidecar| sidecar.identity.declaration().defining_name() == "forward")
+            .expect("the private recursive forwarding request completed");
+        assert_eq!(
+            sidecar.identity.type_arguments(),
+            [CanonicalTypeIdentity::Builtin(
+                CanonicalBuiltinType::FixedScalar(FixedScalar::I32,)
+            )]
+        );
+        let generated = &sidecar.module.executable.hir;
+        let root = generated.function_ids_by_generated[&sidecar.identity];
+        let generated_facts = &generated.function_failure_facts[&root];
+        assert_eq!(generated_facts.contributors.len(), 1);
+        assert!(matches!(
+            &generated_facts.contributors[0].source,
+            HirBuiltinFailureSource::Call(CallTarget::ModulePrivate(identity))
+                if identity.defining_name() == "outer"
+        ));
+        let mut generated_report = report(
+            generated
+                .functions
+                .iter()
+                .map(|function| (function.id, summary(FunctionReturnAliasSummary::Fresh))),
+        );
+        infer_builtin_failure_summaries(generated, &mut generated_report)
+            .expect("generated facts should consume the retained base helper summary");
+        assert!(generated_report.analysis.public_call_summaries[&root].escapes_builtin_failure);
+        assert!(
+            sidecar
+                .module
+                .executable
+                .borrow_analysis
+                .analysis
+                .public_call_summaries[&root]
+                .escapes_builtin_failure
+        );
+        let error_type = generated
+            .functions
+            .iter()
+            .find(|function| function.id == root)
+            .expect("the generated root remains executable")
+            .error_return
+            .expect("the generated private lane returns builtin failure");
+        assert_eq!(
+            sidecar
+                .module
+                .executable
+                .type_environment
+                .canonical_identity_for_type_id(error_type),
+            Some(&CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Error))
+        );
+    }
+}
+
+#[test]
+fn completed_service_diagnoses_retained_generic_assertion_and_custom_catch_sites() {
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let assertion_source = "message type T |marker T, value I32| -> String:\n\
+        number = value * 2\n    return \"unused\"\n;\n\
+        check |value String|:\n    assert(true, message(value, 1))\n;\ncheck(\"safe\")\n";
+    let catch_source = "Failure = | message String |\n\
+        operand type T |marker T, value I32| -> I32:\n    return value * 2\n;\n\
+        load |value I32| -> I32, Failure!:\n    return value\n;\n\
+        recover |value I32| -> I32:\n\
+            return load(operand(value, value)) catch |failure| then 0\n;\n\
+        recovered = recover(1)\n";
+
+    for single_file in [false, true] {
+        for (source, assertion) in [(assertion_source, true), (catch_source, false)] {
+            let (frontend, mut strings) = compile_owned_service_fixture(source, single_file);
+            assert!(frontend.has_diagnosed_or_blocked());
+            let messages = frontend
+                .into_render_messages_with_frozen_identity(&mut strings, None, None)
+                .expect("the completed diagnosis owns its source and required type context");
+            let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
+            assert_eq!(diagnostics.len(), 1);
+            let diagnostic = diagnostics[0];
+            let context = messages.diagnostic_render_context(0);
+            let identity = messages
+                .frozen_identity_context_for_diagnostic(0)
+                .expect("the retained diagnosis owns its compiled source snapshot");
+            let span_start = |span: Option<SourceSpan>| {
+                span.expect("the diagnosed semantic site retains an exact source span")
+                    .byte_range(identity)
+                    .start() as usize
+            };
+            let snapshot = identity
+                .line_index(
+                    diagnostic
+                        .primary_span
+                        .expect("the source diagnosis retains its primary source")
+                        .source(),
+                )
+                .expect("the completed diagnosis retains its source line index");
+            assert_eq!(
+                (0..snapshot.line_count())
+                    .map(|line| snapshot
+                        .line_text(line)
+                        .expect("each retained source line should resolve"))
+                    .collect::<Vec<_>>(),
+                source.lines().collect::<Vec<_>>()
+            );
+            let DiagnosticPayload::InvalidFallibleHandling { reason } = &diagnostic.payload else {
+                panic!("concrete generated failure must diagnose its retained boundary fact");
+            };
+            if assertion {
+                assert_eq!(
+                    *reason,
+                    InvalidFallibleHandlingReason::AssertionMessageCannotEscape
+                );
+                assert_eq!(
+                    span_start(diagnostic.primary_span),
+                    source
+                        .find("message(value, 1)")
+                        .expect("the fixture contains its inert message call")
+                );
+                assert_eq!(
+                    context
+                        .primary_position(diagnostic)
+                        .expect("the retained inert message span resolves after source deletion")
+                        .line,
+                    "    assert(true, message(value, 1))"
+                );
+            } else {
+                let InvalidFallibleHandlingReason::CustomErrorMixedWithImplicitFailure {
+                    error_type_id,
+                    typed_producer_span,
+                    implicit_producer_span,
+                } = reason
+                else {
+                    panic!("the completed generated operand must conflict with custom Failure");
+                };
+                assert_eq!(diagnostic_type_name(*error_type_id, context), "Failure");
+                assert_eq!(
+                    span_start(diagnostic.primary_span),
+                    source
+                        .find("catch |failure| then 0")
+                        .expect("the fixture contains its custom handler")
+                );
+                assert_eq!(
+                    span_start(*typed_producer_span),
+                    source
+                        .find("load(operand(value, value))")
+                        .expect("the fixture contains its typed producer")
+                );
+                assert_eq!(
+                    span_start(*implicit_producer_span),
+                    source
+                        .find("operand(value, value)")
+                        .expect("the fixture contains its generated private operand")
+                );
+                assert_eq!(
+                    diagnostic
+                        .labels
+                        .iter()
+                        .map(|label| (label.span, label.message.as_ref()))
+                        .collect::<Vec<_>>(),
+                    [
+                        (
+                            *typed_producer_span,
+                            Some(&DiagnosticLabelMessage::TypedFailureProducer {
+                                error_type_id: *error_type_id,
+                            })
+                        ),
+                        (
+                            *implicit_producer_span,
+                            Some(&DiagnosticLabelMessage::ImplicitFailureProducer)
+                        ),
+                    ]
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn active_and_inert_generic_message_share_one_completed_service_identity() {
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    const SOURCE: &str = "message type T |value T| -> T:\n    return value\n;\n\
+        check |value String|:\n    assert(true, message(value))\n;\n\
+        check(\"safe\")\nactive_message = message(\"live\")\n[: result=[active_message]]\n";
+    for single_file in [false, true] {
+        let (frontend, _) = compile_owned_service_fixture(SOURCE, single_file);
+        assert!(!frontend.has_diagnosed_or_blocked());
+        let artefacts = frontend
+            .project
+            .successful_artefacts_in_module_id_order()
+            .collect::<Vec<_>>();
+        assert_eq!(artefacts.len(), 1);
+        let base = &artefacts[0].module.executable.hir;
+        let check = base
+            .function_ids_by_private_origin
+            .iter()
+            .find(|(identity, _)| identity.defining_name() == "check")
+            .map(|(_, function)| *function)
+            .expect("the known-true assertion retains its checked function");
+        let start = base
+            .start_function
+            .expect("the active use belongs to the normal root");
+        let check_entry = base
+            .functions
+            .iter()
+            .find(|function| function.id == check)
+            .expect("the checked function retains its executable root")
+            .entry;
+        let check_block = base
+            .blocks
+            .iter()
+            .find(|block| block.id == check_entry)
+            .expect("the checked function retains its entry block");
+        assert!(check_block.statements.is_empty());
+        assert!(
+            matches!(check_block.terminator, HirTerminator::Return(values)
+            if base.expressions.values(values).is_empty())
+        );
+        let sidecars = frontend.project.generated.sidecars().collect::<Vec<_>>();
+        assert_eq!(sidecars.len(), 1);
+        let message = sidecars[0];
+        assert_eq!(message.identity.declaration().defining_name(), "message");
+        assert_eq!(
+            message.identity.type_arguments(),
+            [CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String)]
+        );
+        let root = message.module.executable.hir.function_ids_by_generated[&message.identity];
+        assert!(
+            !message
+                .module
+                .executable
+                .borrow_analysis
+                .analysis
+                .public_call_summaries[&root]
+                .escapes_builtin_failure
+        );
+        let callers = artefacts[0]
+            .module
+            .link_facts
+            .functions
+            .direct_call_targets()
+            .into_iter()
+            .filter_map(|(function, target)| {
+                matches!(&target, CallTarget::Generated(identity)
+                    if identity.as_ref() == &message.identity)
+                .then_some(function)
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(callers, [start]);
+        assert!(!callers.contains(&check));
+        let active_spans = base
+            .blocks
+            .iter()
+            .flat_map(|block| &block.statements)
+            .filter_map(|statement| match &statement.kind {
+                HirStatementKind::Call {
+                    target: CallTarget::Generated(identity),
+                    ..
+                } if identity.as_ref() == &message.identity => statement.span,
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let [span] = active_spans.as_slice() else {
+            panic!("the shared identity has exactly one executable message producer");
+        };
+        assert_eq!(
+            span.resolve_with(ExtendedSpanBuilder::new().resolver_for(span.source()))
+                .start() as usize,
+            SOURCE
+                .find("message(\"live\")")
+                .expect("the fixture has one active message call")
+        );
+        assert_ne!(
+            span.resolve_with(ExtendedSpanBuilder::new().resolver_for(span.source()))
+                .start() as usize,
+            SOURCE
+                .find("message(value)")
+                .expect("the fixture has one inert message occurrence")
+        );
+    }
+}

@@ -5,11 +5,11 @@ Its first parameter is named `this`:
 
 [codeblock, $code("moth"):
     Vector2 = |
-        x Float,
-        y Float,
+        x F64,
+        y F64,
     |
 
-    length_squared |this Vector2| -> Float:
+    length_squared |this Vector2| -> F64:
         return this.x * this.x + this.y * this.y
     ;
 

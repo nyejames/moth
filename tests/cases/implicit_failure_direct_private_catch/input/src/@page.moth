@@ -1,12 +1,12 @@
-double |value Int| -> Int:
+double |value I32| -> I32:
     return value + 2147483647
 ;
 
-recover_direct |value Int| -> Int:
+recover_direct |value I32| -> I32:
     return double(value) catch then -1
 ;
 
-recover_bound |value Int| -> Int:
+recover_bound |value I32| -> I32:
     recovered = double(value) catch |err|:
         then 0 - 1
     ;

@@ -1,0 +1,17 @@
+-- The same result-receiver barrier beside an independent receiver:
+-- `result U64 = count.unsupported()` must not constrain `count`, so the later
+-- `receive_i64(count)` selects I64 and the delayed unknown-member diagnostic
+-- reports that independent I64 receiver.
+--
+-- Letting the result receiver leak into the scalar's constraint set would
+-- instead report a spurious U64/I64 conflict or the wrong receiver type.
+
+receive_i64 |value I64| -> String:
+    return cast value
+;
+
+count = 1
+result U64 = count.unsupported()
+received = receive_i64(count)
+
+[:unreachable]

@@ -1,0 +1,12 @@
+-- A computed U64 fallback is named arithmetic and must not select the protected
+-- raw `1 + 2` backwards. Its `+` pairs U64 with I32, which has no common integer
+-- type. That operator is the only expected rejection.
+
+probe || -> String:
+    fallback U64 = 0
+    value ~= 1 + 2 catch then fallback + 0
+    value = 4294967300
+    return [:[value]]
+;
+
+[:[probe()]]

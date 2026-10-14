@@ -1,6 +1,6 @@
-draw |x Int = cast "bad" catch:
+draw |x I32 = cast "4" catch:
     then 4
-| -> Int:
+| -> I32:
     return x
 ;
 

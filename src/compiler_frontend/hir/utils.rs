@@ -42,13 +42,11 @@ pub fn for_each_terminator_target_mut(
             visit(then_block);
             visit(else_block);
         }
-        HirTerminator::FallibleBranch {
-            success_block,
-            error_block,
-            ..
+        HirTerminator::Invoke {
+            success, failure, ..
         } => {
-            visit(success_block);
-            visit(error_block);
+            visit(success);
+            visit(failure);
         }
         HirTerminator::Match { arms, .. } => {
             for arm in arms {
@@ -56,7 +54,6 @@ pub fn for_each_terminator_target_mut(
             }
         }
         HirTerminator::Return(_)
-        | HirTerminator::ReturnSuccess(_)
         | HirTerminator::ReturnError(_)
         | HirTerminator::RuntimeFailure { .. }
         | HirTerminator::Uninitialized
@@ -81,13 +78,11 @@ pub fn try_for_each_terminator_target<E>(
             visit(*else_block)?;
         }
 
-        HirTerminator::FallibleBranch {
-            success_block,
-            error_block,
-            ..
+        HirTerminator::Invoke {
+            success, failure, ..
         } => {
-            visit(*success_block)?;
-            visit(*error_block)?;
+            visit(*success)?;
+            visit(*failure)?;
         }
 
         HirTerminator::Match { arms, .. } => {
@@ -99,7 +94,6 @@ pub fn try_for_each_terminator_target<E>(
         HirTerminator::Break { target } | HirTerminator::Continue { target } => visit(*target)?,
 
         HirTerminator::Return(_)
-        | HirTerminator::ReturnSuccess(_)
         | HirTerminator::ReturnError(_)
         | HirTerminator::RuntimeFailure { .. }
         | HirTerminator::Uninitialized

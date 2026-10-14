@@ -77,7 +77,7 @@ The default is `10_000`.
 
 The maximum accepted configured value is `1_000_000`.
 
-The configured value must be a positive folded `Int`. Zero, negative values and
+The configured value must be a positive folded `I32`. Zero, negative values and
 values above `1_000_000` are rejected.
 
 A const conditional loop folds to no-output only when its condition is

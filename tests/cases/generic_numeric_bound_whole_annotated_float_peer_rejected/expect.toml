@@ -1,0 +1,11 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0057"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0057"
+path = "input/@page.moth"
+line = 12
+column = 31
+count = 1

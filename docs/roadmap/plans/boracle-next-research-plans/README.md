@@ -1,5 +1,7 @@
 # Recommended research sequence
 
+This directory preserves the Boracle research sequence and completed reference/oracle handoffs. Live production checker status, shared-branch activation, evidence-backed implementation choices and actionable borrow/Boracle follow-ups belong to the [production borrow checker companion](../production-borrow-checker.md). The canonical Boracle documents still own reference and oracle semantics. Research proposals here do not become production acceptance merely by appearing in this directory.
+
 ## Current handoff
 
 Package 1 is complete. Package 2, **Bounded operational oracle**, is complete. This directory retains
@@ -50,9 +52,15 @@ recoverable from Git.
 | 5 | [Call summaries and deferred exclusive access](./boracle-call-summary-and-deferred-exclusive-access-plan.md) | proposed, inactive | Explores per-result, outcome-sensitive, recursive summaries and reserved exclusive arguments |
 | 6 | [Aggregate copy and builtin storage provenance](./boracle-aggregate-copy-and-builtin-storage-provenance-plan.md) | proposed, inactive | Models deep-copy topology, fixed projection precision and compiler-known storage effects |
 
+### Additional exploratory research - group-aware place precision and stability effects
+
+[Group-aware place precision and stability-effect research](./group-aware-place-and-stability-effects-research.md) records Zeta-inspired index-disjointness proofs, conditional and iterator stability, narrow operation effects and lessons from Valen, Carbon, Ante and Rust. It is inactive research, not package 7 and not an amendment to packages 3-6. Initial experiments preserve Moth's exclusive-access, no-data-race and lifetime-topology guarantees. More permissive collection receiver contracts, aliasable mutation and parallel APIs require separate semantic approval.
+
+This topic should be re-anchored when native-result foundations are available and the relevant Boracle soundness gaps have been resolved or isolated. The [production companion](../production-borrow-checker.md) tracks activation and any eventual production implications.
+
 ### Package 1 result
 
-`OriginRelations` is the only origin-overlap owner. Loan conflicts consume `OriginOverlapDecision`. Empty `AliasParams` is malformed input. Missing argument, copy, projection, and aggregate provenance cannot become a fresh generation. Rule selection is `boracle-reference-v1` plus a sorted experiment set; `dead-exclusive-loan` remains the only named experiment. Canonical Boracle docs describe that model. Production Stage 6 still uses storage-root overlap and does not consume `OriginRelations`.
+`OriginRelations` is the only origin-overlap owner. Loan conflicts consume `OriginOverlapDecision`. Empty `AliasParams` is malformed input. Missing argument, copy, projection, and aggregate provenance cannot become a fresh generation. Rule selection is `boracle-reference-v1` plus a sorted experiment set; `dead-exclusive-loan` remains the only named experiment. Canonical Boracle docs describe that model.
 
 Checkpoints on `boracle`:
 
@@ -95,8 +103,7 @@ These are explicit non-goals of the completed package. Do not reopen them while 
 * Storage domains holding several distinct nodes. A repeated projection resolving to two distinct nodes is refused as `RepeatedProjectionChild`. The reference unions the repeated origins into one projected slot and the runtime graph holds one node per position, so modelling the union belongs to package 6.
 * Loop generation widening. The oracle enumerates a bounded number of iterations and truncates; iteration-sensitive generations belong to package 4.
 * Call summaries. `CallEffect` is opaque and a call argument capability ends at its own effect. Callee internals belong to package 5.
-* Production Stage 6 does not consume the oracle. It remains a developer-facing laboratory behind the `boracle` feature.
-* Correcting the reference solver's shared-alias acceptance. The oracle found a real soundness gap and it is recorded under `### Reference gaps the oracle has found` in `boracle-reference-solver.mtf`. Fixing it changes which programs the compiler accepts, so it needs its own plan rather than a change inside an oracle package.
+* The reference solver's shared-alias soundness candidate remains documented in its permanent reference authority. Its current correction/production-handoff status belongs to the living production companion.
 
 ### Deferred from package 1
 
@@ -105,7 +112,6 @@ These are explicit non-goals of the completed package. Do not reopen them while 
 * CFG join of empty union nonempty argument origin state still unions to the nonempty set. `merge_state` widening belongs to package 4, loop generation epochs.
 * Dynamic-index sibling overlap is unused in current producers. `PrecisionLossReason::DynamicIndex` exists but is not emitted. That belongs to package 6, or to refinement if a producer starts emitting precise dynamic-index origins.
 * `ProvenDisjoint` rows against unknown registrations are not rejected at construction. No current emitter produces that shape.
-* Production Stage 6 remaining on storage-root overlap is intentional, not unfinished Boracle work.
 
 ### Future checked proof-budget proposal
 

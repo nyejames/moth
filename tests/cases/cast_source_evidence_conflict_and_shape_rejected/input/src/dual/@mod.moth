@@ -1,0 +1,12 @@
+Token = | raw I32 |
+
+to_i32 |this Token| -> I32:
+    return this.raw
+;
+
+try_to_i32 |this Token| -> I32, Error!:
+    return this.raw
+;
+
+Token must CASTABLE_TO_I32
+Token must TRY_CASTABLE_TO_I32

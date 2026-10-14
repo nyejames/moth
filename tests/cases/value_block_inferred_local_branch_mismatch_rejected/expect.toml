@@ -3,7 +3,7 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-TYPE-0001"]
-message_contains = ["Type mismatch in declaration: expected String, found Int"]
+message_contains = ["Type mismatch in declaration: expected String, found I32"]
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-TYPE-0001"

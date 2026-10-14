@@ -42,6 +42,10 @@ Every mode preflights its selected cases before measurement. That successful pre
 
 Non-recording commands never append local JSONL history or change tracked summaries.
 
+Full-suite read-only runs (`just bench-check`, `just bench-frontend-check` and `just bench-data-layout-check`) print one compact JSON object on stdout after measurement and unchanged-worktree verification. Its line begins with `MOTH_BENCH_EVIDENCE `; parse the JSON suffix after that marker.
+
+The object retains suite and per-case means, medians, standard deviations, workload/source/measurement identities, timing observations and counters, plus protocol/schema, revision, environment and thread identity. It is stdout evidence only: it does not create local system identity or write history or summaries. `just bench-ci` keeps its existing terse output and does not emit this evidence line.
+
 Recorded runs (`just bench`, `just bench-frontend` and `just bench-data-layout`) require a clean committed worktree. The command rejects a dirty or uncommitted repository before fingerprint traversal, compiler construction or history access. Read-only commands (`bench-ci`, `bench-validate`, `bench-check`, `bench-frontend-check` and `bench-data-layout-check`) permit a dirty worktree as long as it stays unchanged during the run.
 
 ## Manifest And Stable Identity
@@ -186,6 +190,53 @@ benchmark mode, because each was being compared against its own history and none
 A series reports `UNMEASURABLE` — and fails — when a metric was not emitted at all, or when the
 largest point is too small to fit. Both are treated as failures rather than as passes, because a
 series that cannot answer the question must not look like one that answered it favourably.
+
+### Numeric inference workloads
+
+`numeric-scaling/` separates body-local inference and selected-width operation costs from the
+existing concrete workloads. Each numeric pattern has committed sources at sizes 32, 128 and 512,
+except the alias receiver chain at 256, 1024 and 4096, where per-query cost stays below constant
+overhead at smaller sizes. The runtime grouped-not pattern uses depths 128, 512 and 2048.
+Every pattern has CLI `check` cases and dev frontend cases. Regenerate every point with
+`python3 benchmarks/numeric-scaling/generate.py`.
+
+The manifest declares ten `numeric_*` scaling series against `frontend.ast.total`, each with
+an `n^1.25` budget for linear construction. The size counts copies, uses, grouped operations,
+independent regions, aggregate pairs, catches, mutable cycles, operations per typed chain or
+private calls in a failure chain.
+These budgets state the intended bound, not an observed fit.
+
+The separate `grouped_not_runtime` series measures the Basic `frontend.hir` metric with its own
+`n^1.25` budget. Each source wraps one runtime `Bool` parameter in exactly `depth` repetitions of
+`not (` and matching closing parentheses, so the frontend cannot fold the chain to a constant.
+Only depth varies. The larger depths target the scaling gate's 1.0 ms measurement floor.
+These benchmarks provide performance evidence, not correctness coverage.
+
+| Required shape | Case or series | What the source exercises |
+|---|---|---|
+| Long numeric copy chain with one late receiver | `numeric_copy_chain_{32,128,512}` | A whole-number origin passes through explicit copies to a final `U64` return receiver. |
+| One origin with many independent uses | `numeric_origin_fanout_{32,128,512}` | Independent copies and `U64` parameter receivers share one whole-number origin. |
+| Deep alias chain with a receiver at every link | `numeric_alias_receiver_chain_{256,1024,4096}` | Each new copy of the previous alias is passed to a `U64` receiver, so origin queries run at every chain depth. |
+| Deep grouped literal arithmetic with a late receiver | `numeric_grouped_arithmetic_{32,128,512}` | Nested literal additions receive `U64` through the final return. |
+| Deep grouped runtime logical-not chain | `grouped_not_runtime_{128,512,2048}` | Nested `not` operations around one runtime `Bool` parameter reach HIR without constant folding. |
+| Many independent numeric regions | `numeric_independent_regions_{32,128,512}` | Separate literal-arithmetic origins meet separate exact receivers in one body. |
+| Numeric collections/maps and generic forwarding | `numeric_aggregate_forwarding_{32,128,512}` | Non-empty numeric collections and maps pass through an identity signature before exact aggregate receivers. |
+| Many safety catches with unreachable handlers | `numeric_safety_pruning_{32,128,512}` | Foldable arithmetic protects handlers with error bindings, captures and generic calls. |
+| Mutable cycles with concrete/pending operands | `numeric_mutable_cycles_{32,128,512}` | Two-way writes use explicit copies, then combine pending origins with a concrete `I64` operand. |
+| Mostly concrete existing program | `speed_test_frontend`, `nominal_scaling_{40,80,160,320}_frontend` | The broad language baseline and explicit-width nominal scaling retain existing source cohorts. |
+| Concrete narrow arithmetic and F16 chains | `numeric_narrow_chains_{32,128,512}` | Separate `I8`, `U8` and `F16` parameter-driven addition chains keep each operation at its selected width. |
+| Long private failure chain beside a retained generic | `numeric_generic_failure_chain_{32,128,512}` | A generic identity enables AST failure-summary validation; a chain of private calls ends in checked `I32` addition, beside an unrelated body of the same size, under one safety catch. |
+
+New workload IDs above take `_check` or `_frontend` case suffixes. The existing constant chain
+resolves compile-time declarations at their own boundaries, so it doesn't represent a pending
+origin with a late receiver. Existing folding, generic and collection workloads remain useful
+baselines, but don't replace these focused shapes.
+
+Keep selected-width narrow arithmetic and `F16` costs separate from equivalent wide-domain
+comparisons. Don't interpret added checks or per-operation rounding as inference overhead.
+The [numeric references](../docs/src/docs/numbers/numeric-literals.mtf) own the language
+contracts. Preserve original and migrated cohort identities when comparing historical results,
+including any width or cast adaptations. A source change doesn't establish a speedup.
 
 ## Source and Measurement Identity
 
@@ -676,6 +727,8 @@ allocation, lookup, folding, import, and lowering pressure.
   One generated pattern at four sizes, with a fixed count of four constants at every size, so
   member-shell and capacity-fixup cost scales independently of constant resolution. Regenerate the
   whole series from one pattern; never hand edit a single point.
+  Numeric fields and results use explicit I32 and F64 types throughout the pattern; changing
+  numeric domains must preserve every size, declaration and driver workload.
 - `constant-scaling/constant-chain-{32,128,512}.moth`: the `constant_chain` scaling series, a
   dependency chain of compile-time constants at three lengths.
 - `module-graph/`: small multi-file project with cross-file imports, constants and templates.

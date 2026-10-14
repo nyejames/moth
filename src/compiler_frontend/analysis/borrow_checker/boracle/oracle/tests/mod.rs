@@ -409,7 +409,7 @@ fn boracle_oracle_alias_from_place_rebind_kills_call_argument_holder() {
     fixture.event(EventKind::CallEffect(CallEffect {
         call: CallId::new(0),
         arguments: vec![argument].into_boxed_slice(),
-        result: None,
+        results: Box::new([]),
     }));
 
     let trace = match run(fixture.finish()) {
@@ -1443,7 +1443,7 @@ fn boracle_oracle_call_argument_interval_extends_to_call_effect() {
     fixture.event(EventKind::CallEffect(CallEffect {
         call: CallId::new(0),
         arguments: vec![first_argument, second_argument].into_boxed_slice(),
-        result: None,
+        results: Box::new([]),
     }));
 
     let trace = conflict_trace(run(fixture.finish()));
@@ -1479,7 +1479,7 @@ fn boracle_oracle_call_argument_ends_at_call_effect_before_later_storage_access(
     let effect_event = fixture.event(EventKind::CallEffect(CallEffect {
         call: CallId::new(0),
         arguments: vec![argument].into_boxed_slice(),
-        result: None,
+        results: Box::new([]),
     }));
     fixture.alias(writer, argument_place, AccessKind::Exclusive);
     let storage_write_event = fixture.access_event(writer, UseKind::Write, false);
@@ -1512,7 +1512,7 @@ fn boracle_oracle_loan_holder_call_argument_exercises_loan_capability() {
     fixture.event(EventKind::CallEffect(CallEffect {
         call: CallId::new(0),
         arguments: vec![argument].into_boxed_slice(),
-        result: None,
+        results: Box::new([]),
     }));
 
     fixture.fresh(unrelated_owner);
@@ -2281,7 +2281,7 @@ fn boracle_oracle_success_only_alias_does_not_leak_to_error_arm() {
 
     fixture.alias(alias, owner, AccessKind::Shared);
     fixture.access(alias, UseKind::Read, false);
-    fixture.terminator(TerminatorEventKind::ReturnSuccess);
+    fixture.terminator(TerminatorEventKind::Return);
     let success_events = fixture.take_events();
 
     fixture.access(owner, UseKind::Write, false);
@@ -2322,7 +2322,7 @@ fn boracle_oracle_error_only_mutation_does_not_leak_to_success_arm() {
     entry_events.extend(fixture.take_events());
 
     fixture.access(alias, UseKind::Read, false);
-    fixture.terminator(TerminatorEventKind::ReturnSuccess);
+    fixture.terminator(TerminatorEventKind::Return);
     let success_events = fixture.take_events();
 
     fixture.access(owner, UseKind::Write, false);
@@ -2927,7 +2927,7 @@ fn boracle_oracle_live_loan_conflict_survives_expired_call_argument() {
     let effect_event = fixture.event(EventKind::CallEffect(CallEffect {
         call: CallId::new(0),
         arguments: vec![argument].into_boxed_slice(),
-        result: None,
+        results: Box::new([]),
     }));
     fixture.jump(gap);
     let body_events = fixture.take_events();
@@ -3056,7 +3056,7 @@ fn boracle_oracle_second_call_invocation_issues_fresh_argument_capabilities() {
     let effect_event = fixture.event(EventKind::CallEffect(CallEffect {
         call: CallId::new(0),
         arguments: vec![argument].into_boxed_slice(),
-        result: None,
+        results: Box::new([]),
     }));
     fixture.jump(gap);
     let body_events = fixture.take_events();
@@ -3246,7 +3246,7 @@ fn boracle_oracle_exercise_capabilities_skip_expired_call_argument() {
     let effect_event = fixture.event(EventKind::CallEffect(CallEffect {
         call: CallId::new(0),
         arguments: vec![argument].into_boxed_slice(),
-        result: None,
+        results: Box::new([]),
     }));
     let problem = fixture.finish();
     let effect_index = effect_event.index();
@@ -3331,7 +3331,7 @@ fn boracle_oracle_call_effect_ceiling_clamps_dragged_call_argument_interval() {
     let effect_event = fixture.event(EventKind::CallEffect(CallEffect {
         call: CallId::new(0),
         arguments: vec![argument].into_boxed_slice(),
-        result: None,
+        results: Box::new([]),
     }));
     let problem = fixture.finish();
     let effect_index = effect_event.index();
@@ -3421,7 +3421,7 @@ fn boracle_oracle_call_effect_respects_explicit_end() {
     let effect_event = fixture.event(EventKind::CallEffect(CallEffect {
         call: CallId::new(0),
         arguments: vec![argument].into_boxed_slice(),
-        result: None,
+        results: Box::new([]),
     }));
     fixture.alias(conflict_alias, conflict_owner, AccessKind::Shared);
     fixture.access(conflict_alias, UseKind::Read, false);
@@ -3532,6 +3532,230 @@ fn boracle_oracle_alias_params_provenance_survives_its_confirming_write() {
         capability.explicit_end.is_none(),
         "the confirming write must not retire the provenance capability it confirms: \
          {capability:?}"
+    );
+}
+
+#[test]
+fn boracle_native_result_slots_preserve_shared_origin_overlap() {
+    let mut fixture = Fixture::new(3);
+    let first = fixture.place(0, []);
+    let second = fixture.place(1, []);
+    let holder = fixture.place(2, []);
+    let call = CallId::new(0);
+    fixture.parts.calls.push(Call {
+        id: call,
+        label: "shared-native-results".to_string(),
+    });
+    let origin = fixture.origin(OriginKind::CallResult {
+        call,
+        provenance: CallResultProvenance::Fresh,
+    });
+    fixture.event(EventKind::CallEffect(CallEffect {
+        call,
+        arguments: Box::new([]),
+        results: vec![
+            CallResult {
+                destination: BindingDestination::Define(first),
+                origin,
+            },
+            CallResult {
+                destination: BindingDestination::Define(second),
+                origin,
+            },
+        ]
+        .into_boxed_slice(),
+    }));
+    fixture.binding_write(BindingDestination::Define(first));
+    fixture.binding_write(BindingDestination::Define(second));
+    fixture.alias(holder, first, AccessKind::Shared);
+    let mutation = fixture.access_event(second, UseKind::Write, false);
+    fixture.access(holder, UseKind::Read, false);
+    let problem = fixture.finish();
+    let reference =
+        super::super::BoracleSolver::solve(&problem).expect("native ordered results should solve");
+    assert!(!reference.loans.conflicts().is_empty());
+    let trace = conflict_trace(run(problem));
+    assert_eq!(
+        trace
+            .conflict
+            .expect("shared result provenance must overlap")
+            .access_event,
+        mutation,
+    );
+}
+
+#[test]
+fn boracle_call_argument_origins_follow_event_order_at_a_shared_point() {
+    let mut fixture = Fixture::new(2);
+    let argument_place = fixture.place(0, []);
+    let result_place = fixture.place(1, []);
+    let point = fixture.new_point();
+    let initial = fixture.origin(OriginKind::Fresh);
+    fixture.event_at(
+        point,
+        EventKind::Fresh {
+            destination: BindingDestination::Define(argument_place),
+            origin: initial,
+        },
+    );
+    let replacement = fixture.origin(OriginKind::Fresh);
+    fixture.event_at(
+        point,
+        EventKind::Fresh {
+            destination: BindingDestination::Define(argument_place),
+            origin: replacement,
+        },
+    );
+    let call = CallId::new(0);
+    fixture.parts.calls.push(Call {
+        id: call,
+        label: "shared-point-ordered-argument".to_string(),
+    });
+    let use_id = UseId::new(fixture.parts.uses.len() as u32);
+    fixture.parts.uses.push(Use {
+        id: use_id,
+        point,
+        place: argument_place,
+        kind: UseKind::Read,
+        definition: false,
+    });
+    let argument = CallArgument {
+        place: argument_place,
+        access: AccessKind::Shared,
+        use_id,
+    };
+    fixture.event_at(
+        point,
+        EventKind::CallArgument {
+            call,
+            index: 0,
+            argument: argument.clone(),
+        },
+    );
+    let result_event = fixture.call_effect_result(
+        call,
+        vec![argument],
+        result_place,
+        CallResultProvenance::AliasParams(vec![0].into_boxed_slice()),
+    );
+    let confirmation = fixture.binding_write(BindingDestination::Define(result_place));
+    let mutation = fixture.access_event(argument_place, UseKind::Write, false);
+    fixture.access(result_place, UseKind::Read, false);
+    let problem = fixture.finish();
+    let reference = super::super::BoracleSolver::solve(&problem)
+        .expect("ordered same-point call argument should solve");
+    assert_eq!(
+        reference
+            .origin
+            .origins_after_event(result_event, result_place),
+        Some([replacement].as_slice()),
+        "the result must retain the replacement observed by the argument event",
+    );
+    let provenance_loan = reference
+        .loans
+        .loans()
+        .iter()
+        .find(|loan| {
+            loan.issue_event == Some(result_event) && loan.holders.as_ref() == [result_place]
+        })
+        .expect("the call result must retain its provenance loan");
+    assert_eq!(provenance_loan.origins.as_ref(), [replacement]);
+    assert!(
+        !provenance_loan
+            .kills
+            .contains(&problem.events()[confirmation.index()].point),
+        "the call's confirming write must not retire the provenance it just installed",
+    );
+    assert!(
+        reference
+            .loans
+            .conflicts()
+            .iter()
+            .any(|conflict| conflict.access_event == mutation),
+        "the reference must reject mutation while the replacement result remains observed",
+    );
+    let trace = conflict_trace(run(problem));
+    assert_eq!(
+        trace
+            .conflict
+            .expect("the oracle must observe the same live replacement")
+            .access_event,
+        mutation,
+    );
+}
+
+#[test]
+fn boracle_alias_result_loans_preserve_repeated_argument_event_owners() {
+    let mut fixture = Fixture::new(2);
+    let argument_place = fixture.place(0, []);
+    let result_place = fixture.place(1, []);
+    let initial = fixture.origin(OriginKind::Fresh);
+    fixture.event(EventKind::Fresh {
+        destination: BindingDestination::Define(argument_place),
+        origin: initial,
+    });
+    let call = CallId::new(0);
+    fixture.parts.calls.push(Call {
+        id: call,
+        label: "repeated-place-ordered-arguments".to_string(),
+    });
+    let (_, first_argument) = fixture.call_argument_at(call, 0, argument_place, AccessKind::Shared);
+    let replacement = fixture.origin(OriginKind::Fresh);
+    fixture.event(EventKind::Fresh {
+        destination: BindingDestination::Define(argument_place),
+        origin: replacement,
+    });
+    let (_, second_argument) =
+        fixture.call_argument_at(call, 1, argument_place, AccessKind::Shared);
+    let result_event = fixture.call_effect_result(
+        call,
+        vec![first_argument, second_argument],
+        result_place,
+        CallResultProvenance::Alias(vec![replacement].into_boxed_slice()),
+    );
+    let confirmation = fixture.binding_write(BindingDestination::Define(result_place));
+    let mutation = fixture.access_event(argument_place, UseKind::Write, false);
+    fixture.access(result_place, UseKind::Read, false);
+    let problem = fixture.finish();
+    let reference = super::super::BoracleSolver::solve(&problem)
+        .expect("repeated-place ordered arguments should solve");
+    assert_eq!(
+        reference
+            .origin
+            .origins_after_event(result_event, result_place),
+        Some([replacement].as_slice()),
+    );
+    let provenance_loans = reference
+        .loans
+        .loans()
+        .iter()
+        .filter(|loan| {
+            loan.issue_event == Some(result_event) && loan.holders.as_ref() == [result_place]
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        provenance_loans
+            .iter()
+            .map(|loan| loan.origins.as_ref())
+            .collect::<Vec<_>>(),
+        vec![[initial].as_slice(), [replacement].as_slice()],
+        "each repeated-place argument must retain the origin its own event observed",
+    );
+    assert!(
+        provenance_loans.iter().all(|loan| {
+            !loan
+                .kills
+                .contains(&problem.events()[confirmation.index()].point)
+        }),
+        "the confirming write must preserve both argument provenance loans"
+    );
+    assert!(
+        reference
+            .loans
+            .conflicts()
+            .iter()
+            .any(|conflict| conflict.access_event == mutation),
+        "the replacement's result observation must block mutation of that replacement",
     );
 }
 
@@ -5418,10 +5642,11 @@ impl Fixture {
         self.event(EventKind::CallEffect(CallEffect {
             call,
             arguments: arguments.into_boxed_slice(),
-            result: Some(CallResult {
+            results: vec![CallResult {
                 destination,
                 origin,
-            }),
+            }]
+            .into_boxed_slice(),
         }))
     }
 

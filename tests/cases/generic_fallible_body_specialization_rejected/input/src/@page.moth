@@ -1,8 +1,8 @@
-parse_number |text String| -> Int, Error!:
+parse_number |text String| -> I32, Error!:
     return! Error([: bad [text]])
 ;
 
-outer type E |text String| -> Int, E!:
+outer type E |text String| -> I32, E!:
     value = parse_number(text)!
     return value
 ;

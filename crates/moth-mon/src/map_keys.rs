@@ -10,8 +10,6 @@ use moth_lexical::numeric::fixed_scalar::FixedScalar;
 pub(super) fn map_key_name(value: &Value) -> String {
     match value {
         Value::String(text) => text.clone(),
-        Value::Int(number) => number.to_string(),
-        Value::Uint(number) => number.to_string(),
         Value::I8(number) => number.to_string(),
         Value::I16(number) => number.to_string(),
         Value::I32(number) => number.to_string(),
@@ -30,8 +28,6 @@ pub(super) fn map_key_name(value: &Value) -> String {
 pub(super) fn map_key_name_len(value: &Value) -> usize {
     match value {
         Value::String(text) => text.len(),
-        Value::Int(number) => signed_key_len(*number),
-        Value::Uint(number) => unsigned_key_len(*number),
         Value::I8(number) => signed_key_len(i64::from(*number)),
         Value::I16(number) => signed_key_len(i64::from(*number)),
         Value::I32(number) => signed_key_len(i64::from(*number)),
@@ -72,15 +68,13 @@ fn unsigned_key_len(mut magnitude: u64) -> usize {
 ///
 /// The owned [`Value::Map`] output keeps insertion order; this set only answers
 /// “have we seen this key” without rescanning prior entries. Matching exact value families
-/// prevents equal numeric carriers from aliasing `Int`, `I64`, `U8` or `Byte`.
+/// prevents equal numeric carriers from aliasing `I64`, `U8` or `Byte`.
 /// Lookups borrow keys; callers charge the decoded-byte budget before insertion clones strings.
 #[derive(Debug)]
 pub(super) enum MapKeyIndex {
     String(HashSet<String>),
     Bool(HashSet<bool>),
     Char(HashSet<char>),
-    Int(HashSet<i64>),
-    Uint(HashSet<u64>),
     I8(HashSet<i8>),
     I16(HashSet<i16>),
     I32(HashSet<i32>),
@@ -98,8 +92,6 @@ impl MapKeyIndex {
             PreparedType::String => Self::String(HashSet::new()),
             PreparedType::Bool => Self::Bool(HashSet::new()),
             PreparedType::Char => Self::Char(HashSet::new()),
-            PreparedType::Int { .. } => Self::Int(HashSet::new()),
-            PreparedType::Uint { .. } => Self::Uint(HashSet::new()),
             PreparedType::Fixed(FixedScalar::I8) => Self::I8(HashSet::new()),
             PreparedType::Fixed(FixedScalar::I16) => Self::I16(HashSet::new()),
             PreparedType::Fixed(FixedScalar::I32) => Self::I32(HashSet::new()),
@@ -120,8 +112,6 @@ impl MapKeyIndex {
             (Self::String(keys), Value::String(text)) => Some(keys.contains(text)),
             (Self::Bool(keys), Value::Bool(flag)) => Some(keys.contains(flag)),
             (Self::Char(keys), Value::Char(character)) => Some(keys.contains(character)),
-            (Self::Int(keys), Value::Int(number)) => Some(keys.contains(number)),
-            (Self::Uint(keys), Value::Uint(number)) => Some(keys.contains(number)),
             (Self::I8(keys), Value::I8(number)) => Some(keys.contains(number)),
             (Self::I16(keys), Value::I16(number)) => Some(keys.contains(number)),
             (Self::I32(keys), Value::I32(number)) => Some(keys.contains(number)),
@@ -141,8 +131,6 @@ impl MapKeyIndex {
             (Self::String(keys), Value::String(text)) => keys.insert(text.clone()),
             (Self::Bool(keys), Value::Bool(flag)) => keys.insert(*flag),
             (Self::Char(keys), Value::Char(character)) => keys.insert(*character),
-            (Self::Int(keys), Value::Int(number)) => keys.insert(*number),
-            (Self::Uint(keys), Value::Uint(number)) => keys.insert(*number),
             (Self::I8(keys), Value::I8(number)) => keys.insert(*number),
             (Self::I16(keys), Value::I16(number)) => keys.insert(*number),
             (Self::I32(keys), Value::I32(number)) => keys.insert(*number),

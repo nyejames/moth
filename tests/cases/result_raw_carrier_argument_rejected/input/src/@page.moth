@@ -1,12 +1,12 @@
-can_error || -> Int, Error!:
+can_error || -> I32, Error!:
     return 1
 ;
 
-accept |value Int| -> Int:
+accept |value I32| -> I32:
     return value
 ;
 
-outer || -> Int:
+outer || -> I32:
     return accept(can_error())
 ;
 

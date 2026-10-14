@@ -1,0 +1,18 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = ["pruned external float"]
+artifacts_must_not_exist = ["dead_float.js"]
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_not_contain = ["discardedFloat", "dead_float.js", "function __moth_float_validate("]
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains = ["pruned external float"]
+artifacts_must_not_exist = ["dead_float.js"]

@@ -1,0 +1,11 @@
+accept_u64 |value U64| -> U64:
+    return value
+;
+
+-- The inferred constant defaults at its compile-time declaration boundary;
+-- a later U64 parameter cannot retype the already concrete constant.
+one #= 1
+raw = accept_u64(1)
+accept_u64(one)
+
+[:unreachable]

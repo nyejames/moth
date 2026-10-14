@@ -3,7 +3,7 @@
 @utils/text prefix
 @utils/random random_score
 
-build_metric |name String, phase Float| -> Metric:
+build_metric |name String, phase F64| -> Metric:
     value = wave(phase)
     return Metric(name, value)
 ;
@@ -12,7 +12,7 @@ format_metric |metric Metric| -> String:
     return [: [prefix(metric.name)] = [metric.value] ]
 ;
 
-status_for |value Float| -> Status:
+status_for |value F64| -> Status:
     if value < 0.0:
         return Status::Error(1, "negative")
     ;

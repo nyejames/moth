@@ -1,0 +1,37 @@
+-- Keep each seeded alias read live while its source binding resolves.
+
+render_shared || -> String, Error!:
+    values ~= {1}
+    shared_alias = values
+    ~values.push(shared_alias.get(0)! + 1)
+    first = values.get(0)!
+    second = values.get(1)!
+    return [:first=[first] second=[second]]
+;
+
+render_copy || -> String, Error!:
+    values ~= {1}
+    copy_alias = copy values
+    ~values.push(copy_alias.get(0)! + 1)
+    first = values.get(0)!
+    second = values.get(1)!
+    return [:first=[first] second=[second]]
+;
+
+render_multi || -> String, Error!:
+    values ~= {1}
+    alias, count = if true:
+        then copy values, 0
+    else
+        then copy values, 1
+    ;
+    ~values.push(alias.get(0)! + 1)
+    first = values.get(0)!
+    second = values.get(1)!
+    return [:first=[first] second=[second] count=[count]]
+;
+
+shared_text = render_shared() catch then "failed"
+copy_text = render_copy() catch then "failed"
+multi_text = render_multi() catch then "failed"
+[:resolving_aliases shared=[shared_text] copy=[copy_text] multi=[multi_text]]

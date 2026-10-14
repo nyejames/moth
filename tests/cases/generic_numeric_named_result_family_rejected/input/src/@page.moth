@@ -1,0 +1,15 @@
+-- An unannotated named generic result keeps its whole-number origin in the integer family.
+-- Its width can remain unresolved, but the later F32 receiver cannot reclassify it.
+
+identity type T |value T| -> T:
+    return value
+;
+
+read_f32 |value F32| -> String:
+    return cast value
+;
+
+forwarded = identity(1)
+text = read_f32(forwarded)
+
+[: [text]]

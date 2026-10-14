@@ -1,8 +1,12 @@
-equal_after_float_rounding |integer Int, real Float| -> Bool:
-    return integer is real
+equal_after_float_rounding |integer I64, real F32| -> Bool:
+    converted F32 = cast integer
+    return converted is real
 ;
 
-constant_equal #Bool = 16777217 is 16777216.0
+constant_integer #I64 = 16777217
+constant_real #F32 = 16777216.0
+constant_converted #F32 = cast constant_integer
+constant_equal #Bool = constant_converted is constant_real
 runtime_equal = equal_after_float_rounding(16777217, 16777216.0)
 
 [: float32 mixed comparison const=[constant_equal] runtime=[runtime_equal]]

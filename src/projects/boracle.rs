@@ -54,7 +54,6 @@ fn compile_boracle_input(
     let project_builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
     let BuildBootstrap {
         config,
-        numeric_profile,
         style_directives,
         mut string_table,
         mut frontend_surface,
@@ -70,7 +69,6 @@ fn compile_boracle_input(
 
     let input = compile_single_file_boracle(
         &config,
-        numeric_profile,
         &style_directives,
         &mut frontend_surface,
         &mut string_table,

@@ -10,6 +10,7 @@ use crate::compiler_frontend::module_compilation::generated::test_fixtures::{
     PublishedBoundary, facts, generated_identity, summary, test_sidecar,
 };
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
+use rustc_hash::FxHashSet;
 use std::sync::Arc;
 
 #[test]
@@ -239,4 +240,56 @@ fn failed_completion_discards_earlier_unpublished_work_and_preserves_published_w
         Some(&published_summary)
     );
     assert!(!known.view().contains(&first_identity));
+}
+
+#[test]
+fn pruning_sidecars_rebuilds_request_and_completion_ids() {
+    let known = PublishedBoundary::empty();
+    let mut transaction = GeneratedFunctionTransaction::new(known.view());
+    let discarded = generated_identity("discarded");
+    let retained = generated_identity("retained");
+    let request_ids = transaction.register_requests([facts("discarded"), facts("retained")]);
+
+    for request_id in request_ids {
+        let identity = transaction.identity(request_id).unwrap().clone();
+        assert_eq!(
+            transaction.enter(request_id).unwrap(),
+            GeneratedRequestEntry::Materialise
+        );
+        let mut sidecar = test_sidecar(identity.clone(), summary());
+        sidecar.module.executable.hir.expressions.freeze();
+        transaction
+            .complete(request_id, summary(), sidecar)
+            .unwrap();
+    }
+
+    let reachable = FxHashSet::from_iter([retained.clone()]);
+    transaction.retain_reachable_sidecars(&reachable).unwrap();
+
+    assert_eq!(transaction.records.len(), 1);
+    assert_eq!(transaction.completed_records.len(), 1);
+    assert!(!transaction.ids_by_identity.contains_key(&discarded));
+    assert!(!transaction.completed_by_identity.contains_key(&discarded));
+    assert_eq!(
+        transaction.ids_by_identity.get(&retained),
+        Some(&GeneratedRequestId(0))
+    );
+    assert_eq!(
+        transaction
+            .completed_by_identity
+            .get(&retained)
+            .map(|id| id.index()),
+        Some(0)
+    );
+    assert_eq!(
+        transaction.request_facts(GeneratedRequestId(0)).unwrap().0,
+        "retained"
+    );
+    assert!(transaction.summary(&discarded).is_none());
+    let retained_summary = summary();
+    assert_eq!(transaction.summary(&retained), Some(&retained_summary));
+
+    let delta = transaction.finish().unwrap();
+    assert_eq!(delta.records().len(), 1);
+    assert_eq!(delta.records()[0].identity, retained);
 }

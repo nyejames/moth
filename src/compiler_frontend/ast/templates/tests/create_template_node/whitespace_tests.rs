@@ -1,6 +1,6 @@
 use super::*;
 use crate::compiler_frontend::ast::cursor::AstCursor;
-use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
+use crate::compiler_frontend::ast::expressions::expression_store::ExpressionOperationView;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 #[test]
@@ -57,6 +57,8 @@ fn escape_html_escapes_body_html_sensitive_characters() {
 
 #[test]
 fn escape_html_preserves_runtime_head_references() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let style_directives = html_project_test_style_directives();
     let mut string_table = StringTable::new();
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -72,6 +74,8 @@ fn escape_html_preserves_runtime_head_references() {
     let context = runtime_template_context_with_style_directives(
         &source_path,
         &style_directives,
+        &mut expression_builder,
+        &mut const_values,
         &mut string_table,
         &mut path_fork,
     );
@@ -91,6 +95,8 @@ fn escape_html_preserves_runtime_head_references() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -101,7 +107,11 @@ fn escape_html_preserves_runtime_head_references() {
     assert!(tir_root_has_head_dynamic_expression(
         &template,
         &store,
-        |expression| matches!(expression.kind, ExpressionKind::Reference(_))
+        &expression_builder,
+        |expression| matches!(
+            expression.operation(),
+            ExpressionOperationView::Reference(_)
+        )
     ));
 
     // Formatted body text is in the TIR root after the escape pass.

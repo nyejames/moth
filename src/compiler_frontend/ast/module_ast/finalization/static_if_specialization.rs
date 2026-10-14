@@ -13,23 +13,28 @@ use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::const_values::resolver::{
     ConstResolutionError, ConstValueEnvironment, ConstValueResolver,
 };
-use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
-use crate::compiler_frontend::ast::expressions::eval_expression::pending_expression_item_bug;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::const_values::store::{ConstValuePayload, ConstValueStore};
+use crate::compiler_frontend::ast::expressions::expression_rewrite::{
+    promote_replacement, replacement_input, rewrite_expression_children,
+};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, CompletedOperation, ExprId, ExpressionOperationView,
+};
 use crate::compiler_frontend::ast::expressions::expression_types::FallibleHandling;
 use crate::compiler_frontend::ast::generic_functions::{
-    GenericFunctionInstantiationRequest, GenericRequestRange, IfGenericRequestRanges,
+    GenericFunctionInstantiationRequest, GenericRequestRange, GenericRequestSlot,
+    IfGenericRequestRanges,
 };
 use crate::compiler_frontend::ast::statements::value_production::analyze_branch_exits;
 use crate::compiler_frontend::ast::statements::value_production::types::{
     ValueBlock, ValueLexicalScope,
 };
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
+use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
-use moth_lexical::numeric::profile::NumericProfile;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::normalize_ast::TemplateNormalizationError;
@@ -43,18 +48,20 @@ pub(super) struct StaticIfCandidate {
 impl StaticIfCandidate {
     pub(super) fn prepare(
         authored_ast: &[AstNode],
-        const_values: &ConstValueStore,
+        const_values: &mut ConstValueStore,
+        expression_builder: &mut AstExpressionBuilder,
         template_ir_store: Rc<RefCell<TemplateIrStore>>,
         string_table: &mut StringTable,
-        numeric_profile: NumericProfile,
+        type_environment: &TypeEnvironment,
     ) -> Result<Self, TemplateNormalizationError> {
         let mut ast = authored_ast.to_vec();
         let specialization = StaticIfSpecialization::run(
             &mut ast,
             const_values,
+            expression_builder,
             template_ir_store,
             string_table,
-            numeric_profile,
+            type_environment,
         )?;
 
         Ok(Self {
@@ -83,6 +90,12 @@ impl StaticIfCandidate {
 
         self.specialization
     }
+}
+
+/// Committed request lanes after static selection and executable-first deduplication.
+pub(super) struct CommittedGenericRequests {
+    pub(super) executable: Vec<GenericFunctionInstantiationRequest>,
+    pub(super) assertion_validation: Vec<GenericFunctionInstantiationRequest>,
 }
 
 pub(super) struct StaticIfSpecialization {
@@ -114,17 +127,19 @@ impl StaticIfSpecialization {
 
     pub(super) fn run(
         ast_nodes: &mut [AstNode],
-        const_values: &ConstValueStore,
+        const_values: &mut ConstValueStore,
+        expression_builder: &mut AstExpressionBuilder,
         template_ir_store: Rc<RefCell<TemplateIrStore>>,
         string_table: &mut StringTable,
-        numeric_profile: NumericProfile,
+        type_environment: &TypeEnvironment,
     ) -> Result<Self, TemplateNormalizationError> {
         let module_environment = module_const_environment(const_values);
         let resolver = ConstValueResolver::new(
             string_table,
             const_values,
+            expression_builder,
             template_ir_store,
-            numeric_profile,
+            type_environment,
         );
         let mut specializer = StaticIfSpecializer {
             resolver,
@@ -132,6 +147,8 @@ impl StaticIfSpecialization {
             selection_count: 0,
             current_function_path: None,
             function_provenance: FxHashMap::default(),
+            expression_pending: Vec::new(),
+            expression_results: Vec::new(),
         };
 
         for node in ast_nodes {
@@ -146,22 +163,79 @@ impl StaticIfSpecialization {
         })
     }
 
-    pub(super) fn commit_active_generic_requests(
+    /// Commits executable demand and surviving inactive-assertion validation demand separately.
+    ///
+    /// Static selection precedes deduplication, and executable demand wins shared instances.
+    /// Validation candidates must also belong to a retained concrete assertion witness, never
+    /// an eliminated branch or an abstract generic validation body.
+    pub(super) fn commit_generic_requests(
         self,
-        requests: Vec<GenericFunctionInstantiationRequest>,
-    ) -> Vec<GenericFunctionInstantiationRequest> {
-        let mut seen = FxHashSet::default();
-        requests
-            .into_iter()
-            .enumerate()
-            .filter(|(index, _)| {
-                !self
-                    .inactive_generic_requests
-                    .iter()
-                    .any(|range| range.start <= *index && *index < range.end)
-            })
-            .filter_map(|(_, request)| seen.insert(request.key.clone()).then_some(request))
-            .collect()
+        mut slots: Vec<GenericRequestSlot>,
+        assertion_validation_paths: &FxHashSet<PathId>,
+    ) -> Result<CommittedGenericRequests, CompilerError> {
+        for range in &self.inactive_generic_requests {
+            let inactive = slots.get_mut(range.start..range.end).ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "static-if inactive generic request range falls outside the request ledger",
+                )
+            })?;
+            for slot in inactive {
+                if matches!(
+                    slot,
+                    GenericRequestSlot::Pending | GenericRequestSlot::AssertionValidationPending
+                ) {
+                    return Err(pending_generic_request_error());
+                }
+                *slot = GenericRequestSlot::Dropped;
+            }
+        }
+
+        let (kept, active_count, validation_count) = {
+            let mut active_keys = FxHashSet::default();
+            let mut kept = Vec::with_capacity(slots.len());
+            let mut active_count = 0;
+            for slot in &slots {
+                let keep = match slot {
+                    GenericRequestSlot::Pending
+                    | GenericRequestSlot::AssertionValidationPending => {
+                        return Err(pending_generic_request_error());
+                    }
+                    GenericRequestSlot::Dropped | GenericRequestSlot::AssertionValidation(_) => {
+                        false
+                    }
+                    GenericRequestSlot::Concrete(request) => active_keys.insert(&request.key),
+                };
+                active_count += usize::from(keep);
+                kept.push(keep);
+            }
+            let mut validation_keys = FxHashSet::default();
+            let mut validation_count = 0;
+            for (slot, kept) in slots.iter().zip(&mut kept) {
+                if let GenericRequestSlot::AssertionValidation(request) = slot {
+                    *kept = assertion_validation_paths.contains(&request.instance_path)
+                        && !active_keys.contains(&request.key)
+                        && validation_keys.insert(&request.key);
+                    validation_count += usize::from(*kept);
+                }
+            }
+            (kept, active_count, validation_count)
+        };
+
+        let mut active = Vec::with_capacity(active_count);
+        let mut assertion_validation = Vec::with_capacity(validation_count);
+        for (slot, kept) in slots.into_iter().zip(kept) {
+            match slot {
+                GenericRequestSlot::Concrete(request) if kept => active.push(request),
+                GenericRequestSlot::AssertionValidation(request) if kept => {
+                    assertion_validation.push(request);
+                }
+                _ => {}
+            }
+        }
+        Ok(CommittedGenericRequests {
+            executable: active,
+            assertion_validation,
+        })
     }
 }
 
@@ -171,6 +245,16 @@ struct StaticIfSpecializer<'a> {
     selection_count: usize,
     current_function_path: Option<PathId>,
     function_provenance: FxHashMap<PathId, SyntheticInterfaceProvenance>,
+    expression_pending: Vec<SpecializationFrame>,
+    expression_results: Vec<(ExprId, ExprId)>,
+}
+
+enum SpecializationFrame {
+    Visit(ExprId),
+    Finish {
+        expression: ExprId,
+        child_count: usize,
+    },
 }
 
 impl StaticIfSpecializer<'_> {
@@ -192,7 +276,9 @@ impl StaticIfSpecializer<'_> {
     ) -> Result<(), TemplateNormalizationError> {
         let selected_body = match &mut node.kind {
             NodeKind::VariableDeclaration(declaration) => {
-                self.specialize_expression(&mut declaration.value, environment)?;
+                if let Some(initializer) = declaration.value.initializer_mut() {
+                    self.specialize_expression(initializer, environment)?;
+                }
                 self.install_local_const(declaration, environment)?;
                 None
             }
@@ -315,7 +401,9 @@ impl StaticIfSpecializer<'_> {
             }
             NodeKind::StructDefinition(_, fields) => {
                 for field in fields {
-                    self.specialize_expression(&mut field.value, environment)?;
+                    if let Some(initializer) = field.value.initializer_mut() {
+                        self.specialize_expression(initializer, environment)?;
+                    }
                 }
                 None
             }
@@ -329,7 +417,11 @@ impl StaticIfSpecializer<'_> {
             node.kind = NodeKind::LexicalScope { body };
         }
 
-        if let Some((body, scope)) = take_terminal_receiver_body(&mut node.kind) {
+        if let Some((body, scope)) = take_terminal_receiver_body(
+            &node.kind,
+            self.resolver.builder(),
+            self.resolver.const_values(),
+        )? {
             node.scope = scope;
             node.kind = NodeKind::LexicalScope { body };
         }
@@ -338,7 +430,7 @@ impl StaticIfSpecializer<'_> {
 
     fn specialize_expressions(
         &mut self,
-        expressions: &mut [Expression],
+        expressions: &mut [ExprId],
         environment: &mut ConstValueEnvironment,
     ) -> Result<(), TemplateNormalizationError> {
         for expression in expressions {
@@ -349,115 +441,115 @@ impl StaticIfSpecializer<'_> {
 
     fn specialize_expression(
         &mut self,
-        expression: &mut Expression,
+        expression: &mut ExprId,
         environment: &mut ConstValueEnvironment,
     ) -> Result<(), TemplateNormalizationError> {
-        match &mut expression.kind {
-            ExpressionKind::Runtime(rpn) => {
-                for item in &mut rpn.items {
-                    match item {
-                        ExpressionRpnItem::Operand(operand) => {
-                            self.specialize_expression(operand, environment)?;
+        // Value-body calls leave the enclosing walk's pending and result prefixes untouched.
+        let pending_base = self.expression_pending.len();
+        let root = self.resolver.builder().view(*expression)?;
+        match root.operation() {
+            ExpressionOperationView::Constant(_) | ExpressionOperationView::Reference(_) => {
+                return Ok(());
+            }
+            ExpressionOperationView::Copy(_) => {
+                root.visit_child_ids(&mut |id| {
+                    self.expression_pending.push(SpecializationFrame::Visit(id));
+                })?;
+                let child_count = self.expression_pending.len() - pending_base;
+                if child_count == 0 {
+                    return Ok(());
+                }
+                self.expression_pending.push(SpecializationFrame::Finish {
+                    expression: *expression,
+                    child_count,
+                });
+                self.expression_pending[pending_base..].reverse();
+            }
+            _ => self
+                .expression_pending
+                .push(SpecializationFrame::Visit(*expression)),
+        }
+        while self.expression_pending.len() > pending_base {
+            let frame = self
+                .expression_pending
+                .pop()
+                .expect("active scratch suffix is non-empty");
+            match frame {
+                SpecializationFrame::Visit(expression_id) => {
+                    let block = match self.resolver.builder().view(expression_id)?.operation() {
+                        ExpressionOperationView::Constant(_)
+                        | ExpressionOperationView::Reference(_) => {
+                            self.expression_results.push((expression_id, expression_id));
+                            continue;
                         }
-                        ExpressionRpnItem::Operator { .. } => {}
-                        // Pending syntax never survives evaluation; this fallible specialization
-                        // reports the broken invariant instead of silently keeping it.
-                        ExpressionRpnItem::PendingNumericLiteral { .. }
-                        | ExpressionRpnItem::PendingGroup { .. } => {
-                            return Err(
-                                pending_expression_item_bug("static-if specialization").into()
-                            );
-                        }
+                        ExpressionOperationView::ValueBlock(block) => Some(block.clone()),
+                        _ => None,
+                    };
+                    if let Some(mut block) = block {
+                        // Shared rows are immutable: selection transforms an independent body.
+                        let previous_selection_count = self.selection_count;
+                        self.specialize_value_block(&mut block, environment)?;
+                        let replacement = if self.selection_count != previous_selection_count {
+                            let original = self.resolver.builder().view(expression_id)?;
+                            let input =
+                                replacement_input(original, CompletedOperation::ValueBlock(block));
+                            promote_replacement(self.resolver.builder_mut(), input)?.id()
+                        } else {
+                            expression_id
+                        };
+                        self.expression_results.push((expression_id, replacement));
+                        continue;
                     }
+                    let pending = &mut self.expression_pending;
+                    let start = pending.len();
+                    self.resolver
+                        .builder()
+                        .view(expression_id)?
+                        .visit_child_ids(&mut |id| pending.push(SpecializationFrame::Visit(id)))?;
+                    let child_count = pending.len() - start;
+                    if child_count == 0 {
+                        self.expression_results.push((expression_id, expression_id));
+                        continue;
+                    }
+                    pending.push(SpecializationFrame::Finish {
+                        expression: expression_id,
+                        child_count,
+                    });
+                    pending[start..].reverse();
+                }
+                SpecializationFrame::Finish {
+                    expression: original,
+                    child_count,
+                } => {
+                    let start = self.expression_results.len() - child_count;
+                    let original = self.resolver.builder().own(original);
+                    let replacements = self
+                        .resolver
+                        .builder()
+                        .own_slice(&self.expression_results[start..]);
+                    let replacement = rewrite_expression_children(
+                        self.resolver.builder_mut(),
+                        original,
+                        replacements,
+                    )?;
+                    self.expression_results.truncate(start);
+                    self.expression_results
+                        .push((original.id(), replacement.id()));
                 }
             }
-            ExpressionKind::Copy(_) => {}
-            ExpressionKind::FieldAccess { base, .. } => {
-                self.specialize_expression(base, environment)?;
-            }
-            ExpressionKind::MethodCall { receiver, args, .. }
-            | ExpressionKind::CollectionBuiltinCall { receiver, args, .. }
-            | ExpressionKind::MapBuiltinCall { receiver, args, .. } => {
-                self.specialize_expression(receiver, environment)?;
-                for argument in args {
-                    self.specialize_expression(&mut argument.value, environment)?;
-                }
-            }
-            ExpressionKind::FunctionCall { args, .. }
-            | ExpressionKind::HostFunctionCall { args, .. }
-            | ExpressionKind::HandledFallibleFunctionCall { args, .. }
-            | ExpressionKind::HandledFallibleHostFunctionCall { args, .. } => {
-                for argument in args {
-                    self.specialize_expression(&mut argument.value, environment)?;
-                }
-            }
-            ExpressionKind::HandledFallibleExpression { value, .. } => {
-                self.specialize_expression(value, environment)?;
-            }
-            ExpressionKind::Cast(cast) => {
-                self.specialize_expression(&mut cast.source, environment)?;
-            }
-            #[cfg(test)]
-            ExpressionKind::FallibleCarrierConstruct { value, .. } => {
-                self.specialize_expression(value, environment)?;
-            }
-            ExpressionKind::OptionPropagation { value } | ExpressionKind::Coerced { value, .. } => {
-                self.specialize_expression(value, environment)?;
-            }
-            ExpressionKind::Collection(items) => {
-                self.specialize_expressions(items, environment)?;
-            }
-            ExpressionKind::MapLiteral(entries) => {
-                for entry in entries {
-                    self.specialize_expression(&mut entry.key, environment)?;
-                    self.specialize_expression(&mut entry.value, environment)?;
-                }
-            }
-            ExpressionKind::StructDefinition(fields)
-            | ExpressionKind::StructInstance(fields)
-            | ExpressionKind::AnonymousConstRecord { fields } => {
-                for field in fields {
-                    self.specialize_expression(&mut field.value, environment)?;
-                }
-            }
-            ExpressionKind::ChoiceConstruct { fields, .. } => {
-                for field in fields {
-                    self.specialize_expression(&mut field.value, environment)?;
-                }
-            }
-            ExpressionKind::Range(start, end) => {
-                self.specialize_expression(start, environment)?;
-                self.specialize_expression(end, environment)?;
-            }
-            ExpressionKind::ValueBlock { block } => {
-                self.specialize_value_block(block, environment)?;
-            }
-            ExpressionKind::NoValue
-            | ExpressionKind::OptionNone
-            | ExpressionKind::Uint(_)
-            | ExpressionKind::Int(_)
-            | ExpressionKind::Float(_)
-            | ExpressionKind::FixedScalar(_)
-            | ExpressionKind::Number(_)
-            | ExpressionKind::StringSlice(_)
-            | ExpressionKind::StructuralString { .. }
-            | ExpressionKind::Bool(_)
-            | ExpressionKind::Char(_)
-            | ExpressionKind::Reference(_)
-            | ExpressionKind::Function(_)
-            | ExpressionKind::Template(_)
-            | ExpressionKind::RuntimeTemplateHandoff(_)
-            | ExpressionKind::RuntimeSlotApplicationHandoff(_) => {}
+        }
+        if let Some((_, replacement)) = self.expression_results.pop() {
+            *expression = replacement;
         }
         Ok(())
     }
 
     fn specialize_value_block(
         &mut self,
-        block: &mut Box<ValueBlock>,
+        block: &mut ValueBlock,
         environment: &mut ConstValueEnvironment,
     ) -> Result<(), TemplateNormalizationError> {
-        let selected = match block.as_mut() {
+        let selected = match block {
             ValueBlock::If(value_if) => {
                 self.specialize_expression(&mut value_if.condition, environment)?;
                 let selection = self.resolve_static_bool(&value_if.condition, environment)?;
@@ -525,7 +617,7 @@ impl StaticIfSpecializer<'_> {
         };
 
         if let Some(selected) = selected {
-            **block = ValueBlock::LexicalScope(selected);
+            *block = ValueBlock::LexicalScope(selected);
         }
         Ok(())
     }
@@ -544,18 +636,23 @@ impl StaticIfSpecializer<'_> {
 
     fn resolve_static_bool(
         &mut self,
-        condition: &Expression,
+        condition: &ExprId,
         environment: &ConstValueEnvironment,
     ) -> Result<Option<(bool, SyntheticInterfaceProvenance)>, TemplateNormalizationError> {
-        match self.resolver.resolve_expression(condition, environment) {
-            Ok(resolved) => match resolved.kind {
-                ExpressionKind::Bool(value) => Ok(Some((
-                    value,
-                    condition
-                        .synthetic_interface_provenance
-                        .union(&resolved.synthetic_interface_provenance),
-                ))),
-                _ => Ok(None),
+        match self.resolver.resolve_expression(*condition, environment) {
+            Ok(resolved) => match self.resolver.const_values().payload(resolved) {
+                Some(ConstValuePayload::Bool(value)) => {
+                    let view = self.resolver.builder().view(*condition)?;
+                    let mut provenance = view
+                        .occurrence_facts()
+                        .map(|facts| facts.provenance.clone())
+                        .unwrap_or_default();
+                    if let Some(metadata) = self.resolver.const_values().metadata(resolved) {
+                        provenance.merge(&metadata.synthetic_interface_provenance);
+                    }
+                    Ok(Some((*value, provenance)))
+                }
+                Some(_) | None => Ok(None),
             },
             Err(ConstResolutionError::TemplateClassification(error)) => {
                 Err(TemplateNormalizationError::from(error))
@@ -609,13 +706,13 @@ impl StaticIfSpecializer<'_> {
         declaration: &crate::compiler_frontend::ast::ast_nodes::Declaration,
         environment: &mut ConstValueEnvironment,
     ) -> Result<(), TemplateNormalizationError> {
-        if declaration.value.value_mode.is_mutable() {
+        if declaration.value_mode.is_mutable() {
             return Ok(());
         }
-        match self
-            .resolver
-            .resolve_expression(&declaration.value, environment)
-        {
+        let Some(initializer) = declaration.value.initializer() else {
+            return Ok(());
+        };
+        match self.resolver.resolve_expression(initializer, environment) {
             Ok(expression) => environment.insert(declaration.id, expression),
             Err(ConstResolutionError::TemplateClassification(error)) => {
                 return Err(TemplateNormalizationError::from(error));
@@ -635,41 +732,55 @@ impl StaticIfSpecializer<'_> {
     }
 }
 
+/// Error for a ledger slot that survived body completion without publishing its request.
+fn pending_generic_request_error() -> CompilerError {
+    CompilerError::compiler_error(
+        "generic request ledger kept a pending call after body completion",
+    )
+}
+
 /// Removes a closed receiver when its selected value body terminates on every path.
 ///
 /// The receiver never observes a value in this case. Keeping a value expression would force HIR
 /// to invent an unreachable merge and result local after the selected return or error return.
-fn take_terminal_receiver_body(kind: &mut NodeKind) -> Option<(Vec<AstNode>, PathId)> {
+fn take_terminal_receiver_body(
+    kind: &NodeKind,
+    builder: &AstExpressionBuilder,
+    constants: &ConstValueStore,
+) -> Result<Option<(Vec<AstNode>, PathId)>, CompilerError> {
     let expression = match kind {
-        NodeKind::VariableDeclaration(declaration) => &mut declaration.value,
+        NodeKind::VariableDeclaration(declaration) => declaration.value.initializer(),
         NodeKind::Assignment { value, .. }
         | NodeKind::MultiBind { value, .. }
-        | NodeKind::ReturnError(value) => value,
-        NodeKind::Return(values) if values.len() == 1 => &mut values[0],
-        _ => return None,
+        | NodeKind::ReturnError(value) => Some(*value),
+        NodeKind::Return(values) if values.len() == 1 => Some(values[0]),
+        _ => None,
     };
-
-    take_terminal_value_body(expression)
+    match expression {
+        Some(expression) => take_terminal_value_body(expression, builder, constants),
+        None => Ok(None),
+    }
 }
 
-fn take_terminal_value_body(expression: &mut Expression) -> Option<(Vec<AstNode>, PathId)> {
-    match &mut expression.kind {
-        ExpressionKind::ValueBlock { block } => {
-            let ValueBlock::LexicalScope(value_lexical_scope) = block.as_mut() else {
-                return None;
-            };
-            let exits = analyze_branch_exits(&value_lexical_scope.body);
+fn take_terminal_value_body(
+    expression: ExprId,
+    builder: &AstExpressionBuilder,
+    constants: &ConstValueStore,
+) -> Result<Option<(Vec<AstNode>, PathId)>, CompilerError> {
+    match builder.view(expression)?.operation() {
+        ExpressionOperationView::ValueBlock(ValueBlock::LexicalScope(scope)) => {
+            let exits = analyze_branch_exits(&scope.body, builder, constants);
             if exits.terminates && !exits.produces_value && !exits.can_fall_through {
-                Some((
-                    std::mem::take(&mut value_lexical_scope.body),
-                    value_lexical_scope.scope,
-                ))
+                // The immutable expression may still be read by another candidate.
+                Ok(Some((scope.body.clone(), scope.scope)))
             } else {
-                None
+                Ok(None)
             }
         }
-        ExpressionKind::Coerced { value, .. } => take_terminal_value_body(value),
-        _ => None,
+        ExpressionOperationView::Coerce { value, .. } => {
+            take_terminal_value_body(value.id(), builder, constants)
+        }
+        _ => Ok(None),
     }
 }
 
@@ -684,3 +795,7 @@ fn module_const_environment(const_values: &ConstValueStore) -> ConstValueEnviron
 #[cfg(test)]
 #[path = "../tests/static_if_specialization_tests.rs"]
 mod static_if_specialization_tests;
+
+#[cfg(test)]
+#[path = "tests/static_if_stack_tests.rs"]
+mod stack_tests;

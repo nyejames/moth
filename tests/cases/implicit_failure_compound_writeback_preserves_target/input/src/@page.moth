@@ -1,4 +1,4 @@
-bump |target ~U8, amount U8| -> U8:
+bump |target ~U8, amount U16| -> U8:
     target += amount
     return target
 ;

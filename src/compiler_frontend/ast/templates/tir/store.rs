@@ -24,16 +24,21 @@ mod slot_plans;
 mod store_support;
 
 use crate::compiler_frontend::arena::capacity::FrontendArenaCapacityEstimate;
+use crate::compiler_frontend::ast::const_values::ConstValueId;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{SlotPlaceholder, TemplateType};
 use crate::compiler_frontend::ast::templates::template_control_flow::TemplateLoopHeader;
 use crate::compiler_frontend::ast::templates::tir::ids::{
-    ChildTemplateOccurrenceId, ExpressionSiteId, SlotOccurrenceId, TemplateIrId, TemplateIrNodeId,
-    TemplateSlotPlanId, TemplateWrapperSetId,
+    ChildTemplateOccurrenceId, ExpressionSiteId, NumericTemplateIntakeSiteId, SlotOccurrenceId,
+    TemplateIrId, TemplateIrNodeId, TemplateSlotPlanId, TemplateWrapperSetId,
 };
 use crate::compiler_frontend::ast::templates::tir::node::{
     TemplateIr, TemplateIrNode, TemplateIrNodeKind, TemplateLoopHeaderExpressionSites,
     TirSlotPlaceholder,
+};
+use crate::compiler_frontend::ast::templates::tir::numeric_intake::{
+    NumericTemplateIntakeIndex, NumericTemplateIntakeRecord, RetainedCollectionHeaderRecord,
+    RetainedRangeHeaderRecord, RetainedSelectorRecord,
 };
 use crate::compiler_frontend::ast::templates::tir::overlays::{
     TirExpressionOverlay, TirSlotResolutionOverlay, TirWrapperContextOverlay,
@@ -45,6 +50,7 @@ use crate::compiler_frontend::ast::templates::tir::summary::{
 use crate::compiler_frontend::ast::templates::tir::wrapper_sets::wrapper_sets_are_equivalent;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
+use rustc_hash::FxHashMap;
 
 pub(crate) use control_flow::ControlFlowBodyKind;
 #[cfg(test)]
@@ -86,6 +92,7 @@ pub(crate) struct TemplateIrStore {
     next_slot_occurrence: u32,
     next_child_template_occurrence: u32,
     next_expression_site: u32,
+    next_numeric_template_intake: u32,
 
     templates: Vec<TemplateIr>,
     nodes: Vec<TemplateIrNode>,
@@ -94,6 +101,29 @@ pub(crate) struct TemplateIrStore {
     expression_overlays: Vec<TirExpressionOverlay>,
     slot_resolution_overlays: Vec<TirSlotResolutionOverlay>,
     wrapper_context_overlays: Vec<TirWrapperContextOverlay>,
+    pub(super) numeric_template_intakes: Vec<NumericTemplateIntakeRecord>,
+    pub(super) numeric_intake_index: NumericTemplateIntakeIndex,
+    /// Retained range loop headers whose operands complete at the owning body root.
+    ///
+    /// WHY: a range header keeps parse-time data (loop bindings, end kind, already built
+    ///      operands) that must not sit inside TIR, because the position stays payload-free until
+    ///      the root selects every operand's type and installs the finished `RangeLoopSpec`.
+    pub(super) retained_range_headers: Vec<RetainedRangeHeaderRecord>,
+    /// Parsed capture patterns of retained conditional selectors.
+    ///
+    /// WHY: the pattern is authored AST data the conditional node needs at completion; store
+    ///      scratch keeps the TIR position payload-free until then.
+    pub(super) retained_selector_patterns: Vec<RetainedSelectorRecord>,
+    /// Concrete bindings of retained collection loop headers, keyed by their position node.
+    ///
+    /// WHY: the bindings are final at parse time but only the completed iterable makes the `Loop`
+    ///      node buildable, so the row waits beside the position instead of inside it.
+    pub(super) retained_collection_headers: Vec<RetainedCollectionHeaderRecord>,
+    /// Rebuilt TIR roots for imported const-template constants, keyed by their stable value.
+    ///
+    /// WHY: every reference to one constant must share one TIR root, so the rebuild runs once per
+    ///      `ConstValueId` per module build instead of once per reference.
+    rebuilt_const_template_roots: FxHashMap<ConstValueId, TemplateIrId>,
 }
 
 impl TemplateIrStore {
@@ -102,6 +132,7 @@ impl TemplateIrStore {
             next_slot_occurrence: 0,
             next_child_template_occurrence: 0,
             next_expression_site: 0,
+            next_numeric_template_intake: 0,
             templates: Vec::new(),
             nodes: Vec::new(),
             wrapper_sets: Vec::new(),
@@ -109,6 +140,12 @@ impl TemplateIrStore {
             expression_overlays: Vec::new(),
             slot_resolution_overlays: Vec::new(),
             wrapper_context_overlays: Vec::new(),
+            numeric_template_intakes: Vec::new(),
+            numeric_intake_index: NumericTemplateIntakeIndex::default(),
+            retained_range_headers: Vec::new(),
+            retained_selector_patterns: Vec::new(),
+            retained_collection_headers: Vec::new(),
+            rebuilt_const_template_roots: FxHashMap::default(),
         }
     }
 
@@ -124,6 +161,7 @@ impl TemplateIrStore {
             next_slot_occurrence: 0,
             next_child_template_occurrence: 0,
             next_expression_site: 0,
+            next_numeric_template_intake: 0,
             templates: Vec::with_capacity(template_capacity),
             nodes: Vec::with_capacity(node_capacity),
             wrapper_sets: Vec::with_capacity(side_capacity),
@@ -131,7 +169,27 @@ impl TemplateIrStore {
             expression_overlays: Vec::with_capacity(side_capacity),
             slot_resolution_overlays: Vec::with_capacity(side_capacity),
             wrapper_context_overlays: Vec::with_capacity(side_capacity),
+            numeric_template_intakes: Vec::new(),
+            numeric_intake_index: NumericTemplateIntakeIndex::default(),
+            retained_range_headers: Vec::new(),
+            retained_selector_patterns: Vec::new(),
+            retained_collection_headers: Vec::new(),
+            rebuilt_const_template_roots: FxHashMap::default(),
         }
+    }
+
+    /// Returns the TIR root already rebuilt for one imported const-template constant.
+    pub(crate) fn rebuilt_const_template_root(&self, value: ConstValueId) -> Option<TemplateIrId> {
+        self.rebuilt_const_template_roots.get(&value).copied()
+    }
+
+    /// Records the TIR root rebuilt for one imported const-template constant.
+    pub(crate) fn remember_rebuilt_const_template_root(
+        &mut self,
+        value: ConstValueId,
+        root: TemplateIrId,
+    ) {
+        self.rebuilt_const_template_roots.insert(value, root);
     }
 
     pub(crate) fn next_slot_occurrence_id(&mut self) -> SlotOccurrenceId {
@@ -149,6 +207,19 @@ impl TemplateIrStore {
             .next_child_template_occurrence
             .checked_add(1)
             .expect("child-template occurrence counter overflow; this is a compiler bug");
+        id
+    }
+
+    /// Issues the next dense numeric template intake site ID.
+    ///
+    /// WHAT: the site indexes the store's intake table, which appends records in this order.
+    /// WHY: body-root completion must address one retained intake without a graph search.
+    pub(crate) fn next_numeric_template_intake_site_id(&mut self) -> NumericTemplateIntakeSiteId {
+        let id = NumericTemplateIntakeSiteId::new(self.next_numeric_template_intake as usize);
+        self.next_numeric_template_intake = self
+            .next_numeric_template_intake
+            .checked_add(1)
+            .expect("numeric template intake site counter overflow; this is a compiler bug");
         id
     }
 

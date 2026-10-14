@@ -1,0 +1,26 @@
+# The second result slot shares T with origin, whose later U64 receiver can resolve it.
+# That future type cannot supply an immediate target for `cast small` in the fallback.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0083"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0083"
+reason = "invalid_cast.missing_explicit_target"
+path = "input/@page.moth"
+line = 10
+column = 56
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0083"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0083"
+reason = "invalid_cast.missing_explicit_target"
+path = "input/@page.moth"
+line = 10
+column = 56

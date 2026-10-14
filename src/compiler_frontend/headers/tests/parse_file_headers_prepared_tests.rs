@@ -125,7 +125,7 @@ fn prepared_output_keeps_the_span_table_its_retained_tokens_index() {
 fn diagnosed_aggregation_preserves_the_source_span_builder() {
     let quoted = "é".repeat(2 * 1024 * 1024);
     let source =
-        format!("helper ||:\n    value = \"{quoted}\"\n    setting #Config of Int = 1\n;\n");
+        format!("helper ||:\n    value = \"{quoted}\"\n    setting #Config of I32 = 1\n;\n");
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from("src/@page.moth");
@@ -223,8 +223,8 @@ fn diagnosed_aggregation_preserves_the_source_span_builder() {
 #[test]
 fn aggregation_diagnostics_keep_distinct_source_ids_in_authored_order() {
     let sources = [
-        "helper ||:\n setting #Config of Int = 1\n;\n",
-        "other ||:\n setting #Config of Int = 2\n;\n",
+        "helper ||:\n setting #Config of I32 = 1\n;\n",
+        "other ||:\n setting #Config of I32 = 2\n;\n",
     ];
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();

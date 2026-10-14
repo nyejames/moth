@@ -1,0 +1,11 @@
+-- The I64 receiver reaches the raw leaf 1 beside the named I32 operand and
+-- types it I64. The named operand keeps I32, so the mixed operation selects
+-- the I64 common domain and the returned base text stays I32.
+raw_leaf_at_i64 |base I32| -> String:
+    total I64 = base + 1
+    base_text String = cast base
+    total_text String = cast total
+    return [:base=[base_text] total=[total_text]]
+;
+
+[:scalar raw leaf beside named=[raw_leaf_at_i64(10)]]

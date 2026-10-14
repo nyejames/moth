@@ -39,6 +39,7 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 fn empty_summary() -> PublicCallSummary {
     PublicCallSummary {
@@ -494,8 +495,10 @@ fn rejects_nested_private_generic_instance_before_publication() {
             "HiddenBox".to_owned(),
             OriginTypeCategory::Struct,
         ),
-        arguments: vec![CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)]
-            .into_boxed_slice(),
+        arguments: vec![CanonicalTypeIdentity::Builtin(
+            CanonicalBuiltinType::FixedScalar(FixedScalar::I32),
+        )]
+        .into_boxed_slice(),
     };
     let origin = OriginFunctionId::new_free(module_origin(), "expose_nested_private".to_owned());
     let interface = PublicSemanticInterface {
@@ -941,7 +944,7 @@ fn rejects_reusable_evidence_with_incompatible_method_shape() {
         unreachable!("target fixture is a struct");
     };
     target.receiver_methods[0].parameters[0].type_identity =
-        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int);
+        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::FixedScalar(FixedScalar::I32));
 
     let error = interface
         .validate_for_publication()

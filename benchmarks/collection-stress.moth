@@ -9,14 +9,14 @@
 
 -- Simple struct for collection items
 Item = |
-    id Int,
+    id I32,
     value String,
 |
 
 Record = |
     key String,
-    count Int,
-    score Float,
+    count I32,
+    score F64,
 |
 
 -- Basic collection operations
@@ -24,7 +24,7 @@ basic_mutations ||:
     io.line("Basic collection mutations")
     
     -- Create empty collection
-    numbers ~{Int} = {}
+    numbers ~{I32} = {}
     
     -- Push operations
     loop 0 to 20 |i|:
@@ -86,12 +86,12 @@ get_with_fallback ||:
 nested_collection_loops ||:
     io.line("Nested collection loops")
     
-    outer ~{Int} = {}
+    outer ~{I32} = {}
     loop 0 to 5 |i|:
         ~outer.push(i)
     ;
     
-    inner ~{Int} = {}
+    inner ~{I32} = {}
     loop 0 to 4 |j|:
         ~inner.push(j * 10)
     ;
@@ -170,9 +170,9 @@ descending_ranges ||:
     io.line([: 50 to 10 by 5: [result_3]])
 ;
 
--- Float ranges
+-- F64 ranges
 float_ranges ||:
-    io.line("Float range loops")
+    io.line("F64 range loops")
     
     result ~= ""
     loop 0.0 to 1.0 by 0.25 |f|:
@@ -185,11 +185,11 @@ float_ranges ||:
 mixed_nesting ||:
     io.line("Mixed collection and range nesting")
     
-    matrix ~{{Int}} = {}
+    matrix ~{{I32}} = {}
     
     -- Build matrix with range loops
     loop 0 to 5 |row|:
-        row_items ~{Int} = {}
+        row_items ~{I32} = {}
         loop 0 to 5 |col|:
             ~row_items.push(row * 10 + col)
         ;
@@ -247,17 +247,17 @@ struct_collection ||:
 deep_nesting ||:
     io.line("Deep nesting (3+ levels)")
     
-    outer ~{Int} = {}
+    outer ~{I32} = {}
     loop 0 to 3 |o|:
         ~outer.push(o)
     ;
     
-    middle ~{Int} = {}
+    middle ~{I32} = {}
     loop 0 to 3 |m|:
         ~middle.push(m * 10)
     ;
     
-    inner ~{Int} = {}
+    inner ~{I32} = {}
     loop 0 to 3 |i|:
         ~inner.push(i * 100)
     ;
@@ -296,7 +296,7 @@ accumulator_pattern ||:
     
     -- Remove every third item
     index = 0
-    to_remove ~{Int} = {}
+    to_remove ~{I32} = {}
     loop result |value, idx|:
         if idx % 3 is 0:
             ~to_remove.push(idx)
@@ -317,8 +317,8 @@ accumulator_pattern ||:
 conditional_building ||:
     io.line("Conditional collection building")
     
-    positives ~{Int} = {}
-    negatives ~{Int} = {}
+    positives ~{I32} = {}
+    negatives ~{I32} = {}
     
     loop -20 to 21 |n|:
         if n > 0:
@@ -356,8 +356,8 @@ transformation ||:
     io.line("Collection transformation")
     
     source ~= {1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
-    doubled ~{Int} = {}
-    squared ~{Int} = {}
+    doubled ~{I32} = {}
+    squared ~{I32} = {}
     
     loop source |n|:
         ~doubled.push(n * 2)
@@ -383,9 +383,10 @@ record_collection ||:
     
     records ~{Record} = {}
     
-    -- Build records
+    -- Build records. A named divisor keeps integer `/`: an F64 receiver would type a raw `1`.
+    divisor I32 = 1
     loop 0 to 10 |i|:
-        r = Record([: key-[i]], i * 10, i / 1)
+        r = Record([: key-[i]], i * 10, i / divisor)
         ~records.push(r)
     ;
     
@@ -406,13 +407,13 @@ complex_workflow ||:
     io.line("Complex collection workflow")
     
     -- Stage 1: Build initial collection
-    stage1 ~{Int} = {}
+    stage1 ~{I32} = {}
     loop 0 to 100 |i|:
         ~stage1.push(i)
     ;
     
     -- Stage 2: Filter and transform
-    stage2 ~{Int} = {}
+    stage2 ~{I32} = {}
     loop stage1 |n|:
         if n % 7 is 0:
             ~stage2.push(n * 3)

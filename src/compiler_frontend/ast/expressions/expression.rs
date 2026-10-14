@@ -1,1438 +1,1254 @@
-//! AST expression values and constructor helpers used before HIR lowering.
+//! Checked semantic constructors for the phase expression owner.
 //!
-//! WHAT: defines frontend expression kinds plus the factory methods that build typed AST values.
-//! WHY: parser and folding code should create expressions through one readable surface instead of
-//! manually reassembling `Expression` fields at each call site.
+//! Constructors consume canonical resolved types and facts. Constant content belongs to the
+//! separate constant store; expression rows retain occurrence metadata and immutable ID edges.
 
-use crate::compiler_frontend::ast::ast_nodes::Declaration;
-use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
-pub use crate::compiler_frontend::ast::expressions::expression_kind::{
-    ExpressionKind, MapLiteralEntry, Operator, ResolvedCastExpression,
-};
-pub use crate::compiler_frontend::ast::expressions::expression_rpn::{
-    ExpressionRpn, PlaceExpression,
-};
-#[cfg(test)]
-pub use crate::compiler_frontend::ast::expressions::expression_types::FallibleCarrierVariant;
-pub use crate::compiler_frontend::ast::expressions::expression_types::{
+use super::call_argument::CallArgument;
+use super::expression_kind::Operator;
+use super::expression_rpn::{ResolvedOperation, ResolvedOperationKind};
+use super::expression_store::*;
+pub use super::expression_types::{
     ConstRecordState, ConstValueKind, FallibleExpressionHandling, FallibleHandling,
 };
-use crate::compiler_frontend::ast::expressions::failure_facts::{
-    ExpressionFailureFacts, FailureDisposition, ImplicitFailureContributor, ImplicitFailureSource,
-    TypedErrorProducer,
+use super::failure_facts::{
+    ExpressionFailureFacts, ImplicitFailureContributor, ImplicitFailureSource, TypedErrorProducer,
 };
-use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
+use crate::compiler_frontend::ast::const_values::store::{
+    ConstStringValue, ConstValueId, ConstValueMetadata, ConstValuePayload, ConstValueStore,
+    ConstValueStoreError,
+};
+use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
-use crate::compiler_frontend::ast::templates::template::Template;
-use crate::compiler_frontend::ast::templates::template::TemplateConstValueKind;
-use crate::compiler_frontend::ast::templates::{
-    OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeTemplateHandoff,
-};
+use crate::compiler_frontend::ast::templates::template::{Template, TemplateConstValueKind};
 use crate::compiler_frontend::builtins::CollectionBuiltinOp;
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic, InvalidBuiltinCallReason,
-    InvalidFallibleHandlingReason,
+    AstCapacityResource, CompileTimeEvaluationErrorReason, CompilerDiagnostic,
+    InvalidBuiltinCallReason, InvalidFallibleHandlingReason,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::generic_identity_bridge::GenericInstantiationKey;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::number::NumberValue;
-use crate::compiler_frontend::datatypes::{DataType, ReceiverKey, diagnostic_type_spelling};
 use crate::compiler_frontend::external_packages::ExternalFunctionId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
-use moth_lexical::numeric::fixed_scalar::FixedScalarValue;
-use moth_lexical::numeric::profile::NumericProfile;
-
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
-/// The kind determines the runtime shape and constant-foldability of the value.
-///
-/// `Runtime` carries a small AST fragment for expressions that could not be folded.
-/// `ExpressionKind` mirrors core datatypes that produce values, omitting structural
-/// types that do not represent first-class runtime values.
-#[derive(Clone, Debug)]
-pub struct Expression {
-    pub kind: ExpressionKind,
-    /// Canonical `TypeId` for the expression's resolved semantic type.
-    ///
-    /// WHAT: expression factories seed builtin scalar IDs immediately; callers that build
-    ///       nominal, constructed, or function values must provide/resolve the canonical ID
-    ///       while they still hold the AST type interner.
-    /// WHY: HIR expression lowering consumes these IDs directly from the final module
-    ///      `TypeEnvironment`; AST finalization only debug-validates that no orphan IDs remain.
-    pub type_id: TypeId,
-    /// Failure delivery is side data: `type_id` remains the success-value identity.
-    pub(crate) failure_facts: ExpressionFailureFacts,
-    /// Non-authoritative type spelling kept for diagnostics and parse-era declarations.
-    ///
-    /// WHAT: preserves the written type spelling for diagnostics and debug output.
-    /// WHY: semantic identity for executable expressions is `type_id`; this field is
-    ///      display-only and must never be used for semantic type decisions.
-    pub diagnostic_type: DataType,
-    /// Receiver metadata for function declarations.
-    ///
-    /// WHAT: records whether an `ExpressionKind::Function` was declared with a
-    /// receiver parameter.
-    /// WHY: receiver lookup must distinguish free functions from receiver
-    /// methods without inspecting diagnostic-only `DataType` structure.
-    pub function_receiver: Option<ReceiverKey>,
-    /// Frontend access classification for this expression.
-    ///
-    /// WHY: mutability and reference semantics are tracked separately from the
-    ///      diagnostic type so that lowering stages can make ownership decisions.
-    pub value_mode: ValueMode,
-    /// Exact authored source span, when the owning file has an identity.
-    pub span: Option<SourceSpan>,
-    /// Explicit value-level const-record classification.
-    ///
-    /// WHAT: `ConstRecord` means this expression is a compile-time member group
-    ///       constructed in a `#=` constant context.
-    /// WHY: const-record status is a value fact, not a type identity. Semantic
-    ///      decisions must inspect this field, not `diagnostic_type`.
-    pub const_record_state: ConstRecordState,
-
-    /// Tracks whether this value was derived from regular division (`/`).
-    ///
-    /// WHY: explicit `Int` contexts should emit a targeted diagnostic when a
-    /// value comes from `/`, even when constant folding removed the original
-    /// operator node.
-    pub contains_regular_division: bool,
-
-    /// Direct synthetic compile-time interface provenance for this value.
-    ///
-    /// WHAT: records the member-granular synthetic-interface dependencies carried by this
-    /// value. Empty means portable (no project-context dependency). Non-empty provenance is a
-    /// sorted, duplicate-free set that must be preserved through every value transformation
-    /// that keeps or derives the value's semantic meaning, including constant folding and
-    /// direct coercion/copy/pass-through paths. Dependencies originate as AST value metadata and
-    /// are not inferred by reparsing source or walking display names.
-    /// WHY: the per-function link-fact lane needs stable, deterministic provenance that
-    /// survives AST value transformations and HIR lowering without leaking process-local IDs,
-    /// source locations or interned names.
-    pub synthetic_interface_provenance: SyntheticInterfaceProvenance,
-}
-
-/// Canonical and diagnostic type data for a collection expression.
-///
-/// WHAT: groups the element type, optional fixed capacity, and optional exact
-/// collection `TypeId` supplied by an explicit receiving context.
-/// WHY: collection literal parsing needs all of these facts together, and keeping
-/// them in one small input avoids long constructor argument lists.
 pub(crate) struct CollectionExpressionType {
     pub(crate) element_type_id: TypeId,
-    pub(crate) element_diagnostic_type: DataType,
     pub(crate) fixed_capacity: Option<usize>,
     pub(crate) collection_type_id: Option<TypeId>,
 }
 
-/// Canonical and diagnostic type data for a map expression.
-///
-/// WHAT: groups the key type, value type, and optional exact semantic identity
-///       supplied by an explicit receiving context.
-/// WHY: map literal construction needs all of these facts together, and keeping
-///      them in one small input avoids long constructor argument lists.
 pub(crate) struct MapLiteralExpressionType {
     pub(crate) key_type_id: TypeId,
     pub(crate) value_type_id: TypeId,
-    pub(crate) key_diagnostic_type: DataType,
-    pub(crate) value_diagnostic_type: DataType,
     pub(crate) map_type_id: Option<TypeId>,
 }
 
-/// Canonical type data for call expressions built after semantic resolution.
-///
-/// WHAT: computes the canonical `TypeId` and a display-only `DataType` from the
-/// resolved return TypeIds so call constructors do not need separate diagnostic vectors.
-/// WHY: typed call constructors should compute all call typing state up front instead of
-/// building placeholder IDs and recomputing them later.
-struct ResolvedCallTypes {
-    result_type_ids: Vec<TypeId>,
-    expression_type_id: TypeId,
-    diagnostic_type: DataType,
-}
-
-/// Input struct for `Expression::handled_fallible_host_function_call_with_typed_arguments`
-/// to avoid a long parameter list.
-pub(crate) struct HandledFallibleHostFunctionCallInput {
+pub(crate) struct HandledFallibleHostFunctionCallInput<A> {
     pub(crate) id: ExternalFunctionId,
-    pub(crate) args: Vec<CallArgument>,
+    pub(crate) args: A,
     pub(crate) result_type_ids: Vec<TypeId>,
+    pub(crate) requires_external_float_validation: bool,
     pub(crate) error_type_id: TypeId,
     pub(crate) handling: FallibleExpressionHandling,
     pub(crate) span: Option<SourceSpan>,
 }
 
-impl ResolvedCallTypes {
-    fn new(result_type_ids: Vec<TypeId>, type_environment: &mut TypeEnvironment) -> Self {
-        let expression_type_id = match result_type_ids.as_slice() {
-            [] => type_environment.builtins().none,
-            [single] => *single,
-            multiple => type_environment.intern_tuple(multiple.to_vec()),
-        };
-        let diagnostic_type = diagnostic_type_spelling(expression_type_id, type_environment);
+pub(crate) struct ChoiceConstructInput<F> {
+    pub(crate) tag: usize,
+    pub(crate) fields: F,
+    pub(crate) type_id: TypeId,
+    pub(crate) span: Option<SourceSpan>,
+    pub(crate) value_mode: ValueMode,
+}
 
-        Self {
-            result_type_ids,
-            expression_type_id,
-            diagnostic_type,
+impl From<ConstValueStoreError> for ExpressionConstructionFailure {
+    fn from(error: ConstValueStoreError) -> Self {
+        match error {
+            ConstValueStoreError::Diagnostic(diagnostic) => Self::Diagnostic(diagnostic),
+            ConstValueStoreError::Infrastructure(error) => Self::Invariant(*error),
         }
     }
 }
 
-/// Best-effort bridge for parse/header paths that still start from diagnostic spelling.
-///
-/// WHAT: maps syntax/display-only `DataType` values to builtin TypeId hints when the caller does
-///      not yet have enough context to resolve through `TypeEnvironment`.
-/// WHY: this is a parse-boundary hint, not a semantic equality path. Executable AST
-///      and HIR should carry canonical TypeIds resolved through the active type environment.
-pub(crate) fn type_id_hint_for_diagnostic_type(data_type: &DataType) -> TypeId {
-    match data_type {
-        DataType::Bool | DataType::True | DataType::False => builtin_type_ids::BOOL,
-        DataType::Int => builtin_type_ids::INT,
-        DataType::Uint => builtin_type_ids::UINT,
-        DataType::Float => builtin_type_ids::FLOAT,
-        // Dec scales are lazily interned in the receiving environment, so a diagnostic
-        // spelling alone cannot supply a canonical hint.
-        DataType::Number(_) => builtin_type_ids::NONE,
-        DataType::StringSlice | DataType::Template => builtin_type_ids::STRING,
-        DataType::Char => builtin_type_ids::CHAR,
-        DataType::FixedScalar(scalar) => builtin_type_ids::fixed_scalar(*scalar),
-        DataType::Range => builtin_type_ids::RANGE,
-        DataType::None | DataType::Inferred => builtin_type_ids::NONE,
-        DataType::Struct { type_id, .. } | DataType::Choices { type_id, .. } => *type_id,
-        _ => builtin_type_ids::NONE,
-    }
-}
-
-/// Input struct for `Expression::choice_construct` to avoid a long parameter list.
-pub struct ChoiceConstructInput {
-    pub nominal_path: PathId,
-    pub tag: usize,
-    pub fields: Vec<Declaration>,
-    pub diagnostic_type: DataType,
-    pub type_id: TypeId,
-    pub span: Option<SourceSpan>,
-    pub value_mode: ValueMode,
-}
-
-impl Expression {
-    /// Generic constructor for an expression with the given kind and type metadata.
-    pub fn new(
-        kind: ExpressionKind,
-        span: Option<SourceSpan>,
-        type_id: TypeId,
-        diagnostic_type: DataType,
-        value_mode: ValueMode,
-    ) -> Self {
-        let failure_facts = ExpressionFailureFacts::from_expression_kind(&kind, span);
-        Self {
-            type_id,
-            failure_facts,
-            diagnostic_type,
-            function_receiver: None,
-            kind,
-            span,
-            value_mode,
-            const_record_state: ConstRecordState::RuntimeValue,
-            contains_regular_division: false,
-            synthetic_interface_provenance: SyntheticInterfaceProvenance::empty(),
-        }
-    }
-
-    pub(crate) fn with_typed_error_producer(
-        mut self,
-        error_type_id: TypeId,
-        builtin_name: Option<StringId>,
-    ) -> Self {
-        self.failure_facts.record_typed_error(TypedErrorProducer {
-            span: self.span,
-            error_type_id,
-            builtin_name,
-        });
-        self
-    }
-
-    pub(crate) fn with_private_call_failure_candidate(mut self, path: PathId) -> Self {
-        self.failure_facts
-            .record_implicit(ImplicitFailureContributor {
-                span: self.span,
-                codes: &[],
-                source: ImplicitFailureSource::PrivateCall(path),
-            });
-        self
-    }
-
-    /// Closed receiving sites reject typed producers that remain outside explicit handling.
-    pub(crate) fn unhandled_typed_error_diagnostic(&self) -> Option<CompilerDiagnostic> {
-        if self.failure_facts.disposition != FailureDisposition::Pending {
-            return None;
-        }
-        self.failure_facts.summary.first_typed.map(|producer| {
-            let span = producer.span.or(self.span);
-            if let Some(builtin_name) = producer.builtin_name {
-                CompilerDiagnostic::invalid_builtin_call(
-                    InvalidBuiltinCallReason::UnhandledFallibleCall,
-                    Some(builtin_name),
-                    span,
-                )
-            } else {
-                CompilerDiagnostic::invalid_fallible_handling(
-                    InvalidFallibleHandlingReason::UnhandledErrorReturn,
-                    span,
-                )
-            }
-        })
-    }
-
-    /// Returns true if this expression represents a const-record value.
-    pub fn is_const_record_value(&self) -> bool {
-        matches!(self.const_record_state, ConstRecordState::ConstRecord)
-    }
-
-    /// Adopt the authored metadata of the expression a substitution replaces.
-    ///
-    /// WHAT: copies the authored span, diagnostic type, receiver, value mode, const-record state
-    ///       and division provenance, and unions the synthetic-interface
-    ///       provenance of the authored operand into the replacement.
-    /// WHY: substituted compile-time operands must stay indistinguishable from their authored
-    ///      node for diagnostics and identity; one owner prevents repeated clones between a
-    ///      projection helper and the general evaluator.
-    pub(crate) fn preserve_authored_metadata(&mut self, authored: &Expression) {
-        self.span = authored.span;
-        self.diagnostic_type = authored.diagnostic_type.clone();
-        self.function_receiver = authored.function_receiver.clone();
-        self.value_mode = authored.value_mode.clone();
-        self.const_record_state = authored.const_record_state;
-        self.contains_regular_division |= authored.contains_regular_division;
-        self.synthetic_interface_provenance = self
-            .synthetic_interface_provenance
-            .union(&authored.synthetic_interface_provenance);
-    }
-
-    /// Marks whether this expression originates from a regular division operator.
-    pub fn with_regular_division_provenance(mut self, contains: bool) -> Self {
-        self.contains_regular_division = contains;
-        self
-    }
-
-    /// Attach direct synthetic compile-time interface provenance to this value.
-    ///
-    /// AST config resolution and public-interface/facade projection attach member-granular
-    /// dependencies; AST value transformations preserve them through HIR lowering and per-function
-    /// link-fact collection. Tests also use this helper to inject explicit dependencies.
-    pub fn with_synthetic_interface_provenance(
-        mut self,
-        provenance: SyntheticInterfaceProvenance,
-    ) -> Self {
-        self.synthetic_interface_provenance = provenance;
-        self
-    }
-
-    /// Centralises scalar literal construction so literal factories stay structurally identical.
-    fn scalar_literal(
-        kind: ExpressionKind,
-        type_id: TypeId,
-        diagnostic_type: DataType,
-        span: Option<SourceSpan>,
-        value_mode: ValueMode,
-    ) -> Self {
-        Self::new(kind, span, type_id, diagnostic_type, value_mode)
-    }
-
-    fn call_expression_with_resolved_types(
-        kind: ExpressionKind,
-        resolved_types: ResolvedCallTypes,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        let ResolvedCallTypes {
-            result_type_ids: _,
-            expression_type_id,
-            diagnostic_type,
-        } = resolved_types;
-
-        Self::new(
-            kind,
-            span,
-            expression_type_id,
-            diagnostic_type,
-            // Planned: derive ownership from alias-aware return signatures once
-            // signature alias metadata is threaded through expression construction.
-            // If the return signature is a reference (the name of a parameter passed in),
-            // then this is a reference to that parameter.
-            ValueMode::MutableOwned,
-        )
-    }
-
-    /// Wraps an expression-owned runtime RPN stack into a single runtime expression.
-    pub fn runtime_with_type_id(
-        rpn: ExpressionRpn,
-        data_type: DataType,
-        type_id: TypeId,
-        span: Option<SourceSpan>,
-        value_mode: ValueMode,
-    ) -> Self {
-        let contains_regular_division = rpn.contains_regular_division();
-
-        debug_assert!(
-            rpn.validate_no_statement_bodies(),
-            "Runtime RPN must not carry statement bodies"
-        );
-
-        Self::new(
-            ExpressionKind::Runtime(rpn),
-            span,
-            type_id,
-            data_type,
-            value_mode,
-        )
-        .with_regular_division_provenance(contains_regular_division)
-    }
-
-    /// Constructs an integer literal expression.
-    pub fn int(value: i64, span: Option<SourceSpan>, value_mode: ValueMode) -> Self {
-        Self::scalar_literal(
-            ExpressionKind::Int(value),
-            builtin_type_ids::INT,
-            DataType::Int,
-            span,
-            value_mode,
-        )
-    }
-
-    /// Constructs one profile-sized unsigned integer literal expression.
-    pub fn uint(value: u64, span: Option<SourceSpan>, value_mode: ValueMode) -> Self {
-        Self::scalar_literal(
-            ExpressionKind::Uint(value),
-            builtin_type_ids::UINT,
-            DataType::Uint,
-            span,
-            value_mode,
-        )
-    }
-
-    /// Constructs a floating-point literal expression.
-    pub fn float(value: f64, span: Option<SourceSpan>, value_mode: ValueMode) -> Self {
-        Self::scalar_literal(
-            ExpressionKind::Float(value),
-            builtin_type_ids::FLOAT,
-            DataType::Float,
-            span,
-            value_mode,
-        )
-    }
-
-    /// Constructs one exact decimal `Dec` value with its resolved receiving identity.
-    ///
-    /// WHAT: carries the immutable materialised value and the explicit `TypeId` selected by the
-    ///       receiving context; Dec identities are lazy and cannot be guessed from a builtin
-    ///       seed.
-    /// WHY: every Dec expression must retain the actual scale identity chosen by the paired
-    ///      environment rather than reconstructing or interning it at a later phase.
-    pub fn number(
-        value: NumberValue,
-        type_id: TypeId,
-        span: Option<SourceSpan>,
-        value_mode: ValueMode,
-    ) -> Self {
-        let scale = value.scale();
-        Self::scalar_literal(
-            ExpressionKind::Number(value),
-            type_id,
-            DataType::Number(scale),
-            span,
-            value_mode,
-        )
-    }
-    /// Constructs one materialised fixed-width scalar or `Byte` literal expression.
-    ///
-    /// WHAT: carries the already-materialised `FixedScalarValue` with the seeded builtin
-    ///       `TypeId` and `DataType` for its scalar identity.
-    /// WHY: the literal parser owns destination-aware materialisation; every later stage
-    ///      consumes the value through this one constructor instead of re-deriving identity.
-    pub fn fixed_scalar(
-        value: FixedScalarValue,
-        span: Option<SourceSpan>,
-        value_mode: ValueMode,
-    ) -> Self {
-        Self::scalar_literal(
-            ExpressionKind::FixedScalar(value),
-            builtin_type_ids::fixed_scalar(value.scalar()),
-            DataType::FixedScalar(value.scalar()),
-            span,
-            value_mode,
-        )
-    }
-
-    /// Constructs a `Float` expression from a host-package constant.
-    ///
-    /// WHAT: rounds the foreign `f64` payload once at the boundary precision and rejects a
-    ///       non-finite result, reporting the constant's name and reference site.
-    /// WHY: `ExpressionKind::Float` must hold a value exactly representable at the profile
-    ///      precision and `Float` is finite by contract, so every external projection shares one
-    ///      rounding rule and one diagnostic instead of each parse site re-deriving them.
-    pub(crate) fn float_from_external_constant(
-        value: f64,
-        numeric_profile: NumericProfile,
-        constant_name: StringId,
-        span: Option<SourceSpan>,
-        value_mode: ValueMode,
-    ) -> Result<Self, CompilerDiagnostic> {
-        let rounded = numeric_profile.float_precision.round(value);
-
-        if !rounded.is_finite() {
-            // `operation` carries the constant name; the typed profile retains the selected
-            // boundary that made this external value unrepresentable.
-            return Err(CompilerDiagnostic::compile_time_evaluation_error(
-                CompileTimeEvaluationErrorReason::FloatOverflow,
-                Some(constant_name),
-                span,
-                Some(numeric_profile),
-            ));
-        }
-
-        Ok(Self::float(rounded, span, value_mode))
-    }
-
-    /// Constructs a string slice literal expression.
-    pub fn string_slice(value: StringId, span: Option<SourceSpan>, value_mode: ValueMode) -> Self {
-        Self::scalar_literal(
-            ExpressionKind::StringSlice(value),
-            builtin_type_ids::STRING,
-            DataType::StringSlice,
-            span,
-            value_mode,
-        )
-    }
-
-    /// Constructs a boolean literal expression.
-    pub fn bool(value: bool, span: Option<SourceSpan>, value_mode: ValueMode) -> Self {
-        Self::scalar_literal(
-            ExpressionKind::Bool(value),
-            builtin_type_ids::BOOL,
-            DataType::Bool,
-            span,
-            value_mode,
-        )
-    }
-
-    /// Constructs a character literal expression.
-    pub fn char(value: char, span: Option<SourceSpan>, value_mode: ValueMode) -> Self {
-        Self::scalar_literal(
-            ExpressionKind::Char(value),
-            builtin_type_ids::CHAR,
-            DataType::Char,
-            span,
-            value_mode,
-        )
-    }
-
-    /// Constructs a reference expression from an interned path.
-    pub fn reference_with_type_id(
-        id: PathId,
-        data_type: DataType,
+impl AstExpressionBuilder {
+    pub(crate) fn field_access(
+        &mut self,
+        base: OwnedExpr,
+        field: StringId,
         type_id: TypeId,
         span: Option<SourceSpan>,
         value_mode: ValueMode,
         const_record_state: ConstRecordState,
-    ) -> Self {
-        let mut expression = Self::new(
-            ExpressionKind::Reference(id),
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        let mut input = self.completed_input(
+            ExpressionOp::FieldAccess { base, field },
+            SuccessShape::One(type_id),
             span,
-            type_id,
-            data_type,
             value_mode,
-        );
-        expression.const_record_state = const_record_state;
-        expression
+        )?;
+        input.classification.const_record_state = const_record_state;
+        self.append_completed(input)
     }
 
-    /// Constructs a function expression with an optional receiver.
-    pub fn function(
-        receiver: Option<ReceiverKey>,
-        signature: FunctionSignature,
+    pub(crate) fn append_expression(
+        &mut self,
+        operation: ExpressionOp<OwnedExpr>,
+        span: Option<SourceSpan>,
         type_id: TypeId,
+        value_mode: ValueMode,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        self.append_with_success_shape(operation, span, SuccessShape::One(type_id), value_mode)
+    }
+
+    pub(crate) fn append_with_success_shape(
+        &mut self,
+        operation: ExpressionOp<OwnedExpr>,
         span: Option<SourceSpan>,
-    ) -> Self {
-        let function_data_type = DataType::Function(Box::new(receiver.clone()), signature.clone());
-        let mut expression = Self::new(
-            ExpressionKind::Function(signature),
-            span,
-            type_id,
-            function_data_type,
-            ValueMode::ImmutableReference,
-        );
-        expression.function_receiver = receiver;
-        expression
+        success: SuccessShape,
+        value_mode: ValueMode,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        let input = self.completed_input(operation, success, span, value_mode)?;
+        self.append_completed(input)
     }
 
-    /// Constructs a resolved function call expression.
-    pub(crate) fn function_call_with_typed_arguments(
-        name: PathId,
-        args: Vec<CallArgument>,
-        result_type_ids: Vec<TypeId>,
-        type_environment: &mut TypeEnvironment,
+    fn snapshot(
+        &self,
+        id: OwnedExpr,
+    ) -> Result<CompletedExpressionInput, ExpressionConstructionFailure> {
+        Ok(self.view_owned(id)?.to_completed_input(self)?)
+    }
+
+    pub(crate) fn completed_input(
+        &self,
+        operation: ExpressionOp<OwnedExpr>,
+        success: SuccessShape,
         span: Option<SourceSpan>,
-    ) -> Self {
-        let resolved_types = ResolvedCallTypes::new(result_type_ids, type_environment);
-
-        let result_type_ids = resolved_types.result_type_ids.clone();
-        Self::call_expression_with_resolved_types(
-            ExpressionKind::FunctionCall {
-                name,
-                args,
-                result_type_ids,
-            },
-            resolved_types,
+        value_mode: ValueMode,
+    ) -> Result<CompletedExpressionInput, ExpressionConstructionFailure> {
+        let raw_operation = self.check_operation_owned(operation)?;
+        let failure =
+            ExpressionFailureFacts::from_operation(self.operation_view(raw_operation)?, span);
+        let mut classification = ExpressionClassification {
+            const_record_state: ConstRecordState::RuntimeValue,
+            contains_regular_division: false,
+        };
+        let mut provenance = SyntheticInterfaceProvenance::empty();
+        self.visit_operation_children(raw_operation, |child| {
+            classification.contains_regular_division |=
+                child.classification().contains_regular_division;
+            if let Some(occurrence) = child.occurrence_facts() {
+                provenance = provenance.union(&occurrence.provenance);
+            }
+        })?;
+        let occurrence = (!provenance.is_empty()).then_some(OccurrenceFacts {
+            provenance,
+            diagnostic_spelling: None,
+        });
+        Ok(CompletedExpressionInput {
+            operation,
+            success,
+            error_type: None,
             span,
-        )
-    }
-
-    /// Constructs a resolved receiver method call expression.
-    pub(crate) fn method_call_with_typed_arguments(
-        receiver: Expression,
-        method_path: PathId,
-        args: Vec<CallArgument>,
-        result_type_ids: Vec<TypeId>,
-        type_environment: &mut TypeEnvironment,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        let resolved_types = ResolvedCallTypes::new(result_type_ids, type_environment);
-
-        let result_type_ids = resolved_types.result_type_ids.clone();
-        Self::call_expression_with_resolved_types(
-            ExpressionKind::MethodCall {
-                receiver: Box::new(receiver),
-                method_path,
-                args,
-                result_type_ids,
-                span,
-            },
-            resolved_types,
-            span,
-        )
-    }
-
-    /// Constructs a resolved collection builtin receiver call expression.
-    pub(crate) fn collection_builtin_call_with_typed_arguments(
-        receiver: Expression,
-        op: CollectionBuiltinOp,
-        args: Vec<CallArgument>,
-        result_type_ids: Vec<TypeId>,
-        type_environment: &mut TypeEnvironment,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        let resolved_types = ResolvedCallTypes::new(result_type_ids, type_environment);
-
-        let result_type_ids = resolved_types.result_type_ids.clone();
-        Self::call_expression_with_resolved_types(
-            ExpressionKind::CollectionBuiltinCall {
-                receiver: Box::new(receiver),
-                op,
-                args,
-                result_type_ids,
-                span,
-            },
-            resolved_types,
-            span,
-        )
-    }
-
-    /// Constructs a resolved map builtin receiver call expression.
-    pub(crate) fn map_builtin_call_with_typed_arguments(
-        receiver: Expression,
-        op: MapBuiltinOp,
-        receiver_requires_mutable: bool,
-        args: Vec<CallArgument>,
-        result_type_ids: Vec<TypeId>,
-        type_environment: &mut TypeEnvironment,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        let resolved_types = ResolvedCallTypes::new(result_type_ids, type_environment);
-
-        let result_type_ids = resolved_types.result_type_ids.clone();
-        Self::call_expression_with_resolved_types(
-            ExpressionKind::MapBuiltinCall {
-                receiver: Box::new(receiver),
-                op,
-                receiver_requires_mutable,
-                args,
-                result_type_ids,
-                span,
-            },
-            resolved_types,
-            span,
-        )
-    }
-    /// Constructs a resolved fallible function call with explicit error handling.
-    pub(crate) fn handled_fallible_function_call_with_typed_arguments(
-        name: PathId,
-        args: Vec<CallArgument>,
-        result_type_ids: Vec<TypeId>,
-        handling: FallibleExpressionHandling,
-        type_environment: &mut TypeEnvironment,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        let resolved_types = ResolvedCallTypes::new(result_type_ids, type_environment);
-
-        let result_type_ids = resolved_types.result_type_ids.clone();
-        Self::call_expression_with_resolved_types(
-            ExpressionKind::HandledFallibleFunctionCall {
-                name,
-                args,
-                result_type_ids,
-                handling,
-                propagation_span: None,
-            },
-            resolved_types,
-            span,
-        )
-    }
-    /// Constructs a resolved host function call expression.
-    pub(crate) fn host_function_call_with_typed_arguments(
-        id: ExternalFunctionId,
-        args: Vec<CallArgument>,
-        result_type_ids: Vec<TypeId>,
-        type_environment: &mut TypeEnvironment,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        let resolved_types = ResolvedCallTypes::new(result_type_ids, type_environment);
-
-        let result_type_ids = resolved_types.result_type_ids.clone();
-        Self::call_expression_with_resolved_types(
-            ExpressionKind::HostFunctionCall {
-                id,
-                args,
-                result_type_ids,
-            },
-            resolved_types,
-            span,
-        )
-    }
-
-    /// Constructs a resolved fallible host function call with explicit error handling.
-    pub(crate) fn handled_fallible_host_function_call_with_typed_arguments(
-        input: HandledFallibleHostFunctionCallInput,
-        type_environment: &mut TypeEnvironment,
-    ) -> Self {
-        let HandledFallibleHostFunctionCallInput {
-            id,
-            args,
-            result_type_ids,
-            error_type_id,
-            handling,
-            span,
-        } = input;
-        let resolved_types = ResolvedCallTypes::new(result_type_ids, type_environment);
-
-        let result_type_ids = resolved_types.result_type_ids.clone();
-        Self::call_expression_with_resolved_types(
-            ExpressionKind::HandledFallibleHostFunctionCall {
-                id,
-                args,
-                result_type_ids,
-                error_type_id,
-                handling,
-                propagation_span: None,
-            },
-            resolved_types,
-            span,
-        )
-    }
-    /// Constructs a resolved explicit `cast` expression.
-    ///
-    /// WHAT: builds the AST value for a cast whose evidence and handling have
-    ///      already been validated. The resulting type is the target type (or the
-    ///      optional-wrapped target type when the boundary was `T?`).
-    /// WHY: boundary callers should produce one resolved `Expression` value rather
-    ///      than manually assembling `ResolvedCastExpression` fields.
-    pub(crate) fn cast(
-        cast: ResolvedCastExpression,
-        target_type_id: TypeId,
-        type_environment: &TypeEnvironment,
-    ) -> Self {
-        let span = cast.span;
-        let diagnostic_type = diagnostic_type_spelling(target_type_id, type_environment);
-        let value_mode = cast.source.value_mode.to_owned();
-        let synthetic_interface_provenance = cast.source.synthetic_interface_provenance.clone();
-
-        let mut expression = Self::new(
-            ExpressionKind::Cast(cast),
-            span,
-            target_type_id,
-            diagnostic_type,
             value_mode,
-        );
-        expression.synthetic_interface_provenance = synthetic_interface_provenance;
-        expression
-    }
-    /// Build an explicit contextual coercion node.
-    /// Build an explicit contextual coercion node.
-    ///
-    /// WHAT: wraps `value` in a `Coerced` expression kind that carries the
-    /// target type explicitly in the AST.
-    /// WHY: contextual conversions such as `Int` → `Float` and `T` → `T?` must
-    ///      be represented deliberately so lowering stages can emit the correct
-    ///      conversion rather than silently mistyping the inner value.
-    ///      An explicit `Coerced` node makes the coercion visible and auditable.
-    pub fn coerced(value: Expression, to_type: TypeId) -> Self {
-        let span = value.span;
-        let value_mode = value.value_mode.to_owned();
-        let contains_regular_division = value.contains_regular_division;
-        let const_record_state = value.const_record_state;
-        let synthetic_interface_provenance = value.synthetic_interface_provenance.clone();
-        let mut expression = Self::new(
-            ExpressionKind::Coerced {
-                value: Box::new(value),
-                to_type,
-            },
-            span,
-            to_type,
-            // diagnostic_type is non-authoritative; Inferred is sufficient for a
-            // coercion node because semantic identity comes from type_id alone.
-            DataType::Inferred,
-            value_mode,
-        )
-        .with_regular_division_provenance(contains_regular_division);
-        expression.const_record_state = const_record_state;
-        expression.synthetic_interface_provenance = synthetic_interface_provenance;
-        expression
+            classification,
+            failure: (failure != ExpressionFailureFacts::default()).then_some(failure),
+            occurrence,
+        })
     }
 
-    /// Constructs a fallible carrier expression for lowering fixtures.
-    #[cfg(test)]
-    pub fn result_construct_with_type_id(
-        variant: FallibleCarrierVariant,
-        value: Expression,
-        diagnostic_type: DataType,
+    pub(crate) fn success_from_slots(
+        &mut self,
+        slots: Vec<TypeId>,
+        span: Option<SourceSpan>,
+    ) -> Result<SuccessShape, ExpressionConstructionFailure> {
+        match slots.as_slice() {
+            [] => Ok(SuccessShape::Zero),
+            [single] => Ok(SuccessShape::One(*single)),
+            _ => Ok(SuccessShape::Multiple(self.append_types(slots, span)?)),
+        }
+    }
+
+    pub(crate) fn constant(
+        &mut self,
+        value: ConstValueId,
         type_id: TypeId,
         span: Option<SourceSpan>,
         value_mode: ValueMode,
-    ) -> Self {
-        let contains_regular_division = value.contains_regular_division;
-        let synthetic_interface_provenance = value.synthetic_interface_provenance.clone();
-        Self::new(
-            ExpressionKind::FallibleCarrierConstruct {
-                variant,
-                value: Box::new(value),
-            },
-            span,
-            type_id,
-            diagnostic_type,
-            value_mode,
-        )
-        .with_regular_division_provenance(contains_regular_division)
-        .with_synthetic_interface_provenance(synthetic_interface_provenance)
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        self.append_expression(ExpressionOp::Constant(value), span, type_id, value_mode)
     }
 
-    /// Wraps a fallible expression with explicit handling.
-    pub fn handled_result_with_type_id(
-        value: Expression,
-        handling: FallibleExpressionHandling,
-        result_type_id: TypeId,
-        diagnostic_type: DataType,
+    fn literal(
+        &mut self,
+        values: &mut ConstValueStore,
+        payload: ConstValuePayload,
+        type_id: TypeId,
         span: Option<SourceSpan>,
-    ) -> Self {
-        let contains_regular_division = value.contains_regular_division;
-        let synthetic_interface_provenance = value.synthetic_interface_provenance.clone();
-        Self::new(
-            ExpressionKind::HandledFallibleExpression {
-                value: Box::new(value),
-                handling,
-                propagation_span: None,
-            },
+        mode: ValueMode,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        let value =
+            values.insert_value(ConstValueMetadata::resolved(type_id, span, mode), payload)?;
+        self.constant(value, type_id, span, mode)
+    }
+
+    pub(crate) fn number(
+        &mut self,
+        values: &mut ConstValueStore,
+        value: NumberValue,
+        type_id: TypeId,
+        span: Option<SourceSpan>,
+        mode: ValueMode,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        self.literal(
+            values,
+            ConstValuePayload::Number(value),
+            type_id,
             span,
-            result_type_id,
-            diagnostic_type,
+            mode,
+        )
+    }
+
+    pub(crate) fn fixed_scalar(
+        &mut self,
+        values: &mut ConstValueStore,
+        value: FixedScalarValue,
+        span: Option<SourceSpan>,
+        mode: ValueMode,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        self.literal(
+            values,
+            ConstValuePayload::FixedScalar(value),
+            builtin_type_ids::fixed_scalar(value.scalar()),
+            span,
+            mode,
+        )
+    }
+
+    pub(crate) fn float_from_external_constant(
+        &mut self,
+        values: &mut ConstValueStore,
+        value: f64,
+        name: StringId,
+        span: Option<SourceSpan>,
+        mode: ValueMode,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        let materialised =
+            FixedScalarValue::binary_float(FixedScalar::F64, value).ok_or_else(|| {
+                ExpressionConstructionFailure::Diagnostic(
+                    CompilerDiagnostic::compile_time_evaluation_error(
+                        CompileTimeEvaluationErrorReason::FloatOverflow,
+                        Some(name),
+                        span,
+                    ),
+                )
+            })?;
+        self.fixed_scalar(values, materialised, span, mode)
+    }
+
+    pub(crate) fn string_slice(
+        &mut self,
+        values: &mut ConstValueStore,
+        value: StringId,
+        span: Option<SourceSpan>,
+        mode: ValueMode,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        self.literal(
+            values,
+            ConstValuePayload::String(ConstStringValue::Text(value)),
+            builtin_type_ids::STRING,
+            span,
+            mode,
+        )
+    }
+
+    pub(crate) fn bool(
+        &mut self,
+        values: &mut ConstValueStore,
+        value: bool,
+        span: Option<SourceSpan>,
+        mode: ValueMode,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        self.literal(
+            values,
+            ConstValuePayload::Bool(value),
+            builtin_type_ids::BOOL,
+            span,
+            mode,
+        )
+    }
+
+    pub(crate) fn char(
+        &mut self,
+        values: &mut ConstValueStore,
+        value: char,
+        span: Option<SourceSpan>,
+        mode: ValueMode,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        self.literal(
+            values,
+            ConstValuePayload::Char(value),
+            builtin_type_ids::CHAR,
+            span,
+            mode,
+        )
+    }
+
+    pub(crate) fn reference_with_type_id(
+        &mut self,
+        path: PathId,
+        type_id: TypeId,
+        span: Option<SourceSpan>,
+        mode: ValueMode,
+        state: ConstRecordState,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        let mut input = self.completed_input(
+            ExpressionOp::Reference(path),
+            SuccessShape::One(type_id),
+            span,
+            mode,
+        )?;
+        input.classification.const_record_state = state;
+        self.append_completed(input)
+    }
+
+    pub(crate) fn copy_with_type_id(
+        &mut self,
+        place: PlaceId,
+        type_id: TypeId,
+        span: Option<SourceSpan>,
+        mode: ValueMode,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        self.append_expression(ExpressionOp::Copy(place), span, type_id, mode.as_owned())
+    }
+
+    pub(crate) fn option_none_with_type_id(
+        &mut self,
+        values: &mut ConstValueStore,
+        inner: TypeId,
+        environment: &mut TypeEnvironment,
+        span: Option<SourceSpan>,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        let type_id = environment.intern_option(inner);
+        self.literal(
+            values,
+            ConstValuePayload::OptionNone,
+            type_id,
+            span,
             ValueMode::ImmutableOwned,
         )
-        .with_regular_division_provenance(contains_regular_division)
-        .with_synthetic_interface_provenance(synthetic_interface_provenance)
     }
 
-    /// Attach the authored postfix propagation span to a handled expression.
-    ///
-    /// The parser is the only production caller. A propagation span on a recovery or unrelated
-    /// expression is an internal construction error and is rejected in debug builds.
-    pub(crate) fn with_propagation_span(mut self, span: Option<SourceSpan>) -> Self {
-        match &mut self.kind {
-            ExpressionKind::HandledFallibleFunctionCall {
-                propagation_span,
-                handling,
-                ..
-            }
-            | ExpressionKind::HandledFallibleHostFunctionCall {
-                propagation_span,
-                handling,
-                ..
-            }
-            | ExpressionKind::HandledFallibleExpression {
-                propagation_span,
-                handling,
-                ..
-            } => {
-                debug_assert!(
-                    matches!(handling, FallibleExpressionHandling::Propagate),
-                    "only propagating fallible expressions carry a postfix span"
-                );
-                *propagation_span = span;
-                self.failure_facts.postfix_exit_span =
-                    span.or(self.failure_facts.postfix_exit_span);
-            }
-            _ => debug_assert!(
-                false,
-                "postfix propagation span attached to a non-fallible expression"
-            ),
+    fn preflight_call_inputs(
+        &self,
+        receiver: Option<OwnedExpr>,
+        args: &ExpressionInputs<'_, CallArgument, CallArgument<OwnedExpr>>,
+    ) -> Result<(), ExpressionConstructionFailure> {
+        // Foreign owners take precedence over invalid indices anywhere in the call inputs.
+        if let Some(receiver) = receiver {
+            self.check_owner(receiver)?;
         }
-        self
+        match args {
+            ExpressionInputs::Attached(args) => {
+                self.check_owned_slice(*args)?;
+            }
+            ExpressionInputs::Owned(args) => {
+                for argument in args {
+                    self.check_owner(argument.value)?;
+                }
+            }
+        }
+        if let Some(receiver) = receiver {
+            self.view(receiver.id())?;
+        }
+        Ok(())
     }
 
-    /// Returns the authored postfix propagation span, if this is a handled fallible value.
-    pub(crate) fn propagation_span(&self) -> Option<SourceSpan> {
-        match &self.kind {
-            ExpressionKind::HandledFallibleFunctionCall {
-                propagation_span, ..
+    fn check_argument_parameter_slot<E>(
+        argument: &CallArgument<E>,
+    ) -> Result<(), ExpressionConstructionFailure> {
+        if let Some(slot) = argument.parameter_slot {
+            u32::try_from(slot.index()).map_err(|_| {
+                ExpressionConstructionFailure::Diagnostic(
+                    CompilerDiagnostic::compiler_capacity_exceeded(
+                        AstCapacityResource::ExpressionSideEntries,
+                        argument.span,
+                    ),
+                )
+            })?;
+        }
+        Ok(())
+    }
+
+    fn resolved_argument<E>(argument: &CallArgument<E>, value: ExprId) -> ResolvedArgument {
+        // The whole argument list has passed parameter-slot checks before installation.
+        let parameter_slot = argument.parameter_slot.map(|slot| slot.index() as u32);
+        ResolvedArgument {
+            value,
+            target_param: argument.target_param,
+            parameter_slot,
+            access_mode: argument.access_mode,
+            passing_mode: argument.passing_mode,
+            span: argument.span,
+            target_span: argument.target_span,
+            marker_span: argument.marker_span,
+            following_separator_span: argument.following_separator_span,
+        }
+    }
+
+    fn resolved_arguments(
+        &mut self,
+        args: ExpressionInputs<'_, CallArgument, CallArgument<OwnedExpr>>,
+        span: Option<SourceSpan>,
+    ) -> Result<ArgumentRange, ExpressionConstructionFailure> {
+        // All callers preflight owners and the receiver before validating argument indices.
+        let (start, len) = match args {
+            ExpressionInputs::Attached(args) => {
+                let args = self.check_owned_slice(args)?;
+                for argument in args {
+                    self.view(argument.value)?;
+                    Self::check_argument_parameter_slot(argument)?;
+                }
+                let extent = checked_extent(
+                    self.storage.arguments.len(),
+                    args.len(),
+                    self.limit,
+                    span,
+                    false,
+                )?;
+                self.storage.arguments.extend(
+                    args.iter()
+                        .map(|argument| Self::resolved_argument(argument, argument.value)),
+                );
+                extent
             }
-            | ExpressionKind::HandledFallibleHostFunctionCall {
-                propagation_span, ..
+            ExpressionInputs::Owned(args) => {
+                for argument in &args {
+                    self.view(argument.value.id())?;
+                    Self::check_argument_parameter_slot(argument)?;
+                }
+                let extent = checked_extent(
+                    self.storage.arguments.len(),
+                    args.len(),
+                    self.limit,
+                    span,
+                    false,
+                )?;
+                self.storage.arguments.extend(
+                    args.into_iter()
+                        .map(|argument| Self::resolved_argument(&argument, argument.value.id())),
+                );
+                extent
             }
-            | ExpressionKind::HandledFallibleExpression {
-                propagation_span, ..
-            } => *propagation_span,
+        };
+        Ok(ArgumentRange { start, len })
+    }
+
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "call assembly keeps the mutable builder, resolved callable, receiver, owned arguments, slots, handling record, external-validation flag and span as separate inputs"
+    )]
+    fn call_with_target<'a>(
+        &mut self,
+        target: ResolvedCallableTarget,
+        receiver: Option<OwnedExpr>,
+        args: impl Into<ExpressionInputs<'a, CallArgument, CallArgument<OwnedExpr>>>,
+        slots: Vec<TypeId>,
+        handling: Option<HandlingRecord>,
+        external_validation: bool,
+        span: Option<SourceSpan>,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        let args = args.into();
+        self.preflight_call_inputs(receiver, &args)?;
+        let arguments = self.resolved_arguments(args, span)?;
+        let success = self.success_from_slots(slots, span)?;
+        let error_type = handling.as_ref().and_then(|record| record.error_type);
+        let handling = handling
+            .map(|record| self.append_handling(record, span))
+            .transpose()?;
+        let call = self.append_call(
+            ResolvedCall {
+                target,
+                arguments,
+                handling,
+                requires_external_float_validation: external_validation,
+                error_type,
+                span,
+            },
+            span,
+        )?;
+        let operation = match receiver {
+            Some(receiver) => ExpressionOp::MethodCall { receiver, call },
+            None => ExpressionOp::Call(call),
+        };
+        self.append_with_success_shape(operation, span, success, ValueMode::MutableOwned)
+    }
+
+    pub(crate) fn function_call_with_typed_arguments<'a>(
+        &mut self,
+        name: PathId,
+        args: impl Into<ExpressionInputs<'a, CallArgument, CallArgument<OwnedExpr>>>,
+        slots: Vec<TypeId>,
+        span: Option<SourceSpan>,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        self.call_with_target(
+            ResolvedCallableTarget::Function(name),
+            None,
+            args,
+            slots,
+            None,
+            false,
+            span,
+        )
+    }
+
+    pub(crate) fn method_call_with_typed_arguments<'a>(
+        &mut self,
+        receiver: OwnedExpr,
+        name: PathId,
+        args: impl Into<ExpressionInputs<'a, CallArgument, CallArgument<OwnedExpr>>>,
+        slots: Vec<TypeId>,
+        span: Option<SourceSpan>,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        self.call_with_target(
+            ResolvedCallableTarget::Function(name),
+            Some(receiver),
+            args,
+            slots,
+            None,
+            false,
+            span,
+        )
+    }
+
+    pub(crate) fn handled_fallible_function_call_with_typed_arguments<'a>(
+        &mut self,
+        name: PathId,
+        args: impl Into<ExpressionInputs<'a, CallArgument, CallArgument<OwnedExpr>>>,
+        slots: Vec<TypeId>,
+        error_type: TypeId,
+        handling: FallibleExpressionHandling,
+        span: Option<SourceSpan>,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        self.call_with_target(
+            ResolvedCallableTarget::Function(name),
+            None,
+            args,
+            slots,
+            Some(HandlingRecord {
+                handling,
+                propagation_span: None,
+                error_type: Some(error_type),
+            }),
+            false,
+            span,
+        )
+    }
+
+    pub(crate) fn host_function_call_with_typed_arguments<'a>(
+        &mut self,
+        id: ExternalFunctionId,
+        args: impl Into<ExpressionInputs<'a, CallArgument, CallArgument<OwnedExpr>>>,
+        slots: Vec<TypeId>,
+        validation: bool,
+        span: Option<SourceSpan>,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        self.call_with_target(
+            ResolvedCallableTarget::Host(id),
+            None,
+            args,
+            slots,
+            None,
+            validation,
+            span,
+        )
+    }
+
+    pub(crate) fn handled_fallible_host_function_call_with_typed_arguments<'a>(
+        &mut self,
+        input: HandledFallibleHostFunctionCallInput<
+            impl Into<ExpressionInputs<'a, CallArgument, CallArgument<OwnedExpr>>>,
+        >,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        self.call_with_target(
+            ResolvedCallableTarget::Host(input.id),
+            None,
+            input.args,
+            input.result_type_ids,
+            Some(HandlingRecord {
+                handling: input.handling,
+                propagation_span: None,
+                error_type: Some(input.error_type_id),
+            }),
+            input.requires_external_float_validation,
+            input.span,
+        )
+    }
+
+    pub(crate) fn collection_builtin_call_with_typed_arguments<'a>(
+        &mut self,
+        receiver: OwnedExpr,
+        operation: CollectionBuiltinOp,
+        args: impl Into<ExpressionInputs<'a, CallArgument, CallArgument<OwnedExpr>>>,
+        slots: Vec<TypeId>,
+        span: Option<SourceSpan>,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        let args = args.into();
+        self.preflight_call_inputs(Some(receiver), &args)?;
+        let arguments = self.resolved_arguments(args, span)?;
+        let success = self.success_from_slots(slots, span)?;
+        let call = self.append_collection_call(
+            CollectionCall {
+                operation,
+                arguments,
+                span,
+            },
+            span,
+        )?;
+        self.append_with_success_shape(
+            ExpressionOp::CollectionBuiltin { receiver, call },
+            span,
+            success,
+            ValueMode::MutableOwned,
+        )
+    }
+
+    pub(crate) fn map_builtin_call_with_typed_arguments<'a>(
+        &mut self,
+        receiver: OwnedExpr,
+        operation: MapBuiltinOp,
+        receiver_requires_mutable: bool,
+        args: impl Into<ExpressionInputs<'a, CallArgument, CallArgument<OwnedExpr>>>,
+        slots: Vec<TypeId>,
+        span: Option<SourceSpan>,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        let args = args.into();
+        self.preflight_call_inputs(Some(receiver), &args)?;
+        let arguments = self.resolved_arguments(args, span)?;
+        let success = self.success_from_slots(slots, span)?;
+        let call = self.append_map_call(
+            MapCall {
+                operation,
+                receiver_requires_mutable,
+                arguments,
+                span,
+            },
+            span,
+        )?;
+        self.append_with_success_shape(
+            ExpressionOp::MapBuiltin { receiver, call },
+            span,
+            success,
+            ValueMode::MutableOwned,
+        )
+    }
+
+    pub(crate) fn cast(
+        &mut self,
+        source: OwnedExpr,
+        facts: CastFacts,
+        result: TypeId,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        let span = facts.span;
+        let mode = self.view_owned(source)?.value_mode();
+        let facts = self.append_cast(facts, span)?;
+        self.append_expression(ExpressionOp::Cast { source, facts }, span, result, mode)
+    }
+
+    pub(crate) fn coerced(
+        &mut self,
+        value: OwnedExpr,
+        to_type: TypeId,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        let child = self.view_owned(value)?;
+        let span = child.span();
+        let mode = child.value_mode();
+        let state = child.classification().const_record_state;
+        let mut input = self.completed_input(
+            ExpressionOp::Coerce {
+                value,
+                operation: CoercionOperation::ToType(to_type),
+            },
+            SuccessShape::One(to_type),
+            span,
+            mode,
+        )?;
+        input.classification.const_record_state = state;
+        self.append_completed(input)
+    }
+
+    pub(crate) fn handled_result(
+        &mut self,
+        value: OwnedExpr,
+        handling: FallibleExpressionHandling,
+        span: Option<SourceSpan>,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        let child = self.view_owned(value)?;
+        let success = child.success_shape();
+        let error_type = child.error_type();
+        let handling = self.append_handling(
+            HandlingRecord {
+                handling,
+                propagation_span: None,
+                error_type,
+            },
+            span,
+        )?;
+        self.append_with_success_shape(
+            ExpressionOp::HandleFallible { value, handling },
+            span,
+            success,
+            ValueMode::ImmutableOwned,
+        )
+    }
+
+    pub(crate) fn option_propagation_with_type_id(
+        &mut self,
+        value: OwnedExpr,
+        inner: TypeId,
+        span: Option<SourceSpan>,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        self.append_expression(
+            ExpressionOp::PropagateOption { value },
+            span,
+            inner,
+            ValueMode::ImmutableOwned,
+        )
+    }
+
+    pub(crate) fn collection_with_type_id<'a>(
+        &mut self,
+        items: impl Into<ExpressionInputs<'a, ExprId, OwnedExpr>>,
+        collection: CollectionExpressionType,
+        environment: &mut TypeEnvironment,
+        span: Option<SourceSpan>,
+        mode: ValueMode,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        let items = self.append_children(items, span)?;
+        let type_id = collection.collection_type_id.unwrap_or_else(|| {
+            environment.intern_collection(collection.element_type_id, collection.fixed_capacity)
+        });
+        self.append_expression(ExpressionOp::Collection(items), span, type_id, mode)
+    }
+
+    pub(crate) fn map_literal_with_type_id<'a>(
+        &mut self,
+        entries: impl Into<ExpressionInputs<'a, MapEntry, MapEntry<OwnedExpr>>>,
+        map: MapLiteralExpressionType,
+        environment: &mut TypeEnvironment,
+        span: Option<SourceSpan>,
+        mode: ValueMode,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        let entries = self.append_map_entries(entries, span)?;
+        let type_id = map
+            .map_type_id
+            .unwrap_or_else(|| environment.intern_map(map.key_type_id, map.value_type_id));
+        self.append_expression(ExpressionOp::Map(entries), span, type_id, mode)
+    }
+
+    pub(crate) fn struct_instance<'a>(
+        &mut self,
+        fields: impl Into<ExpressionInputs<'a, ConstructorField, ConstructorField<OwnedExpr>>>,
+        type_id: TypeId,
+        span: Option<SourceSpan>,
+        mode: ValueMode,
+        const_record: bool,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        let fields = self.append_constructor_fields(fields, span)?;
+        let mut input = self.completed_input(
+            ExpressionOp::Struct { fields },
+            SuccessShape::One(type_id),
+            span,
+            mode,
+        )?;
+        if const_record {
+            input.classification.const_record_state = ConstRecordState::ConstRecord;
+        }
+        self.append_completed(input)
+    }
+
+    pub(crate) fn choice_construct<'a>(
+        &mut self,
+        input: ChoiceConstructInput<
+            impl Into<ExpressionInputs<'a, ConstructorField, ConstructorField<OwnedExpr>>>,
+        >,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        let tag = u32::try_from(input.tag).map_err(|_| {
+            ExpressionConstructionFailure::Diagnostic(
+                CompilerDiagnostic::compiler_capacity_exceeded(
+                    AstCapacityResource::ChoiceTags,
+                    input.span,
+                ),
+            )
+        })?;
+        let fields = self.append_constructor_fields(input.fields, input.span)?;
+        self.append_expression(
+            ExpressionOp::Choice { tag, fields },
+            input.span,
+            input.type_id,
+            input.value_mode,
+        )
+    }
+
+    pub(crate) fn value_block(
+        &mut self,
+        block: ValueBlock,
+        span: Option<SourceSpan>,
+        success: SuccessShape,
+        mode: ValueMode,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        let block = self.append_value_block(block, span)?;
+        self.append_with_success_shape(ExpressionOp::ValueBlock(block), span, success, mode)
+    }
+
+    pub(crate) fn template(
+        &mut self,
+        template: Template,
+        mode: ValueMode,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        let span = template.span;
+        let template = self.append_template(template, span)?;
+        self.append_expression(
+            ExpressionOp::Template(template),
+            span,
+            builtin_type_ids::STRING,
+            mode,
+        )
+    }
+
+    pub(crate) fn resolved_operation(
+        &mut self,
+        left: OwnedExpr,
+        right: Option<OwnedExpr>,
+        facts: ResolvedOperation,
+        mode: ValueMode,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        self.check_owner(left)?;
+        if let Some(right) = right {
+            self.check_owner(right)?;
+        }
+        if facts.operator.required_values() != 1 + usize::from(right.is_some()) {
+            return Err(invariant("resolved operation arity mismatch").into());
+        }
+        if self.view_owned(left)?.value_type_id()? != facts.left_type {
+            return Err(invariant("resolved left operand type mismatch").into());
+        }
+        if right
+            .map(|id| self.view_owned(id).and_then(|view| view.value_type_id()))
+            .transpose()?
+            != facts.right_type
+        {
+            return Err(invariant("resolved right operand type mismatch").into());
+        }
+        let span = facts.span;
+        let result = facts.result_type;
+        let operation = match facts.kind {
+            ResolvedOperationKind::Numeric(_) => {
+                let operation = self.append_numeric_operation(facts, span)?;
+                match right {
+                    Some(right) => ExpressionOp::NumericBinary {
+                        left,
+                        right,
+                        facts: operation,
+                    },
+                    None => ExpressionOp::NumericUnary {
+                        operand: left,
+                        facts: operation,
+                    },
+                }
+            }
+            ResolvedOperationKind::Comparison(_) => ExpressionOp::Compare {
+                left,
+                right: right.ok_or_else(|| invariant("comparison requires two operands"))?,
+                facts: self.append_comparison_operation(facts, span)?,
+            },
+            ResolvedOperationKind::Range { .. } => ExpressionOp::Range {
+                start: left,
+                end: right.ok_or_else(|| invariant("range requires two operands"))?,
+                facts: self.append_range_operation(facts, span)?,
+            },
+            ResolvedOperationKind::NonNumeric => match facts.operator {
+                Operator::Not => ExpressionOp::LogicalNot { operand: left },
+                Operator::And | Operator::Or => ExpressionOp::LogicalBinary {
+                    left,
+                    right: right
+                        .ok_or_else(|| invariant("logical operation requires two operands"))?,
+                    operation: if facts.operator == Operator::And {
+                        LogicalOperator::And
+                    } else {
+                        LogicalOperator::Or
+                    },
+                },
+                Operator::Equality
+                | Operator::NotEqual
+                | Operator::LessThan
+                | Operator::LessThanOrEqual
+                | Operator::GreaterThan
+                | Operator::GreaterThanOrEqual => ExpressionOp::Compare {
+                    left,
+                    right: right.ok_or_else(|| invariant("comparison requires two operands"))?,
+                    facts: self.append_comparison_operation(facts, span)?,
+                },
+                _ => return Err(invariant("non-numeric operation has numeric operator").into()),
+            },
+        };
+        let mut input = self.completed_input(operation, SuccessShape::One(result), span, mode)?;
+        input.classification.contains_regular_division |= facts.operator == Operator::Divide;
+        self.append_completed(input)
+    }
+
+    pub(crate) fn commit_replacement(
+        &mut self,
+        input: CompletedExpressionInput,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        self.construct(|candidate| {
+            let root = candidate.append_replacement(input)?;
+            Ok(CandidateEdge::New(root))
+        })
+    }
+
+    pub(crate) fn with_failure_facts(
+        &mut self,
+        id: OwnedExpr,
+        facts: ExpressionFailureFacts,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        if self.view_owned(id)?.failure_facts() == Some(&facts) {
+            return Ok(id);
+        }
+        let mut input = self.snapshot(id)?;
+        input.failure = Some(facts);
+        self.commit_replacement(input)
+    }
+
+    pub(crate) fn with_typed_error_producer(
+        &mut self,
+        id: OwnedExpr,
+        error: TypeId,
+        builtin_name: Option<StringId>,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        let mut input = self.snapshot(id)?;
+        let operation = self.view_owned(id)?.operation();
+        let handled = match operation {
+            ExpressionOperationView::HandleFallible { .. } => true,
+            ExpressionOperationView::Call(call)
+            | ExpressionOperationView::MethodCall { call, .. } => call.handling().is_some(),
+            _ => false,
+        };
+        if let ExpressionOperationView::Call(call)
+        | ExpressionOperationView::MethodCall { call, .. } = operation
+        {
+            let metadata = call.metadata();
+            let mut record = ResolvedCall {
+                target: metadata.target,
+                arguments: metadata.arguments,
+                handling: metadata.handling,
+                requires_external_float_validation: metadata.requires_external_float_validation,
+                error_type: Some(error),
+                span: metadata.span,
+            };
+            let handling = call.handling().map(|handling| HandlingRecord {
+                handling: handling.handling,
+                error_type: Some(error),
+                propagation_span: handling.propagation_span,
+            });
+            if let Some(handling) = handling {
+                record.handling = Some(self.append_handling(handling, input.span)?);
+            }
+            let call = self.append_call(record, input.span)?;
+            input.operation = match input.operation {
+                ExpressionOp::MethodCall { receiver, .. } => {
+                    ExpressionOp::MethodCall { receiver, call }
+                }
+                _ => ExpressionOp::Call(call),
+            };
+        }
+        if !handled {
+            input.error_type = Some(error);
+        }
+        input
+            .failure
+            .get_or_insert_with(ExpressionFailureFacts::default)
+            .record_typed_error(TypedErrorProducer {
+                span: input.span,
+                error_type_id: error,
+                builtin_name,
+            });
+        self.commit_replacement(input)
+    }
+
+    pub(crate) fn with_private_call_failure_candidate(
+        &mut self,
+        id: OwnedExpr,
+        path: PathId,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        let mut input = self.snapshot(id)?;
+        input
+            .failure
+            .get_or_insert_with(ExpressionFailureFacts::default)
+            .record_implicit(ImplicitFailureContributor {
+                span: input.span,
+                codes: &[],
+                source: ImplicitFailureSource::PrivateCall(path),
+            });
+        self.commit_replacement(input)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_regular_division_provenance(
+        &mut self,
+        id: OwnedExpr,
+        contains: bool,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        if self
+            .view_owned(id)?
+            .classification()
+            .contains_regular_division
+            == contains
+        {
+            return Ok(id);
+        }
+        let mut input = self.snapshot(id)?;
+        input.classification.contains_regular_division = contains;
+        self.commit_replacement(input)
+    }
+
+    pub(crate) fn with_synthetic_interface_provenance(
+        &mut self,
+        id: OwnedExpr,
+        provenance: SyntheticInterfaceProvenance,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        let current = self.view_owned(id)?.occurrence_facts();
+        if current.map_or(provenance.is_empty(), |current| {
+            current.provenance == provenance
+        }) {
+            return Ok(id);
+        }
+        let mut input = self.snapshot(id)?;
+        let diagnostic_spelling = input
+            .occurrence
+            .as_ref()
+            .and_then(|current| current.diagnostic_spelling);
+        input.occurrence = Some(OccurrenceFacts {
+            provenance,
+            diagnostic_spelling,
+        });
+        self.commit_replacement(input)
+    }
+
+    /// Replacement occurrence metadata comes from the authored use, not constant content.
+    pub(crate) fn preserve_authored_metadata(
+        &mut self,
+        replacement: OwnedExpr,
+        authored: OwnedExpr,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        self.check_owner(replacement)?;
+        self.check_owner(authored)?;
+        self.check_owned(replacement)?;
+        self.check_owned(authored)?;
+        if replacement == authored {
+            return Ok(replacement);
+        }
+        let mut input = self.snapshot(replacement)?;
+        let authored = self.view_owned(authored)?;
+        input.span = authored.span();
+        input.value_mode = authored.value_mode();
+        input.classification.const_record_state = authored.classification().const_record_state;
+        input.classification.contains_regular_division |=
+            authored.classification().contains_regular_division;
+        input.failure = authored.failure_facts().cloned();
+        if let Some(occurrence) = authored.occurrence_facts() {
+            let existing = input.occurrence.take();
+            let provenance = existing.as_ref().map_or_else(
+                || occurrence.provenance.clone(),
+                |existing| existing.provenance.union(&occurrence.provenance),
+            );
+            input.occurrence = Some(OccurrenceFacts {
+                provenance,
+                diagnostic_spelling: occurrence.diagnostic_spelling,
+            });
+        }
+        self.commit_replacement(input)
+    }
+
+    /// Postfix source evidence gets a new handling record and root so shared occurrences stay
+    /// immutable even when they use the same resolved call.
+    pub(crate) fn with_propagation_span(
+        &mut self,
+        id: OwnedExpr,
+        span: Option<SourceSpan>,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        let mut input = self.snapshot(id)?;
+        let handling = match self.view_owned(id)?.operation() {
+            ExpressionOperationView::HandleFallible { handling, .. } => handling,
+            ExpressionOperationView::Call(call)
+            | ExpressionOperationView::MethodCall { call, .. } => call
+                .handling()
+                .ok_or_else(|| invariant("postfix span requires handled call"))?,
+            _ => return Err(invariant("postfix span requires handled expression").into()),
+        };
+        if handling.handling != FallibleExpressionHandling::Propagate {
+            return Err(invariant("postfix span requires propagation handling").into());
+        }
+        if handling.propagation_span == span {
+            return Ok(id);
+        }
+        let handling = HandlingRecord {
+            handling: handling.handling,
+            error_type: handling.error_type,
+            propagation_span: span,
+        };
+        let handling = self.append_handling(handling, input.span)?;
+        input.operation = match input.operation {
+            ExpressionOp::HandleFallible { value, .. } => {
+                ExpressionOp::HandleFallible { value, handling }
+            }
+            ExpressionOp::Call(_) | ExpressionOp::MethodCall { .. } => {
+                let view = self.view_owned(id)?;
+                let (ExpressionOperationView::Call(call)
+                | ExpressionOperationView::MethodCall { call, .. }) = view.operation()
+                else {
+                    unreachable!("operation matched above");
+                };
+                let metadata = call.metadata();
+                let record = ResolvedCall {
+                    target: metadata.target,
+                    arguments: metadata.arguments,
+                    handling: Some(handling),
+                    requires_external_float_validation: metadata.requires_external_float_validation,
+                    error_type: metadata.error_type,
+                    span: metadata.span,
+                };
+                let call = self.append_call(record, input.span)?;
+                match input.operation {
+                    ExpressionOp::MethodCall { receiver, .. } => {
+                        ExpressionOp::MethodCall { receiver, call }
+                    }
+                    _ => ExpressionOp::Call(call),
+                }
+            }
+            _ => unreachable!("operation matched above"),
+        };
+        let facts = input
+            .failure
+            .get_or_insert_with(ExpressionFailureFacts::default);
+        facts.postfix_exit_span = span.or(facts.postfix_exit_span);
+        self.commit_replacement(input)
+    }
+}
+
+impl ExpressionView<'_> {
+    pub(crate) fn is_const_record_value(self) -> bool {
+        self.classification().const_record_state == ConstRecordState::ConstRecord
+    }
+
+    pub(crate) fn propagation_span(self) -> Option<SourceSpan> {
+        match self.operation() {
+            ExpressionOperationView::HandleFallible { handling, .. } => handling.propagation_span,
+            ExpressionOperationView::Call(call)
+            | ExpressionOperationView::MethodCall { call, .. } => call
+                .handling()
+                .and_then(|handling| handling.propagation_span),
             _ => None,
         }
     }
 
-    /// Wraps an optional expression with postfix `?` propagation.
-    pub fn option_propagation_with_type_id(
-        value: Expression,
-        inner_type_id: TypeId,
-        diagnostic_type: DataType,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        let contains_regular_division = value.contains_regular_division;
-        let synthetic_interface_provenance = value.synthetic_interface_provenance.clone();
-        Self::new(
-            ExpressionKind::OptionPropagation {
-                value: Box::new(value),
-            },
-            span,
-            inner_type_id,
-            diagnostic_type,
-            ValueMode::ImmutableOwned,
-        )
-        .with_regular_division_provenance(contains_regular_division)
-        .with_synthetic_interface_provenance(synthetic_interface_provenance)
-    }
-
-    /// Constructs a collection expression with a resolved element type.
-    pub(crate) fn collection_with_type_id(
-        items: Vec<Expression>,
-        collection_type: CollectionExpressionType,
-        type_environment: &mut TypeEnvironment,
-        span: Option<SourceSpan>,
-        value_mode: ValueMode,
-    ) -> Self {
-        let collection_type_id = collection_type.collection_type_id.unwrap_or_else(|| {
-            type_environment.intern_collection(
-                collection_type.element_type_id,
-                collection_type.fixed_capacity,
-            )
-        });
-        let contains_regular_division = items.iter().any(|item| item.contains_regular_division);
-        let synthetic_interface_provenance = SyntheticInterfaceProvenance::union_all(
-            items
-                .iter()
-                .map(|item| &item.synthetic_interface_provenance),
-        );
-        // `diagnostic_type` is display-only; semantic identity comes from `collection_type_id`.
-        let diagnostic_type = match collection_type.fixed_capacity {
-            Some(capacity) => {
-                DataType::fixed_collection(collection_type.element_diagnostic_type, capacity)
-            }
-            None => DataType::collection(collection_type.element_diagnostic_type),
-        };
-        Self::new(
-            ExpressionKind::Collection(items),
-            span,
-            collection_type_id,
-            diagnostic_type,
-            value_mode,
-        )
-        .with_regular_division_provenance(contains_regular_division)
-        .with_synthetic_interface_provenance(synthetic_interface_provenance)
-    }
-
-    /// Constructs a map literal expression with resolved key and value types.
-    pub(crate) fn map_literal_with_type_id(
-        entries: Vec<MapLiteralEntry>,
-        map_type: MapLiteralExpressionType,
-        type_environment: &mut TypeEnvironment,
-        span: Option<SourceSpan>,
-        value_mode: ValueMode,
-    ) -> Self {
-        let map_type_id = map_type.map_type_id.unwrap_or_else(|| {
-            type_environment.intern_map(map_type.key_type_id, map_type.value_type_id)
-        });
-        let contains_regular_division = entries.iter().any(|entry| {
-            entry.key.contains_regular_division || entry.value.contains_regular_division
-        });
-        let synthetic_interface_provenance =
-            SyntheticInterfaceProvenance::union_all(entries.iter().flat_map(|entry| {
-                [
-                    &entry.key.synthetic_interface_provenance,
-                    &entry.value.synthetic_interface_provenance,
-                ]
-            }));
-        let diagnostic_type =
-            DataType::map(map_type.key_diagnostic_type, map_type.value_diagnostic_type);
-        Self::new(
-            ExpressionKind::MapLiteral(entries),
-            span,
-            map_type_id,
-            diagnostic_type,
-            value_mode,
-        )
-        .with_regular_division_provenance(contains_regular_division)
-        .with_synthetic_interface_provenance(synthetic_interface_provenance)
-    }
-
-    /// Constructs a struct instance expression.
-    pub fn struct_instance(
-        nominal_path: PathId,
-        args: Vec<Declaration>,
-        span: Option<SourceSpan>,
-        value_mode: ValueMode,
-        const_record: bool,
-        generic_instance_key: Option<GenericInstantiationKey>,
-        type_id: TypeId,
-    ) -> Self {
-        let contains_regular_division = args.iter().any(|arg| arg.value.contains_regular_division);
-        let synthetic_interface_provenance = SyntheticInterfaceProvenance::union_all(
-            args.iter()
-                .map(|argument| &argument.value.synthetic_interface_provenance),
-        );
-        let struct_type = if let Some(key) = generic_instance_key {
-            DataType::Struct {
-                nominal_path,
-                type_id,
-                const_record,
-                generic_instance_key: Some(key),
-            }
-        } else if const_record {
-            DataType::const_struct_record(nominal_path, type_id)
-        } else {
-            DataType::runtime_struct(nominal_path, type_id)
-        };
-        let mut expression = Self::new(
-            ExpressionKind::StructInstance(args),
-            span,
-            type_id,
-            struct_type,
-            value_mode,
-        )
-        .with_regular_division_provenance(contains_regular_division)
-        .with_synthetic_interface_provenance(synthetic_interface_provenance);
-        if const_record {
-            expression.const_record_state = ConstRecordState::ConstRecord;
+    pub(crate) fn unhandled_typed_error_diagnostic(self) -> Option<CompilerDiagnostic> {
+        let facts = self.failure_facts()?;
+        if facts.disposition != super::failure_facts::FailureDisposition::Pending {
+            return None;
         }
-        expression
+        facts.summary.first_typed.map(|producer| {
+            let span = producer.span.or(self.span());
+            match producer.builtin_name {
+                Some(name) => CompilerDiagnostic::invalid_builtin_call(
+                    InvalidBuiltinCallReason::UnhandledFallibleCall,
+                    Some(name),
+                    span,
+                ),
+                None => CompilerDiagnostic::invalid_fallible_handling(
+                    InvalidFallibleHandlingReason::UnhandledErrorReturn,
+                    span,
+                ),
+            }
+        })
     }
 
-    /// Constructs a struct definition expression.
-    pub fn struct_definition(
-        args: Vec<Declaration>,
-        span: Option<SourceSpan>,
-        value_mode: ValueMode,
-    ) -> Self {
-        Self::new(
-            ExpressionKind::StructDefinition(args),
-            span,
-            builtin_type_ids::NONE,
-            DataType::Inferred,
-            value_mode,
-        )
-    }
-
-    /// Constructs an anonymous compile-time record expression.
-    ///
-    /// WHAT: carries ordered named fields resolved to the module-local compile-time marker
-    ///       type, with provenance merged from every field value.
-    /// WHY: the marker type and `ConstRecordState::ConstRecord` keep the record a member
-    ///      group rather than a runtime struct value.
-    pub fn anonymous_const_record(
-        fields: Vec<Declaration>,
-        span: Option<SourceSpan>,
-        value_mode: ValueMode,
-        record_type_id: TypeId,
-    ) -> Self {
-        let contains_regular_division = fields
-            .iter()
-            .any(|field| field.value.contains_regular_division);
-        let synthetic_interface_provenance = SyntheticInterfaceProvenance::union_all(
-            fields
-                .iter()
-                .map(|field| &field.value.synthetic_interface_provenance),
-        );
-
-        let mut expression = Self::new(
-            ExpressionKind::AnonymousConstRecord { fields },
-            span,
-            record_type_id,
-            DataType::None,
-            value_mode,
-        )
-        .with_regular_division_provenance(contains_regular_division)
-        .with_synthetic_interface_provenance(synthetic_interface_provenance);
-        expression.const_record_state = ConstRecordState::ConstRecord;
-        expression
-    }
-
-    /// Constructs a template expression owned by the module's TIR store.
-    pub fn template(template: Template, value_mode: ValueMode) -> Self {
-        let span = template.span;
-        Self::new(
-            ExpressionKind::Template(Box::new(template)),
-            span,
-            builtin_type_ids::STRING,
-            DataType::Template,
-            value_mode,
-        )
-    }
-
-    /// Constructs the final AST-owned payload for an ordinary runtime template.
-    #[allow(
-        dead_code,
-        reason = "Phase 11 introduces the final expression shape before finalization cutover wires production callers"
-    )]
-    pub(crate) fn runtime_template_handoff(
-        handoff: OwnedRuntimeTemplateHandoff,
-        value_mode: ValueMode,
-    ) -> Self {
-        let span = handoff.span;
-        Self::new(
-            ExpressionKind::RuntimeTemplateHandoff(Box::new(handoff)),
-            span,
-            builtin_type_ids::STRING,
-            DataType::Template,
-            value_mode,
-        )
-    }
-
-    /// Constructs the final AST-owned payload for a runtime slot application.
-    #[allow(
-        dead_code,
-        reason = "Phase 11 introduces the final expression shape before finalization cutover wires production callers"
-    )]
-    pub(crate) fn runtime_slot_application_handoff(
-        handoff: OwnedRuntimeSlotApplicationHandoff,
-        value_mode: ValueMode,
-    ) -> Self {
-        let span = handoff.span;
-        Self::new(
-            ExpressionKind::RuntimeSlotApplicationHandoff(Box::new(handoff)),
-            span,
-            builtin_type_ids::STRING,
-            DataType::Template,
-            value_mode,
-        )
-    }
-
-    /// Constructs a copy expression from a frontend place expression.
-    pub fn copy_with_type_id(
-        place: PlaceExpression,
-        data_type: DataType,
-        type_id: TypeId,
-        span: Option<SourceSpan>,
-        value_mode: ValueMode,
-    ) -> Self {
-        Self::new(
-            ExpressionKind::Copy(place),
-            span,
-            type_id,
-            data_type,
-            value_mode.as_owned(),
-        )
-    }
-
-    /// Internal sentinel used for declarations/signature defaults that do not
-    /// provide a value expression in source.
-    pub fn no_value(span: Option<SourceSpan>, data_type: DataType, value_mode: ValueMode) -> Self {
-        let type_id = type_id_hint_for_diagnostic_type(&data_type);
-        Self::no_value_with_type_id(span, data_type, type_id, value_mode)
-    }
-
-    /// Internal sentinel for declarations whose canonical type is already known.
-    pub fn no_value_with_type_id(
-        span: Option<SourceSpan>,
-        data_type: DataType,
-        type_id: TypeId,
-        value_mode: ValueMode,
-    ) -> Self {
-        Self::new(
-            ExpressionKind::NoValue,
-            span,
-            type_id,
-            data_type,
-            value_mode,
-        )
-    }
-
-    /// Constructs a `none` literal for an optional type.
-    pub fn option_none_with_type_id(
-        inner_type_id: TypeId,
-        inner_diagnostic_type: DataType,
-        type_environment: &mut TypeEnvironment,
-        span: Option<SourceSpan>,
-    ) -> Self {
-        let option_type_id = type_environment.intern_option(inner_type_id);
-        // `diagnostic_type` is display-only; semantic identity comes from `option_type_id`.
-        Self::new(
-            ExpressionKind::OptionNone,
-            span,
-            option_type_id,
-            DataType::Option(Box::new(inner_diagnostic_type)),
-            ValueMode::ImmutableOwned,
-        )
-    }
-
-    /// Constructs a choice variant instance.
-    pub fn choice_construct(input: ChoiceConstructInput) -> Self {
-        let contains_regular_division = input
-            .fields
-            .iter()
-            .any(|field| field.value.contains_regular_division);
-        let synthetic_interface_provenance = SyntheticInterfaceProvenance::union_all(
-            input
-                .fields
-                .iter()
-                .map(|field| &field.value.synthetic_interface_provenance),
-        );
-        Self::new(
-            ExpressionKind::ChoiceConstruct {
-                nominal_path: input.nominal_path,
-                tag: input.tag,
-                fields: input.fields,
-            },
-            input.span,
-            input.type_id,
-            input.diagnostic_type,
-            input.value_mode,
-        )
-        .with_regular_division_provenance(contains_regular_division)
-        .with_synthetic_interface_provenance(synthetic_interface_provenance)
-    }
-
-    /// Returns true if this expression represents a function declaration that has
-    /// a receiver parameter (`this` or `This`).
-    pub(crate) fn is_receiver_function(&self) -> bool {
-        self.function_receiver.is_some()
-    }
-
-    /// Classifies expression constness through a caller-owned template authority.
-    ///
-    /// WHAT: keeps ordinary expression-shape recursion in one owner while the
-    ///       caller supplies the stage-appropriate classification for template
-    ///       payloads.
-    /// WHY: finalization already owns exact effective TIR views,
-    ///      while earlier parser callers still materialize current TIR. Both
-    ///      paths must preserve identical non-template const semantics without
-    ///      duplicating the expression walk.
     pub(crate) fn const_value_kind_with_template_classifier(
-        &self,
-        classify_template: &mut impl FnMut(&Template) -> Result<TemplateConstValueKind, TemplateError>,
+        self,
+        constants: &ConstValueStore,
+        classify: &mut impl FnMut(&Template) -> Result<TemplateConstValueKind, TemplateError>,
     ) -> Result<ConstValueKind, TemplateError> {
-        let kind = match &self.kind {
-            ExpressionKind::Int(_)
-            | ExpressionKind::Uint(_)
-            | ExpressionKind::Float(_)
-            | ExpressionKind::FixedScalar(_)
-            | ExpressionKind::Number(_)
-            | ExpressionKind::StringSlice(_)
-            | ExpressionKind::StructuralString { .. }
-            | ExpressionKind::Bool(_)
-            | ExpressionKind::Char(_) => ConstValueKind::Literal,
-
-            // WHAT: the `none` literal is a compile-time constant value.
-            // WHY: it carries no runtime dependency, and the folded-value pipeline already
-            // represents it end to end - `ConstValuePayload::OptionNone`,
-            // `PublicFoldedValue::OptionNone` and `HirConstValue::OptionNone`. Classifying it
-            // non-const rejected the documented `maybe_name #String? = none` binding form and
-            // left that machinery unreachable.
-            ExpressionKind::OptionNone => ConstValueKind::Literal,
-
-            // Composite values are constant only when every sub-field is constant.
-            ExpressionKind::ChoiceConstruct { fields, .. } => {
-                if fields.is_empty() {
-                    ConstValueKind::Literal
-                } else if Self::declarations_are_constant_with_template_classifier(
-                    fields,
-                    classify_template,
-                )? {
-                    ConstValueKind::Composite
-                } else {
-                    ConstValueKind::NonConst
+        use ExpressionOperationView as V;
+        let kind = match self.operation() {
+            V::Constant(id) => {
+                constants
+                    .metadata(id)
+                    .ok_or_else(|| invariant("constant expression outside content owner"))?
+                    .value_kind
+            }
+            V::Collection(values) => {
+                for value in values.iter() {
+                    if value.is_const_record_value()
+                        || !value
+                            .const_value_kind_with_template_classifier(constants, classify)?
+                            .is_compile_time_value()
+                    {
+                        return Ok(ConstValueKind::NonConst);
+                    }
                 }
-            }
-
-            ExpressionKind::Collection(items) => {
-                if items.iter().any(Expression::is_const_record_value) {
-                    ConstValueKind::NonConst
-                } else if Self::expressions_are_constant_with_template_classifier(
-                    items,
-                    classify_template,
-                )? {
-                    ConstValueKind::Composite
-                } else {
-                    ConstValueKind::NonConst
-                }
-            }
-
-            ExpressionKind::MapLiteral(_) => {
-                // Map literals are intentionally not compile-time foldable in V1.
-                ConstValueKind::NonConst
-            }
-
-            ExpressionKind::StructInstance(fields) => {
-                if Self::declarations_are_constant_with_template_classifier(
-                    fields,
-                    classify_template,
-                )? {
-                    ConstValueKind::Composite
-                } else {
-                    ConstValueKind::NonConst
-                }
-            }
-
-            ExpressionKind::AnonymousConstRecord { fields } => {
-                if Self::declarations_are_constant_with_template_classifier(
-                    fields,
-                    classify_template,
-                )? {
-                    ConstValueKind::Composite
-                } else {
-                    ConstValueKind::NonConst
-                }
-            }
-
-            ExpressionKind::Range(start, end) => {
-                if start
-                    .const_value_kind_with_template_classifier(classify_template)?
-                    .is_compile_time_value()
-                    && end
-                        .const_value_kind_with_template_classifier(classify_template)?
-                        .is_compile_time_value()
-                {
-                    ConstValueKind::Composite
-                } else {
-                    ConstValueKind::NonConst
-                }
-            }
-
-            // The caller supplies the template authority for its compiler stage.
-            ExpressionKind::Template(template) => {
-                let template_kind = classify_template(template)?;
-                Self::const_value_kind_from_template_kind(template_kind)
-            }
-
-            // Fallible carriers preserve const-ness of the wrapped value.
-            #[cfg(test)]
-            ExpressionKind::FallibleCarrierConstruct { value, .. } => {
-                if value
-                    .const_value_kind_with_template_classifier(classify_template)?
-                    .is_compile_time_value()
-                {
-                    ConstValueKind::Composite
-                } else {
-                    ConstValueKind::NonConst
-                }
-            }
-
-            // Named const records stay compile-time without cloning the whole record.
-            ExpressionKind::Reference(_) if self.is_const_record_value() => {
                 ConstValueKind::Composite
             }
-
-            // Everything else is non-const by default.
-            ExpressionKind::Reference(_)
-            | ExpressionKind::Copy(_)
-            | ExpressionKind::Runtime(_)
-            | ExpressionKind::RuntimeTemplateHandoff(_)
-            | ExpressionKind::RuntimeSlotApplicationHandoff(_)
-            | ExpressionKind::Function(..)
-            | ExpressionKind::FunctionCall { .. }
-            | ExpressionKind::Cast { .. }
-            | ExpressionKind::HandledFallibleExpression { .. }
-            | ExpressionKind::OptionPropagation { .. }
-            | ExpressionKind::HandledFallibleFunctionCall { .. }
-            | ExpressionKind::HandledFallibleHostFunctionCall { .. }
-            | ExpressionKind::HostFunctionCall { .. }
-            | ExpressionKind::StructDefinition(..)
-            | ExpressionKind::FieldAccess { .. }
-            | ExpressionKind::MethodCall { .. }
-            | ExpressionKind::CollectionBuiltinCall { .. }
-            | ExpressionKind::MapBuiltinCall { .. }
-            | ExpressionKind::NoValue
-            | ExpressionKind::ValueBlock { .. } => ConstValueKind::NonConst,
-
-            // Delegate const classification to the wrapped value — the coercion
-            // does not change whether an expression is compile-time foldable.
-            ExpressionKind::Coerced { value, .. } => {
-                value.const_value_kind_with_template_classifier(classify_template)?
+            V::Struct { fields } | V::Choice { fields, .. } => {
+                for field in fields.iter() {
+                    if !field
+                        .value()
+                        .const_value_kind_with_template_classifier(constants, classify)?
+                        .is_compile_time_value()
+                    {
+                        return Ok(ConstValueKind::NonConst);
+                    }
+                }
+                ConstValueKind::Composite
             }
+            V::Range { start, end, .. }
+                if start
+                    .const_value_kind_with_template_classifier(constants, classify)?
+                    .is_compile_time_value()
+                    && end
+                        .const_value_kind_with_template_classifier(constants, classify)?
+                        .is_compile_time_value() =>
+            {
+                ConstValueKind::Composite
+            }
+            V::Template(template) => match classify(template)? {
+                TemplateConstValueKind::RenderableString => ConstValueKind::RenderableTemplate,
+                TemplateConstValueKind::WrapperTemplate => ConstValueKind::TemplateWrapper,
+                TemplateConstValueKind::SlotInsertHelper => ConstValueKind::SlotInsertTemplate,
+                TemplateConstValueKind::NonConst => ConstValueKind::NonConst,
+            },
+            V::Reference(_) if self.is_const_record_value() => ConstValueKind::Composite,
+            V::Coerce { value, .. } => {
+                value.const_value_kind_with_template_classifier(constants, classify)?
+            }
+            _ => ConstValueKind::NonConst,
         };
-
         Ok(kind)
-    }
-
-    fn expressions_are_constant_with_template_classifier(
-        expressions: &[Expression],
-        classify_template: &mut impl FnMut(&Template) -> Result<TemplateConstValueKind, TemplateError>,
-    ) -> Result<bool, TemplateError> {
-        for expression in expressions {
-            if !expression
-                .const_value_kind_with_template_classifier(classify_template)?
-                .is_compile_time_value()
-            {
-                return Ok(false);
-            }
-        }
-
-        Ok(true)
-    }
-
-    fn declarations_are_constant_with_template_classifier(
-        declarations: &[Declaration],
-        classify_template: &mut impl FnMut(&Template) -> Result<TemplateConstValueKind, TemplateError>,
-    ) -> Result<bool, TemplateError> {
-        for declaration in declarations {
-            if !declaration
-                .value
-                .const_value_kind_with_template_classifier(classify_template)?
-                .is_compile_time_value()
-            {
-                return Ok(false);
-            }
-        }
-
-        Ok(true)
-    }
-
-    fn const_value_kind_from_template_kind(
-        template_kind: TemplateConstValueKind,
-    ) -> ConstValueKind {
-        match template_kind {
-            TemplateConstValueKind::RenderableString => ConstValueKind::RenderableTemplate,
-            TemplateConstValueKind::WrapperTemplate => ConstValueKind::TemplateWrapper,
-            TemplateConstValueKind::SlotInsertHelper => ConstValueKind::SlotInsertTemplate,
-            TemplateConstValueKind::NonConst => ConstValueKind::NonConst,
-        }
     }
 }
 
 #[cfg(test)]
 #[path = "tests/external_float_constant_tests.rs"]
 mod external_float_constant_tests;
+
+#[cfg(test)]
+#[path = "tests/success_shape_tests.rs"]
+mod success_shape_tests;
+
+#[cfg(test)]
+#[path = "tests/runtime_handoff_expression_payload_tests.rs"]
+mod runtime_handoff_expression_payload_tests;

@@ -1,0 +1,7 @@
+big #Config of I32 = 2147483647
+page #= [:
+    [loop 0 to 2 |i|:
+        [i + big]
+    ]
+]
+io.line(page)

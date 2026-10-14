@@ -1,5 +1,5 @@
 Box = |
-    x Int,
+    x I32,
 |
 
 shift |this ~Box|:

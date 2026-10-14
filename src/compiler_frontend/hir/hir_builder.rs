@@ -19,16 +19,18 @@ use crate::compiler_frontend::ast::Ast;
 use crate::compiler_frontend::ast::AstImportedFunctionContract;
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
 use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValueStore};
+use crate::compiler_frontend::ast::expressions::expression_store::ExpressionStore;
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::const_facts::HirConstFacts;
 #[cfg(test)]
 use crate::compiler_frontend::hir::expression_store::HirExpressionStoreTestLimits;
 use crate::compiler_frontend::hir::expression_store::{HirConstructionFailure, HirExpressionStore};
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOriginLookup};
-use crate::compiler_frontend::hir::hir_side_table::HirSideTable;
+use crate::compiler_frontend::hir::hir_side_table::{HirLocation, HirSideTable};
 use crate::compiler_frontend::hir::ids::{
     BlockId, ChoiceId, FieldId, FunctionId, HirConstId, HirNodeId, LocalId, RegionId, StructId,
 };
@@ -62,6 +64,7 @@ pub(in crate::compiler_frontend) fn lower_module(
     function_origin_lookup: HirFunctionOriginLookup,
     module_resources: Option<Rc<RefCell<ModuleResourceTable>>>,
     capacity_estimate: FrontendArenaCapacityEstimate,
+    external_packages: &ExternalPackageRegistry,
 ) -> Result<HirLoweringResult, CompilerMessages> {
     let type_environment = ast.type_environment.clone();
     let mut ctx = HirBuilder::new(
@@ -73,7 +76,7 @@ pub(in crate::compiler_frontend) fn lower_module(
     );
 
     ctx.set_module_resources(module_resources);
-    ctx.build_hir_module(ast)
+    ctx.build_hir_module(ast, external_packages)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -156,15 +159,16 @@ pub struct HirBuilder<'a> {
     pub(super) locals_by_name: FxHashMap<PathId, LocalId>,
     pub(super) functions_by_name: FxHashMap<PathId, FunctionId>,
     pub(super) imported_functions_by_name: FxHashMap<PathId, AstImportedFunctionContract>,
-    pub(super) imported_fallible_carriers_by_origin: FxHashMap<OriginFunctionId, TypeId>,
-    pub(super) module_private_fallible_carriers_by_identity:
-        FxHashMap<ModulePrivateExecutableIdentity, TypeId>,
-    pub(super) generated_fallible_carriers_by_identity:
-        FxHashMap<GeneratedFunctionIdentity, TypeId>,
+    pub(super) imported_fallible_results_by_origin:
+        FxHashMap<OriginFunctionId, (Vec<TypeId>, TypeId)>,
+    pub(super) module_private_fallible_results_by_identity:
+        FxHashMap<ModulePrivateExecutableIdentity, (Vec<TypeId>, TypeId)>,
+    pub(super) generated_fallible_results_by_identity:
+        FxHashMap<GeneratedFunctionIdentity, (Vec<TypeId>, TypeId)>,
     pub(super) structs_by_name: FxHashMap<PathId, StructId>,
     pub(super) choices_by_name: FxHashMap<PathId, ChoiceId>,
     /// Generic struct instantiations keyed by structured identity, not string paths.
-    /// WHAT: `Box of Int` and `Box of String` need distinct StructIds.
+    /// WHAT: `Box of I32` and `Box of String` need distinct StructIds.
     pub(super) generic_structs_by_key: FxHashMap<
         crate::compiler_frontend::datatypes::generic_identity_bridge::GenericInstantiationKey,
         StructId,
@@ -211,6 +215,8 @@ pub struct HirBuilder<'a> {
     /// WHAT: pending records transferred into the module before compaction.
     /// WHY: the lane installer needs the routing captured at lowering time.
     catch_protected_calls: Vec<CatchProtectedCall>,
+    /// All handler roots retained until call-summary convergence prunes inactive paths.
+    catch_handlers: Vec<CatchHandlerRecord>,
 }
 
 /// Target state for value-block lowering inside `HirBuilder`.
@@ -243,6 +249,13 @@ pub(crate) struct CatchHandlerTarget {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct CatchProtectedCall {
     pub statement: HirNodeId,
+    pub handler: CatchHandlerTarget,
+    pub owner: FunctionId,
+}
+
+/// One lowered catch handler retained until convergence decides whether its route is live.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct CatchHandlerRecord {
     pub handler: CatchHandlerTarget,
     pub owner: FunctionId,
 }
@@ -304,9 +317,9 @@ impl<'a> HirBuilder<'a> {
             locals_by_name: FxHashMap::default(),
             functions_by_name: FxHashMap::default(),
             imported_functions_by_name: FxHashMap::default(),
-            imported_fallible_carriers_by_origin: FxHashMap::default(),
-            module_private_fallible_carriers_by_identity: FxHashMap::default(),
-            generated_fallible_carriers_by_identity: FxHashMap::default(),
+            imported_fallible_results_by_origin: FxHashMap::default(),
+            module_private_fallible_results_by_identity: FxHashMap::default(),
+            generated_fallible_results_by_identity: FxHashMap::default(),
             structs_by_name: FxHashMap::default(),
             choices_by_name: FxHashMap::default(),
             generic_structs_by_key: FxHashMap::default(),
@@ -328,6 +341,7 @@ impl<'a> HirBuilder<'a> {
             active_value_block_target: None,
             active_catch_handler: None,
             catch_protected_calls: Vec::new(),
+            catch_handlers: Vec::new(),
         }
     }
 
@@ -410,6 +424,12 @@ impl<'a> HirBuilder<'a> {
         target: CatchHandlerTarget,
         emit: impl FnOnce(&mut HirBuilder<'_>) -> Result<T, HirConstructionFailure>,
     ) -> Result<T, HirConstructionFailure> {
+        if let Some(owner) = self.current_function {
+            self.catch_handlers.push(CatchHandlerRecord {
+                handler: target,
+                owner,
+            });
+        }
         let previous_handler = self.active_catch_handler.replace(target);
         let result = emit(self);
         self.active_catch_handler = previous_handler;
@@ -422,53 +442,33 @@ impl<'a> HirBuilder<'a> {
 
     /// Builds an HIR module from an AST.
     /// This is the main entry point for HIR generation.
-    pub fn build_hir_module(mut self, mut ast: Ast) -> Result<HirLoweringResult, CompilerMessages> {
+    pub fn build_hir_module(
+        mut self,
+        mut ast: Ast,
+        external_packages: &ExternalPackageRegistry,
+    ) -> Result<HirLoweringResult, CompilerMessages> {
         self.module_const_values = std::mem::take(&mut ast.const_values);
 
         self.module.const_facts = HirConstFacts::from(&ast.const_facts);
         self.imported_functions_by_name = ast.imported_functions_by_local_path.clone();
-        self.imported_fallible_carriers_by_origin = self
-            .imported_functions_by_name
-            .values()
-            .filter_map(|contract| match (&contract.target, contract.fallible_carrier_type_id) {
-                (
-                    crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget::Imported {
-                        origin,
-                        ..
-                    },
-                    Some(carrier_type_id),
-                ) => Some((origin.clone(), carrier_type_id)),
-                _ => None,
-            })
-            .collect();
-        self.generated_fallible_carriers_by_identity = self
-            .imported_functions_by_name
-            .values()
-            .filter_map(|contract| match (&contract.target, contract.fallible_carrier_type_id) {
-                (
-                    crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget::Generated {
-                        identity,
-                        ..
-                    },
-                    Some(carrier_type_id),
-                ) => Some((identity.clone(), carrier_type_id)),
-                _ => None,
-            })
-            .collect();
-        self.module_private_fallible_carriers_by_identity = self
-            .imported_functions_by_name
-            .values()
-            .filter_map(|contract| match (&contract.target, contract.fallible_carrier_type_id) {
-                (
-                    crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget::ModulePrivate {
-                        identity,
-                        ..
-                    },
-                    Some(carrier_type_id),
-                ) => Some((identity.clone(), carrier_type_id)),
-                _ => None,
-            })
-            .collect();
+        for contract in self.imported_functions_by_name.values() {
+            let Some(error) = contract.error_return else {
+                continue;
+            };
+            let results = (contract.returns.clone(), error);
+            match &contract.target {
+                crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget::Imported { origin, .. } => {
+                    self.imported_fallible_results_by_origin.insert(origin.clone(), results);
+                }
+                crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget::Generated { identity, .. } => {
+                    self.generated_fallible_results_by_identity.insert(identity.clone(), results);
+                }
+                crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget::ModulePrivate { identity, .. } => {
+                    self.module_private_fallible_results_by_identity.insert(identity.clone(), results);
+                }
+                crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget::Local(_) => {}
+            }
+        }
         self.module.imported_call_summaries = self
             .imported_functions_by_name
             .values()
@@ -521,7 +521,7 @@ impl<'a> HirBuilder<'a> {
 
         // 4. Lower AST nodes to HIR expressions/statements
         for node in &ast.nodes {
-            if let Err(error) = self.process_ast_node(node) {
+            if let Err(error) = self.process_ast_node(&ast.expressions, node) {
                 return Err(self.lower_error_messages(error));
             }
         }
@@ -540,13 +540,21 @@ impl<'a> HirBuilder<'a> {
         // Scalar calls recorded under catch handlers keep their handler routes for the lane
         // installer; block ids are remapped like every other terminator target.
         self.module.catch_protected_calls = std::mem::take(&mut self.catch_protected_calls);
+        self.module.catch_handlers = std::mem::take(&mut self.catch_handlers);
         // Construction may remove unused scaffolding blocks. Later passes index blocks by id.
         self.module.compact_block_ids();
+
+        if let Err(error) = self.module.refresh_function_provenance_from_blocks() {
+            return Err(CompilerMessages::from_error_ref(error, string_table)
+                .with_type_context_for_all_diagnostics(self.type_environment.clone()));
+        }
 
         // 6. Validate the final HIR module. HIR validation checks executable HIR only; non-HIR
         //    compiler metadata (documentation fragments) is validated separately at the module
         //    compilation boundary.
-        if let Err(error) = validate_hir_module(&self.module, &self.type_environment) {
+        if let Err(error) =
+            validate_hir_module(&self.module, &self.type_environment, external_packages)
+        {
             return Err(CompilerMessages::from_error_ref(error, string_table)
                 .with_type_context_for_all_diagnostics(self.type_environment.clone()));
         }
@@ -561,8 +569,12 @@ impl<'a> HirBuilder<'a> {
     }
 
     /// Processes a single AST node and generates corresponding HIR.
-    fn process_ast_node(&mut self, node: &AstNode) -> Result<(), HirConstructionFailure> {
-        self.lower_top_level_node(node)
+    fn process_ast_node(
+        &mut self,
+        expressions: &ExpressionStore,
+        node: &AstNode,
+    ) -> Result<(), HirConstructionFailure> {
+        self.lower_top_level_node(expressions, node)
     }
 
     // -------------------------
@@ -835,6 +847,10 @@ impl<'a> HirBuilder<'a> {
         terminator: HirTerminator,
         source_location: &Option<SourceSpan>,
     ) -> Result<(), CompilerError> {
+        let operation_source = match &terminator {
+            HirTerminator::Invoke { id, span, .. } => Some((*id, *span)),
+            _ => None,
+        };
         {
             let block = self.block_mut_by_id_or_error(block_id, source_location)?;
             if !Self::is_placeholder_terminator(&block.terminator) {
@@ -848,6 +864,11 @@ impl<'a> HirBuilder<'a> {
         }
 
         self.side_table.map_terminator(*source_location, block_id);
+        if let Some((id, span)) = operation_source {
+            let location = HirLocation::Statement(id);
+            self.side_table.map_ast_to_hir(*source_location, location);
+            self.side_table.map_hir_source_span(location, span);
+        }
         Ok(())
     }
 

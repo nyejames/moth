@@ -1,4 +1,4 @@
 -- String utility functions
-format_number |num Int| -> String:
+format_number |num I32| -> String:
     return [:Number: [num]]
 ;

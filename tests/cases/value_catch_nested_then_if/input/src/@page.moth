@@ -1,8 +1,8 @@
-parse_number |text String| -> Int, Error!:
+parse_number |text String| -> I32, Error!:
     return! Error(text)
 ;
 
-recover |use_zero Bool| -> Int:
+recover |use_zero Bool| -> I32:
     value = parse_number("bad") catch |err|:
         io.line([: [err.message]])
         if use_zero:

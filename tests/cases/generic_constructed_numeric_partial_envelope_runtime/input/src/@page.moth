@@ -1,0 +1,32 @@
+-- Only receiver-selected fields leave the generic envelope. In Bundle, the
+-- floating collection is pinned to {F32} and used in a loop while the whole
+-- field is still pending; the whole field is read afterwards as U64.
+
+Split type T, U = |
+    left T,
+    right U,
+|
+
+Bundle type T, U = |
+    items T,
+    whole U,
+|
+
+read_u64 |value U64| -> String:
+    return cast value
+;
+
+read_float |value F32| -> String:
+    return cast value
+;
+
+split = Split(4294967305, 2.5)
+left_text = read_u64(split.left)
+right_text String = cast split.right
+
+bundle = Bundle({1.00000001}, 4294967307)
+narrow {F32} = bundle.items
+narrow_text = [:[loop narrow |item|:[read_float(item)]]]
+wide_text = read_u64(bundle.whole)
+
+[:generic_constructed_numeric_partial_envelope_runtime left=[left_text] right=[right_text] narrow=[narrow_text] wide=[wide_text]]

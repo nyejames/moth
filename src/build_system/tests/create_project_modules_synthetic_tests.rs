@@ -228,8 +228,7 @@ fn synthetic_preparation_reuses_complete_outputs_for_one_final_header_pass() {
         &canonical_root,
     );
     #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
-    let _counter_capture =
-        crate::compiler_frontend::instrumentation::capture_frontend_counters_for_test();
+    let _counter_capture = crate::compiler_frontend::instrumentation::capture_counters_for_test();
     #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
     crate::compiler_frontend::instrumentation::reset_frontend_counters();
     #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
@@ -392,8 +391,7 @@ fn synthetic_diagnosed_preparation_is_not_consumed_again() {
         &canonical_root,
     );
     #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
-    let _counter_capture =
-        crate::compiler_frontend::instrumentation::capture_frontend_counters_for_test();
+    let _counter_capture = crate::compiler_frontend::instrumentation::capture_counters_for_test();
     #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
     crate::compiler_frontend::instrumentation::reset_frontend_counters();
     #[cfg(all(feature = "timers", feature = "benchmark_counters"))]

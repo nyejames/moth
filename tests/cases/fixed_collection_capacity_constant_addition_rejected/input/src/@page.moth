@@ -1,6 +1,6 @@
-capacity #Int = 2
+capacity #I32 = 2
 
 render || -> String:
-    items {capacity + 2 Int} = {}
+    items {capacity + 2 I32} = {}
     return ""
 ;

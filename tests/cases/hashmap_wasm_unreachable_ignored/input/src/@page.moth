@@ -1,4 +1,4 @@
-unused_helper || -> Int:
+unused_helper || -> I32:
     scores ~= {"Priya" = 10}
     return scores.length
 ;

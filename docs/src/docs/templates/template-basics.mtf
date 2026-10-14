@@ -78,8 +78,8 @@ The source-level result stays an owned `String`.
 
 Templates do not become source-visible function values.
 
-Runtime Float interpolation and compile-time folding use the same Moth
-formatter.
+Runtime fixed binary-float interpolation and compile-time folding use the same
+Moth formatter.
 
 ### MON data boundary
 

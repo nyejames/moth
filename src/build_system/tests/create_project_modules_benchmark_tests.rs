@@ -19,8 +19,7 @@ fn synthetic_traversal_prepares_retained_clauses_without_a_token_rescan() {
     )
     .expect("should write helper file");
 
-    let _counter_capture =
-        crate::compiler_frontend::instrumentation::capture_frontend_counters_for_test();
+    let _counter_capture = crate::compiler_frontend::instrumentation::capture_counters_for_test();
     crate::compiler_frontend::instrumentation::reset_frontend_counters();
     let counter_guard =
         crate::timing::start_benchmark_collection(true).expect("timing session should start");
@@ -169,8 +168,7 @@ fn directory_discovery_counts_resolved_clauses_by_language_family() {
         })
         .sum::<usize>() as f64;
 
-    let _counter_capture =
-        crate::compiler_frontend::instrumentation::capture_frontend_counters_for_test();
+    let _counter_capture = crate::compiler_frontend::instrumentation::capture_counters_for_test();
     crate::compiler_frontend::instrumentation::reset_frontend_counters();
     let counter_guard =
         crate::timing::start_benchmark_collection(true).expect("timing session should start");

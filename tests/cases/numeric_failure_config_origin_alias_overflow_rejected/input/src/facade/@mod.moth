@@ -1,5 +1,5 @@
-configured_maximum #Config of Int = 2147483647
+configured_maximum #Config of I32 = 2147483647
 
 export:
-    maximum #Int = configured_maximum
+    maximum #I32 = configured_maximum
 ;

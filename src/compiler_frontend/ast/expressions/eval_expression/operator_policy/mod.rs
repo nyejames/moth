@@ -8,11 +8,10 @@ mod arithmetic;
 mod comparison;
 mod diagnostics;
 mod logical;
-mod shared;
 mod unary;
 
 use crate::compiler_frontend::ast::expressions::eval_expression::typing_error::ExpressionTypingError;
-use crate::compiler_frontend::ast::expressions::expression::Operator;
+use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
@@ -35,8 +34,6 @@ pub(super) fn resolve_binary_operator_type(
     type_environment: &TypeEnvironment,
     path_fork: &PathInternerFork,
 ) -> Result<TypeId, ExpressionTypingError> {
-    shared::reject_fallible_operands(lhs, rhs, op, span, type_environment)?;
-
     if logical::is_logical_operator(op) {
         return logical::resolve_logical_operator_type(lhs, rhs, op, span, type_environment);
     }

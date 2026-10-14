@@ -1,0 +1,8 @@
+probe || -> I32:
+    value = 1 + 2 catch:
+        return 0
+        then "bad"
+    ;
+    return value
+;
+[:[probe()]]

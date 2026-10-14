@@ -3,7 +3,7 @@ entry = "."
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = "compound atomicity i8=20/1 failed-i8=242/100/1 field=10/1 failed-field=242/255/1"
+rendered_output_exact = "compound atomicity i8=20/1 failed-i8=301/100/1 field=10/1 failed-field=301/255/1 mixed-field=242/255/1\ncompound u16 ok=65535/1 failed=301/65535/1/0 mixed=242/65535/1/0"
 
 [backends.html_wasm]
 mode = "failure"

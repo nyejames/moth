@@ -177,7 +177,7 @@ fn duplicate_declaration_detection_works_with_exported_declarations() {
 
 #[test]
 fn export_before_constant_marks_header_public() {
-    let source = "export:\n    theme #= \"dark\"\n    threshold #Int = 42\n;\n";
+    let source = "export:\n    theme #= \"dark\"\n    threshold #I32 = 42\n;\n";
     let headers = parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@page.moth")
         .expect("headers should parse");
 
@@ -199,7 +199,7 @@ fn export_before_constant_marks_header_public() {
 
 #[test]
 fn export_before_type_alias_marks_header_public() {
-    let source = "export:\n    UserId as Int\n;\n";
+    let source = "export:\n    UserId as I32\n;\n";
     let headers = parse_single_file_headers_with_entry(source, "src/@mod.moth", "src/@page.moth")
         .expect("headers should parse");
 
@@ -300,7 +300,7 @@ fn capacity_references_extract_value_refs_without_treating_element_type_as_value
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let file_path = PathBuf::from("src/test.moth");
-    let source = "make |items ~{capacity MyType}| -> Int:\n    return 1\n;\n";
+    let source = "make |items ~{capacity MyType}| -> I32:\n    return 1\n;\n";
     let (output, mut span_builder) = prepare_single_file_with_fork(
         source,
         &file_path,

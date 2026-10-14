@@ -3,9 +3,12 @@
 //! WHAT: exposes extra builder utilities needed only by HIR unit tests.
 //! WHY: tests need direct access to internal builder state without widening the production API.
 
-use crate::compiler_frontend::ast::ast_nodes::Declaration;
-use crate::compiler_frontend::ast::const_values::store::{ConstStringPiece, ConstStringValue};
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::const_values::store::{
+    ConstStringPiece, ConstStringValue, ConstValueId, ConstValuePayload, ConstValueStore,
+};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, ExpressionOperationView,
+};
 use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
 };
@@ -16,6 +19,7 @@ use crate::compiler_frontend::datatypes::definitions::{
 };
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId, TypeId as FrontendTypeId};
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariantPayload;
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
     OwnedFoldedString, OwnedFoldedStringPiece, owned_folded_string_from_const_string,
 };
@@ -40,6 +44,7 @@ use crate::compiler_frontend::semantic_identity::{
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
+use crate::compiler_frontend::tests::ast_fixture_support::runtime_template_handoff_expr;
 
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::path::Path;
@@ -55,8 +60,9 @@ pub(crate) fn validate_module_for_tests(
     module: &HirModule,
     _string_table: &StringTable,
     type_environment: &crate::compiler_frontend::datatypes::environment::TypeEnvironment,
+    external_package_registry: &ExternalPackageRegistry,
 ) -> Result<(), CompilerError> {
-    super::validate_hir_module(module, type_environment)
+    super::validate_hir_module(module, type_environment, external_package_registry)
 }
 
 fn advance_counter_past(next_counter: &mut u32, used_id: u32) {
@@ -224,11 +230,12 @@ impl<'a> HirBuilder<'a> {
         self.reserve_function_id(id);
     }
 
-    pub(crate) fn test_register_function_with_return_type(
+    pub(crate) fn test_register_function_with_returns(
         &mut self,
         name: PathId,
         id: FunctionId,
-        return_type: crate::compiler_frontend::datatypes::ids::TypeId,
+        returns: Vec<TypeId>,
+        error_return: Option<TypeId>,
     ) {
         self.test_register_function_name(name, id);
 
@@ -237,7 +244,8 @@ impl<'a> HirBuilder<'a> {
             id,
             entry,
             params: vec![],
-            return_type,
+            returns: returns.into_boxed_slice(),
+            error_return,
         };
         if let Some(index) = self.function_index_by_id.get(&id).copied() {
             self.module.functions[index] = function;
@@ -286,24 +294,15 @@ impl<'a> HirBuilder<'a> {
         self.reserve_struct_id(struct_id);
     }
 
-    /// Register one already-folded module constant in the store the builder lowers from.
+    /// Register one already-folded module constant that is held in `module_const_values`.
     ///
     /// WHY: production module constants reach HIR as folded store values, never as expression
     /// trees, so a test constant must be a value the store can hold.
-    pub(crate) fn test_register_module_constant(&mut self, name: PathId, value: Expression) {
-        let declaration = Declaration {
-            id: name,
-            value,
-            binding_span: None,
-            config_qualifier: None,
-        };
+    pub(crate) fn test_register_module_constant(&mut self, name: PathId, value: ConstValueId) {
         self.module_const_values
-            .insert_test_declaration(declaration, &self.type_environment);
-        let value_id = self
-            .module_const_values
-            .value_for_path(&name)
-            .expect("test module constant should be indexed");
-        self.module_constants_by_name.insert(name, value_id);
+            .bind_module_constant(name, value)
+            .expect("fixture module constant must have a unique binding");
+        self.module_constants_by_name.insert(name, value);
     }
 
     pub(crate) fn test_register_nominal_struct_type(
@@ -355,8 +354,8 @@ impl<'a> HirBuilder<'a> {
                             .iter()
                             .map(|field| FieldDefinition {
                                 name: field.id,
-                                type_id: field.value.type_id,
-                                span: field.value.span,
+                                type_id: field.type_id,
+                                span: field.binding_span,
                             })
                             .collect::<Vec<_>>();
                         ChoiceVariantPayloadDefinition::Record {
@@ -417,11 +416,7 @@ pub(crate) fn setup_builder<'a>(
     builder.test_push_block(block);
     builder.test_set_current_region(region);
     builder.test_set_current_block(BlockId(0));
-    builder.test_register_function_with_return_type(
-        test_function_name,
-        function_id,
-        crate::compiler_frontend::datatypes::ids::builtin_type_ids::NONE,
-    );
+    builder.test_register_function_with_returns(test_function_name, function_id, Vec::new(), None);
     builder.test_set_current_function(function_id);
 
     builder
@@ -454,32 +449,37 @@ pub(crate) fn register_local(
 ///      `Resource` piece against the empty table fails the fixture loudly instead of
 ///      silently rerouting the structural string, mirroring the handoff's absent-table rule.
 pub(crate) fn expressions_to_owned_render_node(
-    expressions: &[Expression],
+    builder: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
+    expressions: &[ExprId],
     string_table: &StringTable,
 ) -> OwnedRuntimeTemplateNode {
     expressions_to_owned_render_node_with_resources(
+        builder,
+        const_values,
         expressions,
         string_table,
         &ModuleResourceTable::new(),
     )
 }
 
-/// Builds the neutral render node used by HIR expression fixtures against one resource table.
-///
-/// WHAT: maps literal strings to `Text`, maps runtime `StructuralString` expressions to
-///       piece-bearing `Text` nodes through the single shared owned folded-string converter,
+/// WHAT: maps string-content `Constant` leaves to `Text` nodes through the shared converter,
 ///       and maps every other expression to `DynamicExpression`, preserving source locations.
 /// WHY: the runtime handoff materializes a structural string as
 ///      `Text { text: OwnedFoldedString::Pieces(..) }` (see `handoff_materialization`), so HIR
 ///      fixtures must construct exactly that shape instead of a rerouted dynamic expression.
 pub(crate) fn expressions_to_owned_render_node_with_resources(
-    expressions: &[Expression],
+    builder: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
+    expressions: &[ExprId],
     string_table: &StringTable,
     resources: &ModuleResourceTable,
 ) -> OwnedRuntimeTemplateNode {
     let children: Vec<OwnedRuntimeTemplateNode> = expressions
         .iter()
-        .map(|expression| expression_to_owned_node(expression, string_table, resources))
+        .map(|&expression| {
+            expression_to_owned_node(builder, const_values, expression, string_table, resources)
+        })
         .collect();
 
     OwnedRuntimeTemplateNode::Sequence {
@@ -489,47 +489,44 @@ pub(crate) fn expressions_to_owned_render_node_with_resources(
 }
 
 fn expression_to_owned_node(
-    expression: &Expression,
+    builder: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
+    expression: ExprId,
     string_table: &StringTable,
     resources: &ModuleResourceTable,
 ) -> OwnedRuntimeTemplateNode {
-    match &expression.kind {
-        ExpressionKind::StringSlice(text) => OwnedRuntimeTemplateNode::Text {
-            text: OwnedFoldedString::Text(string_table.resolve(*text).to_owned()),
-        },
+    let view = builder
+        .view(expression)
+        .expect("fixture expression belongs to its builder");
+    if let ExpressionOperationView::Constant(value) = view.operation()
+        && let ConstValuePayload::String(value) = const_values
+            .payload(value)
+            .expect("fixture constant belongs to its content owner")
+    {
+        let text = owned_folded_string_from_const_string(value, resources, string_table)
+            .expect("fixture structural string must convert against the resource table that issued its resource handles");
+        return OwnedRuntimeTemplateNode::Text { text };
+    }
 
-        // WHAT: mirrors the runtime handoff: a structural string converts to a piece-bearing
-        //       text node through the one shared owned folded-string helper.
-        // WHY: a fixture must not flatten resource or site-root pieces into rendered text, and
-        //      must not reroute the node into `DynamicExpression`.
-        ExpressionKind::StructuralString { pieces } => {
-            let value = ConstStringValue::Pieces(pieces.clone());
-
-            let text = owned_folded_string_from_const_string(&value, resources, string_table)
-                .expect("fixture structural string must convert against the resource table that issued its resource handles");
-
-            OwnedRuntimeTemplateNode::Text { text }
-        }
-
-        _ => OwnedRuntimeTemplateNode::DynamicExpression {
-            expression: Box::new(expression.clone()),
-            span: expression.span,
-        },
+    OwnedRuntimeTemplateNode::DynamicExpression {
+        expression,
+        span: view.span(),
     }
 }
 
 pub(crate) fn runtime_template_expression(
+    builder: &mut AstExpressionBuilder,
+    const_values: &ConstValueStore,
     span: Option<crate::compiler_frontend::source::SourceSpan>,
-    content: Vec<Expression>,
+    content: Vec<ExprId>,
     string_table: &StringTable,
-) -> Expression {
-    let body = expressions_to_owned_render_node(&content, string_table);
+) -> ExprId {
+    let body = expressions_to_owned_render_node(builder, const_values, &content, string_table);
     let handoff = OwnedRuntimeTemplateHandoff {
         body: OwnedRuntimeTemplateBody::Render(body),
-        span,
     };
 
-    Expression::runtime_template_handoff(handoff, ValueMode::ImmutableOwned)
+    runtime_template_handoff_expr(builder, handoff, span, ValueMode::ImmutableOwned)
 }
 
 // ---------------------------------------------------------------------------
@@ -567,18 +564,37 @@ fn structural_string_fixture_materializes_a_piece_bearing_text_node() {
     let before = string_table.intern("before");
     let after = string_table.intern("after");
     let location = None;
-    let structural = Expression::structural_string(
-        vec![
-            ConstStringPiece::Text(before),
-            ConstStringPiece::Resource(resource_id),
-            ConstStringPiece::SiteRoot,
-            ConstStringPiece::Text(after),
-        ],
-        location,
-    );
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let value = const_values
+        .insert_resolved(
+            crate::compiler_frontend::datatypes::ids::builtin_type_ids::STRING,
+            ConstValuePayload::String(ConstStringValue::Pieces(vec![
+                ConstStringPiece::Text(before),
+                ConstStringPiece::Resource(resource_id),
+                ConstStringPiece::SiteRoot,
+                ConstStringPiece::Text(after),
+            ])),
+            None,
+        )
+        .expect("fixture string content must be valid");
+    let structural = builder
+        .constant(
+            value,
+            crate::compiler_frontend::datatypes::ids::builtin_type_ids::STRING,
+            location,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture string occurrence must be valid")
+        .id();
 
-    let node =
-        expressions_to_owned_render_node_with_resources(&[structural], &string_table, &resources);
+    let node = expressions_to_owned_render_node_with_resources(
+        &builder,
+        &const_values,
+        &[structural],
+        &string_table,
+        &resources,
+    );
 
     let OwnedRuntimeTemplateNode::Sequence { children, .. } = node else {
         panic!("fixture content should map to a sequence node");
@@ -605,12 +621,30 @@ fn structural_string_fixture_materializes_a_piece_bearing_text_node() {
 fn all_text_structural_fixture_keeps_pieces_without_a_resource_table() {
     let mut string_table = StringTable::new();
     let head = string_table.intern("docs/");
-    let structural = Expression::structural_string(
-        vec![ConstStringPiece::Text(head), ConstStringPiece::SiteRoot],
-        None,
-    );
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let value = const_values
+        .insert_resolved(
+            crate::compiler_frontend::datatypes::ids::builtin_type_ids::STRING,
+            ConstValuePayload::String(ConstStringValue::Pieces(vec![
+                ConstStringPiece::Text(head),
+                ConstStringPiece::SiteRoot,
+            ])),
+            None,
+        )
+        .expect("fixture string content must be valid");
+    let structural = builder
+        .constant(
+            value,
+            crate::compiler_frontend::datatypes::ids::builtin_type_ids::STRING,
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture string occurrence must be valid")
+        .id();
 
-    let node = expressions_to_owned_render_node(&[structural], &string_table);
+    let node =
+        expressions_to_owned_render_node(&builder, &const_values, &[structural], &string_table);
 
     let OwnedRuntimeTemplateNode::Sequence { children, .. } = node else {
         panic!("fixture content should map to a sequence node");
@@ -639,16 +673,30 @@ fn resource_piece_without_its_table_fails_instead_of_rerouting() {
     let (phantom_resource, _) = fixture_resource(&mut issuing_resources, "assets/logo.svg");
 
     let head = string_table.intern("docs/");
-    let structural = Expression::structural_string(
-        vec![
-            ConstStringPiece::Text(head),
-            ConstStringPiece::Resource(phantom_resource),
-        ],
-        None,
-    );
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let value = const_values
+        .insert_resolved(
+            crate::compiler_frontend::datatypes::ids::builtin_type_ids::STRING,
+            ConstValuePayload::String(ConstStringValue::Pieces(vec![
+                ConstStringPiece::Text(head),
+                ConstStringPiece::Resource(phantom_resource),
+            ])),
+            None,
+        )
+        .expect("fixture string content must be valid");
+    let structural = builder
+        .constant(
+            value,
+            crate::compiler_frontend::datatypes::ids::builtin_type_ids::STRING,
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture string occurrence must be valid")
+        .id();
 
     // The mapper receives a table that issued none of the expression's handles, so the exact
     // try-origin error proves the structural string reached the conversion boundary instead of
     // being silently rerouted to a dynamic expression.
-    let _ = expressions_to_owned_render_node(&[structural], &string_table);
+    let _ = expressions_to_owned_render_node(&builder, &const_values, &[structural], &string_table);
 }

@@ -1,5 +1,5 @@
 MyType = |
-    value Int,
+    value I32,
 |
 
 MyType ||:

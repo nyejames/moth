@@ -1,5 +1,5 @@
-foo || -> Int:
+foo || -> I32:
     x = 1
-    x Int = 2
+    x I32 = 2
     return x
 ;

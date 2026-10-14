@@ -3,10 +3,18 @@
 //! WHAT: explicit control-flow exits for each block.
 //! WHY: control flow must be structured enough for borrow validation and backend lowering.
 
-use crate::compiler_frontend::hir::expression_store::HirExpressionStore;
-use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirVariantCarrier, ValueKind};
-use crate::compiler_frontend::hir::ids::{BlockId, HirValueId, LocalId};
+use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
+use crate::compiler_frontend::external_packages::CallTarget;
+use crate::compiler_frontend::hir::expression_store::{HirExpressionStore, HirValueRange};
+use crate::compiler_frontend::hir::expressions::{
+    HirExpressionKind, HirMapOp, HirVariantCarrier, ValueKind,
+};
+use crate::compiler_frontend::hir::ids::{BlockId, HirNodeId, HirValueId, LocalId};
+use crate::compiler_frontend::hir::numeric::{
+    HirNumericOp, HirNumericOperands, RangeStepFailureCause,
+};
 use crate::compiler_frontend::hir::patterns::HirMatchArm;
+use crate::compiler_frontend::source::SourceSpan;
 
 #[derive(Debug, Clone)]
 pub enum HirTerminator {
@@ -21,16 +29,16 @@ pub enum HirTerminator {
         else_block: BlockId, // Required, must jump or return somewhere (Could just be continuation)
     },
 
-    /// Branch on an internal fallible carrier's success/error state.
-    ///
-    /// WHAT: routes the Ok/success path to `success_block` and the Err/error path to
-    /// `error_block`.
-    /// WHY: fallible control flow is part of the HIR CFG contract. Keeping the branch as a
-    /// terminator avoids hiding an error edge inside an ordinary boolean expression.
-    FallibleBranch {
-        result: HirValueId,
-        success_block: BlockId,
-        error_block: BlockId,
+    /// Evaluate a fallible operation and define only the selected edge's result locals.
+    /// Both destination sets are killed before selecting an edge, preventing stale loop values.
+    Invoke {
+        id: HirNodeId,
+        span: Option<SourceSpan>,
+        operation: HirFallibleOperation,
+        success: BlockId,
+        success_results: Vec<LocalId>,
+        failure: BlockId,
+        error_result: LocalId,
     },
 
     Match {
@@ -46,21 +54,10 @@ pub enum HirTerminator {
         target: BlockId,
     },
 
-    Return(HirValueId),
+    /// Return the function's ordered success slots, including an empty success result.
+    Return(HirValueRange),
 
-    /// Return through the function's fallible success slot.
-    ///
-    /// WHAT: represents `return value` from a fallible function without constructing a runtime
-    /// fallible carrier in HIR.
-    /// WHY: explicit success/error terminators keep the HIR control-flow contract aligned with
-    /// Moth's fallible signature model.
-    ReturnSuccess(HirValueId),
-
-    /// Return through the function's fallible error slot.
-    ///
-    /// WHAT: represents `return! value` without constructing a runtime fallible carrier in HIR.
-    /// WHY: Phase 8 moves fallible control flow toward explicit success/error edges so borrow
-    /// validation and backend lowering do not need to infer error paths from variant values.
+    /// Return one value through the function's separate error channel.
     ReturnError(HirValueId),
 
     /// Internal placeholder for blocks that have not yet received a real terminator.
@@ -93,6 +90,67 @@ pub enum HirTerminator {
     },
 }
 
+/// Fallible producers retain their exact operation facts without a runtime carrier value.
+#[derive(Debug, Clone)]
+pub enum HirFallibleOperation {
+    Call {
+        target: CallTarget,
+        args: HirValueRange,
+    },
+    CastOp {
+        policy: BuiltinCastPolicyId,
+        source: HirValueId,
+    },
+    MapOp {
+        op: HirMapOp,
+        receiver: HirValueId,
+        args: HirValueRange,
+    },
+    NumericOp {
+        op: HirNumericOp,
+        operands: HirNumericOperands,
+    },
+    RangeStepFailure {
+        cause: RangeStepFailureCause,
+    },
+    FormatFloat {
+        source: HirValueId,
+    },
+    ValidateFloat {
+        source: HirValueId,
+    },
+}
+
+impl HirFallibleOperation {
+    /// Enumerate evaluated inputs for structural and analysis consumers without allocating.
+    pub fn operands<'a>(
+        &'a self,
+        expressions: &'a HirExpressionStore,
+    ) -> impl Iterator<Item = HirValueId> + 'a {
+        let mut inline = [None, None];
+        let mut arguments = &[][..];
+        match self {
+            Self::Call { args, .. } => arguments = expressions.values(*args),
+            Self::MapOp { receiver, args, .. } => {
+                inline[0] = Some(*receiver);
+                arguments = expressions.values(*args);
+            }
+            Self::CastOp { source, .. }
+            | Self::FormatFloat { source }
+            | Self::ValidateFloat { source } => inline[0] = Some(*source),
+            Self::NumericOp { operands, .. } => match operands {
+                HirNumericOperands::Unary { operand } => inline[0] = Some(*operand),
+                HirNumericOperands::Binary { left, right } => inline = [Some(*left), Some(*right)],
+            },
+            Self::RangeStepFailure { .. } => {}
+        }
+        inline
+            .into_iter()
+            .flatten()
+            .chain(arguments.iter().copied())
+    }
+}
+
 /// One local value transferred across a CFG edge into a newly defined destination.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HirJumpArgument {
@@ -102,11 +160,12 @@ pub struct HirJumpArgument {
 
 /// Semantic origin retained until private failure lanes have been installed.
 ///
-/// WHY: compound write-back must preserve its conversion carrier independently of
+/// WHY: implicit casts and compound write-backs retain the edge-local error independently of
 /// the backend-facing runtime failure message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RuntimeFailureCause {
-    StoreConversion { carrier: LocalId },
+    StoreConversion { error: LocalId },
+    AuthoredCastConversion { error: LocalId },
 }
 
 /// Evaluation fact retained with an assertion failure message.

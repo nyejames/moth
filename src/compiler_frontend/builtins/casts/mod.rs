@@ -10,8 +10,9 @@
 //! WHY: the cast owner needs one clearly mapped location that parser, AST, and
 //!      folding stages can all reach for cast answers without depending on
 //!      parser orchestration modules or backend code.
-//! NOTE: `Int` range policy lives on `IntWidth::{min_value, max_value, contains}`;
-//!      there is no separate cast-owned numeric-limit module.
+//! NOTE: integer range policy lives on `NumericScalar::integer_range` and binary-float
+//!      precision on `FixedScalar::binary_float_precision`; there is no separate cast-owned
+//!      numeric-limit module.
 
 pub(crate) mod evidence;
 pub(crate) mod policies;

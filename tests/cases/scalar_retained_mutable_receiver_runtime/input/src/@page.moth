@@ -1,0 +1,57 @@
+-- Retained mutable receiver places remain the binding, not the retained
+-- initializer's fresh result.
+--
+-- `count` and `meter_seed` stay unannotated, so the calls remain retained
+-- through their numeric argument origins. The collection and nominal result
+-- shapes are already known from their signatures. Both collection pushes and
+-- the source method must mutate the existing mutable binding in place.
+--
+-- Distinct appended values, the exact lengths and every element make a copied,
+-- dropped or reordered mutation observable. The nominal mutation uses the
+-- established `this ~Meter` receiver syntax on a retained returned binding.
+
+Meter = |
+    amount I32,
+|
+
+set_amount |this ~Meter, value I32|:
+    this.amount = value
+;
+
+make_meter |seed I32| -> Meter:
+    return Meter(amount = seed)
+;
+
+make_items |count U64| -> {I32}:
+    return {1, 2, 3}
+;
+
+count = 1
+items ~= make_items(count)
+meter_seed = 1
+meter ~= make_meter(meter_seed)
+
+initial_length = items.length()
+~items.push(2)
+~items.push(5)
+final_length = items.length()
+first = items.get(0) catch:
+    then 0
+;
+second = items.get(1) catch:
+    then 0
+;
+third = items.get(2) catch:
+    then 0
+;
+fourth = items.get(3) catch:
+    then 0
+;
+fifth = items.get(4) catch:
+    then 0
+;
+
+~meter.set_amount(9)
+nominal_amount = meter.amount
+
+[:scalar retained mutable receiver initial=[initial_length] final=[final_length] values=[first]/[second]/[third]/[fourth]/[fifth] nominal=[nominal_amount]]

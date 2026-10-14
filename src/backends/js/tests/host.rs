@@ -47,7 +47,7 @@ fn host_io_reads_the_underlying_value_before_logging() {
                 )],
                 &mut expressions,
             ),
-            result: None,
+            results: vec![],
         },
     );
 
@@ -56,18 +56,15 @@ fn host_io_reads_the_underlying_value_before_logging() {
         region: RegionId(0),
         locals: vec![local(0, types.string, RegionId(0))],
         statements: vec![assign_message, call_statement],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -86,7 +83,6 @@ fn host_io_reads_the_underlying_value_before_logging() {
         &string_table,
         JsLoweringConfig {
             pretty: true,
-            numeric_profile: NumericProfile::STANDARD,
             auto_invoke_start: true,
             function_emission_policy: JsFunctionEmissionPolicy::AllFunctions,
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),
@@ -120,28 +116,25 @@ fn host_io_reads_the_underlying_value_before_logging() {
 /// Verifies that auto_invoke_start emits a call to the start function. [start]
 #[test]
 fn auto_invokes_start_function_when_enabled() {
-    let mut expressions = HirExpressionStore::default();
+    let expressions = HirExpressionStore::default();
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
-    let (type_environment, types) = build_type_environment();
+    let (type_environment, _) = build_type_environment();
 
     let block = HirBlock {
         id: BlockId(0),
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -160,7 +153,6 @@ fn auto_invokes_start_function_when_enabled() {
         &string_table,
         JsLoweringConfig {
             pretty: true,
-            numeric_profile: NumericProfile::STANDARD,
             auto_invoke_start: true,
             function_emission_policy: JsFunctionEmissionPolicy::AllFunctions,
             external_package_registry: Arc::new(ExternalPackageRegistry::new()),
@@ -190,7 +182,10 @@ fn auto_invokes_fallible_start_once_and_branches_on_its_carrier_tag() {
         let (type_environment, types) = build_type_environment();
         let region = RegionId(0);
         let terminator = if succeeds {
-            HirTerminator::ReturnSuccess(int_expression(42, types.int, region, &mut expressions))
+            HirTerminator::Return(append_values(
+                &[i32_expression(42, types.i32, region, &mut expressions)],
+                &mut expressions,
+            ))
         } else {
             HirTerminator::ReturnError(string_expression(
                 "application-secret",
@@ -216,7 +211,7 @@ fn auto_invokes_fallible_start_once_and_branches_on_its_carrier_tag() {
                         )],
                         &mut expressions,
                     ),
-                    result: None,
+                    results: vec![],
                 },
             )],
             terminator,
@@ -225,7 +220,8 @@ fn auto_invokes_fallible_start_once_and_branches_on_its_carrier_tag() {
             id: FunctionId(0),
             entry: BlockId(0),
             params: vec![],
-            return_type: types.fallible_int_string,
+            returns: (vec![types.i32]).into_boxed_slice(),
+            error_return: Some(types.string),
         };
         let module = build_module(
             expressions,

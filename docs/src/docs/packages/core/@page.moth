@@ -17,11 +17,16 @@ page_head #= language_theme_head
     but binding-backed implementations don't become files in your project.
 
     Most Core packages require explicit dependency clauses. Unlike large standard-library
-    preludes, Moth exposes only a small always-available surface such as `io`.
+    preludes, Moth reserves only a small implicit namespace surface such as `io`.
 
-    Builder and backend support can differ. The @../../progress/packages-and-builders
-    (packages and builders progress matrix) records current package availability and
-    important accepted follow-ups.
+    Official environments target the complete Core catalogue with documented
+    host-capability gates. Custom builders may supply only the implementations
+    they need. The reserved `io` namespace alone does not guarantee that a custom
+    host implements its operations.
+
+    The @../../progress/packages-and-builders (packages and builders progress
+    matrix) records current availability and implementation gaps. @../../lappet
+    (Lappet) describes planned native Core support and official package admission.
 
     ## Package pages
 

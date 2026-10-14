@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "literal transport midpoint=1 above=1.001 finite=65500 subnormals=6e-8/1e-45/5e-324 signs=true/true/true"

@@ -1,4 +1,4 @@
-recover || -> Int:
+recover || -> I32:
     then 0
 ;
 

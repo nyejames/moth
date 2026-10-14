@@ -1,2 +1,2 @@
-scores ~= {"Priya" = 10}
+scores ~= {"Priya" = true}
 [:hashmap reachable literal]

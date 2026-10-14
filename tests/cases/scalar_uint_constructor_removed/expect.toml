@@ -2,4 +2,4 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0046"]
-message_contains = ["'Uint'(...) constructor-style conversions are removed"]
+message_contains = ["'U32'(...) constructor-style conversions are removed"]

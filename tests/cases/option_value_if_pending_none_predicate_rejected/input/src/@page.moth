@@ -1,0 +1,5 @@
+wrap type T |value T| -> T?:
+    return value
+;
+origin = wrap(4294967325)
+label String = if origin is none then "guest" else "present"

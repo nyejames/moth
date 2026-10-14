@@ -1,0 +1,16 @@
+-- A grouped receiver of several items has no single receiver item, so its
+-- invalid member must still report the concrete receiver. `receive_u64(count)`
+-- witnesses `count` at its U64 parameter through the member's argument region,
+-- so the delayed unknown-member diagnostic reports 'U64'.
+--
+-- The whole `4_294_967_296` does not fit I32, so a skipped nested witness that
+-- let `count` default would report 'I32' instead.
+
+receive_u64 |value U64| -> String:
+    return cast value
+;
+
+count = 4_294_967_296
+y = (count + 1).unsupported(receive_u64(count))
+
+[:unreachable]

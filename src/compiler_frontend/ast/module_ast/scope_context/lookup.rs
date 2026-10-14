@@ -10,12 +10,14 @@
 //! (`builders`, `local_declarations`, `diagnostic_sinks`).
 
 use super::*;
+use crate::compiler_frontend::ast::ast_nodes::{DeclarationShell, DeclarationValue};
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
-use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::compiler_messages::{
-    InvalidAssignmentTargetReason, InvalidThisUsageReason, NameNamespace,
+    InvalidAssignmentTargetReason, InvalidThisUsageReason, NameNamespace, ReservedNameOwner,
 };
 use crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget;
 use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
@@ -35,14 +37,38 @@ pub(crate) enum ScopeDeclarationRef<'a> {
         binding_span: Option<SourceSpan>,
     },
     Shared(&'a Declaration),
+    /// An eligible body-local numeric binding whose single static type is not selected yet.
+    ///
+    /// WHAT: exposes the construction-owned binding ID plus the authored binding span.
+    /// WHY: a pending binding must be visible to lookup — never treated as an unknown name —
+    ///      while no `Declaration`, `TypeId` or default value exists for it. Callers that need
+    ///      a ready declaration use `ready_declaration()` and must handle the pending case
+    ///      explicitly; there is no implicit deref and no placeholder type.
+    PendingNumeric {
+        binding: crate::compiler_frontend::ast::numeric_construction::NumericBindingId,
+        binding_span: Option<SourceSpan>,
+    },
 }
 
 impl<'a> ScopeDeclarationRef<'a> {
-    /// Return a borrowed view of the underlying declaration.
-    pub(crate) fn as_declaration(&self) -> &Declaration {
+    /// Return a borrowed view of the underlying ready declaration.
+    ///
+    /// `None` for `PendingNumeric`: an unresolved numeric binding has no declaration yet.
+    pub(crate) fn ready_declaration(&self) -> Option<&Declaration> {
         match self {
-            ScopeDeclarationRef::Local { declaration, .. } => declaration.as_ref(),
-            ScopeDeclarationRef::Shared(declaration) => declaration,
+            ScopeDeclarationRef::Local { declaration, .. } => Some(declaration.as_ref()),
+            ScopeDeclarationRef::Shared(declaration) => Some(declaration),
+            ScopeDeclarationRef::PendingNumeric { .. } => None,
+        }
+    }
+
+    /// The construction-owned pending binding ID, if this reference is unresolved.
+    pub(crate) fn pending_binding(
+        &self,
+    ) -> Option<crate::compiler_frontend::ast::numeric_construction::NumericBindingId> {
+        match self {
+            ScopeDeclarationRef::PendingNumeric { binding, .. } => Some(*binding),
+            _ => None,
         }
     }
 
@@ -51,25 +77,21 @@ impl<'a> ScopeDeclarationRef<'a> {
     pub(crate) fn binding_span(&self) -> Option<SourceSpan> {
         match self {
             ScopeDeclarationRef::Local { binding_span, .. } => *binding_span,
+            ScopeDeclarationRef::PendingNumeric { binding_span, .. } => *binding_span,
             ScopeDeclarationRef::Shared(_) => None,
         }
     }
 }
 
-impl<'a> std::ops::Deref for ScopeDeclarationRef<'a> {
-    type Target = Declaration;
-
-    fn deref(&self) -> &Declaration {
-        self.as_declaration()
-    }
-}
+// NOTE: there is intentionally no `Deref<Target = Declaration>` for
+// `ScopeDeclarationRef`. A `PendingNumeric` reference has no declaration, so callers that
+// need one must go through `ready_declaration()` and handle the pending case explicitly.
 
 /// Resolved struct constructor metadata for identifier-led expression dispatch.
 ///
 /// WHAT: carries canonical nominal identity plus the original AST field declarations used for
 /// constructor defaults.
-/// WHY: constructor routing should be driven by semantic TypeId/type-environment facts, while
-/// default expressions still live on AST declarations.
+/// WHY: constructor routing uses canonical nominal identity and each field's folded content handle.
 pub(crate) struct SourceStructConstructor<'a> {
     pub(crate) struct_path: PathId,
     pub(crate) fields: &'a [Declaration],
@@ -84,13 +106,28 @@ impl ScopeContext {
 
     pub(crate) fn get_reference<'a>(&'a self, name: &StringId) -> Option<ScopeDeclarationRef<'a>> {
         // 1. Body-local declarations shadow every source-visible declaration.
-        if let Some((declaration, binding_span)) =
-            self.arena.borrow().lookup(self.current_frame_id, name)
+        if let Some((slot, binding_span)) = self.arena.borrow().lookup(self.current_frame_id, name)
         {
-            return Some(ScopeDeclarationRef::Local {
-                declaration,
-                binding_span,
-            });
+            match slot {
+                LocalDeclarationSlot::Ready(declaration) => {
+                    return Some(ScopeDeclarationRef::Local {
+                        declaration,
+                        binding_span,
+                    });
+                }
+                LocalDeclarationSlot::Pending { binding, domain } => {
+                    // A pending binding from another independent body root is not visible here:
+                    // its dense ID indexes that body's construction tables. The name keeps
+                    // resolving through the ordinary module-visible path below, exactly as if the
+                    // foreign body-local declaration did not shadow it.
+                    if domain == self.numeric_domain_id() {
+                        return Some(ScopeDeclarationRef::PendingNumeric {
+                            binding,
+                            binding_span,
+                        });
+                    }
+                }
+            }
         }
 
         // 2. Source-visible names → canonical declaration path.
@@ -106,7 +143,7 @@ impl ScopeContext {
                     .shared
                     .top_level_declarations
                     .get_by_path(canonical_path)
-                && !declaration.value.is_receiver_function()
+                && !declaration.is_receiver_function()
             {
                 return Some(ScopeDeclarationRef::Shared(declaration));
             }
@@ -121,6 +158,40 @@ impl ScopeContext {
             .top_level_declarations
             .get_visible_non_receiver_by_name(*name, self.visible_declaration_ids.as_deref())
             .map(ScopeDeclarationRef::Shared)
+    }
+
+    /// Reject body bindings that would hide a bound or compiler-owned name.
+    ///
+    /// Declaration lookup can miss compile-time names and source declarations not yet emitted.
+    /// Consume their existing visibility owners without changing value lookup or assignment.
+    pub(crate) fn check_body_binding_visibility(
+        &self,
+        name: StringId,
+        span: Option<SourceSpan>,
+        string_table: &StringTable,
+    ) -> Option<CompilerDiagnostic> {
+        if self
+            .trait_environment()
+            .core_trait_id_for_name(name, string_table)
+            .is_some()
+        {
+            return Some(CompilerDiagnostic::reserved_name_collision(
+                name,
+                ReservedNameOwner::CoreTrait,
+                span,
+            ));
+        }
+
+        if self.file_visibility.as_ref().is_some_and(|visibility| {
+            visibility.visible_source_names.contains_key(&name)
+                || visibility.visible_type_alias_names.contains_key(&name)
+                || visibility.visible_trait_names.contains_key(&name)
+                || visibility.visible_external_symbols.contains_key(&name)
+                || visibility.visible_namespace_records.contains_key(&name)
+        }) {
+            return Some(CompilerDiagnostic::shadowed_name(name, None, span));
+        }
+        None
     }
 
     /// Resolve the reserved receiver binding and report its shared availability rules.
@@ -169,19 +240,13 @@ impl ScopeContext {
         })
     }
 
-    /// Return whether a name already resolves to a visible local declaration.
+    /// Check local and source-visible declarations before publishing a new binding.
     ///
-    /// WHAT: a dedicated existence check used before declaring a new local binding.
-    ///       It walks the same parent-linked frame chain as `get_reference`, but counts
-    ///       the walk as a redeclaration ancestor check for instrumentation.
-    /// WHY: no-shadowing means the latest visible local wins; a new binding is illegal
-    ///      if any ancestor frame already declares the name.
-    pub(crate) fn has_visible_local_declaration(&self, name: &StringId) -> bool {
+    /// Count no-shadowing queries separately while using the same visibility owner as expressions.
+    /// Other bound and compiler-owned names are checked by `check_body_binding_visibility`.
+    pub(crate) fn has_visible_declaration(&self, name: &StringId) -> bool {
         increment_ast_counter(AstCounter::ScopeFrameRedeclarationAncestorChecks);
-        self.arena
-            .borrow()
-            .lookup(self.current_frame_id, name)
-            .is_some()
+        self.get_reference(name).is_some()
     }
     /// WHAT: accepts body-local constants recorded during scope growth plus top-level
     /// module constants from either seeded header contexts or completed module lookups.
@@ -212,6 +277,17 @@ impl ScopeContext {
             .is_some_and(|lookups| lookups.resolved_module_constants.contains(declaration_id))
     }
 
+    /// Whether a declaration is a top-level constant header whose folded value is still pending.
+    ///
+    /// WHAT: delegates to the shared top-level table, which owns the constant header role.
+    /// WHY: deferred struct-shell and constant-context checks must recognise pending constants
+    ///     by header role, not by declared type.
+    pub(crate) fn is_unresolved_constant_placeholder(&self, declaration: &Declaration) -> bool {
+        self.shared
+            .top_level_declarations
+            .is_unresolved_constant_placeholder(declaration)
+    }
+
     pub(crate) fn lookup_generic_function_template(
         &self,
         function_path: &PathId,
@@ -231,7 +307,8 @@ impl ScopeContext {
     pub(crate) fn semantic_kind_for_declaration(
         &self,
         declaration: &Declaration,
-        type_environment: &TypeEnvironment,
+        expression_builder: &AstExpressionBuilder,
+        const_values: &ConstValueStore,
     ) -> Result<DeclarationSemanticKind, TemplateError> {
         if let Some(kind) = self
             .lookups
@@ -241,18 +318,29 @@ impl ScopeContext {
             return Ok(kind);
         }
 
-        let kind = match &declaration.value.kind {
-            ExpressionKind::Function(..) => DeclarationSemanticKind::Function,
-            ExpressionKind::NoValue => match type_environment.get(declaration.value.type_id) {
-                Some(TypeDefinition::Struct(..)) => DeclarationSemanticKind::Struct,
-                Some(TypeDefinition::Choice(..)) => DeclarationSemanticKind::Choice,
-                _ => DeclarationSemanticKind::Value,
-            },
-            _ => {
-                let value_is_compile_time_constant = declaration
-                    .value
-                    .const_value_kind_with_template_classifier(&mut |template| {
-                        classify_template_from_effective_tir(template, &self.template_ir_store)
+        let kind = match &declaration.value {
+            DeclarationValue::Shell(DeclarationShell::Function { .. }) => {
+                DeclarationSemanticKind::Function
+            }
+            DeclarationValue::Shell(DeclarationShell::Struct) => DeclarationSemanticKind::Struct,
+            DeclarationValue::Shell(DeclarationShell::Choice) => DeclarationSemanticKind::Choice,
+            DeclarationValue::StructDefinition(_) => DeclarationSemanticKind::Value,
+            DeclarationValue::Shell(DeclarationShell::TypeAlias) | DeclarationValue::Absent => {
+                DeclarationSemanticKind::Value
+            }
+            DeclarationValue::PendingConstant | DeclarationValue::Default(_) => {
+                DeclarationSemanticKind::Constant
+            }
+            DeclarationValue::Initializer(expression_id) => {
+                let expression = expression_builder.view(*expression_id)?;
+                let value_is_compile_time_constant = expression
+                    .const_value_kind_with_template_classifier(const_values, &mut |template| {
+                        classify_template_from_effective_tir(
+                            template,
+                            &self.template_ir_store,
+                            expression_builder,
+                            const_values,
+                        )
                     })?
                     .is_compile_time_value();
 
@@ -269,24 +357,17 @@ impl ScopeContext {
 
     /// Resolve callable metadata for a source declaration.
     ///
-    /// Top-level functions are classified from the environment's resolved signature table.
-    /// Body-local functions carry their signature directly in `ExpressionKind::Function`.
-    pub(crate) fn source_callable_signature<'a>(
-        &'a self,
-        declaration: &'a Declaration,
-    ) -> Option<&'a FunctionSignature> {
-        if let Some(resolved_signature) = self.lookups.as_ref().and_then(|lookups| {
+    /// Callable contracts belong to the immutable module signature table.
+    pub(crate) fn source_callable_signature(
+        &self,
+        declaration: &Declaration,
+    ) -> Option<&FunctionSignature> {
+        self.lookups.as_ref().and_then(|lookups| {
             lookups
                 .resolved_function_signatures_by_path
                 .get(&declaration.id)
-        }) {
-            return Some(&resolved_signature.signature);
-        }
-
-        match &declaration.value.kind {
-            ExpressionKind::Function(signature) => Some(signature),
-            _ => None,
-        }
+                .map(|resolved| &resolved.signature)
+        })
     }
 
     /// Only local private no-slot calls may contribute inferred failure to an outer expression.
@@ -353,14 +434,16 @@ impl ScopeContext {
         &'a self,
         declaration: &'a Declaration,
         type_environment: &TypeEnvironment,
+        expression_builder: &AstExpressionBuilder,
+        const_values: &ConstValueStore,
     ) -> Result<Option<SourceStructConstructor<'a>>, TemplateError> {
-        if self.semantic_kind_for_declaration(declaration, type_environment)?
+        if self.semantic_kind_for_declaration(declaration, expression_builder, const_values)?
             != DeclarationSemanticKind::Struct
         {
             return Ok(None);
         }
 
-        let type_id = declaration.value.type_id;
+        let type_id = declaration.type_id;
         // The semantic check above confirmed this declaration is a struct, so
         // the nominal type path must be registered. A missing path is a compiler
         // invariant violation, not a user-facing diagnostic.
@@ -382,7 +465,7 @@ impl ScopeContext {
         Ok(Some(SourceStructConstructor {
             struct_path,
             fields,
-            struct_value_mode: &declaration.value.value_mode,
+            struct_value_mode: &declaration.value_mode,
             type_id,
         }))
     }
@@ -391,10 +474,11 @@ impl ScopeContext {
     pub(crate) fn is_source_choice_declaration(
         &self,
         declaration: &Declaration,
-        type_environment: &TypeEnvironment,
+        expression_builder: &AstExpressionBuilder,
+        const_values: &ConstValueStore,
     ) -> Result<bool, TemplateError> {
         Ok(
-            self.semantic_kind_for_declaration(declaration, type_environment)?
+            self.semantic_kind_for_declaration(declaration, expression_builder, const_values)?
                 == DeclarationSemanticKind::Choice,
         )
     }
@@ -525,32 +609,6 @@ impl ScopeContext {
             .as_ref()
             .is_some_and(|file_visibility| {
                 file_visibility.visible_type_alias_names.contains_key(&name)
-            })
-    }
-
-    /// Check whether a visible source binding points at a nominal type declaration.
-    ///
-    /// WHAT: uses canonical declaration paths instead of source spelling conventions.
-    /// WHY: values may violate naming conventions and receive warnings, but namespace diagnostics
-    /// must rely on the header/AST type metadata that identifies real type declarations.
-    pub(crate) fn is_nominal_type_declaration_path(&self, path: &PathId) -> bool {
-        if self.nominal_type_ids_by_path.contains_key(path) {
-            return true;
-        }
-
-        self.lookups
-            .as_ref()
-            .and_then(|lookups| {
-                if lookups.module_symbols.nominal_type_paths.contains(path) {
-                    return Some(DeclarationSemanticKind::Struct);
-                }
-                lookups.declaration_semantics.kind_for_path(path)
-            })
-            .is_some_and(|kind| {
-                matches!(
-                    kind,
-                    DeclarationSemanticKind::Struct | DeclarationSemanticKind::Choice
-                )
             })
     }
 }

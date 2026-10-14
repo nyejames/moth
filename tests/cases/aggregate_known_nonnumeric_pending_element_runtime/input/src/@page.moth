@@ -1,0 +1,39 @@
+-- Unannotated numeric arguments stay pending until the U64 parameter receivers of the
+-- retained calls select their class. The String and Bool collections keep their known
+-- nonnumeric element types, so their reads stay String and Bool.
+
+format_origin |value U64| -> String:
+    return cast value
+;
+
+is_wide |value U64| -> Bool:
+    return value > 4_294_967_295
+;
+
+render_pending_known_nonnumeric || -> String:
+    origin = 4_294_967_296
+    small_origin = 7
+    labels = {format_origin(origin)}
+    label = labels.get(0) catch:
+        then "missing"
+    ;
+    label_count = labels.length()
+    flags = {is_wide(origin), is_wide(small_origin)}
+    wide = flags.get(0) catch:
+        then false
+    ;
+    narrow = flags.get(1) catch:
+        then true
+    ;
+    flag_count = flags.length()
+    comparisons = {origin > 4_294_967_295, small_origin > 4_294_967_295}
+    comparison_wide = comparisons.get(0) catch:
+        then false
+    ;
+    comparison_narrow = comparisons.get(1) catch:
+        then true
+    ;
+    return [:known_nonnumeric_pending label=[label] len=[label_count] wide=[wide] narrow=[narrow] flags_len=[flag_count] comparison_wide=[comparison_wide] comparison_narrow=[comparison_narrow]]
+;
+
+[:[render_pending_known_nonnumeric()]]

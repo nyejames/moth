@@ -1,0 +1,72 @@
+-- Retained whole-fragment catch result contract.
+--
+-- The handler is resolved against the protected fragment's own result, never
+-- the trailing operand's signature or the trailing call's success slot, and the
+-- recovery result is the whole fragment rather than the bare call:
+--
+-- 1. `call + 10` keeps the fragment's I32 result even though its trailing item
+--    is a literal in the reversed order. The failure path recovers the whole
+--    fragment as 0 and the succeeding typed call still adds 10.
+-- 2. `1 / call` completes as F64 through whole-integer real division, so the
+--    F64 fallback 0.0 is the valid receiver and the succeeding path is 0.5. A
+--    contract read from the call's I32 slot would reject the source or demand
+--    an I32 fallback.
+-- 3. A raw leaf beside the U64 call with a raw fallback 0 must materialise at
+--    the fragment's U64 result so the later U64 receiver accepts both the
+--    failed 0 and the succeeding 42. Leaving the fallback on the I32 default
+--    rejects the receiver.
+-- 4. A numeric-dependent fallback value stays a produced value of the full
+--    handler in both the inline and block forms, for the provisional
+--    whole-arithmetic site and the known single-call site alike: the pending
+--    reference is completed at the fragment's resolved I32 slot and recovers 2,
+--    instead of escaping as a subfragment of the enclosing initializer.
+--
+-- `pending` and `dependent_fallback` stay unannotated so both origins are
+-- genuinely pending until their I32 receivers resolve them.
+
+recover_fragment |value I32| -> I32, Error!:
+    return! Error("whole fragment failed")
+;
+
+succeed_fragment |value I32| -> I32, Error!:
+    return value + 1
+;
+
+recover_u64_fragment |value I32| -> U64, Error!:
+    return! Error("u64 fragment failed")
+;
+
+succeed_u64_fragment |value I32| -> U64, Error!:
+    return 41
+;
+
+receive_u64 |value U64| -> String:
+    return cast value
+;
+
+pending = 1
+
+reversed_failure = recover_fragment(pending) + 10 catch then 0
+reversed_success = succeed_fragment(pending) + 10 catch then 0
+
+division_failure = 1 / recover_fragment(pending) catch then 0.0
+division_success = 1 / succeed_fragment(pending) catch then 0.0
+
+u64_failure = recover_u64_fragment(pending) + 1 catch then 0
+u64_success = succeed_u64_fragment(pending) + 1 catch then 0
+
+-- The fallback is the same still-unresolved origin as the call argument, so
+-- the handler must own its produced value until the fragment's I32 slot types
+-- it. The whole-arithmetic rows defer the site; the bare-call rows already know
+-- their Some(I32) site and must still own the numeric-dependent produced value.
+dependent_fallback = 2
+fallback_inline = recover_fragment(dependent_fallback) + 10 catch then dependent_fallback
+fallback_block = recover_fragment(dependent_fallback) + 10 catch:
+    then dependent_fallback
+;
+known_inline = recover_fragment(dependent_fallback) catch then dependent_fallback
+known_block = recover_fragment(dependent_fallback) catch:
+    then dependent_fallback
+;
+
+[:scalar fragment catch reversed=[reversed_failure]/[reversed_success] division=[division_failure]/[division_success] u64=[receive_u64(u64_failure)]/[receive_u64(u64_success)] fallback=[fallback_inline]/[fallback_block] known=[known_inline]/[known_block]]

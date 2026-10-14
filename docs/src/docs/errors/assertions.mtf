@@ -8,8 +8,8 @@ message:
 ]
 
 This is compiler-owned metadata, not an importable or shadowable Moth
-function. The rules below describe the accepted contract. See @../progress
-(Progress) for current compiler and backend support.
+function. These rules describe the accepted contract. The Progress matrix owns
+current compiler and backend support: @../progress (Progress).
 
 [codeblock, $code("moth"):
     assert(index < items.length())
@@ -45,12 +45,14 @@ function. The rules below describe the accepted contract. See @../progress
 - The shared call-argument grammar owns trailing-comma behaviour.
 
 The message is type checked, generic-inferred, evidence-checked and fully
-normalized, including nested templates, even when the condition is compile-time
-`true`. The normalized inactive message is then replaced with typed `none` before
-the AST/HIR boundary, so it publishes no TIR, runtime handoff,
-generated-function request or downstream executable fact. An active message is
-evaluated only on the failure edge. A template-backed message is read as one
-snapshot at failure and does not create an assertion sink or live subscription.
+normalised, including nested templates, even when the condition is compile-time
+`true`. The inactive message is then replaced with typed `none` before the
+AST/HIR boundary. Its private generic calls still undergo concrete failure
+validation, but validation-only sidecars are removed before executable
+publication. No inactive TIR, runtime handoff or executable message demand
+survives. An active message is evaluated only on the failure edge. A
+template-backed message is read as one snapshot at failure and does not create
+an assertion sink or live subscription.
 Message construction cannot escape its evaluation through `!`, `?`, `return`,
 `break` or `continue`, or through escaping implicit or typed failure. This
 includes inferred failure from a private call without an error slot. Handle

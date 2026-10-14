@@ -7,8 +7,12 @@
 use crate::compiler_frontend::ast::ast_nodes::{
     Declaration, LoopBindings, RangeEndKind, RangeLoopSpec,
 };
-use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::const_values::store::{
+    ConstStringValue, ConstValuePayload, ConstValueStore,
+};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, ExpressionOperationView,
+};
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{
@@ -45,7 +49,6 @@ use crate::compiler_frontend::ast::templates::tir::{
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidTemplateStructureReason,
 };
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
@@ -54,8 +57,9 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable}
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
+use crate::compiler_frontend::tests::ast_fixture_support::make_test_variable;
 use crate::compiler_frontend::value_mode::ValueMode;
-use moth_lexical::numeric::profile::NumericProfile;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -87,21 +91,69 @@ fn build_text_fixture(string_table: &mut StringTable, text: &str) -> TextFixture
     }
 }
 
-fn fold_context<'a>(string_table: &'a mut StringTable) -> TirFoldContext<'a> {
+fn fold_context<'a>(
+    string_table: &'a mut StringTable,
+    expression_builder: &'a mut AstExpressionBuilder,
+    const_values: &'a mut ConstValueStore,
+) -> TirFoldContext<'a> {
     TirFoldContext {
         string_table,
+        expression_builder,
+        const_values,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         source_scope: None,
         bindings: vec![],
     }
+}
+
+/// One exact `I32` literal for fold-view fixtures.
+fn i32_expression(
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    value: i64,
+) -> ExprId {
+    expressions
+        .fixed_scalar(
+            const_values,
+            FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32"),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("i32 test literal should construct")
+        .id()
+}
+
+/// Whether this expression is one exact `I32` literal with the expected value.
+fn is_i32_literal(
+    expressions: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
+    expression: ExprId,
+    expected: i64,
+) -> bool {
+    let ExpressionOperationView::Constant(value) = expressions
+        .view(expression)
+        .expect("expression should exist")
+        .operation()
+    else {
+        return false;
+    };
+    matches!(
+        const_values.payload(value),
+        Some(ConstValuePayload::FixedScalar(value))
+            if value.scalar() == FixedScalar::I32 && value.as_i64() == Some(expected)
+    )
 }
 
 fn fold_prepared_view(
     view: &TirView<'_>,
     context: &mut TirFoldContext<'_>,
 ) -> Result<TemplateEmission, TemplateError> {
-    let prepared = prepare_tir_view(view, TemplatePreparationMode::Value)?;
+    let prepared = prepare_tir_view(
+        view,
+        context.expression_builder,
+        context.const_values,
+        TemplatePreparationMode::Value,
+    )?;
     assert!(matches!(
         prepared.outcome,
         TemplatePreparationOutcome::Foldable
@@ -162,7 +214,9 @@ fn fold_view_matches_direct_template_fold_for_simple_text() {
     )
     .expect("view should construct");
 
-    let mut context = fold_context(&mut string_table);
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let mut context = fold_context(&mut string_table, &mut expressions, &mut const_values);
     let emission = fold_prepared_view(&view, &mut context).expect("view fold should succeed");
 
     assert_eq!(
@@ -175,6 +229,8 @@ fn fold_view_matches_direct_template_fold_for_simple_text() {
 fn fold_view_is_deterministic_with_and_without_active_bindings() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let fixture = build_text_fixture(&mut string_table, "cached");
     let view = TirView::new(
         &fixture.store,
@@ -186,7 +242,8 @@ fn fold_view_is_deterministic_with_and_without_active_bindings() {
 
     // Folding the same view twice in one context must produce the same result.
     {
-        let mut empty_context = fold_context(&mut string_table);
+        let mut empty_context =
+            fold_context(&mut string_table, &mut expressions, &mut const_values);
         let first = fold_prepared_view(&view, &mut empty_context)
             .expect("empty-binding fold should succeed");
         let second =
@@ -198,14 +255,16 @@ fn fold_view_is_deterministic_with_and_without_active_bindings() {
     let path = path_fork
         .try_intern_portable_path("value", &mut string_table)
         .expect("test path fits");
+    let active_value = i32_expression(&mut expressions, &mut const_values, 1);
     let mut active_context = TirFoldContext {
         string_table: &mut string_table,
+        expression_builder: &mut expressions,
+        const_values: &mut const_values,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
         source_scope: None,
         bindings: vec![TemplateFoldBinding {
             path,
-            value: Expression::int(1, None, ValueMode::ImmutableOwned),
+            value: active_value,
         }],
     };
     fold_prepared_view(&view, &mut active_context)
@@ -216,6 +275,8 @@ fn fold_view_is_deterministic_with_and_without_active_bindings() {
 fn prepared_view_rejects_identity_mismatch() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut fixture = build_text_fixture(&mut string_table, "identity");
     let alternate_id = {
         let text_id = string_table.intern("alternate");
@@ -244,20 +305,19 @@ fn prepared_view_rejects_identity_mismatch() {
         fixture.context,
     )
     .expect("alternate view should construct");
-    let preparation = prepare_tir_view(&original_view, TemplatePreparationMode::Value)
-        .expect("preparation should succeed");
+    let preparation = prepare_tir_view(
+        &original_view,
+        &expressions,
+        &const_values,
+        TemplatePreparationMode::Value,
+    )
+    .expect("preparation should succeed");
     assert!(matches!(
         preparation.outcome,
         TemplatePreparationOutcome::Foldable
     ));
 
-    let mut context = TirFoldContext {
-        string_table: &mut string_table,
-        template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
-        source_scope: None,
-        bindings: vec![],
-    };
+    let mut context = fold_context(&mut string_table, &mut expressions, &mut const_values);
     let error = fold_prepared_template(&preparation, alternate_view, &mut context)
         .expect_err("prepared identity mismatch should fail");
     assert!(format!("{error:?}").contains("root"));
@@ -267,6 +327,8 @@ fn prepared_view_rejects_identity_mismatch() {
 fn foldable_preparation_accepts_simple_text() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
     let fixture = build_text_fixture(&mut string_table, "safe");
     let view = TirView::new(
         &fixture.store,
@@ -275,8 +337,13 @@ fn foldable_preparation_accepts_simple_text() {
         fixture.context,
     )
     .expect("view should construct");
-    let preparation = prepare_tir_view(&view, TemplatePreparationMode::Value)
-        .expect("simple text should have a valid preparation");
+    let preparation = prepare_tir_view(
+        &view,
+        &expressions,
+        &const_values,
+        TemplatePreparationMode::Value,
+    )
+    .expect("simple text should have a valid preparation");
     assert!(
         matches!(preparation.outcome, TemplatePreparationOutcome::Foldable),
         "text-only view should produce a foldable result"
@@ -287,6 +354,8 @@ fn foldable_preparation_accepts_simple_text() {
 fn fold_view_slot_overlay_resolves_filled_and_missing_to_empty() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut store = TemplateIrStore::new();
     let fill_text = string_table.intern("filled");
     let mut builder = TemplateIrBuilder::new(&mut store);
@@ -330,7 +399,7 @@ fn fold_view_slot_overlay_resolves_filled_and_missing_to_empty() {
         resolved_context,
     )
     .expect("resolved view should construct");
-    let mut context = fold_context(&mut string_table);
+    let mut context = fold_context(&mut string_table, &mut expressions, &mut const_values);
     let resolved_emission = fold_prepared_view(&resolved_view, &mut context)
         .expect("resolved slot overlay fold should succeed");
     assert_eq!(
@@ -368,21 +437,30 @@ fn fold_view_slot_overlay_resolves_filled_and_missing_to_empty() {
 fn fold_view_conditional_selectors_use_overlay_or_structural_expression() {
     let mut string_table = StringTable::new();
     let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let bool_selector = expressions
+        .bool(&mut const_values, false, None, ValueMode::ImmutableOwned)
+        .expect("false selector should construct")
+        .id();
 
     let (bool_template, bool_site, bool_body_text) = build_conditional_template(
         &mut store,
         &mut string_table,
-        TemplateBranchSelector::Bool(Expression::bool(false, None, ValueMode::ImmutableOwned)),
+        TemplateBranchSelector::Bool(bool_selector),
         "bool-body",
     );
 
     let mut type_environment = TypeEnvironment::new();
-    let option_none = Expression::option_none_with_type_id(
-        builtin_type_ids::STRING,
-        DataType::StringSlice,
-        &mut type_environment,
-        None,
-    );
+    let option_none = expressions
+        .option_none_with_type_id(
+            &mut const_values,
+            builtin_type_ids::STRING,
+            &mut type_environment,
+            None,
+        )
+        .expect("option none should construct")
+        .id();
     let capture_name = string_table.intern("capture");
     let mut path_fork = PathInternerFork::empty();
     let capture_path = path_fork
@@ -395,11 +473,16 @@ fn fold_view_conditional_selectors_use_overlay_or_structural_expression() {
         span: None,
         binding_span: None,
     };
-    let mut option_some = option_none.clone();
-    option_some.kind = ExpressionKind::Coerced {
-        value: Box::new(Expression::int(7, None, ValueMode::ImmutableOwned)),
-        to_type: option_some.type_id,
-    };
+    let option_none_type = expressions
+        .view(option_none)
+        .expect("option none view should exist")
+        .value_type_id()
+        .expect("option none should be single-valued");
+    let option_some_value = i32_expression(&mut expressions, &mut const_values, 7);
+    let option_some = expressions
+        .coerced(expressions.own(option_some_value), option_none_type)
+        .expect("option coercion should construct")
+        .id();
     let (option_template, option_site, option_body_text) = build_conditional_template(
         &mut store,
         &mut string_table,
@@ -410,17 +493,18 @@ fn fold_view_conditional_selectors_use_overlay_or_structural_expression() {
         "option-body",
     );
 
+    let bool_override = expressions
+        .bool(&mut const_values, true, None, ValueMode::ImmutableOwned)
+        .expect("bool overlay literal should construct")
+        .id();
     let bool_overlay_id = store
         .allocate_expression_overlay(TirExpressionOverlay {
-            overrides: vec![(
-                bool_site,
-                Box::new(Expression::bool(true, None, ValueMode::ImmutableOwned)),
-            )],
+            overrides: vec![(bool_site, bool_override)],
         })
         .expect("bool overlay allocation");
     let option_overlay_id = store
         .allocate_expression_overlay(TirExpressionOverlay {
-            overrides: vec![(option_site, Box::new(option_some))],
+            overrides: vec![(option_site, option_some)],
         })
         .expect("option overlay allocation");
 
@@ -461,7 +545,7 @@ fn fold_view_conditional_selectors_use_overlay_or_structural_expression() {
     )
     .expect("option overlay view should construct");
 
-    let mut fold_context = fold_context(&mut string_table);
+    let mut fold_context = fold_context(&mut string_table, &mut expressions, &mut const_values);
     assert_eq!(
         fold_prepared_view(&bool_structural_view, &mut fold_context)
             .expect("structural bool selector should fold"),
@@ -489,6 +573,8 @@ fn fold_view_restores_option_and_loop_bindings_after_const_loop_limit_error() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
 
     let option_capture_name = string_table.intern("option_value");
     let option_capture_path = path_fork
@@ -502,21 +588,30 @@ fn fold_view_restores_option_and_loop_bindings_after_const_loop_limit_error() {
         .expect("outer fold binding path fits");
 
     let mut type_environment = TypeEnvironment::new();
-    let mut option_scrutinee = Expression::option_none_with_type_id(
-        builtin_type_ids::INT,
-        DataType::Int,
-        &mut type_environment,
-        None,
-    );
-    option_scrutinee.kind = ExpressionKind::Coerced {
-        value: Box::new(Expression::int(7, None, ValueMode::ImmutableOwned)),
-        to_type: option_scrutinee.type_id,
-    };
+    let option_none = expressions
+        .option_none_with_type_id(
+            &mut const_values,
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            &mut type_environment,
+            None,
+        )
+        .expect("option none should construct")
+        .id();
+    let option_none_type = expressions
+        .view(option_none)
+        .expect("option none view should exist")
+        .value_type_id()
+        .expect("option none should be single-valued");
+    let option_scrutinee_value = i32_expression(&mut expressions, &mut const_values, 7);
+    let option_scrutinee = expressions
+        .coerced(expressions.own(option_scrutinee_value), option_none_type)
+        .expect("option coercion should construct")
+        .id();
 
     let option_pattern = MatchPattern::OptionPresentCapture {
         name: option_capture_name,
         binding_path: option_capture_path,
-        inner_type_id: builtin_type_ids::INT,
+        inner_type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
         span: None,
         binding_span: None,
     };
@@ -530,31 +625,21 @@ fn fold_view_restores_option_and_loop_bindings_after_const_loop_limit_error() {
         None,
     );
     let inner_body = builder.push_sequence_node(vec![inner_text_node], None);
-    let range_header = |item, end| TemplateLoopHeader::Range {
+    let outer_value = i32_expression(&mut expressions, &mut const_values, 0);
+    let outer_item = make_test_variable(outer_iteration_path, outer_value, &expressions);
+    let mut range_header = |item: Option<Declaration>, end: i64| TemplateLoopHeader::Range {
         bindings: Box::new(LoopBindings { item, index: None }),
         range: Box::new(RangeLoopSpec {
-            start: Expression::int(0, None, ValueMode::ImmutableOwned),
-            end: Expression::int(end, None, ValueMode::ImmutableOwned),
+            start: i32_expression(&mut expressions, &mut const_values, 0),
+            end: i32_expression(&mut expressions, &mut const_values, end),
             end_kind: RangeEndKind::Exclusive,
             step: None,
         }),
     };
     let inner_loop = builder.push_loop_node(range_header(None, 2), inner_body, None, None);
     let outer_body = builder.push_sequence_node(vec![inner_loop], None);
-    let outer_loop = builder.push_loop_node(
-        range_header(
-            Some(Declaration {
-                id: outer_iteration_path,
-                value: Expression::int(0, None, ValueMode::ImmutableOwned),
-                binding_span: None,
-                config_qualifier: None,
-            }),
-            1,
-        ),
-        outer_body,
-        None,
-        None,
-    );
+    let outer_loop =
+        builder.push_loop_node(range_header(Some(outer_item), 1), outer_body, None, None);
     let conditional_body = builder.push_sequence_node(vec![outer_loop], None);
     let conditional = builder.push_conditional_node(
         TemplateBranchSelector::OptionPresentCapture {
@@ -580,18 +665,24 @@ fn fold_view_restores_option_and_loop_bindings_after_const_loop_limit_error() {
         TemplateViewContext::default(),
     )
     .expect("nested const-control-flow view should construct");
-    let prepared = prepare_tir_view(&view, TemplatePreparationMode::Value)
-        .expect("nested const-control-flow view should prepare");
+    let prepared = prepare_tir_view(
+        &view,
+        &expressions,
+        &const_values,
+        TemplatePreparationMode::Value,
+    )
+    .expect("nested const-control-flow view should prepare");
     assert!(matches!(
         prepared.outcome,
         TemplatePreparationOutcome::Foldable
     ));
 
-    let mut context = fold_context(&mut string_table);
+    let unrelated_value = i32_expression(&mut expressions, &mut const_values, 9);
+    let mut context = fold_context(&mut string_table, &mut expressions, &mut const_values);
     context.template_const_loop_iteration_limit = 1;
     context.bindings.push(TemplateFoldBinding {
         path: unrelated_outer_path,
-        value: Expression::int(9, None, ValueMode::ImmutableOwned),
+        value: unrelated_value,
     });
 
     let error = fold_prepared_template(&prepared, view, &mut context)
@@ -618,9 +709,11 @@ fn fold_view_restores_option_and_loop_bindings_after_const_loop_limit_error() {
         vec![unrelated_outer_path],
         "the failed fold must remove the option capture and active outer loop item"
     );
-    assert!(matches!(
-        context.bindings[0].value.kind,
-        ExpressionKind::Int(9)
+    assert!(is_i32_literal(
+        context.expression_builder,
+        context.const_values,
+        context.bindings[0].value,
+        9,
     ));
 }
 
@@ -679,12 +772,14 @@ fn text_template(
 fn fold_prepared_template_rejects_parsed_phase() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut store = TemplateIrStore::new();
     let template_id = text_template(&mut store, &mut string_table, "parsed");
     let context = TemplateViewContext::default();
     let view = TirView::new(&store, template_id, TemplateTirPhase::Parsed, context)
         .expect("view should construct");
-    let mut context = fold_context(&mut string_table);
+    let mut context = fold_context(&mut string_table, &mut expressions, &mut const_values);
 
     let prepared = TemplatePreparation {
         identity: view.identity(),
@@ -710,16 +805,18 @@ fn fold_prepared_template_rejects_parsed_phase() {
 fn prepared_fold_rejects_missing_body_in_false_conditional() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let bool_selector = expressions
+        .bool(&mut const_values, false, None, ValueMode::ImmutableOwned)
+        .expect("false selector should construct")
+        .id();
     let mut store = TemplateIrStore::new();
     let missing_body = TemplateIrNodeId::new(999);
     let selector_site_id = store.next_expression_site_id();
     let root = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Conditional {
-            selector: Box::new(TemplateBranchSelector::Bool(Expression::bool(
-                false,
-                None,
-                ValueMode::ImmutableOwned,
-            ))),
+            selector: Box::new(TemplateBranchSelector::Bool(bool_selector)),
             selector_site_id,
             body: missing_body,
         },
@@ -735,7 +832,7 @@ fn prepared_fold_rejects_missing_body_in_false_conditional() {
     let context = TemplateViewContext::default();
     let view = TirView::new(&store, template_id, TemplateTirPhase::Composed, context)
         .expect("view should construct");
-    let mut context = fold_context(&mut string_table);
+    let mut context = fold_context(&mut string_table, &mut expressions, &mut const_values);
 
     let error = fold_prepared_view(&view, &mut context)
         .expect_err("a missing body must be rejected even when the selector is false");
@@ -750,6 +847,8 @@ fn prepared_fold_rejects_missing_body_in_false_conditional() {
 fn prepared_fold_emits_each_occurrence_of_a_repeated_composed_child_view() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut store = TemplateIrStore::new();
     let child_template_id = text_template(&mut store, &mut string_table, "child");
     let child_reference = TemplateTirChildReference::new(
@@ -780,7 +879,7 @@ fn prepared_fold_emits_each_occurrence_of_a_repeated_composed_child_view() {
     )
     .expect("parent view should construct");
     let expected_output = string_table.intern("childchild");
-    let mut context = fold_context(&mut string_table);
+    let mut context = fold_context(&mut string_table, &mut expressions, &mut const_values);
 
     let emission = fold_prepared_view(&view, &mut context)
         .expect("repeated composed child views should fold successfully");
@@ -795,14 +894,25 @@ fn prepared_fold_emits_each_occurrence_of_a_repeated_composed_child_view() {
 fn prepared_fold_preserves_root_expression_overlay_through_nested_children() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut store = TemplateIrStore::new();
     let empty_context = TemplateViewContext::default();
 
     let structural_text = string_table.intern("structural-leaf");
+    let structural_expression = expressions
+        .string_slice(
+            &mut const_values,
+            structural_text,
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("structural leaf literal should construct")
+        .id();
     let leaf_template_id = {
         let mut builder = TemplateIrBuilder::new(&mut store);
         let leaf_expression = builder.push_dynamic_expression_node(
-            Expression::string_slice(structural_text, None, ValueMode::ImmutableOwned),
+            structural_expression,
             TemplateSegmentOrigin::Body,
             None,
         );
@@ -849,17 +959,28 @@ fn prepared_fold_preserves_root_expression_overlay_through_nested_children() {
 
     let first_text = string_table.intern("first-root-overlay");
     let second_text = string_table.intern("second-root-overlay");
+    let first_override = expressions
+        .string_slice(
+            &mut const_values,
+            first_text,
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("first root overlay literal should construct")
+        .id();
+    let second_override = expressions
+        .string_slice(
+            &mut const_values,
+            second_text,
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("second root overlay literal should construct")
+        .id();
     let first_context = {
         let overlay_id = store
             .allocate_expression_overlay(TirExpressionOverlay {
-                overrides: vec![(
-                    leaf_site_id,
-                    Box::new(Expression::string_slice(
-                        first_text,
-                        None,
-                        ValueMode::ImmutableOwned,
-                    )),
-                )],
+                overrides: vec![(leaf_site_id, first_override)],
             })
             .expect("test overlay allocation");
         TemplateViewContext {
@@ -871,14 +992,7 @@ fn prepared_fold_preserves_root_expression_overlay_through_nested_children() {
     let second_context = {
         let overlay_id = store
             .allocate_expression_overlay(TirExpressionOverlay {
-                overrides: vec![(
-                    leaf_site_id,
-                    Box::new(Expression::string_slice(
-                        second_text,
-                        None,
-                        ValueMode::ImmutableOwned,
-                    )),
-                )],
+                overrides: vec![(leaf_site_id, second_override)],
             })
             .expect("test overlay allocation");
         TemplateViewContext {
@@ -904,12 +1018,12 @@ fn prepared_fold_preserves_root_expression_overlay_through_nested_children() {
     .expect("second view should construct");
 
     let first = {
-        let mut context = fold_context(&mut string_table);
+        let mut context = fold_context(&mut string_table, &mut expressions, &mut const_values);
         fold_prepared_view(&first_view, &mut context)
     }
     .expect("first overlay fold should succeed");
     let second = {
-        let mut context = fold_context(&mut string_table);
+        let mut context = fold_context(&mut string_table, &mut expressions, &mut const_values);
         fold_prepared_view(&second_view, &mut context)
     }
     .expect("second overlay fold should succeed");
@@ -928,6 +1042,8 @@ fn prepared_fold_preserves_root_expression_overlay_through_nested_children() {
 fn repeated_prepared_fold_reuses_effective_expression_provenance() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut store = TemplateIrStore::new();
     let text = string_table.intern("effective");
     let member = SyntheticInterfaceMemberIdentity::new(
@@ -935,13 +1051,14 @@ fn repeated_prepared_fold_reuses_effective_expression_provenance() {
         "render",
         "effective",
     );
+    let dynamic_value = expressions
+        .string_slice(&mut const_values, text, None, ValueMode::ImmutableOwned)
+        .expect("dynamic string literal should construct")
+        .id();
     let (template_id, site_id) = {
         let mut builder = TemplateIrBuilder::new(&mut store);
-        let dynamic = builder.push_dynamic_expression_node(
-            Expression::string_slice(text, None, ValueMode::ImmutableOwned),
-            TemplateSegmentOrigin::Body,
-            None,
-        );
+        let dynamic =
+            builder.push_dynamic_expression_node(dynamic_value, TemplateSegmentOrigin::Body, None);
         let root = builder.push_sequence_node(vec![dynamic], None);
         let template_id = builder.finish_template(
             root,
@@ -959,17 +1076,20 @@ fn repeated_prepared_fold_reuses_effective_expression_provenance() {
         };
         (template_id, *site_id)
     };
+    let overlay_text_value = expressions
+        .string_slice(&mut const_values, text, None, ValueMode::ImmutableOwned)
+        .expect("overlay string literal should construct")
+        .id();
+    let overlay_value = expressions
+        .with_synthetic_interface_provenance(
+            expressions.own(overlay_text_value),
+            SyntheticInterfaceProvenance::single(member.clone()),
+        )
+        .expect("provenance should attach to the overlay expression")
+        .id();
     let overlay_id = store
         .allocate_expression_overlay(TirExpressionOverlay {
-            overrides: vec![(
-                site_id,
-                Box::new(
-                    Expression::string_slice(text, None, ValueMode::ImmutableOwned)
-                        .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
-                            member.clone(),
-                        )),
-                ),
-            )],
+            overrides: vec![(site_id, overlay_value)],
         })
         .expect("test overlay allocation");
     let view = TirView::new(
@@ -982,13 +1102,18 @@ fn repeated_prepared_fold_reuses_effective_expression_provenance() {
         },
     )
     .expect("effective view should construct");
-    let prepared =
-        prepare_tir_view(&view, TemplatePreparationMode::Value).expect("view should prepare");
+    let prepared = prepare_tir_view(
+        &view,
+        &expressions,
+        &const_values,
+        TemplatePreparationMode::Value,
+    )
+    .expect("view should prepare");
     assert!(matches!(
         prepared.outcome,
         TemplatePreparationOutcome::Foldable
     ));
-    let mut context = fold_context(&mut string_table);
+    let mut context = fold_context(&mut string_table, &mut expressions, &mut const_values);
     let first = fold_prepared_template(&prepared, view.clone(), &mut context)
         .expect("first exact fold should succeed");
     let second = fold_prepared_template(&prepared, view, &mut context)
@@ -1009,6 +1134,8 @@ fn repeated_prepared_fold_reuses_effective_expression_provenance() {
 fn prepared_fold_below_composed_child_ignores_unconsumed_overlay_identity() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut store = TemplateIrStore::new();
     let parent_context = TemplateViewContext::default();
     let missing_context = TemplateViewContext {
@@ -1067,7 +1194,7 @@ fn prepared_fold_below_composed_child_ignores_unconsumed_overlay_identity() {
         parent_context,
     )
     .expect("parent view should construct");
-    let mut context = fold_context(&mut string_table);
+    let mut context = fold_context(&mut string_table, &mut expressions, &mut const_values);
 
     let emission = fold_prepared_view(&view, &mut context)
         .expect("a Parsed child's unconsumed overlay identity must not block folding");
@@ -1086,6 +1213,8 @@ fn prepared_fold_below_composed_child_ignores_unconsumed_overlay_identity() {
 fn prepared_runtime_plan_validates_plan_authority_before_handoff() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
     let mut fixture = build_text_fixture(&mut string_table, "runtime plan");
     let missing_slot_plan_id = TemplateSlotPlanId::new(999);
     super::super::store::MalformedTirStore::new(&mut fixture.store)
@@ -1098,8 +1227,13 @@ fn prepared_runtime_plan_validates_plan_authority_before_handoff() {
         fixture.context,
     )
     .expect("view should construct");
-    let error = prepare_tir_view(&view, TemplatePreparationMode::Value)
-        .expect_err("preparation must validate its required runtime slot plan");
+    let error = prepare_tir_view(
+        &view,
+        &expressions,
+        &const_values,
+        TemplatePreparationMode::Value,
+    )
+    .expect_err("preparation must validate its required runtime slot plan");
     assert!(
         format!("{error:?}").contains("TIR preparation: slot plan"),
         "expected a stable runtime-plan authority error, got: {error:?}"
@@ -1112,6 +1246,8 @@ fn prepared_runtime_plan_validates_plan_authority_before_handoff() {
 fn fold_dynamic_ast_template_with_missing_root_authority() -> TemplateError {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
 
@@ -1134,9 +1270,13 @@ fn fold_dynamic_ast_template_with_missing_root_authority() -> TemplateError {
             span: None,
         };
 
+        let nested_expression = expressions
+            .template(nested_template, ValueMode::ImmutableOwned)
+            .expect("nested template expression should construct")
+            .id();
         let mut builder = TemplateIrBuilder::new(&mut tir);
         let dynamic_node = builder.push_dynamic_expression_node(
-            Expression::template(nested_template, ValueMode::ImmutableOwned),
+            nested_expression,
             TemplateSegmentOrigin::Body,
             None,
         );
@@ -1158,13 +1298,7 @@ fn fold_dynamic_ast_template_with_missing_root_authority() -> TemplateError {
         context,
     )
     .expect("outer view should construct");
-    let mut fold_context = TirFoldContext {
-        string_table: &mut string_table,
-        template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
-        source_scope: None,
-        bindings: vec![],
-    };
+    let mut fold_context = fold_context(&mut string_table, &mut expressions, &mut const_values);
 
     fold_prepared_view(&view, &mut fold_context)
         .expect_err("dynamic AST templates must enter their own fold authority boundary")
@@ -1207,7 +1341,9 @@ fn prepared_fold_rejects_direct_sequence_node_cycle_as_infrastructure() {
         .expect("cyclic view should construct");
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let mut fold_context = fold_context(&mut string_table);
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let mut fold_context = fold_context(&mut string_table, &mut expressions, &mut const_values);
     let TemplateError::Infrastructure(error) =
         fold_prepared_view(&view, &mut fold_context).expect_err("direct cycle must fail")
     else {
@@ -1239,7 +1375,9 @@ fn prepared_fold_increments_phase1_attribution_counters() {
         fixture.context,
     )
     .expect("view should construct");
-    let mut fold_context = fold_context(&mut string_table);
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let mut fold_context = fold_context(&mut string_table, &mut expressions, &mut const_values);
 
     reset_ast_counters();
     let first = fold_prepared_view(&view, &mut fold_context).expect("first fold should succeed");

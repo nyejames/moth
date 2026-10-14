@@ -1,5 +1,5 @@
 hidden ||:
-    v Uint = 4294967296
+    v U32 = 4294967296
 ;
 
 [:unreachable]

@@ -13,7 +13,7 @@ A literal pattern must be compatible with the scrutinee type.
     ;
 ]
 
-One statically typed match can't mix unrelated `Int`, `String` and `Bool`
+One statically typed match can't mix unrelated `I32`, `String` and `Bool`
 literal patterns.
 
 ### Choice variants
@@ -69,8 +69,8 @@ capture when `else =>` is omitted.
     >= value
 ]
 
-Relational patterns accept `Int`, `Uint`, `Float`, `Char`, fixed-width numeric types,
-`Byte` and the `Dec` family. Numeric literals materialise in the subject's
+Relational patterns accept integer, binary-float and `Dec` types, `Byte` and
+`Char`. Numeric literals materialise in the subject's
 type. A `Dec` pattern must be exactly representable at the subject's scale.
 
 ### The catch-all arm

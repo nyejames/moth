@@ -7,20 +7,22 @@
 mod evaluator;
 mod operator_policy;
 mod ordering;
-mod result_type;
+pub(crate) mod result_type;
 mod typing_error;
 
 #[cfg(test)]
-pub(crate) use crate::compiler_frontend::ast::expressions::expression::Expression;
-#[cfg(test)]
-pub(crate) use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
-#[cfg(test)]
 pub(crate) use crate::compiler_frontend::value_mode::ValueMode;
 pub use evaluator::evaluate_expression;
-pub(crate) use evaluator::pending_expression_item_bug;
+#[cfg(test)]
+pub(crate) use evaluator::expression_from_resolved_items;
+
 pub(super) use ordering::extract_expression_span;
 pub(crate) use typing_error::ExpressionTypingError;
 
 #[cfg(test)]
 #[path = "../tests/eval_expression_tests.rs"]
 mod eval_expression_tests;
+
+#[cfg(test)]
+#[path = "../tests/evaluator_escape_tests.rs"]
+mod evaluator_escape_tests;

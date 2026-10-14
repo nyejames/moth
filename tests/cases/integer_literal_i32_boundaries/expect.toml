@@ -1,4 +1,4 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains = ["Int boundaries: 2147483647/-2147483648"]
+rendered_output_contains = ["I32 boundaries: 2147483647/-2147483648"]

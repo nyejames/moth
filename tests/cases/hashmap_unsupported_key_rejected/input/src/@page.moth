@@ -1,2 +1,2 @@
-bad ~{Float = Int} = {1.0 = 1}
+bad ~{F64 = I32} = {1.0 = 1}
 [:test]

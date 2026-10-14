@@ -1,11 +1,13 @@
 use super::*;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-use moth_lexical::numeric::profile::NumericProfile;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 #[test]
 fn finalization_fold_composed_tir_root_folds_view_text() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let view_text = string_table.intern("store-backed view");
 
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
@@ -19,8 +21,9 @@ fn finalization_fold_composed_tir_root_folds_view_text() {
             TemplateValueFinalizationInputs {
                 string_table: &mut string_table,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-                numeric_profile: NumericProfile::STANDARD,
                 template_ir_store: &template_ir_store,
+                expression_builder: &mut expressions,
+                const_values: &mut constants,
             },
             TemplatePreparationMode::Value,
         )
@@ -37,15 +40,20 @@ fn finalization_fold_composed_tir_root_folds_view_text() {
 fn finalization_normalizes_dynamic_expression_payloads_into_expression_overlay() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let normalized_text = string_table.intern("normalized dynamic payload");
 
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
 
-    let dynamic_expression = Expression::template(
-        registered_text_template(normalized_text, context, &template_ir_store, &string_table),
-        ValueMode::ImmutableOwned,
-    );
+    let dynamic_expression = expressions
+        .template(
+            registered_text_template(normalized_text, context, &template_ir_store, &string_table),
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture template expression should commit")
+        .id();
     let (template_id, dynamic_node_id, site_id) = {
         let mut store = template_ir_store.borrow_mut();
         let (template_id, dynamic_node_id) = {
@@ -86,16 +94,21 @@ fn finalization_normalizes_dynamic_expression_payloads_into_expression_overlay()
         None,
     );
 
-    let mut context = TemplateNormalizationContext {
-        template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
-        string_table: &mut string_table,
-        template_ir_store: Rc::clone(&template_ir_store),
-        module_resources: None,
-    };
+    {
+        let mut normalization_context = TemplateNormalizationContext {
+            template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+            expression_builder: &mut expressions,
+            const_values: &mut constants,
+            string_table: &mut string_table,
+            template_ir_store: Rc::clone(&template_ir_store),
+            module_resources: None,
+            expression_pending: Vec::new(),
+            expression_results: Vec::new(),
+        };
 
-    normalize_template_for_hir(&mut template, &mut context)
-        .expect("template normalization should install the dynamic expression overlay");
+        normalize_template_for_hir(&mut template, &mut normalization_context)
+            .expect("template normalization should install the dynamic expression overlay");
+    }
 
     let reference = &template.tir_reference;
     assert_ne!(
@@ -120,19 +133,19 @@ fn finalization_normalizes_dynamic_expression_payloads_into_expression_overlay()
     .expect("updated template reference should build a finalized TirView");
 
     let expression_by_site = view
-        .effective_expression_for_site(site_id)
+        .effective_expression_for_site(&expressions, site_id)
         .expect("site lookup should be valid")
         .expect("normalized dynamic expression should be visible by site");
     assert!(
-        matches!(expression_by_site.kind, ExpressionKind::StringSlice(text) if text == normalized_text)
+        matches!(expression_by_site.operation(), ExpressionOperationView::Constant(id) if constants.payload(id).is_some_and(|payload| matches!(payload, ConstValuePayload::String(ConstStringValue::Text(text)) if *text == normalized_text)))
     );
 
     let expression_by_node = view
-        .effective_expression_for_node(dynamic_node_id)
+        .effective_expression_for_site(&expressions, site_id)
         .expect("node lookup should be valid")
         .expect("normalized dynamic expression should be visible by node");
     assert!(
-        matches!(expression_by_node.kind, ExpressionKind::StringSlice(text) if text == normalized_text)
+        matches!(expression_by_node.operation(), ExpressionOperationView::Constant(id) if constants.payload(id).is_some_and(|payload| matches!(payload, ConstValuePayload::String(ConstStringValue::Text(text)) if *text == normalized_text)))
     );
 
     let structural_expression_is_unchanged = {
@@ -140,11 +153,16 @@ fn finalization_normalizes_dynamic_expression_payloads_into_expression_overlay()
         let node = store
             .get_node(dynamic_node_id)
             .expect("dynamic node should remain in the structural store");
-        matches!(
-            &node.kind,
-            TemplateIrNodeKind::DynamicExpression { expression, .. }
-                if matches!(expression.kind, ExpressionKind::Template(_))
-        )
+        match &node.kind {
+            TemplateIrNodeKind::DynamicExpression { expression, .. } => matches!(
+                expressions
+                    .view(*expression)
+                    .expect("structural expression should be committed")
+                    .operation(),
+                ExpressionOperationView::Template(_)
+            ),
+            _ => false,
+        }
     };
     assert!(
         structural_expression_is_unchanged,
@@ -156,12 +174,22 @@ fn finalization_normalizes_dynamic_expression_payloads_into_expression_overlay()
 fn finalization_merges_expression_overrides_without_duplicate_sites() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let template_id = {
         let mut store = template_ir_store.borrow_mut();
         let mut builder = TemplateIrBuilder::new(&mut store);
         let dynamic_node = builder.push_dynamic_expression_node(
-            Expression::int(1, None, ValueMode::ImmutableOwned),
+            expressions
+                .fixed_scalar(
+                    &mut constants,
+                    FixedScalarValue::signed(FixedScalar::I32, 1).expect("1 fits I32"),
+                    None,
+                    ValueMode::ImmutableOwned,
+                )
+                .expect("fixture expression should commit")
+                .id(),
             TemplateSegmentOrigin::Body,
             None,
         );
@@ -189,7 +217,15 @@ fn finalization_merges_expression_overrides_without_duplicate_sites() {
         .allocate_expression_overlay(TirExpressionOverlay {
             overrides: vec![(
                 site_id,
-                Box::new(Expression::int(2, None, ValueMode::ImmutableOwned)),
+                expressions
+                    .fixed_scalar(
+                        &mut constants,
+                        FixedScalarValue::signed(FixedScalar::I32, 2).expect("2 fits I32"),
+                        None,
+                        ValueMode::ImmutableOwned,
+                    )
+                    .expect("fixture overlay expression should commit")
+                    .id(),
             )],
         })
         .expect("test overlay allocation");
@@ -207,16 +243,21 @@ fn finalization_merges_expression_overrides_without_duplicate_sites() {
         None,
     );
 
-    let mut context = TemplateNormalizationContext {
-        template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
-        string_table: &mut string_table,
-        template_ir_store: Rc::clone(&template_ir_store),
-        module_resources: None,
-    };
+    {
+        let mut normalization_context = TemplateNormalizationContext {
+            template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+            expression_builder: &mut expressions,
+            const_values: &mut constants,
+            string_table: &mut string_table,
+            template_ir_store: Rc::clone(&template_ir_store),
+            module_resources: None,
+            expression_pending: Vec::new(),
+            expression_results: Vec::new(),
+        };
 
-    normalize_template_for_hir(&mut template, &mut context)
-        .expect("normalization should canonicalize the root expression overlay");
+        normalize_template_for_hir(&mut template, &mut normalization_context)
+            .expect("normalization should canonicalize the root expression overlay");
+    }
 
     let store = template_ir_store.borrow();
     let overlay_id = template
@@ -229,9 +270,10 @@ fn finalization_merges_expression_overrides_without_duplicate_sites() {
         .expect("normalized expression overlay should exist");
     assert_eq!(overlay.overrides.len(), 1);
     assert_eq!(overlay.overrides[0].0, site_id);
+    let expected = FixedScalarValue::signed(FixedScalar::I32, 2).expect("2 fits I32");
     assert!(matches!(
-        overlay.overrides[0].1.kind,
-        ExpressionKind::Int(2)
+        expressions.view(overlay.overrides[0].1).expect("overlay expression should be committed").operation(),
+        ExpressionOperationView::Constant(id) if constants.payload(id).is_some_and(|payload| matches!(payload, ConstValuePayload::FixedScalar(value) if *value == expected))
     ));
 }
 
@@ -239,15 +281,20 @@ fn finalization_merges_expression_overrides_without_duplicate_sites() {
 fn finalization_does_not_mark_parsed_expression_overlay_reference_finalized() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let normalized_text = string_table.intern("normalized parsed dynamic payload");
 
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
 
-    let dynamic_expression = Expression::template(
-        registered_text_template(normalized_text, context, &template_ir_store, &string_table),
-        ValueMode::ImmutableOwned,
-    );
+    let dynamic_expression = expressions
+        .template(
+            registered_text_template(normalized_text, context, &template_ir_store, &string_table),
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture template expression should commit")
+        .id();
     let template_id = {
         let mut store = template_ir_store.borrow_mut();
         let mut builder = TemplateIrBuilder::new(&mut store);
@@ -274,16 +321,21 @@ fn finalization_does_not_mark_parsed_expression_overlay_reference_finalized() {
         None,
     );
 
-    let mut context = TemplateNormalizationContext {
-        template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
-        string_table: &mut string_table,
-        template_ir_store: Rc::clone(&template_ir_store),
-        module_resources: None,
-    };
+    {
+        let mut normalization_context = TemplateNormalizationContext {
+            template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+            expression_builder: &mut expressions,
+            const_values: &mut constants,
+            string_table: &mut string_table,
+            template_ir_store: Rc::clone(&template_ir_store),
+            module_resources: None,
+            expression_pending: Vec::new(),
+            expression_results: Vec::new(),
+        };
 
-    normalize_template_for_hir(&mut template, &mut context)
-        .expect("template normalization should preserve parsed reference identity");
+        normalize_template_for_hir(&mut template, &mut normalization_context)
+            .expect("template normalization should preserve parsed reference identity");
+    }
 
     let reference = &template.tir_reference;
     assert_ne!(
@@ -302,13 +354,33 @@ fn finalization_does_not_mark_parsed_expression_overlay_reference_finalized() {
 fn finalization_uses_durable_phase_for_pre_finalized_descendant_overlay_collection() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let (root_template_id, root_context, child_site_id) = {
+        let structural_child = expressions
+            .fixed_scalar(
+                &mut constants,
+                FixedScalarValue::signed(FixedScalar::I32, 1).expect("1 fits I32"),
+                None,
+                ValueMode::ImmutableOwned,
+            )
+            .expect("fixture expression should commit")
+            .id();
+        let overlay_child = expressions
+            .fixed_scalar(
+                &mut constants,
+                FixedScalarValue::signed(FixedScalar::I32, 2).expect("2 fits I32"),
+                None,
+                ValueMode::ImmutableOwned,
+            )
+            .expect("fixture overlay expression should commit")
+            .id();
         let mut store = template_ir_store.borrow_mut();
         let child_dynamic_node = {
             let mut builder = TemplateIrBuilder::new(&mut store);
             builder.push_dynamic_expression_node(
-                Expression::int(1, None, ValueMode::ImmutableOwned),
+                structural_child,
                 TemplateSegmentOrigin::Body,
                 None,
             )
@@ -330,10 +402,7 @@ fn finalization_uses_durable_phase_for_pre_finalized_descendant_overlay_collecti
         ));
         let child_expression_overlay = store
             .allocate_expression_overlay(TirExpressionOverlay {
-                overrides: vec![(
-                    child_site_id,
-                    Box::new(Expression::int(2, None, ValueMode::ImmutableOwned)),
-                )],
+                overrides: vec![(child_site_id, overlay_child)],
             })
             .expect("child expression overlay should allocate");
 
@@ -384,16 +453,21 @@ fn finalization_uses_durable_phase_for_pre_finalized_descendant_overlay_collecti
         None,
     );
 
-    let mut context = TemplateNormalizationContext {
-        template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
-        string_table: &mut string_table,
-        template_ir_store: Rc::clone(&template_ir_store),
-        module_resources: None,
-    };
+    {
+        let mut normalization_context = TemplateNormalizationContext {
+            template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+            expression_builder: &mut expressions,
+            const_values: &mut constants,
+            string_table: &mut string_table,
+            template_ir_store: Rc::clone(&template_ir_store),
+            module_resources: None,
+            expression_pending: Vec::new(),
+            expression_results: Vec::new(),
+        };
 
-    normalize_template_for_hir(&mut template, &mut context)
-        .expect("pre-finalized descendant overlays should normalize");
+        normalize_template_for_hir(&mut template, &mut normalization_context)
+            .expect("pre-finalized descendant overlays should normalize");
+    }
 
     assert_eq!(template.tir_reference.phase, TemplateTirPhase::Parsed);
     let store = template_ir_store.borrow();
@@ -405,25 +479,34 @@ fn finalization_uses_durable_phase_for_pre_finalized_descendant_overlay_collecti
     )
     .expect("the parsed reference should retain its exact durable identity");
     let effective_expression = view
-        .effective_expression_for_site(child_site_id)
+        .effective_expression_for_site(&expressions, child_site_id)
         .expect("child expression site should remain valid")
         .expect("normalization should publish the descendant overlay");
-    assert!(matches!(effective_expression.kind, ExpressionKind::Int(2)));
+    let expected = FixedScalarValue::signed(FixedScalar::I32, 2).expect("2 fits I32");
+    assert!(matches!(
+        effective_expression.operation(),
+        ExpressionOperationView::Constant(id) if constants.payload(id).is_some_and(|payload| matches!(payload, ConstValuePayload::FixedScalar(value) if *value == expected))
+    ));
 }
 
 #[test]
 fn finalization_normalizes_conditional_selector_payloads_into_expression_overlay() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let normalized_text = string_table.intern("normalized conditional selector payload");
 
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
 
-    let selector_expression = Expression::template(
-        registered_text_template(normalized_text, context, &template_ir_store, &string_table),
-        ValueMode::ImmutableOwned,
-    );
+    let selector_expression = expressions
+        .template(
+            registered_text_template(normalized_text, context, &template_ir_store, &string_table),
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture template expression should commit")
+        .id();
     let (template_id, conditional_node_id, selector_site_id) = {
         let mut store = template_ir_store.borrow_mut();
         let mut builder = TemplateIrBuilder::new(&mut store);
@@ -464,16 +547,21 @@ fn finalization_normalizes_conditional_selector_payloads_into_expression_overlay
         None,
     );
 
-    let mut context = TemplateNormalizationContext {
-        template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
-        string_table: &mut string_table,
-        template_ir_store: Rc::clone(&template_ir_store),
-        module_resources: None,
-    };
+    {
+        let mut normalization_context = TemplateNormalizationContext {
+            template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+            expression_builder: &mut expressions,
+            const_values: &mut constants,
+            string_table: &mut string_table,
+            template_ir_store: Rc::clone(&template_ir_store),
+            module_resources: None,
+            expression_pending: Vec::new(),
+            expression_results: Vec::new(),
+        };
 
-    normalize_template_for_hir(&mut template, &mut context)
-        .expect("template normalization should install the conditional selector overlay");
+        normalize_template_for_hir(&mut template, &mut normalization_context)
+            .expect("template normalization should install the conditional selector overlay");
+    }
 
     let reference = &template.tir_reference;
     assert_ne!(
@@ -498,11 +586,11 @@ fn finalization_normalizes_conditional_selector_payloads_into_expression_overlay
     .expect("updated template reference should build a finalized TirView");
 
     let expression_by_site = view
-        .effective_expression_for_site(selector_site_id)
+        .effective_expression_for_site(&expressions, selector_site_id)
         .expect("site lookup should be valid")
         .expect("normalized conditional selector should be visible by site");
     assert!(
-        matches!(expression_by_site.kind, ExpressionKind::StringSlice(text) if text == normalized_text)
+        matches!(expression_by_site.operation(), ExpressionOperationView::Constant(id) if constants.payload(id).is_some_and(|payload| matches!(payload, ConstValuePayload::String(ConstStringValue::Text(text)) if *text == normalized_text)))
     );
 
     let structural_selector_is_unchanged = {
@@ -510,11 +598,19 @@ fn finalization_normalizes_conditional_selector_payloads_into_expression_overlay
         let node = store
             .get_node(conditional_node_id)
             .expect("conditional node should remain in the structural store");
-        matches!(
-            &node.kind,
-            TemplateIrNodeKind::Conditional { selector, .. }
-                if matches!(selector.condition_expression().kind, ExpressionKind::Template(_))
-        )
+        match &node.kind {
+            TemplateIrNodeKind::Conditional { selector, .. } => {
+                let condition = selector.condition_expression();
+                matches!(
+                    expressions
+                        .view(condition)
+                        .expect("structural selector should be committed")
+                        .operation(),
+                    ExpressionOperationView::Template(_)
+                )
+            }
+            _ => false,
+        }
     };
     assert!(
         structural_selector_is_unchanged,
@@ -526,15 +622,20 @@ fn finalization_normalizes_conditional_selector_payloads_into_expression_overlay
 fn finalization_normalizes_loop_header_payloads_into_expression_overlay() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let normalized_text = string_table.intern("normalized loop header payload");
 
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
 
-    let header_expression = Expression::template(
-        registered_text_template(normalized_text, context, &template_ir_store, &string_table),
-        ValueMode::ImmutableOwned,
-    );
+    let header_expression = expressions
+        .template(
+            registered_text_template(normalized_text, context, &template_ir_store, &string_table),
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture template expression should commit")
+        .id();
     let (template_id, loop_node_id, condition_site_id) = {
         let mut store = template_ir_store.borrow_mut();
         let loop_body = store.push_node(TemplateIrNode::new(
@@ -542,7 +643,7 @@ fn finalization_normalizes_loop_header_payloads_into_expression_overlay() {
             None,
         ));
         let header = TemplateLoopHeader::Conditional {
-            condition: Box::new(header_expression),
+            condition: header_expression,
         };
         let header_sites = store.allocate_loop_header_expression_sites(&header);
         let condition_site_id = match header_sites {
@@ -578,16 +679,21 @@ fn finalization_normalizes_loop_header_payloads_into_expression_overlay() {
         None,
     );
 
-    let mut context = TemplateNormalizationContext {
-        template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
-        string_table: &mut string_table,
-        template_ir_store: Rc::clone(&template_ir_store),
-        module_resources: None,
-    };
+    {
+        let mut normalization_context = TemplateNormalizationContext {
+            template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+            expression_builder: &mut expressions,
+            const_values: &mut constants,
+            string_table: &mut string_table,
+            template_ir_store: Rc::clone(&template_ir_store),
+            module_resources: None,
+            expression_pending: Vec::new(),
+            expression_results: Vec::new(),
+        };
 
-    normalize_template_for_hir(&mut template, &mut context)
-        .expect("template normalization should install the loop header overlay");
+        normalize_template_for_hir(&mut template, &mut normalization_context)
+            .expect("template normalization should install the loop header overlay");
+    }
 
     let reference = &template.tir_reference;
     assert_ne!(
@@ -612,11 +718,11 @@ fn finalization_normalizes_loop_header_payloads_into_expression_overlay() {
     .expect("updated template reference should build a finalized TirView");
 
     let expression_by_site = view
-        .effective_expression_for_site(condition_site_id)
+        .effective_expression_for_site(&expressions, condition_site_id)
         .expect("site lookup should be valid")
         .expect("normalized loop header expression should be visible by site");
     assert!(
-        matches!(expression_by_site.kind, ExpressionKind::StringSlice(text) if text == normalized_text)
+        matches!(expression_by_site.operation(), ExpressionOperationView::Constant(id) if constants.payload(id).is_some_and(|payload| matches!(payload, ConstValuePayload::String(ConstStringValue::Text(text)) if *text == normalized_text)))
     );
 
     let structural_header_is_unchanged = {
@@ -624,13 +730,19 @@ fn finalization_normalizes_loop_header_payloads_into_expression_overlay() {
         let node = store
             .get_node(loop_node_id)
             .expect("loop node should remain in the structural store");
-        matches!(
-            &node.kind,
+        match &node.kind {
             TemplateIrNodeKind::Loop {
                 header: TemplateLoopHeader::Conditional { condition },
                 ..
-            } if matches!(condition.kind, ExpressionKind::Template(_))
-        )
+            } => matches!(
+                expressions
+                    .view(*condition)
+                    .expect("structural header should be committed")
+                    .operation(),
+                ExpressionOperationView::Template(_)
+            ),
+            _ => false,
+        }
     };
     assert!(
         structural_header_is_unchanged,
@@ -645,6 +757,8 @@ fn finalization_fold_uses_finalized_expression_overlay_view() {
 
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let structural_text = string_table.intern("structural dynamic payload");
     let overlay_text = string_table.intern("finalized expression overlay");
 
@@ -652,13 +766,19 @@ fn finalization_fold_uses_finalized_expression_overlay_view() {
     let empty_context = TemplateViewContext::default();
 
     let (template_id, dynamic_node) = {
+        let structural = expressions
+            .string_slice(
+                &mut constants,
+                structural_text,
+                None,
+                ValueMode::ImmutableOwned,
+            )
+            .expect("fixture expression should commit")
+            .id();
         let mut store = template_ir_store.borrow_mut();
         let mut builder = TemplateIrBuilder::new(&mut store);
-        let dynamic_node = builder.push_dynamic_expression_node(
-            Expression::string_slice(structural_text, None, ValueMode::ImmutableOwned),
-            TemplateSegmentOrigin::Body,
-            None,
-        );
+        let dynamic_node =
+            builder.push_dynamic_expression_node(structural, TemplateSegmentOrigin::Body, None);
         let root = builder.push_sequence_node(vec![dynamic_node], None);
         let template_id = builder.finish_template(
             root,
@@ -683,17 +803,19 @@ fn finalization_fold_uses_finalized_expression_overlay_view() {
         }
     };
 
+    let overlay_expression = expressions
+        .string_slice(
+            &mut constants,
+            overlay_text,
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture overlay expression should commit")
+        .id();
     let expression_overlay_id = template_ir_store
         .borrow_mut()
         .allocate_expression_overlay(TirExpressionOverlay {
-            overrides: vec![(
-                site_id,
-                Box::new(Expression::string_slice(
-                    overlay_text,
-                    None,
-                    ValueMode::ImmutableOwned,
-                )),
-            )],
+            overrides: vec![(site_id, overlay_expression)],
         })
         .expect("test overlay allocation");
     let expression_context = TemplateViewContext {
@@ -721,8 +843,9 @@ fn finalization_fold_uses_finalized_expression_overlay_view() {
             TemplateValueFinalizationInputs {
                 string_table: &mut string_table,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-                numeric_profile: NumericProfile::STANDARD,
                 template_ir_store: &template_ir_store,
+                expression_builder: &mut expressions,
+                const_values: &mut constants,
             },
             TemplatePreparationMode::Value,
         )
@@ -739,6 +862,8 @@ fn finalization_fold_uses_finalized_expression_overlay_view() {
 fn finalization_classifies_root_expression_overlay_through_nested_children() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let dynamic_text = string_table.intern("root-overlay-dynamic");
     let conditional_body_text = string_table.intern("root-overlay-body");
     let loop_text = string_table.intern("root-overlay-loop");
@@ -747,21 +872,48 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
     let empty_context = TemplateViewContext::default();
 
     let (root_template_id, dynamic_site_id, selector_site_id, loop_site_id) = {
+        let dynamic_reference = expressions
+            .reference_with_type_id(
+                path_fork
+                    .try_intern_portable_path("nested_dynamic", &mut string_table)
+                    .expect("test path fits"),
+                builtin_type_ids::STRING,
+                None,
+                ValueMode::ImmutableReference,
+                ConstRecordState::RuntimeValue,
+            )
+            .expect("fixture reference should commit")
+            .id();
+        let selector_reference = expressions
+            .reference_with_type_id(
+                path_fork
+                    .try_intern_portable_path("nested_selector", &mut string_table)
+                    .expect("test path fits"),
+                builtin_type_ids::BOOL,
+                None,
+                ValueMode::ImmutableReference,
+                ConstRecordState::RuntimeValue,
+            )
+            .expect("fixture reference should commit")
+            .id();
+        let loop_reference = expressions
+            .reference_with_type_id(
+                path_fork
+                    .try_intern_portable_path("nested_loop", &mut string_table)
+                    .expect("test path fits"),
+                builtin_type_ids::BOOL,
+                None,
+                ValueMode::ImmutableReference,
+                ConstRecordState::RuntimeValue,
+            )
+            .expect("fixture reference should commit")
+            .id();
         let mut store = template_ir_store.borrow_mut();
         let (leaf_template_id, dynamic_node, conditional_node, loop_node) = {
             let mut builder = TemplateIrBuilder::new(&mut store);
 
             let dynamic_node = builder.push_dynamic_expression_node(
-                Expression::reference_with_type_id(
-                    path_fork
-                        .try_intern_portable_path("nested_dynamic", &mut string_table)
-                        .expect("test path fits"),
-                    DataType::StringSlice,
-                    builtin_type_ids::STRING,
-                    None,
-                    ValueMode::ImmutableReference,
-                    ConstRecordState::RuntimeValue,
-                ),
+                dynamic_reference,
                 TemplateSegmentOrigin::Body,
                 None,
             );
@@ -772,16 +924,7 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
                 None,
             );
             let conditional_node = builder.push_conditional_node(
-                TemplateBranchSelector::Bool(Expression::reference_with_type_id(
-                    path_fork
-                        .try_intern_portable_path("nested_selector", &mut string_table)
-                        .expect("test path fits"),
-                    DataType::Bool,
-                    builtin_type_ids::BOOL,
-                    None,
-                    ValueMode::ImmutableReference,
-                    ConstRecordState::RuntimeValue,
-                )),
+                TemplateBranchSelector::Bool(selector_reference),
                 conditional_body_text_node,
                 None,
             );
@@ -793,16 +936,7 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
             );
             let loop_node = builder.push_loop_node(
                 TemplateLoopHeader::Conditional {
-                    condition: Box::new(Expression::reference_with_type_id(
-                        path_fork
-                            .try_intern_portable_path("nested_loop", &mut string_table)
-                            .expect("test path fits"),
-                        DataType::Bool,
-                        builtin_type_ids::BOOL,
-                        None,
-                        ValueMode::ImmutableReference,
-                        ConstRecordState::RuntimeValue,
-                    )),
+                    condition: loop_reference,
                 },
                 loop_text_node,
                 None,
@@ -879,26 +1013,30 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
         )
     };
 
+    let dynamic_overlay = expressions
+        .string_slice(
+            &mut constants,
+            dynamic_text,
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture overlay expression should commit")
+        .id();
+    let selector_overlay = expressions
+        .bool(&mut constants, true, None, ValueMode::ImmutableOwned)
+        .expect("fixture overlay expression should commit")
+        .id();
+    let loop_overlay = expressions
+        .bool(&mut constants, false, None, ValueMode::ImmutableOwned)
+        .expect("fixture overlay expression should commit")
+        .id();
     let expression_overlay_id = template_ir_store
         .borrow_mut()
         .allocate_expression_overlay(TirExpressionOverlay {
             overrides: vec![
-                (
-                    dynamic_site_id,
-                    Box::new(Expression::string_slice(
-                        dynamic_text,
-                        None,
-                        ValueMode::ImmutableOwned,
-                    )),
-                ),
-                (
-                    selector_site_id,
-                    Box::new(Expression::bool(true, None, ValueMode::ImmutableOwned)),
-                ),
-                (
-                    loop_site_id,
-                    Box::new(Expression::bool(false, None, ValueMode::ImmutableOwned)),
-                ),
+                (dynamic_site_id, dynamic_overlay),
+                (selector_site_id, selector_overlay),
+                (loop_site_id, loop_overlay),
             ],
         })
         .expect("test overlay allocation");
@@ -923,8 +1061,9 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
             TemplateValueFinalizationInputs {
                 string_table: &mut string_table,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-                numeric_profile: NumericProfile::STANDARD,
                 template_ir_store: &template_ir_store,
+                expression_builder: &mut expressions,
+                const_values: &mut constants,
             },
             TemplatePreparationMode::Value,
         )
@@ -942,6 +1081,8 @@ fn finalization_classifies_root_expression_overlay_through_nested_children() {
 fn finalization_ignores_parsed_child_overlay_before_later_composed_descendant() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let structural_text = string_table.intern("structural");
     let override_text = string_table.intern("root-override");
 
@@ -953,14 +1094,20 @@ fn finalization_ignores_parsed_child_overlay_before_later_composed_descendant() 
     };
 
     let (root_template_id, descendant_site_id) = {
+        let structural = expressions
+            .string_slice(
+                &mut constants,
+                structural_text,
+                None,
+                ValueMode::ImmutableOwned,
+            )
+            .expect("fixture expression should commit")
+            .id();
         let mut store = template_ir_store.borrow_mut();
         let (descendant_template_id, descendant_site_id) = {
             let mut builder = TemplateIrBuilder::new(&mut store);
-            let dynamic_node = builder.push_dynamic_expression_node(
-                Expression::string_slice(structural_text, None, ValueMode::ImmutableOwned),
-                TemplateSegmentOrigin::Body,
-                None,
-            );
+            let dynamic_node =
+                builder.push_dynamic_expression_node(structural, TemplateSegmentOrigin::Body, None);
             let root = builder.push_sequence_node(vec![dynamic_node], None);
             let template_id = builder.finish_template(
                 root,
@@ -1021,17 +1168,19 @@ fn finalization_ignores_parsed_child_overlay_before_later_composed_descendant() 
         (root_template_id, descendant_site_id)
     };
 
+    let root_override = expressions
+        .string_slice(
+            &mut constants,
+            override_text,
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture overlay expression should commit")
+        .id();
     let expression_overlay_id = template_ir_store
         .borrow_mut()
         .allocate_expression_overlay(TirExpressionOverlay {
-            overrides: vec![(
-                descendant_site_id,
-                Box::new(Expression::string_slice(
-                    override_text,
-                    None,
-                    ValueMode::ImmutableOwned,
-                )),
-            )],
+            overrides: vec![(descendant_site_id, root_override)],
         })
         .expect("test overlay allocation");
     let root_context = TemplateViewContext {
@@ -1054,8 +1203,9 @@ fn finalization_ignores_parsed_child_overlay_before_later_composed_descendant() 
             TemplateValueFinalizationInputs {
                 string_table: &mut string_table,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-                numeric_profile: NumericProfile::STANDARD,
                 template_ir_store: &template_ir_store,
+                expression_builder: &mut expressions,
+                const_values: &mut constants,
             },
             TemplatePreparationMode::Value,
         )
@@ -1072,16 +1222,23 @@ fn finalization_ignores_parsed_child_overlay_before_later_composed_descendant() 
 fn finalization_rejects_nested_runtime_wrapper_in_exact_wrapper_overlay() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let (template, template_ir_store) =
-        nested_wrapper_finalization_fixture(&mut string_table, true);
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let (template, template_ir_store) = nested_wrapper_finalization_fixture(
+        &mut string_table,
+        &mut expressions,
+        &mut constants,
+        true,
+    );
 
     let result = finalize_template_value(
         &template,
         TemplateValueFinalizationInputs {
             string_table: &mut string_table,
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-            numeric_profile: NumericProfile::STANDARD,
             template_ir_store: &template_ir_store,
+            expression_builder: &mut expressions,
+            const_values: &mut constants,
         },
         TemplatePreparationMode::Value,
     )
@@ -1097,6 +1254,8 @@ fn finalization_rejects_nested_runtime_wrapper_in_exact_wrapper_overlay() {
 fn finalization_keeps_valid_runtime_slot_plan_out_of_folded_string() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
     let text = string_table.intern("runtime root");
@@ -1108,7 +1267,6 @@ fn finalization_keeps_valid_runtime_slot_plan_out_of_folded_string() {
         let slot_plan_id = store.push_slot_plan(TemplateSlotPlan {
             contribution_sources: Vec::new(),
             slot_sites: Vec::new(),
-            span: None,
         });
         store
             .attach_runtime_slot_plan(template_id, slot_plan_id)
@@ -1120,8 +1278,9 @@ fn finalization_keeps_valid_runtime_slot_plan_out_of_folded_string() {
         TemplateValueFinalizationInputs {
             string_table: &mut string_table,
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-            numeric_profile: NumericProfile::STANDARD,
             template_ir_store: &template_ir_store,
+            expression_builder: &mut expressions,
+            const_values: &mut constants,
         },
         TemplatePreparationMode::Value,
     )
@@ -1146,6 +1305,8 @@ fn finalization_keeps_valid_runtime_slot_plan_out_of_folded_string() {
 fn finalization_replaces_renderable_runtime_slot_plan_with_owned_handoff() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
     let text = string_table.intern("runtime handoff");
@@ -1157,26 +1318,36 @@ fn finalization_replaces_renderable_runtime_slot_plan_with_owned_handoff() {
         let slot_plan_id = store.push_slot_plan(TemplateSlotPlan {
             contribution_sources: Vec::new(),
             slot_sites: Vec::new(),
-            span: None,
         });
         store
             .attach_runtime_slot_plan(template_id, slot_plan_id)
             .expect("template should accept the committed slot plan");
     }
 
-    let mut expression = Expression::template(template, ValueMode::ImmutableOwned);
-    let mut context = TemplateNormalizationContext {
-        template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
-        string_table: &mut string_table,
-        template_ir_store: Rc::clone(&template_ir_store),
-        module_resources: None,
-    };
+    let mut expression = expressions
+        .template(template, ValueMode::ImmutableOwned)
+        .expect("fixture template expression should commit")
+        .id();
+    {
+        let mut normalization_context = TemplateNormalizationContext {
+            template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+            expression_builder: &mut expressions,
+            const_values: &mut constants,
+            string_table: &mut string_table,
+            template_ir_store: Rc::clone(&template_ir_store),
+            module_resources: None,
+            expression_pending: Vec::new(),
+            expression_results: Vec::new(),
+        };
 
-    normalize_expression_templates(&mut expression, &mut context)
-        .expect("renderable runtime slot plans should use the owned handoff path");
+        normalize_expression_templates(&mut expression, &mut normalization_context)
+            .expect("renderable runtime slot plans should use the owned handoff path");
+    }
 
-    let ExpressionKind::RuntimeSlotApplicationHandoff(handoff) = expression.kind else {
+    let view = expressions
+        .view(expression)
+        .expect("normalized expression should be committed");
+    let ExpressionOperationView::RuntimeSlotApplication(handoff) = view.operation() else {
         panic!("expected renderable runtime slot plan to become an owned slot handoff");
     };
     assert!(
@@ -1198,6 +1369,8 @@ fn finalization_replaces_renderable_runtime_slot_plan_with_owned_handoff() {
 fn runtime_handoff_shape_uses_root_slot_plan_not_preparation_reason() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
     let text = string_table.intern("runtime slot root");
@@ -1210,39 +1383,51 @@ fn runtime_handoff_shape_uses_root_slot_plan_not_preparation_reason() {
         let slot_plan_id = store.push_slot_plan(TemplateSlotPlan {
             contribution_sources: Vec::new(),
             slot_sites: Vec::new(),
-            span: None,
         });
         store
             .attach_runtime_slot_plan(template_id, slot_plan_id)
             .expect("template should accept the committed slot plan");
     }
 
-    let mut context = TemplateNormalizationContext {
-        template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        numeric_profile: NumericProfile::STANDARD,
-        string_table: &mut string_table,
-        template_ir_store: Rc::clone(&template_ir_store),
-        module_resources: None,
+    let prepared = {
+        let store = template_ir_store.borrow();
+        let view = TirView::new(
+            &store,
+            template_id,
+            TemplateTirPhase::Finalized,
+            TemplateViewContext::default(),
+        )
+        .expect("finalized runtime-slot view should construct");
+        prepare_tir_view(
+            &view,
+            &expressions,
+            &constants,
+            TemplatePreparationMode::Value,
+        )
+        .expect("runtime-slot preparation should succeed")
     };
-    let store = template_ir_store.borrow();
-    let view = TirView::new(
-        &store,
-        template_id,
-        TemplateTirPhase::Finalized,
-        TemplateViewContext::default(),
-    )
-    .expect("finalized runtime-slot view should construct");
-    let prepared = prepare_tir_view(&view, TemplatePreparationMode::Value)
-        .expect("runtime-slot preparation should succeed");
     assert!(matches!(
         prepared.outcome,
         TemplatePreparationOutcome::Runtime(_)
     ));
 
-    let normalized =
-        super::materialize_runtime_template_handoff_for_hir(&template, &mut context, &prepared)
-            .expect("prepared runtime handoff should materialize");
+    let mut normalization_context = TemplateNormalizationContext {
+        template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
+        expression_builder: &mut expressions,
+        const_values: &mut constants,
+        string_table: &mut string_table,
+        template_ir_store: Rc::clone(&template_ir_store),
+        module_resources: None,
+        expression_pending: Vec::new(),
+        expression_results: Vec::new(),
+    };
 
+    let normalized = super::materialize_runtime_template_handoff_for_hir(
+        &template,
+        &mut normalization_context,
+        &prepared,
+    )
+    .expect("prepared runtime handoff should materialize");
     assert!(
         matches!(
             normalized,
@@ -1256,6 +1441,8 @@ fn runtime_handoff_shape_uses_root_slot_plan_not_preparation_reason() {
 fn module_constant_normalization_rejects_runtime_slot_plan_with_structured_diagnostic() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let context = TemplateViewContext::default();
     let text = string_table.intern("module constant runtime plan");
@@ -1267,27 +1454,37 @@ fn module_constant_normalization_rejects_runtime_slot_plan_with_structured_diagn
         let slot_plan_id = store.push_slot_plan(TemplateSlotPlan {
             contribution_sources: Vec::new(),
             slot_sites: Vec::new(),
-            span: None,
         });
         store
             .attach_runtime_slot_plan(template_id, slot_plan_id)
             .expect("template should accept the committed slot plan");
     }
 
-    let expression = Expression::template(template, ValueMode::ImmutableOwned);
-    let ExpressionKind::Template(template) = &expression.kind else {
-        panic!("module constant regression must start from a template expression");
-    };
+    let root = expressions
+        .template(template.clone(), ValueMode::ImmutableOwned)
+        .expect("module constant regression must start from a template expression")
+        .id();
+    assert!(
+        matches!(
+            expressions
+                .view(root)
+                .expect("template expression should be committed")
+                .operation(),
+            ExpressionOperationView::Template(_)
+        ),
+        "module constant regression must start from a template expression"
+    );
     let projected = project_const_template_value(
-        template,
+        &template,
         &template_ir_store.borrow(),
+        &mut expressions,
+        &mut constants,
         &mut string_table,
         DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        NumericProfile::STANDARD,
         None,
     )
     .expect("a runtime slot plan must classify rather than fail preparation");
-    let Err(result) = const_template_value_from_projection(projected, template) else {
+    let Err(result) = const_template_value_from_projection(projected, &template) else {
         panic!("runtime-plan module constants must be rejected structurally");
     };
 
@@ -1308,8 +1505,14 @@ fn module_constant_normalization_rejects_runtime_slot_plan_with_structured_diagn
 fn finalization_accepts_supported_nested_wrapper_exact_view() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let (template, template_ir_store) =
-        nested_wrapper_finalization_fixture(&mut string_table, false);
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let (template, template_ir_store) = nested_wrapper_finalization_fixture(
+        &mut string_table,
+        &mut expressions,
+        &mut constants,
+        false,
+    );
 
     let folded = finalized_folded(
         finalize_template_value(
@@ -1317,8 +1520,9 @@ fn finalization_accepts_supported_nested_wrapper_exact_view() {
             TemplateValueFinalizationInputs {
                 string_table: &mut string_table,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-                numeric_profile: NumericProfile::STANDARD,
                 template_ir_store: &template_ir_store,
+                expression_builder: &mut expressions,
+                const_values: &mut constants,
             },
             TemplatePreparationMode::Value,
         )
@@ -1336,6 +1540,8 @@ fn finalization_accepts_supported_nested_wrapper_exact_view() {
 fn finalization_fold_uses_resolved_slot_view_context() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let before_text = string_table.intern("before");
     let after_text = string_table.intern("after");
     let fill_text = string_table.intern("filled");
@@ -1426,8 +1632,9 @@ fn finalization_fold_uses_resolved_slot_view_context() {
             TemplateValueFinalizationInputs {
                 string_table: &mut string_table,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-                numeric_profile: NumericProfile::STANDARD,
                 template_ir_store: &template_ir_store,
+                expression_builder: &mut expressions,
+                const_values: &mut constants,
             },
             TemplatePreparationMode::Value,
         )
@@ -1445,6 +1652,8 @@ fn finalization_fold_uses_resolved_slot_view_context() {
 fn finalization_fold_composed_root_with_unfilled_slot_emits_no_slot_output() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let text_id = string_table.intern("text before unfilled slot");
 
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
@@ -1487,8 +1696,9 @@ fn finalization_fold_composed_root_with_unfilled_slot_emits_no_slot_output() {
             TemplateValueFinalizationInputs {
                 string_table: &mut string_table,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-                numeric_profile: NumericProfile::STANDARD,
                 template_ir_store: &template_ir_store,
+                expression_builder: &mut expressions,
+                const_values: &mut constants,
             },
             TemplatePreparationMode::Value,
         )
@@ -1508,6 +1718,8 @@ fn finalization_fold_formatted_root_with_unfilled_slot_emits_no_slot_output() {
 
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let text_id = string_table.intern("formatted text before unfilled slot");
 
     let template_ir_store = Rc::new(RefCell::new(TemplateIrStore::new()));
@@ -1529,10 +1741,7 @@ fn finalization_fold_formatted_root_with_unfilled_slot_emits_no_slot_output() {
             root,
             Style::default(),
             TemplateType::String,
-            TemplateIrSummary {
-                slot_count: 1,
-                ..TemplateIrSummary::default()
-            },
+            TemplateIrSummary::default(),
             location,
         );
 
@@ -1554,8 +1763,9 @@ fn finalization_fold_formatted_root_with_unfilled_slot_emits_no_slot_output() {
             TemplateValueFinalizationInputs {
                 string_table: &mut string_table,
                 template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-                numeric_profile: NumericProfile::STANDARD,
                 template_ir_store: &template_ir_store,
+                expression_builder: &mut expressions,
+                const_values: &mut constants,
             },
             TemplatePreparationMode::Value,
         )

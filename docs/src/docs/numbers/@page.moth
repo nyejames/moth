@@ -31,17 +31,15 @@ page_head #= language_theme_head
 
     # Numbers
 
-    Moth uses `Int` for signed whole numbers, `Uint` for unsigned whole numbers
-    and `Float` for finite real-number
-    values. One compiler-selected numeric profile fixes their width and precision,
-    with `Uint` following the selected `Int` width,
-    and the accepted design also includes fixed-width integers and binary floats,
-    `Byte` and the exact `Dec` family. The numeric families have distinct
-    identities and local promotion rules; other conversions use explicit casts.
+    Moth's bounded numeric types name exact widths and precisions. Unconstrained
+    whole-number values default to `I32`, while decimal/exponent values default
+    to `F64`. These defaults do not impose arithmetic minimums: equal `I8`,
+    `U8` and `F16` operands keep their narrow result type.
 
-    Arithmetic checks overflow, division errors and non-finite results. Literal
-    spelling and operator spacing also follow one exact grammar on every backend.
-    See @../progress (Progress) for current numeric support.
+    Numeric literals retain their origin while body-local constraints resolve
+    them. Operators check or round at their selected result type, including
+    every `F16` operation. See the Progress matrix for current compiler and
+    backend support: @../progress (Progress).
 ]
 
 #[section:

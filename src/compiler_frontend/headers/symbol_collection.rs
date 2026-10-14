@@ -208,9 +208,6 @@ fn receiver_method_receiver_name(
             path.last().copied()
         }
         // Builtin scalar types are parsed directly; map them to their language-visible names.
-        ParsedTypeRef::BuiltinInt { .. } => Some(string_table.intern("Int")),
-        ParsedTypeRef::BuiltinUint { .. } => Some(string_table.intern("Uint")),
-        ParsedTypeRef::BuiltinFloat { .. } => Some(string_table.intern("Float")),
         ParsedTypeRef::BuiltinBool { .. } => Some(string_table.intern("Bool")),
         ParsedTypeRef::BuiltinString { .. } => Some(string_table.intern("String")),
         ParsedTypeRef::BuiltinChar { .. } => Some(string_table.intern("Char")),
@@ -323,11 +320,8 @@ fn register_header_symbol(
         }
 
         HeaderKind::StartFunction => {
-            // Register the compiler-owned implicit start function under its entry source file.
-            let start_name = path_fork
-                .try_intern_child(source_file, string_table.intern(IMPLICIT_START_FUNC_NAME))
-                .expect("path table exhausted while interning implicit start path");
-            register_declared_symbol(module_symbols, &start_name, &source_file, false, path_fork);
+            // Entry assembly owns this synthetic callable. Stage 3 retains its declaration
+            // separately, so it must not enter source binding or name-collision inventories.
         }
 
         HeaderKind::Constant { .. } => {
@@ -399,6 +393,9 @@ fn register_builtin_symbols(
     module_symbols
         .struct_source_by_path
         .extend(builtin_manifest.struct_source_by_path);
+    module_symbols
+        .folded_defaults_by_field_path
+        .extend(builtin_manifest.folded_defaults_by_field_path);
     module_symbols
         .builtin_struct_ast_nodes
         .extend(builtin_manifest.ast_struct_nodes);

@@ -1,0 +1,23 @@
+entry = "."
+
+# The signature-linked, protected-group, grouped, shaped, collection, multi-result,
+# concrete-result, named-origin and receiver-method generic fallback receivers keep the
+# protected arithmetic pending until the U64 fallback or later consumer completes it. The
+# generic signatures supply only the link; a concrete U64 success slot constrains the
+# protected raw value even when the generic argument is pending, a named origin binding
+# flows through `T -> T` without being an arithmetic operand, and a known nominal receiver
+# resolves its method without a numeric type search. These are authored runtime witnesses,
+# separate from the negative computed-fallback and named-arithmetic boundaries.
+# The branch-selected catch fallback receiver keeps the protected arithmetic pending on
+# every path, so a later U64 use of a non-first fallback binding still types it.
+# The inline generic signature fallback, the non-generic I32-parameter fallback with a pending
+# argument origin, the raw F32 and Dec2 receiver families, the grouped error-free generic pair
+# and error-free method arity, and the immediate U64-receiver then-cast targets for inline and
+# block handlers are independent witnesses.
+# Concrete generic success slots supply immediate fallback cast targets. A partial signature keeps
+# its unresolved slot separate until the later independent numeric receiver resolves it.
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "signature=4294967301 protected_group=4294967304 grouped=4294967302 shaped=4294967303 container=1,4294967305, multi=1,1 concrete_fallback=4294967307 named_origin=4294967308 method_multi=1,1 branch=4294967311 raw_branch=4294967312 inline_generic=4294967313 fixed_u64=4294967314 raw_f32=3 raw_dec2=3 error_free_pair=3,3 error_free_method=1,3 cast_inline=0 cast_block=0 cast_untyped=0 cast_fixed_pair=0,0 cast_partial_pair=0,1"

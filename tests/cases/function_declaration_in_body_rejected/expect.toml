@@ -1,0 +1,12 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0043"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0043"
+reason = "invalid_declaration.declaration_requires_module_top_level"
+path = "input/@page.moth"
+line = 2
+column = 5
+count = 1

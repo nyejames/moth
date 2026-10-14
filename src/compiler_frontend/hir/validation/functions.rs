@@ -14,12 +14,46 @@ impl<'a> HirValidator<'a> {
     // -------------------------
 
     pub(super) fn validate_functions(&self) -> Result<(), CompilerError> {
+        for (target, contract) in &self.module.call_result_contracts {
+            let has_signature_owner = match target {
+                crate::compiler_frontend::external_packages::CallTarget::Local(_)
+                | crate::compiler_frontend::external_packages::CallTarget::External(_) => true,
+                crate::compiler_frontend::external_packages::CallTarget::Generated(identity) => {
+                    self.module
+                        .function_ids_by_generated
+                        .contains_key(identity.as_ref())
+                }
+                crate::compiler_frontend::external_packages::CallTarget::ModulePrivate(
+                    identity,
+                ) => self
+                    .module
+                    .function_ids_by_private_origin
+                    .contains_key(identity),
+                crate::compiler_frontend::external_packages::CallTarget::CrossModule(identity) => {
+                    self.module.function_ids_by_origin.contains_key(identity)
+                }
+            };
+            if has_signature_owner {
+                return Err(self.error_with_hir(
+                    "Call result contract mirrors a reachable signature owner",
+                    None,
+                ));
+            }
+            for return_type in contract.returns.iter() {
+                self.require_type_id(*return_type, None)?;
+            }
+            if let Some(error_type) = contract.error_return {
+                self.require_type_id(error_type, None)?;
+            }
+        }
         for function in &self.module.functions {
             self.require_block_id(function.entry, Some(HirLocation::Function(function.id)))?;
-            self.require_type_id(
-                function.return_type,
-                Some(HirLocation::Function(function.id)),
-            )?;
+            for return_type in function.returns.iter() {
+                self.require_type_id(*return_type, Some(HirLocation::Function(function.id)))?;
+            }
+            if let Some(error_type) = function.error_return {
+                self.require_type_id(error_type, Some(HirLocation::Function(function.id)))?;
+            }
 
             let anchor = Some(HirLocation::Function(function.id));
             let mut parameter_ids = FxHashSet::default();

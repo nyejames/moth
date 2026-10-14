@@ -10,7 +10,6 @@ use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, InvalidTemplateSlotReason, InvalidTemplateStructureReason,
 };
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTableResolver};
-use moth_lexical::numeric::profile::NumericProfile;
 
 pub(crate) fn invalid_template_slot_message(
     reason: InvalidTemplateSlotReason,
@@ -47,12 +46,11 @@ pub(crate) fn invalid_template_slot_message(
 pub(crate) fn compile_time_evaluation_error_message(
     reason: CompileTimeEvaluationErrorReason,
     operation: Option<StringId>,
-    numeric_profile: Option<NumericProfile>,
     string_table: &dyn StringTableResolver,
 ) -> String {
     let operation_text = named_value_or_default(operation, string_table, "this expression");
 
-    let mut message = match reason {
+    match reason {
         CompileTimeEvaluationErrorReason::IntegerOverflow => {
             format!("Compile-time integer overflow while evaluating {operation_text}.")
         }
@@ -67,9 +65,6 @@ pub(crate) fn compile_time_evaluation_error_message(
         }
         CompileTimeEvaluationErrorReason::InvalidOperatorForType => {
             format!("Cannot perform operation {operation_text} on this type.")
-        }
-        CompileTimeEvaluationErrorReason::IntegerDivisionOnlyIntInt => {
-            "Integer division operator '//' only supports Int and Int operands.".to_string()
         }
         CompileTimeEvaluationErrorReason::ConstantSelfReference => {
             format!("Constant {operation_text} cannot reference itself in its initializer.")
@@ -121,16 +116,7 @@ pub(crate) fn compile_time_evaluation_error_message(
                 "Cannot use a resource-bearing or site-root string for {operation_text}. Those pieces have no final text until the build assigns URL contexts. Keep the operation at runtime or use plain text without structural pieces."
             )
         }
-    };
-
-    // The message is owned on every arm, so the profile suffix appends into the existing
-    // String instead of allocating a second copy of the whole message.
-    if let Some(profile) = numeric_profile {
-        use std::fmt::Write as _;
-        write!(message, " Numeric profile: {profile}.")
-            .expect("an owned String write cannot fail on a finite in-memory buffer");
     }
-    message
 }
 
 pub(crate) fn compile_time_evaluation_error_suggestion(
@@ -150,9 +136,6 @@ pub(crate) fn compile_time_evaluation_error_suggestion(
         CompileTimeEvaluationErrorReason::InvalidOperatorForType => {
             "Use an operator that is valid for the operand types"
         }
-        CompileTimeEvaluationErrorReason::IntegerDivisionOnlyIntInt => {
-            "Use '//' only with two Int operands"
-        }
         CompileTimeEvaluationErrorReason::ConstantSelfReference => {
             "A constant cannot depend on itself. Use a different value or compute it differently."
         }
@@ -169,7 +152,7 @@ pub(crate) fn compile_time_evaluation_error_suggestion(
             "Constants may only contain compile-time values and constant references."
         }
         CompileTimeEvaluationErrorReason::ExternalNonScalarConstantInConstantContext => {
-            "Only scalar external constants (Int, Uint, Float, Bool) are supported in constant declarations and const templates"
+            "Only scalar external constants (integers, binary floats and Bool) are supported in constant declarations and const templates"
         }
         CompileTimeEvaluationErrorReason::ExternalFunctionCallInConstantContext => {
             "Use only compile-time constant values inside constants and const templates"

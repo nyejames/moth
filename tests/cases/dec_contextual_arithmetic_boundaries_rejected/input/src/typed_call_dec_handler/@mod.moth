@@ -1,4 +1,4 @@
-read_int || -> Int, Error!:
+read_int || -> I32, Error!:
     return 7
 ;
 reject_typed_call_dec_handler || -> String:

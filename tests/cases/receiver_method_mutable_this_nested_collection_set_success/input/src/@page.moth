@@ -3,7 +3,7 @@ Bucket = |
 |
 
 Container = |
-    values {Int},
+    values {I32},
 |
 
 set_seven |this ~Bucket| -> Error!:

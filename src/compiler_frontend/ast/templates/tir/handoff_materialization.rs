@@ -9,8 +9,12 @@
 //! owned handoff shapes defined in `runtime_handoff.rs` that HIR lowering
 //! consumes directly.
 
-use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
-use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
+use crate::compiler_frontend::ast::const_values::store::{
+    ConstStringValue, ConstValuePayload, ConstValueStore,
+};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExpressionOperationView,
+};
 use crate::compiler_frontend::ast::templates::runtime_handoff::{
     OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeSlotContributionSource, OwnedRuntimeSlotSite,
     OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
@@ -50,12 +54,15 @@ use std::collections::HashSet;
 pub(crate) fn owned_runtime_slot_handoff_for_prepared_view(
     prepared: &TemplatePreparation,
     view: TirView<'_>,
+    expressions: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
     string_table: &StringTable,
     module_resources: Option<&ModuleResourceTable>,
 ) -> Result<Option<OwnedRuntimeSlotApplicationHandoff>, CompilerError> {
     validate_prepared_runtime(prepared, &view)?;
     let template_id = template_id_for_view(&view)?;
-    let mut materializer = RuntimeHandoffMaterializer::new(string_table, module_resources);
+    let mut materializer =
+        RuntimeHandoffMaterializer::new(expressions, const_values, string_table, module_resources);
     materializer.owned_runtime_slot_handoff_for_template(&view, template_id)
 }
 
@@ -63,12 +70,15 @@ pub(crate) fn owned_runtime_slot_handoff_for_prepared_view(
 pub(crate) fn owned_runtime_template_handoff_for_prepared_view(
     prepared: &TemplatePreparation,
     view: TirView<'_>,
+    expressions: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
     string_table: &StringTable,
     module_resources: Option<&ModuleResourceTable>,
 ) -> Result<OwnedRuntimeTemplateHandoff, CompilerError> {
     validate_prepared_runtime(prepared, &view)?;
     let template_id = template_id_for_view(&view)?;
-    let mut materializer = RuntimeHandoffMaterializer::new(string_table, module_resources);
+    let mut materializer =
+        RuntimeHandoffMaterializer::new(expressions, const_values, string_table, module_resources);
     materializer.owned_runtime_template_handoff_for_template(&view, template_id)
 }
 
@@ -102,17 +112,23 @@ fn validate_prepared_runtime(
 
 struct RuntimeHandoffMaterializer<'a> {
     active_views: HashSet<TirViewIdentity>,
+    expressions: &'a AstExpressionBuilder,
+    const_values: &'a ConstValueStore,
     string_table: &'a StringTable,
     module_resources: Option<&'a ModuleResourceTable>,
 }
 
 impl<'a> RuntimeHandoffMaterializer<'a> {
     fn new(
+        expressions: &'a AstExpressionBuilder,
+        const_values: &'a ConstValueStore,
         string_table: &'a StringTable,
         module_resources: Option<&'a ModuleResourceTable>,
     ) -> Self {
         Self {
             active_views: HashSet::new(),
+            expressions,
+            const_values,
             string_table,
             module_resources,
         }
@@ -216,7 +232,6 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                         OwnedRuntimeTemplateNode::ChildTemplate {
                             template: Box::new(OwnedRuntimeTemplateHandoff {
                                 body: OwnedRuntimeTemplateBody::RuntimeSlotApplication(application),
-                                span,
                             }),
                             span,
                         }
@@ -235,7 +250,7 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
             body
         };
 
-        Ok(OwnedRuntimeTemplateHandoff { body, span })
+        Ok(OwnedRuntimeTemplateHandoff { body })
     }
 
     fn materialize_runtime_slot_application_by_parts(
@@ -260,7 +275,6 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
             wrapper,
             contribution_sources,
             slot_sites,
-            span: slot_plan.span,
         })
     }
 
@@ -362,25 +376,24 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                 site_id,
             } => {
                 let effective_expression = view
-                    .effective_expression_for_site(*site_id)?
-                    .unwrap_or(expression.as_ref());
+                    .effective_expression_for_site(self.expressions, *site_id)?
+                    .unwrap_or(self.expressions.view(*expression)?);
 
-                if let ExpressionKind::StructuralString { pieces } = &effective_expression.kind {
+                if let ExpressionOperationView::Constant(id) = effective_expression.operation()
+                    && let Some(ConstValuePayload::String(value @ ConstStringValue::Pieces(_))) =
+                        self.const_values.payload(id)
+                {
                     let resources = self.module_resources.ok_or_else(|| {
                         CompilerError::compiler_error(
                             "TIR runtime handoff reached a structural string without the issuing module resource table.",
                         )
                     })?;
-                    let value = ConstStringValue::Pieces(pieces.clone());
-                    let text = owned_folded_string_from_const_string(
-                        &value,
-                        resources,
-                        self.string_table,
-                    )?;
+                    let text =
+                        owned_folded_string_from_const_string(value, resources, self.string_table)?;
                     Ok(OwnedRuntimeTemplateNode::Text { text })
                 } else {
                     Ok(OwnedRuntimeTemplateNode::DynamicExpression {
-                        expression: Box::new(effective_expression.clone()),
+                        expression: effective_expression.id(),
                         span: node.span,
                     })
                 }
@@ -414,8 +427,12 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                 selector_site_id,
                 body,
             } => {
-                let selector =
-                    effective_branch_selector_for_view(view, selector.as_ref(), *selector_site_id)?;
+                let selector = effective_branch_selector_for_view(
+                    view,
+                    self.expressions,
+                    selector.as_ref(),
+                    *selector_site_id,
+                )?;
                 let body =
                     self.materialize_node_with_injection(view, *body, active_slot_plan, injection)?;
 
@@ -448,7 +465,12 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                 };
 
                 Ok(OwnedRuntimeTemplateNode::Loop {
-                    header: effective_loop_header_for_view(view, header, *header_sites)?,
+                    header: effective_loop_header_for_view(
+                        view,
+                        self.expressions,
+                        header,
+                        *header_sites,
+                    )?,
                     body: Box::new(body_node),
                     aggregate_wrapper,
                     span: node.span,
@@ -537,6 +559,13 @@ impl<'a> RuntimeHandoffMaterializer<'a> {
                     span: node.span,
                 })
             }
+
+            // A retained position is unfinished compiler scratch: body-root numeric completion
+            // installs its value before any template reaches the runtime handoff.
+            TemplateIrNodeKind::RetainedNumericIntake(_) => Err(CompilerError::compiler_error(
+                "TIR HIR handoff materialization reached a retained numeric intake position; \
+                 body-root completion must install every retained value before handoff.",
+            )),
         }?;
 
         increment_ast_counter(AstCounter::RuntimeSlotHandoffOwnedNodesMaterialized);

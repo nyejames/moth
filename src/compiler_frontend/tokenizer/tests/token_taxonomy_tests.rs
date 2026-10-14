@@ -131,6 +131,18 @@ fn schema_has_all_explicit_tags_once() {
         !raw_tags.contains(&5),
         "retired token tag code 5 must not be reused"
     );
+    assert!(
+        !raw_tags.contains(&38),
+        "retired token tag code 38 must not be reused"
+    );
+    assert!(
+        !raw_tags.contains(&39),
+        "retired token tag code 39 must not be reused"
+    );
+    assert!(
+        !raw_tags.contains(&107),
+        "retired token tag code 107 must not be reused"
+    );
     assert_eq!(
         tags.iter()
             .filter(|tag| !matches!(**tag, TokenTag::NUMERIC_LITERAL | TokenTag::DOUBLE_COLON))
@@ -155,6 +167,24 @@ fn unknown_tags_and_reserved_flags_are_rejected() {
         TokenShape::from_raw_parts(5, 0, 0),
         None,
         "retired token tag code 5 must not decode"
+    );
+    assert_eq!(TokenTag::from_raw(38), None, "retired token tag code 38");
+    assert_eq!(
+        TokenShape::from_raw_parts(38, 0, 0),
+        None,
+        "retired token tag code 38 must not decode"
+    );
+    assert_eq!(TokenTag::from_raw(39), None, "retired token tag code 39");
+    assert_eq!(
+        TokenShape::from_raw_parts(39, 0, 0),
+        None,
+        "retired token tag code 39 must not decode"
+    );
+    assert_eq!(TokenTag::from_raw(107), None, "retired token tag code 107");
+    assert_eq!(
+        TokenShape::from_raw_parts(107, 0, 0),
+        None,
+        "retired token tag code 107 must not decode"
     );
 
     let first_unknown_raw = first_unknown_raw_tag();
@@ -325,12 +355,33 @@ fn schema_classifications_match_frontend_semantics() {
     assert!(!TokenTag::RAW_STRING_LITERAL.is_operand_start());
 
     assert!(TokenTag::RETURN_BANG.is_keyword());
-    assert!(TokenTag::CAST_BANG.is_keyword());
+    assert!(TokenTag::CAST.is_keyword());
     assert!(TokenTag::NOT.is_word_operator());
     assert!(!TokenTag::NOT.is_keyword());
     assert!(TokenTag::NONE_LITERAL.is_literal());
-    assert!(TokenTag::DATATYPE_INT.is_builtin_type());
-    assert!(!TokenTag::DATATYPE_INT.is_literal());
+    for tag in [
+        TokenTag::DATATYPE_I8,
+        TokenTag::DATATYPE_I16,
+        TokenTag::DATATYPE_I32,
+        TokenTag::DATATYPE_I64,
+        TokenTag::DATATYPE_U8,
+        TokenTag::DATATYPE_U16,
+        TokenTag::DATATYPE_U32,
+        TokenTag::DATATYPE_U64,
+        TokenTag::DATATYPE_F16,
+        TokenTag::DATATYPE_F32,
+        TokenTag::DATATYPE_F64,
+        TokenTag::DATATYPE_BYTE,
+    ] {
+        assert!(
+            tag.is_builtin_type(),
+            "{tag:?} must classify as a builtin type keyword"
+        );
+        assert!(
+            !tag.is_literal(),
+            "{tag:?} is a type keyword, not a literal"
+        );
+    }
     assert!(TokenTag::OPEN_PARENTHESIS.is_delimiter());
     assert!(TokenTag::FAT_ARROW.is_delimiter());
     assert!(!TokenTag::ADD.is_delimiter());
@@ -433,7 +484,7 @@ fn stats_classification_uses_schema_authority() {
         assert_eq!(stats.map_or_collection_delimiters, 1);
     }
 
-    // Keyword-adjacent operators (`copy`) and bang spellings keep their legacy buckets.
+    // `copy` and the remaining `return!` spelling keep their existing stats buckets.
     assert!(TokenTag::COPY.is_keyword());
     assert!(TokenTag::COPY.is_stats_operator());
     for tag in [TokenTag::RETURN, TokenTag::RETURN_BANG] {
@@ -441,9 +492,7 @@ fn stats_classification_uses_schema_authority() {
         stats.accumulate_tag(tag);
         assert_eq!(stats.return_tokens, 1);
     }
-    for tag in [TokenTag::CAST, TokenTag::CAST_BANG] {
-        let mut stats = TokenStats::default();
-        stats.accumulate_tag(tag);
-        assert_eq!(stats.cast_tokens, 1);
-    }
+    let mut cast_stats = TokenStats::default();
+    cast_stats.accumulate_tag(TokenTag::CAST);
+    assert_eq!(cast_stats.cast_tokens, 1);
 }

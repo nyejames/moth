@@ -1,5 +1,5 @@
 @provider counts
 
-overflow || -> Int:
+overflow || -> I32:
     return counts.top + 1
 ;

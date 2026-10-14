@@ -16,7 +16,7 @@ if maybe_user is:
     else => user_label = "present"
 ;
 
-score Int? = 7
+score I32? = 7
 score_label ~= "unset"
 
 if score is:

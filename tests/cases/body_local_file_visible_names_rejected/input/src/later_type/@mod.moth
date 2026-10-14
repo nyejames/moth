@@ -1,0 +1,6 @@
+local_binding || -> I32:
+    LaterRecord I32 = 1
+    return LaterRecord
+;
+
+LaterRecord = |value I32|

@@ -38,6 +38,7 @@ use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 fn provider_origin(module_name: &str) -> StableModuleOriginIdentity {
     StableModuleOriginIdentity::from_portable_path(
@@ -89,7 +90,9 @@ fn function_record(
         parameters: (0..parameter_count)
             .map(|index| PublicParameterTypeSlot {
                 name: Some(format!("arg{index}")),
-                type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int),
+                type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::FixedScalar(
+                    FixedScalar::I32,
+                )),
                 access: crate::compiler_frontend::public_call_summary::PublicCallParameterAccess::Shared,
                 folded_default: None,
             })
@@ -287,7 +290,9 @@ impl DeepReexportFixture {
                 alias_record(
                     &beta,
                     "Other",
-                    CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int),
+                    CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::FixedScalar(
+                        FixedScalar::I32,
+                    )),
                 ),
             ],
             Vec::new(),

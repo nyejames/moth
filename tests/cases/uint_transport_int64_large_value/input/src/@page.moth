@@ -1,11 +1,11 @@
 @large big,
     above
 
--- Values above i64::MAX stay exact in the 64-bit profile, including across
+-- U64 values above i64::MAX stay exact, including across
 -- module imports and concrete generic instantiation.
-huge Uint = 18446744073709551615
-above_signed Uint = 9223372036854775808
-max_signed Int = 9223372036854775807
+huge U64 = 18446744073709551615
+above_signed U64 = 9223372036854775808
+max_signed I64 = 9223372036854775807
 
 identity type T |value T| -> T:
     return value
@@ -15,10 +15,10 @@ Box type T = |
     value T,
 |
 
-passed Uint = identity(big)
-reboxed Box of Uint = Box(above)
+passed U64 = identity(big)
+reboxed Box of U64 = Box(above)
 
-passed_big Uint = passed
-reboxed_value Uint = reboxed.value
+passed_big U64 = passed
+reboxed_value U64 = reboxed.value
 
 [:uint int64 huge=[huge] above=[above_signed] maxsigned=[max_signed] imported=[big]/[above] generic=[passed_big] boxed=[reboxed_value]]

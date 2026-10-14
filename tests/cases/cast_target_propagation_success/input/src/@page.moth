@@ -8,12 +8,17 @@ prefix |s String| -> String:
 
 maybe String? = cast 1
 labels {String} = { cast 'A', cast true }
-keyed {String = Int} = { cast 1 = 100 }
-valued {Int = String} = { 2 = cast 30 }
+keyed {String = I32} = { cast 1 = 100 }
+valued {I32 = String} = { 2 = cast 30 }
 cell = Cell(label = cast 40)
 step = prefix(cast 50)
 result String = if true then cast 60 else "none"
+small U8 = 42
+inline_total I32 = 1 + 2 catch then cast small
+block_total I32 = 1 + 2 catch:
+    then cast small
+;
 
 maybe_text = if maybe is |value| then value else "none"
 
-[: target propagation: [maybe_text]|[cell.label]|[step]|[result]]
+[: target propagation: [maybe_text]|[cell.label]|[step]|[result]|[inline_total]|[block_total]]

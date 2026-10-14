@@ -51,11 +51,11 @@ fn builtin_seeding_creates_all_expected_ids() {
         Some(super::super::queries::TypeKind::Builtin)
     );
     assert_eq!(
-        env.type_kind(builtins.int),
+        env.type_kind(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
         Some(super::super::queries::TypeKind::Builtin)
     );
     assert_eq!(
-        env.type_kind(builtins.float),
+        env.type_kind(builtin_type_ids::fixed_scalar(FixedScalar::F64)),
         Some(super::super::queries::TypeKind::Builtin)
     );
     assert_eq!(
@@ -75,35 +75,34 @@ fn builtin_seeding_creates_all_expected_ids() {
         Some(super::super::queries::TypeKind::Builtin)
     );
     assert_eq!(
-        env.type_kind(builtins.uint),
+        env.type_kind(builtin_type_ids::fixed_scalar(FixedScalar::U32)),
         Some(super::super::queries::TypeKind::Builtin)
     );
 }
 
 #[test]
-fn fresh_environments_have_independent_ids() {
+fn fresh_environments_seed_matching_builtin_ids() {
     let env_a = TypeEnvironment::new();
     let env_b = TypeEnvironment::new();
 
-    // IDs happen to line up because both start from 0, but they belong to
-    // different environments. This test documents that equality is only
-    // meaningful within one environment.
-    assert_eq!(env_a.builtins().int, env_b.builtins().int);
-}
-
-#[test]
-fn type_id_identity_equality_within_environment() {
-    let env = TypeEnvironment::new();
-    let int_a = env.builtins().int;
-    let int_b = env.builtins().int;
-
-    assert_eq!(int_a, int_b);
+    // Deterministic seeding makes fresh environments agree on the builtin ids.
+    // Fixed scalars have no per-environment handle, so the agreement is checked
+    // through the deterministic id itself.
+    let i32_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
+    assert_eq!(
+        env_a.type_kind(i32_id),
+        Some(super::super::queries::TypeKind::Builtin)
+    );
+    assert_eq!(
+        env_b.type_kind(i32_id),
+        Some(super::super::queries::TypeKind::Builtin)
+    );
 }
 
 #[test]
 fn constructed_type_interning_reuses_ids() {
     let mut env = TypeEnvironment::new();
-    let int = env.builtins().int;
+    let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let collection_a = env.intern_constructed(
         TypeConstructor::Builtin(BuiltinTypeConstructor::Collection {
@@ -127,7 +126,7 @@ fn constructed_type_interning_reuses_ids() {
 #[test]
 fn distinct_constructed_types_get_distinct_ids() {
     let mut env = TypeEnvironment::new();
-    let int = env.builtins().int;
+    let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let string = env.builtins().string;
 
     let collection_int = env.intern_constructed(
@@ -150,21 +149,18 @@ fn distinct_constructed_types_get_distinct_ids() {
 }
 
 #[test]
-fn result_interning_is_deterministic() {
+fn function_result_slots_intern_deterministically() {
     let mut env = TypeEnvironment::new();
-    let int = env.builtins().int;
-    let error_type = env.builtins().string;
-
-    let result_a = env.intern_constructed(
-        TypeConstructor::Builtin(BuiltinTypeConstructor::FallibleCarrier),
-        Box::new([int, error_type]),
-    );
-    let result_b = env.intern_constructed(
-        TypeConstructor::Builtin(BuiltinTypeConstructor::FallibleCarrier),
-        Box::new([int, error_type]),
-    );
-
-    assert_eq!(result_a, result_b);
+    let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
+    let string = env.builtins().string;
+    let key = FunctionTypeKey {
+        parameters: Box::new([]),
+        returns: Box::new([int, string]),
+        error_return: Some(string),
+    };
+    let first = env.intern_function(key.clone());
+    let second = env.intern_function(key);
+    assert_eq!(first, second);
 }
 
 #[test]
@@ -192,12 +188,22 @@ fn display_renders_builtin_names() {
     let table = StringTable::new();
 
     assert_eq!(
-        display_type(env.builtins().int, &env, &table, &empty_path_table()),
-        "Int"
+        display_type(
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            &env,
+            &table,
+            &empty_path_table()
+        ),
+        "I32"
     );
     assert_eq!(
-        display_type(env.builtins().float, &env, &table, &empty_path_table()),
-        "Float"
+        display_type(
+            builtin_type_ids::fixed_scalar(FixedScalar::F64),
+            &env,
+            &table,
+            &empty_path_table()
+        ),
+        "F64"
     );
     assert_eq!(
         display_type(env.builtins().bool, &env, &table, &empty_path_table()),
@@ -217,7 +223,7 @@ fn display_renders_builtin_names() {
 fn display_renders_collection_with_braces() {
     let mut env = TypeEnvironment::new();
     let table = StringTable::new();
-    let int = env.builtins().int;
+    let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let collection = env.intern_constructed(
         TypeConstructor::Builtin(BuiltinTypeConstructor::Collection {
@@ -228,7 +234,7 @@ fn display_renders_collection_with_braces() {
 
     assert_eq!(
         display_type(collection, &env, &table, &empty_path_table()),
-        "{Int}"
+        "{I32}"
     );
 }
 
@@ -236,7 +242,7 @@ fn display_renders_collection_with_braces() {
 fn display_renders_option_with_question_mark() {
     let mut env = TypeEnvironment::new();
     let table = StringTable::new();
-    let int = env.builtins().int;
+    let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let option = env.intern_constructed(
         TypeConstructor::Builtin(BuiltinTypeConstructor::Option),
@@ -245,63 +251,64 @@ fn display_renders_option_with_question_mark() {
 
     assert_eq!(
         display_type(option, &env, &table, &empty_path_table()),
-        "Int?"
+        "I32?"
     );
 }
 
 #[test]
-fn display_renders_internal_result_carrier_as_fallible_signature() {
+fn display_renders_single_success_fallible_function_signature() {
     let mut env = TypeEnvironment::new();
     let table = StringTable::new();
-    let int = env.builtins().int;
+    let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let error_type = env.builtins().string;
 
-    let result = env.intern_constructed(
-        TypeConstructor::Builtin(BuiltinTypeConstructor::FallibleCarrier),
-        Box::new([int, error_type]),
-    );
+    let result = env.intern_function(FunctionTypeKey {
+        parameters: Box::new([]),
+        returns: Box::new([int]),
+        error_return: Some(error_type),
+    });
 
     assert_eq!(
         display_type(result, &env, &table, &empty_path_table()),
-        "Int, String!"
+        "Function( -> I32, String!)"
     );
 }
 
 #[test]
-fn display_renders_multi_success_result_carrier_as_fallible_signature() {
+fn display_renders_multi_success_fallible_function_signature() {
     let mut env = TypeEnvironment::new();
     let table = StringTable::new();
-    let int = env.builtins().int;
+    let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let string = env.builtins().string;
     let error_type = env.builtins().string;
 
-    let success_tuple = env.intern_tuple(vec![int, string]);
-    let result = env.intern_constructed(
-        TypeConstructor::Builtin(BuiltinTypeConstructor::FallibleCarrier),
-        Box::new([success_tuple, error_type]),
-    );
+    let result = env.intern_function(FunctionTypeKey {
+        parameters: Box::new([]),
+        returns: Box::new([int, string]),
+        error_return: Some(error_type),
+    });
 
     assert_eq!(
         display_type(result, &env, &table, &empty_path_table()),
-        "Int, String, String!"
+        "Function( -> I32, String, String!)"
     );
 }
 
 #[test]
-fn display_renders_zero_success_result_carrier_as_error_signature() {
+fn display_renders_error_only_function_signature() {
     let mut env = TypeEnvironment::new();
     let table = StringTable::new();
-    let none = env.builtins().none;
     let error_type = env.builtins().string;
 
-    let result = env.intern_constructed(
-        TypeConstructor::Builtin(BuiltinTypeConstructor::FallibleCarrier),
-        Box::new([none, error_type]),
-    );
+    let result = env.intern_function(FunctionTypeKey {
+        parameters: Box::new([]),
+        returns: Box::new([]),
+        error_return: Some(error_type),
+    });
 
     assert_eq!(
         display_type(result, &env, &table, &empty_path_table()),
-        "String!"
+        "Function( -> String!)"
     );
 }
 
@@ -309,7 +316,7 @@ fn display_renders_zero_success_result_carrier_as_error_signature() {
 fn display_renders_function_error_return_slot() {
     let mut env = TypeEnvironment::new();
     let table = StringTable::new();
-    let int = env.builtins().int;
+    let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let string = env.builtins().string;
     let error_type = env.builtins().string;
 
@@ -321,25 +328,7 @@ fn display_renders_function_error_return_slot() {
 
     assert_eq!(
         display_type(function, &env, &table, &empty_path_table()),
-        "Function(Int -> String, String!)"
-    );
-}
-
-#[test]
-fn display_renders_tuple_fields() {
-    let mut env = TypeEnvironment::new();
-    let table = StringTable::new();
-    let int = env.builtins().int;
-    let string = env.builtins().string;
-
-    let tuple = env.intern_constructed(
-        TypeConstructor::Builtin(BuiltinTypeConstructor::Tuple),
-        Box::new([int, string]),
-    );
-
-    assert_eq!(
-        display_type(tuple, &env, &table, &empty_path_table()),
-        "(Int, String)"
+        "Function(I32 -> String, String!)"
     );
 }
 
@@ -463,7 +452,7 @@ fn member_definition_queries_return_borrowed_views_and_direct_matches() {
         path: point_path,
         fields: vec![FieldDefinition {
             name: value_name,
-            type_id: env.builtins().int,
+            type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
             span: None,
         }]
         .into_boxed_slice(),
@@ -479,7 +468,10 @@ fn member_definition_queries_return_borrowed_views_and_direct_matches() {
     let value_field = env
         .field_for(point_type_id, value_id, &path_fork)
         .expect("direct field lookup should find base struct field");
-    assert_eq!(value_field.type_id, env.builtins().int);
+    assert_eq!(
+        value_field.type_id,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
+    );
 
     let ready_name = table.intern("Ready");
     let status_path = test_path(&mut path_builder, &mut table, "Status");
@@ -537,7 +529,10 @@ fn generic_member_definition_queries_return_substituted_borrowed_views() {
         const_record: false,
     });
 
-    let box_of_int = env.intern_generic_instance(box_nominal_id, Box::new([env.builtins().int]));
+    let box_of_int = env.intern_generic_instance(
+        box_nominal_id,
+        Box::new([builtin_type_ids::fixed_scalar(FixedScalar::I32)]),
+    );
     let borrowed_fields: Option<&[FieldDefinition]> = env.fields_for(box_of_int);
     assert_eq!(borrowed_fields.map(|fields| fields.len()), Some(1));
 
@@ -546,7 +541,10 @@ fn generic_member_definition_queries_return_substituted_borrowed_views() {
     let item_field = env
         .field_for(box_of_int, item_id, &path_fork)
         .expect("direct field lookup should find substituted generic field");
-    assert_eq!(item_field.type_id, env.builtins().int);
+    assert_eq!(
+        item_field.type_id,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
+    );
 
     let state_parameter_name = table.intern("U");
     let state_parameters = single_generic_parameter_list(state_parameter_name);
@@ -601,8 +599,9 @@ fn receiver_key_queries_use_type_id_semantics() {
     let mut table = StringTable::new();
 
     assert_eq!(
-        env.receiver_key_for_type_id(env.builtins().int),
-        Some(ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Int))
+        env.receiver_key_for_type_id(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
+        None,
+        "fixed scalars have no member receiver"
     );
     assert_eq!(
         env.receiver_key_for_type_id(env.builtins().string),
@@ -658,7 +657,10 @@ fn receiver_key_queries_use_type_id_semantics() {
         generic_parameters: Some(box_parameter_list),
         const_record: false,
     });
-    let box_of_int = env.intern_generic_instance(box_nominal_id, Box::new([env.builtins().int]));
+    let box_of_int = env.intern_generic_instance(
+        box_nominal_id,
+        Box::new([builtin_type_ids::fixed_scalar(FixedScalar::I32)]),
+    );
     assert_eq!(
         env.receiver_key_for_type_id(box_of_int),
         Some(ReceiverKey::Struct(box_path)),
@@ -727,7 +729,7 @@ fn updating_choice_variants_refreshes_generic_instance_variant_cache() {
         generic_parameters: Some(parameter_list),
     });
 
-    let int_type_id = env.builtins().int;
+    let int_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let instance_type_id = env.intern_generic_instance(nominal_id, Box::new([int_type_id]));
 
     assert_eq!(
@@ -806,7 +808,7 @@ fn updating_struct_fields_refreshes_cached_substituted_generic_instance_views() 
     });
 
     let box_of_parameter = env.intern_generic_instance(nominal_id, Box::new([parameter_type_id]));
-    let int_type_id = env.builtins().int;
+    let int_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let mut mapping = FxHashMap::default();
     mapping.insert(parameter_id, int_type_id);
 
@@ -878,7 +880,10 @@ fn remap_string_ids_updates_definitions_indexes_and_generic_instance_caches() {
         generic_parameters: Some(box_parameter_list),
         const_record: false,
     });
-    let box_of_int = env.intern_generic_instance(box_nominal_id, Box::new([env.builtins().int]));
+    let box_of_int = env.intern_generic_instance(
+        box_nominal_id,
+        Box::new([builtin_type_ids::fixed_scalar(FixedScalar::I32)]),
+    );
 
     let state_path = test_path(&mut path_builder, &mut local_table, "State");
     let state_parameter_name = local_table.intern("U");
@@ -917,7 +922,7 @@ fn remap_string_ids_updates_definitions_indexes_and_generic_instance_caches() {
     let function_type_id = env.insert_function_type_for_test(FunctionTypeDefinition {
         parameters: vec![FunctionParameterDefinition {
             name: Some(named_parameter),
-            type_id: env.builtins().int,
+            type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
         }]
         .into_boxed_slice(),
         returns: vec![env.builtins().string].into_boxed_slice(),
@@ -957,7 +962,7 @@ fn remap_string_ids_updates_definitions_indexes_and_generic_instance_caches() {
             &merged_table,
             remapped_path_builder.paths()
         ),
-        "Box of Int"
+        "Box of I32"
     );
 
     let generic_parameters = env
@@ -1058,7 +1063,8 @@ fn by_nominal_queries_reject_wrong_kind_and_missing_ids() {
         generic_parameters: None,
         const_record: false,
     });
-    let interleaved_collection = env.intern_collection(env.builtins().int, None);
+    let interleaved_collection =
+        env.intern_collection(builtin_type_ids::fixed_scalar(FixedScalar::I32), None);
 
     let (choice_nominal, choice_type_id) = env.register_nominal_choice(ChoiceTypeDefinition {
         id: NominalTypeId(0),
@@ -1115,7 +1121,8 @@ fn generated_fork_appends_local_nominals_after_inherited_prefix() {
         });
 
     let mut generated = requester.fork_for_generated();
-    let interleaved_type_id = generated.intern_collection(generated.builtins().int, None);
+    let interleaved_type_id =
+        generated.intern_collection(builtin_type_ids::fixed_scalar(FixedScalar::I32), None);
     let local_path = test_path(&mut path_builder, &mut table, "Local");
     let (local_nominal, local_type_id) = generated.register_nominal_choice(ChoiceTypeDefinition {
         id: NominalTypeId(0),
@@ -1204,7 +1211,7 @@ fn mutually_referring_nominal_shells_patch_the_canonical_payloads() {
 #[test]
 fn collection_element_type_query_works() {
     let mut env = TypeEnvironment::new();
-    let int = env.builtins().int;
+    let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let collection = env.intern_constructed(
         TypeConstructor::Builtin(BuiltinTypeConstructor::Collection {
@@ -1239,23 +1246,9 @@ fn option_interning_is_deterministic() {
 }
 
 #[test]
-fn fallible_carrier_slots_query_works() {
-    let mut env = TypeEnvironment::new();
-    let int = env.builtins().int;
-    let error_type = env.builtins().string;
-
-    let result = env.intern_fallible_carrier(int, error_type);
-
-    assert_eq!(env.fallible_carrier_slots(result), Some((int, error_type)));
-}
-
-#[test]
 fn runtime_equality_query_accepts_supported_scalar_types() {
     let env = TypeEnvironment::new();
 
-    assert!(env.supports_runtime_equality(env.builtins().int));
-    assert!(env.supports_runtime_equality(env.builtins().uint));
-    assert!(env.supports_runtime_equality(env.builtins().float));
     assert!(env.supports_runtime_equality(env.builtins().bool));
     assert!(env.supports_runtime_equality(env.builtins().char));
     assert!(env.supports_runtime_equality(env.builtins().string));
@@ -1275,7 +1268,7 @@ fn runtime_equality_query_rejects_unsupported_non_choice_types() {
     let mut table = StringTable::new();
     let mut path_builder = PathInternerBuilder::new();
     let struct_path = test_path(&mut path_builder, &mut table, "Point");
-    let int_type_id = env.builtins().int;
+    let int_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let (_, struct_type_id) = env.register_nominal_struct(StructTypeDefinition {
         id: NominalTypeId(0),
@@ -1332,7 +1325,7 @@ fn runtime_equality_query_accepts_choice_payloads_when_fields_do() {
     let mut table = StringTable::new();
     let mut path_builder = PathInternerBuilder::new();
     let path = test_path(&mut path_builder, &mut table, "Response");
-    let int_type_id = env.builtins().int;
+    let int_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let (_, choice_type_id) = env.register_nominal_choice(ChoiceTypeDefinition {
         id: NominalTypeId(0),
@@ -1496,7 +1489,7 @@ fn intern_generic_instance_reuses_ids() {
         .into_boxed_slice(),
     );
 
-    let int = env.builtins().int;
+    let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let instance_a = env.intern_generic_instance(box_nominal, Box::new([int]));
     let count_after_first_intern = env.type_count();
     let instance_b = env.intern_generic_instance(box_nominal, Box::new([int]));
@@ -1575,7 +1568,7 @@ fn intern_generic_instance_distinguishes_different_arguments() {
         .into_boxed_slice(),
     );
 
-    let int = env.builtins().int;
+    let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let string = env.builtins().string;
 
     let pair_of_int_string = env.intern_generic_instance(pair_nominal, Box::new([int, string]));
@@ -1639,7 +1632,7 @@ fn intern_generic_instance_distinguishes_identically_shaped_bases() {
     let box_a_nominal = register_generic_box("BoxA");
     let box_b_nominal = register_generic_box("BoxB");
 
-    let int = env.builtins().int;
+    let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let box_a_of_int = env.intern_generic_instance(box_a_nominal, Box::new([int]));
     let box_b_of_int = env.intern_generic_instance(box_b_nominal, Box::new([int]));
 
@@ -1723,7 +1716,7 @@ fn recursive_generic_instance_members_resolve_to_the_same_instance_id() {
     // Substituting the recursive tail member re-enters `intern_generic_instance`
     // with the key of the instance currently being populated. This only
     // terminates because the key is registered before substitution runs.
-    let int = env.builtins().int;
+    let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let list_of_int = env.intern_generic_instance(list_nominal, Box::new([int]));
 
     let variants = env
@@ -1787,12 +1780,12 @@ fn generic_instance_display_uses_of_syntax() {
         const_record: false,
     });
 
-    let int = env.builtins().int;
+    let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let box_of_int = env.intern_generic_instance(box_nominal, Box::new([int]));
 
     assert_eq!(
         display_type(box_of_int, &env, &table, path_builder.paths()),
-        "Box of Int"
+        "Box of I32"
     );
 }
 
@@ -1803,7 +1796,7 @@ fn generic_instance_display_uses_of_syntax() {
 #[test]
 fn fixed_capacity_collection_interns_to_distinct_type_id() {
     let mut env = TypeEnvironment::new();
-    let int = env.builtins().int;
+    let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let growable = env.intern_collection(int, None);
     let fixed_64 = env.intern_collection(int, Some(64));
@@ -1817,7 +1810,7 @@ fn fixed_capacity_collection_interns_to_distinct_type_id() {
 #[test]
 fn same_fixed_capacity_reuses_type_id() {
     let mut env = TypeEnvironment::new();
-    let int = env.builtins().int;
+    let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let fixed_a = env.intern_collection(int, Some(64));
     let fixed_b = env.intern_collection(int, Some(64));
@@ -1831,7 +1824,7 @@ fn same_fixed_capacity_reuses_type_id() {
 #[test]
 fn different_fixed_capacities_are_distinct() {
     let mut env = TypeEnvironment::new();
-    let int = env.builtins().int;
+    let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let fixed_32 = env.intern_collection(int, Some(32));
     let fixed_64 = env.intern_collection(int, Some(64));
@@ -1845,7 +1838,7 @@ fn different_fixed_capacities_are_distinct() {
 #[test]
 fn collection_shape_queries_work() {
     let mut env = TypeEnvironment::new();
-    let int = env.builtins().int;
+    let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let growable = env.intern_collection(int, None);
     let fixed_64 = env.intern_collection(int, Some(64));
@@ -1881,7 +1874,7 @@ fn collection_shape_queries_work() {
 #[test]
 fn is_collection_works_for_fixed_and_growable() {
     let mut env = TypeEnvironment::new();
-    let int = env.builtins().int;
+    let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let growable = env.intern_collection(int, None);
     let fixed_64 = env.intern_collection(int, Some(64));
@@ -1895,18 +1888,18 @@ fn is_collection_works_for_fixed_and_growable() {
 fn display_type_renders_growable_and_fixed_collections() {
     let mut env = TypeEnvironment::new();
     let table = StringTable::new();
-    let int = env.builtins().int;
+    let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let growable = env.intern_collection(int, None);
     let fixed_64 = env.intern_collection(int, Some(64));
 
     assert_eq!(
         display_type(growable, &env, &table, &empty_path_table()),
-        "{Int}"
+        "{I32}"
     );
     assert_eq!(
         display_type(fixed_64, &env, &table, &empty_path_table()),
-        "{64 Int}"
+        "{64 I32}"
     );
 }
 
@@ -1914,14 +1907,14 @@ fn display_type_renders_growable_and_fixed_collections() {
 fn display_type_renders_nested_fixed_collections() {
     let mut env = TypeEnvironment::new();
     let table = StringTable::new();
-    let int = env.builtins().int;
+    let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let inner_fixed = env.intern_collection(int, Some(8));
     let outer_fixed = env.intern_collection(inner_fixed, Some(4));
 
     assert_eq!(
         display_type(outer_fixed, &env, &table, &empty_path_table()),
-        "{4 {8 Int}}"
+        "{4 {8 I32}}"
     );
 }
 
@@ -1929,7 +1922,7 @@ fn display_type_renders_nested_fixed_collections() {
 fn map_interning_reuses_ids() {
     let mut env = TypeEnvironment::new();
     let string = env.builtins().string;
-    let int = env.builtins().int;
+    let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let map_a = env.intern_map(string, int);
     let map_b = env.intern_map(string, int);
@@ -1941,7 +1934,7 @@ fn map_interning_reuses_ids() {
 fn distinct_map_types_get_distinct_ids() {
     let mut env = TypeEnvironment::new();
     let string = env.builtins().string;
-    let int = env.builtins().int;
+    let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let bool = env.builtins().bool;
 
     let map_string_int = env.intern_map(string, int);
@@ -1957,7 +1950,7 @@ fn distinct_map_types_get_distinct_ids() {
 fn map_shape_queries_work() {
     let mut env = TypeEnvironment::new();
     let string = env.builtins().string;
-    let int = env.builtins().int;
+    let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let map_type = env.intern_map(string, int);
 
@@ -1975,13 +1968,13 @@ fn display_renders_map_type() {
     let mut env = TypeEnvironment::new();
     let table = StringTable::new();
     let string = env.builtins().string;
-    let int = env.builtins().int;
+    let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let map_type = env.intern_map(string, int);
 
     assert_eq!(
         display_type(map_type, &env, &table, &empty_path_table()),
-        "{String = Int}"
+        "{String = I32}"
     );
 }
 
@@ -1990,32 +1983,33 @@ fn display_renders_nested_map_type() {
     let mut env = TypeEnvironment::new();
     let table = StringTable::new();
     let string = env.builtins().string;
-    let int = env.builtins().int;
+    let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let inner_map = env.intern_map(string, int);
     let outer_map = env.intern_map(string, inner_map);
 
     assert_eq!(
         display_type(outer_map, &env, &table, &empty_path_table()),
-        "{String = {String = Int}}"
+        "{String = {String = I32}}"
     );
 }
 
 #[test]
 fn generated_forks_share_inherited_types_and_keep_local_interning_independent() {
     let mut requester = TypeEnvironment::new();
-    let inherited_collection = requester.intern_collection(requester.builtins().int, None);
+    let inherited_collection =
+        requester.intern_collection(builtin_type_ids::fixed_scalar(FixedScalar::I32), None);
 
     let preparation = requester.fork_for_generated();
     let mut first = preparation.clone();
     let mut second = preparation;
 
     assert_eq!(
-        first.intern_collection(first.builtins().int, None),
+        first.intern_collection(builtin_type_ids::fixed_scalar(FixedScalar::I32), None),
         inherited_collection
     );
     assert_eq!(
-        second.intern_collection(second.builtins().int, None),
+        second.intern_collection(builtin_type_ids::fixed_scalar(FixedScalar::I32), None),
         inherited_collection
     );
 
@@ -2065,7 +2059,7 @@ fn generated_forks_reuse_inherited_generic_instances_and_keep_local_misses_indep
         .into_boxed_slice(),
     );
 
-    let int = requester.builtins().int;
+    let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let string = requester.builtins().string;
     let bool = requester.builtins().bool;
     let inherited_instance = requester.intern_generic_instance(box_nominal, Box::new([int]));
@@ -2158,7 +2152,7 @@ fn generated_forks_remap_inherited_names_across_sibling_and_nested_layers() {
             path: point_path,
             fields: vec![FieldDefinition {
                 name: test_path(&mut path_builder, &mut local_table, "value"),
-                type_id: requester.builtins().int,
+                type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 span: Some(source_span),
             }]
             .into_boxed_slice(),

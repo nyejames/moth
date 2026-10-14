@@ -1,5 +1,5 @@
-Every function parameter has a name and an explicit value type or parameter
-capability contract.
+Every ordinary function parameter has a name and an explicit exact value type
+or parameter capability contract.
 
 [codeblock, $code("moth"):
     describe |prefix String, subject String| -> String:

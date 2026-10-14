@@ -3,8 +3,10 @@
 //!      handoff owns runtime materialization after consuming the prepared result.
 
 use crate::compiler_frontend::ast::ScopeContext;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::const_values::store::{ConstValuePayload, ConstValueStore};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, ExpressionOperationView, ExpressionView,
+};
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{TemplateConstValueKind, TemplateType};
 use crate::compiler_frontend::ast::templates::template_control_flow::{
@@ -19,7 +21,9 @@ use crate::compiler_frontend::ast::templates::tir::expression_constness::{
 use crate::compiler_frontend::ast::templates::tir::ids::{
     TemplateIrId, TemplateIrNodeId, TemplateSlotPlanId, TemplateWrapperSetId,
 };
-use crate::compiler_frontend::ast::templates::tir::node::{TemplateIrNodeKind, TirSlotPlaceholder};
+use crate::compiler_frontend::ast::templates::tir::node::{
+    RetainedNumericIntakeRole, TemplateBranchSelectorKind, TemplateIrNodeKind, TirSlotPlaceholder,
+};
 use crate::compiler_frontend::ast::templates::tir::overlays::{
     TemplateViewContext, TirSlotResolutionKind,
 };
@@ -109,6 +113,8 @@ struct PreparationWalk<'scope> {
     mode: TemplatePreparationMode,
     const_diagnostic: Option<CompilerDiagnostic>,
     source_scope: Option<&'scope ScopeContext>,
+    expressions: &'scope AstExpressionBuilder,
+    const_values: &'scope ConstValueStore,
 }
 
 struct PreparationFacts {
@@ -171,7 +177,12 @@ impl PreparationFacts {
 }
 
 impl<'scope> PreparationWalk<'scope> {
-    fn new(mode: TemplatePreparationMode, source_scope: Option<&'scope ScopeContext>) -> Self {
+    fn new(
+        mode: TemplatePreparationMode,
+        source_scope: Option<&'scope ScopeContext>,
+        expressions: &'scope AstExpressionBuilder,
+        const_values: &'scope ConstValueStore,
+    ) -> Self {
         Self {
             visiting_templates: HashSet::new(),
             visiting_nodes: HashSet::new(),
@@ -180,6 +191,8 @@ impl<'scope> PreparationWalk<'scope> {
             mode,
             const_diagnostic: None,
             source_scope,
+            expressions,
+            const_values,
         }
     }
 
@@ -211,22 +224,28 @@ impl<'scope> PreparationWalk<'scope> {
 
 pub(crate) fn prepare_tir_view(
     view: &TirView<'_>,
+    expressions: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
     mode: TemplatePreparationMode,
 ) -> Result<TemplatePreparation, TemplateError> {
-    prepare_tir_view_in_scope(view, mode, None)
+    prepare_tir_view_in_scope(view, expressions, const_values, mode, None)
 }
 
 /// Prepares a parser-owned view with access to the scope's visible resolved constants.
 pub(crate) fn prepare_tir_view_with_source_scope(
     view: &TirView<'_>,
+    expressions: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
     mode: TemplatePreparationMode,
     source_scope: &ScopeContext,
 ) -> Result<TemplatePreparation, TemplateError> {
-    prepare_tir_view_in_scope(view, mode, Some(source_scope))
+    prepare_tir_view_in_scope(view, expressions, const_values, mode, Some(source_scope))
 }
 
 fn prepare_tir_view_in_scope(
     view: &TirView<'_>,
+    expressions: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
     mode: TemplatePreparationMode,
     source_scope: Option<&ScopeContext>,
 ) -> Result<TemplatePreparation, TemplateError> {
@@ -240,7 +259,7 @@ fn prepare_tir_view_in_scope(
     }
 
     increment_ast_counter(AstCounter::TirPreparationAttempts);
-    let mut walk = PreparationWalk::new(mode, source_scope);
+    let mut walk = PreparationWalk::new(mode, source_scope, expressions, const_values);
     let facts = walk.walk_template(
         view.root_ref(),
         view,
@@ -569,8 +588,12 @@ impl PreparationWalk<'_> {
                     body,
                 } => {
                     let mut facts = PreparationFacts::const_value();
-                    let effective_selector =
-                        effective_branch_selector_for_view(view, selector, *selector_site_id)?;
+                    let effective_selector = effective_branch_selector_for_view(
+                        view,
+                        self.expressions,
+                        selector,
+                        *selector_site_id,
+                    )?;
                     let (body_binding_paths, selector_const, selector_facts) = self
                         .const_required_branch_selector(
                             view,
@@ -614,8 +637,12 @@ impl PreparationWalk<'_> {
                     aggregate_wrapper,
                     ..
                 } => {
-                    let effective_header =
-                        effective_loop_header_for_view(view, header, *header_sites)?;
+                    let effective_header = effective_loop_header_for_view(
+                        view,
+                        self.expressions,
+                        header,
+                        *header_sites,
+                    )?;
                     let mut facts = self.walk_loop_header(
                         view,
                         &effective_header,
@@ -678,8 +705,9 @@ impl PreparationWalk<'_> {
                     ..
                 } => {
                     let effective_expression = view
-                        .effective_expression_for_site(*site_id)?
-                        .unwrap_or(expression.as_ref());
+                        .effective_expression_for_site(self.expressions, *site_id)?
+                        .map(ExpressionView::id)
+                        .unwrap_or(*expression);
                     self.walk_expression(view, effective_expression, loop_binding_paths, role)
                 }
 
@@ -696,6 +724,47 @@ impl PreparationWalk<'_> {
                         );
                         Ok(facts)
                     }
+                }
+                // A retained position holds no value yet: body-root completion installs the
+                // selected numeric value, so preparation must treat it as runtime rather than
+                // reading a payload that does not exist. A pending numeric value is a runtime
+                // body-local, so a const-required template rejects it with the reason its
+                // position's ready form would report.
+                TemplateIrNodeKind::RetainedNumericIntake(intake_role) => {
+                    let mut facts = PreparationFacts::default();
+                    self.record_role_runtime(
+                        &mut facts,
+                        role,
+                        RuntimeTemplateReason::RuntimeExpression,
+                    );
+                    if matches!(self.mode, TemplatePreparationMode::ConstRequired) {
+                        let reason = match intake_role {
+                            RetainedNumericIntakeRole::HeadExpression { .. } => {
+                                InvalidTemplateStructureReason::RuntimeValueInConstTemplateHead
+                            }
+                            RetainedNumericIntakeRole::ConditionalLoopCondition { .. } => {
+                                InvalidTemplateStructureReason::TemplateLoopConditionNotConst
+                            }
+                            RetainedNumericIntakeRole::LoopRange { .. } => {
+                                InvalidTemplateStructureReason::TemplateLoopRangeBoundsNotConst
+                            }
+                            RetainedNumericIntakeRole::LoopCollection { .. } => {
+                                InvalidTemplateStructureReason::TemplateLoopSourceNotConst
+                            }
+                            RetainedNumericIntakeRole::ConditionalSelector {
+                                kind: TemplateBranchSelectorKind::Bool,
+                                ..
+                            } => InvalidTemplateStructureReason::TemplateIfConditionNotConst,
+                            RetainedNumericIntakeRole::ConditionalSelector {
+                                kind: TemplateBranchSelectorKind::OptionPresent,
+                                ..
+                            } => InvalidTemplateStructureReason::TemplateOptionCaptureConstDeferred,
+                        };
+                        self.record_const_diagnostic(
+                            CompilerDiagnostic::invalid_template_structure(reason, node.span),
+                        );
+                    }
+                    Ok(facts)
                 }
             }
         })();
@@ -870,7 +939,7 @@ impl PreparationWalk<'_> {
     fn walk_expression(
         &mut self,
         view: &TirView<'_>,
-        expression: &Expression,
+        expression: ExprId,
         loop_binding_paths: &[PathId],
         role: &PreparationTraversalRole,
     ) -> Result<PreparationFacts, TemplateError> {
@@ -888,11 +957,12 @@ impl PreparationWalk<'_> {
     fn walk_expression_with_bindings(
         &mut self,
         view: &TirView<'_>,
-        expression: &Expression,
+        expression: ExprId,
         const_binding_paths: &[PathId],
         nested_template_binding_paths: &[PathId],
         role: &PreparationTraversalRole,
     ) -> Result<PreparationFacts, TemplateError> {
+        let expression = self.expressions.view(expression)?;
         let mut nested_facts = PreparationFacts::const_value();
         let mut visit_nested_template =
             |reference: TemplateTirReference, _nested_binding_paths: &[PathId]| {
@@ -937,7 +1007,7 @@ impl PreparationWalk<'_> {
         let result = match selector {
             TemplateBranchSelector::Bool(condition) => {
                 let condition_facts =
-                    self.walk_expression(view, condition, loop_binding_paths, role)?;
+                    self.walk_expression(view, *condition, loop_binding_paths, role)?;
                 let is_const = condition_facts.const_evaluable;
                 selector_facts.merge(condition_facts);
                 if is_const {
@@ -945,26 +1015,32 @@ impl PreparationWalk<'_> {
                 } else {
                     Err(CompilerDiagnostic::invalid_template_structure(
                         InvalidTemplateStructureReason::TemplateIfConditionNotConst,
-                        condition.span.or(node_span),
+                        self.expressions.view(*condition)?.span().or(node_span),
                     ))
                 }
             }
             TemplateBranchSelector::OptionPresentCapture { scrutinee, pattern } => {
-                let is_const = match &scrutinee.kind {
-                    ExpressionKind::OptionNone => true,
-                    ExpressionKind::Reference(path) => {
-                        loop_binding_paths.iter().any(|known| known == path)
-                    }
-                    ExpressionKind::Coerced { value, .. } => {
+                let scrutinee_view = self.expressions.view(*scrutinee)?;
+                let is_const = match scrutinee_view.operation() {
+                    ExpressionOperationView::Constant(id) => matches!(
+                        self.const_values.payload(id),
+                        Some(
+                            ConstValuePayload::OptionNone
+                                | ConstValuePayload::OptionSome(_)
+                                | ConstValuePayload::Coerced(_)
+                        )
+                    ),
+                    ExpressionOperationView::Reference(path) => loop_binding_paths.contains(&path),
+                    ExpressionOperationView::Coerce { value, .. } => {
                         let value_facts =
-                            self.walk_expression(view, value, loop_binding_paths, role)?;
+                            self.walk_expression(view, value.id(), loop_binding_paths, role)?;
                         let is_const = value_facts.const_evaluable;
                         selector_facts.merge(value_facts);
                         is_const
                     }
                     _ => {
                         let scrutinee_facts =
-                            self.walk_expression(view, scrutinee, loop_binding_paths, role)?;
+                            self.walk_expression(view, *scrutinee, loop_binding_paths, role)?;
                         selector_facts.merge(scrutinee_facts);
                         false
                     }
@@ -975,7 +1051,7 @@ impl PreparationWalk<'_> {
                 } else {
                     Err(CompilerDiagnostic::invalid_template_structure(
                         InvalidTemplateStructureReason::TemplateOptionCaptureConstDeferred,
-                        scrutinee.span.or(node_span),
+                        scrutinee_view.span().or(node_span),
                     ))
                 }
             }
@@ -1008,15 +1084,20 @@ impl PreparationWalk<'_> {
         let diagnostic = match header {
             TemplateLoopHeader::Conditional { condition } => {
                 let condition_facts =
-                    self.walk_expression(view, condition, loop_binding_paths, role)?;
+                    self.walk_expression(view, *condition, loop_binding_paths, role)?;
                 facts.merge(condition_facts);
 
-                let mut diagnostic_condition = condition.as_ref();
-                while let ExpressionKind::Coerced { value, .. } = &diagnostic_condition.kind {
+                let mut diagnostic_condition = self.expressions.view(*condition)?;
+                while let ExpressionOperationView::Coerce { value, .. } =
+                    diagnostic_condition.operation()
+                {
                     diagnostic_condition = value;
                 }
 
-                let condition_value = const_conditional_loop_condition_value(condition);
+                let condition_value = const_conditional_loop_condition_value(
+                    self.expressions.view(*condition)?,
+                    self.const_values,
+                );
                 let diagnostic = match condition_value {
                     Some(false) => None,
                     Some(true) => Some(CompilerDiagnostic::invalid_template_structure(
@@ -1044,19 +1125,22 @@ impl PreparationWalk<'_> {
                 let mut source_constant_paths = Vec::new();
                 if let Some(source_scope) = self.source_scope {
                     collect_source_constant_paths(
-                        &range.start,
+                        self.expressions.view(range.start)?,
                         source_scope,
+                        self.const_values,
                         &mut source_constant_paths,
                     );
                     collect_source_constant_paths(
-                        &range.end,
+                        self.expressions.view(range.end)?,
                         source_scope,
+                        self.const_values,
                         &mut source_constant_paths,
                     );
                     if let Some(step) = &range.step {
                         collect_source_constant_paths(
-                            step,
+                            self.expressions.view(*step)?,
                             source_scope,
+                            self.const_values,
                             &mut source_constant_paths,
                         );
                     }
@@ -1069,14 +1153,14 @@ impl PreparationWalk<'_> {
                 }
                 let start_facts = self.walk_expression_with_bindings(
                     view,
-                    &range.start,
+                    range.start,
                     &const_binding_paths,
                     loop_binding_paths,
                     role,
                 )?;
                 let end_facts = self.walk_expression_with_bindings(
                     view,
-                    &range.end,
+                    range.end,
                     &const_binding_paths,
                     loop_binding_paths,
                     role,
@@ -1088,7 +1172,7 @@ impl PreparationWalk<'_> {
                 if let Some(step) = &range.step {
                     let step_facts = self.walk_expression_with_bindings(
                         view,
-                        step,
+                        *step,
                         &const_binding_paths,
                         loop_binding_paths,
                         role,
@@ -1105,13 +1189,14 @@ impl PreparationWalk<'_> {
             }
             TemplateLoopHeader::Collection { iterable, .. } => {
                 let iterable_facts =
-                    self.walk_expression(view, iterable, loop_binding_paths, role)?;
+                    self.walk_expression(view, *iterable, loop_binding_paths, role)?;
                 let header_const = iterable_facts.const_evaluable;
                 facts.merge(iterable_facts);
+                let iterable_span = self.expressions.view(*iterable)?.span().or(loop_span);
                 (!header_const).then(|| {
                     CompilerDiagnostic::invalid_template_structure(
                         InvalidTemplateStructureReason::TemplateLoopSourceNotConst,
-                        iterable.span.or(loop_span),
+                        iterable_span,
                     )
                 })
             }
@@ -1126,41 +1211,30 @@ impl PreparationWalk<'_> {
     }
 }
 fn collect_source_constant_paths(
-    expression: &Expression,
+    expression: ExpressionView<'_>,
     source_scope: &ScopeContext,
+    const_values: &ConstValueStore,
     paths: &mut Vec<PathId>,
 ) {
-    match &expression.kind {
-        ExpressionKind::Reference(path) => {
+    match expression.operation() {
+        ExpressionOperationView::Coerce { .. }
+        | ExpressionOperationView::NumericUnary { .. }
+        | ExpressionOperationView::NumericBinary { .. }
+        | ExpressionOperationView::LogicalNot { .. }
+        | ExpressionOperationView::LogicalBinary { .. }
+        | ExpressionOperationView::Compare { .. }
+        | ExpressionOperationView::Range { .. } => {
+            expression.visit_children(|child| {
+                collect_source_constant_paths(child, source_scope, const_values, paths)
+            });
+        }
+        ExpressionOperationView::Reference(path)
             if source_scope
-                .resolved_module_constant_expression(path)
+                .resolved_module_constant_value(&path, const_values)
                 .is_some()
-                && !paths.contains(path)
-            {
-                paths.push(*path);
-            }
-        }
-        ExpressionKind::Coerced { value, .. } => {
-            collect_source_constant_paths(value, source_scope, paths);
-        }
-        ExpressionKind::Runtime(rpn) => {
-            for item in &rpn.items {
-                match item {
-                    ExpressionRpnItem::Operand(operand) => {
-                        collect_source_constant_paths(operand, source_scope, paths);
-                    }
-                    ExpressionRpnItem::Operator { .. } => {}
-                    // Pending syntax never survives evaluation; flag it in debug builds so the
-                    // invalid boundary is visible instead of silently collecting no paths.
-                    ExpressionRpnItem::PendingNumericLiteral { .. }
-                    | ExpressionRpnItem::PendingGroup { .. } => {
-                        debug_assert!(
-                            false,
-                            "pending expression syntax reached TIR source-constant collection"
-                        );
-                    }
-                }
-            }
+                && !paths.contains(&path) =>
+        {
+            paths.push(path);
         }
         _ => {}
     }
@@ -1248,8 +1322,8 @@ fn missing_overlay_dimension_error(
 }
 
 fn condition_span_or_loop_span(
-    condition: &Expression,
+    condition: ExpressionView<'_>,
     loop_span: Option<SourceSpan>,
 ) -> Option<SourceSpan> {
-    condition.span.or(loop_span)
+    condition.span().or(loop_span)
 }

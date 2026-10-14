@@ -44,20 +44,20 @@ pub(crate) use diagnostic_label::{
     DiagnosticLabel, DiagnosticLabelMessage, DiagnosticLabelStyle, GenericSubstitutionDiagnostic,
 };
 pub(crate) use diagnostic_payload::{
-    BorrowAccessKind, BuiltinFailureOriginKind, BuiltinFailureWitness, ChoiceVariantSeparatorGap,
-    CommonSyntaxMistakeReason, CompileTimeEvaluationErrorReason, CssTemplateWarning,
-    DeferredFeatureReason, DependencyClauseKind, DiagnosticCompoundAssignmentOperator,
-    DiagnosticOperator, DiagnosticPayload, DiagnosticPlace, GenericApplicationErrorReason,
-    GenericInferenceSubject, HirCapacityResource, HtmlTemplateWarning, ImportPublicSurfaceType,
+    AstCapacityResource, BorrowAccessKind, BuiltinFailureOriginKind, BuiltinFailureWitness,
+    CapacityResource, ChoiceVariantSeparatorGap, CommonSyntaxMistakeReason,
+    CompileTimeEvaluationErrorReason, CssTemplateWarning, DeferredFeatureReason,
+    DependencyClauseKind, DiagnosticCompoundAssignmentOperator, DiagnosticOperator,
+    DiagnosticPayload, DiagnosticPlace, GenericApplicationErrorReason, GenericInferenceSubject,
+    HirCapacityResource, HtmlTemplateWarning, ImportPublicSurfaceType,
     IncompatibleChoiceComparisonReason, InvalidAssignmentTargetReason, InvalidBuiltinCallReason,
     InvalidCallShapeReason, InvalidCastReason, InvalidChoiceVariantReason,
     InvalidCollectionTypeReason, InvalidCompileTimePathReason, InvalidConfigReason,
     InvalidControlFlowStatementReason, InvalidCopyTargetReason, InvalidDeclarationReason,
     InvalidDependencyClauseReason, InvalidExpressionReason, InvalidExternalModuleReason,
-    InvalidFallibleHandlingReason, InvalidFallibleOperandReason, InvalidFieldAccessReason,
-    InvalidFunctionSignatureReason, InvalidGenericInstantiationReason,
-    InvalidGenericParameterReason, InvalidImportPathReason, InvalidLoopHeaderReason,
-    InvalidMapLiteralReason, InvalidMapTypeReason, InvalidMatchArmReason,
+    InvalidFallibleHandlingReason, InvalidFieldAccessReason, InvalidFunctionSignatureReason,
+    InvalidGenericInstantiationReason, InvalidGenericParameterReason, InvalidImportPathReason,
+    InvalidLoopHeaderReason, InvalidMapLiteralReason, InvalidMapTypeReason, InvalidMatchArmReason,
     InvalidMatchPatternReason, InvalidMultiBindReason, InvalidMutableAccessReason,
     InvalidOutputFolderReason, InvalidPageMetadataReason, InvalidRangeOperandReason,
     InvalidReceiverCallReason, InvalidReceiverDeclarationReason, InvalidReturnShapeReason,
@@ -70,7 +70,7 @@ pub(crate) use diagnostic_payload::{
     OperatorOperandPosition, PathKind, ProjectContextEscapeReason, RangeOperandKind,
     ReceiverCallKind, ReservedNameOwner, SourceSpanCapacityResource, SymbolicSpacingConstruct,
     SymbolicSpacingError, TypeAnnotationContext, TypeMismatchContext,
-    UnsupportedBackendFeatureReason, UnsupportedOperatorCategory,
+    UnsupportedBackendFeatureReason, ValueReceiverContext,
 };
 pub(crate) use diagnostic_severity::DiagnosticSeverity;
 pub(crate) use diagnostic_token::DiagnosticToken;

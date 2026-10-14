@@ -1,0 +1,6 @@
+mixed_results || -> I32, F32, I64, F64:
+    return 7, 1.25, 9007199254740993, -9.5
+;
+
+whole, single, wide, double = mixed_results()
+[:mixed slots: [whole]|[single]|[wide]|[double]]

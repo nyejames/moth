@@ -2,7 +2,7 @@ Summary = | label String |
 
 -- A return inside a local's value block exits the function, so it is checked
 -- against Summary rather than the local's String annotation.
-make_summary |count Int| -> Summary:
+make_summary |count I32| -> Summary:
     label String = if count < 0:
         return "negative"
     else

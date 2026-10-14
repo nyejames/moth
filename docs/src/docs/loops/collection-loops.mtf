@@ -32,11 +32,12 @@ order.
 - Hash maps are not collection-loop sources.
 - Bindings are optional.
 - The first binding receives the current item and has the collection's element type.
-- The optional second binding receives the zero-based iteration index and has type `Int`.
+- The optional second binding receives the zero-based iteration index and has type `I32`.
 - Binding names are written inside one `|...|` suffix.
 - A binding list may contain one or two names.
 - An empty binding list, a third binding or duplicate binding names are invalid.
 - Loop bindings are immutable body-local names.
+- Binding an unresolved whole-number item pins its integer family, including whole-number leaves in a known nested item shape. Later integer receivers can still select its width, but float, decimal and Byte receivers or peers require an explicit cast.
 - A binding name must not collide with another visible name.
 - An empty collection runs the body zero times.
 

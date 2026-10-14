@@ -1,0 +1,6 @@
+-- A stray `|` after a value block whose pending numeric branches are retained.
+run ||:
+    seed = 1
+    result I32 = if true then seed else seed | 2
+    io.line([: [result]])
+;

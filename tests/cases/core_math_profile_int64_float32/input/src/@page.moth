@@ -1,5 +1,16 @@
 @core/math as math
 
-pi #= math.PI
-absolute_pi = math.abs(math.PI)
-io.line([: core_math_profile_int64_float32 pi=[pi] abs=[absolute_pi]])
+to_f32 |value F64| -> F32, Error!:
+    return cast value
+;
+
+pi #F64 = math.PI
+absolute_pi F64 = math.abs(math.PI)
+pi_single = to_f32(pi) catch:
+    then 0.0
+;
+absolute_single = to_f32(absolute_pi) catch:
+    then 0.0
+;
+io.line([: core_math_profile_int64_float32 pi=[pi_single] abs=[absolute_single]])
+io.line([: core_math_f64 pi=[pi] abs=[absolute_pi]])

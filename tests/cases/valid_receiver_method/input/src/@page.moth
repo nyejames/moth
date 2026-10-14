@@ -1,9 +1,9 @@
 Point = |
-    x Int,
-    y Int,
+    x I32,
+    y I32,
 |
 
-get_x |this Point| -> Int:
+get_x |this Point| -> I32:
     return this.x
 ;
 

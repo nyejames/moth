@@ -1,10 +1,10 @@
 @core/random random_int
 @data/constants base_count
 
-random_index || -> Int:
+random_index || -> I32:
     return random_int(0, base_count)
 ;
 
-random_score || -> Int:
+random_score || -> I32:
     return random_int(0, 100)
 ;

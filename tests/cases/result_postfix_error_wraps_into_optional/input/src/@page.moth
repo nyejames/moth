@@ -2,7 +2,7 @@ SmallError = |
     message String,
 |
 
-inner |fail Bool| -> Int, SmallError!:
+inner |fail Bool| -> I32, SmallError!:
     if fail:
         return! SmallError("inner failed")
     ;
@@ -10,7 +10,7 @@ inner |fail Bool| -> Int, SmallError!:
     return 42
 ;
 
-outer |fail Bool| -> Int, SmallError?!:
+outer |fail Bool| -> I32, SmallError?!:
     value = inner(fail)!
     return value
 ;

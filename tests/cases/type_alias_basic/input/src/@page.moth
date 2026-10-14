@@ -1,3 +1,3 @@
-UserId as Int
+UserId as I32
 id UserId = 42
 io.line([: [id]])

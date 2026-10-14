@@ -1,5 +1,5 @@
-consume || -> Uint, Error!:
-    maximum #Uint = 4294967295
+consume || -> U32, Error!:
+    maximum #U32 = 4294967295
     counts #= (top = maximum)
     return counts.top + 1
 ;

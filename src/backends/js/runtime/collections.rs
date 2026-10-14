@@ -29,11 +29,8 @@
 //! [`collection_javascript_helpers`].
 
 use crate::backends::js::JsEmitter;
-use crate::backends::js::numeric_carrier::JsNumericCarrier;
 use crate::backends::js::runtime::error_result_source;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
-use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
-use moth_lexical::numeric::profile::NumericProfile;
 
 /// One emitted JavaScript helper implementing the compiler-owned `@core/collections` package.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,50 +39,22 @@ pub(crate) struct CollectionJsHelper {
     pub(crate) source: String,
 }
 
-/// Returns the complete `@core/collections` JavaScript source for the selected Int carrier.
-/// First-party dependency validation inventories the standard-profile source.
-pub(crate) fn collection_javascript_helpers(profile: NumericProfile) -> Vec<CollectionJsHelper> {
-    let carrier = JsNumericCarrier::for_scalar(NumericScalar::Int, profile)
-        .expect("Int always has a JavaScript numeric carrier");
-    let (int_min, int_max) = carrier
-        .integer_bounds_js()
-        .expect("Int carrier always has integer bounds");
-    let zero = JsNumericCarrier::int_literal(0, profile)
-        .expect("zero always fits the Int numeric profile");
-
+/// Returns the complete `@core/collections` JavaScript source.
+///
+/// WHY: collection lengths, capacities and positional indices are exactly I32, whose JS carrier is
+///      the exact Number carrier, so every helper validates and reads Number indices directly.
+pub(crate) fn collection_javascript_helpers() -> Vec<CollectionJsHelper> {
     let invalid_collection_error =
         error_result_source(BuiltinErrorCode::CollectionExpectedOrderedCollection);
     let out_of_bounds_error = error_result_source(BuiltinErrorCode::CollectionIndexOutOfBounds);
     let capacity_exceeded_error =
         error_result_source(BuiltinErrorCode::CollectionFixedCapacityExceeded);
 
-    let (capacity_validation, index_validation, index_access, capacity_full, length_value) =
-        match carrier {
-            JsNumericCarrier::ExactInteger { .. } => (
-                "Number.isInteger(collection.fixedCapacity)\n        && collection.fixedCapacity > 0\n        && collection.items.length <= collection.fixedCapacity".to_owned(),
-                "Number.isInteger(index) && index >= 0 && index < items.length".to_owned(),
-                "index",
-                "items.length >= collection.fixedCapacity",
-                "items.length",
-            ),
-            JsNumericCarrier::BigInteger { .. } => (
-                format!(
-                    "typeof collection.fixedCapacity === \"bigint\"\n        && collection.fixedCapacity >= {int_min}\n        && collection.fixedCapacity <= {int_max}\n        && collection.fixedCapacity > {zero}\n        && BigInt(collection.items.length) <= collection.fixedCapacity"
-                ),
-                format!(
-                    "typeof index === \"bigint\" && index >= {int_min} && index <= {int_max} && index >= {zero} && index < BigInt(items.length)"
-                ),
-                "Number(index)",
-                "BigInt(items.length) >= collection.fixedCapacity",
-                "BigInt(items.length)",
-            ),
-            JsNumericCarrier::BinaryFloat { .. } => {
-                unreachable!("Int carrier cannot be a binary float")
-            }
-            JsNumericCarrier::ScaledInteger { .. } => {
-                unreachable!("Int carrier cannot be a Number")
-            }
-        };
+    let capacity_validation = "Number.isInteger(collection.fixedCapacity)\n        && collection.fixedCapacity > 0\n        && collection.items.length <= collection.fixedCapacity";
+    let index_validation = "Number.isInteger(index) && index >= 0 && index < items.length";
+    let index_access = "index";
+    let capacity_full = "items.length >= collection.fixedCapacity";
+    let length_value = "items.length";
 
     vec![
         CollectionJsHelper {
@@ -174,6 +143,7 @@ pub(crate) fn collection_javascript_helpers(profile: NumericProfile) -> Vec<Coll
         CollectionJsHelper {
             name: "__moth_collection_push_growable",
             source: r#"function __moth_collection_push_growable(collection, value) {
+    if (collection.length >= 2147483647) throw new RangeError("Collection length exceeds the I32 length carrier");
     collection.push(value);
 }"#
             .to_owned(),
@@ -224,7 +194,7 @@ pub(crate) fn collection_javascript_helpers(profile: NumericProfile) -> Vec<Coll
 
 impl<'hir> JsEmitter<'hir> {
     pub(crate) fn emit_runtime_collection_helpers(&mut self) {
-        for helper in collection_javascript_helpers(self.config.numeric_profile) {
+        for helper in collection_javascript_helpers() {
             self.emit_javascript_source(&helper.source);
             self.emit_line("");
         }

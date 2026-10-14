@@ -4,7 +4,7 @@
 //! Tests keep this facade so fixtures can push nodes without repeating store
 //! allocation details.
 
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression_store::ExprId;
 use crate::compiler_frontend::ast::templates::template::{
     SlotKey, Style, TemplateSegmentOrigin, TemplateType,
 };
@@ -90,14 +90,14 @@ impl<'store> TemplateIrBuilder<'store> {
 
     pub(crate) fn push_dynamic_expression_node(
         &mut self,
-        expression: Expression,
+        expression: ExprId,
         origin: TemplateSegmentOrigin,
         span: Option<SourceSpan>,
     ) -> TemplateIrNodeId {
         let site_id = self.store.next_expression_site_id();
         self.store.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::DynamicExpression {
-                expression: Box::new(expression),
+                expression,
                 origin,
                 site_id,
             },

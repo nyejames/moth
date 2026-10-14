@@ -17,7 +17,9 @@ use super::super::store::{MalformedTirStore, TemplateIrStore, TemplateWrapperSet
 use super::super::summary::TemplateIrSummary;
 use super::super::{TemplateTirPhase, TemplateViewContext, TirView};
 use super::builder::TemplateIrBuilder;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
+use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{
@@ -33,45 +35,53 @@ use crate::compiler_frontend::ast::templates::tir::refs::{
     TemplateTirChildReference, TemplateTirReference, TemplateWrapperReference,
 };
 use crate::compiler_frontend::compiler_errors::ErrorType;
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
 
-fn runtime_expression(string_table: &mut StringTable) -> Expression {
+fn runtime_expression(
+    expressions: &mut AstExpressionBuilder,
+    string_table: &mut StringTable,
+) -> ExprId {
     let mut path_fork = PathInternerFork::empty();
     let scope = path_fork
         .try_intern_portable_path("main.moth", string_table)
         .expect("test path fits");
     let name = string_table.intern("runtime_text");
-    Expression::new(
-        ExpressionKind::FunctionCall {
-            name: path_fork
-                .try_intern_child(scope, name)
-                .expect("test path fits"),
-            args: Vec::new(),
-            result_type_ids: vec![builtin_type_ids::STRING],
-        },
-        None,
-        builtin_type_ids::STRING,
-        DataType::StringSlice,
-        ValueMode::ImmutableOwned,
-    )
+    let name = path_fork
+        .try_intern_child(scope, name)
+        .expect("test path fits");
+    expressions
+        .function_call_with_typed_arguments(name, Vec::new(), vec![builtin_type_ids::STRING], None)
+        .expect("runtime fixture call fits expression store")
+        .id()
 }
 
 fn prepare_root(
     kind: TemplateType,
-    build_root: impl FnOnce(&mut TemplateIrBuilder<'_>, &mut StringTable) -> TemplateIrNodeId,
+    build_root: impl FnOnce(
+        &mut TemplateIrBuilder<'_>,
+        &mut StringTable,
+        &mut AstExpressionBuilder,
+        &mut ConstValueStore,
+    ) -> TemplateIrNodeId,
     mode: TemplatePreparationMode,
 ) -> Result<(TemplatePreparation, super::super::view::TirViewIdentity), TemplateError> {
     let mut store = TemplateIrStore::new();
     let mut string_table = StringTable::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let _path_fork = PathInternerFork::empty();
     let template_id = {
         let mut builder = TemplateIrBuilder::new(&mut store);
-        let root = build_root(&mut builder, &mut string_table);
+        let root = build_root(
+            &mut builder,
+            &mut string_table,
+            &mut expressions,
+            &mut const_values,
+        );
         builder.finish_template(
             root,
             Style::default(),
@@ -87,7 +97,7 @@ fn prepare_root(
         TemplateViewContext::default(),
     )?;
     let identity = view.identity();
-    let prepared = prepare_tir_view(&view, mode)?;
+    let prepared = prepare_tir_view(&view, &expressions, &const_values, mode)?;
     Ok((prepared, identity))
 }
 
@@ -95,7 +105,7 @@ fn prepare_root(
 fn preparation_modes_return_one_identity_bound_foldable_result() {
     let (value, identity) = prepare_root(
         TemplateType::String,
-        |builder, table| {
+        |builder, table, _, _| {
             let text = table.intern("value");
             let text_node = builder.push_text_node(text, 5, TemplateSegmentOrigin::Body, None);
             builder.push_sequence_node(vec![text_node], None)
@@ -105,7 +115,7 @@ fn preparation_modes_return_one_identity_bound_foldable_result() {
     .expect("Value preparation should succeed");
     let (const_required, const_identity) = prepare_root(
         TemplateType::String,
-        |builder, table| {
+        |builder, table, _, _| {
             let text = table.intern("value");
             let text_node = builder.push_text_node(text, 5, TemplateSegmentOrigin::Body, None);
             builder.push_sequence_node(vec![text_node], None)
@@ -135,7 +145,7 @@ fn preparation_modes_return_one_identity_bound_foldable_result() {
 fn preparation_preserves_structural_wrapper_shape_for_value_callers() {
     let (prepared, _) = prepare_root(
         TemplateType::String,
-        |builder, _| {
+        |builder, _, _, _| {
             let slot = builder.push_slot_node(SlotKey::Default, None);
             builder.push_sequence_node(vec![slot], None)
         },
@@ -157,9 +167,9 @@ fn preparation_preserves_structural_wrapper_shape_for_value_callers() {
 fn preparation_returns_runtime_with_exact_identity_for_runtime_expression() {
     let (prepared, identity) = prepare_root(
         TemplateType::String,
-        |builder, table| {
+        |builder, table, expressions, _| {
             let expression = builder.push_dynamic_expression_node(
-                runtime_expression(table),
+                runtime_expression(expressions, table),
                 TemplateSegmentOrigin::Body,
                 None,
             );
@@ -186,7 +196,7 @@ fn preparation_returns_runtime_with_exact_identity_for_runtime_expression() {
 fn preparation_uses_structural_const_facts_for_static_string_function() {
     let (prepared, _) = prepare_root(
         TemplateType::StringFunction,
-        |builder, table| {
+        |builder, table, _, _| {
             let text = table.intern("static function body");
             let text_node = builder.push_text_node(
                 text,
@@ -210,7 +220,7 @@ fn preparation_uses_structural_const_facts_for_static_string_function() {
 fn preparation_classifies_slot_insert_helpers() {
     let (slot_insert, _) = prepare_root(
         TemplateType::SlotInsert(SlotKey::Default),
-        |builder, table| {
+        |builder, table, _, _| {
             let text = table.intern("slot");
             let text_node = builder.push_text_node(text, 4, TemplateSegmentOrigin::Body, None);
             builder.push_sequence_node(vec![text_node], None)
@@ -226,11 +236,14 @@ fn preparation_classifies_slot_insert_helpers() {
 
 #[test]
 fn preparation_mode_controls_const_required_conditional_validation() {
-    let build_conditional = |builder: &mut TemplateIrBuilder<'_>, table: &mut StringTable| {
+    let build_conditional = |builder: &mut TemplateIrBuilder<'_>,
+                             table: &mut StringTable,
+                             expressions: &mut AstExpressionBuilder,
+                             _constants: &mut ConstValueStore| {
         let body_text = table.intern("body");
         let body = builder.push_text_node(body_text, 4, TemplateSegmentOrigin::Body, None);
         builder.push_conditional_node(
-            TemplateBranchSelector::Bool(runtime_expression(table)),
+            TemplateBranchSelector::Bool(runtime_expression(expressions, table)),
             body,
             None,
         )
@@ -268,33 +281,24 @@ fn preparation_mode_controls_const_required_conditional_validation() {
 fn preparation_const_required_recurses_through_coerced_loop_condition() {
     let result = prepare_root(
         TemplateType::StringFunction,
-        |builder, table| {
-            let condition = Expression::bool(true, None, ValueMode::ImmutableOwned);
-            let coerced_once = Expression::new(
-                ExpressionKind::Coerced {
-                    value: Box::new(condition),
-                    to_type: builtin_type_ids::BOOL,
-                },
-                None,
-                builtin_type_ids::BOOL,
-                DataType::Bool,
-                ValueMode::ImmutableOwned,
-            );
-            let coerced_twice = Expression::new(
-                ExpressionKind::Coerced {
-                    value: Box::new(coerced_once),
-                    to_type: builtin_type_ids::BOOL,
-                },
-                None,
-                builtin_type_ids::BOOL,
-                DataType::Bool,
-                ValueMode::ImmutableOwned,
-            );
+        |builder, table, expressions, constants| {
+            let condition = expressions
+                .bool(constants, true, None, ValueMode::ImmutableOwned)
+                .expect("literal fits expression store")
+                .id();
+            let coerced_once = expressions
+                .coerced(expressions.own(condition), builtin_type_ids::BOOL)
+                .expect("coercion fits expression store")
+                .id();
+            let coerced_twice = expressions
+                .coerced(expressions.own(coerced_once), builtin_type_ids::BOOL)
+                .expect("coercion fits expression store")
+                .id();
             let body_text = table.intern("body");
             let body = builder.push_text_node(body_text, 4, TemplateSegmentOrigin::Body, None);
             builder.push_loop_node(
                 TemplateLoopHeader::Conditional {
-                    condition: Box::new(coerced_twice),
+                    condition: coerced_twice,
                 },
                 body,
                 None,
@@ -321,9 +325,9 @@ fn preparation_const_required_recurses_through_coerced_loop_condition() {
 fn preparation_continues_after_runtime_dependence_to_malformed_authority() {
     let result = prepare_root(
         TemplateType::StringFunction,
-        |builder, table| {
+        |builder, table, expressions, _| {
             let runtime = builder.push_dynamic_expression_node(
-                runtime_expression(table),
+                runtime_expression(expressions, table),
                 TemplateSegmentOrigin::Body,
                 None,
             );
@@ -342,6 +346,7 @@ fn preparation_continues_after_runtime_dependence_to_malformed_authority() {
 #[test]
 fn preparation_reenters_nested_template_payload_authority() {
     let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
     let context = TemplateViewContext::default();
     let nested_id = store.push_template(TemplateIr::new(
         TemplateIrNodeId::new(999),
@@ -361,7 +366,10 @@ fn preparation_reenters_nested_template_payload_authority() {
     let outer_id = {
         let mut builder = TemplateIrBuilder::new(&mut store);
         let dynamic = builder.push_dynamic_expression_node(
-            Expression::template(nested_template, ValueMode::ImmutableOwned),
+            expressions
+                .template(nested_template, ValueMode::ImmutableOwned)
+                .expect("test template expression should construct")
+                .id(),
             TemplateSegmentOrigin::Body,
             None,
         );
@@ -377,8 +385,14 @@ fn preparation_reenters_nested_template_payload_authority() {
     let view = TirView::new(&store, outer_id, TemplateTirPhase::Composed, context)
         .expect("outer view should construct");
 
-    let error = prepare_tir_view(&view, TemplatePreparationMode::Value)
-        .expect_err("nested template authority must be traversed");
+    let const_values = ConstValueStore::default();
+    let error = prepare_tir_view(
+        &view,
+        &expressions,
+        &const_values,
+        TemplatePreparationMode::Value,
+    )
+    .expect_err("nested template authority must be traversed");
     let TemplateError::Infrastructure(error) = error else {
         panic!("nested authority failure must remain infrastructure");
     };
@@ -388,6 +402,7 @@ fn preparation_reenters_nested_template_payload_authority() {
 #[test]
 fn preparation_classifies_nested_value_cycle_as_runtime() {
     let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
     let context = TemplateViewContext::default();
     let nested_id = TemplateIrId::new(store.template_count());
     let nested_value = || Template {
@@ -401,7 +416,10 @@ fn preparation_classifies_nested_value_cycle_as_runtime() {
     {
         let mut builder = TemplateIrBuilder::new(&mut store);
         let dynamic = builder.push_dynamic_expression_node(
-            Expression::template(nested_value(), ValueMode::ImmutableOwned),
+            expressions
+                .template(nested_value(), ValueMode::ImmutableOwned)
+                .expect("test template expression should construct")
+                .id(),
             TemplateSegmentOrigin::Body,
             None,
         );
@@ -419,7 +437,10 @@ fn preparation_classifies_nested_value_cycle_as_runtime() {
     }
     let mut outer_builder = TemplateIrBuilder::new(&mut store);
     let outer_dynamic = outer_builder.push_dynamic_expression_node(
-        Expression::template(nested_value(), ValueMode::ImmutableOwned),
+        expressions
+            .template(nested_value(), ValueMode::ImmutableOwned)
+            .expect("test template expression should construct")
+            .id(),
         TemplateSegmentOrigin::Body,
         None,
     );
@@ -434,7 +455,13 @@ fn preparation_classifies_nested_value_cycle_as_runtime() {
     let view = TirView::new(&store, outer_id, TemplateTirPhase::Composed, context)
         .expect("outer nested-cycle view should construct");
 
-    let error = match prepare_tir_view(&view, TemplatePreparationMode::Value) {
+    let const_values = ConstValueStore::default();
+    let error = match prepare_tir_view(
+        &view,
+        &expressions,
+        &const_values,
+        TemplatePreparationMode::Value,
+    ) {
         Err(error) => error,
         Ok(prepared) => panic!("nested value cycles must be CompilerError, got {prepared:?}"),
     };
@@ -473,7 +500,14 @@ fn preparation_rejects_exact_child_cycle_as_internal_error() {
     )
     .expect("cyclic view should construct");
 
-    let error = match prepare_tir_view(&view, TemplatePreparationMode::Value) {
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
+    let error = match prepare_tir_view(
+        &view,
+        &expressions,
+        &const_values,
+        TemplatePreparationMode::Value,
+    ) {
         Err(error) => error,
         Ok(prepared) => panic!("exact-view child cycles must be CompilerError, got {prepared:?}"),
     };
@@ -510,8 +544,15 @@ fn preparation_validates_runtime_slot_plan_authority() {
     )
     .expect("view should construct before slot-plan preparation");
 
-    let error = prepare_tir_view(&view, TemplatePreparationMode::Value)
-        .expect_err("missing runtime slot plan must remain authority failure");
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
+    let error = prepare_tir_view(
+        &view,
+        &expressions,
+        &const_values,
+        TemplatePreparationMode::Value,
+    )
+    .expect_err("missing runtime slot plan must remain authority failure");
     let TemplateError::Infrastructure(error) = error else {
         panic!("missing slot plan must remain infrastructure");
     };
@@ -535,7 +576,6 @@ fn preparation_classifies_runtime_slot_plan_and_site_as_runtime() {
     let plan_id = store.push_slot_plan(TemplateSlotPlan {
         contribution_sources: Vec::new(),
         slot_sites: vec![site_plan(RuntimeSlotSiteId(0), render_root)],
-        span: None,
     });
     let runtime_site = store.push_node(TemplateIrNode::new(
         crate::compiler_frontend::ast::templates::tir::node::TemplateIrNodeKind::RuntimeSlotSite {
@@ -568,8 +608,15 @@ fn preparation_classifies_runtime_slot_plan_and_site_as_runtime() {
         TemplateViewContext::default(),
     )
     .expect("runtime-plan view should construct");
-    let preparation = prepare_tir_view(&view, TemplatePreparationMode::Value)
-        .expect("runtime-plan view should prepare");
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
+    let preparation = prepare_tir_view(
+        &view,
+        &expressions,
+        &const_values,
+        TemplatePreparationMode::Value,
+    )
+    .expect("runtime-plan view should prepare");
 
     assert!(matches!(
         preparation.outcome,
@@ -595,12 +642,10 @@ fn preparation_rejects_runtime_slot_site_from_a_different_plan() {
     let owner_plan = store.push_slot_plan(TemplateSlotPlan {
         contribution_sources: Vec::new(),
         slot_sites: vec![site_plan(RuntimeSlotSiteId(0), render_root)],
-        span: None,
     });
     let other_plan = store.push_slot_plan(TemplateSlotPlan {
         contribution_sources: Vec::new(),
         slot_sites: vec![site_plan(RuntimeSlotSiteId(0), render_root)],
-        span: None,
     });
     let runtime_site = store.push_node(TemplateIrNode::new(
         crate::compiler_frontend::ast::templates::tir::node::TemplateIrNodeKind::RuntimeSlotSite {
@@ -632,7 +677,6 @@ fn preparation_rejects_out_of_range_runtime_slot_site() {
     let plan = store.push_slot_plan(TemplateSlotPlan {
         contribution_sources: Vec::new(),
         slot_sites: Vec::new(),
-        span: None,
     });
     let runtime_site = store.push_node(TemplateIrNode::new(
         crate::compiler_frontend::ast::templates::tir::node::TemplateIrNodeKind::RuntimeSlotSite {
@@ -672,7 +716,6 @@ fn preparation_rejects_mismatched_runtime_slot_site_identity() {
     let plan = store.push_slot_plan(TemplateSlotPlan {
         contribution_sources: Vec::new(),
         slot_sites: vec![site_plan(RuntimeSlotSiteId(0), render_root)],
-        span: None,
     });
     MalformedTirStore::new(&mut store)
         .replace_slot_sites(plan, vec![site_plan(RuntimeSlotSiteId(7), render_root)]);
@@ -758,24 +801,32 @@ fn runtime_contribution_constness_propagates_option_capture_bindings() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let string_type_id = type_environment.builtins().string;
     let capture_name = string_table.intern("value");
     let capture_path = path_fork
         .try_intern_portable_path("main.moth/#value", &mut string_table)
         .expect("test path fits");
-    let scrutinee = Expression::option_none_with_type_id(
-        string_type_id,
-        DataType::StringSlice,
-        &mut type_environment,
-        None,
-    );
-    let capture_expression = Expression::new(
-        ExpressionKind::Reference(capture_path),
-        None,
-        string_type_id,
-        DataType::StringSlice,
-        ValueMode::ImmutableOwned,
-    );
+    let scrutinee = expressions
+        .option_none_with_type_id(
+            &mut const_values,
+            string_type_id,
+            &mut type_environment,
+            None,
+        )
+        .expect("test option none should construct")
+        .id();
+    let capture_expression = expressions
+        .reference_with_type_id(
+            capture_path,
+            string_type_id,
+            None,
+            ValueMode::ImmutableOwned,
+            ConstRecordState::RuntimeValue,
+        )
+        .expect("test capture reference should construct")
+        .id();
     let root = {
         let mut builder = TemplateIrBuilder::new(&mut store);
         let body_expression = builder.push_dynamic_expression_node(
@@ -800,6 +851,8 @@ fn runtime_contribution_constness_propagates_option_capture_bindings() {
     assert!(
         crate::compiler_frontend::ast::templates::tir::tir_node_is_const_evaluable_value(
             &store,
+            &expressions,
+            &const_values,
             root,
             &string_table,
         )
@@ -835,8 +888,15 @@ fn preparation_validates_wrapper_set_authority() {
     )
     .expect("view should construct before wrapper-set preparation");
 
-    let error = prepare_tir_view(&view, TemplatePreparationMode::Value)
-        .expect_err("missing wrapper set must remain authority failure");
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
+    let error = prepare_tir_view(
+        &view,
+        &expressions,
+        &const_values,
+        TemplatePreparationMode::Value,
+    )
+    .expect_err("missing wrapper set must remain authority failure");
     let TemplateError::Infrastructure(error) = error else {
         panic!("missing wrapper set must remain infrastructure");
     };
@@ -847,13 +907,20 @@ fn prepare_slot_plan_view(
     store: &TemplateIrStore,
     template_id: TemplateIrId,
 ) -> Result<TemplatePreparation, TemplateError> {
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
     let view = TirView::new(
         store,
         template_id,
         TemplateTirPhase::Composed,
         TemplateViewContext::default(),
     )?;
-    prepare_tir_view(&view, TemplatePreparationMode::Value)
+    prepare_tir_view(
+        &view,
+        &expressions,
+        &const_values,
+        TemplatePreparationMode::Value,
+    )
 }
 
 fn assert_preparation_authority_error(
@@ -910,7 +977,6 @@ fn preparation_rejects_contribution_marker_with_wrong_plan() {
     let owner_plan = store.push_slot_plan(TemplateSlotPlan {
         contribution_sources: vec![empty_source_plan(RuntimeSlotContributionSourceId(0), text)],
         slot_sites: vec![],
-        span: None,
     });
     let other_plan = TemplateSlotPlanId::new(owner_plan.index() + 1);
     let marker = push_runtime_slot_contribution_source(
@@ -948,7 +1014,6 @@ fn preparation_rejects_contribution_marker_outside_owning_plan() {
         let plan = store.push_slot_plan(TemplateSlotPlan {
             contribution_sources: vec![],
             slot_sites: vec![],
-            span: None,
         });
         push_runtime_slot_contribution_source(
             &mut store,
@@ -990,7 +1055,6 @@ fn preparation_rejects_out_of_range_contribution_source() {
     let plan = store.push_slot_plan(TemplateSlotPlan {
         contribution_sources: vec![empty_source_plan(RuntimeSlotContributionSourceId(0), text)],
         slot_sites: vec![],
-        span: None,
     });
     let marker = push_runtime_slot_contribution_source(
         &mut store,
@@ -1028,7 +1092,6 @@ fn preparation_rejects_source_identity_mismatch() {
     let plan = store.push_slot_plan(TemplateSlotPlan {
         contribution_sources: vec![empty_source_plan(RuntimeSlotContributionSourceId(0), text)],
         slot_sites: vec![],
-        span: None,
     });
     MalformedTirStore::new(&mut store).replace_contribution_sources(
         plan,
@@ -1073,7 +1136,6 @@ fn preparation_rejects_plan_a_source_inside_plan_b() {
     let plan_a = store.push_slot_plan(TemplateSlotPlan {
         contribution_sources: vec![empty_source_plan(RuntimeSlotContributionSourceId(0), text)],
         slot_sites: vec![],
-        span: None,
     });
     let plan_a_marker = push_runtime_slot_contribution_source(
         &mut store,
@@ -1084,7 +1146,6 @@ fn preparation_rejects_plan_a_source_inside_plan_b() {
     let plan_b = store.push_slot_plan(TemplateSlotPlan {
         contribution_sources: vec![empty_source_plan(RuntimeSlotContributionSourceId(0), text)],
         slot_sites: vec![site_plan(RuntimeSlotSiteId(0), plan_a_marker)],
-        span: None,
     });
     let template_id = {
         let mut builder = TemplateIrBuilder::new(&mut store);
@@ -1121,7 +1182,6 @@ fn preparation_keeps_nested_plans_with_local_source_zero_independent() {
                 inner_text,
             )],
             slot_sites: vec![],
-            span: None,
         });
         let marker = push_runtime_slot_contribution_source(
             &mut store,
@@ -1163,7 +1223,6 @@ fn preparation_keeps_nested_plans_with_local_source_zero_independent() {
             child_node,
         )],
         slot_sites: vec![],
-        span: None,
     });
     let outer_marker = push_runtime_slot_contribution_source(
         &mut store,

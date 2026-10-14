@@ -8,11 +8,10 @@
 //!
 //! AST resolves all cast targets, evidence, fallibility, and optional wrapping flags before HIR.
 //! HIR only carries compiler-owned builtin runtime casts as `HirExpressionKind::Cast` or
-//! `HirStatementKind::CastOp`. User-defined cast evidence lowers to a direct user-function call
+//! `HirFallibleOperation::CastOp`. User-defined cast evidence lowers to a direct user-function call
 //! during HIR lowering, and `ResolvedCastEvidence::GenericBound` is validation-only and must not
 //! reach HIR.
 
-use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::hir::expression_store::HirValueRange;
@@ -90,16 +89,11 @@ pub enum HirStatementKind {
         value: HirValueId,
     },
 
-    /// Call a function and optionally capture the result.
-    ///
-    /// WHAT: invokes `target` with evaluated `args` and binds the return value to `result`
-    ///       when present.
-    /// WHY: nested calls are flattened into statement preludes during expression lowering;
-    ///      a top-level call in statement position is represented directly as a `Call`.
+    /// Call an infallible function and bind its ordered success slots.
     Call {
         target: CallTarget,
         args: HirValueRange,
-        result: Option<HirLocalDestination>,
+        results: Vec<HirLocalDestination>,
     },
 
     /// Expression evaluated only for side effects.
@@ -120,24 +114,6 @@ pub enum HirStatementKind {
     /// Explicit deterministic drop.
     #[allow(dead_code)] // Planned: explicit drop statements after ownership lowering matures.
     Drop(LocalId),
-
-    // -------------------------
-    //  Cast Builtins
-    // -------------------------
-    /// Apply a compiler-owned builtin cast to a source value and capture the result.
-    ///
-    /// WHAT: evaluates `source`, applies `policy`, and stores the produced value (or fallible
-    ///      carrier) in `result` when present.
-    /// WHY: AST already resolved the target, evidence, fallibility, and optional wrap flag, so
-    ///      HIR only materializes the resulting builtin runtime cast. Fallible casts need a
-    ///      statement-shaped operation so HIR can branch on the resulting carrier without hiding
-    ///      control flow inside an expression. Infallible casts may also use this form when the
-    ///      result is needed as a statement-local temporary.
-    CastOp {
-        policy: BuiltinCastPolicyId,
-        source: HirValueId,
-        result: Option<HirLocalDestination>,
-    },
 
     // -------------------------
     //  Map Builtins
@@ -166,15 +142,11 @@ pub enum HirStatementKind {
     /// Perform a checked numeric operation and capture the result.
     ///
     /// WHAT: evaluates `operands` according to `op` and stores the produced value in `result`.
-    /// WHY: arithmetic failures (overflow, divide by zero, invalid exponent, non-finite `Float`)
-    ///      are semantic effects that must be visible to HIR validation and backend lowering.
+    /// WHY: arithmetic failures (overflow, divide by zero, invalid exponent, non-finite binary
+    ///      float) are semantic effects that must be visible to HIR validation and backend
+    ///      lowering.
     ///
-    /// Result-local contract:
-    /// - In `NumericFailureMode::Trap` the result local receives the scalar success value.
-    ///   Failure is a runtime trap/throw and does not produce a user-visible carrier.
-    /// - In `NumericFailureMode::ReturnError` the result local receives the internal fallible
-    ///   carrier (success value or builtin `Error`). A later lowering helper is expected to branch
-    ///   with `HirTerminator::FallibleBranch` and unwrap success/error before borrow validation.
+    /// Trap and Infallible modes produce a scalar value; recoverable operations use `Invoke`.
     NumericOp {
         /// The checked numeric operation (operator plus canonical numeric domain).
         op: HirNumericOp,
@@ -182,15 +154,14 @@ pub enum HirStatementKind {
         failure_mode: NumericFailureMode,
         /// The operand(s) to the operation.
         operands: HirNumericOperands,
-        /// Local that receives the operation result or fallible carrier.
+        /// Local that receives the scalar operation result.
         result: HirLocalDestination,
     },
 
     /// Produce the failure selected by a language-defined range-step guard.
     ///
-    /// The enclosing CFG has already established zero step or lack of progress. Keeping this
-    /// producer statement-shaped lets the private failure lane retarget it exactly like NumericOp.
-    /// Its result follows NumericOp's scalar/carrier contract with Bool as the unused success type.
+    /// The enclosing CFG has established zero step or lack of progress.
+    /// Recoverable range failures use `Invoke` instead.
     RangeStepFailure {
         cause: RangeStepFailureCause,
         failure_mode: NumericFailureMode,
@@ -199,13 +170,13 @@ pub enum HirStatementKind {
 
     /// Compute the next candidate for a compiler-generated binary-float range loop.
     ///
-    /// WHAT: performs exactly one profile-precision add/subtract into a backend-local scratch,
+    /// WHAT: performs exactly one domain-precision add/subtract into a backend-local scratch,
     ///       then reports whether that finite candidate satisfies the authored range endpoint.
     /// WHY: the rounded step-vs-distance precheck can reject an inclusive endpoint reached by
     ///      rounding. The candidate destination is written only when the result is finite and in
     ///      range; the Bool result is always written.
     ///
-    /// `domain` is limited to profile `Float` and fixed `F32`/`F64` ranges. The expressions are
+    /// `domain` is any exact binary-float range (`F16`/`F32`/`F64`). The expressions are
     /// already converted to that domain by HIR lowering.
     FloatRangeCandidate {
         current: HirValueId,
@@ -219,51 +190,40 @@ pub enum HirStatementKind {
     },
 
     // -------------------------
-    //  Float Formatting & Validation
+    //  Binary-float Formatting & Validation
     // -------------------------
-    /// Format a finite `Float` into a `String` using Moth's formatting contract.
+    /// Format a finite binary float into a `String` using Moth's formatting contract.
     ///
-    /// WHAT: evaluates `source` (which must be a valid Moth `Float`) and stores the formatted
+    /// WHAT: evaluates `source` (which must be a valid Moth binary float) and stores the formatted
     ///      string in `result`.
-    /// WHY: `Float -> String` casts and runtime Float template interpolation must share one
-    ///      Moth-owned formatter instead of relying on target-native stringification.
+    /// WHY: binary-float template interpolation must share one Moth-owned formatter instead of
+    ///      relying on target-native stringification.
     ///
-    /// Result-local contract:
-    /// - In `NumericFailureMode::Trap` the result local receives the scalar `String` success value.
-    ///   Failure (an unexpected non-finite input) is a runtime trap/throw.
-    /// - In `NumericFailureMode::ReturnError` the result local receives the internal fallible
-    ///   carrier (`String` success value or builtin `Error`). A later lowering helper is expected to
-    ///   branch with `HirTerminator::FallibleBranch` and unwrap success/error before borrow
-    ///   validation.
+    /// Recoverable formatting uses `Invoke`; statement results are ordinary strings.
     FormatFloat {
-        /// The `Float` expression to format.
+        /// The binary-float expression to format.
         source: HirValueId,
         /// How the operation should behave on failure.
         failure_mode: NumericFailureMode,
-        /// Local that receives the formatted string or fallible carrier.
+        /// Local that receives the formatted string.
         result: HirLocalDestination,
     },
 
-    /// Validate that a `Float` value is finite before exposing it as an ordinary Moth `Float`.
+    /// Validate that a binary-float value is finite before ordinary Moth code observes it.
     ///
-    /// WHAT: evaluates `source` (a `Float` value coming from an external/backend boundary) and
-    ///      stores the validated finite `Float` in `result`.
-    /// WHY: Moth `Float` is finite `f64`; values entering from external functions or backend
-    ///      boundaries must be checked explicitly rather than trusted implicitly.
+    /// WHAT: evaluates `source` (an exact binary-float value coming from an external/backend
+    ///      boundary) and stores the validated finite value in `result`.
+    /// WHY: supported binary floats are finite by language contract, so values entering from
+    ///      external functions or backend boundaries must be rounded at their resolved precision
+    ///      and checked explicitly rather than trusted implicitly.
     ///
-    /// Result-local contract:
-    /// - In `NumericFailureMode::Trap` the result local receives the scalar `Float` success value.
-    ///   Failure (a non-finite input) is a runtime trap/throw.
-    /// - In `NumericFailureMode::ReturnError` the result local receives the internal fallible
-    ///   carrier (`Float` success value or builtin `Error`). A later lowering helper is expected to
-    ///   branch with `HirTerminator::FallibleBranch` and unwrap success/error before borrow
-    ///   validation.
+    /// Recoverable validation uses `Invoke`; statement results are ordinary finite values.
     ValidateFloat {
-        /// The `Float` expression to validate.
+        /// The exact binary-float expression to validate.
         source: HirValueId,
         /// How the operation should behave on failure.
         failure_mode: NumericFailureMode,
-        /// Local that receives the validated float or fallible carrier.
+        /// Local that receives the validated binary-float value.
         result: HirLocalDestination,
     },
 }

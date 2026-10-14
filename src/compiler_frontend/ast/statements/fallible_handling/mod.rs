@@ -4,10 +4,12 @@
 //! This owner resolves producer compatibility, types the optional binding and validates handler
 //! success slots or termination. Call finishers consume only postfix propagation; neither
 //! implicit failure facts nor handlers create a source-level carrier type.
+//! Completed protected and fallback values retain owner-local expression IDs. Parsing borrows
+//! the phase builder and constant store explicitly; catch disposition updates publish fresh
+//! immutable rows, while only unresolved suffixes remain in the numeric construction owner.
 
 mod catch_handler;
 mod parser;
-mod success_types;
 mod validation;
 
 use crate::compiler_frontend::ast::cursor::AstCursor;
@@ -20,17 +22,26 @@ use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 //  Re-exports
 // --------------------------
 
+pub(crate) use catch_handler::{
+    DeferredCatchHandler, FallibleSuccessContract, complete_deferred_catch_handler,
+    constrain_protected_by_fallbacks, raw_protected_result_shape,
+};
+/// In-crate lowering tests build catch shapes directly, so the wrapper stays reachable to them.
+#[cfg(test)]
+pub(crate) use parser::wrap_catch_expression;
 pub(crate) use parser::{
     CastCatchSite, FallibleCallSite, FallibleHostCallSite, HandledFallibleCall,
-    HandledFallibleHostCall, compatible_expression_error_type, complete_catch_failure_fact,
-    fallible_catch_allowed_in_context, parse_cast_catch_handling_suffix,
+    HandledFallibleHostCall, ParsedFallibleSuffix, apply_completed_handling_suffix,
+    compatible_expression_error_type, fallible_catch_allowed_in_context,
+    non_fallible_call_handler_diagnostic, parse_cast_catch_handling_suffix,
     parse_completed_expression_catch, parse_fallible_handling_suffix_for_call_expression,
     parse_fallible_handling_suffix_for_expression,
-    parse_fallible_handling_suffix_for_host_call_expression, wrap_catch_expression,
+    parse_fallible_handling_suffix_for_host_call_expression, parse_fragment_handling_suffix,
+    retain_pending_catch_handler, validate_postfix_propagation_contract,
 };
 
-const FUNCTION_CALL_STAGE: &str = "Function Call Parsing";
-const EXPRESSION_STAGE: &str = "Expression Parsing";
+pub(crate) const FUNCTION_CALL_STAGE: &str = "Function Call Parsing";
+pub(crate) const EXPRESSION_STAGE: &str = "Expression Parsing";
 
 /// Returns whether the current token starts explicit typed propagation.
 ///

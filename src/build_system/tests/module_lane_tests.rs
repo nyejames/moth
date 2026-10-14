@@ -65,7 +65,7 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use moth_lexical::numeric::profile::NumericProfile;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -93,31 +93,20 @@ fn fixture_lane_js_runtime_asset(canonical_source_path: PathBuf) -> RuntimeAsset
 /// caller-supplied interned path in the caller-owned string table.
 fn minimal_hir_module(start_name_path: PathId) -> HirModule {
     let mut module = HirModule::new();
-    let return_value = module
-        .expressions
-        .append_expression(HirExpression {
-            kind: HirExpressionKind::TupleConstruct {
-                elements: HirValueRange::empty(),
-            },
-            ty: NONE,
-            value_kind: ValueKind::Const,
-            region: RegionId(0),
-            span: None,
-        })
-        .expect("fixture expression fits");
     module.regions = vec![HirRegion::lexical(RegionId(0), None)];
     module.blocks = vec![HirBlock {
         id: BlockId(0),
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(return_value),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     }];
     module.functions = vec![HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: NONE,
+        returns: Box::new([]),
+        error_return: None,
     }];
     module.start_function = Some(FunctionId(0));
     module
@@ -150,7 +139,9 @@ fn remap_string_ids_routes_hir_and_link_fact_names_through_their_lanes() {
     let payload = hir_module
         .expressions
         .append_expression(HirExpression {
-            kind: HirExpressionKind::Int(7),
+            kind: HirExpressionKind::FixedScalar(
+                FixedScalarValue::signed(FixedScalar::I32, 7).expect("fixture payload fits I32"),
+            ),
             ty: NONE,
             value_kind: ValueKind::Const,
             region: RegionId(0),
@@ -328,7 +319,7 @@ fn entry_assembly_rejects_reachable_external_function_without_package_owner() {
         kind: HirStatementKind::Call {
             target: CallTarget::External(ExternalFunctionId::Synthetic(99_999)),
             args: HirValueRange::empty(),
-            result: None,
+            results: Vec::new(),
         },
         span: None,
     });
@@ -401,7 +392,7 @@ fn frontend_compilation_retains_project_artefact_interfaces() {
         "artefact interface survives the handoff"
     );
 
-    let compilation = ProjectCompilation::from_frontend(frontend, NumericProfile::STANDARD)
+    let compilation = ProjectCompilation::from_frontend(frontend)
         .expect("one active project module assembles one entry");
     assert_eq!(compilation.module_count(), 1, "one base module");
     let retained = compilation
@@ -451,7 +442,7 @@ fn source_package_artefacts_are_retained_but_never_project_entries() {
         "source-package root activity is retained, not cleared"
     );
 
-    let compilation = ProjectCompilation::from_frontend(frontend, NumericProfile::STANDARD)
+    let compilation = ProjectCompilation::from_frontend(frontend)
         .expect("project and package artefacts should assemble");
     assert_eq!(compilation.module_count(), 2, "both base modules retained");
     assert_eq!(
@@ -844,7 +835,7 @@ fn source_package_boundaries_never_cross_address_overlapping_module_ids() {
             .ends_with("packages/b/@mod.moth")
     );
 
-    let compilation = ProjectCompilation::from_frontend(frontend, NumericProfile::STANDARD)
+    let compilation = ProjectCompilation::from_frontend(frontend)
         .expect("overlapping package module ids should assemble");
     assert_eq!(compilation.module_count(), 3);
     let module_paths = compilation
@@ -948,7 +939,7 @@ fn generated_sidecar_warnings_survive_render_and_success_only_compilation() {
     );
 
     let frontend = frontend_with_sidecar_warnings(&mut string_table);
-    let compilation = ProjectCompilation::from_frontend(frontend, NumericProfile::STANDARD)
+    let compilation = ProjectCompilation::from_frontend(frontend)
         .expect("generated sidecar boundaries should assemble");
     let compilation_codes = compilation
         .modules()
@@ -1037,7 +1028,7 @@ fn project_and_package_boundaries_may_contain_equal_generated_identities() {
     )
     .expect("equal generated identities across boundaries should validate");
 
-    let compilation = ProjectCompilation::from_frontend(frontend, NumericProfile::STANDARD)
+    let compilation = ProjectCompilation::from_frontend(frontend)
         .expect("equal generated identities across project and package boundaries must assemble");
     let entries = compilation.entries();
     assert_eq!(entries.len(), 1, "one project root becomes one entry");
@@ -1158,7 +1149,7 @@ fn package_cannot_resolve_an_unrelated_package_sidecar() {
     )
     .expect("frontend boundaries should validate");
 
-    let error = match ProjectCompilation::from_frontend(frontend, NumericProfile::STANDARD) {
+    let error = match ProjectCompilation::from_frontend(frontend) {
         Ok(_) => panic!("a package must not resolve another package's sidecar"),
         Err(ProjectAssemblyError::Infrastructure(error)) => error,
         Err(ProjectAssemblyError::Diagnostic { .. }) => {
@@ -1258,7 +1249,7 @@ fn independent_packages_publish_equal_generated_identities_in_any_order() {
     let second = frontend_for(["b", "a"]);
 
     let symbols_by_prefix = |frontend: ProjectFrontendCompilation| {
-        let compilation = ProjectCompilation::from_frontend(frontend, NumericProfile::STANDARD)
+        let compilation = ProjectCompilation::from_frontend(frontend)
             .expect("two packages may publish equal generated identities in either order");
         assert_eq!(
             compilation.module_count(),
@@ -1345,7 +1336,7 @@ fn independent_packages_publish_equal_generated_identities_in_any_order() {
             Vec::new(),
         )
         .expect("single-package frontend should validate");
-        let compilation = ProjectCompilation::from_frontend(frontend, NumericProfile::STANDARD)
+        let compilation = ProjectCompilation::from_frontend(frontend)
             .expect("one package alone must stay coherent");
         assert_eq!(compilation.module_count(), 3);
     }
@@ -1374,9 +1365,9 @@ fn lane_module_with_generated_and_cross_module_calls(
         hir_module.blocks[0].statements.push(HirStatement {
             id: HirNodeId(7),
             kind: HirStatementKind::Call {
-                target: CallTarget::Generated(identity),
+                target: CallTarget::Generated(Box::new(identity)),
                 args: HirValueRange::empty(),
-                result: None,
+                results: Vec::new(),
             },
             span: None,
         });
@@ -1387,7 +1378,7 @@ fn lane_module_with_generated_and_cross_module_calls(
             kind: HirStatementKind::Call {
                 target: CallTarget::CrossModule(origin.clone()),
                 args: HirValueRange::empty(),
-                result: None,
+                results: Vec::new(),
             },
             span: None,
         });
@@ -1568,7 +1559,7 @@ fn mixed_outcomes_remain_valid_for_check_and_reject_success_only_compilation() {
     .expect("mixed outcomes are a valid retained frontend result for check");
     assert!(frontend.has_diagnosed_or_blocked());
 
-    let error = match ProjectCompilation::from_frontend(frontend, NumericProfile::STANDARD) {
+    let error = match ProjectCompilation::from_frontend(frontend) {
         Ok(_) => panic!("diagnosed or blocked modules must reject success-only compilation"),
         Err(ProjectAssemblyError::Infrastructure(error)) => error,
         Err(ProjectAssemblyError::Diagnostic { .. }) => {
@@ -1682,7 +1673,9 @@ fn generated_test_identity(name: &str) -> GeneratedFunctionIdentity {
             name.to_owned(),
             None,
         )),
-        Box::new([CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)]),
+        Box::new([CanonicalTypeIdentity::Builtin(
+            CanonicalBuiltinType::FixedScalar(FixedScalar::I32),
+        )]),
         Box::new([]),
     )
 }
@@ -2203,7 +2196,6 @@ fn generated_names_stay_stable_under_sidecar_publication_reordering() {
                 Vec::new(),
             )
             .expect("frontend should validate"),
-            NumericProfile::STANDARD,
         )
         .expect("sidecar boundaries should assemble")
     };

@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "outer=outer-0outer-1|inner=inner-0inner-1inner-2"

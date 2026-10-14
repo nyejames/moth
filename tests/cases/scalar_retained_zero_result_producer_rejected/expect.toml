@@ -1,0 +1,14 @@
+entry = "."
+
+# The retained zero-success producer feeds an inferred multi-bind `then` slot.
+# Completion must diagnose that single-value receiver before projecting a type.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0087"]
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0087"]

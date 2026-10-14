@@ -1,0 +1,6 @@
+marker ||:
+;
+
+reject_callable_annotation ||:
+    value marker = "ok"
+;

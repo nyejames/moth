@@ -100,15 +100,15 @@ fn exported_typed_constant_headers_are_parsed_and_follow_on_constant_stays_heade
 #[test]
 fn non_generic_headers_keep_generic_parameter_lists_empty() {
     let headers = parse_single_file_headers(
-        "identity |value Int| -> Int:\n\
+        "identity |value I32| -> I32:\n\
              return value\n\
          ;\n\
          Box = |\n\
-             value Int,\n\
+             value I32,\n\
          |\n\
          Status :: Ready,\n\
          ;\n\
-         Alias as Int\n",
+         Alias as I32\n",
     );
 
     for header in &headers.headers {
@@ -328,7 +328,7 @@ fn top_level_const_template_tokens_keep_close_and_eof_for_ast_parser() {
 #[test]
 fn header_const_fragment_and_source_contract_spans_keep_authored_ranges() {
     let long_fragment_name = "fragment_".to_owned() + &"x".repeat(1300);
-    let source = format!("value #Config of Int = 1\n#[{long_fragment_name}]\n");
+    let source = format!("value #Config of I32 = 1\n#[{long_fragment_name}]\n");
     let mut source_context = TestSourceContext::new("src/@page.moth");
     let mut path_fork = PathInternerFork::empty();
     let file_path = source_context.path().to_path_buf();
@@ -624,7 +624,7 @@ fn top_level_expression_symbols_stay_in_implicit_start_body() {
 
     let start_header = start_function_header(&headers);
     let start_symbols = symbol_tokens_in_header_body(&headers, start_header, &string_table);
-    let header_names = non_start_header_names(&headers, &string_table);
+    let header_names = declared_header_names(&headers, &string_table);
 
     assert!(
         start_symbols.iter().any(|symbol| symbol == "basic"),
@@ -662,7 +662,7 @@ fn compile_time_declarations_parse_as_headers_without_elevating_body_symbols() {
          theme\n",
     );
 
-    let header_names = non_start_header_names(&headers, &string_table);
+    let header_names = declared_header_names(&headers, &string_table);
     assert_eq!(
         header_names,
         vec![String::from("theme")],
@@ -711,14 +711,14 @@ fn function_without_arrow_has_zero_return_slots() {
 
 #[test]
 fn function_value_return_is_preserved_as_return_syntax_shell() {
-    let headers = parse_single_file_headers("f|| -> Int:\n;\n");
+    let headers = parse_single_file_headers("f|| -> I32:\n;\n");
     let signature = first_function_signature(&headers);
 
     assert!(matches!(
         signature.returns.as_slice(),
         [ReturnSlotSyntax {
             value: FunctionReturnSyntax {
-                type_annotation: ParsedTypeRef::BuiltinInt { .. },
+                type_annotation: ParsedTypeRef::BuiltinFixedScalar { .. },
                 ..
             },
             channel: ReturnChannelSyntax::Success,
@@ -773,7 +773,7 @@ fn function_parameter_default_stays_in_header_syntax_tokens() {
 #[test]
 fn struct_field_default_stays_in_header_syntax_tokens() {
     let (headers, string_table) = parse_single_file_headers_with_table(
-        "DEFAULT_WIDTH #= 80\nOptions = |\n    width Int = DEFAULT_WIDTH,\n|\n",
+        "DEFAULT_WIDTH #= 80\nOptions = |\n    width I32 = DEFAULT_WIDTH,\n|\n",
     );
     let struct_header = headers
         .headers
@@ -788,7 +788,7 @@ fn struct_field_default_stays_in_header_syntax_tokens() {
 
     assert!(matches!(
         field.type_annotation,
-        ParsedTypeRef::BuiltinInt { .. }
+        ParsedTypeRef::BuiltinFixedScalar { .. }
     ));
     assert!(
         cursor_has_string(
@@ -926,12 +926,12 @@ fn retained_header_substreams_share_one_frozen_file_path_table() {
 #[test]
 fn retained_header_substreams_do_not_count_copied_path_rows() {
     use crate::compiler_frontend::instrumentation::{
-        capture_frontend_counters_for_test, log_frontend_counters, reset_frontend_counters,
+        capture_counters_for_test, log_frontend_counters, reset_frontend_counters,
     };
     use crate::timing::start_benchmark_collection;
 
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let _counter_capture = capture_frontend_counters_for_test();
+    let _counter_capture = capture_counters_for_test();
     reset_frontend_counters();
     let timing_session = start_benchmark_collection(true).expect("timing session should start");
 

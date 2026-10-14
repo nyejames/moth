@@ -18,7 +18,7 @@ This README is the package's living development document. It holds design direct
 - `graphics.js` exports nothing. Registration still parses it on every HTML build, so the asset can't drift out of the accepted annotation subset.
 - The package is HTML-JS only. A future Wasm path follows the same rule as `@web/canvas`: reachable calls are rejected before lowering until a lowering exists.
 - No API slice has started. Every Phase 1 operation depends on at least one binding prerequisite below.
-- Fixed `U32` and `F32` scalar slots, flat named `U32` constants and compiler-owned error-code exports are delivered in the shared boundary. Shared opaque type references, nested annotation paths and bulk collection/data mapping remain unresolved.
+- Fixed `I32`, `I64`, `U32`, `U64`, `F32` and `F64` scalar slots, flat named `U32` constants and compiler-owned error-code exports are delivered in the shared boundary. Shared opaque type references, nested annotation paths and bulk collection/data mapping remain unresolved.
 
 ## Role and boundary
 
@@ -74,7 +74,7 @@ The public API isn't built from unexplained numeric WebGL constants. Primitive m
 
 ### Numeric precision
 
-WebGL consumes 32-bit floats for vertex data, uniforms and clear values. Fixed `F32` gives an exact profile-independent binary32 slot where the API needs it. Moth `Float` follows the boundary-wide numeric profile, so Float64 programs round at the host boundary. The canonical reference must state that rounding when the first `Float`-carrying operation ships.
+WebGL consumes 32-bit floats for vertex data, uniforms and clear values. `F32` gives an exact binary32 slot where the API needs it and `F64` keeps its binary64 width. The shared boundary requires finite values at each declared precision. `F32` parameters arrive as exact binary32 values and `F32` results round once at binary32. The [external binding contract](../../../../../../docs/src/docs/packages/external-binding-contracts.mtf) owns the validation and failure rules.
 
 ### Async and callback boundary
 
@@ -109,11 +109,11 @@ Tentative preference: let annotations declare a nested Moth path so `graphics.js
 
 ### 3. Closed-domain values
 
-Delivered for the carrier this package uses. `@moth.sig` accepts fixed `U32` and `F32` in scalar parameters and success results through the shared fixed-scalar owner (`ExternalAbiType::Fixed(FixedScalar)`). `@moth.const` exposes one flat Moth name with fixed `U32` type from its authored literal without running JavaScript (`ExternalConstantValue::Fixed(FixedScalarValue)`). The binding contract owns the exact literal form, the rejection list and the constant-only emission rule. Native `Int`, `Uint` and `Float` keep their profile-selected meaning. The shared boundary canonicalises integer zero and rounds `F32` results once at binary32 while preserving signed zero. Closed WebGL domains cross as named `U32` constants and those names don't make domains nominally distinct. Nominal foreign enums stay pending in the binding contract and this package doesn't wait for them.
+Delivered for the carrier this package uses. `@moth.sig` accepts the exact numeric subset `I32`, `I64`, `U32`, `U64`, `F32` and `F64` in scalar parameters and success results through the shared fixed-scalar owner (`ExternalAbiType::Fixed(FixedScalar)`). `@moth.const` exposes one flat Moth name with fixed `U32` type from its authored literal without running JavaScript (`ExternalConstantValue::Fixed(FixedScalarValue)`). The binding contract owns the exact literal form, the rejection list and the constant-only emission rule. The retired `Int`, `Uint` and `Float` spellings are ordinary unknown type names and gain no alias. The shared integer boundaries canonicalise integer `-0` to `0`, and `F32` results round once at binary32 while preserving signed zero. The existing `Number`-based foreign bridge carries `I64` and `U64` only as safe integers: `I64` within -9,007,199,254,740,991 through 9,007,199,254,740,991 and `U64` within 0 through 9,007,199,254,740,991, rejecting wrong-carrier, fractional, unsafe and non-finite values before precision can be lost. Closed WebGL domains cross as named `U32` constants and those names don't make domains nominally distinct. Nominal foreign enums stay pending in the binding contract and this package doesn't wait for them.
 
 ### 4. Bulk numeric and byte data
 
-Unresolved. GPU data upload is central, so a clean data path is required for a genuinely useful v1. Annotated signatures still reject collections and options. Fixed `U32` and `F32` scalars and flat `U32` constants are delivered under prerequisite 3 but they don't carry bulk arrays. Operations that need the path:
+Unresolved. GPU data upload is central, so a clean data path is required for a genuinely useful v1. Annotated signatures still reject collections and options. The fixed scalar slots and flat `U32` constants delivered under prerequisite 3 don't carry bulk arrays. Operations that need the path:
 
 - vertex-buffer and index-buffer upload and partial update
 - texture pixel upload
@@ -123,7 +123,7 @@ Unresolved. GPU data upload is central, so a clean data path is required for a g
 Design questions:
 
 - whether a Moth collection crosses as a copy or a borrowed view, and how borrow rules bound a view's lifetime
-- element-type mapping to typed arrays, including how profile-selected `Float` maps to `Float32Array`
+- element-type mapping to typed arrays, including how `F32` and `F64` map to `Float32Array` and `Float64Array`
 - keeping numeric `U8` distinct from `Byte` octets, which share storage but aren't interchangeable
 - readback into caller-owned mutable collections
 - how the same contract later maps to Wasm linear-memory views

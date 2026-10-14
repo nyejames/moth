@@ -6,44 +6,51 @@
 //! WHY: value receivers reuse these structural facts rather than scanning `is`
 //! again. This file does not own choice-predicate value matching.
 
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
-use crate::compiler_frontend::ast::expressions::parse_expression::create_expression;
+use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
+use crate::compiler_frontend::ast::expressions::parse_expression::create_expression_with_trailing_newline_policy;
+use crate::compiler_frontend::ast::expressions::parse_expression_input::{
+    ExpressionParseInput, ExpressionParseResources,
+};
+use crate::compiler_frontend::ast::numeric_construction::{
+    DeferredArmPattern, PendingOptionPattern, StatementExpression, deferred_numeric_expression,
+};
 use crate::compiler_frontend::ast::statements::condition_validation::{
     ensure_if_statement_condition, if_condition_is_missing,
 };
 use crate::compiler_frontend::ast::statements::match_headers::{
-    build_option_present_capture_scope_and_pattern, parse_scrutinee_until_is,
+    deferred_pattern_span, parse_scrutinee_until_is, parse_single_predicate_match_pattern,
+    retained_match_subject,
 };
-use crate::compiler_frontend::ast::statements::match_patterns::{
-    MatchPattern, parse_option_pattern,
-};
+use crate::compiler_frontend::ast::statements::match_patterns::{MatchPattern, MatchSubject};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidControlFlowStatementReason, InvalidMatchPatternReason,
+    ValueReceiverContext,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
-use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
+use crate::compiler_frontend::type_coercion::parse_context::{CastTargetContext, ExpectedType};
 use crate::compiler_frontend::utilities::token_scan::NestingDepth;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 #[allow(clippy::large_enum_variant)]
 pub(crate) enum ParsedIfHeader {
-    BoolCondition {
-        condition: Expression,
-    },
+    /// A boolean `if`. The condition is built, or retained because it still references a pending
+    /// numeric origin whose exact type the body root has not selected yet.
+    BoolCondition { condition: StatementExpression },
     OptionPresentCapture {
-        scrutinee: Expression,
-        pattern: MatchPattern,
+        scrutinee: StatementExpression,
+        pattern: DeferredArmPattern,
         then_context: ScopeContext,
     },
-    MatchStyle {
-        scrutinee: Expression,
-    },
+    /// A statement-style `if <subject> is:` match. The scrutinee is built, or retained until the
+    /// body root selects the pending numeric origin it references.
+    MatchStyle { scrutinee: StatementExpression },
 }
 
 /// Syntax-only shape of tokens after `if`.
@@ -133,6 +140,8 @@ pub(crate) fn parse_if_header(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> IfHeaderResult<ParsedIfHeader> {
@@ -145,6 +154,8 @@ pub(crate) fn parse_if_header(
             token_stream,
             context,
             type_interner,
+            expression_builder,
+            const_values,
             string_table,
             path_fork,
         );
@@ -155,6 +166,8 @@ pub(crate) fn parse_if_header(
             token_stream,
             context,
             type_interner,
+            expression_builder,
+            const_values,
             string_table,
             path_fork,
         );
@@ -169,17 +182,47 @@ pub(crate) fn parse_if_header(
     }
 
     let condition_context = if_condition_parse_context(context, string_table, path_fork);
-    let mut condition_type = ExpectedType::Infer;
-    let condition = create_expression(
+    let condition = match create_header_expression(
         token_stream,
         &condition_context,
         type_interner,
-        &mut condition_type,
+        expression_builder,
+        const_values,
         &ValueMode::ImmutableOwned,
-        false,
         string_table,
         path_fork,
-    )?;
+    ) {
+        Ok(condition) => {
+            if token_stream.current_tag() == TokenTag::IS {
+                token_stream.advance();
+                return Ok(ParsedIfHeader::MatchStyle {
+                    scrutinee: StatementExpression::Built(condition),
+                });
+            }
+            ensure_if_statement_condition(
+                expression_builder.view(condition)?,
+                type_interner.environment(),
+            )?;
+            StatementExpression::Built(condition)
+        }
+        Err(error) => {
+            // A condition that still references a pending numeric origin completes at the body
+            // root, where the resolved expression is validated as `Bool` exactly like this path.
+            // The scrutinee form below keeps the same retained fragment for pattern completion at
+            // whatever type the pending origin resolves to.
+            if !header_is_match_style(token_stream) {
+                return Ok(ParsedIfHeader::BoolCondition {
+                    condition: retain_header_expression(
+                        error,
+                        ExpectedType::Known(type_interner.environment().builtins().bool),
+                    )?,
+                });
+            }
+            let scrutinee = retain_header_expression(error, ExpectedType::Infer)?;
+            token_stream.advance(); // consume `is`
+            return Ok(ParsedIfHeader::MatchStyle { scrutinee });
+        }
+    };
 
     if token_stream.current_tag() == TokenTag::IS {
         token_stream.advance();
@@ -188,9 +231,73 @@ pub(crate) fn parse_if_header(
         });
     }
 
-    ensure_if_statement_condition(&condition, type_interner.environment())?;
-
     Ok(ParsedIfHeader::BoolCondition { condition })
+}
+
+/// True when the cursor sits on the `is` that opens a match-style header.
+fn header_is_match_style(token_stream: &AstCursor) -> bool {
+    token_stream.current_tag() == TokenTag::IS
+}
+
+/// Parse one `if` condition or match scrutinee that owns its whole authored syntax.
+///
+/// WHAT: builds the shared expression input directly so the position owns a raised numeric
+///       deferral, keeping the ordinary trailing policy of `create_expression`.
+/// WHY: a condition or scrutinee that still references a pending numeric origin must retain its
+///      whole fragment for body-root completion instead of leaking a non-owning deferral.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "header expression parsing keeps the token stream, condition scope, mutable interner/builder/constant/string/path state, and value mode as separate borrows"
+)]
+fn create_header_expression(
+    token_stream: &mut AstCursor,
+    context: &ScopeContext,
+    type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    value_mode: &ValueMode,
+    string_table: &mut StringTable,
+    path_fork: &mut PathInternerFork,
+) -> IfHeaderResult<ExprId> {
+    let mut expected_type = ExpectedType::Infer;
+    let mut cast_target_context = CastTargetContext::None;
+    let input = ExpressionParseInput::ordinary(
+        ExpressionParseResources {
+            token_stream,
+            scope_context: context,
+            type_interner,
+            expression_builder,
+            const_values,
+            expected_type: &mut expected_type,
+            cast_target_context: &mut cast_target_context,
+            value_mode,
+            string_table,
+            path_fork,
+        },
+        false,
+    )
+    .with_numeric_deferral_owner();
+    create_expression_with_trailing_newline_policy(input).map(|expression| expression.id())
+}
+
+/// Retain one `if` header fragment whose numeric origins complete at the body root.
+///
+/// WHAT: takes the complete deferral and records the exact receiving expectation of the position.
+/// WHY: an `if` condition is a `Bool` predicate, so completion validates the resolved expression
+///      against `Bool`; a match scrutinee keeps `Infer` because its subject type is whatever the
+///      pending origin resolves to and its patterns complete at that selected type.
+fn retain_header_expression(
+    error: ExpressionParseError,
+    expected: ExpectedType,
+) -> IfHeaderResult<StatementExpression> {
+    let deferral = error.take_numeric_deferral("an if header expression")?;
+    Ok(StatementExpression::Retained(deferred_numeric_expression(
+        deferral.items,
+        expected,
+        deferral.value_mode,
+        deferral.span,
+        deferral.suffix,
+    )))
 }
 
 /// Classify the structural shape of the header after `if` without consuming it.
@@ -364,6 +471,8 @@ fn parse_match_style_if_header(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> IfHeaderResult<ParsedIfHeader> {
@@ -372,6 +481,8 @@ fn parse_match_style_if_header(
         token_stream,
         &condition_context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     )?;
@@ -384,6 +495,8 @@ fn parse_option_present_capture_if_header(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> IfHeaderResult<ParsedIfHeader> {
@@ -392,61 +505,86 @@ fn parse_option_present_capture_if_header(
         token_stream,
         &condition_context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     )?;
     token_stream.advance(); // consume `is`
 
-    let type_environment = type_interner.environment();
-    let Some(inner_type_id) = type_environment.option_inner_type(scrutinee.type_id) else {
+    let subject_span = match &scrutinee {
+        StatementExpression::Built(expression) => expression_builder.view(*expression)?.span(),
+        StatementExpression::Retained(fragment) => fragment.span,
+    };
+    let subject = match &scrutinee {
+        StatementExpression::Built(expression) => MatchSubject::Known(
+            expression_builder
+                .view(*expression)?
+                .require_single(ValueReceiverContext::MatchScrutinee)?,
+        ),
+        StatementExpression::Retained(fragment) => retained_match_subject(
+            context,
+            type_interner.environment(),
+            &fragment.items,
+            expression_builder,
+        ),
+    };
+    let is_option = match subject {
+        MatchSubject::Known(type_id) => type_interner
+            .environment()
+            .option_inner_type(type_id)
+            .is_some(),
+        MatchSubject::PendingOption { .. } => true,
+        MatchSubject::Pending | MatchSubject::PendingChoice(_) => false,
+    };
+    if !is_option {
         return Err(CompilerDiagnostic::invalid_match_pattern(
             InvalidMatchPatternReason::OptionPresentCaptureOnNonOptional,
             None,
             None,
-            scrutinee.span,
+            subject_span,
         )
         .into());
-    };
+    }
 
-    let pattern = parse_option_pattern(
+    let parsed = parse_single_predicate_match_pattern(
+        &subject,
         token_stream,
-        inner_type_id,
-        context.numeric_profile,
-        string_table,
-        type_environment,
-    )?;
-    let MatchPattern::OptionPresentCapture {
-        name,
-        binding_span,
-        inner_type_id: capture_inner_type_id,
-        span: pattern_span,
-        ..
-    } = &pattern
-    else {
-        return Err(CompilerDiagnostic::invalid_match_pattern(
-            InvalidMatchPatternReason::ExpectedBindingInOptionPresentCapture,
-            None,
-            None,
-            pattern.span(),
-        )
-        .into());
-    };
-    let (then_context, pattern) = build_option_present_capture_scope_and_pattern(
         context,
-        *name,
-        *binding_span,
-        *capture_inner_type_id,
-        *pattern_span,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     )?;
+    ensure_option_present_capture_pattern(&parsed.pattern)?;
 
     Ok(ParsedIfHeader::OptionPresentCapture {
         scrutinee,
-        pattern,
-        then_context,
+        pattern: parsed.pattern,
+        then_context: parsed.arm_scope,
     })
+}
+
+/// Rejects a statement option header whose pattern does not bind the present payload.
+///
+/// WHY: `if subject is |name|:` binds the payload; every other pattern form keeps its own owner.
+fn ensure_option_present_capture_pattern(pattern: &DeferredArmPattern) -> IfHeaderResult<()> {
+    if matches!(
+        pattern,
+        DeferredArmPattern::Ready(MatchPattern::OptionPresentCapture { .. })
+            | DeferredArmPattern::PendingOption(PendingOptionPattern::PresentCapture(_))
+    ) {
+        return Ok(());
+    }
+
+    Err(CompilerDiagnostic::invalid_match_pattern(
+        InvalidMatchPatternReason::ExpectedBindingInOptionPresentCapture,
+        None,
+        None,
+        deferred_pattern_span(pattern),
+    )
+    .into())
 }
 
 fn if_condition_parse_context(

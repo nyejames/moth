@@ -1,0 +1,15 @@
+entry = "."
+
+# The computed fallback's `+` is the only expected rejection. The operator-type
+# payload has no stable reason key, so the code and primary span are asserted.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-TYPE-0003"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0003"
+path = "input/@page.moth"
+line = 7
+column = 40

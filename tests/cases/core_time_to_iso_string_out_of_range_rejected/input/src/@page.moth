@@ -1,13 +1,13 @@
 @core/time Timestamp, timestamp_from_unix_milliseconds, to_iso_string
 
-render_past_window || -> Int, Error!:
+render_past_window || -> I32, Error!:
     -- One millisecond past 9999-12-31T23:59:59.999Z, the last renderable instant
     far = timestamp_from_unix_milliseconds(253402300800000.0)
     iso = to_iso_string(far)!
     return 0
 ;
 
-render_fractional_edge || -> Int, Error!:
+render_fractional_edge || -> I32, Error!:
     -- Half a millisecond past the window: the range is tested before truncation
     edge = timestamp_from_unix_milliseconds(253402300799999.5)
     iso = to_iso_string(edge)!

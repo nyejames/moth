@@ -1,0 +1,17 @@
+-- The collection element is used only through explicit casts, so no cast target
+-- constrains its origin. It keeps the language default I32, which the final I32
+-- cast exposes as an invalid same-type cast (invalid_cast.same_source_and_target).
+-- If a cast target wrongly constrained the element, the earlier casts would make
+-- the final cast a valid conversion and this diagnostic would vanish.
+values = {1, 2}
+wide U64 = cast values.get(0) catch:
+    then 0
+;
+signed I64 = cast values.get(0) catch:
+    then 0
+;
+same_default I32 = cast values.get(0) catch:
+    then 0
+;
+
+[:unreachable]

@@ -1,5 +1,5 @@
 render || -> String:
-    items {2 Int} = {1, 2}
-    other {3 Int} = items
+    items {2 I32} = {1, 2}
+    other {3 I32} = items
     return ""
 ;

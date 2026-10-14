@@ -10,7 +10,7 @@ Roots, joins, optional transfer safety and facts.
 - Must not decide: lifetime topology, physical ownership, final allocation, or backend lowering
 - Invariant: borrow validation reads HIR and writes side tables; it doesn't rewrite HIR
 
-This output contract is solver-independent. The current alpha lattice, root approximation and advisory drop candidates are current scaffolding rather than permanent architecture; a stronger production borrow checker may replace them without changing the contract or source legality.
+This output contract is solver-independent. The live current alpha implementation, its coverage and the production work queue are maintained in `docs/roadmap/plans/production-borrow-checker.md`, not in this semantic reference. Replacing its internal lattice or advisory scaffolding must preserve this contract.
 
 A future `$checked:` proof-budget block may authorise substantially deeper
 conflict-directed analysis. Its spelling and compiler-owned direction are
@@ -26,6 +26,8 @@ path; it is not current production behaviour.
 - `src/compiler_frontend/analysis/borrow_checker/boracle/` (feature-gated developer path)
 
 ## Read next
+
+- `docs/roadmap/plans/production-borrow-checker.md` for live implementation status and follow-up decisions
 
 - `docs/src/developer-docs/memory-management/borrow-validation/borrow-validation.mtf`
 - `docs/src/developer-docs/memory-management/boracle/boracle-reference-solver.mtf` for the permanent reference solver and its opt-in developer lane

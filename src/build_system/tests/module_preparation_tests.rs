@@ -46,7 +46,6 @@ use crate::compiler_frontend::{
     FrontendFilePrepareSource,
 };
 use crate::projects::settings::Config;
-use moth_lexical::numeric::profile::NumericProfile;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -351,7 +350,7 @@ fn fused_preparation_merges_local_forks_and_resolves_source_and_generated_string
     let style_directives = StyleDirectiveRegistry::built_ins();
     let external_package_registry = Arc::new(ExternalPackageRegistry::new());
     let mut frontend = CompilerFrontend::new(
-        Config::new(temp_dir.path().to_path_buf()).frontend_options(NumericProfile::STANDARD),
+        Config::new(temp_dir.path().to_path_buf()).frontend_options(),
         string_table,
         source_files.fork_path_interner(),
         &style_directives,
@@ -719,8 +718,7 @@ fn prepare_module_retains_header_syntax_for_semantic_compilation() {
     let provider_materialisations = ProviderMaterialisationRegistry::default();
     let compile_context = ModuleCompilationContext {
         source_files: source_files_view,
-        options: Config::new(temp_dir.path().to_path_buf())
-            .frontend_options(NumericProfile::STANDARD),
+        options: Config::new(temp_dir.path().to_path_buf()).frontend_options(),
         build_profile: FrontendBuildProfile::Dev,
         root_role_override: None,
         project_path_resolver: Some(&project_path_resolver),
@@ -913,8 +911,7 @@ fn compile_api_only_root_and_assert_boundary(root_role: ModuleRootRole) {
     let provider_materialisations = ProviderMaterialisationRegistry::default();
     let compile_context = ModuleCompilationContext {
         source_files: source_files_view,
-        options: Config::new(temp_dir.path().to_path_buf())
-            .frontend_options(NumericProfile::STANDARD),
+        options: Config::new(temp_dir.path().to_path_buf()).frontend_options(),
         build_profile: FrontendBuildProfile::Dev,
         root_role_override: None,
         project_path_resolver: Some(&project_path_resolver),
@@ -1128,7 +1125,7 @@ fn serial_file_preparation_produces_deterministic_ordered_output() {
     let style_directives = StyleDirectiveRegistry::built_ins();
     let external_package_registry = Arc::new(ExternalPackageRegistry::new());
     let mut frontend = CompilerFrontend::new(
-        Config::new(temp_dir.path().to_path_buf()).frontend_options(NumericProfile::STANDARD),
+        Config::new(temp_dir.path().to_path_buf()).frontend_options(),
         string_table,
         source_files.fork_path_interner(),
         &style_directives,
@@ -1420,7 +1417,7 @@ fn parallel_file_preparation_produces_deterministic_ordered_output() {
 
     let external_package_registry = Arc::new(ExternalPackageRegistry::new());
     let mut frontend = CompilerFrontend::new(
-        Config::new(temp_dir.path().to_path_buf()).frontend_options(NumericProfile::STANDARD),
+        Config::new(temp_dir.path().to_path_buf()).frontend_options(),
         string_table,
         source_files.fork_path_interner(),
         &style_directives,
@@ -2014,7 +2011,7 @@ fn merge_rejects_chunk_forked_from_a_foreign_path_base() {
 fn merge_skips_frozen_already_global_output_when_later_chunk_remap_is_non_identity() {
     #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
     use crate::compiler_frontend::instrumentation::{
-        capture_frontend_counters_for_test, log_frontend_counters, reset_frontend_counters,
+        capture_counters_for_test, log_frontend_counters, reset_frontend_counters,
     };
     #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
     use crate::timing::start_benchmark_collection;
@@ -2022,7 +2019,7 @@ fn merge_skips_frozen_already_global_output_when_later_chunk_remap_is_non_identi
     #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
-    let _counter_capture = capture_frontend_counters_for_test();
+    let _counter_capture = capture_counters_for_test();
     #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
     reset_frontend_counters();
     #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
@@ -2238,12 +2235,12 @@ fn resolve_and_validate_active_root_rejects_mismatched_expected_origin() {
 #[test]
 fn serial_chunk_local_preparation_counts_each_selected_source_once() {
     use crate::compiler_frontend::instrumentation::{
-        capture_frontend_counters_for_test, log_frontend_counters, reset_frontend_counters,
+        capture_counters_for_test, log_frontend_counters, reset_frontend_counters,
     };
     use crate::timing::start_benchmark_collection;
 
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let _counter_capture = capture_frontend_counters_for_test();
+    let _counter_capture = capture_counters_for_test();
 
     reset_frontend_counters();
     let timing_session = start_benchmark_collection(true).expect("timing session should start");
@@ -2293,12 +2290,12 @@ fn serial_chunk_local_preparation_counts_each_selected_source_once() {
 #[test]
 fn chunked_file_preparation_skips_identity_payload_remap() {
     use crate::compiler_frontend::instrumentation::{
-        capture_frontend_counters_for_test, log_frontend_counters, reset_frontend_counters,
+        capture_counters_for_test, log_frontend_counters, reset_frontend_counters,
     };
     use crate::timing::start_benchmark_collection;
 
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let _counter_capture = capture_frontend_counters_for_test();
+    let _counter_capture = capture_counters_for_test();
 
     reset_frontend_counters();
     let timing_session = start_benchmark_collection(true).expect("timing session should start");

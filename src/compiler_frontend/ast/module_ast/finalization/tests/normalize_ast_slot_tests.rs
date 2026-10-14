@@ -1,5 +1,4 @@
 use super::*;
-use moth_lexical::numeric::profile::NumericProfile;
 
 // ------------------------------
 //  Slot-bearing template classification uses effective view
@@ -71,14 +70,17 @@ fn build_resolved_slot_template_store() -> (Template, Rc<RefCell<TemplateIrStore
 #[test]
 fn slot_bearing_module_constant_classifies_through_effective_tir_view() {
     let mut string_table = StringTable::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
 
     let (template, registry) = build_resolved_slot_template_store();
     let projected = project_const_template_value(
         &template,
         &registry.borrow(),
+        &mut expression_builder,
+        &mut const_values,
         &mut string_table,
         DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        NumericProfile::STANDARD,
         None,
     )
     .expect("slot template should project as a const template value");
@@ -109,6 +111,8 @@ fn slot_bearing_module_constant_classifies_through_effective_tir_view() {
 fn const_template_projection_round_trips_structural_resource_and_site_root() {
     let location = None;
     let mut producer_strings = StringTable::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut producer_resources = ModuleResourceTable::new();
     let module_origin = StableModuleOriginIdentity::from_portable_path(
         StablePackageIdentity::project_local("const-template-test"),
@@ -123,20 +127,27 @@ fn const_template_projection_round_trips_structural_resource_and_site_root() {
     let resource_id = producer_resources.intern_origin(resource_origin.clone(), location);
     let before = producer_strings.intern("before");
     let after = producer_strings.intern("after");
-    let structural_expression = Expression::new(
-        ExpressionKind::StructuralString {
-            pieces: vec![
+    let structural_value = const_values
+        .insert_resolved(
+            builtin_type_ids::STRING,
+            ConstValuePayload::String(ConstStringValue::Pieces(vec![
                 ConstStringPiece::Text(before),
                 ConstStringPiece::Resource(resource_id),
                 ConstStringPiece::SiteRoot,
                 ConstStringPiece::Text(after),
-            ],
-        },
-        location,
-        builtin_type_ids::STRING,
-        DataType::StringSlice,
-        ValueMode::ImmutableOwned,
-    );
+            ])),
+            None,
+        )
+        .expect("fixture structural string content");
+    let structural_expression = expression_builder
+        .constant(
+            structural_value,
+            builtin_type_ids::STRING,
+            location,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture structural string occurrence")
+        .id();
 
     let mut producer_store = TemplateIrStore::new();
     let template_id = {
@@ -167,9 +178,10 @@ fn const_template_projection_round_trips_structural_resource_and_site_root() {
     let projected = project_const_template_value(
         &template,
         &producer_store,
+        &mut expression_builder,
+        &mut const_values,
         &mut producer_strings,
         DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        NumericProfile::STANDARD,
         Some(&producer_resources),
     )
     .expect("structural const-template projection should succeed");
@@ -191,37 +203,43 @@ fn const_template_projection_round_trips_structural_resource_and_site_root() {
 
     let mut consumer = ConstTemplateProjectionMaterializer::new();
     let mut consumer_strings = StringTable::new();
-    let consumer_store_handle = Rc::clone(&consumer.template_ir_store);
-    let imported = materialize_public_const_template(
+    let mut consumer_constants = ConstValueStore::default();
+    let imported = materialize_public_folded_value(
         &mut consumer,
-        &public,
-        &consumer_store_handle,
+        &PublicFoldedValue::ConstTemplate {
+            template: public.clone(),
+            folded: None,
+        },
+        builtin_type_ids::STRING,
+        &mut consumer_constants,
         &mut consumer_strings,
         location,
     )
     .expect("consumer const-template materialization should succeed");
-    let consumer_store = consumer.template_ir_store.borrow();
-    let root = consumer_store
-        .get_template(imported.tir_reference.root)
-        .expect("materialized template should have a TIR entry")
-        .root;
-    let TemplateIrNodeKind::Sequence { children } = &consumer_store
-        .get_node(root)
-        .expect("materialized template root should exist")
-        .kind
+    let Some(ConstValuePayload::Template {
+        template: imported_template,
+        folded: None,
+    }) = consumer_constants.payload(imported)
     else {
-        panic!("materialized const-template root should be a sequence");
+        panic!("consumer const-template materialization should keep the template payload");
     };
-    assert_eq!(children.len(), 1);
-    let TemplateIrNodeKind::DynamicExpression { expression, .. } = &consumer_store
-        .get_node(children[0])
-        .expect("materialized structural text node should exist")
-        .kind
+    assert_eq!(
+        imported_template, &public,
+        "consumer materialization must keep the structural template intact",
+    );
+
+    let [PublicConstTemplatePiece::Text(structural_run)] = public.pieces.as_slice() else {
+        panic!("projection should keep the structural content as one owned text run");
+    };
+    let ConstStringValue::Pieces(pieces) =
+        materialize_owned_folded_string(structural_run, &mut consumer_strings, |origin| {
+            Ok(consumer
+                .module_resources
+                .intern_origin(origin.clone(), location))
+        })
+        .expect("consumer structural string materialization should succeed")
     else {
-        panic!("structural owned text should materialize as a dynamic expression");
-    };
-    let ExpressionKind::StructuralString { pieces } = &expression.kind else {
-        panic!("structural owned text should remain a structural string expression");
+        panic!("structural owned text should rebuild as structural string content");
     };
     let [
         ConstStringPiece::Text(consumer_before),

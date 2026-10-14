@@ -7,12 +7,12 @@ Pair type Left, Right = |
     right Right,
 |
 
-IntBox as Box of Int
+IntBox as Box of I32
 StringBox as Box of String
-NamedCount as Pair of String, Int
+NamedCount as Pair of String, I32
 
 alias_value IntBox = Box(1)
-raw Box of Int = alias_value
+raw Box of I32 = alias_value
 
 item StringBox = Box("text")
 raw_text Box of String = item

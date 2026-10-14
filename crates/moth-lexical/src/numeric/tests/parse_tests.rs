@@ -102,97 +102,123 @@ fn rejects_bad_separator_placement() {
         assert_eq!(reason, expected_reason, "{source}");
     }
 }
+
 #[test]
-fn materialize_normalized_int_matches_token_policy() {
+fn materialize_normalized_signed_scalars_match_token_policy() {
     assert_eq!(
-        materialize_normalized_int("2147483647", false, IntWidth::Bits32).unwrap(),
-        i64::from(i32::MAX)
+        materialize_normalized_fixed_scalar("2147483647", false, FixedScalar::I32)
+            .unwrap()
+            .as_i64(),
+        Some(i64::from(i32::MAX))
     );
     assert_eq!(
-        materialize_normalized_int("2147483648", true, IntWidth::Bits32).unwrap(),
-        i64::from(i32::MIN)
+        materialize_normalized_fixed_scalar("2147483648", true, FixedScalar::I32)
+            .unwrap()
+            .as_i64(),
+        Some(i64::from(i32::MIN))
     );
     assert_eq!(
-        materialize_normalized_int("9223372036854775808", true, IntWidth::Bits64).unwrap(),
-        i64::MIN
+        materialize_normalized_fixed_scalar("9223372036854775808", true, FixedScalar::I64)
+            .unwrap()
+            .as_i64(),
+        Some(i64::MIN)
     );
     assert_eq!(
-        materialize_normalized_int("9223372036854775808", false, IntWidth::Bits64).unwrap_err(),
-        NumberLiteralErrorReason::OutsideIntRange
+        materialize_normalized_fixed_scalar("9223372036854775808", false, FixedScalar::I64)
+            .unwrap_err(),
+        NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I64)
     );
 }
 
 #[test]
-fn parse_numeric_text_to_int_accepts_signed_boundaries_and_separators() {
+fn parse_numeric_text_to_fixed_scalar_accepts_signed_i32_boundaries_and_separators() {
     assert_eq!(
-        parse_numeric_text_to_int("2_147_483_647", IntWidth::Bits32).unwrap(),
-        i64::from(i32::MAX)
+        parse_numeric_text_to_fixed_scalar("2_147_483_647", FixedScalar::I32)
+            .unwrap()
+            .as_i64(),
+        Some(i64::from(i32::MAX))
     );
     assert_eq!(
-        parse_numeric_text_to_int("-2147483648", IntWidth::Bits32).unwrap(),
-        i64::from(i32::MIN)
-    );
-}
-
-#[test]
-fn parse_numeric_text_to_int_rejects_out_of_range_values() {
-    assert_eq!(
-        parse_numeric_text_to_int("2147483648", IntWidth::Bits32).unwrap_err(),
-        NumberLiteralErrorReason::OutsideIntRange
-    );
-    assert_eq!(
-        parse_numeric_text_to_int("-2147483649", IntWidth::Bits32).unwrap_err(),
-        NumberLiteralErrorReason::OutsideIntRange
+        parse_numeric_text_to_fixed_scalar("-2147483648", FixedScalar::I32)
+            .unwrap()
+            .as_i64(),
+        Some(i64::from(i32::MIN))
     );
 }
 
 #[test]
-fn parse_numeric_text_to_int_supports_bits64_boundaries() {
+fn parse_numeric_text_to_fixed_scalar_rejects_out_of_range_i32_values() {
     assert_eq!(
-        parse_numeric_text_to_int("9223372036854775807", IntWidth::Bits64).unwrap(),
-        i64::MAX
+        parse_numeric_text_to_fixed_scalar("2147483648", FixedScalar::I32).unwrap_err(),
+        NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I32)
     );
     assert_eq!(
-        parse_numeric_text_to_int("-9223372036854775808", IntWidth::Bits64).unwrap(),
-        i64::MIN
-    );
-    assert_eq!(
-        parse_numeric_text_to_int("9223372036854775808", IntWidth::Bits64).unwrap_err(),
-        NumberLiteralErrorReason::OutsideIntRange
-    );
-    // 2^31 is accepted under Bits64.
-    assert_eq!(
-        parse_numeric_text_to_int("2147483648", IntWidth::Bits64).unwrap(),
-        2_147_483_648_i64
+        parse_numeric_text_to_fixed_scalar("-2147483649", FixedScalar::I32).unwrap_err(),
+        NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I32)
     );
 }
 
 #[test]
-fn parse_numeric_text_to_int_rejects_non_whole_or_invalid_text() {
+fn parse_numeric_text_to_fixed_scalar_supports_i64_boundaries() {
+    assert_eq!(
+        parse_numeric_text_to_fixed_scalar("9223372036854775807", FixedScalar::I64)
+            .unwrap()
+            .as_i64(),
+        Some(i64::MAX)
+    );
+    assert_eq!(
+        parse_numeric_text_to_fixed_scalar("-9223372036854775808", FixedScalar::I64)
+            .unwrap()
+            .as_i64(),
+        Some(i64::MIN)
+    );
+    assert_eq!(
+        parse_numeric_text_to_fixed_scalar("9223372036854775808", FixedScalar::I64).unwrap_err(),
+        NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I64)
+    );
+    // 2^31 is accepted under I64.
+    assert_eq!(
+        parse_numeric_text_to_fixed_scalar("2147483648", FixedScalar::I64)
+            .unwrap()
+            .as_i64(),
+        Some(2_147_483_648_i64)
+    );
+}
+
+#[test]
+fn parse_numeric_text_to_fixed_scalar_rejects_non_whole_signed_text() {
     for source in ["1.0", "1e3", "+1", " 1", "1 ", ""] {
-        let reason = parse_numeric_text_to_int(source, IntWidth::Bits32).expect_err(source);
+        let reason =
+            parse_numeric_text_to_fixed_scalar(source, FixedScalar::I32).expect_err(source);
         assert_ne!(
             reason,
-            NumberLiteralErrorReason::OutsideIntRange,
+            NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I32),
             "{source}"
         );
     }
 }
+
 #[test]
-fn materialize_normalized_float_preserves_bits32_subnormal_and_signed_zero() {
-    // Smallest positive f32 subnormal survives the Bits32 path.
-    let subnormal = materialize_normalized_float("1e-45", false, FloatPrecision::Bits32).unwrap();
+fn materialize_normalized_f32_preserves_subnormal_and_signed_zero() {
+    // Smallest positive f32 subnormal survives the F32 path.
+    let subnormal = materialize_normalized_fixed_scalar("1e-45", false, FixedScalar::F32)
+        .unwrap()
+        .as_f64()
+        .unwrap();
     assert_eq!(subnormal, f64::from(1e-45f32));
     assert!(subnormal > 0.0);
 
     // Signed zero keeps its sign bit through negation.
-    let negative_zero = materialize_normalized_float("0.0", true, FloatPrecision::Bits32).unwrap();
+    let negative_zero = materialize_normalized_fixed_scalar("0.0", true, FixedScalar::F32)
+        .unwrap()
+        .as_f64()
+        .unwrap();
     assert!(negative_zero.is_sign_negative());
     assert_eq!(negative_zero, 0.0);
 }
 
 #[test]
-fn parse_numeric_text_to_float_accepts_float_grammar_cases() {
+fn parse_numeric_text_to_fixed_scalar_accepts_f64_grammar_cases() {
     let cases = [
         ("1", 1.0),
         ("1.5", 1.5),
@@ -204,28 +230,35 @@ fn parse_numeric_text_to_float_accepts_float_grammar_cases() {
     ];
 
     for (source, expected) in cases {
-        let result = parse_numeric_text_to_float(source, FloatPrecision::Bits64).expect(source);
-        assert_eq!(result, expected, "{source}");
+        let result = parse_numeric_text_to_fixed_scalar(source, FixedScalar::F64)
+            .expect(source)
+            .as_f64();
+        assert_eq!(result, Some(expected), "{source}");
     }
 }
 
 #[test]
-fn parse_numeric_text_to_float_rounds_directly_at_bits32() {
+fn parse_numeric_text_to_fixed_scalar_rounds_directly_at_f32() {
     assert_eq!(
-        parse_numeric_text_to_float("0.1", FloatPrecision::Bits32).unwrap(),
-        f64::from(0.1f32)
+        parse_numeric_text_to_fixed_scalar("0.1", FixedScalar::F32)
+            .unwrap()
+            .as_f64(),
+        Some(f64::from(0.1f32))
     );
     assert_eq!(
-        parse_numeric_text_to_float("3.5e38", FloatPrecision::Bits32).unwrap_err(),
-        NumberLiteralErrorReason::NonFiniteFloat
+        parse_numeric_text_to_fixed_scalar("3.5e38", FixedScalar::F32).unwrap_err(),
+        NumberLiteralErrorReason::NonFiniteFixedFloat(FixedScalar::F32)
     );
 
-    let negative_zero = parse_numeric_text_to_float("-0.0", FloatPrecision::Bits32).unwrap();
+    let negative_zero = parse_numeric_text_to_fixed_scalar("-0.0", FixedScalar::F32)
+        .unwrap()
+        .as_f64()
+        .unwrap();
     assert!(negative_zero.is_sign_negative());
 }
 
 #[test]
-fn parse_numeric_text_to_float_rejects_invalid_grammar_cases() {
+fn parse_numeric_text_to_fixed_scalar_rejects_invalid_f64_grammar_cases() {
     let invalid_cases = [
         "1E6",
         "NaN",
@@ -243,13 +276,15 @@ fn parse_numeric_text_to_float_rejects_invalid_grammar_cases() {
     ];
 
     for source in invalid_cases {
-        let reason = parse_numeric_text_to_float(source, FloatPrecision::Bits64).expect_err(source);
+        let reason =
+            parse_numeric_text_to_fixed_scalar(source, FixedScalar::F64).expect_err(source);
         assert!(
-            !matches!(reason, NumberLiteralErrorReason::NonFiniteFloat),
+            !matches!(reason, NumberLiteralErrorReason::NonFiniteFixedFloat(_)),
             "{source} should fail as invalid grammar, not as non-finite"
         );
     }
 }
+
 #[test]
 fn parse_numeric_text_to_fixed_scalar_accepts_each_class() {
     // Whole-string fixed parsing is the `String -> fixed` policy's grammar, so it must accept the
@@ -394,7 +429,7 @@ fn parse_numeric_text_to_fixed_scalar_rejects_out_of_range_and_wrong_families() 
 #[test]
 fn parse_numeric_text_to_fixed_scalar_rounds_binary_floats_at_the_destination() {
     // `0.1` has no exact binary16 form, so the parse must round once at `F16` instead of
-    // materialising at `Float` and narrowing afterwards.
+    // materialising at `F64` and narrowing afterwards.
     let rounded = parse_numeric_text_to_fixed_scalar("0.1", FixedScalar::F16).unwrap();
 
     assert_eq!(rounded.as_f64(), Some(0.099_975_585_937_5));
@@ -410,10 +445,13 @@ fn parse_numeric_text_to_fixed_scalar_rounds_binary_floats_at_the_destination() 
 }
 
 #[test]
-fn parse_numeric_text_to_float_rejects_non_finite_materialization() {
-    let reason = parse_numeric_text_to_float("1e10000", FloatPrecision::Bits64)
+fn parse_numeric_text_to_fixed_scalar_rejects_non_finite_f64() {
+    let reason = parse_numeric_text_to_fixed_scalar("1e10000", FixedScalar::F64)
         .expect_err("should be non-finite");
-    assert_eq!(reason, NumberLiteralErrorReason::NonFiniteFloat);
+    assert_eq!(
+        reason,
+        NumberLiteralErrorReason::NonFiniteFixedFloat(FixedScalar::F64)
+    );
 }
 
 #[test]
@@ -438,106 +476,124 @@ fn literal_kind_initialises_matches_direct_receiving_boundaries() {
 }
 
 #[test]
-fn materialize_normalized_uint_accepts_both_unsigned_maxima() {
+fn materialize_normalized_unsigned_accepts_both_unsigned_maxima() {
     assert_eq!(
-        materialize_normalized_uint("4294967295", false, IntWidth::Bits32).unwrap(),
-        u32::MAX as u64
+        materialize_normalized_fixed_scalar("4294967295", false, FixedScalar::U32)
+            .unwrap()
+            .as_u64(),
+        Some(u64::from(u32::MAX))
     );
     assert_eq!(
-        materialize_normalized_uint("18446744073709551615", false, IntWidth::Bits64).unwrap(),
-        u64::MAX
+        materialize_normalized_fixed_scalar("18446744073709551615", false, FixedScalar::U64)
+            .unwrap()
+            .as_u64(),
+        Some(u64::MAX)
     );
     // Zero materialises without a sign.
     assert_eq!(
-        materialize_normalized_uint("0", false, IntWidth::Bits32).unwrap(),
-        0
+        materialize_normalized_fixed_scalar("0", false, FixedScalar::U32)
+            .unwrap()
+            .as_u64(),
+        Some(0)
     );
 }
 
 #[test]
-fn materialize_normalized_uint_rejects_maxima_plus_one_as_text() {
+fn materialize_normalized_unsigned_rejects_maxima_plus_one_as_text() {
     assert_eq!(
-        materialize_normalized_uint("4294967296", false, IntWidth::Bits32).unwrap_err(),
-        NumberLiteralErrorReason::OutsideUintRange(IntWidth::Bits32)
+        materialize_normalized_fixed_scalar("4294967296", false, FixedScalar::U32).unwrap_err(),
+        NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::U32)
     );
     assert_eq!(
-        materialize_normalized_uint("18446744073709551616", false, IntWidth::Bits64).unwrap_err(),
-        NumberLiteralErrorReason::OutsideUintRange(IntWidth::Bits64)
+        materialize_normalized_fixed_scalar("18446744073709551616", false, FixedScalar::U64)
+            .unwrap_err(),
+        NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::U64)
     );
-    // A 32-bit maximum still fits under the 64-bit width.
+    // A 32-bit maximum still fits under U64.
     assert_eq!(
-        materialize_normalized_uint("4294967295", false, IntWidth::Bits64).unwrap(),
-        u32::MAX as u64
+        materialize_normalized_fixed_scalar("4294967295", false, FixedScalar::U64)
+            .unwrap()
+            .as_u64(),
+        Some(u64::from(u32::MAX))
     );
 }
 
 #[test]
-fn materialize_normalized_uint_rejects_negative_spellings_including_minus_zero() {
+fn materialize_normalized_unsigned_rejects_negative_spellings_including_minus_zero() {
     for normalized in ["1", "0", "00", "4294967295"] {
         assert_eq!(
-            materialize_normalized_uint(normalized, true, IntWidth::Bits32).unwrap_err(),
-            NumberLiteralErrorReason::NegativeUintLiteral(IntWidth::Bits32),
+            materialize_normalized_fixed_scalar(normalized, true, FixedScalar::U32).unwrap_err(),
+            NumberLiteralErrorReason::NegativeUnsignedLiteral(FixedScalar::U32),
             "{normalized}"
         );
     }
     assert_eq!(
-        materialize_normalized_uint("0", true, IntWidth::Bits64).unwrap_err(),
-        NumberLiteralErrorReason::NegativeUintLiteral(IntWidth::Bits64)
+        materialize_normalized_fixed_scalar("0", true, FixedScalar::U64).unwrap_err(),
+        NumberLiteralErrorReason::NegativeUnsignedLiteral(FixedScalar::U64)
     );
 }
 
 #[test]
-fn parse_numeric_text_to_uint_accepts_boundaries_and_separators() {
+fn parse_numeric_text_to_fixed_scalar_accepts_unsigned_boundaries_and_separators() {
     assert_eq!(
-        parse_numeric_text_to_uint("4_294_967_295", IntWidth::Bits32).unwrap(),
-        u32::MAX as u64
+        parse_numeric_text_to_fixed_scalar("4_294_967_295", FixedScalar::U32)
+            .unwrap()
+            .as_u64(),
+        Some(u64::from(u32::MAX))
     );
     assert_eq!(
-        parse_numeric_text_to_uint("18_446_744_073_709_551_615", IntWidth::Bits64).unwrap(),
-        u64::MAX
+        parse_numeric_text_to_fixed_scalar("18_446_744_073_709_551_615", FixedScalar::U64)
+            .unwrap()
+            .as_u64(),
+        Some(u64::MAX)
     );
     assert_eq!(
-        parse_numeric_text_to_uint("9_223_372_036_854_775_808", IntWidth::Bits64).unwrap(),
-        i64::MAX as u64 + 1,
+        parse_numeric_text_to_fixed_scalar("9_223_372_036_854_775_808", FixedScalar::U64)
+            .unwrap()
+            .as_u64(),
+        Some(i64::MAX as u64 + 1),
         "values above i64::MAX stay exact instead of narrowing through a signed type"
     );
 }
 
 #[test]
-fn parse_numeric_text_to_uint_rejects_out_of_range_values() {
+fn parse_numeric_text_to_fixed_scalar_rejects_unsigned_out_of_range_values() {
     assert_eq!(
-        parse_numeric_text_to_uint("4294967296", IntWidth::Bits32).unwrap_err(),
-        NumberLiteralErrorReason::OutsideUintRange(IntWidth::Bits32)
+        parse_numeric_text_to_fixed_scalar("4294967296", FixedScalar::U32).unwrap_err(),
+        NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::U32)
     );
     assert_eq!(
-        parse_numeric_text_to_uint("18446744073709551616", IntWidth::Bits64).unwrap_err(),
-        NumberLiteralErrorReason::OutsideUintRange(IntWidth::Bits64)
+        parse_numeric_text_to_fixed_scalar("18446744073709551616", FixedScalar::U64).unwrap_err(),
+        NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::U64)
     );
-    // 2^31 is accepted under Bits64.
+    // 2^31 is accepted under U64.
     assert_eq!(
-        parse_numeric_text_to_uint("2147483648", IntWidth::Bits64).unwrap(),
-        2_147_483_648_u64
+        parse_numeric_text_to_fixed_scalar("2147483648", FixedScalar::U64)
+            .unwrap()
+            .as_u64(),
+        Some(2_147_483_648_u64)
     );
 }
 
 #[test]
-fn parse_numeric_text_to_uint_rejects_negative_and_non_whole_text() {
+fn parse_numeric_text_to_fixed_scalar_rejects_negative_and_non_whole_unsigned_text() {
     for source in ["-1", "-0", "-4294967295"] {
         assert_eq!(
-            parse_numeric_text_to_uint(source, IntWidth::Bits32).unwrap_err(),
-            NumberLiteralErrorReason::NegativeUintLiteral(IntWidth::Bits32),
+            parse_numeric_text_to_fixed_scalar(source, FixedScalar::U32).unwrap_err(),
+            NumberLiteralErrorReason::NegativeUnsignedLiteral(FixedScalar::U32),
             "{source}"
         );
     }
     for source in ["1.0", "1e3", "+1", " 1", "1 ", ""] {
-        let reason = parse_numeric_text_to_uint(source, IntWidth::Bits32).expect_err(source);
+        let reason =
+            parse_numeric_text_to_fixed_scalar(source, FixedScalar::U32).expect_err(source);
         assert!(
             !matches!(
                 reason,
-                NumberLiteralErrorReason::OutsideUintRange(_)
-                    | NumberLiteralErrorReason::NegativeUintLiteral(_)
+                NumberLiteralErrorReason::OutsideFixedScalarRange(_)
+                    | NumberLiteralErrorReason::NegativeUnsignedLiteral(_)
             ),
-            "{source} should fail as invalid grammar, not as a Uint range error"
+            "{source} should fail as invalid grammar, not as a range error"
         );
     }
 }

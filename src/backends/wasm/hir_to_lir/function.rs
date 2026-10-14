@@ -9,7 +9,7 @@ use crate::backends::wasm::hir_to_lir::stmt::lower_statement;
 use crate::backends::wasm::hir_to_lir::terminator::lower_terminator;
 use crate::backends::wasm::lir::function::{WasmLirFunction, WasmLirFunctionOrigin};
 use crate::backends::wasm::lir::instructions::WasmLirTerminator;
-use crate::backends::wasm::lir::types::{WasmAbiType, WasmLirSignature, WasmLocalRole};
+use crate::backends::wasm::lir::types::{WasmLirSignature, WasmLocalRole};
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
@@ -84,8 +84,8 @@ pub(crate) fn lower_function(
         for statement in &hir_block.statements {
             if let HirStatementKind::RangeStepFailure { failure_mode, .. } = statement.kind {
                 range_step_trap = failure_mode == NumericFailureMode::Trap;
-                // This unconditional producer ends the block. Recoverable mode must reach
-                // the existing fallible-terminator rejection below, never the trap branch.
+                // Recoverable range guards are Invoke terminators and are target-gated.
+                // This statement is the unconditional trap-mode producer.
                 break;
             }
             lower_statement(&mut function_context, statement, &mut lowered_statements)?;
@@ -122,8 +122,6 @@ fn lower_function_signature(
     function: &HirFunction,
     reachable_blocks: &[BlockId],
 ) -> Result<WasmLirSignature, CompilerError> {
-    // Multi-value lowering is intentionally incomplete. We only support zero/one result here and
-    // keep explicit error paths for unsupported shapes.
     let local_type_map = collect_local_type_map(context, reachable_blocks, function.id)?;
 
     let mut params = Vec::with_capacity(function.params.len());
@@ -137,12 +135,11 @@ fn lower_function_signature(
         params.push(lower_type_to_abi(context, type_id));
     }
 
-    let result_abi = lower_type_to_abi(context, function.return_type);
-    let results = if matches!(result_abi, WasmAbiType::Void) {
-        Vec::new()
-    } else {
-        vec![result_abi]
-    };
+    let results = function
+        .returns
+        .iter()
+        .map(|type_id| lower_type_to_abi(context, *type_id))
+        .collect();
 
     Ok(WasmLirSignature { params, results })
 }

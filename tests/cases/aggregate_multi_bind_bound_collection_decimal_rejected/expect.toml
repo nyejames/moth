@@ -1,0 +1,8 @@
+entry = "."
+
+# The named whole collection retains its integer family beside a later raw decimal peer.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-TYPE-0001"]

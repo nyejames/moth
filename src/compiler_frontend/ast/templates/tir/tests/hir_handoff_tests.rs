@@ -4,11 +4,20 @@
 //! WHY: the AST/HIR boundary must consume one shared module store without
 //! exposing TIR identity or store-internal traversal.
 
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::const_values::store::{
+    ConstStringPiece, ConstStringValue, ConstValuePayload, ConstValueStore,
+};
+use crate::compiler_frontend::ast::expressions::expression_rewrite::{
+    promote_replacement, replacement_input,
+};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, CompletedOperation, ExprId, ExpressionOperationView,
+};
 use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
 use crate::compiler_frontend::ast::templates::template::TemplateConstValueKind;
 use crate::compiler_frontend::ast::templates::template::{
-    SlotKey, Style, TemplateSegmentOrigin, TemplateType,
+    SlotKey, Style, Template, TemplateSegmentOrigin, TemplateType,
 };
 use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateBranchSelector, TemplateLoopHeader,
@@ -29,7 +38,7 @@ use crate::compiler_frontend::ast::templates::tir::overlays::{
 };
 use crate::compiler_frontend::ast::templates::tir::preparation::TemplatePreparationFacts;
 use crate::compiler_frontend::ast::templates::tir::refs::{
-    TemplateTirChildReference, TemplateWrapperReference,
+    TemplateTirChildReference, TemplateTirReference, TemplateWrapperReference,
 };
 use crate::compiler_frontend::ast::templates::tir::store::{MalformedTirStore, TemplateIrStore};
 use crate::compiler_frontend::ast::templates::tir::summary::{
@@ -37,15 +46,15 @@ use crate::compiler_frontend::ast::templates::tir::summary::{
 };
 use crate::compiler_frontend::ast::templates::tir::view::{TemplateTirPhase, TirView};
 use crate::compiler_frontend::ast::templates::tir::{
-    RuntimeTemplateReason, TemplatePreparation, TemplatePreparationOutcome,
-    owned_runtime_slot_handoff_for_prepared_view, owned_runtime_template_handoff_for_prepared_view,
+    RuntimeTemplateReason, TemplatePreparation, TemplatePreparationMode,
+    TemplatePreparationOutcome, owned_runtime_slot_handoff_for_prepared_view,
+    owned_runtime_template_handoff_for_prepared_view, prepare_tir_view,
 };
 use crate::compiler_frontend::ast::templates::tir::{TemplateSlotPlan, TemplateSlotSitePlan};
 use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeTemplateBody, OwnedRuntimeTemplateNode,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
-use crate::compiler_frontend::datatypes::datatype::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, OwnedFoldedStringPiece};
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
@@ -77,10 +86,19 @@ fn prepared_runtime(view: &TirView<'_>) -> TemplatePreparation {
 
 fn handoff_for_view(
     view: TirView<'_>,
+    expressions: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
     string_table: &StringTable,
 ) -> Result<crate::compiler_frontend::ast::templates::OwnedRuntimeTemplateHandoff, CompilerError> {
     let prepared = prepared_runtime(&view);
-    owned_runtime_template_handoff_for_prepared_view(&prepared, view, string_table, None)
+    owned_runtime_template_handoff_for_prepared_view(
+        &prepared,
+        view,
+        expressions,
+        const_values,
+        string_table,
+        None,
+    )
 }
 
 /// Pushes a literal text node into the store and returns its ID.
@@ -123,31 +141,67 @@ fn text_template(
 
 /// Builds a bool-typed reference expression for selector/header overrides.
 fn bool_reference_expression(
+    expressions: &mut AstExpressionBuilder,
     path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
     name: &str,
-) -> Expression {
-    Expression::reference_with_type_id(
-        path_fork
-            .try_intern_portable_path(name, string_table)
-            .expect("test path fits"),
-        DataType::Bool,
-        builtin_type_ids::BOOL,
-        None,
-        ValueMode::ImmutableReference,
-        ConstRecordState::RuntimeValue,
-    )
+) -> ExprId {
+    let path = path_fork
+        .try_intern_portable_path(name, string_table)
+        .expect("test path fits");
+    expressions
+        .reference_with_type_id(
+            path,
+            builtin_type_ids::BOOL,
+            None,
+            ValueMode::ImmutableReference,
+            ConstRecordState::RuntimeValue,
+        )
+        .expect("bool reference expression should construct")
+        .id()
+}
+
+/// Builds a structural string constant from the given pieces, mirroring the
+/// production structural-string constant path.
+fn structural_string_expression(
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    pieces: Vec<ConstStringPiece>,
+    value_mode: ValueMode,
+) -> ExprId {
+    let value = const_values
+        .insert_resolved(
+            builtin_type_ids::STRING,
+            ConstValuePayload::String(ConstStringValue::Pieces(pieces)),
+            None,
+        )
+        .expect("structural string constant should resolve");
+    expressions
+        .constant(value, builtin_type_ids::STRING, None, value_mode)
+        .expect("structural string constant expression should construct")
+        .id()
+}
+
+/// Reads a bool literal's value through the typed store; other shapes yield `None`.
+fn bool_literal_value(
+    expressions: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
+    id: ExprId,
+) -> Option<bool> {
+    let ExpressionOperationView::Constant(value) = expressions.view(id).ok()?.operation() else {
+        return None;
+    };
+    match const_values.payload(value)? {
+        ConstValuePayload::Bool(value) => Some(*value),
+        _ => None,
+    }
 }
 
 /// Builds a view context that overrides the given expression sites.
 fn expression_overlay_context(
     store: &mut TemplateIrStore,
-    overrides: Vec<(ExpressionSiteId, Expression)>,
+    overrides: Vec<(ExpressionSiteId, ExprId)>,
 ) -> TemplateViewContext {
-    let overrides = overrides
-        .into_iter()
-        .map(|(site_id, expression)| (site_id, Box::new(expression)))
-        .collect();
     let expression_overlay_id = store
         .allocate_expression_overlay(TirExpressionOverlay { overrides })
         .expect("test overlay allocation");
@@ -217,12 +271,14 @@ fn view_for(
 fn materialize_parent_handoff_result(
     store: Rc<RefCell<TemplateIrStore>>,
     parent_template_id: TemplateIrId,
+    expressions: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
     string_table: &mut StringTable,
     view_context: TemplateViewContext,
 ) -> Result<OwnedRuntimeTemplateBody, CompilerError> {
     let store_ref = store.borrow();
     let view = view_for(&store_ref, parent_template_id, view_context);
-    handoff_for_view(view, string_table).map(|handoff| handoff.body)
+    handoff_for_view(view, expressions, const_values, string_table).map(|handoff| handoff.body)
 }
 
 /// Convenience wrapper for success-path tests that expect materialization to
@@ -230,11 +286,20 @@ fn materialize_parent_handoff_result(
 fn materialize_parent_handoff(
     store: Rc<RefCell<TemplateIrStore>>,
     parent_template_id: TemplateIrId,
+    expressions: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
     string_table: &mut StringTable,
     context: TemplateViewContext,
 ) -> OwnedRuntimeTemplateBody {
-    materialize_parent_handoff_result(store, parent_template_id, string_table, context)
-        .expect("handoff materialization should succeed")
+    materialize_parent_handoff_result(
+        store,
+        parent_template_id,
+        expressions,
+        const_values,
+        string_table,
+        context,
+    )
+    .expect("handoff materialization should succeed")
 }
 
 /// Asserts an owned handoff node carries exactly the expected plain text.
@@ -261,16 +326,20 @@ fn assert_owned_text_node(node: &OwnedRuntimeTemplateNode, expected: &str) {
 //  Wrapper template builders
 // ---------------------------------------------------------------------------
 
-fn build_conditional_wrapper_template(store: &mut TemplateIrStore) -> TemplateIrId {
+fn build_conditional_wrapper_template(
+    store: &mut TemplateIrStore,
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+) -> TemplateIrId {
+    let selector = expressions
+        .bool(const_values, true, None, ValueMode::ImmutableOwned)
+        .expect("conditional wrapper selector should construct")
+        .id();
     let mut builder = TemplateIrBuilder::new(store);
     let default_slot = builder.push_slot_node(SlotKey::Default, None);
     let positional_slot = builder.push_slot_node(SlotKey::Positional(2), None);
     let body = builder.push_sequence_node(vec![default_slot, positional_slot], None);
-    let root = builder.push_conditional_node(
-        TemplateBranchSelector::Bool(Expression::bool(true, None, ValueMode::ImmutableOwned)),
-        body,
-        None,
-    );
+    let root = builder.push_conditional_node(TemplateBranchSelector::Bool(selector), body, None);
     builder.finish_template(
         root,
         Style::default(),
@@ -283,6 +352,8 @@ fn build_conditional_wrapper_template(store: &mut TemplateIrStore) -> TemplateIr
 fn build_loop_wrapper_template(
     store: &mut TemplateIrStore,
     string_table: &mut StringTable,
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
 ) -> TemplateIrId {
     let mut builder = TemplateIrBuilder::new(store);
     let body_default_slot = builder.push_slot_node(SlotKey::Default, None);
@@ -305,7 +376,10 @@ fn build_loop_wrapper_template(
     );
     let root = builder.push_loop_node(
         TemplateLoopHeader::Conditional {
-            condition: Box::new(Expression::bool(true, None, ValueMode::ImmutableOwned)),
+            condition: expressions
+                .bool(const_values, true, None, ValueMode::ImmutableOwned)
+                .expect("loop wrapper condition should construct")
+                .id(),
         },
         body_default_slot,
         Some(aggregate_wrapper),
@@ -363,15 +437,12 @@ fn build_expression_wrapper_template(
     store: &mut TemplateIrStore,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
+    expressions: &mut AstExpressionBuilder,
 ) -> (TemplateIrId, ExpressionSiteId) {
     let expression_site_id = store.next_expression_site_id();
     let expression_node = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::DynamicExpression {
-            expression: Box::new(bool_reference_expression(
-                path_fork,
-                string_table,
-                "original",
-            )),
+            expression: bool_reference_expression(expressions, path_fork, string_table, "original"),
             origin: TemplateSegmentOrigin::Body,
             site_id: expression_site_id,
         },
@@ -578,6 +649,8 @@ fn build_parent_with_inherited_wrapper_set(
 
 #[test]
 fn owned_handoff_materializes_text_from_the_shared_store() {
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
     let _path_fork = PathInternerFork::empty();
@@ -585,7 +658,8 @@ fn owned_handoff_materializes_text_from_the_shared_store() {
     let handoff = {
         let store_ref = store.borrow();
         let view = view_for(&store_ref, template_id, TemplateViewContext::default());
-        handoff_for_view(view, &strings).expect("text handoff should succeed")
+        handoff_for_view(view, &expressions, &const_values, &strings)
+            .expect("text handoff should succeed")
     };
 
     let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Text { text, .. }) =
@@ -598,6 +672,8 @@ fn owned_handoff_materializes_text_from_the_shared_store() {
 
 #[test]
 fn owned_handoff_text_uses_interned_text_without_a_narrowed_byte_len() {
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
     let _path_fork = PathInternerFork::empty();
@@ -609,7 +685,8 @@ fn owned_handoff_text_uses_interned_text_without_a_narrowed_byte_len() {
     let handoff = {
         let store_ref = store.borrow();
         let view = view_for(&store_ref, template_id, TemplateViewContext::default());
-        handoff_for_view(view, &strings).expect("text handoff should succeed")
+        handoff_for_view(view, &expressions, &const_values, &strings)
+            .expect("text handoff should succeed")
     };
 
     let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Text { text, .. }) =
@@ -626,6 +703,8 @@ fn owned_handoff_text_uses_interned_text_without_a_narrowed_byte_len() {
 
 #[test]
 fn owned_handoff_preserves_structural_string_pieces() {
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
     let _path_fork = PathInternerFork::empty();
@@ -642,26 +721,21 @@ fn owned_handoff_preserves_structural_string_pieces() {
     let resource_id = resources.intern_origin(resource_origin.clone(), None);
     let before = strings.intern("before");
     let after = strings.intern("after");
-    let structural_expression = Expression::new(
-        ExpressionKind::StructuralString {
-            pieces: vec![
-                crate::compiler_frontend::ast::const_values::store::ConstStringPiece::Text(before),
-                crate::compiler_frontend::ast::const_values::store::ConstStringPiece::Resource(
-                    resource_id,
-                ),
-                crate::compiler_frontend::ast::const_values::store::ConstStringPiece::SiteRoot,
-                crate::compiler_frontend::ast::const_values::store::ConstStringPiece::Text(after),
-            ],
-        },
-        None,
-        builtin_type_ids::STRING,
-        DataType::StringSlice,
+    let structural_expression = structural_string_expression(
+        &mut expressions,
+        &mut const_values,
+        vec![
+            ConstStringPiece::Text(before),
+            ConstStringPiece::Resource(resource_id),
+            ConstStringPiece::SiteRoot,
+            ConstStringPiece::Text(after),
+        ],
         ValueMode::ImmutableOwned,
     );
     let site_id = store.borrow_mut().next_expression_site_id();
     let dynamic_node = store.borrow_mut().push_node(TemplateIrNode::new(
         TemplateIrNodeKind::DynamicExpression {
-            expression: Box::new(structural_expression),
+            expression: structural_expression,
             origin: TemplateSegmentOrigin::Body,
             site_id,
         },
@@ -676,6 +750,8 @@ fn owned_handoff_preserves_structural_string_pieces() {
         owned_runtime_template_handoff_for_prepared_view(
             &prepared,
             view,
+            &expressions,
+            &const_values,
             &strings,
             Some(&resources),
         )
@@ -699,6 +775,8 @@ fn owned_handoff_preserves_structural_string_pieces() {
 
 #[test]
 fn owned_handoff_resolves_slot_overlay_to_a_child_template() {
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
     let _path_fork = PathInternerFork::empty();
@@ -744,7 +822,8 @@ fn owned_handoff_resolves_slot_overlay_to_a_child_template() {
     let handoff = {
         let store_ref = store.borrow();
         let view = view_for(&store_ref, parent_id, view_context);
-        handoff_for_view(view, &strings).expect("slot handoff should succeed")
+        handoff_for_view(view, &expressions, &const_values, &strings)
+            .expect("slot handoff should succeed")
     };
 
     let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::ChildTemplate {
@@ -763,6 +842,8 @@ fn owned_handoff_resolves_slot_overlay_to_a_child_template() {
 
 #[test]
 fn owned_handoff_missing_slot_resolution_renders_slot_placeholder() {
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let (parent_id, _occurrence_id, view_context) = {
         let mut store_ref = store.borrow_mut();
@@ -789,7 +870,8 @@ fn owned_handoff_missing_slot_resolution_renders_slot_placeholder() {
     let handoff = {
         let store_ref = store.borrow();
         let view = view_for(&store_ref, parent_id, view_context);
-        handoff_for_view(view, &StringTable::new()).expect("handoff materialization should succeed")
+        handoff_for_view(view, &expressions, &const_values, &StringTable::new())
+            .expect("handoff materialization should succeed")
     };
 
     assert!(
@@ -804,6 +886,8 @@ fn owned_handoff_missing_slot_resolution_renders_slot_placeholder() {
 
 #[test]
 fn owned_handoff_preserves_child_boundary() {
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
     let _path_fork = PathInternerFork::empty();
@@ -835,7 +919,8 @@ fn owned_handoff_preserves_child_boundary() {
     let handoff = {
         let store_ref = store.borrow();
         let view = view_for(&store_ref, parent_id, TemplateViewContext::default());
-        handoff_for_view(view, &strings).expect("child handoff should succeed")
+        handoff_for_view(view, &expressions, &const_values, &strings)
+            .expect("child handoff should succeed")
     };
 
     let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::ChildTemplate {
@@ -859,6 +944,8 @@ fn owned_handoff_preserves_child_boundary() {
 
 #[test]
 fn parent_root_expression_overlay_applies_inside_child() {
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -866,10 +953,11 @@ fn parent_root_expression_overlay_applies_inside_child() {
         let mut store_ref = store.borrow_mut();
         let child_context = TemplateViewContext::default();
         let child_site_id = store_ref.next_expression_site_id();
-        let child_expression = bool_reference_expression(&mut path_fork, &mut strings, "original");
+        let child_expression =
+            bool_reference_expression(&mut expressions, &mut path_fork, &mut strings, "original");
         let child_root = store_ref.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::DynamicExpression {
-                expression: Box::new(child_expression),
+                expression: child_expression,
                 origin: TemplateSegmentOrigin::Body,
                 site_id: child_site_id,
             },
@@ -881,17 +969,23 @@ fn parent_root_expression_overlay_applies_inside_child() {
             child_reference(child_template_id, child_context),
         );
         let parent_id = finish_text_template(&mut store_ref, child_node);
-        let context = expression_overlay_context(
-            &mut store_ref,
-            vec![(
-                child_site_id,
-                Expression::bool(true, None, ValueMode::ImmutableOwned),
-            )],
-        );
+        let override_expression = expressions
+            .bool(&mut const_values, true, None, ValueMode::ImmutableOwned)
+            .expect("child overlay literal should construct")
+            .id();
+        let context =
+            expression_overlay_context(&mut store_ref, vec![(child_site_id, override_expression)]);
         (parent_id, child_site_id, context)
     };
 
-    let body = materialize_parent_handoff(store, parent_id, &mut strings, context);
+    let body = materialize_parent_handoff(
+        store,
+        parent_id,
+        &expressions,
+        &const_values,
+        &mut strings,
+        context,
+    );
     let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::ChildTemplate {
         template, ..
     }) = body
@@ -907,95 +1001,460 @@ fn parent_root_expression_overlay_applies_inside_child() {
     };
 
     assert!(
-        matches!(expression.kind, ExpressionKind::Bool(true)),
+        bool_literal_value(&expressions, &const_values, *expression) == Some(true),
         "parent root override should win over the child's empty overlay"
     );
 }
 
 #[test]
-fn prepared_handoff_preserves_root_overlay_through_nested_children() {
+fn prepared_handoff_preserves_structural_and_nested_value_contexts_after_tir_release() {
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
+    let weak_store = Rc::downgrade(&store);
     let mut strings = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    let (root_id, _leaf_site_id, context) = {
+    let mut path_fork = PathInternerFork::empty();
+    let scope = path_fork
+        .try_intern_portable_path("main.moth", &mut strings)
+        .expect("fixture scope fits");
+
+    let completed_expression = {
         let mut store_ref = store.borrow_mut();
-        let empty_context = TemplateViewContext::default();
-        let leaf_site_id = store_ref.next_expression_site_id();
-        let stale_structural_text = strings.intern("stale-structural");
-        let leaf_root = store_ref.push_node(TemplateIrNode::new(
+        let [stale_text, parent_text, nested_text] =
+            ["stale-structural", "effective-parent", "effective-nested"].map(|text| {
+                let text = strings.intern(text);
+                expressions
+                    .string_slice(&mut const_values, text, None, ValueMode::ImmutableOwned)
+                    .expect("fixture string fits")
+                    .id()
+            });
+        let false_selector = expressions
+            .bool(&mut const_values, false, None, ValueMode::ImmutableOwned)
+            .expect("structural selector fits")
+            .id();
+        let true_selector = expressions
+            .bool(&mut const_values, true, None, ValueMode::ImmutableOwned)
+            .expect("nested selector fits")
+            .id();
+        let parent_selector = bool_reference_expression(
+            &mut expressions,
+            &mut path_fork,
+            &mut strings,
+            "parent_ready",
+        );
+        let text_site = store_ref.next_expression_site_id();
+        let selector_site = store_ref.next_expression_site_id();
+        let slot_occurrence = store_ref.next_slot_occurrence_id();
+        let child_occurrence = store_ref.next_child_template_occurrence_id();
+        let child_id = text_template(&mut store_ref, &mut strings, "child");
+        let dynamic_text = store_ref.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::DynamicExpression {
-                expression: Box::new(Expression::string_slice(
-                    stale_structural_text,
-                    None,
-                    ValueMode::ImmutableOwned,
-                )),
+                expression: stale_text,
                 origin: TemplateSegmentOrigin::Body,
-                site_id: leaf_site_id,
+                site_id: text_site,
             },
             None,
         ));
-        let leaf_template_id = finish_text_template(&mut store_ref, leaf_root);
-        let middle_child = child_template_node_id(
-            &mut store_ref,
-            child_reference(leaf_template_id, empty_context),
+        let selected_body = text_node_id(&mut store_ref, &mut strings, "selected-body");
+        let conditional = store_ref.push_node(TemplateIrNode::new(
+            TemplateIrNodeKind::Conditional {
+                selector: Box::new(TemplateBranchSelector::Bool(false_selector)),
+                selector_site_id: selector_site,
+                body: selected_body,
+            },
+            None,
+        ));
+        let slot = store_ref.push_node(TemplateIrNode::new(
+            TemplateIrNodeKind::Slot {
+                placeholder: TirSlotPlaceholder::with_wrapper_sets(
+                    SlotKey::Default,
+                    slot_occurrence,
+                    None,
+                    None,
+                    false,
+                ),
+            },
+            None,
+        ));
+        let child = store_ref.push_node(TemplateIrNode::new(
+            TemplateIrNodeKind::ChildTemplate {
+                reference: child_reference(child_id, TemplateViewContext::default()),
+                occurrence_id: child_occurrence,
+            },
+            None,
+        ));
+        // Both accepted contexts remain runtime values even though their visible constant
+        // text and selector differ, so both use the real runtime handoff contract.
+        let runtime_expression = bool_reference_expression(
+            &mut expressions,
+            &mut path_fork,
+            &mut strings,
+            "content_ready",
         );
-        let middle_template_id = finish_text_template(&mut store_ref, middle_child);
-        let root_child = child_template_node_id(
+        let runtime_site = store_ref.next_expression_site_id();
+        let runtime = store_ref.push_node(TemplateIrNode::new(
+            TemplateIrNodeKind::DynamicExpression {
+                expression: runtime_expression,
+                origin: TemplateSegmentOrigin::Body,
+                site_id: runtime_site,
+            },
+            None,
+        ));
+        let shared_root = store_ref.push_node(TemplateIrNode::new(
+            TemplateIrNodeKind::Sequence {
+                children: vec![dynamic_text, conditional, slot, child, runtime],
+            },
+            None,
+        ));
+        let shared_template = finish_text_template(&mut store_ref, shared_root);
+
+        // The same structural root has two complete value contexts. Losing any nested
+        // dimension changes text, the branch, the slot source or the child wrapper.
+        let mut contexts = Vec::new();
+        for (text, selector, slot_text, before, after) in [
+            (
+                parent_text,
+                parent_selector,
+                "parent-slot",
+                "<parent>",
+                "</parent>",
+            ),
+            (
+                nested_text,
+                true_selector,
+                "nested-slot",
+                "<nested>",
+                "</nested>",
+            ),
+        ] {
+            let mut context = expression_overlay_context(
+                &mut store_ref,
+                vec![(text_site, text), (selector_site, selector)],
+            );
+            let source = text_template(&mut store_ref, &mut strings, slot_text);
+            context.slot_resolution = slot_resolution_context(
+                &mut store_ref,
+                vec![(
+                    slot_occurrence,
+                    TirSlotResolution::resolved(SlotKey::Default, vec![source]),
+                )],
+            )
+            .slot_resolution;
+            let wrapper = build_slot_wrapper_template(&mut store_ref, &mut strings, before, after);
+            let wrapper_set =
+                store_ref.push_or_reuse_wrapper_set(vec![TemplateWrapperReference::new(
+                    wrapper,
+                    TemplateTirPhase::Finalized,
+                    TemplateViewContext::default(),
+                )]);
+            context.wrapper_context = Some(
+                store_ref
+                    .allocate_wrapper_context_overlay(TirWrapperContextOverlay {
+                        contexts: vec![(
+                            child_occurrence,
+                            TirWrapperContext::inherited(wrapper_set),
+                        )],
+                    })
+                    .expect("wrapper context fits"),
+            );
+            contexts.push(context);
+        }
+        let parent_context = contexts[0];
+        let nested_context = contexts[1];
+        let nested_template = Template {
+            tir_reference: TemplateTirReference {
+                root: shared_template,
+                phase: TemplateTirPhase::Finalized,
+                context: nested_context,
+            },
+            span: None,
+        };
+        let nested_expression = expressions
+            .template(nested_template, ValueMode::ImmutableOwned)
+            .expect("nested template expression fits")
+            .id();
+        let structural_child = child_template_node_id(
             &mut store_ref,
-            child_reference(middle_template_id, empty_context),
+            child_reference(
+                shared_template,
+                TemplateViewContext {
+                    expression_overlay: nested_context.expression_overlay,
+                    ..parent_context
+                },
+            ),
         );
-        let root_id = finish_text_template(&mut store_ref, root_child);
-        let effective_root_text = strings.intern("effective-root");
-        let context = expression_overlay_context(
-            &mut store_ref,
-            vec![(
-                leaf_site_id,
-                Expression::string_slice(effective_root_text, None, ValueMode::ImmutableOwned),
-            )],
+        let nested_site = store_ref.next_expression_site_id();
+        let nested_value = store_ref.push_node(TemplateIrNode::new(
+            TemplateIrNodeKind::DynamicExpression {
+                expression: nested_expression,
+                origin: TemplateSegmentOrigin::Body,
+                site_id: nested_site,
+            },
+            None,
+        ));
+        let root = store_ref.push_node(TemplateIrNode::new(
+            TemplateIrNodeKind::Sequence {
+                children: vec![structural_child, nested_value],
+            },
+            None,
+        ));
+        let root_id = finish_text_template(&mut store_ref, root);
+        let root_template = Template {
+            tir_reference: TemplateTirReference {
+                root: root_id,
+                phase: TemplateTirPhase::Finalized,
+                context: parent_context,
+            },
+            span: None,
+        };
+        let root_expression = expressions
+            .template(root_template, ValueMode::ImmutableOwned)
+            .expect("root template expression fits")
+            .id();
+        let view = view_for(&store_ref, root_id, parent_context);
+        let prepared = prepare_tir_view(
+            &view,
+            &expressions,
+            &const_values,
+            TemplatePreparationMode::Value,
+        )
+        .expect("both structural and nested contexts prepare");
+        assert_eq!(prepared.identity, view.identity());
+        assert!(matches!(
+            prepared.outcome,
+            TemplatePreparationOutcome::Runtime(_)
+        ));
+
+        let changed_view = view_for(&store_ref, root_id, nested_context);
+        let error = owned_runtime_template_handoff_for_prepared_view(
+            &prepared,
+            changed_view,
+            &expressions,
+            &const_values,
+            &strings,
+            None,
+        )
+        .expect_err("accepted preparation cannot authorise a changed context");
+        assert_eq!(error.error_type, ErrorType::Compiler);
+        assert!(error.msg.contains("identity does not match"));
+
+        let mut handoff = owned_runtime_template_handoff_for_prepared_view(
+            &prepared,
+            view.clone(),
+            &expressions,
+            &const_values,
+            &strings,
+            None,
+        )
+        .expect("handoff consumes the same accepted view without rebuilding its overlay");
+        let ExpressionOperationView::Template(nested_template) = expressions
+            .view(nested_expression)
+            .expect("nested value exists")
+            .operation()
+        else {
+            panic!("nested value must still have its own TIR context before projection");
+        };
+        let nested_view = view
+            .nested_template_value(nested_template.tir_reference)
+            .expect("nested value enters its complete context");
+        let nested_prepared = prepare_tir_view(
+            &nested_view,
+            &expressions,
+            &const_values,
+            TemplatePreparationMode::Value,
+        )
+        .expect("nested exact view prepares");
+        assert!(matches!(
+            nested_prepared.outcome,
+            TemplatePreparationOutcome::Runtime(_)
+        ));
+        let nested_handoff = owned_runtime_template_handoff_for_prepared_view(
+            &nested_prepared,
+            nested_view,
+            &expressions,
+            &const_values,
+            &strings,
+            None,
+        )
+        .expect("nested accepted view materialises its own context");
+
+        // Model the completed-expression projection used after accepted-view materialisation,
+        // not a second template interpretation or a private module-finaliser entry point.
+        let nested_input = replacement_input(
+            expressions
+                .view(nested_expression)
+                .expect("nested occurrence exists"),
+            CompletedOperation::RuntimeTemplate(nested_handoff),
         );
-        (root_id, leaf_site_id, context)
+        let completed_nested = promote_replacement(&mut expressions, nested_input)
+            .expect("nested neutral payload commits")
+            .id();
+        handoff.visit_expression_ids_mut(&mut |expression| {
+            if *expression == nested_expression {
+                *expression = completed_nested;
+            }
+        });
+        let root_input = replacement_input(
+            expressions
+                .view(root_expression)
+                .expect("root occurrence exists"),
+            CompletedOperation::RuntimeTemplate(handoff),
+        );
+        promote_replacement(&mut expressions, root_input)
+            .expect("root neutral payload commits")
+            .id()
     };
 
-    let body = materialize_parent_handoff(store, root_id, &mut strings, context);
-    let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::ChildTemplate {
-        template: middle_template,
-        ..
-    }) = &body
-    else {
-        panic!("expected root child template handoff, got {body:?}");
+    // End every TIR reader before freezing. A sole Rc release proves that no hidden
+    // preparation or handoff owner retains the module's construction graph.
+    let released_store = Rc::try_unwrap(store)
+        .expect("last TIR reader has ended")
+        .into_inner();
+    assert!(weak_store.upgrade().is_none());
+    drop(released_store);
+    let mut roots = vec![AstNode {
+        kind: NodeKind::ExpressionStatement(completed_expression),
+        span: None,
+        scope,
+    }];
+    let frozen = expressions
+        .freeze(&mut roots)
+        .expect("only neutral completed expressions survive");
+    let NodeKind::ExpressionStatement(root) = roots[0].kind else {
+        panic!("completed root remains an expression statement");
     };
-    let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::ChildTemplate {
-        template: leaf_template,
-        ..
-    }) = &middle_template.body
+    let ExpressionOperationView::RuntimeTemplate(handoff) = frozen
+        .view(root)
+        .expect("root is paired with frozen owner")
+        .operation()
     else {
-        panic!(
-            "expected nested leaf child template handoff, got {:?}",
-            middle_template.body
-        );
+        panic!("completed root must contain a neutral runtime payload");
     };
-    let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::DynamicExpression {
-        expression,
-        ..
-    }) = &leaf_template.body
+    let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Sequence { children, .. }) =
+        &handoff.body
     else {
-        panic!(
-            "stale structural leaf must not be folded into text, got {:?}",
-            leaf_template.body
-        );
+        panic!("root keeps its structural and nested value positions");
     };
+    let OwnedRuntimeTemplateNode::ChildTemplate { template, .. } = &children[0] else {
+        panic!("first position remains a structural child");
+    };
+    let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Sequence {
+        children: structural,
+        ..
+    }) = &template.body
+    else {
+        panic!("structural child keeps its accepted body");
+    };
+    let OwnedRuntimeTemplateNode::DynamicExpression { expression, .. } = &structural[0] else {
+        panic!("parent text is an expression leaf");
+    };
+    let ExpressionOperationView::Constant(value) = frozen.view(*expression).unwrap().operation()
+    else {
+        panic!("parent text remains a constant expression");
+    };
+    assert_eq!(
+        strings.resolve(const_values.string_value(value).unwrap()),
+        "effective-parent"
+    );
+    let OwnedRuntimeTemplateNode::Conditional { selector, body, .. } = &structural[1] else {
+        panic!("parent branch remains lazy");
+    };
+    let ExpressionOperationView::Reference(path) = frozen
+        .view(selector.condition_expression())
+        .unwrap()
+        .operation()
+    else {
+        panic!("parent branch must use the overlaid runtime selector");
+    };
+    assert_eq!(
+        path_fork.render_native(path, &strings, &mut Vec::new()),
+        PathBuf::from("parent_ready"),
+    );
+    assert_owned_text_node(body, "selected-body");
+    assert_owned_text_node(&structural[2], "parent-slot");
+    let OwnedRuntimeTemplateNode::Sequence {
+        children: wrapper, ..
+    } = &structural[3]
+    else {
+        panic!("parent wrapper remains materialised");
+    };
+    assert_owned_text_node(&wrapper[0], "<parent>");
+    assert_owned_text_node(&wrapper[1], "child");
+    assert_owned_text_node(&wrapper[2], "</parent>");
 
-    let ExpressionKind::StringSlice(text) = expression.kind else {
-        panic!(
-            "expected the root expression overlay to survive structurally, got {:?}",
-            expression.kind
-        );
+    let OwnedRuntimeTemplateNode::DynamicExpression { expression, .. } = &children[1] else {
+        panic!("second position remains an independently owned nested expression");
     };
-    assert_eq!(strings.resolve(text), "effective-root");
+    let ExpressionOperationView::RuntimeTemplate(nested) = frozen
+        .view(*expression)
+        .expect("nested ID is paired with frozen owner")
+        .operation()
+    else {
+        panic!("nested value must not retain a build-only Template after TIR release");
+    };
+    let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Sequence {
+        children: nested,
+        ..
+    }) = &nested.body
+    else {
+        panic!("nested value keeps its own accepted body");
+    };
+    let OwnedRuntimeTemplateNode::DynamicExpression { expression, .. } = &nested[0] else {
+        panic!("nested text is an expression leaf");
+    };
+    let ExpressionOperationView::Constant(value) = frozen.view(*expression).unwrap().operation()
+    else {
+        panic!("nested text remains a constant expression");
+    };
+    assert_eq!(
+        strings.resolve(const_values.string_value(value).unwrap()),
+        "effective-nested"
+    );
+    let OwnedRuntimeTemplateNode::Conditional { selector, body, .. } = &nested[1] else {
+        panic!("nested branch keeps its own selector");
+    };
+    let ExpressionOperationView::Constant(value) = frozen
+        .view(selector.condition_expression())
+        .unwrap()
+        .operation()
+    else {
+        panic!("nested branch must not inherit the parent runtime selector");
+    };
+    assert!(matches!(
+        const_values.payload(value),
+        Some(ConstValuePayload::Bool(true))
+    ));
+    assert_owned_text_node(body, "selected-body");
+    assert_owned_text_node(&nested[2], "nested-slot");
+    let OwnedRuntimeTemplateNode::Sequence {
+        children: wrapper, ..
+    } = &nested[3]
+    else {
+        panic!("nested wrapper remains materialised");
+    };
+    assert_owned_text_node(&wrapper[0], "<nested>");
+    assert_owned_text_node(&wrapper[1], "child");
+    assert_owned_text_node(&wrapper[2], "</nested>");
+    let OwnedRuntimeTemplateNode::DynamicExpression { expression, .. } = &nested[4] else {
+        panic!("nested runtime leaf survives alongside its own constant facts");
+    };
+    let ExpressionOperationView::Reference(path) = frozen
+        .view(*expression)
+        .expect("nested runtime leaf belongs to frozen owner")
+        .operation()
+    else {
+        panic!("nested runtime dependence remains a reference");
+    };
+    assert_eq!(
+        path_fork.render_native(path, &strings, &mut Vec::new()),
+        PathBuf::from("content_ready"),
+    );
 }
 
 #[test]
 fn runtime_child_reference_uses_structural_handoff() {
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -1003,10 +1462,11 @@ fn runtime_child_reference_uses_structural_handoff() {
         let mut store_ref = store.borrow_mut();
         let empty_context = TemplateViewContext::default();
         let child_site_id = store_ref.next_expression_site_id();
-        let child_expression = bool_reference_expression(&mut path_fork, &mut strings, "runtime");
+        let child_expression =
+            bool_reference_expression(&mut expressions, &mut path_fork, &mut strings, "runtime");
         let child_root = store_ref.push_node(TemplateIrNode::new(
             TemplateIrNodeKind::DynamicExpression {
-                expression: Box::new(child_expression),
+                expression: child_expression,
                 origin: TemplateSegmentOrigin::Body,
                 site_id: child_site_id,
             },
@@ -1021,8 +1481,15 @@ fn runtime_child_reference_uses_structural_handoff() {
         (parent_id, empty_context)
     };
 
-    let body = materialize_parent_handoff_result(store, parent_id, &mut strings, context)
-        .expect("runtime reference should use structural handoff");
+    let body = materialize_parent_handoff_result(
+        store,
+        parent_id,
+        &expressions,
+        &const_values,
+        &mut strings,
+        context,
+    )
+    .expect("runtime reference should use structural handoff");
 
     let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::ChildTemplate {
         template, ..
@@ -1040,15 +1507,16 @@ fn runtime_child_reference_uses_structural_handoff() {
             template.body
         );
     };
-    let ExpressionKind::Reference(path) = &expression.kind else {
-        panic!(
-            "expected an owned reference expression, got {:?}",
-            expression.kind
-        );
+    let ExpressionOperationView::Reference(path) = expressions
+        .view(*expression)
+        .expect("runtime reference expression should exist")
+        .operation()
+    else {
+        panic!("expected an owned reference expression, got {expression:?}");
     };
     let mut scratch = Vec::new();
     assert_eq!(
-        path_fork.render_native(*path, &strings, &mut scratch),
+        path_fork.render_native(path, &strings, &mut scratch),
         PathBuf::from("runtime"),
         "runtime reference value should survive structural handoff"
     );
@@ -1056,6 +1524,8 @@ fn runtime_child_reference_uses_structural_handoff() {
 
 #[test]
 fn missing_child_node_authority_propagates_as_compiler_error_through_hir_handoff() {
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
     let _path_fork = PathInternerFork::empty();
@@ -1084,8 +1554,15 @@ fn missing_child_node_authority_propagates_as_compiler_error_through_hir_handoff
         (parent_id, empty_context)
     };
 
-    let error = materialize_parent_handoff_result(store, parent_id, &mut strings, context)
-        .expect_err("malformed child authority must reach the HIR handoff caller");
+    let error = materialize_parent_handoff_result(
+        store,
+        parent_id,
+        &expressions,
+        &const_values,
+        &mut strings,
+        context,
+    )
+    .expect_err("malformed child authority must reach the HIR handoff caller");
 
     assert_eq!(error.error_type, ErrorType::Compiler);
     assert!(
@@ -1102,13 +1579,16 @@ fn missing_child_node_authority_propagates_as_compiler_error_through_hir_handoff
 
 #[test]
 fn inherited_wrapper_handoff_preserves_conditional_body() {
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let (parent_id, context) = {
         let mut store_ref = store.borrow_mut();
         let empty_context = TemplateViewContext::default();
-        let wrapper_template_id = build_conditional_wrapper_template(&mut store_ref);
+        let wrapper_template_id =
+            build_conditional_wrapper_template(&mut store_ref, &mut expressions, &mut const_values);
         build_parent_with_inherited_wrapper(
             &mut store_ref,
             wrapper_template_id,
@@ -1117,7 +1597,14 @@ fn inherited_wrapper_handoff_preserves_conditional_body() {
         )
     };
 
-    let body = materialize_parent_handoff(store, parent_id, &mut strings, context);
+    let body = materialize_parent_handoff(
+        store,
+        parent_id,
+        &expressions,
+        &const_values,
+        &mut strings,
+        context,
+    );
     let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Conditional {
         selector,
         body,
@@ -1130,7 +1617,7 @@ fn inherited_wrapper_handoff_preserves_conditional_body() {
     assert!(matches!(
         selector.as_ref(),
         TemplateBranchSelector::Bool(expression)
-            if matches!(&expression.kind, ExpressionKind::Bool(true))
+            if bool_literal_value(&expressions, &const_values, *expression) == Some(true)
     ));
     let OwnedRuntimeTemplateNode::Sequence { children, .. } = body.as_ref() else {
         panic!("expected conditional body sequence, got {body:?}");
@@ -1145,6 +1632,8 @@ fn inherited_wrapper_handoff_preserves_conditional_body() {
 
 #[test]
 fn conditional_handoff_materializes_the_effective_selector_overlay() {
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut store = TemplateIrStore::new();
     let mut strings = StringTable::new();
     let (template_id, selector_site_id) = {
@@ -1156,7 +1645,12 @@ fn conditional_handoff_materializes_the_effective_selector_overlay() {
             None,
         );
         let conditional = builder.push_conditional_node(
-            TemplateBranchSelector::Bool(Expression::bool(true, None, ValueMode::ImmutableOwned)),
+            TemplateBranchSelector::Bool(
+                expressions
+                    .bool(&mut const_values, true, None, ValueMode::ImmutableOwned)
+                    .expect("conditional selector literal should construct")
+                    .id(),
+            ),
             body,
             None,
         );
@@ -1180,17 +1674,18 @@ fn conditional_handoff_materializes_the_effective_selector_overlay() {
         );
         (template_id, selector_site_id)
     };
-    let context = expression_overlay_context(
-        &mut store,
-        vec![(
-            selector_site_id,
-            Expression::bool(false, None, ValueMode::ImmutableOwned),
-        )],
-    );
+    let override_expression = expressions
+        .bool(&mut const_values, false, None, ValueMode::ImmutableOwned)
+        .expect("selector overlay literal should construct")
+        .id();
+    let context =
+        expression_overlay_context(&mut store, vec![(selector_site_id, override_expression)]);
 
     let body = materialize_parent_handoff_result(
         Rc::new(RefCell::new(store)),
         template_id,
+        &expressions,
+        &const_values,
         &mut strings,
         context,
     )
@@ -1207,20 +1702,27 @@ fn conditional_handoff_materializes_the_effective_selector_overlay() {
     assert!(matches!(
         selector.as_ref(),
         TemplateBranchSelector::Bool(expression)
-            if matches!(&expression.kind, ExpressionKind::Bool(false))
+            if bool_literal_value(&expressions, &const_values, *expression) == Some(false)
     ));
     assert_owned_text_node(body.as_ref(), "conditional body");
 }
 
 #[test]
 fn inherited_wrapper_handoff_injects_through_loop_body_and_aggregate() {
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let (parent_id, context) = {
         let mut store_ref = store.borrow_mut();
         let empty_context = TemplateViewContext::default();
-        let wrapper_template_id = build_loop_wrapper_template(&mut store_ref, &mut strings);
+        let wrapper_template_id = build_loop_wrapper_template(
+            &mut store_ref,
+            &mut strings,
+            &mut expressions,
+            &mut const_values,
+        );
         build_parent_with_inherited_wrapper(
             &mut store_ref,
             wrapper_template_id,
@@ -1229,7 +1731,14 @@ fn inherited_wrapper_handoff_injects_through_loop_body_and_aggregate() {
         )
     };
 
-    let body = materialize_parent_handoff(store, parent_id, &mut strings, context);
+    let body = materialize_parent_handoff(
+        store,
+        parent_id,
+        &expressions,
+        &const_values,
+        &mut strings,
+        context,
+    );
     let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Loop {
         body,
         aggregate_wrapper,
@@ -1257,6 +1766,8 @@ fn inherited_wrapper_handoff_injects_through_loop_body_and_aggregate() {
 
 #[test]
 fn inherited_wrapper_handoff_injects_through_child_template() {
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
     let _path_fork = PathInternerFork::empty();
@@ -1272,7 +1783,14 @@ fn inherited_wrapper_handoff_injects_through_child_template() {
         )
     };
 
-    let body = materialize_parent_handoff(store, parent_id, &mut strings, context);
+    let body = materialize_parent_handoff(
+        store,
+        parent_id,
+        &expressions,
+        &const_values,
+        &mut strings,
+        context,
+    );
     let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::ChildTemplate {
         template, ..
     }) = body
@@ -1293,20 +1811,27 @@ fn inherited_wrapper_handoff_injects_through_child_template() {
 
 #[test]
 fn inherited_wrapper_handoff_applies_wrapper_overlay() {
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (parent_id, context) = {
         let mut store_ref = store.borrow_mut();
         let empty_context = TemplateViewContext::default();
-        let (wrapper_template_id, expression_site_id) =
-            build_expression_wrapper_template(&mut store_ref, &mut strings, &mut path_fork);
+        let (wrapper_template_id, expression_site_id) = build_expression_wrapper_template(
+            &mut store_ref,
+            &mut strings,
+            &mut path_fork,
+            &mut expressions,
+        );
+        let override_expression = expressions
+            .bool(&mut const_values, true, None, ValueMode::ImmutableOwned)
+            .expect("wrapper overlay literal should construct")
+            .id();
         let wrapper_context = expression_overlay_context(
             &mut store_ref,
-            vec![(
-                expression_site_id,
-                Expression::bool(true, None, ValueMode::ImmutableOwned),
-            )],
+            vec![(expression_site_id, override_expression)],
         );
         let (parent_id, context) = build_parent_with_inherited_wrapper_and_overlay(
             &mut store_ref,
@@ -1322,7 +1847,14 @@ fn inherited_wrapper_handoff_applies_wrapper_overlay() {
         (parent_id, context.merge(wrapper_context))
     };
 
-    let body = materialize_parent_handoff(store, parent_id, &mut strings, context);
+    let body = materialize_parent_handoff(
+        store,
+        parent_id,
+        &expressions,
+        &const_values,
+        &mut strings,
+        context,
+    );
     let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Sequence { children, .. }) =
         body
     else {
@@ -1333,7 +1865,7 @@ fn inherited_wrapper_handoff_applies_wrapper_overlay() {
         panic!("expected wrapper expression, got {:?}", children[0]);
     };
     assert!(
-        matches!(expression.kind, ExpressionKind::Bool(true)),
+        bool_literal_value(&expressions, &const_values, *expression) == Some(true),
         "wrapper overlay should override the wrapper expression"
     );
     let OwnedRuntimeTemplateNode::ChildTemplate { template, .. } = &children[1] else {
@@ -1347,6 +1879,8 @@ fn inherited_wrapper_handoff_applies_wrapper_overlay() {
 
 #[test]
 fn inherited_wrapper_handoff_applies_wrapper_set_innermost_to_outermost() {
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
     // A single inherited wrapper set holding two distinct wrappers must hand off
     // as `outer(inner(child))`. `TemplateWrapperSet::wrappers` is stored
     // innermost-to-outermost, so forward handoff consumption applies the innermost
@@ -1376,7 +1910,14 @@ fn inherited_wrapper_handoff_applies_wrapper_set_innermost_to_outermost() {
         )
     };
 
-    let body = materialize_parent_handoff(store, parent_id, &mut strings, context);
+    let body = materialize_parent_handoff(
+        store,
+        parent_id,
+        &expressions,
+        &const_values,
+        &mut strings,
+        context,
+    );
     let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Sequence { children, .. }) =
         body
     else {
@@ -1401,6 +1942,8 @@ fn inherited_wrapper_handoff_applies_wrapper_set_innermost_to_outermost() {
 
 #[test]
 fn inherited_wrapper_handoff_applies_conditional_wrapper_set_innermost_to_outermost() {
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
     // The IfChildEmits aggregate-wrapper path must also consume the
     // innermost-to-outermost store order forward, producing a
     // `ConditionalWrapper` whose wrapper tree is `outer(inner(AggregateOutput))`.
@@ -1433,7 +1976,14 @@ fn inherited_wrapper_handoff_applies_conditional_wrapper_set_innermost_to_outerm
         )
     };
 
-    let body = materialize_parent_handoff(store, parent_id, &mut strings, context);
+    let body = materialize_parent_handoff(
+        store,
+        parent_id,
+        &expressions,
+        &const_values,
+        &mut strings,
+        context,
+    );
     let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::ConditionalWrapper {
         child,
         wrapper,
@@ -1471,6 +2021,8 @@ fn inherited_wrapper_handoff_applies_conditional_wrapper_set_innermost_to_outerm
 
 #[test]
 fn inherited_slotless_wrapper_handoff_appends_child_after_wrapper_content() {
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
     let _path_fork = PathInternerFork::empty();
@@ -1486,7 +2038,14 @@ fn inherited_slotless_wrapper_handoff_appends_child_after_wrapper_content() {
         )
     };
 
-    let body = materialize_parent_handoff(store, parent_id, &mut strings, context);
+    let body = materialize_parent_handoff(
+        store,
+        parent_id,
+        &expressions,
+        &const_values,
+        &mut strings,
+        context,
+    );
     let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Sequence { children, .. }) =
         body
     else {
@@ -1500,6 +2059,8 @@ fn inherited_slotless_wrapper_handoff_appends_child_after_wrapper_content() {
 
 #[test]
 fn inherited_named_only_wrapper_handoff_preserves_named_slot_and_appends_child() {
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
     let _path_fork = PathInternerFork::empty();
@@ -1515,7 +2076,14 @@ fn inherited_named_only_wrapper_handoff_preserves_named_slot_and_appends_child()
         )
     };
 
-    let body = materialize_parent_handoff(store, parent_id, &mut strings, context);
+    let body = materialize_parent_handoff(
+        store,
+        parent_id,
+        &expressions,
+        &const_values,
+        &mut strings,
+        context,
+    );
     let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::Sequence { children, .. }) =
         body
     else {
@@ -1533,6 +2101,8 @@ fn inherited_named_only_wrapper_handoff_preserves_named_slot_and_appends_child()
 
 #[test]
 fn malformed_child_view_context_propagates_view_failure() {
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
     let _path_fork = PathInternerFork::empty();
@@ -1553,8 +2123,15 @@ fn malformed_child_view_context_propagates_view_failure() {
         (parent_id, valid_context)
     };
 
-    let error = materialize_parent_handoff_result(store, parent_id, &mut strings, valid_context)
-        .expect_err("malformed child overlay should produce a CompilerError");
+    let error = materialize_parent_handoff_result(
+        store,
+        parent_id,
+        &expressions,
+        &const_values,
+        &mut strings,
+        valid_context,
+    )
+    .expect_err("malformed child overlay should produce a CompilerError");
 
     assert!(
         error.msg.contains("slot resolution overlay"),
@@ -1565,6 +2142,8 @@ fn malformed_child_view_context_propagates_view_failure() {
 
 #[test]
 fn missing_wrapper_tree_node_propagates_layout_error() {
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
     let _path_fork = PathInternerFork::empty();
@@ -1605,8 +2184,15 @@ fn missing_wrapper_tree_node_propagates_layout_error() {
         )
     };
 
-    let error = materialize_parent_handoff_result(store, parent_id, &mut strings, context)
-        .expect_err("missing wrapper tree node should produce a CompilerError");
+    let error = materialize_parent_handoff_result(
+        store,
+        parent_id,
+        &expressions,
+        &const_values,
+        &mut strings,
+        context,
+    )
+    .expect_err("missing wrapper tree node should produce a CompilerError");
 
     assert!(
         error.msg.contains("TIR slot layout requested missing node"),
@@ -1617,6 +2203,8 @@ fn missing_wrapper_tree_node_propagates_layout_error() {
 
 #[test]
 fn missing_child_in_wrapper_propagates_layout_error() {
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
     let store = Rc::new(RefCell::new(TemplateIrStore::new()));
     let mut strings = StringTable::new();
     let _path_fork = PathInternerFork::empty();
@@ -1647,8 +2235,15 @@ fn missing_child_in_wrapper_propagates_layout_error() {
         )
     };
 
-    let error = materialize_parent_handoff_result(store, parent_id, &mut strings, context)
-        .expect_err("missing child in wrapper should produce a CompilerError");
+    let error = materialize_parent_handoff_result(
+        store,
+        parent_id,
+        &expressions,
+        &const_values,
+        &mut strings,
+        context,
+    )
+    .expect_err("missing child in wrapper should produce a CompilerError");
 
     assert!(
         error
@@ -1683,6 +2278,8 @@ fn runtime_site_template(
 
 #[test]
 fn runtime_slot_handoff_preserves_root_conditional_wrapper() {
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
     let mut store = TemplateIrStore::new();
     let mut strings = StringTable::new();
     let slot_render_root = text_node_id(&mut store, &mut strings, "slot-render");
@@ -1694,7 +2291,6 @@ fn runtime_slot_handoff_preserves_root_conditional_wrapper() {
             render_root: slot_render_root,
             span: None,
         }],
-        span: None,
     });
     let template_id = runtime_site_template(&mut store, slot_plan, RuntimeSlotSiteId(0));
 
@@ -1717,15 +2313,29 @@ fn runtime_slot_handoff_preserves_root_conditional_wrapper() {
     let prepared = prepared_runtime(&view);
 
     assert!(
-        owned_runtime_slot_handoff_for_prepared_view(&prepared, view, &strings, None)
-            .expect("direct slot handoff should succeed")
-            .is_none(),
+        owned_runtime_slot_handoff_for_prepared_view(
+            &prepared,
+            view,
+            &expressions,
+            &const_values,
+            &strings,
+            None
+        )
+        .expect("direct slot handoff should succeed")
+        .is_none(),
         "direct slot handoff cannot carry the root's conditional wrapper"
     );
 
     let view = view_for(&store, template_id, TemplateViewContext::default());
-    let handoff = owned_runtime_template_handoff_for_prepared_view(&prepared, view, &strings, None)
-        .expect("generic handoff should preserve the conditional wrapper");
+    let handoff = owned_runtime_template_handoff_for_prepared_view(
+        &prepared,
+        view,
+        &expressions,
+        &const_values,
+        &strings,
+        None,
+    )
+    .expect("generic handoff should preserve the conditional wrapper");
     let OwnedRuntimeTemplateBody::Render(OwnedRuntimeTemplateNode::ConditionalWrapper {
         child,
         wrapper,
@@ -1758,6 +2368,8 @@ fn runtime_slot_handoff_preserves_root_conditional_wrapper() {
 
 #[test]
 fn handoff_rejects_runtime_slot_site_from_a_different_plan() {
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
     let mut store = TemplateIrStore::new();
     let mut strings = StringTable::new();
     let _path_fork = PathInternerFork::empty();
@@ -1770,7 +2382,6 @@ fn handoff_rejects_runtime_slot_site_from_a_different_plan() {
             render_root,
             span: None,
         }],
-        span: None,
     });
     let other_plan = store.push_slot_plan(TemplateSlotPlan {
         contribution_sources: Vec::new(),
@@ -1780,7 +2391,6 @@ fn handoff_rejects_runtime_slot_site_from_a_different_plan() {
             render_root,
             span: None,
         }],
-        span: None,
     });
     let template_id = runtime_site_template(&mut store, other_plan, RuntimeSlotSiteId(0));
     store
@@ -1788,28 +2398,32 @@ fn handoff_rejects_runtime_slot_site_from_a_different_plan() {
         .expect("owner plan should replace the forged plan");
 
     let view = view_for(&store, template_id, TemplateViewContext::default());
-    let error = handoff_for_view(view, &strings).expect_err("wrong-plan site must fail at handoff");
+    let error = handoff_for_view(view, &expressions, &const_values, &strings)
+        .expect_err("wrong-plan site must fail at handoff");
     assert!(error.msg.contains("outside its owning slot application"));
 }
 
 #[test]
 fn handoff_rejects_out_of_range_runtime_slot_site() {
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
     let mut store = TemplateIrStore::new();
     let plan = store.push_slot_plan(TemplateSlotPlan {
         contribution_sources: Vec::new(),
         slot_sites: Vec::new(),
-        span: None,
     });
     let template_id = runtime_site_template(&mut store, plan, RuntimeSlotSiteId(0));
 
     let view = view_for(&store, template_id, TemplateViewContext::default());
-    let error = handoff_for_view(view, &StringTable::new())
+    let error = handoff_for_view(view, &expressions, &const_values, &StringTable::new())
         .expect_err("out-of-range site must fail at handoff");
     assert!(error.msg.contains("out-of-range runtime slot site"));
 }
 
 #[test]
 fn handoff_rejects_mismatched_runtime_slot_site_identity() {
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
     let mut store = TemplateIrStore::new();
     let mut strings = StringTable::new();
     let _path_fork = PathInternerFork::empty();
@@ -1822,7 +2436,6 @@ fn handoff_rejects_mismatched_runtime_slot_site_identity() {
             render_root,
             span: None,
         }],
-        span: None,
     });
     MalformedTirStore::new(&mut store).replace_slot_sites(
         plan,
@@ -1836,7 +2449,8 @@ fn handoff_rejects_mismatched_runtime_slot_site_identity() {
     let template_id = runtime_site_template(&mut store, plan, RuntimeSlotSiteId(0));
 
     let view = view_for(&store, template_id, TemplateViewContext::default());
-    let error = handoff_for_view(view, &strings).expect_err("mismatched site identity must fail");
+    let error = handoff_for_view(view, &expressions, &const_values, &strings)
+        .expect_err("mismatched site identity must fail");
     assert!(
         error
             .msg
@@ -1846,6 +2460,8 @@ fn handoff_rejects_mismatched_runtime_slot_site_identity() {
 
 #[test]
 fn handoff_rejects_mismatched_loop_header_shape() {
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut store = TemplateIrStore::new();
     let mut strings = StringTable::new();
     let _path_fork = PathInternerFork::empty();
@@ -1853,7 +2469,10 @@ fn handoff_rejects_mismatched_loop_header_shape() {
     let loop_node = store.push_node(TemplateIrNode::new(
         TemplateIrNodeKind::Loop {
             header: TemplateLoopHeader::Conditional {
-                condition: Box::new(Expression::bool(false, None, ValueMode::ImmutableOwned)),
+                condition: expressions
+                    .bool(&mut const_values, false, None, ValueMode::ImmutableOwned)
+                    .expect("loop header condition literal should construct")
+                    .id(),
             },
             header_sites: TemplateLoopHeaderExpressionSites::Collection {
                 iterable: ExpressionSiteId::new(0),
@@ -1866,8 +2485,8 @@ fn handoff_rejects_mismatched_loop_header_shape() {
     let template_id = finish_text_template(&mut store, loop_node);
     let view = view_for(&store, template_id, TemplateViewContext::default());
 
-    let error =
-        handoff_for_view(view, &strings).expect_err("loop header shape mismatch must fail closed");
+    let error = handoff_for_view(view, &expressions, &const_values, &strings)
+        .expect_err("loop header shape mismatch must fail closed");
     assert!(
         error
             .msg
@@ -1878,6 +2497,8 @@ fn handoff_rejects_mismatched_loop_header_shape() {
 /// Exact-view child cycles must fail before owned-handoff recursion.
 #[test]
 fn handoff_rejects_exact_view_child_cycle() {
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
     let mut store = TemplateIrStore::new();
     let template_id = TemplateIrId::new(store.template_count());
     let child = TemplateTirChildReference::new(
@@ -1903,7 +2524,7 @@ fn handoff_rejects_exact_view_child_cycle() {
     )
     .expect("cyclic view should construct");
 
-    let error = handoff_for_view(view, &StringTable::new())
+    let error = handoff_for_view(view, &expressions, &const_values, &StringTable::new())
         .expect_err("exact-view child cycles must fail before handoff recursion");
     assert_eq!(error.error_type, ErrorType::Compiler);
 }

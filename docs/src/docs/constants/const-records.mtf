@@ -3,7 +3,7 @@ A fully folded struct instance stored in a constant may become a const record.
 [codeblock, $code("moth"):
     Defaults = |
         title String,
-        year Int,
+        year I32,
     |
 
     defaults #= Defaults("Moth", 2026)
@@ -61,8 +61,8 @@ record or an explicitly constructed nominal value that satisfies constant rules.
 
 [codeblock, $code("moth"):
     Size = |
-        width Int,
-        height Int,
+        width I32,
+        height I32,
     |
 
     settings #= (

@@ -8,8 +8,8 @@
 //! or history implementation can drift.
 
 use crate::bench_history::{
-    append_local_run, find_latest_matching_run, read_local_runs, thread_identity_suffix,
-    to_case_results, to_local_record,
+    append_local_run, find_latest_matching_run, read_local_runs, thread_identity_label,
+    thread_identity_suffix, to_case_results, to_local_record,
 };
 use crate::bench_summary::update_monthly_summary;
 use crate::bench_system::{SystemIdentityMode, load_or_create_system_at};
@@ -27,15 +27,101 @@ use crate::benchmark_execution::{
 };
 use crate::benchmark_manifest::BenchmarkCase;
 use crate::benchmark_run::{BenchmarkPaths, PreparedBenchmarkRun};
+use std::io::Write;
 use std::num::NonZeroUsize;
+
+const READ_ONLY_EVIDENCE_MARKER: &str = "MOTH_BENCH_EVIDENCE";
+
+#[derive(serde::Serialize)]
+struct ReadOnlyBenchmarkEvidence<'a> {
+    evidence_schema: &'static str,
+    benchmark_protocol_version: u32,
+    timing_schema_version: u32,
+    timestamp: String,
+    month_key: String,
+    commit: Option<&'a str>,
+    git_dirty: Option<bool>,
+    environment: ReadOnlyBenchmarkEnvironment<'a>,
+    warmup_runs: usize,
+    measured_iterations: usize,
+    suite_kind: &'static str,
+    primary_metric_name: &'static str,
+    suite_average_ms: f64,
+    suite_case_spread_ms: f64,
+    thread_count: Option<u32>,
+    thread_identity: String,
+    groups: &'a [BenchmarkGroupStats],
+    cases: &'a [BenchmarkCaseResult],
+}
+
+#[derive(serde::Serialize)]
+struct ReadOnlyBenchmarkEnvironment<'a> {
+    operating_system: &'static str,
+    architecture: &'static str,
+    system: Option<&'a BenchmarkSystem>,
+}
+
+fn write_read_only_evidence(
+    writer: &mut impl Write,
+    case_results: &[BenchmarkCaseResult],
+    suite_kind: BenchmarkSuiteKind,
+    thread_count: Option<u32>,
+    measured_iterations: NonZeroUsize,
+    git_revision: &GitRevision,
+    presentation: &SuitePresentation,
+) -> Result<(), String> {
+    let timestamp = &presentation.timestamp;
+    let evidence = ReadOnlyBenchmarkEvidence {
+        evidence_schema: "moth_benchmark_read_only_v1",
+        benchmark_protocol_version: BENCHMARK_PROTOCOL_VERSION,
+        timing_schema_version: crate::bench_types::BENCHMARK_TIMING_SCHEMA_VERSION,
+        timestamp: format!(
+            "{:04}-{:02}-{:02}T{:02}:{:02}",
+            timestamp.year, timestamp.month, timestamp.day, timestamp.hour, timestamp.minute
+        ),
+        month_key: timestamp.month_key(),
+        commit: git_revision.commit.as_deref(),
+        git_dirty: git_revision.dirty,
+        environment: ReadOnlyBenchmarkEnvironment {
+            operating_system: std::env::consts::OS,
+            architecture: std::env::consts::ARCH,
+            system: presentation.system.as_ref(),
+        },
+        warmup_runs: 1,
+        measured_iterations: measured_iterations.get(),
+        suite_kind: suite_kind.persisted_name(),
+        primary_metric_name: suite_kind.primary_metric_name(),
+        suite_average_ms: presentation.suite.average_ms,
+        suite_case_spread_ms: presentation.suite.case_spread_ms,
+        thread_count,
+        thread_identity: thread_identity_label(thread_count),
+        groups: &presentation.groups,
+        cases: case_results,
+    };
+
+    writer
+        .write_all(READ_ONLY_EVIDENCE_MARKER.as_bytes())
+        .map_err(|error| format!("failed to write read-only benchmark evidence marker: {error}"))?;
+    writer.write_all(b" ").map_err(|error| {
+        format!("failed to write read-only benchmark evidence separator: {error}")
+    })?;
+    serde_json::to_writer(&mut *writer, &evidence)
+        .map_err(|error| format!("failed to write read-only benchmark evidence JSON: {error}"))?;
+    writer
+        .write_all(b"\n")
+        .map_err(|error| format!("failed to finish read-only benchmark evidence line: {error}"))?;
+    writer
+        .flush()
+        .map_err(|error| format!("failed to flush read-only benchmark evidence: {error}"))
+}
 
 /// Measured case results plus the presentation facts needed to persist a run.
 struct SuitePresentation {
     timestamp: BenchmarkTimestamp,
-    system: BenchmarkSystem,
+    system: Option<BenchmarkSystem>,
     groups: Vec<BenchmarkGroupStats>,
     suite: SuiteStats,
-    comparison: BenchmarkComparison,
+    comparison: Option<BenchmarkComparison>,
 }
 
 /// Measure every selected case with the shared loop and result builder.
@@ -125,27 +211,44 @@ fn build_case_result(
 
 /// Present and persist one completed suite run.
 ///
-/// Read-only runs only present. Recorded runs present with a created system
-/// identity, then append local history and update the tracked summary. The
-/// caller owns finalisation and repository verification before calling this.
+/// Full read-only runs verify the repository snapshot at successful
+/// finalisation before emitting evidence. Recorded runs present with a created
+/// system identity, then append local history and update the tracked summary.
 pub(crate) fn finish_suite_run(
     case_results: Vec<BenchmarkCaseResult>,
     suite_kind: BenchmarkSuiteKind,
     thread_count: Option<u32>,
     policy: BenchmarkRunPolicy,
     git_revision: &GitRevision,
-    paths: &BenchmarkPaths,
+    prepared: &PreparedBenchmarkRun,
 ) -> Result<(), String> {
     if policy.recording() == BenchmarkRecording::ReadOnly {
-        return present_run(
+        let presentation = present_run(
             &case_results,
             suite_kind,
             thread_count,
             policy.selection(),
             SystemIdentityMode::ReadOnly,
-            paths,
-        )
-        .map(|_| ());
+            prepared.paths(),
+        )?;
+
+        if policy.selection() == BenchmarkSelection::Full {
+            prepared.verify_unchanged()?;
+
+            let stdout = std::io::stdout();
+            let mut stdout = stdout.lock();
+            write_read_only_evidence(
+                &mut stdout,
+                &case_results,
+                suite_kind,
+                thread_count,
+                policy.measured_iterations(),
+                git_revision,
+                &presentation,
+            )?;
+        }
+
+        return Ok(());
     }
 
     let presentation = present_run(
@@ -154,24 +257,34 @@ pub(crate) fn finish_suite_run(
         thread_count,
         policy.selection(),
         SystemIdentityMode::CreateIfMissing,
-        paths,
-    )?
-    .ok_or_else(|| "recording benchmark run has no system identity".to_owned())?;
+        prepared.paths(),
+    )?;
+    let SuitePresentation {
+        timestamp,
+        system,
+        groups,
+        suite,
+        comparison,
+    } = presentation;
+    let system =
+        system.ok_or_else(|| "recording benchmark run has no system identity".to_owned())?;
+    let comparison =
+        comparison.ok_or_else(|| "recording benchmark run has no comparison".to_owned())?;
 
     let run = BenchmarkRun {
-        timestamp: presentation.timestamp,
+        timestamp,
         benchmark_protocol_version: BENCHMARK_PROTOCOL_VERSION,
         git_revision: git_revision.clone(),
-        system: presentation.system,
+        system,
         suite_kind,
         cases: case_results,
-        groups: presentation.groups,
-        suite: presentation.suite,
+        groups,
+        suite,
         warmup_runs: 1,
         measured_iterations: policy.measured_iterations().get(),
         thread_count,
     };
-    record_run(&run, &presentation.comparison, paths)
+    record_run(&run, &comparison, prepared.paths())
 }
 
 /// Present one completed suite without entering any persistence path.
@@ -200,7 +313,7 @@ fn present_run(
     selection: BenchmarkSelection,
     identity_mode: SystemIdentityMode,
     paths: &BenchmarkPaths,
-) -> Result<Option<SuitePresentation>, String> {
+) -> Result<SuitePresentation, String> {
     let groups = calculate_group_stats(case_results);
     debug_assert_eq!(
         groups
@@ -220,7 +333,7 @@ fn present_run(
     let timestamp = BenchmarkTimestamp::now();
 
     let system = match load_or_create_system_at(&paths.system_toml, identity_mode)? {
-        Some(sys) => sys,
+        Some(system) => system,
         None => {
             println!(
                 "Result: {} ~{:.0}ms, case spread ~{:.0}ms{}",
@@ -236,7 +349,13 @@ fn present_run(
                 "No local baseline found. Run '{}' to create one.",
                 suite_kind.record_command_hint()
             );
-            return Ok(None);
+            return Ok(SuitePresentation {
+                timestamp,
+                system: None,
+                groups,
+                suite,
+                comparison: None,
+            });
         }
     };
 
@@ -276,13 +395,13 @@ fn present_run(
         }
     }
 
-    Ok(Some(SuitePresentation {
+    Ok(SuitePresentation {
         timestamp,
-        system,
+        system: Some(system),
         groups,
         suite,
-        comparison,
-    }))
+        comparison: Some(comparison),
+    })
 }
 
 /// Load the most recent previous case results for the given system and suite.

@@ -90,5 +90,11 @@ pub(super) fn estimate_tir_node_output_bytes(
             )
             .into(),
         ),
+        // A retained position is unfinished compiler scratch and must never be estimated: its
+        // value is installed by body-root numeric completion before folding runs.
+        TemplateIrNodeKind::RetainedNumericIntake(_) => Err(CompilerError::compiler_error(
+            "TIR fold: a retained numeric intake position cannot enter constant-fold output estimation.",
+        )
+        .into()),
     }
 }

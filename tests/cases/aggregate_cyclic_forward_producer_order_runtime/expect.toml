@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "cyclic_producer_order late=first=1 second=2 third=4294967297 left=4294967296 right=1 early=first=1 second=4294967297 third=2 left=4294967296 right=1"

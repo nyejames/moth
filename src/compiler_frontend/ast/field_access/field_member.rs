@@ -9,10 +9,13 @@ use std::rc::Rc;
 use super::MemberStepContext;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, Declaration, NodeKind};
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
+use crate::compiler_frontend::ast::const_values::store::{
+    ConstValueId, ConstValuePayload, ConstValueStore,
+};
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-use crate::compiler_frontend::ast::expressions::expression_rpn::{
-    PlaceExpression, PlaceExpressionKind,
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, ExpressionConstructionFailure, ExpressionOp,
+    ExpressionOperationView, ExpressionView, OwnedExpr, PlaceProjectionView, SuccessShape,
 };
 use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
 use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
@@ -20,13 +23,10 @@ use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidFieldAccessReason};
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
-use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::queries::TypeKind;
-use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use moth_lexical::numeric::grammar::NumericLiteralKind;
 
 use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
@@ -47,17 +47,19 @@ mod tests;
 //  Types
 // --------------------------
 
-struct ResolvedFieldMember {
-    field_name: StringId,
-    type_id: TypeId,
-    diagnostic_type: DataType,
-    value_mode: ValueMode,
-    const_record_state: ConstRecordState,
-    const_inline_value: Option<Expression>,
+pub(super) struct ResolvedFieldMember {
+    pub(super) field_name: StringId,
+    pub(super) type_id: TypeId,
+    pub(super) value_mode: ValueMode,
+    pub(super) const_record_state: ConstRecordState,
+    pub(super) const_inline_value: Option<ExprId>,
 }
 
 struct FieldMemberResolution<'a> {
-    receiver_node: &'a AstNode,
+    /// The receiver's authored value, when one exists. A pending receiver (a retained call's
+    /// result) has none, so only the type-level field facts apply and no const-record projection
+    /// is possible.
+    receiver_value: Option<ExprId>,
     receiver_type_id: TypeId,
     field_name: StringId,
     type_environment: &'a TypeEnvironment,
@@ -66,112 +68,100 @@ struct FieldMemberResolution<'a> {
     template_ir_store: Option<&'a Rc<RefCell<TemplateIrStore>>>,
     scope_context: Option<&'a ScopeContext>,
     path_fork: &'a PathInternerFork,
+    expression_builder: &'a mut AstExpressionBuilder,
+    const_values: &'a ConstValueStore,
 }
 
 // --------------------------
 //  Helpers
 // --------------------------
 
-fn const_field_value<'a>(
+fn const_field_value(
     receiver_type_id: TypeId,
     field_name: StringId,
     type_environment: &TypeEnvironment,
-    resolved_struct_fields_by_path: Option<&'a FxHashMap<PathId, Vec<Declaration>>>,
+    resolved_struct_fields_by_path: Option<&FxHashMap<PathId, Vec<Declaration>>>,
     path_fork: &PathInternerFork,
-) -> Option<&'a Expression> {
+) -> Option<ProjectedField> {
     if matches!(
         type_environment.type_kind(receiver_type_id),
         Some(TypeKind::GenericInstance)
     ) {
         return None;
     }
-
     let nominal_path = type_environment.nominal_path(receiver_type_id)?;
-    let fields = resolved_struct_fields_by_path.and_then(|map| map.get(nominal_path))?;
+    let fields = resolved_struct_fields_by_path?.get(nominal_path)?;
     let field = fields
         .iter()
         .find(|field| path_fork.component(field.id) == Some(field_name))?;
-
-    Some(&field.value)
+    field
+        .value
+        .default()
+        .map(ProjectedField::Constant)
+        .or_else(|| field.value.initializer().map(ProjectedField::Expression))
 }
 
 fn expression_is_compile_time_constant(
-    expression: &Expression,
+    expression: ExpressionView<'_>,
     template_ir_store: &Rc<RefCell<TemplateIrStore>>,
+    expression_builder: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
 ) -> Result<bool, ExpressionParseError> {
     Ok(expression
-        .const_value_kind_with_template_classifier(&mut |template| {
-            classify_template_from_effective_tir(template, template_ir_store)
+        .const_value_kind_with_template_classifier(const_values, &mut |template| {
+            classify_template_from_effective_tir(
+                template,
+                template_ir_store,
+                expression_builder,
+                const_values,
+            )
         })?
         .is_compile_time_value())
 }
-fn clone_inlined_const_field(
-    field_value: &Expression,
-    template_ir_store: &Rc<RefCell<TemplateIrStore>>,
-) -> Result<Option<Expression>, ExpressionParseError> {
-    if !expression_is_compile_time_constant(field_value, template_ir_store)? {
-        return Ok(None);
-    }
 
-    let mut inlined_expression = field_value.to_owned();
-    inlined_expression.value_mode = ValueMode::ImmutableOwned;
-    Ok(Some(inlined_expression))
+#[derive(Clone, Copy)]
+enum ProjectedField {
+    Expression(ExprId),
+    Constant(ConstValueId),
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "const field inlining keeps the receiver node and type, field name, type environment, optional field and scope tables, template store, and path fork as separate borrows"
-)]
-fn const_inline_field_value(
-    receiver_node: &AstNode,
-    receiver_type_id: TypeId,
-    field_name: StringId,
-    type_environment: &TypeEnvironment,
-    resolved_struct_fields_by_path: Option<&FxHashMap<PathId, Vec<Declaration>>>,
-    template_ir_store: &Rc<RefCell<TemplateIrStore>>,
-    scope_context: Option<&ScopeContext>,
-    path_fork: &PathInternerFork,
-) -> Result<Option<Expression>, ExpressionParseError> {
-    if let Some(field_value) =
-        clone_const_record_field_from_receiver(receiver_node, field_name, scope_context, path_fork)
-    {
-        return clone_inlined_const_field(&field_value, template_ir_store);
-    }
-
-    let Some(field_value) = const_field_value(
-        receiver_type_id,
-        field_name,
-        type_environment,
-        resolved_struct_fields_by_path,
-        path_fork,
-    ) else {
-        return Ok(None);
-    };
-
-    clone_inlined_const_field(field_value, template_ir_store)
-}
-
-#[cfg(test)]
-fn const_inline_field_value_from_receiver(
-    receiver_node: &AstNode,
-    field_name: StringId,
-    template_ir_store: &Rc<RefCell<TemplateIrStore>>,
-    scope_context: Option<&ScopeContext>,
-    path_fork: &PathInternerFork,
-) -> Result<Option<Expression>, ExpressionParseError> {
-    let Some(field_value) =
-        clone_const_record_field_from_receiver(receiver_node, field_name, scope_context, path_fork)
-    else {
-        return Ok(None);
-    };
-    clone_inlined_const_field(&field_value, template_ir_store)
-}
-
-fn receiver_value_expression(receiver_node: &AstNode) -> Option<&Expression> {
-    match &receiver_node.kind {
-        NodeKind::ExpressionStatement(expression) => Some(expression),
-        NodeKind::VariableDeclaration(declaration) => Some(&declaration.value),
-        _ => None,
+impl ProjectedField {
+    fn materialise(
+        self,
+        expression_builder: &mut AstExpressionBuilder,
+        const_values: &ConstValueStore,
+        span: Option<crate::compiler_frontend::source::SourceSpan>,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        match self {
+            Self::Expression(id) => {
+                let mut input = expression_builder
+                    .view(id)?
+                    .to_completed_input(expression_builder)?;
+                input.value_mode = ValueMode::ImmutableOwned;
+                input.span = span.or(input.span);
+                expression_builder.commit_replacement(input)
+            }
+            Self::Constant(id) => {
+                let metadata = const_values.metadata(id).ok_or_else(|| {
+                    CompilerError::compiler_error("projected field constant outside owner")
+                })?;
+                let mut input = expression_builder.completed_input(
+                    ExpressionOp::Constant(id),
+                    SuccessShape::One(metadata.type_id),
+                    span.or(metadata.span),
+                    ValueMode::ImmutableOwned,
+                )?;
+                input.classification.const_record_state = metadata.const_record_state;
+                input.classification.contains_regular_division = metadata.contains_regular_division;
+                if !metadata.synthetic_interface_provenance.is_empty() {
+                    input.occurrence = Some(crate::compiler_frontend::ast::expressions::expression_store::OccurrenceFacts {
+                        provenance: metadata.synthetic_interface_provenance.clone(),
+                        diagnostic_spelling: None,
+                    });
+                }
+                expression_builder.commit_replacement(input)
+            }
+        }
     }
 }
 
@@ -186,191 +176,256 @@ fn with_const_record_declaration<T>(
         return visit(declaration);
     }
     let name = path_fork.component(*path)?;
-    visit(scope.get_reference(&name)?.as_declaration())
-}
-
-struct ConstRecordFieldFacts {
-    type_id: TypeId,
-    diagnostic_type: DataType,
-    is_const_record: bool,
+    let reference = scope.get_reference(&name)?;
+    visit(reference.ready_declaration()?)
 }
 
 fn const_record_root_and_field_path(
-    receiver_value: &Expression,
+    receiver_value: ExpressionView<'_>,
     field_name: StringId,
-) -> (&Expression, Vec<StringId>) {
+) -> (ExpressionView<'_>, Vec<StringId>) {
     let mut fields = vec![field_name];
     let mut current = receiver_value;
-    while let ExpressionKind::FieldAccess { base, field } = &current.kind {
-        fields.push(*field);
+    while let ExpressionOperationView::FieldAccess { base, field } = current.operation() {
+        fields.push(field);
         current = base;
     }
     fields.reverse();
     (current, fields)
 }
 
-fn const_record_root_and_field_path_from_place(
-    place: &PlaceExpression,
-) -> (&PathId, Vec<StringId>) {
-    let mut fields = Vec::new();
-    let mut current = place;
-    loop {
-        match &current.kind {
-            PlaceExpressionKind::Local(path) => {
-                fields.reverse();
-                return (path, fields);
-            }
-            PlaceExpressionKind::Field { base, field } => {
-                fields.push(*field);
-                current = base;
-            }
-        }
-    }
-}
-
-fn with_const_record_field<T>(
-    receiver_value: &Expression,
-    field_name: StringId,
-    scope_context: Option<&ScopeContext>,
+fn project_constant_fields(
+    mut current: ConstValueId,
+    fields: &[StringId],
+    const_values: &ConstValueStore,
     path_fork: &PathInternerFork,
-    visit: impl FnOnce(&Expression) -> T,
-) -> Option<T> {
-    let (root, fields) = const_record_root_and_field_path(receiver_value, field_name);
-    project_const_record_fields(root, &fields, scope_context, path_fork, visit)
+) -> Option<ConstValueId> {
+    for name in fields {
+        let ConstValuePayload::Record(record_fields) = const_values.payload(current)? else {
+            return None;
+        };
+        current = record_fields
+            .iter()
+            .find(|field| path_fork.component(field.name) == Some(*name))?
+            .value;
+    }
+    Some(current)
 }
 
-fn project_const_record_fields<T>(
-    current: &Expression,
+fn project_const_record_fields(
+    current: ExpressionView<'_>,
     fields: &[StringId],
     scope_context: Option<&ScopeContext>,
     path_fork: &PathInternerFork,
-    visit: impl FnOnce(&Expression) -> T,
-) -> Option<T> {
+    const_values: &ConstValueStore,
+) -> Result<Option<ProjectedField>, CompilerError> {
     if fields.is_empty() {
-        return Some(visit(current));
+        return Ok(Some(ProjectedField::Expression(current.id())));
     }
-
-    match &current.kind {
-        ExpressionKind::StructInstance(record_fields)
-        | ExpressionKind::AnonymousConstRecord {
+    match current.operation() {
+        ExpressionOperationView::Struct {
             fields: record_fields,
         } => {
-            let field_value = record_fields
+            let Some(field) = record_fields
                 .iter()
-                .find(|field| path_fork.component(field.id) == Some(fields[0]))
-                .map(|field| &field.value)?;
-            project_const_record_fields(field_value, &fields[1..], scope_context, path_fork, visit)
+                .find(|field| path_fork.component(field.name()) == Some(fields[0]))
+            else {
+                return Ok(None);
+            };
+            project_const_record_fields(
+                field.value(),
+                &fields[1..],
+                scope_context,
+                path_fork,
+                const_values,
+            )
         }
-        ExpressionKind::Reference(path) => {
-            with_const_record_declaration(path, scope_context, path_fork, |declaration| {
-                project_const_record_fields(
-                    &declaration.value,
+        ExpressionOperationView::Constant(id) => {
+            Ok(project_constant_fields(id, fields, const_values, path_fork)
+                .map(ProjectedField::Constant))
+        }
+        ExpressionOperationView::Reference(path) => {
+            let Some(value) =
+                with_const_record_declaration(&path, scope_context, path_fork, |declaration| {
+                    declaration
+                        .value
+                        .default()
+                        .map(ProjectedField::Constant)
+                        .or_else(|| {
+                            declaration
+                                .value
+                                .initializer()
+                                .map(ProjectedField::Expression)
+                        })
+                })
+            else {
+                return Ok(None);
+            };
+            match value {
+                ProjectedField::Constant(id) => {
+                    Ok(project_constant_fields(id, fields, const_values, path_fork)
+                        .map(ProjectedField::Constant))
+                }
+                ProjectedField::Expression(id) => project_const_record_fields(
+                    current.bind(id)?,
                     fields,
                     scope_context,
                     path_fork,
-                    visit,
-                )
-            })
+                    const_values,
+                ),
+            }
         }
+        _ => Ok(None),
+    }
+}
+
+fn projected_field_from_receiver(
+    receiver: ExpressionView<'_>,
+    field_name: StringId,
+    scope_context: Option<&ScopeContext>,
+    path_fork: &PathInternerFork,
+    const_values: &ConstValueStore,
+) -> Result<Option<ProjectedField>, CompilerError> {
+    let (root, fields) = const_record_root_and_field_path(receiver, field_name);
+    project_const_record_fields(root, &fields, scope_context, path_fork, const_values)
+}
+
+fn inline_projected_field(
+    field: ProjectedField,
+    template_ir_store: &Rc<RefCell<TemplateIrStore>>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &ConstValueStore,
+) -> Result<Option<ExprId>, ExpressionParseError> {
+    let is_constant = match field {
+        ProjectedField::Expression(id) => expression_is_compile_time_constant(
+            expression_builder.view(id)?,
+            template_ir_store,
+            expression_builder,
+            const_values,
+        )?,
+        ProjectedField::Constant(id) => const_values
+            .metadata(id)
+            .ok_or_else(|| CompilerError::compiler_error("projected field constant outside owner"))?
+            .value_kind
+            .is_compile_time_value(),
+    };
+    if !is_constant {
+        return Ok(None);
+    }
+    Ok(Some(
+        field
+            .materialise(expression_builder, const_values, None)?
+            .id(),
+    ))
+}
+
+fn receiver_value_expression(receiver_node: &AstNode) -> Option<ExprId> {
+    match &receiver_node.kind {
+        NodeKind::ExpressionStatement(expression) => Some(*expression),
+        NodeKind::VariableDeclaration(declaration) => declaration.value.initializer(),
         _ => None,
     }
 }
 
-fn const_record_field_facts(
-    receiver_value: &Expression,
-    field_name: StringId,
-    scope_context: Option<&ScopeContext>,
-    path_fork: &PathInternerFork,
-) -> Option<ConstRecordFieldFacts> {
-    with_const_record_field(
-        receiver_value,
-        field_name,
-        scope_context,
-        path_fork,
-        |field_value| ConstRecordFieldFacts {
-            type_id: field_value.type_id,
-            diagnostic_type: field_value.diagnostic_type.clone(),
-            is_const_record: field_value.is_const_record_value(),
-        },
-    )
+struct ConstRecordFieldFacts {
+    type_id: TypeId,
+    is_const_record: bool,
 }
 
-fn clone_const_record_field_from_receiver(
-    receiver_node: &AstNode,
-    field_name: StringId,
-    scope_context: Option<&ScopeContext>,
-    path_fork: &PathInternerFork,
-) -> Option<Expression> {
-    with_const_record_field(
-        receiver_value_expression(receiver_node)?,
-        field_name,
-        scope_context,
-        path_fork,
-        Expression::to_owned,
-    )
+fn projected_field_facts(
+    field: ProjectedField,
+    expression_builder: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
+) -> Result<ConstRecordFieldFacts, ExpressionParseError> {
+    match field {
+        ProjectedField::Expression(id) => {
+            let view = expression_builder.view(id)?;
+            Ok(ConstRecordFieldFacts {
+                type_id: view.value_type_id()?,
+                is_const_record: view.is_const_record_value(),
+            })
+        }
+        ProjectedField::Constant(id) => {
+            let metadata = const_values.metadata(id).ok_or_else(|| {
+                CompilerError::compiler_error("projected field constant outside owner")
+            })?;
+            Ok(ConstRecordFieldFacts {
+                type_id: metadata.type_id,
+                is_const_record: metadata.const_record_state == ConstRecordState::ConstRecord,
+            })
+        }
+    }
 }
 
-/// Project a field access or copied field from an explicit const-record initializer.
+/// Project an explicit const-record field without reconstructing a semantic tree.
 pub(crate) fn project_explicit_const_record_field(
-    expression: &Expression,
+    expression: OwnedExpr,
     scope_context: &ScopeContext,
     path_fork: &PathInternerFork,
-) -> Option<Expression> {
-    let (root_path, fields) = match &expression.kind {
-        ExpressionKind::FieldAccess { base, field } => {
-            let (root, fields) = const_record_root_and_field_path(base, *field);
-            let ExpressionKind::Reference(path) = &root.kind else {
-                return None;
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &ConstValueStore,
+) -> Result<Option<OwnedExpr>, ExpressionConstructionFailure> {
+    let view = expression_builder.view_owned(expression)?;
+    let (root_path, fields) = match view.operation() {
+        ExpressionOperationView::FieldAccess { base, field } => {
+            let (root, fields) = const_record_root_and_field_path(base, field);
+            let ExpressionOperationView::Reference(path) = root.operation() else {
+                return Ok(None);
             };
             (path, fields)
         }
-        ExpressionKind::Copy(place) => {
-            let PlaceExpressionKind::Field { .. } = &place.kind else {
-                return None;
-            };
-            const_record_root_and_field_path_from_place(place)
-        }
-        _ => return None,
-    };
-
-    let projected = scope_context
-        .with_explicit_constant_expression(root_path, path_fork, |constant| {
-            if !constant.is_const_record_value() {
-                return None;
+        ExpressionOperationView::Copy(place) => {
+            let mut fields = Vec::new();
+            for projection in place.projections() {
+                let PlaceProjectionView::Field { field, .. } = projection else {
+                    return Ok(None);
+                };
+                fields.push(field);
             }
-
-            project_const_record_fields(
-                constant,
-                &fields,
-                Some(scope_context),
-                path_fork,
-                |field_value| {
-                    let mut projected = field_value.to_owned();
-                    projected
-                        .synthetic_interface_provenance
-                        .merge(&constant.synthetic_interface_provenance);
-                    projected
-                },
-            )
-        })
-        .flatten()?;
-    if projected.type_id != expression.type_id {
-        return None;
+            if fields.is_empty() {
+                return Ok(None);
+            }
+            (place.metadata().root, fields)
+        }
+        _ => return Ok(None),
+    };
+    let Some(constant) = scope_context.explicit_constant_value(&root_path, path_fork, const_values)
+    else {
+        return Ok(None);
+    };
+    let Some(root_metadata) = const_values.metadata(constant) else {
+        return Ok(None);
+    };
+    if root_metadata.const_record_state != ConstRecordState::ConstRecord {
+        return Ok(None);
     }
-
-    // The projected leaf inherits aggregate dependencies from the borrowed explicit root.
-    // The evaluator separately adopts the authored field-access metadata.
-    Some(projected)
+    let Some(projected) = project_constant_fields(constant, &fields, const_values, path_fork)
+    else {
+        return Ok(None);
+    };
+    let Some(metadata) = const_values.metadata(projected) else {
+        return Ok(None);
+    };
+    if view.success_types() != [metadata.type_id] {
+        return Ok(None);
+    }
+    let provenance = metadata
+        .synthetic_interface_provenance
+        .union(&root_metadata.synthetic_interface_provenance);
+    let projected =
+        ProjectedField::Constant(projected).materialise(expression_builder, const_values, None)?;
+    Ok(Some(
+        expression_builder.with_synthetic_interface_provenance(projected, provenance)?,
+    ))
 }
 
 fn resolved_projected_field(
     field_name: StringId,
     field_type_id: TypeId,
-    diagnostic_type: DataType,
     field_value_is_const_record: bool,
     type_environment: &TypeEnvironment,
     receiver_is_const_record: bool,
-    const_inline_value: Option<Expression>,
+    const_inline_value: Option<ExprId>,
 ) -> ResolvedFieldMember {
     let field_type_is_struct = matches!(
         type_environment.get(field_type_id),
@@ -386,7 +441,6 @@ fn resolved_projected_field(
     ResolvedFieldMember {
         field_name,
         type_id: field_type_id,
-        diagnostic_type,
         value_mode: ValueMode::ImmutableOwned,
         const_record_state,
         const_inline_value,
@@ -397,7 +451,7 @@ fn resolve_field_member(
     input: FieldMemberResolution<'_>,
 ) -> Result<Option<ResolvedFieldMember>, ExpressionParseError> {
     let FieldMemberResolution {
-        receiver_node,
+        receiver_value,
         receiver_type_id,
         field_name,
         type_environment,
@@ -406,23 +460,39 @@ fn resolve_field_member(
         template_ir_store,
         scope_context,
         path_fork,
+        expression_builder,
+        const_values,
     } = input;
 
-    let projected_field = receiver_value_expression(receiver_node).and_then(|receiver| {
-        const_record_field_facts(receiver, field_name, scope_context, path_fork)
-    });
-
-    let const_inline_value = if let Some(template_ir_store) = template_ir_store {
-        const_inline_field_value(
-            receiver_node,
-            receiver_type_id,
+    let projected_field = match receiver_value {
+        Some(receiver) => projected_field_from_receiver(
+            expression_builder.view(receiver)?,
             field_name,
-            type_environment,
-            resolved_struct_fields_by_path,
-            template_ir_store,
             scope_context,
             path_fork,
-        )?
+            const_values,
+        )?,
+        None => None,
+    };
+    let projected_facts = projected_field
+        .map(|field| projected_field_facts(field, expression_builder, const_values))
+        .transpose()?;
+    let const_inline_value = if let Some(template_ir_store) = template_ir_store {
+        let candidate = projected_field.or_else(|| {
+            const_field_value(
+                receiver_type_id,
+                field_name,
+                type_environment,
+                resolved_struct_fields_by_path,
+                path_fork,
+            )
+        });
+        match candidate {
+            Some(field) => {
+                inline_projected_field(field, template_ir_store, expression_builder, const_values)?
+            }
+            None => None,
+        }
     } else {
         None
     };
@@ -430,20 +500,22 @@ fn resolve_field_member(
     if let Some(inlined_expression) = const_inline_value {
         return Ok(Some(resolved_projected_field(
             field_name,
-            inlined_expression.type_id,
-            inlined_expression.diagnostic_type.clone(),
-            inlined_expression.is_const_record_value(),
+            expression_builder
+                .view(inlined_expression)?
+                .value_type_id()?,
+            expression_builder
+                .view(inlined_expression)?
+                .is_const_record_value(),
             type_environment,
             receiver_is_const_record,
             Some(inlined_expression),
         )));
     }
 
-    if let Some(field_facts) = projected_field {
+    if let Some(field_facts) = projected_facts {
         return Ok(Some(resolved_projected_field(
             field_name,
             field_facts.type_id,
-            field_facts.diagnostic_type,
             field_facts.is_const_record,
             type_environment,
             receiver_is_const_record,
@@ -464,7 +536,7 @@ fn resolve_field_member(
             let declaration = fields
                 .iter()
                 .find(|f| path_fork.component(f.id) == Some(field_name))?;
-            Some(declaration.value.type_id)
+            Some(declaration.type_id)
         })
     else {
         return Ok(None);
@@ -479,8 +551,9 @@ fn resolve_field_member(
     );
 
     let field_value_is_const_record = const_field_value
-        .map(Expression::is_const_record_value)
-        .unwrap_or(false);
+        .map(|field| projected_field_facts(field, expression_builder, const_values))
+        .transpose()?
+        .is_some_and(|facts| facts.is_const_record);
     let field_type_is_struct = matches!(
         type_environment.get(field_type_id),
         Some(TypeDefinition::Struct(_))
@@ -498,11 +571,46 @@ fn resolve_field_member(
     Ok(Some(ResolvedFieldMember {
         field_name,
         type_id: field_type_id,
-        diagnostic_type: diagnostic_type_spelling(field_type_id, type_environment),
         value_mode: ValueMode::ImmutableOwned,
         const_record_state,
         const_inline_value: None,
     }))
+}
+/// Resolve one field member for a pending receiver whose concrete type is already known.
+///
+/// WHAT: runs the same canonical field lookup as the completed chain without a receiver value: no
+///       const-record projection is possible, while a declaration-level const field still inlines
+///       its compile-time value.
+/// WHY: member steps on a retained operand resolve against known receiver structure at the authored
+///      site, so their field facts must come from the one field-resolution owner instead of a
+///      second lookup beside it.
+pub(super) fn resolve_field_member_for_known_receiver(
+    receiver_type_id: TypeId,
+    field_name: StringId,
+    scope_context: &ScopeContext,
+    type_interner: &AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &ConstValueStore,
+    path_fork: &PathInternerFork,
+) -> Result<Option<ResolvedFieldMember>, ExpressionParseError> {
+    let template_ir_store = if scope_context.kind.is_constant_context() {
+        Some(scope_context.template_ir_store.clone())
+    } else {
+        None
+    };
+    resolve_field_member(FieldMemberResolution {
+        receiver_value: None,
+        receiver_type_id,
+        field_name,
+        type_environment: type_interner.environment(),
+        resolved_struct_fields_by_path: scope_context.resolved_struct_fields_by_path.as_deref(),
+        receiver_is_const_record: false,
+        template_ir_store: template_ir_store.as_ref(),
+        scope_context: Some(scope_context),
+        path_fork,
+        expression_builder,
+        const_values,
+    })
 }
 
 pub(super) fn parse_member_name_typed(
@@ -564,6 +672,8 @@ pub(super) fn parse_field_member_access_typed(
     token_stream: &mut AstCursor<'_>,
     context: MemberStepContext<'_>,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &ConstValueStore,
     path_fork: &PathInternerFork,
 ) -> Result<Option<AstNode>, ExpressionParseError> {
     let MemberStepContext {
@@ -574,7 +684,9 @@ pub(super) fn parse_field_member_access_typed(
         scope_context,
         ..
     } = context;
-    let receiver_is_const_record = receiver_node.expression_is_const_record_value()?;
+    let receiver_is_const_record =
+        receiver_node.expression_is_const_record_value(expression_builder)?;
+    let receiver_value = receiver_value_expression(receiver_node);
     let field = {
         let template_ir_store = if scope_context.kind.is_constant_context() {
             Some(scope_context.template_ir_store.clone())
@@ -582,7 +694,7 @@ pub(super) fn parse_field_member_access_typed(
             None
         };
         resolve_field_member(FieldMemberResolution {
-            receiver_node,
+            receiver_value,
             receiver_type_id,
             field_name: member_name,
             type_environment: type_interner.environment(),
@@ -591,6 +703,8 @@ pub(super) fn parse_field_member_access_typed(
             template_ir_store: template_ir_store.as_ref(),
             scope_context: Some(scope_context),
             path_fork,
+            expression_builder,
+            const_values,
         })?
     };
 
@@ -611,40 +725,28 @@ pub(super) fn parse_field_member_access_typed(
         .into());
     }
 
-    let result_expression = if let Some(mut inlined_expression) = field.const_inline_value {
-        inlined_expression.span = member_span;
-        inlined_expression
+    let result_expression = if let Some(inlined_expression) = field.const_inline_value {
+        let mut input = expression_builder
+            .view(inlined_expression)?
+            .to_completed_input(expression_builder)?;
+        input.span = member_span;
+        expression_builder.commit_replacement(input)?
     } else {
-        increment_ast_counter(AstCounter::PostfixReceiverNodesCopied);
-
-        let base_expression = match &receiver_node.kind {
-            NodeKind::ExpressionStatement(expression) => expression.to_owned(),
-            NodeKind::VariableDeclaration(declaration) => declaration.value.to_owned(),
-            _ => {
-                return Err(CompilerError::compiler_error(format!(
-                    "Expected expression receiver node, found {:?}",
-                    receiver_node.kind
-                ))
-                .into());
-            }
-        };
-
-        let mut expression = Expression::new(
-            ExpressionKind::FieldAccess {
-                base: Box::new(base_expression),
-                field: field.field_name,
-            },
-            member_span,
+        let base_expression = receiver_value_expression(receiver_node).ok_or_else(|| {
+            CompilerError::compiler_error("field receiver had no expression initializer")
+        })?;
+        expression_builder.field_access(
+            expression_builder.own(base_expression),
+            field.field_name,
             field.type_id,
-            field.diagnostic_type,
+            member_span,
             field.value_mode,
-        );
-        expression.const_record_state = field.const_record_state;
-        expression
+            field.const_record_state,
+        )?
     };
 
     Ok(Some(AstNode {
-        kind: NodeKind::ExpressionStatement(result_expression),
+        kind: NodeKind::ExpressionStatement(result_expression.id()),
         scope: scope_context.scope.to_owned(),
         span: member_span,
     }))

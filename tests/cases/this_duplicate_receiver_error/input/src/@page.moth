@@ -1,3 +1,11 @@
-bad |this Int, this Float|:
+First = |
+    value I32,
+|
+
+Second = |
+    value F64,
+|
+
+bad |this First, this Second|:
     return 0
 ;

@@ -1,5 +1,5 @@
 @helpers empty_values
 
-numbers {Int} = empty_values()
+numbers {I32} = empty_values()
 
 io.line([: [numbers.length()]])

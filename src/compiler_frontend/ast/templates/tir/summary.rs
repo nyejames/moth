@@ -317,6 +317,16 @@ fn accumulate_nodes(
             }
 
             TemplateIrNodeKind::AggregateOutput => {}
+
+            // A retained position completes into the shape its role names: an expression splice
+            // counts as one dynamic expression, a retained loop condition as one control-flow node.
+            TemplateIrNodeKind::RetainedNumericIntake(role) => {
+                if role.completes_into_control_flow() {
+                    summary.record_control_flow();
+                } else {
+                    summary.record_dynamic_expression();
+                }
+            }
         }
 
         visiting_nodes.remove(&node_id);

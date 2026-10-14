@@ -1,4 +1,4 @@
--- return type -> ~{64 Int} rejected
-make || -> ~{64 Int}:
+-- return type -> ~{64 I32} rejected
+make || -> ~{64 I32}:
     return {}
 ;

@@ -19,7 +19,8 @@ use crate::compiler_frontend::ast::templates::tir::{
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidTemplateSlotReason};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+
+use super::head_chain::HeadChainResolutionInputs;
 
 type SlotCompositionResult<T> = Result<T, TemplateError>;
 type StoredInsertContributionTemplates = Option<Vec<(TemplateIrId, Option<SourceSpan>)>>;
@@ -212,38 +213,47 @@ pub(super) fn rebuild_root_sequence(
 
 pub(super) fn compose_wrapper_application(
     store: &mut TemplateIrStore,
+    inputs: &HeadChainResolutionInputs,
     wrapper_reference: TemplateWrapperReference,
     layout: &TirSlotLayout,
     fill_nodes: Vec<TemplateIrNodeId>,
     fill_span: Option<SourceSpan>,
-    string_table: &StringTable,
-    allow_runtime_plans: bool,
 ) -> SlotCompositionResult<TemplateTirChildReference> {
     let routed = super::contributions::route_tir_fill_nodes_against_schema(
         store,
         &layout.schema,
         &fill_nodes,
         fill_span,
-        string_table,
+        inputs.string_table,
     )?;
 
-    let needs_runtime = allow_runtime_plans
-        && tir_contributions_need_runtime(&layout.schema, &routed, string_table, store)?;
+    let needs_runtime = inputs.allow_runtime_plans
+        && tir_contributions_need_runtime(
+            &layout.schema,
+            &routed,
+            inputs.string_table,
+            store,
+            inputs.expressions,
+            inputs.const_values,
+        )?;
     let composed_template_id = if needs_runtime {
         materialize_tir_native_runtime_slot_plan(
             store,
+            inputs.expressions,
+            inputs.const_values,
             wrapper_reference.root,
             &layout.schema,
             &routed,
-            string_table,
-            fill_span,
+            inputs.string_table,
         )?
     } else {
         let expanded_root = super::schema::expand_tir_slot_placeholders_into(
             store,
+            inputs.expressions,
+            inputs.const_values,
             wrapper_reference.root,
             &routed,
-            string_table,
+            inputs.string_table,
         )?;
         build_composed_wrapper_template(store, wrapper_reference.root, expanded_root)?
     };

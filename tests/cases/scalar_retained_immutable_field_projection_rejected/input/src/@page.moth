@@ -1,0 +1,11 @@
+Holder = |
+    items {I32},
+|
+
+make_holder |seed I32| -> Holder:
+    return Holder(items = {seed})
+;
+
+seed = 1
+holder = make_holder(seed)
+~holder.items.push(2)

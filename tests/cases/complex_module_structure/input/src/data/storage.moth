@@ -1,10 +1,10 @@
 -- Storage utility module
-save |key String, value Int|:
+save |key String, value I32|:
     io.line([: Saving [key] = [value]])
     -- In a real implementation, this would store to the collection
 ;
 
-load |key String| -> Int:
+load |key String| -> I32:
     io.line([: Loading [key]])
     -- In a real implementation, this would load from the collection
     return 42

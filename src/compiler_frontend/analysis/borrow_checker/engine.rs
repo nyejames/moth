@@ -29,6 +29,10 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::{VecDeque, hash_map::Entry};
 
+#[cfg(test)]
+#[path = "transfer/tests/invoke_edge_tests.rs"]
+mod invoke_edge_tests;
+
 pub(super) struct BorrowChecker<'a> {
     pub(super) module: &'a HirModule,
     pub(super) external_package_registry: &'a ExternalPackageRegistry,
@@ -134,6 +138,8 @@ impl<'a> BorrowChecker<'a> {
 
         let mut in_states: FxHashMap<BlockId, BorrowState> = FxHashMap::default();
         let mut out_states: FxHashMap<BlockId, BorrowState> = FxHashMap::default();
+        let mut invoke_results_by_block =
+            FxHashMap::<BlockId, Vec<(LocalId, LocalState)>>::default();
         // HIR expression rows are immutable and may be shared across blocks. Keep only the
         // latest facts for each block during fixed-point iteration, then merge those surviving
         // snapshots after the state has stabilized.
@@ -222,7 +228,8 @@ impl<'a> BorrowChecker<'a> {
             let changed_out = match out_states.get(&block_id) {
                 Some(existing) => existing != &output_state,
                 None => true,
-            };
+            } || (!block_stats.invoke_results.is_empty()
+                && invoke_results_by_block.get(&block_id) != Some(&block_stats.invoke_results));
 
             // If output state is unchanged, successor joins cannot change either.
             if !changed_out {
@@ -235,6 +242,13 @@ impl<'a> BorrowChecker<'a> {
                 }
 
                 let mut successor_input = output_state.clone();
+                apply_invoke_edge_transfer(
+                    &layout,
+                    &block.terminator,
+                    successor,
+                    &block_stats.invoke_results,
+                    &mut successor_input,
+                );
                 self.apply_jump_argument_transfer(
                     function.id,
                     &layout,
@@ -268,6 +282,9 @@ impl<'a> BorrowChecker<'a> {
             })?;
 
             out_states.insert(block_id, output_state);
+            if !block_stats.invoke_results.is_empty() {
+                invoke_results_by_block.insert(block_id, block_stats.invoke_results);
+            }
         }
 
         // A row may be observed under different final states in different blocks or functions.
@@ -374,15 +391,13 @@ impl<'a> BorrowChecker<'a> {
             let mut block_sites = Vec::new();
 
             match &block.terminator {
-                HirTerminator::Return(_)
-                | HirTerminator::ReturnSuccess(_)
-                | HirTerminator::ReturnError(_) => {
+                HirTerminator::Return(_) | HirTerminator::ReturnError(_) => {
                     block_sites.push(BorrowDropSite {
                         kind: BorrowDropSiteKind::Return,
                         locals: candidate_locals.clone(),
                     });
                 }
-                HirTerminator::FallibleBranch { .. } => {}
+                HirTerminator::Invoke { .. } => {}
                 HirTerminator::Break { .. } => {
                     block_sites.push(BorrowDropSite {
                         kind: BorrowDropSiteKind::Break,
@@ -585,5 +600,41 @@ impl<'a> BorrowChecker<'a> {
         }
 
         Ok(())
+    }
+}
+
+/// Retire both previous outcomes before installing the selected operation's captured results.
+fn apply_invoke_edge_transfer(
+    layout: &FunctionLayout,
+    terminator: &HirTerminator,
+    successor: BlockId,
+    operation_results: &[(LocalId, LocalState)],
+    edge_state: &mut BorrowState,
+) {
+    let HirTerminator::Invoke {
+        success,
+        success_results,
+        failure,
+        error_result,
+        ..
+    } = terminator
+    else {
+        return;
+    };
+    for local in success_results.iter().chain(std::iter::once(error_result)) {
+        if let Some(index) = layout.index_of(*local) {
+            edge_state.update_local_state(index, LocalState::uninit(layout.local_count()));
+        }
+    }
+    if successor == *success {
+        for (local, result) in operation_results {
+            if let Some(index) = layout.index_of(*local) {
+                edge_state.update_local_state(index, result.clone());
+            }
+        }
+    } else if successor == *failure
+        && let Some(index) = layout.index_of(*error_result)
+    {
+        edge_state.update_local_state(index, LocalState::slot(layout.local_count()));
     }
 }

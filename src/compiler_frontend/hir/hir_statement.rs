@@ -12,11 +12,13 @@
 use crate::compiler_frontend::ast::ast_nodes::{
     AstNode, LoopBindings, MultiBindTarget, MultiBindTargetKind, NodeKind, RangeLoopSpec,
 };
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-use crate::compiler_frontend::ast::expressions::expression_rpn::PlaceExpression;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    ExpressionOperationView, ExpressionStore, ExpressionView, PlaceView,
+};
+
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
-use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
+use crate::compiler_frontend::hir::expression_store::{HirConstructionFailure, HirValueRange};
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId};
@@ -49,11 +51,12 @@ impl<'a> HirBuilder<'a> {
     //      only accept nodes that materially contribute module/runtime semantics.
     pub(super) fn lower_top_level_node(
         &mut self,
+        expressions: &ExpressionStore,
         node: &AstNode,
     ) -> Result<(), HirConstructionFailure> {
         match &node.kind {
             NodeKind::Function(name, signature, body) => {
-                self.lower_function_body(name, signature, body, &node.span)
+                self.lower_function_body(expressions, name, signature, body, &node.span)
             }
 
             NodeKind::StructDefinition(_, _) => Ok(()),
@@ -86,6 +89,7 @@ impl<'a> HirBuilder<'a> {
     //      into the next function.
     pub(super) fn lower_function_body(
         &mut self,
+        expressions: &ExpressionStore,
         function_name: &PathId,
         signature: &FunctionSignature,
         body: &[AstNode],
@@ -100,7 +104,8 @@ impl<'a> HirBuilder<'a> {
         //      at end of entry start loads it as the function result.
         self.maybe_initialize_entry_fragment_accumulator(function_id, span)?;
 
-        let lower_result = self.lower_function_body_inner(function_id, signature, body, span);
+        let lower_result =
+            self.lower_function_body_inner(expressions, function_id, signature, body, span);
         self.leave_function();
 
         lower_result
@@ -108,43 +113,30 @@ impl<'a> HirBuilder<'a> {
 
     fn lower_function_body_inner(
         &mut self,
+        expressions: &ExpressionStore,
         function_id: FunctionId,
         signature: &FunctionSignature,
         body: &[AstNode],
         span: &Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
-        let return_type = self.function_by_id_or_error(function_id, span)?.return_type;
-
         self.lower_parameter_locals(function_id, signature, span)?;
-        self.lower_statement_sequence(body)?;
+        self.lower_statement_sequence(expressions, body)?;
 
         let current_block = self.current_block_id_or_error(span)?;
         if self.block_has_explicit_terminator(current_block, span)? {
             return Ok(());
         }
 
-        if self.is_unit_type(return_type) {
-            let region = self.current_region_or_error(span)?;
-            let unit = self.unit_expression(span, region)?;
-            self.emit_terminator(current_block, HirTerminator::Return(unit), span)?;
-            return Ok(());
-        }
-
-        if let Some((ok, _)) = self.type_environment.fallible_carrier_slots(return_type)
-            && signature.success_returns().is_empty()
+        if self
+            .function_by_id_or_error(function_id, span)?
+            .returns
+            .is_empty()
         {
-            let region = self.current_region_or_error(span)?;
-            let unit = self.unit_expression(span, region)?;
-            if self.module.expressions.expression(unit).ty != ok {
-                return Err(CompilerError::new(
-                    "Result function with empty success returns has non-unit ok type",
-                    self.hir_error_location(span),
-                    ErrorType::HirTransformation,
-                )
-                .into());
-            }
-
-            self.emit_terminator(current_block, HirTerminator::ReturnSuccess(unit), span)?;
+            self.emit_terminator(
+                current_block,
+                HirTerminator::Return(HirValueRange::empty()),
+                span,
+            )?;
             return Ok(());
         }
 
@@ -175,6 +167,7 @@ impl<'a> HirBuilder<'a> {
     //      the current CFG path and must not be appended.
     pub(crate) fn lower_statement_sequence(
         &mut self,
+        expressions: &ExpressionStore,
         nodes: &[AstNode],
     ) -> Result<(), HirConstructionFailure> {
         for node in nodes {
@@ -183,7 +176,7 @@ impl<'a> HirBuilder<'a> {
                 break;
             }
 
-            self.lower_statement_node(node)?;
+            self.lower_statement_node(expressions, node)?;
         }
 
         Ok(())
@@ -194,44 +187,58 @@ impl<'a> HirBuilder<'a> {
     //      mapping from AST statement kinds to explicit HIR form.
     pub(crate) fn lower_statement_node(
         &mut self,
+        expressions: &ExpressionStore,
         node: &AstNode,
     ) -> Result<(), HirConstructionFailure> {
         self.log_statement_input(node);
 
         let result = match &node.kind {
             NodeKind::VariableDeclaration(var) => {
-                self.lower_variable_declaration_statement(var, &node.span, node.span)
+                self.lower_variable_declaration_statement(expressions, var, &node.span, node.span)
             }
 
-            NodeKind::Assignment { target, value } => {
-                self.lower_assignment_statement(target, value, &node.span, node.span)
-            }
+            NodeKind::Assignment { target, value } => self.lower_assignment_statement(
+                expressions.place(*target)?,
+                expressions.view(*value)?,
+                &node.span,
+                node.span,
+            ),
 
-            NodeKind::MultiBind { targets, value } => {
-                self.lower_multi_bind_statement(targets, value, &node.span, node.span)
-            }
+            NodeKind::MultiBind { targets, value } => self.lower_multi_bind_statement(
+                targets,
+                expressions.view(*value)?,
+                &node.span,
+                node.span,
+            ),
 
             NodeKind::ExpressionStatement(expr) => {
-                self.lower_expression_statement(expr, &node.span, node.span)
+                self.lower_expression_statement(expressions.view(*expr)?, &node.span, node.span)
             }
 
-            NodeKind::Return(values) => self.lower_return_statement(values, &node.span, node.span),
+            NodeKind::Return(values) => {
+                self.lower_return_statement(expressions, values, &node.span, node.span)
+            }
 
             NodeKind::ReturnError(value) => {
-                self.lower_error_return_statement(value, &node.span, node.span)
+                self.lower_error_return_statement(expressions.view(*value)?, &node.span, node.span)
             }
 
             NodeKind::If(condition, then_body, else_body, _) => self.lower_if_statement(
-                condition,
+                expressions,
+                expressions.view(*condition)?,
                 then_body,
                 else_body.as_deref(),
                 &node.span,
                 node.span,
             ),
 
-            NodeKind::WhileLoop(condition, body) => {
-                self.lower_while_statement(condition, body, &node.span, node.span)
-            }
+            NodeKind::WhileLoop(condition, body) => self.lower_while_statement(
+                expressions,
+                expressions.view(*condition)?,
+                body,
+                &node.span,
+                node.span,
+            ),
 
             NodeKind::Break => self.lower_break_statement(&node.span, node.span),
 
@@ -243,7 +250,8 @@ impl<'a> HirBuilder<'a> {
                 default,
                 exhaustiveness,
             } => self.lower_match_statement(
-                scrutinee,
+                expressions,
+                expressions.view(*scrutinee)?,
                 arms,
                 default.as_deref(),
                 *exhaustiveness,
@@ -251,7 +259,9 @@ impl<'a> HirBuilder<'a> {
                 node.span,
             ),
 
-            NodeKind::LexicalScope { body } => self.lower_lexical_scope(body, &node.span),
+            NodeKind::LexicalScope { body } => {
+                self.lower_lexical_scope(expressions, body, &node.span)
+            }
 
             NodeKind::StructDefinition(_, _) => Ok(()),
 
@@ -259,22 +269,38 @@ impl<'a> HirBuilder<'a> {
                 bindings,
                 range,
                 body,
-            } => self.lower_range_loop_statement(bindings, range, body, &node.span, node.span),
+            } => self.lower_range_loop_statement(
+                expressions,
+                bindings,
+                range,
+                body,
+                &node.span,
+                node.span,
+            ),
 
             NodeKind::CollectionLoop {
                 bindings,
                 iterable,
                 body,
-            } => self
-                .lower_collection_loop_statement(bindings, iterable, body, &node.span, node.span),
+            } => self.lower_collection_loop_statement(
+                expressions,
+                bindings,
+                expressions.view(*iterable)?,
+                body,
+                &node.span,
+                node.span,
+            ),
 
             NodeKind::ThenValue(produced_values) => {
-                self.lower_then_value_statement(produced_values, &node.span, node.span)
+                self.lower_then_value_statement(expressions, produced_values, &node.span, node.span)
             }
 
-            NodeKind::Assert { condition, message } => {
-                self.lower_assert_statement(condition, message, &node.span, node.span)
-            }
+            NodeKind::Assert { condition, message } => self.lower_assert_statement(
+                expressions.view(*condition)?,
+                expressions.view(*message)?,
+                &node.span,
+                node.span,
+            ),
 
             NodeKind::PushStartRuntimeFragment(expr) => {
                 // WHAT: lower a top-level runtime template push into a PushRuntimeFragment HIR statement.
@@ -287,7 +313,8 @@ impl<'a> HirBuilder<'a> {
                     );
                 };
 
-                let value = self.lower_expression_value_to_current_block(expr)?;
+                let value =
+                    self.lower_expression_value_to_current_block(expressions.view(*expr)?)?;
                 self.emit_statement_kind_with_span(
                     HirStatementKind::PushRuntimeFragment { vec_local, value },
                     &node.span,
@@ -317,8 +344,8 @@ impl<'a> HirBuilder<'a> {
 
     fn lower_assignment_statement(
         &mut self,
-        target: &PlaceExpression,
-        value: &Expression,
+        target: PlaceView<'_>,
+        value: ExpressionView<'_>,
         span: &Option<SourceSpan>,
         statement_span: Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
@@ -349,13 +376,11 @@ impl<'a> HirBuilder<'a> {
     fn lower_multi_bind_statement(
         &mut self,
         targets: &[MultiBindTarget],
-        value: &Expression,
+        value: ExpressionView<'_>,
         span: &Option<SourceSpan>,
         statement_span: Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
-        // INVARIANT: AST validation guarantees the RHS is an explicitly supported multi-bind
-        // source (currently a multi-return function call). This lowering assumes that invariant
-        // and does not handle generic destructuring of arbitrary expressions.
+        // Save every RHS slot before changing existing targets, preserving swaps and aliases.
         if targets.len() < 2 {
             return_hir_transformation_error!(
                 "Single-target bind unexpectedly reached multi-bind lowering",
@@ -363,33 +388,12 @@ impl<'a> HirBuilder<'a> {
             );
         }
 
-        let rhs_value = self.lower_expression_value_to_current_block(value)?;
+        let rhs_values = self.lower_expression_results_to_current_block(value)?;
+        let success_types = value.success_types();
 
-        let rhs_type = self.module.expressions.expression(rhs_value).ty;
-        let rhs_local = self.allocate_temp_local(rhs_type, None)?;
-        // Generated tuple spill defines compiler-owned storage and stays spanless even though
-        // the RHS value itself is authored.
-        self.emit_statement_kind(
-            HirStatementKind::Write {
-                target: HirWriteTarget::DefineLocal(rhs_local),
-                value: rhs_value,
-            },
-            span,
-        )?;
-
-        let tuple_fields = match self.type_environment.tuple_field_ids(rhs_type) {
-            Some(fields) => fields.to_vec(),
-            None => {
-                return_hir_transformation_error!(
-                    "Multi-bind right-hand value lowered to a non-tuple shape",
-                    self.hir_error_location(span)
-                );
-            }
-        };
-
-        if tuple_fields.len() != targets.len() {
+        if success_types.len() != targets.len() || rhs_values.len() != targets.len() {
             return_hir_transformation_error!(
-                "Multi-bind slot arity does not match lowered tuple shape",
+                "Multi-bind slot arity does not match lowered result channels",
                 self.hir_error_location(span)
             );
         }
@@ -397,7 +401,7 @@ impl<'a> HirBuilder<'a> {
         let mut write_targets = Vec::with_capacity(targets.len());
         let mut staged_results = Vec::with_capacity(targets.len());
         for (slot_index, bind_target) in targets.iter().enumerate() {
-            let slot_type = tuple_fields[slot_index];
+            let slot_type = self.lower_type_id(success_types[slot_index], &value.span())?;
             let target_type = self.lower_type_id(bind_target.type_id, &bind_target.span)?;
 
             if slot_type != target_type {
@@ -465,23 +469,7 @@ impl<'a> HirBuilder<'a> {
             };
 
             let slot_region = self.current_region_or_error(&bind_target.span)?;
-            let tuple_value = self.make_expression(
-                &bind_target.span,
-                HirExpressionKind::Load(HirPlace::local(rhs_local)),
-                rhs_type,
-                ValueKind::RValue,
-                slot_region,
-            )?;
-            let slot_value = self.make_expression(
-                &bind_target.span,
-                HirExpressionKind::TupleGet {
-                    tuple: tuple_value,
-                    index: slot_index,
-                },
-                slot_type,
-                ValueKind::RValue,
-                slot_region,
-            )?;
+            let slot_value = rhs_values[slot_index];
 
             let staged_local = self.allocate_temp_local(slot_type, None)?;
             self.emit_statement_kind(
@@ -503,7 +491,7 @@ impl<'a> HirBuilder<'a> {
             staged_results.push(staged_value);
         }
 
-        // Evaluate every tuple slot into a fresh temporary before updating any existing target.
+        // Evaluate every result slot into a fresh temporary before updating any existing target.
         // This preserves simultaneous multi-bind reads when an earlier write aliases a later
         // result's allocation.
         for (bind_target, (target, value)) in targets
@@ -524,35 +512,31 @@ impl<'a> HirBuilder<'a> {
 
     fn lower_expression_statement(
         &mut self,
-        expression: &Expression,
+        expression: ExpressionView<'_>,
         span: &Option<SourceSpan>,
         statement_span: Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
-        let value = self.lower_expression_value_to_current_block(expression)?;
-
-        if self.is_unit_type(self.module.expressions.expression(value).ty) {
-            if matches!(
-                expression.kind,
-                ExpressionKind::HandledFallibleFunctionCall { .. }
-                    | ExpressionKind::HandledFallibleHostFunctionCall { .. }
-            ) {
-                // Authored unit-valued handled call in statement position keeps the
-                // statement span; the fallback covers identity-free statements.
-                self.emit_statement_kind_with_span(
-                    HirStatementKind::Expr(value),
-                    span,
-                    statement_span.or(expression.span),
-                )?;
-            }
-            return Ok(());
+        let values = self.lower_expression_results_to_current_block(expression)?;
+        for value in values {
+            self.emit_statement_kind_with_span(
+                HirStatementKind::Expr(value),
+                span,
+                statement_span.or(expression.span()),
+            )?;
         }
+        Ok(())
+    }
 
-        // Authored expression statement carries the statement span.
-        self.emit_statement_kind_with_span(
-            HirStatementKind::Expr(value),
-            span,
-            statement_span.or(expression.span),
-        )
+    pub(super) fn expression_constant_bool(&self, expression: ExpressionView<'_>) -> Option<bool> {
+        let ExpressionOperationView::Constant(value) = expression.operation() else {
+            return None;
+        };
+        match self.module_const_values.payload(value) {
+            Some(crate::compiler_frontend::ast::const_values::store::ConstValuePayload::Bool(
+                value,
+            )) => Some(*value),
+            _ => None,
+        }
     }
 
     // -------------------------
@@ -566,13 +550,13 @@ impl<'a> HirBuilder<'a> {
     ///      failure block that terminates with `AssertFailure`.
     fn lower_assert_statement(
         &mut self,
-        condition: &Expression,
-        message: &Expression,
+        condition: ExpressionView<'_>,
+        message: ExpressionView<'_>,
         span: &Option<SourceSpan>,
         statement_span: Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
         // Statically known false → immediate assertion failure, no pass block needed.
-        if matches!(condition.kind, ExpressionKind::Bool(false)) {
+        if self.expression_constant_bool(condition) == Some(false) {
             let message_value = self.lower_expression_value_to_current_block(message)?;
             let failure_block = self.current_block_id_or_error(span)?;
             return self.emit_terminator_with_span(
@@ -590,7 +574,7 @@ impl<'a> HirBuilder<'a> {
         }
 
         // Statically known true → no runtime effect.
-        if matches!(condition.kind, ExpressionKind::Bool(true)) {
+        if self.expression_constant_bool(condition) == Some(true) {
             return Ok(());
         }
 
@@ -614,7 +598,7 @@ impl<'a> HirBuilder<'a> {
                 else_block: failure_block,
             },
             span,
-            statement_span.or(condition.span),
+            statement_span.or(condition.span()),
         )?;
         self.log_control_flow_edge(condition_block, pass_block, "assert.true");
         self.log_control_flow_edge(condition_block, failure_block, "assert.false");
@@ -644,6 +628,7 @@ impl<'a> HirBuilder<'a> {
 
     fn lower_range_loop_statement(
         &mut self,
+        expressions: &ExpressionStore,
         bindings: &LoopBindings,
         range: &RangeLoopSpec,
         body: &[AstNode],
@@ -652,18 +637,33 @@ impl<'a> HirBuilder<'a> {
     ) -> Result<(), HirConstructionFailure> {
         // Loop lowering is intentionally split into a dedicated submodule to keep this file
         // focused on statement dispatch and shared lowering helpers.
-        self.lower_range_loop_statement_impl(bindings, range, body, span, statement_span)
+        self.lower_range_loop_statement_impl(
+            expressions,
+            bindings,
+            range,
+            body,
+            span,
+            statement_span,
+        )
     }
 
     fn lower_collection_loop_statement(
         &mut self,
+        expressions: &ExpressionStore,
         bindings: &LoopBindings,
-        iterable: &Expression,
+        iterable: ExpressionView<'_>,
         body: &[AstNode],
         span: &Option<SourceSpan>,
         statement_span: Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
-        self.lower_collection_loop_statement_impl(bindings, iterable, body, span, statement_span)
+        self.lower_collection_loop_statement_impl(
+            expressions,
+            bindings,
+            iterable,
+            body,
+            span,
+            statement_span,
+        )
     }
 
     // -------------------------

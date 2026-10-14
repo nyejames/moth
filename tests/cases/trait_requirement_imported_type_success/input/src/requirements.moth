@@ -5,7 +5,7 @@ DESCRIBE must:
 ;
 
 Badge = |
-    id Int,
+    id I32,
 |
 
 describe |this Badge, tag Label| -> String:

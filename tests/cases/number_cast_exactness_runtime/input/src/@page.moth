@@ -1,5 +1,5 @@
 integer_targets |value Dec0| -> String:
-    as_int Int = cast value catch:
+    as_int I64 = cast value catch:
         then -1
     ;
     as_i8 I8 = cast value catch:
@@ -29,31 +29,31 @@ integer_targets |value Dec0| -> String:
     return [:[as_int]/[as_i8]/[as_i16]/[as_i32]/[as_i64]/[as_u8]/[as_u16]/[as_u32]/[as_u64]]
 ;
 
-int_to_number |value Int| -> Dec0:
+int_to_number |value I64| -> Dec0:
     return cast value
 ;
 u64_to_number |value U64| -> Dec2:
     return cast value
 ;
-integer_to_number256 |value Int| -> Dec256:
+integer_to_number256 |value I64| -> Dec256:
     return cast value
 ;
 widen_to_number4 |value Dec1| -> Dec4:
     return cast value
 ;
 narrow_to_number2 |value Dec4| -> Dec2, Error!:
-    return cast! value
+    return cast value
 ;
 number_to_u64 |value Dec0| -> U64, Error!:
-    return cast! value
+    return cast value
 ;
 fraction_to_i8 |value Dec1| -> I8, Error!:
-    return cast! value
+    return cast value
 ;
-number_to_int |value Dec0| -> Int, Error!:
-    return cast! value
+number_to_int |value Dec0| -> I64, Error!:
+    return cast value
 ;
-add_float |value Float, increment Float| -> Float:
+add_float |value F64, increment F64| -> F64:
     return value + increment
 ;
 

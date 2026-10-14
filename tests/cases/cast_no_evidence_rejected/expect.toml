@@ -2,4 +2,9 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0083"]
-message_contains = ["No cast evidence exists from 'Bool' to 'Int'"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0083"
+reason = "invalid_cast.no_evidence"
+path = "input/@page.moth"
+line = 2

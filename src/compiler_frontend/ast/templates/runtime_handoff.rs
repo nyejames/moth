@@ -10,7 +10,7 @@
 //! keeps HIR independent of TIR-internal stores, views, and overlays while
 //! keeping the handoff walkers co-located with the data they traverse.
 
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression_store::ExprId;
 use crate::compiler_frontend::ast::templates::template_control_flow::{
     TemplateBranchSelector, TemplateLoopHeader,
 };
@@ -31,14 +31,12 @@ pub struct OwnedRuntimeSlotApplicationHandoff {
     pub(crate) wrapper: OwnedRuntimeTemplateNode,
     pub(crate) contribution_sources: Vec<OwnedRuntimeSlotContributionSource>,
     pub(crate) slot_sites: Vec<OwnedRuntimeSlotSite>,
-    pub(crate) span: Option<SourceSpan>,
 }
 
 /// Runtime template value materialized for a child-template boundary.
 #[derive(Clone, Debug)]
 pub struct OwnedRuntimeTemplateHandoff {
     pub(crate) body: OwnedRuntimeTemplateBody,
-    pub(crate) span: Option<SourceSpan>,
 }
 
 /// Runtime template body kind.
@@ -54,12 +52,10 @@ pub(crate) enum OwnedRuntimeTemplateBody {
 
 /// Owned runtime-template node prepared for the AST/HIR boundary.
 ///
-/// WHAT: a self-contained, recursive tree representing one runtime template
-/// fragment. No field carries a TIR store, node ID, view, overlay, or other
-/// TIR-internal value.
-/// WHY: HIR lowering consumes this shape directly; keeping it free of
-/// AST-stage identifiers lets the AST finalize and drop its TIR data before
-/// HIR runs.
+/// WHAT: a recursive render structure whose expression leaves are committed IDs
+/// in the completed AST expression owner. No field carries TIR identity.
+/// WHY: HIR consumes the render structure while borrowing the AST expressions,
+/// after the AST has dropped its construction-only TIR data.
 #[derive(Clone, Debug)]
 pub(crate) enum OwnedRuntimeTemplateNode {
     Sequence {
@@ -79,7 +75,7 @@ pub(crate) enum OwnedRuntimeTemplateNode {
     },
 
     DynamicExpression {
-        expression: Box<Expression>,
+        expression: ExprId,
         #[allow(dead_code)] // Retained for deferred source-aware handoff diagnostics.
         span: Option<SourceSpan>,
     },
@@ -168,6 +164,84 @@ pub(crate) struct OwnedRuntimeSlotSite {
     pub(crate) site: RuntimeSlotSiteId,
     pub(crate) render_root: OwnedRuntimeTemplateNode,
     pub(crate) span: Option<SourceSpan>,
+}
+
+impl OwnedRuntimeTemplateHandoff {
+    pub(crate) fn visit_expression_ids(&self, visitor: &mut dyn FnMut(ExprId)) {
+        let _ = walk_owned_runtime_template_handoff(self, &mut |node| {
+            visit_node_expression_ids(node, visitor);
+            Ok::<(), std::convert::Infallible>(())
+        });
+    }
+
+    pub(crate) fn visit_expression_ids_mut(&mut self, visitor: &mut dyn FnMut(&mut ExprId)) {
+        let _ = walk_owned_runtime_template_handoff_mut(self, &mut |node| {
+            visit_node_expression_ids_mut(node, visitor);
+            Ok::<(), std::convert::Infallible>(())
+        });
+    }
+}
+
+impl OwnedRuntimeSlotApplicationHandoff {
+    pub(crate) fn visit_expression_ids(&self, visitor: &mut dyn FnMut(ExprId)) {
+        let _ = walk_owned_runtime_slot_application_handoff(self, &mut |node| {
+            visit_node_expression_ids(node, visitor);
+            Ok::<(), std::convert::Infallible>(())
+        });
+    }
+
+    pub(crate) fn visit_expression_ids_mut(&mut self, visitor: &mut dyn FnMut(&mut ExprId)) {
+        let _ = walk_owned_runtime_slot_application_handoff_mut(self, &mut |node| {
+            visit_node_expression_ids_mut(node, visitor);
+            Ok::<(), std::convert::Infallible>(())
+        });
+    }
+}
+
+fn visit_node_expression_ids(node: &OwnedRuntimeTemplateNode, visitor: &mut dyn FnMut(ExprId)) {
+    match node {
+        OwnedRuntimeTemplateNode::DynamicExpression { expression, .. } => visitor(*expression),
+        OwnedRuntimeTemplateNode::Conditional { selector, .. } => {
+            visitor(selector.condition_expression())
+        }
+        OwnedRuntimeTemplateNode::Loop { header, .. } => match header {
+            TemplateLoopHeader::Conditional { condition } => visitor(*condition),
+            TemplateLoopHeader::Collection { iterable, .. } => visitor(*iterable),
+            TemplateLoopHeader::Range { range, .. } => {
+                visitor(range.start);
+                visitor(range.end);
+                if let Some(step) = range.step {
+                    visitor(step);
+                }
+            }
+        },
+        _ => {}
+    }
+}
+
+fn visit_node_expression_ids_mut(
+    node: &mut OwnedRuntimeTemplateNode,
+    visitor: &mut dyn FnMut(&mut ExprId),
+) {
+    match node {
+        OwnedRuntimeTemplateNode::DynamicExpression { expression, .. } => visitor(expression),
+        OwnedRuntimeTemplateNode::Conditional { selector, .. } => match selector.as_mut() {
+            TemplateBranchSelector::Bool(expression) => visitor(expression),
+            TemplateBranchSelector::OptionPresentCapture { scrutinee, .. } => visitor(scrutinee),
+        },
+        OwnedRuntimeTemplateNode::Loop { header, .. } => match header {
+            TemplateLoopHeader::Conditional { condition } => visitor(condition),
+            TemplateLoopHeader::Collection { iterable, .. } => visitor(iterable),
+            TemplateLoopHeader::Range { range, .. } => {
+                visitor(&mut range.start);
+                visitor(&mut range.end);
+                if let Some(step) = &mut range.step {
+                    visitor(step);
+                }
+            }
+        },
+        _ => {}
+    }
 }
 
 /// Walks every nested `OwnedRuntimeTemplateNode` in `handoff` and calls `callback` for each.
@@ -361,3 +435,7 @@ pub(crate) fn walk_owned_runtime_template_node_mut<E>(
 
     Ok(())
 }
+
+#[cfg(test)]
+#[path = "tests/runtime_handoff_tests.rs"]
+mod tests;

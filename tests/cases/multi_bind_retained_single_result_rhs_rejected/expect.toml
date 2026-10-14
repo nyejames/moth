@@ -1,0 +1,25 @@
+entry = "."
+
+# The protected fragment is not exactly one retained source call, so the
+# multi-bind boundary must reject the accepted retained shape before assuming a
+# call signature. The expected reason is the same structured RHS shape
+# diagnostic the completed classifier reports for a non-tuple RHS; an internal
+# CompilerError instead fails the case through the missing diagnostic contract.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0045"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0045"
+reason = "invalid_multi_bind.rhs_not_multi_value"
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0045"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0045"
+reason = "invalid_multi_bind.rhs_not_multi_value"

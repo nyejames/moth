@@ -282,10 +282,10 @@ fn is_generic_parameter_name(name: &str) -> bool {
 }
 
 fn is_reserved_generic_parameter_name(name: &str) -> bool {
-    matches!(name, "Int" | "Float" | "Bool" | "String" | "Char")
+    matches!(name, "Bool" | "String" | "Char")
         || is_reserved_builtin_symbol(name)
         // Explicit-width spellings and `Byte` are builtin type names too, so a generic parameter
-        // must not shadow them just as it must not shadow `Int`.
+        // must not shadow them.
         || FixedScalar::from_name(name).is_some()
         // The reserved `Dec` family shares the identifier-shadow reservation: any casing,
         // leading-underscore and digit-suffix spelling would shadow the builtin exact-decimal

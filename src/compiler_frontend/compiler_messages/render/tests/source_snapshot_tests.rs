@@ -1,3 +1,11 @@
+//! Rendering retained source and diagnostic identities after their producing owners end.
+
+use crate::build_system::BuildProfile;
+use crate::build_system::create_project_modules::{
+    FrontendCompilationMode, compile_project_frontend_with_inputs,
+};
+use crate::builder_surface::{BuilderSurface, PackageOrigin};
+use crate::compiler_frontend::build_config::BuildConfigInputSet;
 use crate::compiler_frontend::compiler_messages::compiler_diagnostic::CompilerDiagnostic;
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::compiler_messages::render::dev_server::render_compiler_messages_html;
@@ -8,17 +16,20 @@ use crate::compiler_frontend::compiler_messages::render::terminal::{
 };
 use crate::compiler_frontend::compiler_messages::render::terse::format_terse_diagnostic_with_context;
 use crate::compiler_frontend::compiler_messages::render::{
-    DiagnosticRenderContext, ResolvedDiagnosticLabel, primary_caret_padding,
+    DiagnosticRenderContext, ResolvedDiagnosticLabel, diagnostic_type_name, primary_caret_padding,
     primary_underline_length, resolve_label_render_facts_from_root,
 };
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticLabel, DiagnosticLabelMessage, DiagnosticLabelStyle,
+    DiagnosticLabel, DiagnosticLabelMessage, DiagnosticLabelStyle, DiagnosticPayload,
+    TypeMismatchContext,
 };
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, FrozenIdentityContext, FrozenIdentityHandle, LocalSpan, SourceDatabase,
     SourceId, SourceSpan,
 };
+use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::projects::settings::Config;
 use std::fs;
 use std::sync::Arc;
 
@@ -64,6 +75,147 @@ fn rendered_source_frame_uses_retained_snapshot_after_disk_mutation() {
     assert!(
         !rendered.contains("newer disk version"),
         "the source frame must not reread the mutated source file: {rendered}"
+    );
+}
+
+#[test]
+fn materialised_diagnostic_renders_owned_requester_and_donor_snapshots_after_service_exit() {
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let project_directory = tempfile::tempdir().expect("the project directory should exist");
+    let donor_directory = tempfile::tempdir().expect("the donor directory should exist");
+    let source_root = project_directory.path().join("src");
+    fs::create_dir_all(&source_root).expect("the requester source root should exist");
+    let requester_path = source_root.join("@page.moth");
+    let donor_path = donor_directory.path().join("@mod.moth");
+    const REQUESTER: &str = "@pkg outer\nvalue I32 = outer(1)\n";
+    const DONOR: &str = "inner type U |text String, result U| -> U:\n    return result\n;\n\
+        export:\n    outer type T |value T| -> I32:\n        return inner(value, 1)\n    ;\n;\n";
+    fs::write(&requester_path, REQUESTER).expect("the requester should be written");
+    fs::write(&donor_path, DONOR).expect("the donor should be written");
+    fs::write(
+        project_directory.path().join("config.moth"),
+        "project #= (name = \"snapshots\", entry_root = \"src\")\nhtml #= ()\n",
+    )
+    .expect("the config should be written");
+    let requester_path =
+        fs::canonicalize(requester_path).expect("the requester should canonicalise");
+    let donor_path = fs::canonicalize(donor_path).expect("the donor should canonicalise");
+
+    // Return only the report. The complete module transaction, provider preparation, caller
+    // configuration and mutable source owners end before any source or type is rendered.
+    let messages = {
+        let mut config = Config::new(project_directory.path().to_path_buf());
+        let mut strings = StringTable::new();
+        let mut surface = BuilderSurface::with_mandatory_core();
+        surface.source_packages.register_filesystem_root(
+            "pkg",
+            donor_directory.path().to_path_buf(),
+            PackageOrigin::Builder,
+        );
+        let mut source_files = None;
+        let frontend = compile_project_frontend_with_inputs(
+            &mut config,
+            BuildProfile::Dev,
+            None,
+            &StyleDirectiveRegistry::built_ins(),
+            &mut surface,
+            &mut strings,
+            &mut source_files,
+            &BuildConfigInputSet::new(),
+            FrontendCompilationMode::Canonical,
+        )
+        .expect("the generated source diagnosis should return its complete transaction");
+        assert!(frontend.has_diagnosed_or_blocked());
+        frontend
+            .into_render_messages_with_frozen_identity(&mut strings, source_files.take(), None)
+            .expect("the transaction should move its captured snapshots into the report")
+    };
+    fs::write(&requester_path, "requester disk replacement\n")
+        .expect("the requester should be replaced");
+    fs::write(&donor_path, "donor disk replacement\n").expect("the donor should be replaced");
+
+    let diagnostics = messages.diagnostics().collect::<Vec<_>>();
+    assert_eq!(diagnostics.len(), 1);
+    let diagnostic = diagnostics[0];
+    let DiagnosticPayload::TypeMismatch {
+        expected,
+        found,
+        context: mismatch_context,
+    } = &diagnostic.payload
+    else {
+        panic!("the concrete donor call must retain a typed mismatch");
+    };
+    assert_eq!(*mismatch_context, TypeMismatchContext::FunctionArgument);
+    let context = messages.diagnostic_render_context(0);
+    assert!(context.type_environment.is_some());
+    assert_eq!(diagnostic_type_name(*expected, context), "String");
+    assert_eq!(diagnostic_type_name(*found, context), "I32");
+    let primary = context
+        .primary_position(diagnostic)
+        .expect("the retained requester span should resolve");
+    assert_eq!(primary.host_path, Some(requester_path.as_path()));
+    assert_eq!(primary.line, "value I32 = outer(1)");
+    assert_eq!(primary.start.line, 1);
+    assert_eq!(diagnostic.labels.len(), 3);
+    assert_eq!(
+        diagnostic.labels[0].message,
+        Some(DiagnosticLabelMessage::GenericInstantiationBodySite)
+    );
+    assert_eq!(
+        diagnostic.labels[1].message,
+        Some(DiagnosticLabelMessage::GenericInstantiationDeclarationSite)
+    );
+    let Some(DiagnosticLabelMessage::GenericInstantiationSubstitutions { substitutions }) =
+        &diagnostic.labels[2].message
+    else {
+        panic!("the final label should retain concrete substitution provenance");
+    };
+    assert_eq!(substitutions.len(), 1);
+    assert_eq!(
+        diagnostic_type_name(substitutions[0].concrete_type_id, context),
+        "I32"
+    );
+    for (label, expected_line) in diagnostic.labels.iter().zip([
+        "        return inner(value, 1)",
+        "    outer type T |value T| -> I32:",
+    ]) {
+        let donor = context
+            .label_position(label)
+            .expect("the retained donor label should resolve in its own domain");
+        assert_eq!(donor.host_path, Some(donor_path.as_path()));
+        assert_eq!(donor.line, expected_line);
+        assert_eq!(
+            label
+                .span
+                .expect("the donor label retains its source")
+                .source(),
+            diagnostic
+                .primary_span
+                .expect("the requester retains its source")
+                .source(),
+            "colliding source IDs still resolve through their explicit provenance"
+        );
+    }
+    let rendered = render_compiler_messages_html(&messages, project_directory.path());
+    assert!(
+        rendered.contains(r#"<span class="source-line">value I32 = outer(1)</span>"#),
+        "the source frame should render the exact compiled requester line: {rendered}"
+    );
+    assert!(rendered.contains("String") && rendered.contains("I32"));
+    assert!(!rendered.contains("disk replacement"));
+    assert_eq!(rendered.matches("source-frame").count(), 1);
+    let label_facts =
+        resolve_label_render_facts_from_root(diagnostic, context, project_directory.path());
+    assert_eq!(
+        label_facts
+            .iter()
+            .map(|label| label.message.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "generic body operation failed here",
+            "generic function declared here",
+            "generic substitution: T = I32",
+        ]
     );
 }
 
@@ -767,6 +919,75 @@ fn renderers_include_related_donor_path_and_message_in_terminal_and_html() {
         html.matches("source-frame").count(),
         1,
         "secondary labels should not duplicate the primary source geometry: {html}",
+    );
+}
+
+/// A span-only secondary label is a valid structured fact (label message code 0). The shared
+/// resolver and both renderers must surface its own resolved location, and neither may append an
+/// empty message separator.
+#[test]
+fn span_only_secondary_label_surfaces_its_own_location() {
+    let temporary_directory = tempfile::tempdir().expect("should create temporary directory");
+    let mut string_table = StringTable::new();
+    let (source_database, source_id) = retained_source_database(
+        temporary_directory.path(),
+        "main.moth",
+        "base\nvalue\n",
+        &mut string_table,
+    );
+
+    let name = string_table.intern("value");
+    let diagnostic =
+        CompilerDiagnostic::unknown_value_name(name, Some(inline_span(source_id, 5, 5)))
+            .with_labels(vec![DiagnosticLabel::secondary(
+                Some(inline_span(source_id, 0, 4)),
+                None,
+            )]);
+    let context = DiagnosticRenderContext::new(&string_table)
+        .with_optional_source_database(Some(&source_database));
+
+    let label_facts =
+        resolve_label_render_facts_from_root(&diagnostic, context, temporary_directory.path());
+    assert_eq!(
+        label_facts,
+        vec![ResolvedDiagnosticLabel {
+            style: DiagnosticLabelStyle::Secondary,
+            path: Some("src/main.moth".to_owned()),
+            line: Some(1),
+            column: Some(1),
+            message: String::new(),
+        }],
+        "a span-only label must keep its resolved location with an empty message",
+    );
+
+    let terminal_labels = format_label_messages_with_context_from_root(
+        &diagnostic,
+        context,
+        temporary_directory.path(),
+    );
+    assert_eq!(
+        terminal_labels,
+        vec!["info: 1:1"],
+        "the terminal label line must show the distinct location without an empty message suffix",
+    );
+
+    let html = render_diagnostics_html_with_context(
+        std::slice::from_ref(&diagnostic),
+        temporary_directory.path(),
+        context,
+    );
+    assert!(
+        html.contains("src/main.moth:2:1"),
+        "the primary location must still render: {html}",
+    );
+    assert_eq!(
+        html.matches(r#"class="diagnostic-label""#).count(),
+        1,
+        "the span-only label must render exactly once: {html}",
+    );
+    assert!(
+        html.contains(r#"class="diagnostic-label">info: 1:1</p>"#),
+        "HTML must show the span-only label location without an empty message suffix: {html}",
     );
 }
 

@@ -4,6 +4,7 @@
 //! WHY: control-flow nodes already preserve lazy evaluation while using the same string
 //!      accumulator as ordinary template content.
 
+use crate::compiler_frontend::ast::expressions::expression_store::ExpressionView;
 use crate::compiler_frontend::ast::templates::OwnedRuntimeTemplateNode;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
@@ -22,12 +23,13 @@ impl<'a> HirBuilder<'a> {
     pub(super) fn lower_runtime_template_render_expression(
         &mut self,
         node: &OwnedRuntimeTemplateNode,
+        anchor: ExpressionView<'_>,
         span_ref: &Option<SourceSpan>,
     ) -> Result<LoweredExpression, HirConstructionFailure> {
         let accumulator = self.initialize_runtime_template_accumulator(span_ref)?;
         self.append_owned_runtime_template_node_to_accumulator(
             node,
-            RuntimeTemplateAppendContext::new(accumulator),
+            RuntimeTemplateAppendContext::new(accumulator, anchor),
             None,
             span_ref,
         )?;

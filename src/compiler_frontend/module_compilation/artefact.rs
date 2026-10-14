@@ -95,8 +95,7 @@ pub(crate) struct ModuleExecutable {
     pub(crate) resource_table: ModuleResourceTable,
     pub(crate) type_environment: TypeEnvironment,
     pub(crate) borrow_analysis: BorrowCheckReport,
-    /// Conservative bounded-integer proof facts computed from this exact validated HIR under
-    /// the boundary `NumericProfile`.
+    /// Conservative bounded-integer proof facts computed from this exact validated HIR.
     ///
     /// WHAT: statement-keyed proven-safe operation/narrowing facts paired with this executable;
     ///       the empty default table retains every runtime check.

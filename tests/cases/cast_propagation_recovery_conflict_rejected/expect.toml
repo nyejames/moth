@@ -2,4 +2,11 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0083"]
-message_contains = ['cannot also use `catch:`']
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0083"
+reason = "invalid_cast.cast_propagation_removed"
+path = "input/@page.moth"
+line = 2
+column = 21
+count = 1

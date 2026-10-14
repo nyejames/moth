@@ -1,5 +1,5 @@
 @types Box
 
-value Box of Int = Box(1)
+value Box of I32 = Box(1)
 
 [: same-module generic import [value.value]]

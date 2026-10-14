@@ -36,16 +36,16 @@ pub(crate) use syntax::*;
 pub(crate) use templates::*;
 
 use crate::compiler_frontend::compiler_messages::{
-    BorrowAccessKind, CssTemplateWarning, DeferredFeatureReason, DiagnosticOperator,
-    DiagnosticPlace, GenericApplicationErrorReason, HirCapacityResource, HtmlTemplateWarning,
-    IncompatibleChoiceComparisonReason, InvalidChoiceVariantReason, InvalidCollectionTypeReason,
-    InvalidCompileTimePathReason, InvalidConfigReason, InvalidDependencyClauseReason,
-    InvalidExpressionReason, InvalidExternalModuleReason, InvalidFallibleOperandReason,
-    InvalidGenericParameterReason, InvalidImportPathReason, InvalidMapLiteralReason,
-    InvalidMapTypeReason, InvalidMutableAccessReason, InvalidOutputFolderReason,
-    InvalidPageMetadataReason, InvalidRangeOperandReason, InvalidTemplateDirectiveReason,
-    MalformedTemplateReason, NameNamespace, NamespaceTypeValueMisuseKind, PathKind,
-    RangeOperandKind, SourceSpanCapacityResource, UnsupportedOperatorCategory,
+    AstCapacityResource, BorrowAccessKind, CapacityResource, CssTemplateWarning,
+    DeferredFeatureReason, DiagnosticOperator, DiagnosticPlace, GenericApplicationErrorReason,
+    HirCapacityResource, HtmlTemplateWarning, IncompatibleChoiceComparisonReason,
+    InvalidChoiceVariantReason, InvalidCollectionTypeReason, InvalidCompileTimePathReason,
+    InvalidConfigReason, InvalidDependencyClauseReason, InvalidExpressionReason,
+    InvalidExternalModuleReason, InvalidGenericParameterReason, InvalidImportPathReason,
+    InvalidMapLiteralReason, InvalidMapTypeReason, InvalidMutableAccessReason,
+    InvalidOutputFolderReason, InvalidPageMetadataReason, InvalidRangeOperandReason,
+    InvalidTemplateDirectiveReason, MalformedTemplateReason, NameNamespace,
+    NamespaceTypeValueMisuseKind, PathKind, RangeOperandKind, SourceSpanCapacityResource,
 };
 use crate::compiler_frontend::compiler_messages::{DiagnosticToken, TokenDescriptorPayload};
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
@@ -167,7 +167,7 @@ pub(crate) fn invalid_collection_type_message(reason: InvalidCollectionTypeReaso
         }
         InvalidCollectionTypeReason::CapacityNotInt => "Collection capacity must be an integer.",
         InvalidCollectionTypeReason::CapacityNotConstant => {
-            "Collection capacity must be a positive integer literal or the bare name of a visible compile-time `Int` constant."
+            "Collection capacity must be a positive integer literal or the bare name of a visible compile-time integer constant."
         }
         InvalidCollectionTypeReason::CapacityOverflow => "Collection capacity is too large.",
         InvalidCollectionTypeReason::InitializerExceedsFixedCapacity { .. } => {
@@ -193,7 +193,7 @@ pub(crate) fn invalid_map_type_message(
         InvalidMapTypeReason::UnsupportedKeyType { key_type } => {
             let type_name = diagnostic_type_name(key_type, context);
             format!(
-                "Map key type '{type_name}' is not supported. Builtin hashmap keys are limited to String, Int, Uint, Bool, Char, I8, I16, I32, I64, U8, U16, U32, U64, and Byte. Use a package or user-defined map type for custom key behavior."
+                "Map key type '{type_name}' is not supported. Builtin hashmap keys are limited to String, Bool, Char, I8, I16, I32, I64, U8, U16, U32, U64, and Byte. Use a package or user-defined map type for custom key behavior."
             )
         }
         InvalidMapTypeReason::ExcessiveInlineNesting { depth } => {
@@ -407,7 +407,7 @@ pub(crate) fn unsupported_operator_types_message(
         );
     }
 
-    // Fixed-width values do not implicitly mix with Int/Uint/Float or the other fixed numeric family.
+    // Fixed-width integer and binary-float values do not implicitly mix with each other.
     if (is_arithmetic_operator(operator) || is_comparison_operator(operator))
         && let Some(rhs) = rhs
         && implicitly_mixed_numeric_pair(lhs, rhs)
@@ -470,26 +470,14 @@ fn is_fixed_integer(scalar: FixedScalar) -> bool {
     )
 }
 
-fn is_fixed_numeric(scalar: FixedScalar) -> bool {
-    is_fixed_integer(scalar) || scalar.class() == FixedScalarClass::BinaryFloat
-}
-
 fn implicitly_mixed_numeric_pair(lhs: TypeId, rhs: TypeId) -> bool {
     match (diagnostic_fixed_scalar(lhs), diagnostic_fixed_scalar(rhs)) {
         (Some(left), Some(right)) => {
             (is_fixed_integer(left) && right.class() == FixedScalarClass::BinaryFloat)
                 || (left.class() == FixedScalarClass::BinaryFloat && is_fixed_integer(right))
         }
-        (Some(scalar), None) => is_fixed_numeric(scalar) && is_profile_numeric(rhs),
-        (None, Some(scalar)) => is_fixed_numeric(scalar) && is_profile_numeric(lhs),
-        (None, None) => false,
+        (Some(_), None) | (None, Some(_)) | (None, None) => false,
     }
-}
-
-fn is_profile_numeric(type_id: TypeId) -> bool {
-    type_id == builtin_type_ids::INT
-        || type_id == builtin_type_ids::UINT
-        || type_id == builtin_type_ids::FLOAT
 }
 
 fn generic_parameter_operator_message(
@@ -542,24 +530,6 @@ fn generic_parameter_name(type_id: TypeId, context: DiagnosticRenderContext<'_>)
     }
 }
 
-pub(crate) fn invalid_fallible_operand_message(
-    reason: InvalidFallibleOperandReason,
-    category: UnsupportedOperatorCategory,
-    operand_type: TypeId,
-    context: DiagnosticRenderContext<'_>,
-) -> String {
-    let category_name = unsupported_operator_category_name(category);
-    let type_name = diagnostic_type_name(operand_type, context);
-
-    match reason {
-        InvalidFallibleOperandReason::FallibleValueNotHandled => {
-            format!(
-                "{category_name} operator cannot use a fallible value that has not been handled. Use postfix `!` in a compatible fallible function or recover with `catch` before applying the operator (found '{type_name}')."
-            )
-        }
-    }
-}
-
 fn namespace_name(namespace: NameNamespace) -> &'static str {
     match namespace {
         NameNamespace::Value => "value",
@@ -571,17 +541,6 @@ fn namespace_name(namespace: NameNamespace) -> &'static str {
         NameNamespace::Method => "method",
         NameNamespace::TemplateSlot => "template slot",
         NameNamespace::ConfigKey => "config key",
-    }
-}
-
-fn unsupported_operator_category_name(category: UnsupportedOperatorCategory) -> &'static str {
-    match category {
-        UnsupportedOperatorCategory::Arithmetic => "arithmetic",
-        UnsupportedOperatorCategory::Comparison => "comparison",
-        UnsupportedOperatorCategory::Range => "range",
-        UnsupportedOperatorCategory::Logical => "logical",
-        UnsupportedOperatorCategory::Unary => "unary",
-        UnsupportedOperatorCategory::Other => "this",
     }
 }
 
@@ -774,11 +733,11 @@ pub(crate) fn invalid_range_operand_message(
     match reason {
         InvalidRangeOperandReason::NotNumeric => {
             format!(
-                "Range {operand_name} must be numeric (Int, Uint or Float). Found '{type_name}'"
+                "Range {operand_name} must be an integer or binary-float type. Found '{type_name}'"
             )
         }
         InvalidRangeOperandReason::IncompatibleDomain => format!(
-            "Range {operand_name} type '{type_name}' has no shared numeric domain with the other range operands. Uint or Int bounds and steps do not mix unless a Float operand selects Float, and explicit-width types stay in their own family. Convert the operand explicitly with `cast` at a typed declaration."
+            "Range {operand_name} type '{type_name}' has no shared numeric domain with the other range operands. Integer and binary-float operands do not mix, and integer operands need one type that holds every operand's range. Convert the operand explicitly with `cast` at a typed declaration."
         ),
     }
 }

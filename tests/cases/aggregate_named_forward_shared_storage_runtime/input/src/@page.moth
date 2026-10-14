@@ -1,0 +1,22 @@
+-- Shared storage: the U64 initializer element and the later independent U64 receivers
+-- keep their width while the joined collection reads the same forwarded values.
+
+read_u64 |value U64| -> U64:
+    return value
+;
+
+render || -> String, Error!:
+    values = {4294967295}
+    left = 4_294_967_296
+    right = 1
+    joined = {values.get(0)!, left + right}
+    left_text String = cast read_u64(left)
+    right_text String = cast read_u64(right)
+    first = values.get(0)!
+    second = joined.get(1)!
+    total = first + second
+    return [:named_forward_shared left=[left_text] right=[right_text] first=[first] second=[second] total=[total]]
+;
+
+text = render() catch then "failed"
+[:[text]]

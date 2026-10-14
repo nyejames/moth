@@ -11,6 +11,8 @@ mod sites;
 mod sources;
 mod types;
 
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrStore, TemplateSlotPlan, TirCopyState, TirSlotContributions, TirSlotSchema,
@@ -19,7 +21,6 @@ use crate::compiler_frontend::ast::templates::tir::{
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
-use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 pub(in crate::compiler_frontend::ast::templates) use sources::tir_contributions_need_runtime;
@@ -38,11 +39,12 @@ pub(crate) use types::{RuntimeSlotContributionSourceId, RuntimeSlotSiteId};
 ///      skipped conditional or zero-iteration contributions.
 pub(in crate::compiler_frontend::ast::templates) fn materialize_tir_native_runtime_slot_plan(
     store: &mut TemplateIrStore,
+    expressions: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
     wrapper_template_id: crate::compiler_frontend::ast::templates::tir::TemplateIrId,
     schema: &TirSlotSchema,
     routed: &TirSlotContributions,
     string_table: &StringTable,
-    span: Option<SourceSpan>,
 ) -> Result<crate::compiler_frontend::ast::templates::tir::TemplateIrId, TemplateError> {
     let wrapper_root = store
         .get_template(wrapper_template_id)
@@ -71,6 +73,8 @@ pub(in crate::compiler_frontend::ast::templates) fn materialize_tir_native_runti
         routed,
         string_table,
         store,
+        expressions,
+        const_values,
         &mut copy_state,
     )?;
 
@@ -83,7 +87,6 @@ pub(in crate::compiler_frontend::ast::templates) fn materialize_tir_native_runti
     )?;
 
     let slot_plan = TemplateSlotPlan {
-        span,
         contribution_sources: sources.into_iter().map(|source| source.source).collect(),
         slot_sites,
     };

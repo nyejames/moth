@@ -78,7 +78,7 @@ fn unknown_key_renders_authored_key() {
 fn config_input_string_mismatch_suggests_quoting() {
     let mut string_table = StringTable::new();
     let key = string_table.intern("version");
-    let provided = string_table.intern("Int");
+    let provided = string_table.intern("I32");
     let expected = string_table.intern("String");
     let message = invalid_config_message(
         Some(key),

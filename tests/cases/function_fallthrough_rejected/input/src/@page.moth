@@ -1,5 +1,5 @@
 -- non-unit function with no explicit return must be rejected during AST emission
 
-returns_int || -> Int:
+returns_int || -> I32:
     io.line("fallthrough")
 ;

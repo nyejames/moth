@@ -6,22 +6,54 @@
 use super::*;
 use crate::compiler_frontend::ast::Ast;
 use crate::compiler_frontend::ast::ast_nodes::RangeEndKind;
+use crate::compiler_frontend::ast::const_values::ConstValuePayload;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    ExprId, ExpressionOperationView, ExpressionView,
+};
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidLoopHeaderReason, InvalidRangeOperandReason, RangeOperandKind,
     ReservedNameOwner, TypeMismatchContext,
 };
 use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId};
 use crate::compiler_frontend::tests::ast_fixture_support::function_body_by_name;
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
 use crate::compiler_frontend::tokenizer::tokens::{TestSourceTokensBuilder, TokenTag};
-use moth_lexical::numeric::fixed_scalar::FixedScalar;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use std::sync::Arc;
+
+#[test]
+fn rejects_non_single_loop_sources_and_range_operands() {
+    let producers = "pair || -> I32, I32:\nreturn 1, 2\n;\nempty ||:\nreturn\n;\n";
+    for (header, produced_count) in [
+        ("pair()", 2),
+        ("empty()", 0),
+        ("pair() |item|", 2),
+        ("empty() |item|", 0),
+        ("0 to pair()", 2),
+        ("0 to empty()", 0),
+        ("pair() to 5", 2),
+        ("empty() to 5", 0),
+        ("0 to 5 by pair()", 2),
+        ("0 to 5 by empty()", 0),
+    ] {
+        let source = format!("{producers}loop {header}:\n;\n");
+        let diagnostic = parse_single_file_ast_diagnostic(&source);
+        assert!(matches!(
+            &diagnostic.payload,
+            DiagnosticPayload::InvalidValueReceiver {
+                target_count: 1,
+                produced_count: actual,
+                ..
+            } if *actual == produced_count
+        ));
+    }
+}
 
 #[test]
 fn malformed_loop_header_payload_stays_infrastructure_error_while_scanning_for_colon() {
@@ -105,6 +137,31 @@ fn loop_function_body<'a>(
     function_body_by_name(ast, path_fork, string_table, "loop_test")
 }
 
+/// Returns the stored view of a parsed loop-header expression.
+fn expression_view(ast: &Ast, id: ExprId) -> ExpressionView<'_> {
+    ast.expressions
+        .view(id)
+        .expect("parsed loop expression should be stored")
+}
+
+/// Returns the single value type of a parsed loop-header expression.
+fn expression_type_id(ast: &Ast, id: ExprId) -> TypeId {
+    expression_view(ast, id)
+        .value_type_id()
+        .expect("parsed loop expression should produce one value")
+}
+
+/// Returns the fixed-scalar value of a parsed loop-header literal, or `None` for other expressions.
+fn fixed_scalar_constant(ast: &Ast, id: ExprId) -> Option<FixedScalarValue> {
+    let ExpressionOperationView::Constant(constant) = expression_view(ast, id).operation() else {
+        return None;
+    };
+    match ast.const_values.payload(constant)? {
+        ConstValuePayload::FixedScalar(value) => Some(*value),
+        _ => None,
+    }
+}
+
 // --------------------------
 //  Conditional loops
 // --------------------------
@@ -120,7 +177,7 @@ fn parses_conditional_loop_without_bindings() {
         panic!("expected conditional loop in function body");
     };
 
-    assert!(matches!(condition.diagnostic_type, DataType::Bool));
+    assert_eq!(expression_type_id(&ast, *condition), builtin_type_ids::BOOL);
     assert_eq!(loop_body.len(), 1);
     assert!(matches!(loop_body[0].kind, NodeKind::Assignment { .. }));
 }
@@ -153,11 +210,20 @@ fn parses_range_loop_with_pipe_binding() {
     );
     assert!(bindings.index.is_none());
     assert_eq!(range.end_kind, RangeEndKind::Inclusive);
-    assert!(matches!(range.start.kind, ExpressionKind::Int(1)));
-    assert!(matches!(range.end.kind, ExpressionKind::Int(5)));
     assert!(matches!(
-        range.step.as_ref().map(|expr| &expr.kind),
-        Some(ExpressionKind::Int(2))
+        fixed_scalar_constant(&ast, range.start),
+        Some(value)
+            if value.scalar() == FixedScalar::I32 && value.as_i64() == Some(1)
+    ));
+    assert!(matches!(
+        fixed_scalar_constant(&ast, range.end),
+        Some(value)
+            if value.scalar() == FixedScalar::I32 && value.as_i64() == Some(5)
+    ));
+    assert!(matches!(
+        range.step.and_then(|step| fixed_scalar_constant(&ast, step)),
+        Some(value)
+            if value.scalar() == FixedScalar::I32 && value.as_i64() == Some(2)
     ));
     assert_eq!(loop_body.len(), 1);
 }
@@ -188,7 +254,7 @@ fn parses_range_loop_with_value_and_index_bindings() {
 }
 
 #[test]
-fn range_index_binding_has_int_type() {
+fn range_index_binding_has_i32_type() {
     let (ast, path_fork, string_table) =
         parse_loop_fixture("sum ~= 0\nloop 0 to 4 |value, index|:\n    sum = sum + value\n;");
     let body = loop_function_body(&ast, &path_fork, &string_table);
@@ -201,8 +267,8 @@ fn range_index_binding_has_int_type() {
         bindings
             .index
             .as_ref()
-            .map(|binding| &binding.value.diagnostic_type),
-        Some(DataType::Int)
+            .map(|binding| &binding.diagnostic_type),
+        Some(DataType::FixedScalar(FixedScalar::I32))
     ));
 }
 
@@ -223,29 +289,26 @@ fn range_item_type_uses_canonical_fixed_integer_promotion() {
 
     assert!(bindings.item.as_ref().is_some_and(|binding| {
         matches!(
-            &binding.value.diagnostic_type,
+            &binding.diagnostic_type,
             DataType::FixedScalar(FixedScalar::I32)
         )
     }));
-    assert!(
-        bindings
-            .index
-            .as_ref()
-            .is_some_and(|binding| { matches!(&binding.value.diagnostic_type, DataType::Int) })
-    );
-    assert!(matches!(
-        &range.start.diagnostic_type,
-        DataType::FixedScalar(FixedScalar::I8)
-    ));
-    assert!(matches!(
-        &range.end.diagnostic_type,
-        DataType::FixedScalar(FixedScalar::U16)
-    ));
-    assert!(range.step.as_ref().is_some_and(|step| {
+    assert!(bindings.index.as_ref().is_some_and(|binding| {
         matches!(
-            &step.diagnostic_type,
-            DataType::FixedScalar(FixedScalar::U16)
+            &binding.diagnostic_type,
+            DataType::FixedScalar(FixedScalar::I32)
         )
+    }));
+    assert_eq!(
+        expression_type_id(&ast, range.start),
+        builtin_type_ids::fixed_scalar(FixedScalar::I8)
+    );
+    assert_eq!(
+        expression_type_id(&ast, range.end),
+        builtin_type_ids::fixed_scalar(FixedScalar::U16)
+    );
+    assert!(range.step.as_ref().is_some_and(|step| {
+        expression_type_id(&ast, *step) == builtin_type_ids::fixed_scalar(FixedScalar::U16)
     }));
 }
 
@@ -263,7 +326,7 @@ fn range_item_type_promotes_mixed_i32_u32_to_i64() {
 
     assert!(bindings.item.as_ref().is_some_and(|binding| {
         matches!(
-            &binding.value.diagnostic_type,
+            &binding.diagnostic_type,
             DataType::FixedScalar(FixedScalar::I64)
         )
     }));
@@ -285,22 +348,22 @@ fn omitted_range_start_zero_uses_promoted_fixed_domain() {
     };
 
     assert!(matches!(
-        range.start.kind,
-        ExpressionKind::FixedScalar(value)
+        fixed_scalar_constant(&ast, range.start),
+        Some(value)
             if value.scalar() == FixedScalar::U64 && value.as_u64() == Some(0)
     ));
     assert!(bindings.item.as_ref().is_some_and(|binding| {
         matches!(
-            &binding.value.diagnostic_type,
+            &binding.diagnostic_type,
             DataType::FixedScalar(FixedScalar::U64)
         )
     }));
-    assert!(
-        bindings
-            .index
-            .as_ref()
-            .is_some_and(|binding| { matches!(&binding.value.diagnostic_type, DataType::Int) })
-    );
+    assert!(bindings.index.as_ref().is_some_and(|binding| {
+        matches!(
+            &binding.diagnostic_type,
+            DataType::FixedScalar(FixedScalar::I32)
+        )
+    }));
 }
 
 #[test]
@@ -319,14 +382,16 @@ fn omitted_range_zero_keeps_endpoint_type_before_step_promotion() {
     };
 
     assert!(matches!(
-        range.start.kind,
-        ExpressionKind::FixedScalar(value)
+        fixed_scalar_constant(&ast, range.start),
+        Some(value)
             if value.scalar() == FixedScalar::U16 && value.as_u64() == Some(0)
     ));
+    // D15: the `U16` endpoint and `I8` step mix selects the smallest signed type that contains
+    // both complete ranges, so the counter domain is `I32` without a minimum-width floor.
     assert!(bindings.item.as_ref().is_some_and(|binding| {
         matches!(
-            &binding.value.diagnostic_type,
-            DataType::FixedScalar(FixedScalar::I64)
+            &binding.diagnostic_type,
+            DataType::FixedScalar(FixedScalar::I32)
         )
     }));
 }
@@ -345,7 +410,7 @@ fn range_item_type_promotes_f16_with_explicit_step_to_f32() {
 
     assert!(bindings.item.as_ref().is_some_and(|binding| {
         matches!(
-            &binding.value.diagnostic_type,
+            &binding.diagnostic_type,
             DataType::FixedScalar(FixedScalar::F32)
         )
     }));
@@ -393,16 +458,19 @@ fn range_domain_failure(
 
 #[test]
 fn range_step_that_breaks_compatible_bounds_is_blamed_on_the_step() {
-    let uint_bounds_int_step = range_domain_failure(
-        "lo Uint = 0\nhi Uint = 10\nstep Int = 1\n\
+    // The bounds agree on their own (`U64`/`U64` and `I64`/`I64`); the explicit step's complete
+    // range has no common fixed-integer type with them (`U64` with a signed type needs 65 bits),
+    // so the step is the blamed operand regardless of the authored signed/unsigned direction.
+    let u64_bounds_i64_step = range_domain_failure(
+        "lo U64 = 0\nhi U64 = 10\nstep I64 = 1\n\
          loop lo to hi by step |value|:\n    io.line([: [value]])\n;",
     );
-    let int_bounds_u8_step = range_domain_failure(
-        "lo Int = 0\nhi Int = 10\nstep U8 = 1\n\
+    let i64_bounds_u64_step = range_domain_failure(
+        "lo I64 = 0\nhi I64 = 10\nstep U64 = 1\n\
          loop lo to hi by step |value|:\n    io.line([: [value]])\n;",
     );
 
-    for result in [uint_bounds_int_step, int_bounds_u8_step] {
+    for result in [u64_bounds_i64_step, i64_bounds_u64_step] {
         assert_eq!(
             result,
             (
@@ -415,13 +483,13 @@ fn range_step_that_breaks_compatible_bounds_is_blamed_on_the_step() {
 }
 
 #[test]
-fn incompatible_range_bounds_without_float_step_are_blamed_on_the_bounds() {
+fn incompatible_range_bounds_are_blamed_on_the_bounds() {
     let unstepped = range_domain_failure(
-        "lo Uint = 0\nhi Int = 10\nloop lo to hi |value|:\n    io.line([: [value]])\n;",
+        "lo U64 = 0\nhi I64 = 10\nloop lo to hi |value|:\n    io.line([: [value]])\n;",
     );
-    // The Uint step matches the start, so only the bounds disagree.
+    // The U64 step matches the start, so only the bounds disagree.
     let stepped = range_domain_failure(
-        "lo Uint = 0\nhi Int = 10\nstep Uint = 1\n\
+        "lo U64 = 0\nhi I64 = 10\nstep U64 = 1\n\
          loop lo to hi by step |value|:\n    io.line([: [value]])\n;",
     );
 
@@ -438,24 +506,49 @@ fn incompatible_range_bounds_without_float_step_are_blamed_on_the_bounds() {
 }
 
 #[test]
-fn float_step_selects_float_for_mixed_uint_and_int_bounds_in_either_order() {
-    for (start_type, end_type) in [("Uint", "Int"), ("Int", "Uint")] {
+fn float_step_selects_wider_precision_for_mixed_float_bounds_in_either_order() {
+    // D15: fixed integers and binary floats require an explicit conversion to mix, so a range
+    // header combines operands within one family. A float step therefore selects the wider
+    // *float* precision when the bounds already use mixed float precisions, and the selected
+    // counter domain does not depend on the bounds' authored order.
+    for (start_type, end_type) in [("F16", "F32"), ("F32", "F16")] {
         let (ast, path_fork, string_table) = parse_loop_fixture(&format!(
-            "lo {start_type} = 0\nhi {end_type} = 3\nstep Float = 0.5\n\
+            "lo {start_type} = 0.0\nhi {end_type} = 3.0\nstep F16 = 0.5\n\
              loop lo to hi by step |value|:\n    io.line([: [value]])\n;"
         ));
         let body = loop_function_body(&ast, &path_fork, &string_table);
         let NodeKind::RangeLoop { bindings, .. } = &body[3].kind else {
-            panic!("expected a Float range loop for {start_type}/{end_type} bounds");
+            panic!("expected an F32 range loop for {start_type}/{end_type} bounds");
         };
-        assert!(
-            bindings
-                .item
-                .as_ref()
-                .is_some_and(|binding| matches!(binding.value.diagnostic_type, DataType::Float)),
-            "{start_type}/{end_type} bounds with a Float step must iterate as Float"
+        let item_type = bindings
+            .item
+            .as_ref()
+            .map(|binding| binding.diagnostic_type.to_owned());
+        assert_eq!(
+            item_type,
+            Some(DataType::FixedScalar(FixedScalar::F32)),
+            "{start_type}/{end_type} bounds must iterate at the wider F32 precision"
         );
     }
+}
+
+#[test]
+fn rejects_binary_float_step_for_integer_bounds_without_conversion() {
+    // The header's operands must share one family, so an integer bound set cannot take a
+    // binary-float step without an explicit conversion and the incompatible step is blamed.
+    let payload = parse_loop_fixture_diagnostic(
+        "lo I32 = 0\nhi I32 = 3\nstep F32 = 0.5\n\
+         loop lo to hi by step |value|:\n    io.line([: [value]])\n;",
+    );
+
+    assert!(matches!(
+        payload,
+        DiagnosticPayload::InvalidRangeOperand {
+            operand: RangeOperandKind::Step,
+            reason: InvalidRangeOperandReason::IncompatibleDomain,
+            ..
+        }
+    ));
 }
 
 #[test]
@@ -500,8 +593,14 @@ fn parses_collection_loop_with_pipe_item_binding() {
         Some("item")
     );
     assert!(bindings.index.is_none());
-    assert!(matches!(iterable.kind, ExpressionKind::Reference(_)));
-    assert!(iterable.diagnostic_type.is_collection());
+    assert!(matches!(
+        expression_view(&ast, *iterable).operation(),
+        ExpressionOperationView::Reference(_)
+    ));
+    assert!(
+        ast.type_environment
+            .is_collection(expression_type_id(&ast, *iterable))
+    );
     assert_eq!(loop_body.len(), 1);
 }
 
@@ -532,7 +631,7 @@ fn parses_collection_loop_with_item_and_index_pipe_bindings() {
 }
 
 #[test]
-fn collection_index_binding_has_int_type() {
+fn collection_index_binding_has_i32_type() {
     let (ast, path_fork, string_table) = parse_loop_fixture(
         "items = {1, 2, 3}\nloop items |item, index|:\n    io.line([: [item]])\n;",
     );
@@ -546,8 +645,8 @@ fn collection_index_binding_has_int_type() {
         bindings
             .index
             .as_ref()
-            .map(|binding| &binding.value.diagnostic_type),
-        Some(DataType::Int)
+            .map(|binding| &binding.diagnostic_type),
+        Some(DataType::FixedScalar(FixedScalar::I32))
     ));
 }
 
@@ -729,6 +828,19 @@ fn rejects_loop_binding_shadowing_existing_name() {
 }
 
 #[test]
+fn rejects_loop_binding_shadowing_visible_source_declaration() {
+    let diagnostic = parse_single_file_ast_diagnostic(
+        "source_value || -> I32:\n    return 1\n;\nloop 0 to 2 |source_value|:\n;\n",
+    );
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::InvalidLoopHeader {
+            reason: InvalidLoopHeaderReason::BindingAlreadyDeclared,
+        }
+    ));
+}
+
+#[test]
 fn rejects_keyword_shadow_loop_binding_names() {
     let payload = parse_loop_fixture_diagnostic(
         "items = {1, 2, 3}\nloop items |_if|:\n    io.line([: [items]])\n;",
@@ -802,9 +914,17 @@ fn parses_omitted_start_exclusive_range_loop() {
         panic!("expected range loop in function body");
     };
 
-    assert!(matches!(range.start.kind, ExpressionKind::Int(0)));
+    assert!(matches!(
+        fixed_scalar_constant(&ast, range.start),
+        Some(value)
+            if value.scalar() == FixedScalar::I32 && value.as_i64() == Some(0)
+    ));
     assert_eq!(range.end_kind, RangeEndKind::Exclusive);
-    assert!(matches!(range.end.kind, ExpressionKind::Int(5)));
+    assert!(matches!(
+        fixed_scalar_constant(&ast, range.end),
+        Some(value)
+            if value.scalar() == FixedScalar::I32 && value.as_i64() == Some(5)
+    ));
 }
 
 #[test]
@@ -818,9 +938,17 @@ fn parses_omitted_start_inclusive_range_loop() {
         panic!("expected range loop in function body");
     };
 
-    assert!(matches!(range.start.kind, ExpressionKind::Int(0)));
+    assert!(matches!(
+        fixed_scalar_constant(&ast, range.start),
+        Some(value)
+            if value.scalar() == FixedScalar::I32 && value.as_i64() == Some(0)
+    ));
     assert_eq!(range.end_kind, RangeEndKind::Inclusive);
-    assert!(matches!(range.end.kind, ExpressionKind::Int(5)));
+    assert!(matches!(
+        fixed_scalar_constant(&ast, range.end),
+        Some(value)
+            if value.scalar() == FixedScalar::I32 && value.as_i64() == Some(5)
+    ));
 }
 
 #[test]

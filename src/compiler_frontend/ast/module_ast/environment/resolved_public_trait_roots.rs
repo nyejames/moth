@@ -275,7 +275,7 @@ fn build_trait_requirement_fact(
         .iter()
         .map(|parameter| ResolvedTraitParameterFact {
             name: parameter.name,
-            value_mode: parameter.value_mode.clone(),
+            value_mode: parameter.value_mode,
             type_id: parameter.type_id,
         })
         .collect();

@@ -1,0 +1,12 @@
+entry = "."
+
+# HTML-only by design: this fixture asserts exact runtime values through the retained optional,
+# iteration and independent-member completion paths. Checked U64 arithmetic is a recoverable
+# numeric failure under the Wasm capability validation and typed runnable `Error!` recovery has
+# no observed Wasm success fixture, so only the backend whose output is asserted is declared
+# rather than pinning an unobserved Wasm disposition.
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "scalar retained optional present=7 absent=none grouped=15 projected=19 optional=8/none bang=2 items=0=4;1=6;2=9;"

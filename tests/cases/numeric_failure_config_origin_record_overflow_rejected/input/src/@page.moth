@@ -1,5 +1,5 @@
 @facade counts
 
-overflow || -> Int, Error!:
+overflow || -> I32, Error!:
     return counts.maximum + 1
 ;

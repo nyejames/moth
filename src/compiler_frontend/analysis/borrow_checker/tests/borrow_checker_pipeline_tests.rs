@@ -5,18 +5,20 @@
 
 use crate::compiler_frontend::CompilerFrontend;
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::compiler_messages::{BorrowDiagnosticKind, DiagnosticKind};
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::module_compilation::artefact::{
     ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts,
 };
 use crate::compiler_frontend::module_compilation::{FrontendOptions, Module, ModuleRootActivity};
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
-use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceDatabase};
+use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceDatabase, SourceSpan};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
@@ -30,12 +32,34 @@ use crate::compiler_frontend::tests::type_id_fixture_support::build_ast_with_reg
 use std::sync::Arc;
 
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+
+fn i32_expression(
+    builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    value: i64,
+    span: Option<SourceSpan>,
+    mode: ValueMode,
+) -> ExprId {
+    builder
+        .fixed_scalar(
+            const_values,
+            FixedScalarValue::signed(FixedScalar::I32, value).expect("I32 literal in range"),
+            span,
+            mode,
+        )
+        .expect("fixture scalar fits store")
+        .id()
+}
 
 #[test]
 fn frontend_check_borrows_propagates_failures() {
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let type_environment = TypeEnvironment::new();
 
     let x = symbol("x", &mut path_fork, &mut string_table);
     let y = symbol("y", &mut path_fork, &mut string_table);
@@ -51,21 +75,22 @@ fn frontend_check_borrows_propagates_failures() {
         node(
             NodeKind::VariableDeclaration(make_test_variable(
                 x,
-                Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
+                i32_expression(&mut builder, &mut const_values, 1, test_source_location(1), ValueMode::MutableOwned),
+                &builder,
             )),
             test_source_location(1),
         ),
         node(
             NodeKind::VariableDeclaration(make_test_variable(
                 y,
-                Expression::reference_with_type_id(
+                builder.reference_with_type_id(
                     x,
-                    DataType::Int,
-                    builtin_type_ids::INT,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     test_source_location(2),
                     ValueMode::MutableReference,
                     crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
-                ),
+                ).expect("fixture reference fits store").id(),
+                &builder,
             )),
             test_source_location(2),
         ),
@@ -73,11 +98,13 @@ fn frontend_check_borrows_propagates_failures() {
             NodeKind::VariableDeclaration(make_test_variable(
                 z,
                 reference_expr_with_datatype(
+                    &mut builder,
                     x,
-                    DataType::Int,
-                    builtin_type_ids::INT,
+                    DataType::FixedScalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     test_source_location(3),
                 ),
+                &builder,
             )),
             test_source_location(3),
         ),
@@ -85,15 +112,22 @@ fn frontend_check_borrows_propagates_failures() {
     None,
 );
 
+    let external_package_registry =
+        Arc::new(crate::compiler_frontend::external_packages::ExternalPackageRegistry::new());
     let hir = lower_hir(
-        build_ast_with_registered_types(vec![start_fn], entry_path),
+        build_ast_with_registered_types(
+            vec![start_fn],
+            entry_path,
+            builder,
+            const_values,
+            type_environment,
+        ),
         &mut string_table,
         &mut path_fork,
+        &external_package_registry,
     );
 
     let style_directives = StyleDirectiveRegistry::built_ins();
-    let external_package_registry =
-        Arc::new(crate::compiler_frontend::external_packages::ExternalPackageRegistry::new());
     let source_files = Arc::new(SourceDatabase::empty());
     let mut frontend = CompilerFrontend::new(
         FrontendOptions::default(),
@@ -133,6 +167,9 @@ fn successful_borrow_report_can_be_stored_on_module() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let type_environment = TypeEnvironment::new();
 
     let counter = symbol("counter", &mut path_fork, &mut string_table);
 
@@ -146,19 +183,33 @@ fn successful_borrow_report_can_be_stored_on_module() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     counter,
-                    Expression::int(0, test_source_location(1), ValueMode::MutableOwned),
+                    i32_expression(
+                        &mut builder,
+                        &mut const_values,
+                        0,
+                        test_source_location(1),
+                        ValueMode::MutableOwned,
+                    ),
+                    &builder,
                 )),
                 test_source_location(1),
             ),
             node(
                 NodeKind::Assignment {
                     target: assignment_target(
+                        &mut builder,
                         counter,
-                        DataType::Int,
-                        builtin_type_ids::INT,
+                        DataType::FixedScalar(FixedScalar::I32),
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         test_source_location(2),
                     ),
-                    value: Expression::int(1, test_source_location(2), ValueMode::ImmutableOwned),
+                    value: i32_expression(
+                        &mut builder,
+                        &mut const_values,
+                        1,
+                        test_source_location(2),
+                        ValueMode::ImmutableOwned,
+                    ),
                 },
                 test_source_location(2),
             ),
@@ -167,9 +218,16 @@ fn successful_borrow_report_can_be_stored_on_module() {
     );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(vec![start_fn], entry_path),
+        build_ast_with_registered_types(
+            vec![start_fn],
+            entry_path,
+            builder,
+            const_values,
+            type_environment,
+        ),
         &mut string_table,
         &mut path_fork,
+        &external_package_registry,
     );
     let borrow_analysis =
         run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)

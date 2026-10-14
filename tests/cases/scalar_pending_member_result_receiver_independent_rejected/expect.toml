@@ -1,0 +1,26 @@
+entry = "."
+
+# The independent I64 receiver selects `count`'s type while the result barrier
+# stays outside the constraint set, so the delayed unknown-member diagnostic
+# reports the I64 receiver rather than a spurious U64/I64 conflict or the U64
+# result annotation.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0048"]
+message_contains = ["'I64'"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0048"
+reason = "invalid_field_access.unknown_member"
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0048"]
+message_contains = ["'I64'"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0048"
+reason = "invalid_field_access.unknown_member"

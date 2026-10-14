@@ -11,20 +11,9 @@ use crate::compiler_frontend::symbols::path_interner::{
     NonUtf8PathComponent, PathId, PathInternError, PathInternerFork,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use moth_lexical::numeric::profile::NumericProfile;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct MothTemplateCompileRequest {
-    pub(crate) input: MothTemplateInput,
-    /// The requesting project's boundary numeric profile.
-    ///
-    /// WHY: a template folds under the same boundary widths as any other compilation in the same
-    /// project, so the profile travels with the request instead of being re-selected here.
-    pub(crate) numeric_profile: NumericProfile,
-}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum MothTemplateInput {
@@ -46,13 +35,13 @@ pub(super) struct MothTemplateSourceUnit {
     pub(super) source_text: String,
 }
 
-impl MothTemplateCompileRequest {
+impl MothTemplateInput {
     pub(super) fn collect_sources(
         self,
         string_table: &mut StringTable,
         path_fork: &mut PathInternerFork,
     ) -> Result<Vec<MothTemplateSourceUnit>, CompilerMessages> {
-        let units = match self.input {
+        let units = match self {
             MothTemplateInput::File(path) => vec![read_file_unit(path, None, string_table)?],
 
             MothTemplateInput::Directory { path, recursive } => {

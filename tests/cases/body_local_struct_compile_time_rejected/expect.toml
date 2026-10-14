@@ -1,0 +1,11 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0053"]
+message_contains = ["Constant 'Local' is not compile-time resolvable."]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0053"
+path = "input/@page.moth"
+line = 2
+column = 11

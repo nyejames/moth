@@ -1,4 +1,13 @@
 @utils identity
 
 value = identity(42)
-[: [value] ]
+
+read_u64 |value U64| -> String:
+    return cast value
+;
+
+first_origin = identity(18_446_744_073_709_551_615)
+second_origin = identity(18_446_744_073_709_551_614)
+first_text = read_u64(first_origin)
+second_text = read_u64(second_origin)
+[:generic_facade immediate=[value] first=[first_text] second=[second_text]]

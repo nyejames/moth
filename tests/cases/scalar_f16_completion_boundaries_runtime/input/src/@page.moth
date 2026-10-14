@@ -1,0 +1,58 @@
+@core/math atan2
+
+-- The minimum F16 subnormal halves to zero before the later multiply.
+subnormal_round_trip |smallest F16| -> F16, Error!:
+    return (smallest / 2.0) * 2.0
+;
+
+-- The declared F16 return completes the addition before its caller subtracts.
+round_at_return |value F16, half_ulp F16| -> F16, Error!:
+    return value + half_ulp
+;
+
+return_boundary |value F16, half_ulp F16| -> F16, Error!:
+    rounded = round_at_return(value, half_ulp)!
+    return rounded - value
+;
+
+-- Each same-type compound update completes before the next update reads value.
+compound_subnormal |smallest F16, half F16| -> F16, Error!:
+    value ~= copy smallest
+    value *= half
+    value += smallest
+    return value
+;
+
+finite_maximum |largest F16| -> F16, Error!:
+    return largest * 1.0
+;
+
+negative_half_subnormal |smallest F16| -> F16, Error!:
+    return -(smallest / 2.0)
+;
+
+positive_half_subnormal |smallest F16| -> F16, Error!:
+    return smallest / 2.0
+;
+
+smallest_subnormal F16 = 5.9604644775390625e-8
+nested_value = subnormal_round_trip(smallest_subnormal) catch then -1.0
+return_value = return_boundary(1.0, 0.00048828125) catch then -1.0
+compound_value = compound_subnormal(smallest_subnormal, 0.5) catch then -1.0
+finite_value = finite_maximum(65504.0) catch then -1.0
+negative_zero = negative_half_subnormal(smallest_subnormal) catch then 1.0
+positive_zero = positive_half_subnormal(smallest_subnormal) catch then 1.0
+
+nested_text String = cast nested_value
+return_text String = cast return_value
+compound_text String = cast compound_value
+finite_text String = cast finite_value
+smallest_text String = cast smallest_subnormal
+negative_zero_text String = cast negative_zero
+positive_zero_text String = cast positive_zero
+negative_zero_f64 F64 = cast negative_zero
+positive_zero_f64 F64 = cast positive_zero
+negative_zero_is_negative = atan2(negative_zero_f64, -1.0) < 0.0
+positive_zero_is_negative = atan2(positive_zero_f64, -1.0) < 0.0
+
+[:scalar f16 boundaries nested-subnormal=[nested_text] return-boundary=[return_text] compound-subnormal=[compound_text] max-finite=[finite_text] min-subnormal=[smallest_text] signed-zero=[negative_zero_text]/[negative_zero_is_negative]/[positive_zero_text]/[positive_zero_is_negative]]

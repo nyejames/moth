@@ -23,15 +23,11 @@ pub enum HirTypeClass {
     Unit,
     Bool,
     Char,
-    Int,
-    /// Profile-sized unsigned integer, following the selected `Int` width.
-    Uint,
-    Float,
     /// Explicit-width builtin scalar or the `Byte` octet type.
     ///
-    /// WHAT: keeps the fixed-width identity visible to backends instead of erasing it into
-    ///       `Int`/`Float`, which are profile-dependent and never alias a matching width.
-    /// WHY: ABI and layout decisions must be able to distinguish `U8` from `Int`, and `Byte`
+    /// WHAT: keeps the exact-width identity visible to backends instead of erasing it into a
+    ///       coarse numeric class.
+    /// WHY: ABI and layout decisions must be able to distinguish `U8` from `I32`, and `Byte`
     ///      from `U8`, so classification carries the scalar rather than a coarse numeric class.
     FixedScalar(FixedScalar),
     /// One arbitrary-precision `Dec` scale identity.
@@ -65,9 +61,6 @@ pub fn classify_hir_type(
     match definition {
         TypeDefinition::Builtin(builtin) => Ok(match builtin.key {
             BuiltinTypeKey::Bool => HirTypeClass::Bool,
-            BuiltinTypeKey::Int => HirTypeClass::Int,
-            BuiltinTypeKey::Uint => HirTypeClass::Uint,
-            BuiltinTypeKey::Float => HirTypeClass::Float,
             BuiltinTypeKey::Number(scale) => HirTypeClass::Number(scale),
             BuiltinTypeKey::Char => HirTypeClass::Char,
             BuiltinTypeKey::None => HirTypeClass::Unit,

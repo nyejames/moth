@@ -1,9 +1,8 @@
 //! Compiler-owned token mapping for neutral source-word identities.
 //!
-//! WHAT: maps moth-lexical word identities to `TokenTag` and specializes attached-bang forms into
-//! compiler token identities.
-//! WHY: lexical spelling and presentation categories stay below the compiler, while token storage
-//! and its attached-bang tags remain compiler-owned.
+//! WHAT: maps moth-lexical word identities to compiler token tags and recognizes `return!`.
+//! WHY: source-word classification is shared, while token storage and the retained `return!` tag
+//! remain compiler-owned.
 
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use moth_lexical::words::{SourceWord, classify_source_word};
@@ -40,8 +39,6 @@ pub(crate) fn token_tag_for_source_word(word: SourceWord) -> TokenTag {
         SourceWord::Or => TokenTag::OR,
         SourceWord::TrueLiteral | SourceWord::FalseLiteral => TokenTag::BOOL_LITERAL,
         SourceWord::NoneLiteral => TokenTag::NONE_LITERAL,
-        SourceWord::IntType => TokenTag::DATATYPE_INT,
-        SourceWord::FloatType => TokenTag::DATATYPE_FLOAT,
         SourceWord::BoolType => TokenTag::DATATYPE_BOOL,
         SourceWord::StringType => TokenTag::DATATYPE_STRING,
         SourceWord::CharType => TokenTag::DATATYPE_CHAR,
@@ -56,7 +53,6 @@ pub(crate) fn token_tag_for_source_word(word: SourceWord) -> TokenTag {
         SourceWord::U16Type => TokenTag::DATATYPE_U16,
         SourceWord::U32Type => TokenTag::DATATYPE_U32,
         SourceWord::U64Type => TokenTag::DATATYPE_U64,
-        SourceWord::UintType => TokenTag::DATATYPE_UINT,
         SourceWord::F16Type => TokenTag::DATATYPE_F16,
         SourceWord::F32Type => TokenTag::DATATYPE_F32,
         SourceWord::F64Type => TokenTag::DATATYPE_F64,
@@ -64,11 +60,10 @@ pub(crate) fn token_tag_for_source_word(word: SourceWord) -> TokenTag {
     }
 }
 
-/// Returns the compiler token identity for an exact source word with an attached `!`.
+/// Returns the compiler token identity for the supported attached-bang keyword form.
 pub(crate) fn attached_bang_keyword_token_tag(text: &str) -> Option<TokenTag> {
     match classify_source_word(text)? {
         SourceWord::Return => Some(TokenTag::RETURN_BANG),
-        SourceWord::Cast => Some(TokenTag::CAST_BANG),
         _ => None,
     }
 }

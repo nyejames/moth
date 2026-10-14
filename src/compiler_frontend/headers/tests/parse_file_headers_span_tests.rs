@@ -1,5 +1,6 @@
 use super::*;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 /// Preparation retains exact dependency and file-path ranges across identity normalization.
 #[test]
@@ -158,7 +159,7 @@ fn declaration_initializer_reference_member_return_and_variant_spans_retain_orig
     let return_name = format!("Output{}", "X".repeat(1100));
     let variant_name = format!("Ready{}", "X".repeat(1100));
     let source = format!(
-        "-- é🦋\nprocess |{member_name} Int| -> {return_name}:\n;\nState ::\n{variant_name} | field Int |,\n;\nRecord = | member Int |\nsource_reference #= target_value\n"
+        "-- é🦋\nprocess |{member_name} I32| -> {return_name}:\n;\nState ::\n{variant_name} | field I32 |,\n;\nRecord = | member I32 |\nsource_reference #= target_value\n"
     );
     let canonical = PathBuf::from("member-spans.moth");
     let mut strings = StringTable::new();
@@ -411,7 +412,7 @@ fn declaration_initializer_reference_member_return_and_variant_spans_retain_orig
 
 #[test]
 fn const_template_and_config_spans_rebind_before_whole_file_freeze() {
-    let source = "release_version #Config of Int = 1\n#[if show_banner: Hello]\n";
+    let source = "release_version #Config of I32 = 1\n#[if show_banner: Hello]\n";
     let canonical = PathBuf::from("src/@page.moth");
     let mut strings = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -471,12 +472,18 @@ fn const_template_and_config_spans_rebind_before_whole_file_freeze() {
                 HeaderKind::Constant { declaration } => {
                     let qualifier = declaration.config_qualifier.as_ref()?;
                     let qualifier_type_span = match &qualifier.type_annotation {
-                        ParsedTypeRef::BuiltinInt { span: Some(span) } => *span,
-                        _ => panic!("config qualifier should retain its parsed Int span"),
+                        ParsedTypeRef::BuiltinFixedScalar {
+                            scalar: FixedScalar::I32,
+                            span: Some(span),
+                        } => *span,
+                        _ => panic!("config qualifier should retain its parsed I32 span"),
                     };
                     let declaration_type_span = match &declaration.type_annotation {
-                        ParsedTypeRef::BuiltinInt { span: Some(span) } => *span,
-                        _ => panic!("declaration should retain its parsed Int span"),
+                        ParsedTypeRef::BuiltinFixedScalar {
+                            scalar: FixedScalar::I32,
+                            span: Some(span),
+                        } => *span,
+                        _ => panic!("declaration should retain its parsed I32 span"),
                     };
                     Some((
                         qualifier.qualifier_span.expect("config qualifier span"),
@@ -549,12 +556,18 @@ fn const_template_and_config_spans_rebind_before_whole_file_freeze() {
             HeaderKind::Constant { declaration } => {
                 let qualifier = declaration.config_qualifier.as_ref()?;
                 let declaration_type_span = match &declaration.type_annotation {
-                    ParsedTypeRef::BuiltinInt { span: Some(span) } => *span,
-                    _ => panic!("declaration should retain its parsed Int span"),
+                    ParsedTypeRef::BuiltinFixedScalar {
+                        scalar: FixedScalar::I32,
+                        span: Some(span),
+                    } => *span,
+                    _ => panic!("declaration should retain its parsed I32 span"),
                 };
                 let qualifier_type_span = match &qualifier.type_annotation {
-                    ParsedTypeRef::BuiltinInt { span: Some(span) } => *span,
-                    _ => panic!("config qualifier should retain its parsed Int span"),
+                    ParsedTypeRef::BuiltinFixedScalar {
+                        scalar: FixedScalar::I32,
+                        span: Some(span),
+                    } => *span,
+                    _ => panic!("config qualifier should retain its parsed I32 span"),
                 };
                 Some((
                     qualifier.qualifier_span.expect("rebound qualifier span"),
@@ -595,8 +608,8 @@ fn const_template_and_config_spans_rebind_before_whole_file_freeze() {
     };
     assert_eq!(resolve(rebound_condition_span), "show_banner");
     assert_eq!(resolve(rebound_config_spans.0), "#");
-    assert_eq!(resolve(rebound_config_spans.1), "Int");
-    assert_eq!(resolve(rebound_config_spans.2), "Int");
+    assert_eq!(resolve(rebound_config_spans.1), "I32");
+    assert_eq!(resolve(rebound_config_spans.2), "I32");
 }
 
 #[test]

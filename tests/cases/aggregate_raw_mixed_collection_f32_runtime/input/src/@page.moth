@@ -1,0 +1,35 @@
+-- Raw whole and decimal literals in one collection select the F32 family before
+-- binding, independent of order. The large whole literal rounds directly at F32,
+-- so it stays above the binary64 detour value 2^53.
+
+element_above |values {F32}, index I32| -> Bool:
+    threshold F32 = 9_007_199_254_740_992.0
+    value = values.get(index) catch:
+        then 0.0
+    ;
+    return value > threshold
+;
+
+element_at |values {F32}, index I32| -> F32:
+    value = values.get(index) catch:
+        then 0.0
+    ;
+    return value
+;
+
+render_f32_mixed_collections || -> String:
+    forward_values = {9_007_199_791_611_905, 0.0}
+    reverse_values = {0.0, 9_007_199_791_611_905}
+    simple_forward = {1, 2.5}
+    simple_reverse = {2.5, 1}
+    forward_above = element_above(forward_values, 0)
+    reverse_above = element_above(reverse_values, 1)
+    forward_zero = element_at(forward_values, 1)
+    simple_forward_first = element_at(simple_forward, 0)
+    simple_forward_second = element_at(simple_forward, 1)
+    simple_reverse_first = element_at(simple_reverse, 0)
+    simple_reverse_second = element_at(simple_reverse, 1)
+    return [:f32_mixed forward_above=[forward_above] reverse_above=[reverse_above] forward_zero=[forward_zero] simple_forward=[simple_forward_first],[simple_forward_second] simple_reverse=[simple_reverse_first],[simple_reverse_second]]
+;
+
+[:[render_f32_mixed_collections()]]

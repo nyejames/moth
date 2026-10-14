@@ -1,0 +1,18 @@
+-- A rejected member occurrence authored as a property access (no parentheses and no
+-- argument list) must consume its own member token and keep the enclosing body parsable,
+-- so the later independent `render_count(count)` use still registers `count`'s exact U64
+-- receiver before the delayed ordinary diagnostic is issued.
+--
+-- The whole `4_294_967_296` does not fit I32, so a name-consumption path that stopped on
+-- the member symbol, or that skipped the following statement, would report the literal's
+-- range or the defaulted receiver instead of the unknown-member diagnostic on U64.
+
+render_count |value U64| -> String:
+    return cast value
+;
+
+count = 4_294_967_296
+result = count.unsupported
+render_count(count)
+
+[:unreachable]

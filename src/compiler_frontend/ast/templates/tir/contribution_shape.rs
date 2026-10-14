@@ -95,6 +95,11 @@ pub(crate) fn tir_node_is_control_flow_root(
 
     match &node.kind {
         TemplateIrNodeKind::Conditional { .. } | TemplateIrNodeKind::Loop { .. } => Ok(true),
+
+        // A retained control-flow position is the `Loop` node it completes into, before body-root
+        // completion installs it.
+        TemplateIrNodeKind::RetainedNumericIntake(role) => Ok(role.completes_into_control_flow()),
+
         TemplateIrNodeKind::ChildTemplate { reference, .. } => {
             let template = store.get_template(reference.root).ok_or_else(|| {
                 CompilerError::compiler_error(

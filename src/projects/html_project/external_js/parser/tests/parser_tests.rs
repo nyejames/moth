@@ -197,7 +197,7 @@ export function doFallible() {
 fn const_arrow_export_parsed() {
     let source = r#"
 /**
- * @moth.sig add |a Int, b Int| -> Int
+ * @moth.sig add |a I32, b I32| -> I32
  */
 export const add = (a, b) => {
     return a + b;
@@ -214,7 +214,7 @@ export const add = (a, b) => {
 fn uint_signature_parsed_with_existing_restrictions() {
     let source = r#"
 /**
- * @moth.sig identity_uint |value Uint| -> Uint
+ * @moth.sig identity_uint |value U32| -> U32
  */
 export function identityUint(value) {
     return value;
@@ -224,14 +224,14 @@ export function identityUint(value) {
     assert_no_diagnostics(&parsed);
     assert_free_functions(&parsed, &["identity_uint"]);
     let func = &parsed.free_functions[0];
-    assert_eq!(func.signature.parameters[0].type_name, "Uint");
-    assert_eq!(func.signature.returns[0].type_name, "Uint");
+    assert_eq!(func.signature.parameters[0].type_name, "U32");
+    assert_eq!(func.signature.returns[0].type_name, "U32");
     assert_eq!(func.signature.abi_parameter_count(), 1);
 }
 
 #[test]
-fn fixed_u32_and_f32_signatures_parse_parameters_and_both_result_lanes() {
-    for scalar in ["U32", "F32"] {
+fn delivered_fixed_scalar_signatures_parse_parameters_and_both_result_lanes() {
+    for scalar in ["I32", "I64", "U32", "U64", "F32", "F64"] {
         for error_slot in ["", ", Error!"] {
             let source = format!(
                 "/** @moth.sig identity |value {scalar}| -> {scalar}{error_slot} */\nexport function identity(value) {{ return value; }}"
@@ -247,9 +247,9 @@ fn fixed_u32_and_f32_signatures_parse_parameters_and_both_result_lanes() {
 }
 
 #[test]
-fn other_fixed_scalar_annotations_remain_outside_the_signature_subset() {
+fn other_and_retired_numeric_annotations_remain_outside_the_signature_subset() {
     for scalar in [
-        "I8", "I16", "I32", "I64", "U8", "U16", "U64", "F16", "F64", "Byte",
+        "I8", "I16", "U8", "U16", "F16", "Byte", "Int", "Uint", "Float",
     ] {
         let source = format!(
             "/** @moth.sig identity |value {scalar}| -> {scalar} */\nexport function identity(value) {{ return value; }}"
@@ -294,7 +294,7 @@ fn fixed_scalar_annotations_do_not_admit_dotted_or_collection_types() {
 fn signature_annotation_cannot_bind_literal_constant() {
     let source = r#"
 /**
- * @moth.sig answer || -> Int
+ * @moth.sig answer || -> I32
  */
 export const answer = 42;
 "#;
@@ -314,7 +314,7 @@ fn receiver_method_signature_parsed() {
  */
 
 /**
- * @moth.sig fill_rect |this ~Canvas2d, x Float, y Float, width Float, height Float|
+ * @moth.sig fill_rect |this ~Canvas2d, x F64, y F64, width F64, height F64|
  */
 export function fillRect(ctx, x, y, width, height) {
     ctx.fillRect(x, y, width, height);
@@ -379,7 +379,7 @@ fn receiver_parameter_must_be_first() {
     let source = r#"
 /**
  * @moth.opaque Canvas2d
- * @moth.sig bad |x Float, this ~Canvas2d|
+ * @moth.sig bad |x F64, this ~Canvas2d|
  */
 export function bad(x, ctx) {}
 "#;
@@ -470,7 +470,7 @@ fn receiver_this_counts_in_arity() {
     let source = r#"
 /**
  * @moth.opaque Canvas2d
- * @moth.sig fill_rect |this ~Canvas2d, x Float|
+ * @moth.sig fill_rect |this ~Canvas2d, x F64|
  */
 export function fillRect(ctx, x, y) {
     ctx.fillRect(x, y);
@@ -516,7 +516,7 @@ export function getCanvas(id) {
 fn unknown_receiver_type_reported() {
     let source = r#"
 /**
- * @moth.sig fill_rect |this ~Canvas2d, x Float|
+ * @moth.sig fill_rect |this ~Canvas2d, x F64|
  */
 export function fillRect(ctx, x) {
     ctx.fillRect(x, x);
@@ -596,7 +596,7 @@ export function helper(x) {
 fn unannotated_and_annotated_exports_mixed() {
     let source = r#"
 /**
- * @moth.sig public_fn |x Int| -> Int
+ * @moth.sig public_fn |x I32| -> I32
  */
 export function publicFn(x) { return x; }
 
@@ -936,7 +936,7 @@ fn runtime_named_import_is_recorded() {
 import { mothOk, mothErr } from "@moth/runtime";
 
 /**
- * @moth.sig do_thing || -> Int, Error!
+ * @moth.sig do_thing || -> I32, Error!
  */
 export function doThing() {
     return mothOk(7);
@@ -979,7 +979,7 @@ import {
 } from "@moth/runtime";
 
 /**
- * @moth.sig do_thing || -> Int, Error!
+ * @moth.sig do_thing || -> I32, Error!
  */
 export function doThing() {
     return mothOk(7);
@@ -1009,7 +1009,7 @@ fn non_fallible_function_with_runtime_import_records_import() {
 import { mothOk } from "@moth/runtime";
 
 /**
- * @moth.sig get_number || -> Int
+ * @moth.sig get_number || -> I32
  */
 export function getNumber() {
     return mothOk(7).value;
@@ -1069,7 +1069,7 @@ import { mothOk } from "@moth/runtime";
 import { mothErr } from "@moth/runtime";
 
 /**
- * @moth.sig do_thing || -> Int, Error!
+ * @moth.sig do_thing || -> I32, Error!
  */
 export function doThing() {
     return mothOk(7);
@@ -1092,7 +1092,7 @@ import { mothOk } from "@moth/runtime";
 import { mothOk } from "@moth/runtime";
 
 /**
- * @moth.sig do_thing || -> Int, Error!
+ * @moth.sig do_thing || -> I32, Error!
  */
 export function doThing() {
     return mothOk(7);
@@ -1159,7 +1159,7 @@ export function tricky() {
 }
 
 /**
- * @moth.sig next || -> Int
+ * @moth.sig next || -> I32
  */
 export function next() {
     return 1;
@@ -1234,7 +1234,7 @@ fn template_literal_at_top_level_before_export() {
 const hint = `}; export function fake() {}`;
 
 /**
- * @moth.sig real || -> Int
+ * @moth.sig real || -> I32
  */
 export function real() {
     return 1;
@@ -1254,7 +1254,7 @@ import {
 } from "@moth/runtime";
 
 /**
- * @moth.sig do_thing || -> Int, Error!
+ * @moth.sig do_thing || -> I32, Error!
  */
 export function doThing() {
     return mothOk(7);
@@ -1269,7 +1269,7 @@ export function doThing() {
 fn export_body_comments_containing_export_are_ignored() {
     let source = r#"
 /**
- * @moth.sig tricky || -> Int
+ * @moth.sig tricky || -> I32
  */
 export function tricky() {
     // export function fake() {}
@@ -1318,7 +1318,7 @@ export const tricky = () => {
 fn expression_bodied_arrow_export_rejected() {
     let source = r#"
 /**
- * @moth.sig add |a Int, b Int| -> Int
+ * @moth.sig add |a I32, b I32| -> I32
  */
 export const add = (a, b) => a + b;
 "#;
@@ -1341,7 +1341,7 @@ export const add = (a, b) => a + b;
 fn rest_parameter_rejected() {
     let source = r#"
 /**
- * @moth.sig sum |...values| -> Int
+ * @moth.sig sum |...values| -> I32
  */
 export function sum(...values) {
     return values.reduce((a, b) => a + b, 0);
@@ -1375,7 +1375,7 @@ export function greet(name = "world") {
 fn destructuring_parameter_rejected() {
     let source = r#"
 /**
- * @moth.sig unpack |point| -> Int
+ * @moth.sig unpack |point| -> I32
  */
 export function unpack({ x }) {
     return x;
@@ -1442,7 +1442,7 @@ export function identity(value) {
 fn generic_external_opaque_type_rejected() {
     let source = r#"
 /**
- * @moth.opaque Canvas of Int
+ * @moth.opaque Canvas of I32
  */
 "#;
     let parsed = parse(source);
@@ -1466,7 +1466,7 @@ export function noop() {}
 fn multi_success_return_rejected() {
     let source = r#"
 /**
- * @moth.sig pair || -> Int, String
+ * @moth.sig pair || -> I32, String
  */
 export function pair() {
     return [1, "a"];
@@ -1508,7 +1508,7 @@ function privateHelper(x) {
 }
 
 /**
- * @moth.sig double |x Int| -> Int
+ * @moth.sig double |x I32| -> I32
  */
 export function double(x) {
     return privateHelper(x);
@@ -1545,7 +1545,7 @@ export function getCanvas(id) {
 }
 
 /**
- * @moth.sig fill_rect |this ~Canvas2d, x Float, y Float, width Float, height Float|
+ * @moth.sig fill_rect |this ~Canvas2d, x F64, y F64, width F64, height F64|
  */
 export function fillRect(ctx, x, y, width, height) {
     ctx.fillRect(x, y, width, height);

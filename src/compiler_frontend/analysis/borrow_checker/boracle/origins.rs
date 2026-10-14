@@ -122,6 +122,17 @@ impl OriginSolution {
         })
     }
 
+    pub(crate) fn is_write_through_destination(&self, event: EventId, place: PlaceId) -> bool {
+        self.traces.iter().any(|trace| {
+            trace.event == event
+                && trace.destination == Some(place)
+                && matches!(
+                    trace.rule,
+                    OriginTraceRule::Mixed | OriginTraceRule::WriteThrough
+                )
+        })
+    }
+
     pub(crate) fn is_slot_rebind_event(&self, event: EventId) -> bool {
         let mut saw_rebind = false;
         for trace in self.traces.iter().filter(|trace| trace.event == event) {
@@ -465,17 +476,20 @@ fn call_result_input_origins(
         let EventKind::CallEffect(effect) = &event.kind else {
             continue;
         };
-        let Some(result) = effect.result else {
-            continue;
-        };
-        inputs
-            .entry(result.origin)
-            .and_modify(|existing: &mut Box<[ValueOriginId]>| {
-                if trace.input_origins.is_empty() {
-                    *existing = Box::new([]);
-                }
-            })
-            .or_insert_with(|| trace.input_origins.clone());
+        for result in effect
+            .results
+            .iter()
+            .filter(|result| trace.destination == Some(result.destination.place()))
+        {
+            inputs
+                .entry(result.origin)
+                .and_modify(|existing: &mut Box<[ValueOriginId]>| {
+                    if trace.input_origins.is_empty() {
+                        *existing = Box::new([]);
+                    }
+                })
+                .or_insert_with(|| trace.input_origins.clone());
+        }
     }
     for origin in missing_call_result_origins {
         inputs.insert(*origin, Box::new([]));
@@ -920,8 +934,79 @@ fn apply_block(
                 event_id
             ))
         })?;
-        let (rule, destination, inputs) =
-            apply_event(problem, event, &mut state, missing_call_result_origins)?;
+        if let EventKind::CallEffect(effect) = &event.kind {
+            // Resolve each slot against the same incoming state before writing any destination.
+            let incoming = effect
+                .results
+                .iter()
+                .map(|result| {
+                    resolve_call_result(
+                        problem,
+                        effect,
+                        result,
+                        &state.origins,
+                        missing_call_result_origins,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            for (result, (input, output)) in effect.results.iter().zip(incoming) {
+                let (rule, _, inputs) = apply_binding_write(
+                    problem,
+                    &mut state,
+                    result.destination,
+                    BindingMode::Slot,
+                    output,
+                    input.into_iter().collect(),
+                    OriginTraceRule::CallResult,
+                );
+                let destination = result.destination.place();
+                if matches!(rule, OriginTraceRule::Mixed | OriginTraceRule::WriteThrough) {
+                    for confirming_event in block.events[event_index + 1..].iter() {
+                        let EventKind::Access { use_id } =
+                            &problem.events()[confirming_event.index()].kind
+                        else {
+                            break;
+                        };
+                        let use_row = &problem.uses()[use_id.index()];
+                        if use_row.place == destination
+                            && use_row.kind.is_write()
+                            && use_row
+                                .kind
+                                .binding_destination()
+                                .is_none_or(|binding| !binding.defines())
+                        {
+                            local_write_through_uses.insert(*use_id);
+                        }
+                    }
+                }
+                let output_origins = sorted_origins(state.origins.get(&destination));
+                local_facts.push(OriginFact {
+                    event: event.id,
+                    place: destination,
+                    origins: output_origins.clone(),
+                });
+                local_traces.push(OriginTrace {
+                    event: event.id,
+                    rule,
+                    destination: Some(destination),
+                    input_origins: inputs.into_boxed_slice(),
+                    output_origins,
+                });
+            }
+            for (place, origins) in &state.origins {
+                local_states.insert(
+                    (event.id, *place),
+                    origins
+                        .iter()
+                        .copied()
+                        .collect::<Vec<_>>()
+                        .into_boxed_slice(),
+                );
+            }
+            pending_write = None;
+            continue;
+        }
+        let (rule, destination, inputs) = apply_event(problem, event, &mut state)?;
         let jump_definitions = apply_jump_arguments(problem, event, &mut state)?;
         if matches!(rule, OriginTraceRule::Mixed | OriginTraceRule::WriteThrough)
             && let Some(destination) = destination
@@ -934,27 +1019,6 @@ fn apply_block(
                 .is_none_or(|binding_destination| !binding_destination.defines())
         {
             local_write_through_uses.insert(use_id);
-        }
-        if matches!(rule, OriginTraceRule::Mixed | OriginTraceRule::WriteThrough)
-            && let Some(destination) = destination
-            && matches!(&event.kind, EventKind::CallEffect(_))
-            && let Some(next_event_id) = block.events.get(event_index + 1)
-            && let Some(Event {
-                kind: EventKind::Access { use_id },
-                ..
-            }) = problem.events().get(next_event_id.index())
-            && problem.uses().get(use_id.index()).is_some_and(|use_row| {
-                use_row.kind.is_write()
-                    && use_row.place == destination
-                    && use_row
-                        .kind
-                        .binding_destination()
-                        .is_none_or(|binding_destination| !binding_destination.defines())
-            })
-        {
-            // Call results publish their write-through origin at the CallEffect event, while
-            // the normalized destination write is the immediately following Access event.
-            local_write_through_uses.insert(*use_id);
         }
         pending_write = match &event.kind {
             EventKind::Access { use_id } => problem
@@ -1033,7 +1097,6 @@ fn apply_event(
     problem: &BorrowProblem,
     event: &Event,
     state: &mut FlowState,
-    missing_call_result_origins: &mut BTreeSet<ValueOriginId>,
 ) -> Result<(OriginTraceRule, Option<PlaceId>, Vec<ValueOriginId>), CompilerError> {
     match &event.kind {
         EventKind::Fresh {
@@ -1232,46 +1295,7 @@ fn apply_event(
             rebuild_origins(state);
             Ok(result)
         }
-        EventKind::CallEffect(effect) => {
-            let Some(result) = effect.result else {
-                return Ok((OriginTraceRule::CallResult, None, Vec::new()));
-            };
-            let call = problem.calls().get(effect.call.index()).ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "Boracle origin solver cannot locate call {:?}",
-                    effect.call
-                ))
-            })?;
-            let _ = call;
-            let origin = problem
-                .origins()
-                .get(result.origin.index())
-                .ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "Boracle origin solver cannot locate call-result origin {:?}",
-                        result.origin
-                    ))
-                })?;
-            let (input, output) = match &origin.kind {
-                OriginKind::CallResult { provenance, .. } => call_result_origins(
-                    problem,
-                    provenance,
-                    effect,
-                    &state.origins,
-                    missing_call_result_origins,
-                ),
-                _ => (BTreeSet::new(), one_origin(result.origin)),
-            };
-            Ok(apply_binding_write(
-                problem,
-                state,
-                result.destination,
-                BindingMode::Slot,
-                output,
-                input.into_iter().collect(),
-                OriginTraceRule::CallResult,
-            ))
-        }
+        EventKind::CallEffect(_) => Ok((OriginTraceRule::CallResult, None, Vec::new())),
         EventKind::ScopeExit { bindings } => {
             let roots = bindings.iter().copied().collect::<BTreeSet<_>>();
             state.alternatives.retain(|(place, _), _| {
@@ -1293,6 +1317,35 @@ fn apply_event(
             Ok((OriginTraceRule::Noop, None, Vec::new()))
         }
     }
+}
+
+fn resolve_call_result(
+    problem: &BorrowProblem,
+    effect: &super::super::problem::CallEffect,
+    result: &super::super::problem::CallResult,
+    incoming: &OriginState,
+    missing_call_result_origins: &mut BTreeSet<ValueOriginId>,
+) -> Result<(OriginSet, OriginSet), CompilerError> {
+    let origin = problem
+        .origins()
+        .get(result.origin.index())
+        .ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "Boracle origin solver cannot locate call-result origin {:?}",
+                result.origin
+            ))
+        })?;
+    Ok(match &origin.kind {
+        OriginKind::CallResult { provenance, .. } => call_result_origins(
+            problem,
+            provenance,
+            effect,
+            result.origin,
+            incoming,
+            missing_call_result_origins,
+        ),
+        _ => (BTreeSet::new(), one_origin(result.origin)),
+    })
 }
 
 fn apply_jump_arguments(
@@ -1522,13 +1575,14 @@ fn call_result_origins(
     problem: &BorrowProblem,
     provenance: &CallResultProvenance,
     effect: &super::super::problem::CallEffect,
+    result_origin: ValueOriginId,
     state: &OriginState,
     missing_call_result_origins: &mut BTreeSet<ValueOriginId>,
 ) -> (OriginSet, OriginSet) {
     match provenance {
-        CallResultProvenance::Fresh => (BTreeSet::new(), one_origin_from_result(effect)),
+        CallResultProvenance::Fresh => (BTreeSet::new(), one_origin(result_origin)),
         CallResultProvenance::Unknown(_) => {
-            let output = one_origin_from_result(effect);
+            let output = one_origin(result_origin);
             (output.clone(), output)
         }
         CallResultProvenance::Alias(origins) => {
@@ -1536,8 +1590,7 @@ fn call_result_origins(
             (origins.clone(), origins)
         }
         CallResultProvenance::AliasParams(indices) => {
-            let result_origin = effect.result.map(|result| result.origin);
-            if result_origin.is_some_and(|origin| missing_call_result_origins.contains(&origin)) {
+            if missing_call_result_origins.contains(&result_origin) {
                 return (BTreeSet::new(), BTreeSet::new());
             }
 
@@ -1556,9 +1609,7 @@ fn call_result_origins(
                 }
             }
             if missing_argument_state {
-                if let Some(origin) = result_origin {
-                    missing_call_result_origins.insert(origin);
-                }
+                missing_call_result_origins.insert(result_origin);
                 return (BTreeSet::new(), BTreeSet::new());
             }
             (origins.clone(), origins)
@@ -1621,13 +1672,6 @@ fn projection_child_origins(
         })?;
     let child = projected_place(problem, source, projection)?;
     state.get(&child).cloned()
-}
-
-fn one_origin_from_result(effect: &super::super::problem::CallEffect) -> OriginSet {
-    effect
-        .result
-        .map(|result| one_origin(result.origin))
-        .unwrap_or_default()
 }
 
 fn one_origin(origin: ValueOriginId) -> OriginSet {

@@ -1,39 +1,45 @@
-The compiler owns a closed set of static cast traits. They provide source evidence for explicit `cast` and `cast!` conversions.
+The compiler owns a closed set of static cast traits. They provide source
+evidence for the plain `cast` expression.
 
-### Trait table
+### Trait families
 
-Each trait requires one receiver method:
+Each of fifteen target families has an infallible and a fallible trait. The
+targets comprise all eleven fixed numeric types plus `Bool`, `String`, `Char`
+and `Error`:
 
-- `CASTABLE_TO_INT` requires `to_int |This| -> Int`
-- `TRY_CASTABLE_TO_INT` requires `try_to_int |This| -> Int, Error!`
-- `CASTABLE_TO_FLOAT` requires `to_float |This| -> Float`
-- `TRY_CASTABLE_TO_FLOAT` requires `try_to_float |This| -> Float, Error!`
-- `CASTABLE_TO_BOOL` requires `to_bool |This| -> Bool`
-- `TRY_CASTABLE_TO_BOOL` requires `try_to_bool |This| -> Bool, Error!`
-- `CASTABLE_TO_STRING` requires `to_string |This| -> String`
-- `TRY_CASTABLE_TO_STRING` requires `try_to_string |This| -> String, Error!`
-- `CASTABLE_TO_CHAR` requires `to_char |This| -> Char`
-- `TRY_CASTABLE_TO_CHAR` requires `try_to_char |This| -> Char, Error!`
-- `CASTABLE_TO_ERROR` requires `to_error |This| -> Error`
-- `TRY_CASTABLE_TO_ERROR` requires `try_to_error |This| -> Error, Error!`
+- `I8`: `CASTABLE_TO_I8` requires `to_i8 |This| -> I8`. `TRY_CASTABLE_TO_I8` requires `try_to_i8 |This| -> I8, Error!`.
+- `I16`: `CASTABLE_TO_I16` requires `to_i16 |This| -> I16`. `TRY_CASTABLE_TO_I16` requires `try_to_i16 |This| -> I16, Error!`.
+- `I32`: `CASTABLE_TO_I32` requires `to_i32 |This| -> I32`. `TRY_CASTABLE_TO_I32` requires `try_to_i32 |This| -> I32, Error!`.
+- `I64`: `CASTABLE_TO_I64` requires `to_i64 |This| -> I64`. `TRY_CASTABLE_TO_I64` requires `try_to_i64 |This| -> I64, Error!`.
+- `U8`: `CASTABLE_TO_U8` requires `to_u8 |This| -> U8`. `TRY_CASTABLE_TO_U8` requires `try_to_u8 |This| -> U8, Error!`.
+- `U16`: `CASTABLE_TO_U16` requires `to_u16 |This| -> U16`. `TRY_CASTABLE_TO_U16` requires `try_to_u16 |This| -> U16, Error!`.
+- `U32`: `CASTABLE_TO_U32` requires `to_u32 |This| -> U32`. `TRY_CASTABLE_TO_U32` requires `try_to_u32 |This| -> U32, Error!`.
+- `U64`: `CASTABLE_TO_U64` requires `to_u64 |This| -> U64`. `TRY_CASTABLE_TO_U64` requires `try_to_u64 |This| -> U64, Error!`.
+- `F16`: `CASTABLE_TO_F16` requires `to_f16 |This| -> F16`. `TRY_CASTABLE_TO_F16` requires `try_to_f16 |This| -> F16, Error!`.
+- `F32`: `CASTABLE_TO_F32` requires `to_f32 |This| -> F32`. `TRY_CASTABLE_TO_F32` requires `try_to_f32 |This| -> F32, Error!`.
+- `F64`: `CASTABLE_TO_F64` requires `to_f64 |This| -> F64`. `TRY_CASTABLE_TO_F64` requires `try_to_f64 |This| -> F64, Error!`.
+- `Bool`: `CASTABLE_TO_BOOL` requires `to_bool |This| -> Bool`. `TRY_CASTABLE_TO_BOOL` requires `try_to_bool |This| -> Bool, Error!`.
+- `String`: `CASTABLE_TO_STRING` requires `to_string |This| -> String`. `TRY_CASTABLE_TO_STRING` requires `try_to_string |This| -> String, Error!`.
+- `Char`: `CASTABLE_TO_CHAR` requires `to_char |This| -> Char`. `TRY_CASTABLE_TO_CHAR` requires `try_to_char |This| -> Char, Error!`.
+- `Error`: `CASTABLE_TO_ERROR` requires `to_error |This| -> Error`. `TRY_CASTABLE_TO_ERROR` requires `try_to_error |This| -> Error, Error!`.
+
+The list gives requirement signatures. A source implementation uses an
+ordinary lowercase `this` receiver and its concrete type.
 
 ### Contract
 
 - These traits resolve without dependency clauses.
-- They cannot be redeclared, imported, exported, aliased or shadowed.
-- They cannot be used as values.
-- The compiler registers builtin evidence for the builtin cast table, including `Uint`, the new fixed-width numeric types, `Byte` and the `Dec` family.
-- Source-authored evidence remains the six target families above, so `Int` and `Float` keep their source-authorable traits. This six-family scope is intentional: `Uint` joins the compiler-owned builtin policy rather than gaining source-authorable traits.
-- No source-authorable cast trait is defined for `Uint`, the new fixed-width numeric types, `Byte` or the `Dec` family, so those targets come from compiler-owned builtin policy alone.
-- Same-file nominal source types and aligned generic constructors may provide evidence.
-- Source method implementations use lowercase `this` and the concrete receiver type.
-- Explicit conformance is required.
-- Infallible and fallible pairs for one target are incompatible.
-- Evidence resolves before HIR.
-- The traits prove source evidence only.
-- They do not create user-defined target types or a general conversion framework.
+- They cannot be redeclared, imported, exported, aliased or shadowed, and they cannot be used as values.
+- The compiler registers builtin conversion evidence, including for `Byte` and the `Dec` family.
+- Source-authored traits cover only the fifteen targets above. `Byte` and `Dec` have no source-authored trait families.
+- Same-file nominal source types and aligned generic nominal constructors can provide evidence with explicit conformance.
+- Matching method shape alone does not prove conformance.
+- Infallible and fallible evidence for the same source type and target are mutually exclusive.
+- Infallible methods return the target. Fallible methods return the target and builtin `Error!`.
+- Evidence follows the complete static source and target types, not known values or optimiser proofs.
+- Evidence resolves before HIR. The traits prove source evidence only and add no general conversion framework.
 
-### Example
+### Infallible evidence
 
 [codeblock, $code("moth"):
     Label = |
@@ -49,48 +55,39 @@ Each trait requires one receiver method:
     value String = cast Label("docs")
 ]
 
-### Infallible versus fallible
+The compiler checks that an infallible evidence method does not acquire a
+failure contract.
 
-[codeblock, $code("moth"):
-    -- Infallible: source always produces the target
-    Label must CASTABLE_TO_STRING
+### Fallible evidence
 
-    -- Fallible: source may produce the target or an error
-    Label must TRY_CASTABLE_TO_INT
-]
-
-A fallible conformance requires the matching `try_to_*` method. The method returns success with `return` and failure with `return!`:
+A fallible method returns through builtin `Error!`. Its caller uses the same
+plain `cast` syntax:
 
 [codeblock, $code("moth"):
     Label = |
         text String,
     |
 
-    try_to_int |this Label| -> Int, Error!:
-        value Int = cast! this.text
+    try_to_i32 |this Label| -> I32, Error!:
+        value I32 = cast this.text
         return value
     ;
 
-    Label must TRY_CASTABLE_TO_INT
+    Label must TRY_CASTABLE_TO_I32
 
-    -- Local recovery with `cast ... catch`.
-    parsed_count Int = cast Label("42") catch |err|:
+    parsed I32 = cast Label("42") catch |err|:
         then 0
     ;
 ]
 
-Propagation through a compatible `Error!` function uses `cast!`:
+The method's typed error follows ordinary call and catch compatibility rules.
+Builtin conversion failures use implicit failure. A custom error still needs
+explicit mapping where the destination expects builtin `Error`.
 
-[codeblock, $code("moth"):
-    parse_label |label Label| -> Int, Error!:
-        value Int = cast! label
-        return value
-    ;
-]
-
-`cast!` and `catch` are mutually exclusive. `cast! ... catch` is rejected.
+There is no cast-specific propagation marker. Postfix `!` remains the normal
+propagation form for a fallible call, not a cast.
 
 ### Concepts related to core cast traits
 
-- For cast target selection and fallible handling see @../casts (Casts).
+- For cast targets and conversion rules see @../casts (Casts).
 - For trait incompatibility see @#trait-incompatibility (Trait incompatibility).

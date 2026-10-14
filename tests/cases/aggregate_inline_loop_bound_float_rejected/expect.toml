@@ -1,0 +1,8 @@
+entry = "."
+
+# The bound whole-number loop item remains integer-family at the F32 receiver.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-TYPE-0001"]

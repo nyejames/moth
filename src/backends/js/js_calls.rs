@@ -55,7 +55,7 @@ impl<'hir> JsEmitter<'hir> {
             CallTarget::Generated(identity) => self
                 .config
                 .generated_function_names
-                .get(identity)
+                .get(identity.as_ref())
                 .cloned()
                 .map(LoweredCallTarget::FunctionName)
                 .ok_or_else(|| {
@@ -115,8 +115,35 @@ impl<'hir> JsEmitter<'hir> {
         &mut self,
         target: &CallTarget,
         args: HirValueRange,
-        result: &Option<HirLocalDestination>,
+        results: &[HirLocalDestination],
     ) -> Result<(), CompilerError> {
+        let call = self.lower_call_expression(target, args)?;
+        match results {
+            [] => self.emit_line(&format!("{call};")),
+            [result] => self.emit_value_destination(*result, &call)?,
+            _ => {
+                // Capture every ABI slot before updates can alter aliased destinations.
+                let returned = self.next_temp_identifier("__call_results");
+                self.emit_line(&format!("const {returned} = {call};"));
+                let mut captured = Vec::with_capacity(results.len());
+                for index in 0..results.len() {
+                    let slot = self.next_temp_identifier("__call_slot");
+                    self.emit_line(&format!("const {slot} = {returned}[{index}];"));
+                    captured.push(slot);
+                }
+                for (result, slot) in results.iter().zip(captured) {
+                    self.emit_value_destination(*result, &slot)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn lower_call_expression(
+        &mut self,
+        target: &CallTarget,
+        args: HirValueRange,
+    ) -> Result<String, CompilerError> {
         let lowered_target = self.lower_call_target(target)?;
         let hir = self.hir;
         let args = hir.expressions.values(args);
@@ -140,13 +167,7 @@ impl<'hir> JsEmitter<'hir> {
             }
         };
 
-        if let Some(result) = result {
-            self.emit_value_destination(*result, &call)?;
-        } else {
-            self.emit_line(&format!("{call};"));
-        }
-
-        Ok(())
+        Ok(call)
     }
 }
 

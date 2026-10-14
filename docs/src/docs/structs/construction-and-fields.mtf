@@ -3,8 +3,8 @@ A struct constructor uses the struct name and supplies its fields through
 
 [codeblock, $code("moth"):
     Point = |
-        x Int,
-        y Int = 0,
+        x I32,
+        y I32 = 0,
     |
 
     first = Point(10)
@@ -22,6 +22,9 @@ A struct constructor uses the struct name and supplies its fields through
 - Extra arguments are invalid.
 - Values are checked and contextually coerced against field types.
 
+An exact field type can receive a raw numeric literal directly. An already
+typed value must match the field type; construction does not widen or retag it.
+
 A constructor creates a fresh value.
 
 ### Explicit nested construction
@@ -29,7 +32,7 @@ A constructor creates a fresh value.
 Construct a named child at its field's receiving boundary:
 
 [codeblock, $code("moth"):
-    Size = | width Int, height Int |
+    Size = | width I32, height I32 |
     Window = | size Size |
 
     window = Window(size = Size(width = 1280, height = 720))

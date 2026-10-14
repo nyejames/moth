@@ -77,7 +77,7 @@ fn parsed_type_ref_applied_remaps_nested_names() {
 fn parsed_type_ref_collection_remaps_element_and_capacity_name() {
     let mut local = StringTable::new();
     let mut global = StringTable::new();
-    let element_name = local.intern("Int");
+    let element_name = local.intern("I32");
     let capacity_name = local.intern("capacity");
     let mut parsed = ParsedTypeRef::Collection {
         element: Box::new(ParsedTypeRef::Named {
@@ -103,7 +103,7 @@ fn parsed_type_ref_collection_remaps_element_and_capacity_name() {
             ..
         } => {
             assert!(
-                matches!(*element, ParsedTypeRef::Named { name, .. } if global.resolve(name) == "Int")
+                matches!(*element, ParsedTypeRef::Named { name, .. } if global.resolve(name) == "I32")
             );
             assert!(
                 matches!(fixed_capacity, Some(crate::compiler_frontend::datatypes::parsed::ParsedCollectionCapacity::BareConstant { name, .. }) if global.resolve(name) == "capacity")

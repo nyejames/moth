@@ -14,13 +14,13 @@ use super::targets::{
     BuiltinCastFallibility, BuiltinCastPolicyId, BuiltinCastTarget,
     builtin_cast_target_for_builtin_type,
 };
+use super::traits::BUILTIN_CAST_TRAIT_ROWS;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::traits::environment::{CoreTraitKind, TraitEnvironment};
 use crate::compiler_frontend::traits::ids::TraitId;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
-use moth_lexical::numeric::profile::NumericProfile;
 
 /// Static row describing a single initial builtin evidence entry.
 #[derive(Debug, Clone, Copy)]
@@ -35,8 +35,8 @@ pub(crate) struct BuiltinCastEvidenceRow {
 ///
 /// WHAT: every row maps a (source, target) pair to its fallibility
 ///      classification and the stable `BuiltinCastPolicyId` that the policy
-///      owner dispatches on. Distinct numeric pairs (including `Int` and
-///      `Float`) are answered by `numeric_conversion_fallibility` and the
+///      owner dispatches on. Distinct numeric pairs are answered by
+///      `numeric_conversion_fallibility` and the
 ///      numeric text pairs by the text row generators instead. `Byte` is not
 ///      numeric, so its only conversions, to and from `U8`, live here.
 /// WHY: holding the non-numeric rows as one `const` array makes the per-row
@@ -57,7 +57,7 @@ const STATIC_BUILTIN_EVIDENCE_ROWS: &[BuiltinCastEvidenceRow] = &[
     },
     BuiltinCastEvidenceRow {
         source: BuiltinCastTarget::Char,
-        target: BuiltinCastTarget::Int,
+        target: BuiltinCastTarget::Fixed(FixedScalar::I32),
         fallibility: BuiltinCastFallibility::Infallible,
         policy: BuiltinCastPolicyId::CharToInt,
     },
@@ -74,7 +74,7 @@ const STATIC_BUILTIN_EVIDENCE_ROWS: &[BuiltinCastEvidenceRow] = &[
         policy: BuiltinCastPolicyId::ErrorToString,
     },
     BuiltinCastEvidenceRow {
-        source: BuiltinCastTarget::Int,
+        source: BuiltinCastTarget::Fixed(FixedScalar::I32),
         target: BuiltinCastTarget::Char,
         fallibility: BuiltinCastFallibility::Fallible,
         policy: BuiltinCastPolicyId::IntToChar,
@@ -115,7 +115,6 @@ const STATIC_BUILTIN_EVIDENCE_ROWS: &[BuiltinCastEvidenceRow] = &[
 pub(crate) fn numeric_conversion_fallibility(
     source: NumericScalar,
     target: NumericScalar,
-    profile: NumericProfile,
 ) -> BuiltinCastFallibility {
     match (source, target) {
         (NumericScalar::Number(source_scale), NumericScalar::Number(target_scale)) => {
@@ -126,11 +125,11 @@ pub(crate) fn numeric_conversion_fallibility(
             };
         }
 
-        (NumericScalar::Number(_), target) if target.integer_range(profile).is_some() => {
+        (NumericScalar::Number(_), target) if target.integer_range().is_some() => {
             return BuiltinCastFallibility::Fallible;
         }
 
-        (source, NumericScalar::Number(_)) if source.integer_range(profile).is_some() => {
+        (source, NumericScalar::Number(_)) if source.integer_range().is_some() => {
             return BuiltinCastFallibility::Infallible;
         }
 
@@ -142,10 +141,10 @@ pub(crate) fn numeric_conversion_fallibility(
     }
 
     let infallible = match (
-        source.integer_range(profile),
-        target.integer_range(profile),
-        source.binary_float_precision(profile),
-        target.binary_float_precision(profile),
+        source.integer_range(),
+        target.integer_range(),
+        source.binary_float_precision(),
+        target.binary_float_precision(),
     ) {
         (Some((source_min, source_max)), Some((target_min, target_max)), _, _) => {
             source_min >= target_min && source_max <= target_max
@@ -161,7 +160,7 @@ pub(crate) fn numeric_conversion_fallibility(
             target_precision >= source_precision
         }
 
-        // Float to integer truncates, then checks the target range.
+        // Binary float to integer truncates, then checks the target range.
         _ => false,
     };
 
@@ -173,36 +172,24 @@ pub(crate) fn numeric_conversion_fallibility(
 }
 
 /// The generated evidence row for one distinct numeric pair.
-fn numeric_evidence_row(
-    source: NumericScalar,
-    target: NumericScalar,
-    profile: NumericProfile,
-) -> BuiltinCastEvidenceRow {
+fn numeric_evidence_row(source: NumericScalar, target: NumericScalar) -> BuiltinCastEvidenceRow {
     BuiltinCastEvidenceRow {
         source: source.into(),
         target: target.into(),
-        fallibility: numeric_conversion_fallibility(source, target, profile),
+        fallibility: numeric_conversion_fallibility(source, target),
         policy: BuiltinCastPolicyId::NumericConversion { source, target },
     }
 }
 
-/// Every numeric domain in canonical order: `Int`, `Uint`, `Float`, then the non-`Byte` fixed scalars.
+/// Every numeric domain in canonical order: the non-`Byte` fixed scalars.
 ///
 /// WHY: the numeric conversion matrix and both numeric text matrices cover exactly the same
 ///      domains, so one iterator owns that domain list instead of three parallel spellings.
 pub(crate) fn numeric_scalars() -> impl Iterator<Item = NumericScalar> {
-    [
-        NumericScalar::Int,
-        NumericScalar::Uint,
-        NumericScalar::Float,
-    ]
-    .into_iter()
-    .chain(
-        FixedScalar::ALL
-            .into_iter()
-            .filter(|scalar| *scalar != FixedScalar::Byte)
-            .map(NumericScalar::Fixed),
-    )
+    FixedScalar::ALL
+        .into_iter()
+        .filter(|scalar| *scalar != FixedScalar::Byte)
+        .map(NumericScalar::Fixed)
 }
 
 /// The generated evidence row for one numeric domain's text conversion.
@@ -226,8 +213,8 @@ fn numeric_text_evidence_row(scalar: NumericScalar) -> BuiltinCastEvidenceRow {
 ///
 /// WHAT: every numeric domain parses from `String` fallibly, materialising inside its own range
 ///       or precision.
-/// WHY: parsing is fallible for every numeric target, including the profile-selected `Int` and
-///      `Float`, so the row set is generated alongside the formatting rows.
+/// WHY: parsing is fallible for every numeric target, so the row set is generated alongside
+///      the formatting rows.
 fn string_numeric_evidence_row(scalar: NumericScalar) -> BuiltinCastEvidenceRow {
     BuiltinCastEvidenceRow {
         source: BuiltinCastTarget::String,
@@ -242,12 +229,11 @@ fn string_numeric_evidence_row(scalar: NumericScalar) -> BuiltinCastEvidenceRow 
 /// WHAT: answers distinct numeric pairs through `numeric_conversion_fallibility`, numeric text
 ///      pairs through the text row generators, and every other pair, including `Byte <-> U8`,
 ///      through the static table.
-/// WHY: the evidence class is fixed before HIR from the complete source/target types and the
-///      boundary profile, so resolution asks this one owner.
+/// WHY: the evidence class is fixed before HIR from the complete source/target types, so
+///      resolution asks this one owner.
 pub(crate) fn lookup_builtin_evidence(
     source: BuiltinCastTarget,
     target: BuiltinCastTarget,
-    profile: NumericProfile,
 ) -> Option<BuiltinCastEvidenceRow> {
     // Dec conversions resolve only for this exact source/target pair. They do not enter the
     // bounded numeric generator or register one row for every scale.
@@ -261,17 +247,17 @@ pub(crate) fn lookup_builtin_evidence(
             }
             (BuiltinCastTarget::Number(source_scale), target) => target
                 .numeric_scalar()
-                .filter(|scalar| scalar.integer_range(profile).is_some())
+                .filter(|scalar| scalar.integer_range().is_some())
                 .map(|target| (NumericScalar::Number(source_scale), target)),
             (source, BuiltinCastTarget::Number(target_scale)) => source
                 .numeric_scalar()
-                .filter(|scalar| scalar.integer_range(profile).is_some())
+                .filter(|scalar| scalar.integer_range().is_some())
                 .map(|source| (source, NumericScalar::Number(target_scale))),
             _ => None,
         };
 
         if let Some((source_scalar, target_scalar)) = number_conversion {
-            return Some(numeric_evidence_row(source_scalar, target_scalar, profile));
+            return Some(numeric_evidence_row(source_scalar, target_scalar));
         }
     }
 
@@ -279,7 +265,7 @@ pub(crate) fn lookup_builtin_evidence(
         (source.numeric_scalar(), target.numeric_scalar())
     {
         return (source_scalar != target_scalar)
-            .then(|| numeric_evidence_row(source_scalar, target_scalar, profile));
+            .then(|| numeric_evidence_row(source_scalar, target_scalar));
     }
 
     if target == BuiltinCastTarget::String {
@@ -320,13 +306,12 @@ pub(crate) fn lookup_builtin_evidence(
 ///
 /// The type classifier deliberately accepts builtin identities only; source nominals must use
 /// registered evidence. Pair availability and fallibility remain owned by the cast evidence
-/// table and the active numeric profile.
+/// table and the exact source and target scalars.
 pub(crate) fn builtin_cast_proves_core_trait(
     source_type_id: TypeId,
     trait_id: TraitId,
     type_environment: &TypeEnvironment,
     trait_environment: &TraitEnvironment,
-    numeric_profile: NumericProfile,
 ) -> bool {
     let Some(CoreTraitKind::Castable {
         target,
@@ -340,38 +325,50 @@ pub(crate) fn builtin_cast_proves_core_trait(
         return false;
     };
 
-    lookup_builtin_evidence(source, target, numeric_profile)
-        .is_some_and(|row| row.fallibility == fallibility)
+    lookup_builtin_evidence(source, target).is_some_and(|row| row.fallibility == fallibility)
 }
 
-/// The bounded builtin evidence rows registered as core cast trait evidence for one profile.
+/// The builtin evidence rows registered for core cast traits.
 ///
-/// WHAT: static rows, distinct numeric pairs and numeric text rows whose target carries a
-///       source-authorable core cast trait. Fixed-target rows are never built here; fixed
-///       and `Dec` casts resolve on demand through `lookup_builtin_evidence`.
-/// WHY: registration stays finite and only constructs rows it registers.
-pub(crate) fn builtin_evidence_rows_for_profile(
-    profile: NumericProfile,
-) -> impl Iterator<Item = BuiltinCastEvidenceRow> {
-    const NUMERIC_TRAIT_TARGETS: [NumericScalar; 2] = [NumericScalar::Int, NumericScalar::Float];
-
+/// Numeric conversions target only the exact-width traits present in the central metadata table.
+/// Byte and Dec still have no source-authored target traits.
+pub(crate) fn builtin_evidence_rows() -> impl Iterator<Item = BuiltinCastEvidenceRow> {
     let numeric_rows = numeric_scalars().flat_map(move |source| {
-        NUMERIC_TRAIT_TARGETS
-            .into_iter()
-            .filter(move |target| *target != source)
-            .map(move |target| numeric_evidence_row(source, target, profile))
+        BUILTIN_CAST_TRAIT_ROWS.iter().filter_map(move |metadata| {
+            if metadata.fallibility != BuiltinCastFallibility::Infallible {
+                return None;
+            }
+
+            let target = metadata.target.numeric_scalar()?;
+            if source == target {
+                return None;
+            }
+
+            Some(numeric_evidence_row(source, target))
+        })
     });
 
     let text_rows = numeric_scalars().map(numeric_text_evidence_row).chain(
-        NUMERIC_TRAIT_TARGETS
-            .into_iter()
-            .map(string_numeric_evidence_row),
+        BUILTIN_CAST_TRAIT_ROWS.iter().filter_map(|metadata| {
+            if metadata.fallibility != BuiltinCastFallibility::Fallible {
+                return None;
+            }
+
+            metadata
+                .target
+                .numeric_scalar()
+                .map(string_numeric_evidence_row)
+        }),
     );
 
     STATIC_BUILTIN_EVIDENCE_ROWS
         .iter()
         .copied()
-        .filter(|row| !matches!(row.target, BuiltinCastTarget::Fixed(_)))
+        .filter(|row| {
+            BUILTIN_CAST_TRAIT_ROWS.iter().any(|metadata| {
+                metadata.target == row.target && metadata.fallibility == row.fallibility
+            })
+        })
         .chain(numeric_rows)
         .chain(text_rows)
 }
@@ -397,11 +394,8 @@ pub(crate) fn type_id_for_builtin_target(
     let builtins = type_environment.builtins();
     match target {
         BuiltinCastTarget::Bool => Some(builtins.bool),
-        BuiltinCastTarget::Int => Some(builtins.int),
-        BuiltinCastTarget::Uint => Some(builtins.uint),
         BuiltinCastTarget::String => Some(builtins.string),
         BuiltinCastTarget::Char => Some(builtins.char),
-        BuiltinCastTarget::Float => Some(builtins.float),
         BuiltinCastTarget::Fixed(scalar) => {
             Some(crate::compiler_frontend::datatypes::ids::builtin_type_ids::fixed_scalar(scalar))
         }

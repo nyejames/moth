@@ -22,15 +22,18 @@ use super::test_support::{
     nominal_origins_map, path, receiver_entry, register_struct, struct_origin, struct_root,
     this_type, trait_binding, trait_origin, trait_origins_map, trait_root,
 };
+use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
 
 use crate::compiler_frontend::analysis::borrow_checker::BorrowAnalysis;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
-use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValueStore};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, OwnedExpr,
+};
 use crate::compiler_frontend::ast::generic_functions::{
     GenericFunctionBody, GenericFunctionTemplate,
 };
-use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
+use crate::compiler_frontend::ast::statements::functions::{FunctionParameter, FunctionSignature};
 use crate::compiler_frontend::ast::{
     AstPublicInterfaceProjectionInput, ReceiverMethodCatalog, ResolvedPublicTypeRoot,
     ResolvedPublicTypeRootKind, ResolvedPublicTypeRootTable,
@@ -39,6 +42,7 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::datatypes::ReceiverKey;
+use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::datatype::DataType;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
@@ -63,8 +67,14 @@ use crate::compiler_frontend::tokenizer::tokens::TestSourceTokensBuilder;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 use rustc_hash::FxHashMap;
+
+/// One materialised `I32` fixture value; panics when the fixture literal is out of range.
+fn i32_value(value: i64) -> FixedScalarValue {
+    FixedScalarValue::signed(FixedScalar::I32, value).expect("I32 literal in range")
+}
 
 fn alias_origin(name: &str) -> OriginTypeId {
     OriginTypeId::new(
@@ -156,15 +166,16 @@ fn empty_signature() -> FunctionSignature {
 fn field_declaration_with_default(
     name: &str,
     type_id: TypeId,
-    default: Expression,
+    default: ConstValueId,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Declaration {
-    let mut value = default;
-    value.type_id = type_id;
     Declaration {
         id: path(name, string_table, path_fork),
-        value,
+        type_id,
+        diagnostic_type: DataType::Inferred,
+        value_mode: ValueMode::ImmutableOwned,
+        value: DeclarationValue::Default(default),
         binding_span: None,
         config_qualifier: None,
     }
@@ -178,14 +189,59 @@ fn field_declaration_no_default(
 ) -> Declaration {
     Declaration {
         id: path(name, string_table, path_fork),
-        value: Expression::no_value_with_type_id(
-            None,
-            DataType::Inferred,
-            type_id,
-            ValueMode::ImmutableOwned,
-        ),
+        type_id,
+        diagnostic_type: DataType::Inferred,
+        value_mode: ValueMode::ImmutableOwned,
+        value: DeclarationValue::Absent,
         binding_span: None,
         config_qualifier: None,
+    }
+}
+
+/// Fixture-owned expression/content pair: projection views bind folded defaults here directly.
+struct FixtureConstants {
+    builder: AstExpressionBuilder,
+    constants: ConstValueStore,
+}
+
+impl FixtureConstants {
+    fn literal(
+        &mut self,
+        build: impl FnOnce(&mut AstExpressionBuilder, &mut ConstValueStore) -> OwnedExpr,
+    ) -> ConstValueId {
+        let root = build(&mut self.builder, &mut self.constants);
+        let view = self
+            .builder
+            .view_owned(root)
+            .expect("fixture default belongs to builder");
+        let type_id = view.value_type_id().expect("fixture default has one type");
+        if !matches!(
+            view.operation(),
+            crate::compiler_frontend::ast::expressions::expression_store::ExpressionOperationView::Constant(_)
+        ) {
+            let folded = crate::compiler_frontend::ast::const_eval::fold_expression_with_constants(
+                root.id(),
+                &mut self.builder,
+                &mut self.constants,
+                &mut crate::compiler_frontend::symbols::string_interning::StringTable::new(),
+                &crate::compiler_frontend::datatypes::environment::TypeEnvironment::new(),
+                |_| None,
+            )
+            .expect("fixture default folds as content");
+            let crate::compiler_frontend::ast::expressions::expression_store::ExpressionOperationView::Constant(id) =
+                self.builder.view(folded).expect("folded default belongs to builder").operation()
+            else {
+                panic!("fixture default fold must produce a bound constant occurrence");
+            };
+            return id;
+        }
+        let crate::compiler_frontend::ast::expressions::expression_store::ExpressionOperationView::Constant(id) =
+            view.operation()
+        else {
+            unreachable!("operation matched above");
+        };
+        let _ = type_id;
+        id
     }
 }
 
@@ -206,7 +262,7 @@ fn builder_produces_declaration_centric_draft_covering_every_category() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     // Register a struct and a choice so the type-surface projection can resolve them.
     let (_, struct_type_id) = register_struct(
@@ -235,7 +291,7 @@ fn builder_produces_declaration_centric_draft_covering_every_category() {
         &mut path_fork,
     );
     let choice_root = choice_root("Status", choice_type_id, &mut string_table, &mut path_fork);
-    let alias_root = alias_root("IntAlias", int_id, &mut string_table, &mut path_fork);
+    let alias_root = alias_root("I32Alias", int_id, &mut string_table, &mut path_fork);
     let constant_root = constant_root("MaxSize", int_id, &mut string_table, &mut path_fork);
 
     let root_table = ResolvedPublicTypeRootTable {
@@ -263,8 +319,8 @@ fn builder_produces_declaration_centric_draft_covering_every_category() {
         ),
         ExportBinding::new(
             module_origin(),
-            "IntAlias".to_owned(),
-            OriginDeclarationId::Type(alias_origin("IntAlias")),
+            "I32Alias".to_owned(),
+            OriginDeclarationId::Type(alias_origin("I32Alias")),
         ),
         ExportBinding::new(
             module_origin(),
@@ -307,17 +363,24 @@ fn builder_produces_declaration_centric_draft_covering_every_category() {
         trait_evidence_environment: Some(std::rc::Rc::new(TraitEvidenceEnvironment::new())),
     };
 
-    let max_size_constant = Declaration {
-        id: path_fork
-            .try_intern_portable_path("MaxSize", &mut string_table)
-            .expect("test path fits"),
-        value: Expression::int(256, None, ValueMode::ImmutableOwned),
-        binding_span: None,
-        config_qualifier: None,
-    };
-    let module_constants = vec![max_size_constant];
-    let const_values = ConstValueStore::from_test_declarations(module_constants.clone(), &env)
+    let mut const_values = ConstValueStore::default();
+    let max_size_id = const_values
+        .insert_resolved(
+            int_id,
+            crate::compiler_frontend::ast::const_values::store::ConstValuePayload::FixedScalar(
+                i32_value(256),
+            ),
+            None,
+        )
         .expect("test module constant should be representable in the value store");
+    const_values
+        .bind_module_constant(
+            path_fork
+                .try_intern_portable_path("MaxSize", &mut string_table)
+                .expect("test path fits"),
+            max_size_id,
+        )
+        .expect("test module constant binds");
 
     let registry = ExternalPackageRegistry::new();
     let draft = PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
@@ -364,7 +427,7 @@ fn builder_produces_declaration_centric_draft_covering_every_category() {
     assert!(categories.contains(&"constant"));
     assert!(categories.contains(&"trait"));
 
-    // The constant record carries the canonical builtin int type.
+    // The constant record carries the canonical fixed-scalar identity.
     let constant_record = draft
         .declarations
         .iter()
@@ -373,11 +436,11 @@ fn builder_produces_declaration_centric_draft_covering_every_category() {
     if let PublicDeclarationSemantics::Constant(semantics) = &constant_record.semantics {
         assert_eq!(
             semantics.type_identity,
-            CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)
+            CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::FixedScalar(FixedScalar::I32))
         );
     }
 
-    // The alias record carries the canonical builtin int target.
+    // The alias record carries the canonical fixed-scalar target.
     let alias_record = draft
         .declarations
         .iter()
@@ -391,7 +454,7 @@ fn builder_produces_declaration_centric_draft_covering_every_category() {
     if let PublicDeclarationSemantics::TransparentAlias(semantics) = &alias_record.semantics {
         assert_eq!(
             semantics.target_type_identity,
-            CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)
+            CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::FixedScalar(FixedScalar::I32))
         );
     }
 
@@ -538,16 +601,13 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
 
     let receiver_path = path("Box", &mut string_table, &mut path_fork);
     let method_fn_path = path("render", &mut string_table, &mut path_fork);
-    let receiver = Declaration {
+    let receiver = FunctionParameter {
         id: path("this", &mut string_table, &mut path_fork),
-        value: Expression::no_value_with_type_id(
-            None,
-            DataType::Inferred,
-            struct_type_id,
-            ValueMode::MutableReference,
-        ),
+        type_id: struct_type_id,
+        diagnostic_type: DataType::Inferred,
+        value_mode: ValueMode::MutableReference,
+        default: None,
         binding_span: None,
-        config_qualifier: None,
     };
     let method_signature = FunctionSignature {
         parameters: vec![receiver],
@@ -772,7 +832,7 @@ fn free_function_retains_folded_parameter_defaults_in_authored_order() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let string_id = env.builtins().string;
     let default_member = SyntheticInterfaceMemberIdentity::new(
         SyntheticInterfaceClass::ProjectContext,
@@ -783,25 +843,71 @@ fn free_function_retains_folded_parameter_defaults_in_authored_order() {
     // Every default expression carries its declared TypeId so the projection reads the
     // correct canonical type identity from the expression, not from a global builtin
     // constant that may differ from the environment.
+    let mut fixtures = FixtureConstants {
+        builder: AstExpressionBuilder::new().unwrap(),
+        constants: ConstValueStore::default(),
+    };
+    let prefix_text = string_table.intern("default-prefix");
+    let prefix_id = fixtures
+        .builder
+        .string_slice(
+            &mut fixtures.constants,
+            prefix_text,
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture default fits builder");
+    let prefix_id = fixtures
+        .builder
+        .with_synthetic_interface_provenance(
+            prefix_id,
+            SyntheticInterfaceProvenance::single(default_member.clone()),
+        )
+        .expect("fixture provenance fits builder");
+    let prefix_default = fixtures.literal(|_, _| prefix_id);
+    // Literals already produce bound constant occurrences; re-resolve through the helper
+    // so authored provenance stays on the folded content the projection reads.
+    let prefix_default = {
+        let metadata = fixtures
+            .constants
+            .metadata(prefix_default)
+            .expect("fixture default has content")
+            .clone();
+        let mut metadata = metadata;
+        metadata.synthetic_interface_provenance =
+            SyntheticInterfaceProvenance::single(default_member.clone());
+        let payload = fixtures
+            .constants
+            .payload(prefix_default)
+            .expect("fixture default has content")
+            .clone();
+        fixtures
+            .constants
+            .insert_value(metadata, payload)
+            .expect("fixture default refits store")
+    };
+    let count_id = fixtures
+        .builder
+        .fixed_scalar(
+            &mut fixtures.constants,
+            i32_value(42),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture default fits builder");
+    let count_default = fixtures.literal(|_, _| count_id);
     let parameters = vec![
         field_declaration_with_default(
             "prefix",
             string_id,
-            Expression::string_slice(
-                string_table.intern("default-prefix"),
-                None,
-                ValueMode::ImmutableOwned,
-            )
-            .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
-                default_member.clone(),
-            )),
+            prefix_default,
             &mut string_table,
             &mut path_fork,
         ),
         field_declaration_with_default(
             "count",
             int_id,
-            Expression::int(42, None, ValueMode::ImmutableOwned),
+            count_default,
             &mut string_table,
             &mut path_fork,
         ),
@@ -809,7 +915,19 @@ fn free_function_retains_folded_parameter_defaults_in_authored_order() {
     ];
 
     let signature = FunctionSignature {
-        parameters,
+        parameters: parameters
+            .into_iter()
+            .map(|declaration| {
+                crate::compiler_frontend::ast::statements::functions::FunctionParameter {
+                    id: declaration.id,
+                    type_id: declaration.type_id,
+                    diagnostic_type: declaration.diagnostic_type,
+                    value_mode: declaration.value_mode,
+                    default: declaration.value.default(),
+                    binding_span: declaration.binding_span,
+                }
+            })
+            .collect(),
         returns: vec![],
     };
 
@@ -846,7 +964,7 @@ fn free_function_retains_folded_parameter_defaults_in_authored_order() {
         external_registry: &registry,
         string_table: &string_table,
         generic_function_templates: &FxHashMap::default(),
-        const_values: &ConstValueStore::default(),
+        const_values: &fixtures.constants,
         module_resources: None,
     })
     .build()
@@ -877,7 +995,7 @@ fn free_function_retains_folded_parameter_defaults_in_authored_order() {
     assert_eq!(semantics.parameters[1].name.as_deref(), Some("count"));
     assert_eq!(
         &semantics.parameters[1].folded_default,
-        &Some(PublicFoldedValue::Int(42))
+        &Some(PublicFoldedValue::FixedScalar(i32_value(42)))
     );
 
     assert_eq!(semantics.parameters[2].name.as_deref(), Some("subject"));
@@ -889,7 +1007,7 @@ fn struct_retains_folded_field_defaults_in_authored_order() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let bool_id = env.builtins().bool;
     let string_id = env.builtins().string;
 
@@ -908,18 +1026,36 @@ fn struct_retains_folded_field_defaults_in_authored_order() {
         &mut path_fork,
     );
 
+    let mut fixtures = FixtureConstants {
+        builder: AstExpressionBuilder::new().unwrap(),
+        constants: ConstValueStore::default(),
+    };
+    let x_id = fixtures
+        .builder
+        .fixed_scalar(
+            &mut fixtures.constants,
+            i32_value(10),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture default fits builder");
+    let x_default = fixtures.literal(|_, _| x_id);
+    let flag_id = fixtures
+        .builder
+        .bool(
+            &mut fixtures.constants,
+            true,
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture default fits builder");
+    let flag_default = fixtures.literal(|_, _| flag_id);
     let fields = vec![
-        field_declaration_with_default(
-            "x",
-            int_id,
-            Expression::int(10, None, ValueMode::ImmutableOwned),
-            &mut string_table,
-            &mut path_fork,
-        ),
+        field_declaration_with_default("x", int_id, x_default, &mut string_table, &mut path_fork),
         field_declaration_with_default(
             "flag",
             bool_id,
-            Expression::bool(true, None, ValueMode::ImmutableOwned),
+            flag_default,
             &mut string_table,
             &mut path_fork,
         ),
@@ -972,7 +1108,7 @@ fn struct_retains_folded_field_defaults_in_authored_order() {
         external_registry: &registry,
         string_table: &string_table,
         generic_function_templates: &FxHashMap::default(),
-        const_values: &ConstValueStore::default(),
+        const_values: &fixtures.constants,
         module_resources: None,
     })
     .build()
@@ -990,7 +1126,7 @@ fn struct_retains_folded_field_defaults_in_authored_order() {
     assert_eq!(semantics.fields[0].name.as_str(), "x");
     assert_eq!(
         &semantics.fields[0].folded_default,
-        &Some(PublicFoldedValue::Int(10))
+        &Some(PublicFoldedValue::FixedScalar(i32_value(10)))
     );
 
     assert_eq!(semantics.fields[1].name.as_str(), "flag");
@@ -1008,7 +1144,7 @@ fn choice_payload_fields_remain_default_free() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let variant = ChoiceVariantDefinition {
         name: string_table.intern("Some"),
@@ -1115,20 +1251,39 @@ fn receiver_method_retains_folded_parameter_defaults() {
 
     // The first parameter is the `this` receiver: it carries the struct TypeId and has no
     // default. The second parameter is an ordinary parameter with a folded default.
+    let mut fixtures = FixtureConstants {
+        builder: AstExpressionBuilder::new().unwrap(),
+        constants: ConstValueStore::default(),
+    };
+    let fallback_text = string_table.intern("fallback");
+    let fallback_id = fixtures
+        .builder
+        .string_slice(
+            &mut fixtures.constants,
+            fallback_text,
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture default fits builder");
+    let fallback_default = fixtures.literal(|_, _| fallback_id);
     let signature = FunctionSignature {
         parameters: vec![
-            field_declaration_no_default("this", struct_type_id, &mut string_table, &mut path_fork),
-            field_declaration_with_default(
-                "label",
-                string_id,
-                Expression::string_slice(
-                    string_table.intern("fallback"),
-                    None,
-                    ValueMode::ImmutableOwned,
-                ),
-                &mut string_table,
-                &mut path_fork,
-            ),
+            FunctionParameter {
+                id: path("this", &mut string_table, &mut path_fork),
+                type_id: struct_type_id,
+                diagnostic_type: DataType::Inferred,
+                value_mode: ValueMode::ImmutableOwned,
+                default: None,
+                binding_span: None,
+            },
+            FunctionParameter {
+                id: path("label", &mut string_table, &mut path_fork),
+                type_id: string_id,
+                diagnostic_type: DataType::Inferred,
+                value_mode: ValueMode::ImmutableOwned,
+                default: Some(fallback_default),
+                binding_span: None,
+            },
         ],
         returns: vec![],
     };
@@ -1190,7 +1345,7 @@ fn receiver_method_retains_folded_parameter_defaults() {
         external_registry: &registry,
         string_table: &string_table,
         generic_function_templates: &FxHashMap::default(),
-        const_values: &ConstValueStore::default(),
+        const_values: &fixtures.constants,
         module_resources: None,
     })
     .build()

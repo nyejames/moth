@@ -58,18 +58,15 @@ fn explicit_copy_emits_clone_value_wrapped_read() {
             local(1, types.string, RegionId(0)),
         ],
         statements: vec![assign_source, assign_copy],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -121,12 +118,12 @@ fn lowers_option_construct_expression() {
             fields: append_variant_fields(
                 &[HirVariantField {
                     name: Some(value_name),
-                    value: int_expression(10, types.int, RegionId(0), &mut expressions),
+                    value: i32_expression(10, types.i32, RegionId(0), &mut expressions),
                 }],
                 &mut expressions,
             ),
         },
-        types.option_int,
+        types.option_i32,
         RegionId(0),
         ValueKind::RValue,
         &mut expressions,
@@ -139,18 +136,15 @@ fn lowers_option_construct_expression() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![option_statement],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -191,13 +185,13 @@ fn growable_collection_expression_lowers_to_array() {
     let mut string_table = StringTable::new();
     let (mut type_environment, types) = build_type_environment();
 
-    let growable_type = type_environment.intern_collection(types.int, None);
+    let growable_type = type_environment.intern_collection(types.i32, None);
 
     let collection_expr = expression(
         HirExpressionKind::Collection(append_values(
             &[
-                int_expression(1, types.int, RegionId(0), &mut expressions),
-                int_expression(2, types.int, RegionId(0), &mut expressions),
+                i32_expression(1, types.i32, RegionId(0), &mut expressions),
+                i32_expression(2, types.i32, RegionId(0), &mut expressions),
             ],
             &mut expressions,
         )),
@@ -214,18 +208,15 @@ fn growable_collection_expression_lowers_to_array() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![collection_statement],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -268,13 +259,13 @@ fn fixed_collection_expression_lowers_to_wrapper() {
     let mut string_table = StringTable::new();
     let (mut type_environment, types) = build_type_environment();
 
-    let fixed_type = type_environment.intern_collection(types.int, Some(4));
+    let fixed_type = type_environment.intern_collection(types.i32, Some(4));
 
     let collection_expr = expression(
         HirExpressionKind::Collection(append_values(
             &[
-                int_expression(10, types.int, RegionId(0), &mut expressions),
-                int_expression(20, types.int, RegionId(0), &mut expressions),
+                i32_expression(10, types.i32, RegionId(0), &mut expressions),
+                i32_expression(20, types.i32, RegionId(0), &mut expressions),
             ],
             &mut expressions,
         )),
@@ -291,18 +282,15 @@ fn fixed_collection_expression_lowers_to_wrapper() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![collection_statement],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -341,7 +329,7 @@ fn fixed_collection_empty_expression_lowers_to_wrapper() {
     let mut string_table = StringTable::new();
     let (mut type_environment, types) = build_type_environment();
 
-    let fixed_type = type_environment.intern_collection(types.int, Some(2));
+    let fixed_type = type_environment.intern_collection(types.i32, Some(2));
 
     let collection_expr = expression(
         HirExpressionKind::Collection(append_values(&[], &mut expressions)),
@@ -358,18 +346,15 @@ fn fixed_collection_empty_expression_lowers_to_wrapper() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![collection_statement],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -411,16 +396,16 @@ fn map_literal_with_entries_lowers_to_map_new() {
 
     let entry1 = HirMapEntry {
         key: string_expression("Priya", types.string, RegionId(0), &mut expressions),
-        value: int_expression(10, types.int, RegionId(0), &mut expressions),
+        value: i32_expression(10, types.i32, RegionId(0), &mut expressions),
     };
     let entry2 = HirMapEntry {
         key: string_expression("Grace", types.string, RegionId(0), &mut expressions),
-        value: int_expression(12, types.int, RegionId(0), &mut expressions),
+        value: i32_expression(12, types.i32, RegionId(0), &mut expressions),
     };
 
     let map_expr = expression(
         HirExpressionKind::MapLiteral(append_map_entries(&[entry1, entry2], &mut expressions)),
-        types.map_string_int,
+        types.map_string_i32,
         RegionId(0),
         ValueKind::RValue,
         &mut expressions,
@@ -433,18 +418,15 @@ fn map_literal_with_entries_lowers_to_map_new() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![map_statement],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -485,7 +467,7 @@ fn empty_map_literal_lowers_to_map_new_with_empty_array() {
 
     let map_expr = expression(
         HirExpressionKind::MapLiteral(append_map_entries(&[], &mut expressions)),
-        types.map_string_int,
+        types.map_string_i32,
         RegionId(0),
         ValueKind::RValue,
         &mut expressions,
@@ -498,18 +480,15 @@ fn empty_map_literal_lowers_to_map_new_with_empty_array() {
         region: RegionId(0),
         locals: vec![],
         statements: vec![map_statement],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -570,13 +549,17 @@ fn lowers_structural_string_with_url_map_as_escaped_literal() {
         region,
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(structural_expression),
+        terminator: HirTerminator::Return(append_values(
+            &[structural_expression],
+            &mut expressions,
+        )),
     };
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.string,
+        returns: (vec![types.string]).into_boxed_slice(),
+        error_return: None,
     };
     let module = build_module(
         expressions,

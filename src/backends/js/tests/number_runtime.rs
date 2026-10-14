@@ -8,10 +8,6 @@ use moth_lexical::numeric::decimal::NumberScale;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use std::process::Command;
 
-fn emit_cast_helpers(policies: &[BuiltinCastPolicyId]) -> String {
-    emit_cast_helpers_for_profile(policies, NumericProfile::STANDARD)
-}
-
 #[test]
 fn number_conversion_helper_artifacts_are_deterministic_for_the_same_demands() {
     let scale_one = NumberScale::new(1).expect("scale one is valid");
@@ -335,7 +331,7 @@ fn lower_number_operation_source(scale: NumberScale) -> String {
 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let (mut type_environment, types) = build_type_environment();
+    let (mut type_environment, _) = build_type_environment();
     let number_type = type_environment.intern_number(scale);
     let region = RegionId(0);
     let number_value = NumberValue::from_integer(1, scale);
@@ -369,13 +365,14 @@ fn lower_number_operation_source(scale: NumberScale) -> String {
                 result: HirLocalDestination::Define(LocalId(0)),
             },
         )],
-        terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
     let module = build_module(
         expressions,
@@ -400,11 +397,12 @@ fn lower_number_operation_source(scale: NumberScale) -> String {
 
 #[test]
 fn shared_numeric_text_normalization_rejects_trailing_newlines_for_float() {
-    let mut script =
-        emit_cast_helpers(&[BuiltinCastPolicyId::StringToNumeric(NumericScalar::Float)]);
+    let mut script = emit_cast_helpers(&[BuiltinCastPolicyId::StringToNumeric(
+        NumericScalar::Fixed(FixedScalar::F64),
+    )]);
     script.push_str(
-        "\nconst parsed = __moth_cast_float(\"1.25\", 64, \"Float\");\n\
-         const rejected = __moth_cast_float(\"1\\n\", 64, \"Float\");\n\
+        "\nconst parsed = __moth_cast_float(\"1.25\", 64, \"F64\");\n\
+         const rejected = __moth_cast_float(\"1\\n\", 64, \"F64\");\n\
          console.log(JSON.stringify([parsed.tag, parsed.value, rejected.tag, __moth_error_code(rejected.value)]));",
     );
 

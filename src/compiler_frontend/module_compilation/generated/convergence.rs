@@ -14,10 +14,13 @@
 
 use crate::compiler_frontend::CompilerFrontend;
 use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
+use crate::compiler_frontend::analysis::numeric_proofs::analyse_numeric_proofs;
 use crate::compiler_frontend::ast::expressions::failure_facts::{
     WitnessCandidates, retain_bounded_witness_hops, select_failure_witness,
 };
-use crate::compiler_frontend::ast::generic_functions::ModuleMaterialisationPreparationBuilder;
+use crate::compiler_frontend::ast::generic_functions::{
+    ModuleMaterialisationPreparedBuilder, StableFunctionTarget,
+};
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::compiler_errors::RenderTypeContext;
 use crate::compiler_frontend::compiler_messages::{
@@ -26,7 +29,6 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::CallTarget;
-use crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget;
 use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::failure_facts::{
     HirBuiltinFailureBoundary, HirBuiltinFailureContributor, HirBuiltinFailureSource,
@@ -385,8 +387,9 @@ fn add_model_edges(
                 }
             }
             CallTarget::Generated(identity) => {
-                record.generated_callees.push(identity.clone());
-                ids_by_generated.get(&identity).copied()
+                let callee = ids_by_generated.get(identity.as_ref()).copied();
+                record.generated_callees.push(*identity);
+                callee
             }
         };
         let Some(callee) = callee else {
@@ -590,14 +593,20 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
             Some(&source_owner),
         )?;
     }
+    discard_validated_failure_captures(hir_module);
     // Unchanged base HIR keeps the link facts the service collected before convergence.
-    let refreshed = refresh_private_failure_lanes(
-        compiler,
-        hir_module,
-        &borrow_analysis,
-        type_environment,
-        warnings,
-        None,
+    // The refresh re-runs borrow analysis over the installed lanes, so it is borrow convergence.
+    let refreshed = timed_stage_attributed!(
+        crate::timing::TimingMetric::FrontendBorrowConverge,
+        timing_context,
+        refresh_private_failure_lanes(
+            compiler,
+            hir_module,
+            &borrow_analysis,
+            type_environment,
+            warnings,
+            None,
+        )
     )?;
     if let Some(report) = refreshed {
         *function_link_facts = collect_module_function_link_facts(hir_module)
@@ -616,13 +625,18 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
             identity.declaration().module_origin().package().clone(),
         );
         let sidecar = generated_transaction.sidecar_mut(&identity)?;
-        let refreshed = refresh_private_failure_lanes(
-            compiler,
-            &mut sidecar.module.executable.hir,
-            &sidecar.module.executable.borrow_analysis,
-            &mut sidecar.module.executable.type_environment,
-            &sidecar.module.metadata.warnings,
-            Some(&source_owner),
+        discard_validated_failure_captures(&mut sidecar.module.executable.hir);
+        let refreshed = timed_stage_attributed!(
+            crate::timing::TimingMetric::FrontendGeneratedBorrowRecheck,
+            timing_context,
+            refresh_private_failure_lanes(
+                compiler,
+                &mut sidecar.module.executable.hir,
+                &sidecar.module.executable.borrow_analysis,
+                &mut sidecar.module.executable.type_environment,
+                &sidecar.module.metadata.warnings,
+                Some(&source_owner),
+            )
         )?;
         // Unchanged sidecar HIR keeps the link facts materialisation collected from it.
         if let Some(report) = refreshed {
@@ -631,11 +645,99 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
                     .map_err(PremergeFailure::Infrastructure)?;
             sidecar.module.executable.borrow_analysis = report;
         }
+        retain_live_call_summaries(
+            &mut sidecar.module.executable.hir,
+            &sidecar.module.link_facts.functions,
+        );
+        // The publication owner computes the proof table once, from the final HIR after every
+        // rewrite and summary refresh above, so the paired facts match what gets published.
+        sidecar.module.executable.numeric_proofs = analyse_numeric_proofs(
+            &sidecar.module.executable.hir,
+            &sidecar.module.executable.type_environment,
+        );
         // The unchanged lane shares this barrier: every newly completed sidecar
         // releases spare construction capacity before the transaction publishes it.
         sidecar.module.executable.hir.expressions.freeze();
     }
+    retain_live_call_summaries(hir_module, function_link_facts);
+    let reachable_sidecars =
+        reachable_generated_sidecars(function_link_facts, generated_transaction);
+    generated_transaction
+        .retain_reachable_sidecars(&reachable_sidecars)
+        .map_err(PremergeFailure::Infrastructure)?;
     Ok(borrow_analysis)
+}
+
+/// Drop source-validation captures after convergence has checked them; runtime contributors remain.
+fn discard_validated_failure_captures(hir: &mut HirModule) {
+    for facts in hir.function_failure_facts.values_mut() {
+        facts.assertion_message_calls.clear();
+        facts.deferred_custom_catches.clear();
+    }
+}
+
+fn retain_live_call_summaries(hir: &mut HirModule, link_facts: &HirModuleLinkFacts) {
+    let mut live_imported = FxHashSet::default();
+    let mut live_private = FxHashSet::default();
+    let mut live_generated = FxHashSet::default();
+    for (_, target) in link_facts.direct_call_targets() {
+        match target {
+            CallTarget::CrossModule(identity) => {
+                live_imported.insert(identity);
+            }
+            CallTarget::ModulePrivate(identity) => {
+                live_private.insert(identity);
+            }
+            CallTarget::Generated(identity) => {
+                live_generated.insert(*identity);
+            }
+            CallTarget::Local(_) | CallTarget::External(_) => {}
+        }
+    }
+    hir.imported_call_summaries
+        .retain(|identity, _| live_imported.contains(identity));
+    hir.module_private_call_summaries
+        .retain(|identity, _| live_private.contains(identity));
+    hir.generated_call_summaries
+        .retain(|identity, _| live_generated.contains(identity));
+}
+
+fn reachable_generated_sidecars(
+    base_link_facts: &HirModuleLinkFacts,
+    transaction: &GeneratedFunctionTransaction<'_>,
+) -> FxHashSet<GeneratedFunctionIdentity> {
+    let generated_callees = transaction
+        .completed_link_facts()
+        .map(|(identity, link_facts)| {
+            let callees = link_facts
+                .direct_call_targets()
+                .into_iter()
+                .filter_map(|(_, target)| match target {
+                    CallTarget::Generated(identity) => Some(*identity),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            (identity.clone(), callees)
+        })
+        .collect::<FxHashMap<_, _>>();
+    let mut pending = base_link_facts
+        .direct_call_targets()
+        .into_iter()
+        .filter_map(|(_, target)| match target {
+            CallTarget::Generated(identity) => Some(*identity),
+            _ => None,
+        })
+        .collect::<VecDeque<_>>();
+    let mut reachable = FxHashSet::default();
+    while let Some(identity) = pending.pop_front() {
+        if !reachable.insert(identity.clone()) {
+            continue;
+        }
+        if let Some(callees) = generated_callees.get(&identity) {
+            pending.extend(callees.iter().cloned());
+        }
+    }
+    reachable
 }
 
 /// Install private failure lanes and re-run analysis of the rewritten HIR.
@@ -649,27 +751,32 @@ fn refresh_private_failure_lanes(
     warnings: &[CompilerDiagnostic],
     source_owner: Option<&FrozenIdentityHandle>,
 ) -> Result<Option<BorrowCheckReport>, PremergeFailure> {
-    let installation =
-        install_private_failure_lanes(hir, report, type_environment).map_err(|failure| {
-            let messages = match failure {
-                HirConstructionFailure::Diagnosed(diagnostic) => {
-                    CompilerMessages::from_diagnostic_with_warnings(
-                        diagnostic,
-                        warnings.to_vec(),
-                        &compiler.string_table,
-                    )
-                    .with_type_context_for_all_diagnostics(type_environment.clone())
-                }
-                HirConstructionFailure::Infrastructure(error) => {
-                    CompilerMessages::from_error_ref(error, &compiler.string_table)
-                }
-            };
-            let mut failure = PremergeFailure::from(messages);
-            if let Some(owner) = source_owner {
-                failure.set_frozen_identity_handle_if_missing(owner.clone());
+    let installation = install_private_failure_lanes(
+        hir,
+        report,
+        type_environment,
+        compiler.external_package_registry.as_ref(),
+    )
+    .map_err(|failure| {
+        let messages = match failure {
+            HirConstructionFailure::Diagnosed(diagnostic) => {
+                CompilerMessages::from_diagnostic_with_warnings(
+                    diagnostic,
+                    warnings.to_vec(),
+                    &compiler.string_table,
+                )
+                .with_type_context_for_all_diagnostics(type_environment.clone())
             }
-            failure
-        })?;
+            HirConstructionFailure::Infrastructure(error) => {
+                CompilerMessages::from_error_ref(error, &compiler.string_table)
+            }
+        };
+        let mut failure = PremergeFailure::from(messages);
+        if let Some(owner) = source_owner {
+            failure.set_frozen_identity_handle_if_missing(owner.clone());
+        }
+        failure
+    })?;
     if installation == PrivateFailureLaneInstallation::Unchanged {
         return Ok(None);
     }
@@ -852,7 +959,7 @@ fn retained_call_summary<'a>(
         CallTarget::Local(function) => report.analysis.public_call_summaries.get(function),
         CallTarget::CrossModule(origin) => hir.imported_call_summaries.get(origin),
         CallTarget::ModulePrivate(identity) => hir.module_private_call_summaries.get(identity),
-        CallTarget::Generated(identity) => hir.generated_call_summaries.get(identity),
+        CallTarget::Generated(identity) => hir.generated_call_summaries.get(identity.as_ref()),
         CallTarget::External(_) => {
             return Err(CompilerError::compiler_error(
                 "external call cannot contribute an implicit builtin failure",
@@ -900,24 +1007,48 @@ fn function_failure_facts(
     })
 }
 
-/// Numeric contributors are always active once their code set is validated; calls are active
-/// while their exact summary escapes builtin failure.
+/// Arithmetic and cast contributors are active once validated; calls are active while their
+/// exact summary escapes builtin failure.
 fn builtin_failure_contributor_is_active(
     hir: &HirModule,
     report: &BorrowCheckReport,
     contributor: &HirBuiltinFailureContributor,
 ) -> Result<bool, CompilerError> {
     match &contributor.source {
-        HirBuiltinFailureSource::NumericOperation
-        | HirBuiltinFailureSource::CompoundWriteBack { .. } => {
+        HirBuiltinFailureSource::NumericOperation => {
             if contributor.codes.is_empty()
                 || contributor
                     .codes
                     .iter()
-                    .any(|code| !code.is_implicit_failure())
+                    .any(|code| !code.is_implicit_numeric_or_range_failure())
             {
                 return Err(CompilerError::compiler_error(
                     "implicit numeric failure contributor must carry nonempty implicit builtin failure codes",
+                ));
+            }
+            Ok(true)
+        }
+        HirBuiltinFailureSource::CompoundWriteBack { .. } => {
+            if contributor.codes.is_empty()
+                || contributor
+                    .codes
+                    .iter()
+                    .any(|code| !code.is_implicit_cast_failure())
+            {
+                return Err(CompilerError::compiler_error(
+                    "implicit compound write-back failure contributor must carry nonempty cast failure codes",
+                ));
+            }
+            Ok(true)
+        }
+        HirBuiltinFailureSource::AuthoredCastConversion => {
+            if contributor
+                .codes
+                .iter()
+                .any(|code| !code.is_implicit_cast_failure())
+            {
+                return Err(CompilerError::compiler_error(
+                    "implicit cast failure contributor carries a non-implicit builtin failure code",
                 ));
             }
             Ok(true)
@@ -958,7 +1089,8 @@ fn builtin_failure_witness_search<'a>(
     loop {
         if let Some(contributor) = next.take() {
             let target = match &contributor.source {
-                HirBuiltinFailureSource::NumericOperation => {
+                HirBuiltinFailureSource::NumericOperation
+                | HirBuiltinFailureSource::AuthoredCastConversion => {
                     witness.codes = contributor.codes.clone();
                     witness.origin_span = contributor.span;
                     witness.origin = BuiltinFailureOriginKind::Operation;
@@ -980,9 +1112,10 @@ fn builtin_failure_witness_search<'a>(
                 CallTarget::ModulePrivate(identity) => {
                     hir.function_ids_by_private_origin.get(identity).copied()
                 }
-                CallTarget::Generated(identity) => {
-                    hir.function_ids_by_generated.get(identity).copied()
-                }
+                CallTarget::Generated(identity) => hir
+                    .function_ids_by_generated
+                    .get(identity.as_ref())
+                    .copied(),
                 CallTarget::CrossModule(_) | CallTarget::External(_) => None,
             };
             let Some(callee) = callee else {
@@ -1130,6 +1263,14 @@ pub(crate) fn builtin_failure_diagnostic(
     let Some(contributor) = active_builtin_failure_contributor(hir, report, function)? else {
         return Ok(None);
     };
+    // Evidence was selected before lowering. Discharge its promise only against the closed
+    // summaries, before private-lane installation can erase an apparently infallible catch.
+    if let Some(contract) = &facts.infallible_cast_evidence {
+        let witness = builtin_failure_witness(hir, report, function, contributor)?;
+        return Ok(Some(CompilerDiagnostic::infallible_cast_evidence_failure(
+            contract, &witness,
+        )));
+    }
     let reason = match facts.boundary {
         HirBuiltinFailureBoundary::InferPrivate | HirBuiltinFailureBoundary::BuiltinErrorSlot => {
             return Ok(None);
@@ -1363,19 +1504,20 @@ pub(crate) fn exact_generated_sidecar_summary(
 }
 
 pub(in crate::compiler_frontend) fn install_exact_concrete_call_summaries(
-    context: &mut ModuleMaterialisationPreparationBuilder,
+    context: &mut ModuleMaterialisationPreparedBuilder,
     hir: &HirModule,
     borrow_analysis: &BorrowCheckReport,
 ) -> Result<(), CompilerError> {
-    for contract in context.imported_functions_mut().values_mut() {
+    for index in 0..context.callables().len() {
+        let contract = &context.callables()[index];
         let function_id = match &contract.target {
-            SourceFunctionTarget::Imported { origin, .. } => {
+            StableFunctionTarget::Imported(origin) => {
                 let Some(function_id) = hir.function_ids_by_origin.get(origin).copied() else {
                     continue;
                 };
                 function_id
             }
-            SourceFunctionTarget::ModulePrivate { identity, .. } => hir
+            StableFunctionTarget::ModulePrivate(identity) => hir
                 .function_ids_by_private_origin
                 .get(identity)
                 .copied()
@@ -1384,24 +1526,23 @@ pub(in crate::compiler_frontend) fn install_exact_concrete_call_summaries(
                         "Module materialisation context could not resolve private executable {identity:?}"
                     ))
                 })?,
-            SourceFunctionTarget::Local(_) | SourceFunctionTarget::Generated { .. } => continue,
+            StableFunctionTarget::Generated(_) => continue,
         };
         let exact_summary = borrow_analysis
             .analysis
             .public_call_summaries
             .get(&function_id)
-            .cloned()
             .ok_or_else(|| {
                 CompilerError::compiler_error(format!(
                     "Module materialisation context is missing the exact call summary for {function_id:?}"
                 ))
             })?;
         add_frontend_counter(FrontendCounter::ConvergenceSummaryComparisons, 1);
-        let transition =
-            validate_public_call_summary_transition(&contract.summary, &exact_summary)?;
+        let transition = validate_public_call_summary_transition(&contract.summary, exact_summary)?;
         if transition == PublicCallSummaryTransition::Widened {
             add_frontend_counter(FrontendCounter::ConvergenceSummaryChanges, 1);
-            contract.summary = exact_summary;
+            let local_path = contract.local_path;
+            context.update_callable_summary(&local_path, exact_summary);
         }
     }
     Ok(())

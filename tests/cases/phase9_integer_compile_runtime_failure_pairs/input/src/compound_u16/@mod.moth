@@ -1,0 +1,3 @@
+target #U16 = 65535
+step #U32 = 1
+replacement #U16 = cast (target + step)

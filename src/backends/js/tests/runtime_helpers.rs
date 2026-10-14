@@ -4,70 +4,15 @@ use super::support::*;
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, HirMapEntry, ValueKind};
 use crate::compiler_frontend::hir::functions::HirFunction;
-use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, LocalId, RegionId};
+use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, LocalId, RegionId};
+use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirLocalDestination, HirStatementKind};
-use crate::compiler_frontend::hir::terminators::HirTerminator;
-use moth_lexical::numeric::profile::{FloatPrecision, IntWidth};
+use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use std::process::Command;
 
 // Runtime helper contract tests
 // ---------------------------------------------------------------------------
-
-/// Verifies that `__moth_result_propagate` unwraps ok values and throws a structured
-/// sentinel for err values. [result]
-#[test]
-fn result_propagate_unwraps_ok_and_throws_sentinel_for_err() {
-    let source = lower_minimal_module("main");
-    let propagate = helper_source(&source, "__moth_result_propagate");
-
-    assert!(
-        propagate.contains("result.tag === \"ok\"") && propagate.contains("return result.value;"),
-        "__moth_result_propagate must return the ok value"
-    );
-    assert!(
-        propagate.contains("throw { __moth_result_propagate: true, value: result.value }")
-            || propagate.contains("throw { __moth_result_propagate: true, value: result.value };"),
-        "__moth_result_propagate must throw a structured sentinel for err"
-    );
-}
-
-/// Verifies that `__moth_result_fallback` returns the ok value directly without calling
-/// the fallback function. [result]
-#[test]
-fn result_fallback_returns_ok_value_without_calling_fallback() {
-    let source = lower_minimal_module("main");
-    let fallback = helper_source(&source, "__moth_result_fallback");
-
-    assert!(
-        fallback.contains("result.tag === \"ok\"") && fallback.contains("return result.value;"),
-        "__moth_result_fallback must return the ok value directly"
-    );
-    // The fallback callback should only be invoked in the err branch.
-    let ok_pos = fallback
-        .find("if (result && result.tag === \"ok\")")
-        .expect("ok branch must exist");
-    let ok_branch_end = fallback[ok_pos..]
-        .find("return result.value;")
-        .map(|i| ok_pos + i)
-        .expect("ok return must exist");
-    let ok_branch = &fallback[ok_pos..ok_branch_end];
-    assert!(
-        !ok_branch.contains("fallback()"),
-        "ok branch must not call the fallback callback"
-    );
-}
-
-/// Verifies that `__moth_result_fallback` invokes the fallback callback for err carriers. [result]
-#[test]
-fn result_fallback_invokes_callback_for_err() {
-    let source = lower_minimal_module("main");
-    let fallback = helper_source(&source, "__moth_result_fallback");
-
-    assert!(
-        fallback.contains("result.tag === \"err\"") && fallback.contains("return fallback();"),
-        "__moth_result_fallback must invoke fallback() for err carriers"
-    );
-}
 
 /// Verifies that `__moth_clone_value` deep-copies arrays via `.map(__moth_clone_value)`. [clone]
 #[test]
@@ -210,36 +155,33 @@ fn collection_remove_call_is_not_wrapped_with_result_propagate() {
                 &[
                     expression(
                         HirExpressionKind::Collection(append_values(&[], &mut expressions)),
-                        types.collection_int,
+                        types.collection_i32,
                         RegionId(0),
                         ValueKind::RValue,
                         &mut expressions,
                     ),
-                    int_expression(0, types.int, RegionId(0), &mut expressions),
+                    i32_expression(0, types.i32, RegionId(0), &mut expressions),
                 ],
                 &mut expressions,
             ),
-            result: Some(HirLocalDestination::Define(LocalId(0))),
+            results: vec![HirLocalDestination::Define(LocalId(0))],
         },
     );
 
     let block = HirBlock {
         id: BlockId(0),
         region: RegionId(0),
-        locals: vec![local(0, types.int, RegionId(0))],
+        locals: vec![local(0, types.i32, RegionId(0))],
         statements: vec![call_statement],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -297,34 +239,31 @@ fn collection_length_call_is_not_wrapped_with_result_propagate() {
             args: append_values(
                 &[expression(
                     HirExpressionKind::Collection(append_values(&[], &mut expressions)),
-                    types.collection_int,
+                    types.collection_i32,
                     RegionId(0),
                     ValueKind::RValue,
                     &mut expressions,
                 )],
                 &mut expressions,
             ),
-            result: Some(HirLocalDestination::Define(LocalId(0))),
+            results: vec![HirLocalDestination::Define(LocalId(0))],
         },
     );
 
     let block = HirBlock {
         id: BlockId(0),
         region: RegionId(0),
-        locals: vec![local(0, types.int, RegionId(0))],
+        locals: vec![local(0, types.i32, RegionId(0))],
         statements: vec![call_statement],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -369,49 +308,67 @@ fn cast_int_does_not_trim_string_input() {
     );
 }
 
-/// Verifies that Float -> Int casts use the standard profile's Int range helper. [cast]
+/// Verifies that `F64 -> I32` casts use the exact I32 range helper. [cast]
 #[test]
-fn cast_float_to_int_uses_standard_profile_range_helper() {
+fn cast_float_to_int_uses_exact_i32_range_helper() {
     let mut expressions = HirExpressionStore::default();
     let mut path_fork = PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (type_environment, types) = build_type_environment();
     let region = RegionId(0);
 
-    let source_expr = expression(
-        HirExpressionKind::Float((i32::MAX as f64) + 1.0),
-        type_environment.builtins().float,
-        region,
-        ValueKind::Const,
-        &mut expressions,
-    );
+    let source_expr = f64_expression((i32::MAX as f64) + 1.0, types.f64, region, &mut expressions);
 
-    let cast_statement = statement(
-        2,
-        HirStatementKind::CastOp {
-            policy:
-                crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId::NumericConversion {
-                source: crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Float,
-                target: crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Int,
+    let operation = HirFallibleOperation::CastOp {
+        policy:
+            crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId::NumericConversion {
+                source: crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Fixed(FixedScalar::F64),
+                target: crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar::Fixed(FixedScalar::I32),
             },
-            source: source_expr,
-            result: Some(HirLocalDestination::Define(LocalId(0))),
-        },
-    );
-
+        source: source_expr,
+    };
     let block = HirBlock {
         id: BlockId(0),
         region,
-        locals: vec![local(0, types.int, region)],
-        statements: vec![cast_statement],
-        terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
+        locals: vec![local(0, types.i32, region), local(1, types.error, region)],
+        statements: vec![],
+        terminator: HirTerminator::Invoke {
+            id: HirNodeId(2),
+            span: None,
+            operation,
+            success: BlockId(1),
+            success_results: vec![LocalId(0)],
+            failure: BlockId(2),
+            error_result: LocalId(1),
+        },
+    };
+    let success = HirBlock {
+        id: BlockId(1),
+        region,
+        locals: vec![],
+        statements: vec![],
+        terminator: HirTerminator::Return(HirValueRange::empty()),
+    };
+    let failure = HirBlock {
+        id: BlockId(2),
+        region,
+        locals: vec![],
+        statements: vec![],
+        terminator: HirTerminator::ReturnError(expression(
+            HirExpressionKind::Load(HirPlace::local(LocalId(1))),
+            types.error,
+            region,
+            ValueKind::RValue,
+            &mut expressions,
+        )),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: Some(types.error),
     };
 
     let module = build_module(
@@ -419,7 +376,7 @@ fn cast_float_to_int_uses_standard_profile_range_helper() {
         &mut path_fork,
         &mut string_table,
         "main",
-        vec![block],
+        vec![block, success, failure],
         function,
         &[(LocalId(0), "result")],
     );
@@ -694,7 +651,7 @@ fn clone_value_deep_copies_map_entries() {
 // Emitted error-code behavior tests
 // ---------------------------------------------------------------------------
 
-fn lower_error_runtime_module(profile: NumericProfile) -> String {
+fn lower_error_runtime_module() -> String {
     let mut expressions = HirExpressionStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -705,11 +662,11 @@ fn lower_error_runtime_module(profile: NumericProfile) -> String {
         HirExpressionKind::MapLiteral(append_map_entries(
             &[HirMapEntry {
                 key: string_expression("seed", types.string, region, &mut expressions),
-                value: int_expression(1, types.int, region, &mut expressions),
+                value: i32_expression(1, types.i32, region, &mut expressions),
             }],
             &mut expressions,
         )),
-        types.map_string_int,
+        types.map_string_i32,
         region,
         ValueKind::RValue,
         &mut expressions,
@@ -726,17 +683,18 @@ fn lower_error_runtime_module(profile: NumericProfile) -> String {
                 HirStatementKind::Call {
                     target: CallTarget::External(ExternalFunctionId::IoInputNew),
                     args: append_values(&[], &mut expressions),
-                    result: None,
+                    results: vec![],
                 },
             ),
         ],
-        terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
     let module = build_module(
         expressions,
@@ -752,7 +710,7 @@ fn lower_error_runtime_module(profile: NumericProfile) -> String {
         &module,
         &NumericProofs::default(),
         &string_table,
-        JsLoweringConfig::direct_js(false, profile),
+        JsLoweringConfig::direct_js(false),
         &type_environment,
         &path_fork.snapshot_table(),
     )
@@ -774,28 +732,17 @@ fn run_javascript(source: &str) -> String {
 }
 
 /// Verifies that emitted collection, map, and Core IO errors retain their unsigned code records
-/// and exact messages under both Int profiles. [collection] [map] [io-input-helper]
+/// and exact messages. [collection] [map] [io-input-helper]
 #[test]
-fn emitted_error_producers_preserve_u32_codes_across_int_profiles() {
-    let profiles = [
-        NumericProfile::STANDARD,
-        NumericProfile {
-            int_width: IntWidth::Bits64,
-            float_precision: FloatPrecision::Bits64,
-        },
-    ];
+fn emitted_error_producers_preserve_u32_codes() {
+    let source = lower_error_runtime_module();
     let code_field = format!(
         "{:?}",
         crate::backends::js::builtin_error_code_js_field_name(false)
     );
-
-    for profile in profiles {
-        let source = lower_error_runtime_module(profile);
-        let (zero_index, out_of_bounds_index) = match profile.int_width {
-            IntWidth::Bits32 => ("0", "1"),
-            IntWidth::Bits64 => ("0n", "1n"),
-        };
-        let driver = r#"
+    // Collection positions are exactly I32, so the driver passes Number indexes.
+    let (zero_index, out_of_bounds_index) = ("0", "1");
+    let driver = r#"
 delete globalThis.window;
 delete globalThis.document;
 if (typeof window !== "undefined" || typeof document !== "undefined") {
@@ -827,26 +774,25 @@ for (const result of results) {
     ]));
 }
 "#
-        .replace("INDEX_ZERO", zero_index)
-        .replace("INDEX_OUT_OF_BOUNDS", out_of_bounds_index)
-        .replace("ERROR_CODE_FIELD", &code_field);
+    .replace("INDEX_ZERO", zero_index)
+    .replace("INDEX_OUT_OF_BOUNDS", out_of_bounds_index)
+    .replace("ERROR_CODE_FIELD", &code_field);
 
-        let output = run_javascript(&format!("{source}\n{driver}"));
-        assert_eq!(
-            output.lines().collect::<Vec<_>>(),
-            vec![
-                r#"["err","Collection operation expects an ordered collection","number","100","number","101",100]"#,
-                r#"["err","Collection operation expects an ordered collection","number","100","number","101",100]"#,
-                r#"["err","Collection index out of bounds","number","101","number","102",101]"#,
-                r#"["err","Collection index out of bounds","number","101","number","102",101]"#,
-                r#"["err","Collection index out of bounds","number","101","number","102",101]"#,
-                r#"["err","Map operation expects an ordered map","number","110","number","111",110]"#,
-                r#"["err","Map key not found","number","111","number","112",111]"#,
-                r#"["err","Map operation expects an ordered map","number","110","number","111",110]"#,
-                r#"["err","Map key not found","number","111","number","112",111]"#,
-                r#"["err","Unsupported operation","number","1","number","2",1]"#,
-            ],
-            "generated error records must retain U32-number codes under {profile}"
-        );
-    }
+    let output = run_javascript(&format!("{source}\n{driver}"));
+    assert_eq!(
+        output.lines().collect::<Vec<_>>(),
+        vec![
+            r#"["err","Collection operation expects an ordered collection","number","100","number","101",100]"#,
+            r#"["err","Collection operation expects an ordered collection","number","100","number","101",100]"#,
+            r#"["err","Collection index out of bounds","number","101","number","102",101]"#,
+            r#"["err","Collection index out of bounds","number","101","number","102",101]"#,
+            r#"["err","Collection index out of bounds","number","101","number","102",101]"#,
+            r#"["err","Map operation expects an ordered map","number","110","number","111",110]"#,
+            r#"["err","Map key not found","number","111","number","112",111]"#,
+            r#"["err","Map operation expects an ordered map","number","110","number","111",110]"#,
+            r#"["err","Map key not found","number","111","number","112",111]"#,
+            r#"["err","Unsupported operation","number","1","number","2",1]"#,
+        ],
+        "generated error records must retain U32-number codes"
+    );
 }

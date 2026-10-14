@@ -1,0 +1,7 @@
+pair || -> I32, I32:
+    return 10, 20
+;
+
+
+
+value = pair()

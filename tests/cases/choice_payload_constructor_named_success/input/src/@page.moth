@@ -1,4 +1,4 @@
-Response :: Err | message String |, Pending | retry_count Int, message String |, Success;
+Response :: Err | message String |, Pending | retry_count I32, message String |, Success;
 
 e = Response::Err(message = "bad")
 p = Response::Pending(retry_count = 3, message = "waiting")

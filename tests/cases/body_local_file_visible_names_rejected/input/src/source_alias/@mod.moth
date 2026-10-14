@@ -1,0 +1,6 @@
+local_binding || -> I32:
+    AccountId = 1
+    return AccountId
+;
+
+AccountId as I32

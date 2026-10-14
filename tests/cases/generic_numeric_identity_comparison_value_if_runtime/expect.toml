@@ -1,0 +1,8 @@
+entry = "."
+
+# Authored for Phase 5B.2 and unobserved until the parent harness run. No html_wasm block is declared, so no Wasm outcome is asserted.
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "pending-numeric-comparison inline=yes block=yes named=yes nested=yes later=1 direct_inline=yes direct_block=no"

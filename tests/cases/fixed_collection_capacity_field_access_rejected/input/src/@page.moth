@@ -1,8 +1,8 @@
-Defaults = | capacity Int |
+Defaults = | capacity I32 |
 
 defaults Defaults = Defaults(4)
 
 render || -> String:
-    items {defaults.capacity Int} = {}
+    items {defaults.capacity I32} = {}
     return ""
 ;

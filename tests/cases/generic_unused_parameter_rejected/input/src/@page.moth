@@ -1,5 +1,5 @@
 Box type T = |
-    value Int,
+    value I32,
 |
 
 #[: unused generic]

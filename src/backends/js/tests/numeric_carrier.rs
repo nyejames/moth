@@ -3,43 +3,32 @@ use crate::compiler_frontend::builtins::casts::evidence::numeric_scalars;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use moth_lexical::numeric::precision::BinaryFloatPrecision;
-use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
 
 #[test]
-fn carrier_selection_follows_profile_and_complete_scalar_range() {
-    let profile = NumericProfile {
-        int_width: IntWidth::Bits64,
-        float_precision: FloatPrecision::Bits32,
-    };
-
+fn carrier_selection_follows_the_exact_scalar_range() {
+    // Every bounded identity carries its own width, so carrier selection reads only the scalar.
     assert_eq!(
-        JsNumericCarrier::for_scalar(NumericScalar::Int, profile),
+        JsNumericCarrier::for_scalar(NumericScalar::Fixed(FixedScalar::I64)),
         Some(JsNumericCarrier::BigInteger {
             min: i64::MIN as i128,
             max: i64::MAX as i128,
         })
     );
     assert_eq!(
-        JsNumericCarrier::for_scalar(NumericScalar::Float, profile),
+        JsNumericCarrier::for_scalar(NumericScalar::Fixed(FixedScalar::F32)),
         Some(JsNumericCarrier::BinaryFloat {
             precision: BinaryFloatPrecision::Binary32,
         })
     );
     assert!(matches!(
-        JsNumericCarrier::for_scalar(
-            NumericScalar::Fixed(FixedScalar::U32),
-            NumericProfile::STANDARD
-        ),
+        JsNumericCarrier::for_scalar(NumericScalar::Fixed(FixedScalar::U32)),
         Some(JsNumericCarrier::ExactInteger {
             min: 0,
             max: 4_294_967_295
         })
     ));
     assert!(matches!(
-        JsNumericCarrier::for_scalar(
-            NumericScalar::Fixed(FixedScalar::U64),
-            NumericProfile::STANDARD
-        ),
+        JsNumericCarrier::for_scalar(NumericScalar::Fixed(FixedScalar::U64)),
         Some(JsNumericCarrier::BigInteger {
             min: 0,
             max: 18_446_744_073_709_551_615
@@ -84,83 +73,54 @@ fn fixed_literals_use_their_javascript_carrier_without_losing_bits() {
         ),
     ] {
         assert_eq!(
-            JsNumericCarrier::fixed_literal(value, NumericProfile::STANDARD).as_deref(),
+            JsNumericCarrier::fixed_literal(value).as_deref(),
             Some(expected)
         );
     }
 }
 
 #[test]
-fn numeric_conversion_calls_only_required_helpers_in_every_profile() {
-    let profiles = [
-        NumericProfile {
-            int_width: IntWidth::Bits32,
-            float_precision: FloatPrecision::Bits32,
-        },
-        NumericProfile {
-            int_width: IntWidth::Bits32,
-            float_precision: FloatPrecision::Bits64,
-        },
-        NumericProfile {
-            int_width: IntWidth::Bits64,
-            float_precision: FloatPrecision::Bits32,
-        },
-        NumericProfile {
-            int_width: IntWidth::Bits64,
-            float_precision: FloatPrecision::Bits64,
-        },
-    ];
+fn numeric_conversion_calls_only_required_helpers() {
     let scalars = numeric_scalars().collect::<Vec<_>>();
 
-    for profile in profiles {
-        for source in &scalars {
-            for target in &scalars {
-                let conversion = JsNumericConversion::classify(*source, *target, profile)
-                    .expect("every canonical numeric pair has a JS conversion");
-                let expression = conversion.expression("value", *source, *target);
-                let required = conversion
-                    .required_helpers()
-                    .iter()
-                    .map(|helper| helper.function_name())
-                    .collect::<Vec<_>>();
+    for source in &scalars {
+        for target in &scalars {
+            let conversion = JsNumericConversion::classify(*source, *target)
+                .expect("every canonical numeric pair has a JS conversion");
+            let expression = conversion.expression("value", *source, *target);
+            let required = conversion
+                .required_helpers()
+                .iter()
+                .map(|helper| helper.function_name())
+                .collect::<Vec<_>>();
 
-                for called in expression
-                    .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
-                    .filter(|word| word.starts_with("__moth_"))
-                {
-                    assert!(
-                        required.contains(&called),
-                        "{source:?} -> {target:?} under {profile} calls {called}, which is not a required helper"
-                    );
-                }
+            for called in expression
+                .split(|character: char| !character.is_ascii_alphanumeric() && character != '_')
+                .filter(|word| word.starts_with("__moth_"))
+            {
+                assert!(
+                    required.contains(&called),
+                    "{source:?} -> {target:?} calls {called}, which is not a required helper"
+                );
             }
         }
     }
 }
 
-/// Verifies that profile `Uint` selects the shared integer carriers and bounds:
-/// `Uint32` rides exact `Number`, `Uint64` rides exact `BigInt`, with no
-/// Uint-only arithmetic helper family.
+/// Verifies that each exact unsigned width selects the shared integer carrier and bounds:
+/// `U32` rides exact `Number`, `U64` rides exact `BigInt`, with no unsigned-only arithmetic
+/// helper family.
 #[test]
-fn uint_carriers_follow_the_selected_int_width_without_new_helpers() {
-    let profile32 = NumericProfile {
-        int_width: IntWidth::Bits32,
-        float_precision: FloatPrecision::Bits64,
-    };
-    let profile64 = NumericProfile {
-        int_width: IntWidth::Bits64,
-        float_precision: FloatPrecision::Bits64,
-    };
-
+fn uint_carriers_follow_the_exact_width_without_new_helpers() {
     assert_eq!(
-        JsNumericCarrier::for_scalar(NumericScalar::Uint, profile32),
+        JsNumericCarrier::for_scalar(NumericScalar::Fixed(FixedScalar::U32)),
         Some(JsNumericCarrier::ExactInteger {
             min: 0,
             max: 4_294_967_295
         })
     );
     assert_eq!(
-        JsNumericCarrier::for_scalar(NumericScalar::Uint, profile64),
+        JsNumericCarrier::for_scalar(NumericScalar::Fixed(FixedScalar::U64)),
         Some(JsNumericCarrier::BigInteger {
             min: 0,
             max: 18_446_744_073_709_551_615
@@ -169,130 +129,146 @@ fn uint_carriers_follow_the_selected_int_width_without_new_helpers() {
 
     // Both widths reuse the shared integer helper families and bounds.
     assert_eq!(
-        JsNumericCarrier::for_scalar(NumericScalar::Uint, profile32)
-            .expect("Uint32 has a carrier")
+        JsNumericCarrier::for_scalar(NumericScalar::Fixed(FixedScalar::U32))
+            .expect("U32 has a carrier")
             .helper_family(),
         Some("int")
     );
     assert_eq!(
-        JsNumericCarrier::for_scalar(NumericScalar::Uint, profile64)
-            .expect("Uint64 has a carrier")
+        JsNumericCarrier::for_scalar(NumericScalar::Fixed(FixedScalar::U64))
+            .expect("U64 has a carrier")
             .helper_family(),
         Some("bigint")
     );
     assert_eq!(
-        JsNumericCarrier::for_scalar(NumericScalar::Uint, profile32)
-            .expect("Uint32 has bounds")
+        JsNumericCarrier::for_scalar(NumericScalar::Fixed(FixedScalar::U32))
+            .expect("U32 has bounds")
             .integer_bounds_js(),
         Some(("0".to_owned(), "4294967295".to_owned()))
     );
     assert_eq!(
-        JsNumericCarrier::for_scalar(NumericScalar::Uint, profile64)
-            .expect("Uint64 has bounds")
+        JsNumericCarrier::for_scalar(NumericScalar::Fixed(FixedScalar::U64))
+            .expect("U64 has bounds")
             .integer_bounds_js(),
         Some(("0n".to_owned(), "18446744073709551615n".to_owned()))
     );
 
     // Adversarial boundary literals keep their exact carrier spelling.
     for (value, expected) in [
-        (0, "0"),
+        (0u32, "0"),
         (2_147_483_647, "2147483647"),
         (2_147_483_648, "2147483648"),
         (4_294_967_295, "4294967295"),
     ] {
+        let value = FixedScalarValue::unsigned(FixedScalar::U32, u64::from(value))
+            .expect("U32 literal fits");
         assert_eq!(
-            JsNumericCarrier::uint_literal(value, profile32).as_deref(),
+            JsNumericCarrier::fixed_literal(value).as_deref(),
             Some(expected)
         );
     }
-    assert_eq!(
-        JsNumericCarrier::uint_literal(4_294_967_296, profile32),
-        None
-    );
     for (value, expected) in [
-        (0, "0n"),
+        (0u64, "0n"),
         (9_223_372_036_854_775_807, "9223372036854775807n"),
         (9_223_372_036_854_775_808, "9223372036854775808n"),
         (18_446_744_073_709_551_615, "18446744073709551615n"),
     ] {
+        let value = FixedScalarValue::unsigned(FixedScalar::U64, value).expect("U64 literal fits");
         assert_eq!(
-            JsNumericCarrier::uint_literal(value, profile64).as_deref(),
+            JsNumericCarrier::fixed_literal(value).as_deref(),
             Some(expected)
         );
     }
 }
 
-/// Verifies that `Uint` conversions classify through the existing conversion
-/// vocabulary: Uint32 rides `Number` rounding, Uint64 rides direct `BigInt`
-/// rounding at the destination precision, and Uint/Int pairs stay checked.
+/// Verifies that unsigned conversions classify through the existing conversion
+/// vocabulary: U32 rides `Number` rounding, U64 rides direct `BigInt` rounding at
+/// the destination precision, and unsigned/signed pairs stay checked.
 #[test]
 fn uint_conversions_classify_through_shared_integer_conversions() {
-    let profiles = [
-        NumericProfile {
-            int_width: IntWidth::Bits32,
-            float_precision: FloatPrecision::Bits32,
-        },
-        NumericProfile {
-            int_width: IntWidth::Bits32,
-            float_precision: FloatPrecision::Bits64,
-        },
-        NumericProfile {
-            int_width: IntWidth::Bits64,
-            float_precision: FloatPrecision::Bits32,
-        },
-        NumericProfile {
-            int_width: IntWidth::Bits64,
-            float_precision: FloatPrecision::Bits64,
-        },
-    ];
-
-    for profile in profiles {
-        let uint_to_float =
-            JsNumericConversion::classify(NumericScalar::Uint, NumericScalar::Float, profile)
-                .expect("Uint to Float classifies in every profile");
-        let expected = match (profile.int_width, profile.float_precision.into()) {
-            (IntWidth::Bits32, BinaryFloatPrecision::Binary32) => {
-                JsNumericConversion::RoundExactIntegerToFloat {
-                    precision: BinaryFloatPrecision::Binary32,
-                }
-            }
-            (IntWidth::Bits32, _) => JsNumericConversion::RoundExactIntegerToFloat {
-                precision: BinaryFloatPrecision::Binary64,
-            },
-            (IntWidth::Bits64, BinaryFloatPrecision::Binary32) => {
-                JsNumericConversion::RoundBigIntegerToFloat {
-                    precision: BinaryFloatPrecision::Binary32,
-                }
-            }
-            (IntWidth::Bits64, _) => JsNumericConversion::ToNumber,
-        };
-        assert_eq!(uint_to_float, expected, "Uint to Float under {profile:?}");
-
-        for (source, target) in [
-            (NumericScalar::Uint, NumericScalar::Int),
-            (NumericScalar::Int, NumericScalar::Uint),
-        ] {
-            assert!(
-                matches!(
-                    JsNumericConversion::classify(source, target, profile),
-                    Ok(JsNumericConversion::CheckedIntegerToInteger { .. })
-                ),
-                "{source:?} to {target:?} stays a checked integer cast under {profile:?}"
-            );
+    assert_eq!(
+        JsNumericConversion::classify(
+            NumericScalar::Fixed(FixedScalar::U32),
+            NumericScalar::Fixed(FixedScalar::F64),
+        )
+        .expect("U32 to F64 classifies"),
+        JsNumericConversion::RoundExactIntegerToFloat {
+            precision: BinaryFloatPrecision::Binary64,
         }
+    );
+    assert_eq!(
+        JsNumericConversion::classify(
+            NumericScalar::Fixed(FixedScalar::U32),
+            NumericScalar::Fixed(FixedScalar::F32),
+        )
+        .expect("U32 to F32 classifies"),
+        JsNumericConversion::RoundExactIntegerToFloat {
+            precision: BinaryFloatPrecision::Binary32,
+        }
+    );
+    assert_eq!(
+        JsNumericConversion::classify(
+            NumericScalar::Fixed(FixedScalar::U64),
+            NumericScalar::Fixed(FixedScalar::F64),
+        )
+        .expect("U64 to F64 classifies"),
+        JsNumericConversion::ToNumber
+    );
+    assert_eq!(
+        JsNumericConversion::classify(
+            NumericScalar::Fixed(FixedScalar::U64),
+            NumericScalar::Fixed(FixedScalar::F32),
+        )
+        .expect("U64 to F32 classifies"),
+        JsNumericConversion::RoundBigIntegerToFloat {
+            precision: BinaryFloatPrecision::Binary32,
+        }
+    );
+    assert_eq!(
+        JsNumericConversion::classify(
+            NumericScalar::Fixed(FixedScalar::U32),
+            NumericScalar::Fixed(FixedScalar::U64),
+        )
+        .expect("the wider unsigned target is an infallible carrier change"),
+        JsNumericConversion::ToBigInt
+    );
+
+    for (source, target) in [
+        (
+            NumericScalar::Fixed(FixedScalar::U64),
+            NumericScalar::Fixed(FixedScalar::I64),
+        ),
+        (
+            NumericScalar::Fixed(FixedScalar::I64),
+            NumericScalar::Fixed(FixedScalar::U64),
+        ),
+        (
+            NumericScalar::Fixed(FixedScalar::U64),
+            NumericScalar::Fixed(FixedScalar::U32),
+        ),
+    ] {
+        assert!(
+            matches!(
+                JsNumericConversion::classify(source, target),
+                Ok(JsNumericConversion::CheckedIntegerToInteger { .. })
+            ),
+            "{source:?} to {target:?} stays a checked integer cast"
+        );
     }
 
-    // Uint64 converts to Float32 directly at destination precision, never
+    // U64 converts to F32 directly at destination precision, never
     // through a binary64 intermediate.
-    let profile_float32 = NumericProfile {
-        int_width: IntWidth::Bits64,
-        float_precision: FloatPrecision::Bits32,
-    };
-    let conversion =
-        JsNumericConversion::classify(NumericScalar::Uint, NumericScalar::Float, profile_float32)
-            .expect("Uint64 to Float32 classifies");
+    let conversion = JsNumericConversion::classify(
+        NumericScalar::Fixed(FixedScalar::U64),
+        NumericScalar::Fixed(FixedScalar::F32),
+    )
+    .expect("U64 to F32 classifies");
     assert_eq!(
-        conversion.expression("value", NumericScalar::Uint, NumericScalar::Float),
+        conversion.expression(
+            "value",
+            NumericScalar::Fixed(FixedScalar::U64),
+            NumericScalar::Fixed(FixedScalar::F32)
+        ),
         "__moth_bigint_to_binary_float(value, 32)"
     );
 }

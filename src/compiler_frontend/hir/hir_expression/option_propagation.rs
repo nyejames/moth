@@ -5,7 +5,7 @@
 //! WHY: propagation is control flow. Lowering it into blocks keeps borrow
 //! validation and backend lowering from treating it as a panic unwrap.
 
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression_store::ExpressionView;
 use crate::compiler_frontend::hir::expression_store::HirConstructionFailure;
 use crate::compiler_frontend::hir::expressions::{
     HirExpressionKind, HirVariantCarrier, OPTION_SOME_VARIANT_INDEX, ValueKind,
@@ -22,7 +22,7 @@ use super::LoweredExpression;
 impl<'a> HirBuilder<'a> {
     pub(crate) fn lower_option_expression_to_present_value(
         &mut self,
-        value: &Expression,
+        value: ExpressionView<'_>,
         span: &Option<SourceSpan>,
     ) -> Result<LoweredExpression, HirConstructionFailure> {
         let lowered = self.lower_expression(value)?;
@@ -107,23 +107,17 @@ impl<'a> HirBuilder<'a> {
         self.set_current_block(none_block, span)?;
         let none_region = self.current_region_or_error(span)?;
         let current_function_id = self.current_function_id_or_error(span)?;
-        let function_return_type = self
+        let returns = &self
             .function_by_id_or_error(current_function_id, span)?
-            .return_type;
-
-        let no_span = None;
-        if let Some((success_type, _)) = self
-            .type_environment
-            .fallible_carrier_slots(function_return_type)
-        {
-            let none = self.option_none_expression(success_type, none_region, &no_span)?;
-            return self.emit_terminator_with_span(
-                none_block,
-                HirTerminator::ReturnSuccess(none),
-                span,
-                *span,
+            .returns;
+        let [function_return_type] = returns.as_ref() else {
+            return_hir_transformation_error!(
+                "Option propagation requires one success return slot",
+                self.hir_error_location(span)
             );
-        }
+        };
+        let function_return_type = *function_return_type;
+        let no_span = None;
 
         let none = self.option_none_expression(function_return_type, none_region, &no_span)?;
         if self.module.expressions.expression(none).ty != propagated_option_type {
@@ -135,7 +129,8 @@ impl<'a> HirBuilder<'a> {
             );
         }
 
-        self.emit_terminator_with_span(none_block, HirTerminator::Return(none), span, *span)
+        let values = self.module.expressions.append_values(&[none], *span)?;
+        self.emit_terminator_with_span(none_block, HirTerminator::Return(values), span, *span)
     }
 
     fn option_none_expression(

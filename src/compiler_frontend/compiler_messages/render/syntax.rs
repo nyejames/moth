@@ -80,20 +80,6 @@ pub(crate) fn invalid_number_literal_message(
         NumberLiteralErrorReason::InvalidSeparatorPlacement => {
             format!("Numeric literal '{literal}' has an invalid `_` separator placement.")
         }
-        NumberLiteralErrorReason::OutsideIntRange => {
-            format!("Integer literal '{literal}' is outside the supported Int range.")
-        }
-        NumberLiteralErrorReason::OutsideUintRange(width) => {
-            format!(
-                "Integer literal '{literal}' is outside the Uint range 0 to {}.",
-                width.unsigned_max_value()
-            )
-        }
-        NumberLiteralErrorReason::NegativeUintLiteral(_) => {
-            format!(
-                "Numeric literal '{literal}' is negative, but Uint cannot hold negative values."
-            )
-        }
         NumberLiteralErrorReason::OutsideFixedScalarRange(scalar) => {
             let name = scalar.name();
             match fixed_scalar_inclusive_range(scalar) {
@@ -114,9 +100,6 @@ pub(crate) fn invalid_number_literal_message(
                 "Float literal '{literal}' does not materialize to a finite {}.",
                 scalar.name()
             )
-        }
-        NumberLiteralErrorReason::NonFiniteFloat => {
-            format!("Float literal '{literal}' does not materialize to a finite Float.")
         }
         NumberLiteralErrorReason::InexactNumberScale(scale) => {
             format!("Numeric literal '{literal}' does not fit {scale} exactly.")
@@ -157,7 +140,7 @@ pub(crate) fn invalid_type_annotation_message(
 ) -> String {
     match reason {
         InvalidTypeAnnotationReason::NoneNotAllowed => {
-            "`none` is not a valid type annotation. Use an explicit type such as `String` or `Int`."
+            "`none` is not a valid type annotation. Use an explicit type such as `String` or `I32`."
                 .to_string()
         }
         InvalidTypeAnnotationReason::ReservedTraitKeyword => {
@@ -500,10 +483,17 @@ pub(crate) fn invalid_loop_header_message(
         InvalidLoopHeaderReason::BindingAlreadyDeclared => {
             "Loop binding is already declared in this scope.".to_string()
         }
-        InvalidLoopHeaderReason::CollectionSourceNotCollection { found_type } => {
-            let found_type = diagnostic_type_name(found_type, context);
-            format!("Collection loop source must be a collection. Found '{found_type}'.")
-        }
+        InvalidLoopHeaderReason::CollectionSourceNotCollection { found_type } => match found_type {
+            Some(found_type) => {
+                let found_type = diagnostic_type_name(found_type, context);
+                format!("Collection loop source must be a collection. Found '{found_type}'.")
+            }
+            // The source's exact type is selected at the owning body root, so the message names
+            // the unresolved expression instead of a fabricated default width.
+            None => "Collection loop source must be a collection. Found an unresolved expression \
+                     whose exact type is selected at the end of the enclosing body."
+                .to_string(),
+        },
         InvalidLoopHeaderReason::MissingRangeSeparator => {
             "Range loops must include 'to' between bounds.".to_string()
         }

@@ -33,7 +33,6 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::identity::DependencyShellId;
 use crate::compiler_frontend::symbols::path_interner::PathInternerBuilder;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use moth_lexical::numeric::profile::NumericProfile;
 
 use crate::builder_surface::BuilderSurface;
 use crate::projects::settings::Config;
@@ -128,7 +127,10 @@ pub(super) fn publish_module_and_generated(
 ///       needed, and publishes the complete module result and its sidecars.
 /// WHY: the build-system contract makes publication atomic, so this is the single
 ///      merge-remap-publish tail shared by canonical directory and synthetic single-file lanes.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "publication keeps mutable module, generated-function, materialisation and resource owners, module identity and origin, the compiled result, string/path base lengths and mutable boundary string/path tables separate"
+)]
 pub(super) fn publish_compiled_module(
     modules: &mut ModuleArtifactStore,
     generated: &mut BoundaryGeneratedFunctionStore,
@@ -667,7 +669,6 @@ pub(crate) fn order_packages_by_dependency(
 )]
 pub(super) fn discover_source_package_inventories(
     config: &Config,
-    numeric_profile: NumericProfile,
     namespace_set: &ModuleNamespaceSet,
     project_path_resolver: &ProjectPathResolver,
     style_directives: &StyleDirectiveRegistry,
@@ -751,14 +752,10 @@ pub(super) fn discover_source_package_inventories(
         };
         // Merge canonical contract spans before any transient package job forks its string
         // table. Every later transient fact can then share this boundary prefix safely.
-        let canonical_source_facts = match config_boundary::source_contract_facts_from_module_waves(
+        let canonical_source_facts = config_boundary::source_contract_facts_from_module_waves(
             package_waves.waves(),
             string_table,
-            numeric_profile,
-        ) {
-            Ok(facts) => facts,
-            Err(failure) => return Err(finalize_package_failure(failure, package_sources)),
-        };
+        );
         let Some(root_module_id) = package_index
             .module_identities()
             .module_id_for_directory(package_index.entry_root())
@@ -871,7 +868,6 @@ pub(super) fn prepare_source_package_check_only_jobs(
 pub(super) fn compile_source_package_inventories(
     config: &Config,
     build_profile: FrontendBuildProfile,
-    numeric_profile: NumericProfile,
     style_directives: &StyleDirectiveRegistry,
     builder_surface: &BuilderSurface,
     external_packages: &Arc<ExternalPackageRegistry>,
@@ -916,7 +912,6 @@ pub(super) fn compile_source_package_inventories(
                 &config_globals,
                 package_fallback_span,
                 string_table,
-                numeric_profile,
             )?;
             let deferred_build_config_values = build_config_values.clone();
             timing_scope_attributed!(
@@ -931,7 +926,6 @@ pub(super) fn compile_source_package_inventories(
                     canonical::BoundaryCompilationContext::new(
                         config,
                         build_profile,
-                        numeric_profile,
                         &path_resolver,
                         Arc::clone(source_files.sources()),
                         style_directives,
@@ -1028,7 +1022,6 @@ pub(super) fn compile_source_package_inventories(
                 canonical::BoundaryCompilationContext::new(
                     config,
                     build_profile,
-                    numeric_profile,
                     &path_resolver,
                     Arc::clone(source_files.sources()),
                     style_directives,
@@ -1101,11 +1094,13 @@ pub(super) fn compile_source_package_inventories(
 /// WHAT: owns the single final conversion from the premerge lane into the boundary vessel.
 /// WHY: every intermediate directory site stays typed until here, so source attachment and
 ///      string-table finalization happen exactly once at this outer tail.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "directory compilation keeps configuration, build profile, validated output settings, directives, mutable builder/string/source owners, build-config inputs and compilation mode separate"
+)]
 pub(crate) fn compile_directory_frontend(
     config: &Config,
     build_profile: FrontendBuildProfile,
-    numeric_profile: NumericProfile,
     validated_output_settings: Option<&ValidatedDirectoryOutputSettings>,
     style_directives: &StyleDirectiveRegistry,
     builder_surface: &mut BuilderSurface,
@@ -1117,7 +1112,6 @@ pub(crate) fn compile_directory_frontend(
     match compile_directory_frontend_in_premerge_lane(
         config,
         build_profile,
-        numeric_profile,
         validated_output_settings,
         style_directives,
         builder_surface,
@@ -1150,11 +1144,13 @@ pub(crate) fn compile_directory_frontend(
 ///       package snapshot beside package-scoped failures.
 /// WHY: the public wrapper above owns the single final vessel conversion; this lane never
 ///      constructs it early and never clones a diagnostic table solely to transport a failure.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "premerge directory orchestration keeps configuration, profile, output settings, directives, mutable builder/string/source owners, build-config inputs and mode separate"
+)]
 fn compile_directory_frontend_in_premerge_lane(
     config: &Config,
     build_profile: FrontendBuildProfile,
-    numeric_profile: NumericProfile,
     validated_output_settings: Option<&ValidatedDirectoryOutputSettings>,
     style_directives: &StyleDirectiveRegistry,
     builder_surface: &mut BuilderSurface,
@@ -1231,7 +1227,6 @@ fn compile_directory_frontend_in_premerge_lane(
 
         let mut source_package_inventories = discover_source_package_inventories(
             config,
-            numeric_profile,
             &project_setup.module_namespace_set,
             &project_path_resolver,
             style_directives,
@@ -1293,7 +1288,7 @@ fn compile_directory_frontend_in_premerge_lane(
             }
         };
         let effective_project_fields =
-            config_boundary::effective_project_fields(config, string_table, numeric_profile)?;
+            config_boundary::effective_project_fields(config, string_table)?;
         let fixed_project_facts =
             config_boundary::fixed_project_contract_facts(&effective_project_fields);
         let direct_project_facts = config_boundary::input_contract_facts(&effective_project_fields);
@@ -1355,18 +1350,14 @@ fn compile_directory_frontend_in_premerge_lane(
         let project_source_facts = config_boundary::source_contract_facts_from_module_waves(
             &project_module_waves,
             string_table,
-            numeric_profile,
-        )
-        .map_err(BoundaryPremergeFailure::project)?;
+        );
         let mut all_project_source_facts = project_source_facts.clone();
         if mode.includes_check_only() {
             all_project_source_facts.extend(
                 config_boundary::source_contract_facts_from_check_only_jobs(
                     &project_check_only_jobs,
                     string_table,
-                    numeric_profile,
-                )
-                .map_err(BoundaryPremergeFailure::project)?,
+                ),
             );
         }
         // Canonical resolution must use only canonical source facts, but explicit inputs are checked
@@ -1385,7 +1376,6 @@ fn compile_directory_frontend_in_premerge_lane(
             &config_globals,
             project_fallback,
             string_table,
-            numeric_profile,
         )
         .map_err(BoundaryPremergeFailure::project)?;
         if let Some(input) = config_boundary::first_unknown_build_config_input(
@@ -1421,7 +1411,6 @@ fn compile_directory_frontend_in_premerge_lane(
             compile_source_package_inventories(
                 config,
                 build_profile,
-                numeric_profile,
                 style_directives,
                 builder_surface,
                 &external_packages,
@@ -1441,7 +1430,6 @@ fn compile_directory_frontend_in_premerge_lane(
             canonical::BoundaryCompilationContext::new(
                 config,
                 build_profile,
-                numeric_profile,
                 &project_path_resolver,
                 project_source_files,
                 style_directives,

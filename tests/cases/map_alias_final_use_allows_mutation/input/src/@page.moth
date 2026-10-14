@@ -1,6 +1,6 @@
 -- A map `get` alias reaches final use before `set` mutates the same map.
 
-observe |value String, before Int| -> String:
+observe |value String, before I32| -> String:
     return [:map_alias_final_use_allows_mutation observed=[value] length_before=[before]]
 ;
 

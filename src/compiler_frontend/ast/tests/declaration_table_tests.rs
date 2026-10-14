@@ -7,8 +7,10 @@
 
 use super::environment::{DeclarationId, DeclarationPassLanes, TopLevelDeclarationTable};
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::ast_nodes::DeclarationShell;
+use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
 use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::DeclarationSyntax;
@@ -50,9 +52,9 @@ fn updates_existing_declaration_slot_without_reordering() {
 
     let declarations = table.iter().collect::<Vec<_>>();
     assert_eq!(declarations[0].id, first_path);
-    assert_eq!(declarations[0].value.diagnostic_type, DataType::StringSlice);
+    assert_eq!(declarations[0].diagnostic_type, DataType::StringSlice);
     assert_eq!(declarations[1].id, second_path);
-    assert_eq!(declarations[1].value.diagnostic_type, DataType::Bool);
+    assert_eq!(declarations[1].diagnostic_type, DataType::Bool);
 
     let first_name = path_fork
         .component(first_path)
@@ -60,7 +62,7 @@ fn updates_existing_declaration_slot_without_reordering() {
     let by_name = table
         .get_visible_resolved_by_name(first_name, None)
         .expect("name lookup should see updated declaration");
-    assert_eq!(by_name.value.diagnostic_type, DataType::StringSlice);
+    assert_eq!(by_name.diagnostic_type, DataType::StringSlice);
 }
 
 #[test]
@@ -108,10 +110,7 @@ fn stage3_order_assigns_ids_to_value_and_metadata_declarations() {
                 3,
                 &function_path,
                 OrderedSemanticDeclarationKind::Function,
-                Some(declaration(
-                    &function_path,
-                    DataType::Function(Box::new(None), Default::default()),
-                )),
+                Some(function_shell(&function_path)),
             ),
         ],
         Vec::new(),
@@ -144,6 +143,69 @@ fn stage3_order_assigns_ids_to_value_and_metadata_declarations() {
             .expect("constant ID should own a value row")
             .id,
         constant_path
+    );
+}
+
+#[test]
+
+fn pending_constant_state_is_independent_of_declared_type() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let constant_path = path_fork
+        .try_intern_portable_path("typed_constant", &mut string_table)
+        .expect("test path fits");
+    let function_path = path_fork
+        .try_intern_portable_path("shell_function", &mut string_table)
+        .expect("test path fits");
+
+    let table = TopLevelDeclarationTable::from_stage3_order(
+        vec![
+            ordered_declaration(
+                0,
+                0,
+                &constant_path,
+                OrderedSemanticDeclarationKind::Constant,
+                Some({
+                    let mut declaration = declaration(&constant_path, DataType::Bool);
+                    declaration.value = DeclarationValue::PendingConstant;
+                    declaration
+                }),
+            ),
+            ordered_declaration(
+                1,
+                1,
+                &function_path,
+                OrderedSemanticDeclarationKind::Function,
+                Some({
+                    let mut declaration = declaration(&function_path, DataType::Bool);
+                    declaration.value =
+                        DeclarationValue::Shell(DeclarationShell::Function { receiver: None });
+                    declaration
+                }),
+            ),
+        ],
+        Vec::new(),
+        &path_fork,
+    )
+    .expect("distinct Stage 3 paths should build a declaration table");
+
+    let constant = table
+        .get_by_path(&constant_path)
+        .expect("constant header should be indexed");
+    let function = table
+        .get_by_path(&function_path)
+        .expect("function header should be indexed");
+    assert!(table.is_unresolved_constant_placeholder(constant));
+    assert!(!table.is_unresolved_constant_placeholder(function));
+    assert!(
+        table
+            .get_visible_resolved_by_path(&constant_path, None)
+            .is_none()
+    );
+    assert!(
+        table
+            .get_visible_resolved_by_path(&function_path, None)
+            .is_some()
     );
 }
 
@@ -303,10 +365,7 @@ fn implicit_start_rejects_authored_start_collision() {
     let start_path = path_fork
         .try_intern_portable_path("start", &mut string_table)
         .expect("test path fits");
-    let authored = declaration(
-        &start_path,
-        DataType::Function(Box::new(None), Default::default()),
-    );
+    let authored = function_shell(&start_path);
     let implicit = authored.clone();
 
     let authored_collision = TopLevelDeclarationTable::from_stage3_order(
@@ -327,16 +386,7 @@ fn implicit_start_rejects_authored_start_collision() {
 
     let repeated_start = TopLevelDeclarationTable::from_stage3_order(
         Vec::new(),
-        vec![
-            declaration(
-                &start_path,
-                DataType::Function(Box::new(None), Default::default()),
-            ),
-            declaration(
-                &start_path,
-                DataType::Function(Box::new(None), Default::default()),
-            ),
-        ],
+        vec![function_shell(&start_path), function_shell(&start_path)],
         &path_fork,
     );
     assert!(
@@ -407,10 +457,7 @@ fn declaration_lanes_reject_mismatched_and_duplicate_header_associations() {
         0,
         &other_path,
         OrderedSemanticDeclarationKind::Function,
-        Some(declaration(
-            &other_path,
-            DataType::Function(Box::new(None), Default::default()),
-        )),
+        Some(function_shell(&other_path)),
     )];
     assert!(
         DeclarationPassLanes::from_stage3_order(std::slice::from_ref(&header), &path_mismatch)
@@ -437,20 +484,14 @@ fn declaration_lanes_reject_mismatched_and_duplicate_header_associations() {
             0,
             &function_path,
             OrderedSemanticDeclarationKind::Function,
-            Some(declaration(
-                &function_path,
-                DataType::Function(Box::new(None), Default::default()),
-            )),
+            Some(function_shell(&function_path)),
         ),
         ordered_declaration(
             1,
             0,
             &function_path,
             OrderedSemanticDeclarationKind::Function,
-            Some(declaration(
-                &function_path,
-                DataType::Function(Box::new(None), Default::default()),
-            )),
+            Some(function_shell(&function_path)),
         ),
     ];
     assert!(
@@ -474,12 +515,7 @@ fn declaration_lanes_reject_non_dense_ids_and_out_of_range_headers() {
         function_path,
         &mut string_table,
     );
-    let function_declaration = || {
-        declaration(
-            &function_path,
-            DataType::Function(Box::new(None), Default::default()),
-        )
-    };
+    let function_declaration = || function_shell(&function_path);
 
     let non_dense = vec![ordered_declaration(
         1,
@@ -544,10 +580,7 @@ fn compiler_owned_and_appended_rows_follow_semantic_metadata_holes() {
             ),
         ],
         vec![
-            declaration(
-                &start_path,
-                DataType::Function(Box::new(None), Default::default()),
-            ),
+            function_shell(&start_path),
             declaration(&builtin_path, DataType::Inferred),
         ],
         &path_fork,
@@ -598,7 +631,6 @@ fn appending_declaration_updates_path_and_name_indexes() {
         table
             .get_by_path(&appended_path)
             .expect("path index should include appended declaration")
-            .value
             .diagnostic_type,
         DataType::StringSlice
     );
@@ -622,7 +654,7 @@ fn appending_declaration_updates_path_and_name_indexes() {
 }
 
 #[test]
-fn generated_layer_keeps_replacements_and_appends_local() {
+fn flat_table_clone_keeps_replacements_and_appends_independent() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let shared_path = path_fork
@@ -632,15 +664,13 @@ fn generated_layer_keeps_replacements_and_appends_local() {
         .try_intern_portable_path("appended", &mut string_table)
         .expect("test path fits");
 
-    let original = std::rc::Rc::new(TopLevelDeclarationTable::new(
-        vec![declaration(&shared_path, DataType::Bool)],
-        &path_fork,
-    ));
-    let mut generated = TopLevelDeclarationTable::fork_for_generated(std::rc::Rc::clone(&original));
+    let original =
+        TopLevelDeclarationTable::new(vec![declaration(&shared_path, DataType::Bool)], &path_fork);
+    let mut generated = original.clone();
 
     let shared_id = generated
         .declaration_id_by_path(&shared_path)
-        .expect("inherited declaration should have an ID");
+        .expect("copied declaration should have an ID");
     assert!(generated.replace_by_id(shared_id, declaration(&shared_path, DataType::StringSlice),));
     generated
         .append_for_construction(declaration(&appended_path, DataType::Bool), &path_fork)
@@ -650,7 +680,6 @@ fn generated_layer_keeps_replacements_and_appends_local() {
         original
             .get_by_path(&shared_path)
             .expect("original declaration should remain present")
-            .value
             .diagnostic_type,
         DataType::Bool
     );
@@ -659,7 +688,6 @@ fn generated_layer_keeps_replacements_and_appends_local() {
         generated
             .get_by_path(&shared_path)
             .expect("generated declaration should remain present")
-            .value
             .diagnostic_type,
         DataType::StringSlice
     );
@@ -667,7 +695,7 @@ fn generated_layer_keeps_replacements_and_appends_local() {
 }
 
 #[test]
-fn nested_generated_layers_inherit_prior_deltas_without_mutating_siblings() {
+fn flat_table_clones_preserve_metadata_ids_and_isolate_mutations() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let alias_path = path_fork
@@ -686,61 +714,57 @@ fn nested_generated_layers_inherit_prior_deltas_without_mutating_siblings() {
         .try_intern_portable_path("nested_local", &mut string_table)
         .expect("test path fits");
 
-    let root = std::rc::Rc::new(
-        TopLevelDeclarationTable::from_stage3_order(
-            vec![
-                ordered_declaration(
-                    0,
-                    0,
-                    &alias_path,
-                    OrderedSemanticDeclarationKind::TypeAlias,
-                    None,
-                ),
-                ordered_declaration(
-                    1,
-                    1,
-                    &shared_path,
-                    OrderedSemanticDeclarationKind::Constant,
-                    Some(declaration(&shared_path, DataType::Bool)),
-                ),
-                ordered_declaration(
-                    2,
-                    2,
-                    &trait_path,
-                    OrderedSemanticDeclarationKind::Trait,
-                    None,
-                ),
-            ],
-            Vec::new(),
-            &path_fork,
-        )
-        .expect("metadata holes should coexist with one value declaration"),
-    );
-    let mut first = TopLevelDeclarationTable::fork_for_generated(std::rc::Rc::clone(&root));
-    let sibling = TopLevelDeclarationTable::fork_for_generated(std::rc::Rc::clone(&root));
+    let root = TopLevelDeclarationTable::from_stage3_order(
+        vec![
+            ordered_declaration(
+                0,
+                0,
+                &alias_path,
+                OrderedSemanticDeclarationKind::TypeAlias,
+                None,
+            ),
+            ordered_declaration(
+                1,
+                1,
+                &shared_path,
+                OrderedSemanticDeclarationKind::Constant,
+                Some(declaration(&shared_path, DataType::Bool)),
+            ),
+            ordered_declaration(
+                2,
+                2,
+                &trait_path,
+                OrderedSemanticDeclarationKind::Trait,
+                None,
+            ),
+        ],
+        Vec::new(),
+        &path_fork,
+    )
+    .expect("metadata holes should coexist with one value declaration");
+    let mut first = root.clone();
+    let sibling = root.clone();
 
     let shared_id = first
         .declaration_id_by_path(&shared_path)
-        .expect("inherited declaration should have an ID");
+        .expect("copied declaration should have an ID");
     assert!(first.replace_by_id(shared_id, declaration(&shared_path, DataType::StringSlice),));
     let first_id = first
         .append_for_construction(declaration(&first_path, DataType::Bool), &path_fork)
-        .expect("first layer should append one local declaration");
+        .expect("first copy should append one declaration");
     assert_eq!(first_id.index(), 3);
 
-    let first = std::rc::Rc::new(first);
-    let mut nested = TopLevelDeclarationTable::fork_for_generated(std::rc::Rc::clone(&first));
+    let mut nested = first.clone();
     assert!(nested.replace_by_id(shared_id, declaration(&shared_path, DataType::Inferred),));
     let nested_id = nested
         .append_for_construction(declaration(&nested_path, DataType::Bool), &path_fork)
-        .expect("nested layer should append one local declaration");
+        .expect("nested copy should append one declaration");
     assert_eq!(nested_id.index(), 4);
 
     assert_eq!(
         first
             .get_by_path(&shared_path)
             .expect("first replacement should remain visible")
-            .value
             .diagnostic_type,
         DataType::StringSlice
     );
@@ -749,7 +773,6 @@ fn nested_generated_layers_inherit_prior_deltas_without_mutating_siblings() {
         sibling
             .get_by_path(&shared_path)
             .expect("sibling should retain the root declaration")
-            .value
             .diagnostic_type,
         DataType::Bool
     );
@@ -758,26 +781,33 @@ fn nested_generated_layers_inherit_prior_deltas_without_mutating_siblings() {
         nested
             .get_by_path(&shared_path)
             .expect("nested replacement should be visible")
-            .value
             .diagnostic_type,
         DataType::Inferred
     );
     assert!(nested.get_by_path(&first_path).is_some());
     assert!(nested.get_by_path(&nested_path).is_some());
     assert_eq!(nested.iter().count(), 3);
+    assert_eq!(nested.len(), 5);
+    for (path, index) in [(alias_path, 0), (trait_path, 2)] {
+        let declaration_id = DeclarationId::from_index(index);
+        assert_eq!(nested.declaration_id_by_path(&path), Some(declaration_id));
+        assert!(nested.get_by_id(declaration_id).is_none());
+        assert!(nested.get_mut_by_id(declaration_id).is_none());
+        assert!(!nested.replace_by_id(declaration_id, declaration(&path, DataType::Bool)));
+    }
 }
 
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
 #[test]
 fn declaration_copy_counter_detects_flat_row_clones() {
     use crate::compiler_frontend::instrumentation::{
-        capture_frontend_counters_for_test, lock_counter_test, log_frontend_counters,
+        capture_counters_for_test, lock_counter_test, log_frontend_counters,
         reset_frontend_counters,
     };
     use crate::timing::start_benchmark_collection;
 
     let _guard = lock_counter_test();
-    let _counter_capture = capture_frontend_counters_for_test();
+    let _counter_capture = capture_counters_for_test();
     reset_frontend_counters();
     let timing_session = start_benchmark_collection(true).expect("timing session should start");
 
@@ -810,15 +840,15 @@ fn declaration_copy_counter_detects_flat_row_clones() {
 
 #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
 #[test]
-fn generated_layer_clones_do_not_copy_inherited_rows() {
+fn flat_table_clones_count_existing_and_appended_slots() {
     use crate::compiler_frontend::instrumentation::{
-        capture_frontend_counters_for_test, lock_counter_test, log_frontend_counters,
+        capture_counters_for_test, lock_counter_test, log_frontend_counters,
         reset_frontend_counters,
     };
     use crate::timing::start_benchmark_collection;
 
     let _guard = lock_counter_test();
-    let _counter_capture = capture_frontend_counters_for_test();
+    let _counter_capture = capture_counters_for_test();
     reset_frontend_counters();
     let timing_session = start_benchmark_collection(true).expect("timing session should start");
 
@@ -830,21 +860,19 @@ fn generated_layer_clones_do_not_copy_inherited_rows() {
     let local_path = path_fork
         .try_intern_portable_path("local", &mut string_table)
         .expect("test path fits");
-    let root = std::rc::Rc::new(TopLevelDeclarationTable::new(
-        vec![declaration(&shared_path, DataType::Bool)],
-        &path_fork,
-    ));
-    let mut generated = TopLevelDeclarationTable::fork_for_generated(root);
+    let root =
+        TopLevelDeclarationTable::new(vec![declaration(&shared_path, DataType::Bool)], &path_fork);
+    let mut generated = root.clone();
     let shared_id = generated
         .declaration_id_by_path(&shared_path)
-        .expect("inherited declaration should have an ID");
+        .expect("copied declaration should have an ID");
     assert!(generated.replace_by_id(shared_id, declaration(&shared_path, DataType::StringSlice),));
     generated
         .append_for_construction(declaration(&local_path, DataType::Bool), &path_fork)
-        .expect("generated layer should append a local row");
+        .expect("flat table should append a row");
 
     let generated_copy = generated.clone();
-    let nested = TopLevelDeclarationTable::fork_for_generated(std::rc::Rc::new(generated_copy));
+    let nested = generated_copy.clone();
     let _nested_copy = nested.clone();
     log_frontend_counters();
 
@@ -852,7 +880,7 @@ fn generated_layer_clones_do_not_copy_inherited_rows() {
     assert_counter(
         &observations.counters,
         "generated_declaration_inherited_row_copies",
-        0.0,
+        7.0,
     );
 }
 
@@ -870,11 +898,28 @@ fn assert_counter(
 }
 
 fn declaration(path: &PathId, data_type: DataType) -> Declaration {
+    let type_id = match data_type {
+        DataType::Bool => builtin_type_ids::BOOL,
+        DataType::StringSlice => builtin_type_ids::STRING,
+        DataType::Inferred => builtin_type_ids::NONE,
+        _ => panic!("unsupported declaration-table fixture type"),
+    };
     Declaration {
         id: path.to_owned(),
-        value: Expression::no_value(None, data_type, ValueMode::ImmutableOwned),
+        type_id,
+        diagnostic_type: data_type,
+        value_mode: ValueMode::ImmutableOwned,
+        value: DeclarationValue::Absent,
         binding_span: None,
         config_qualifier: None,
+    }
+}
+
+fn function_shell(path: &PathId) -> Declaration {
+    Declaration {
+        value: DeclarationValue::Shell(DeclarationShell::Function { receiver: None }),
+        value_mode: ValueMode::ImmutableReference,
+        ..declaration(path, DataType::Inferred)
     }
 }
 

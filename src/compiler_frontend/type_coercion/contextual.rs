@@ -1,109 +1,113 @@
 //! Contextual coercion for explicit type boundaries.
 //!
-//! WHAT: applies the small set of implicit conversions that Moth allows
-//! only when a surrounding declaration, argument, field, collection, or return
-//! slot supplies the target type.
+//! WHAT: applies the one implicit conversion that Moth allows at an explicit
+//! boundary: wrapping a value into its optional target (`T -> T?`).
 //! WHY: this module coerces already-typed values after natural expression typing
-//! has completed, inserting explicit AST coercion nodes at the boundary. Context
-//! for unresolved literal arithmetic belongs to the indexed RPN result-typing
-//! owner in `ast::expressions::eval_expression::result_type`.
+//! has completed, inserting explicit AST coercion nodes at the boundary. Numeric
+//! conversions are explicit-only and never inserted here. Context for unresolved
+//! literal arithmetic belongs to the indexed RPN result-typing owner in
+//! `ast::expressions::eval_expression::result_type`.
 
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, TypeMismatchContext};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExpressionConstructionFailure, OwnedExpr,
+};
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, TypeMismatchContext, ValueReceiverContext,
+};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use moth_lexical::numeric::profile::FloatPrecision;
 
-use crate::compiler_frontend::type_coercion::compatibility::{
-    is_declaration_compatible, is_numeric_coercible_by_id,
-};
-use crate::compiler_frontend::value_mode::ValueMode;
+use crate::compiler_frontend::type_coercion::compatibility::is_type_compatible;
 
 /// Result for the contextual coercion boundary.
 ///
 /// Coercion diagnostics remain plain `CompilerDiagnostic` values until the
 /// owning accumulation boundary.
-type ContextualCoercionResult<T> = Result<T, CompilerDiagnostic>;
+type ContextualCoercionResult<T> = Result<T, ExpressionConstructionFailure>;
 
 /// Validates and applies the contextual coercion policy for an explicit typed boundary.
 ///
-/// WHAT: accepts exact matches and ordinary contextual coercions such as `Int -> Float`,
-/// `Uint -> Float` and `T -> T?`.
+/// WHAT: accepts exact matches and the ordinary contextual `T -> T?` option wrap.
 /// WHY: declarations, returns, produced values, and explicit collection elements should share one
-/// frontend-owned policy rather than duplicating the same compatibility checks.
+/// frontend-owned policy rather than duplicating the same compatibility checks. Numeric
+/// conversions are explicit-only, so no integer-to-float receiving promotion exists here.
 pub(crate) fn coerce_expression_to_explicit_type_boundary(
-    expression: Expression,
+    expression: OwnedExpr,
     expected_type_id: TypeId,
     type_environment: &TypeEnvironment,
-    float_precision: FloatPrecision,
     mismatch_context: TypeMismatchContext,
-) -> ContextualCoercionResult<Expression> {
-    if expression.type_id == expected_type_id {
+    expression_builder: &mut AstExpressionBuilder,
+) -> ContextualCoercionResult<OwnedExpr> {
+    let view = expression_builder.view_owned(expression)?;
+    let actual_type_id = view.require_single(value_receiver_context(mismatch_context))?;
+    let span = view.span();
+    if actual_type_id == expected_type_id {
         return Ok(expression);
     }
 
-    if is_declaration_compatible(expected_type_id, expression.type_id, type_environment) {
-        return Ok(coerce_expression_to_declared_type(
+    if is_type_compatible(expected_type_id, actual_type_id, type_environment) {
+        return coerce_expression_to_declared_type(
             expression,
             expected_type_id,
             type_environment,
-            float_precision,
-        ));
+            expression_builder,
+        );
     }
 
-    Err(CompilerDiagnostic::type_mismatch(
-        expected_type_id,
-        expression.type_id,
-        mismatch_context,
-        expression.span,
-    ))
+    Err(
+        CompilerDiagnostic::type_mismatch(expected_type_id, actual_type_id, mismatch_context, span)
+            .into(),
+    )
 }
 
 /// Applies contextual coercion to `expr` if the target type requires it.
 ///
 /// WHAT: post-parse coercion step for explicit type boundaries.
 /// WHY: `create_expression` resolves the natural type of an expression. When a
-/// boundary says `Float` or `T?`, this function rewrites the expression to carry
-/// the explicit target type so HIR/backend lowering can materialize the
-/// conversion instead of silently mistyping the inner value.
+/// boundary says `T?`, this function rewrites the expression to carry the
+/// explicit target type so HIR/backend lowering can materialize the wrapping
+/// instead of silently mistyping the inner value.
 ///
 /// Returns the original expression unchanged when no coercion is needed.
+/// Callers must already have validated that `expr` produces exactly one success slot.
 pub(crate) fn coerce_expression_to_declared_type(
-    expr: Expression,
+    expression: OwnedExpr,
     declared_type_id: TypeId,
     type_environment: &TypeEnvironment,
-    float_precision: FloatPrecision,
-) -> Expression {
-    if should_wrap_in_option(expr.type_id, declared_type_id, type_environment) {
-        return Expression::coerced(expr, declared_type_id);
+    expression_builder: &mut AstExpressionBuilder,
+) -> ContextualCoercionResult<OwnedExpr> {
+    // Numeric conversions remain explicit. Only an option receiver adds a semantic wrapper.
+    let actual_type_id = expression_builder.view_owned(expression)?.value_type_id()?;
+    if should_wrap_in_option(actual_type_id, declared_type_id, type_environment) {
+        return expression_builder.coerced(expression, declared_type_id);
     }
 
-    if is_numeric_coercible_by_id(expr.type_id, declared_type_id, type_environment) {
-        if let ExpressionKind::Int(value) = &expr.kind {
-            // `Int -> Float` rounds once at the boundary precision so contextual
-            // coercion agrees with literal materialisation and const folding.
-            return Expression::float(
-                float_precision.round_int(*value),
-                expr.span,
-                ValueMode::ImmutableOwned,
-            )
-            .with_synthetic_interface_provenance(expr.synthetic_interface_provenance.clone());
-        }
-        if let ExpressionKind::Uint(value) = &expr.kind {
-            // `Uint -> Float` rounds directly from the u64 payload at the boundary
-            // precision, never through an f64 intermediate.
-            return Expression::float(
-                float_precision.round_uint(*value),
-                expr.span,
-                ValueMode::ImmutableOwned,
-            )
-            .with_synthetic_interface_provenance(expr.synthetic_interface_provenance.clone());
-        }
+    Ok(expression)
+}
 
-        return Expression::coerced(expr, declared_type_id);
+fn value_receiver_context(context: TypeMismatchContext) -> ValueReceiverContext {
+    match context {
+        TypeMismatchContext::Assignment => ValueReceiverContext::Assignment,
+        TypeMismatchContext::Declaration => ValueReceiverContext::Declaration,
+        TypeMismatchContext::ReturnValue | TypeMismatchContext::ErrorReturn => {
+            ValueReceiverContext::Return
+        }
+        TypeMismatchContext::FunctionArgument | TypeMismatchContext::ReceiverArgument => {
+            ValueReceiverContext::FunctionArgument
+        }
+        TypeMismatchContext::AssertionArgument => ValueReceiverContext::AssertionArgument,
+        TypeMismatchContext::ConstructorArgument | TypeMismatchContext::StructFieldDefault => {
+            ValueReceiverContext::ConstructorArgument
+        }
+        TypeMismatchContext::Operator => ValueReceiverContext::OperatorOperand,
+        TypeMismatchContext::Condition => ValueReceiverContext::Condition,
+        TypeMismatchContext::CollectionElement => ValueReceiverContext::CollectionElement,
+        TypeMismatchContext::TemplateInterpolation => ValueReceiverContext::TemplateInterpolation,
+        TypeMismatchContext::MatchScrutinee => ValueReceiverContext::MatchScrutinee,
+        TypeMismatchContext::MatchPattern
+        | TypeMismatchContext::Pattern
+        | TypeMismatchContext::General => ValueReceiverContext::General,
     }
-
-    expr
 }
 
 fn should_wrap_in_option(

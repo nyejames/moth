@@ -1,6 +1,38 @@
-unused_helper |value Int| -> String:
+unused_helper |value I32| -> String:
     text String = cast value
     return text
 ;
+left || -> I32:
+    return 1
+;
+
+right || -> I32:
+    return 1
+;
+
+-- Only the eliminated handler requests this instance and implicit failure lane.
+pruned_materialisation type T |value T| -> String:
+    return "dead-handler-materialisation"
+;
+
+parse_unreachable |text String| -> I32:
+    return cast text
+;
+
+export:
+    compare |value I32| -> Bool:
+        result = left() is right() catch |caught_error|:
+            ignored_code U32 = caught_error.code
+            text String = cast value
+            parsed = parse_unreachable(text)
+            marker = pruned_materialisation(value)
+            io.line(marker)
+            then false
+        ;
+        return result
+    ;
+;
+comparison = compare(128)
+assert(comparison is true)
 
 [: wasm unreachable cast ignored]

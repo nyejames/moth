@@ -10,6 +10,7 @@
 //! ```text
 //! tokens
 //!   -> head/body parsers and `TemplateConstructionContext`
+//!   -> committed expression IDs in the paired phase expression builder
 //!   -> module-local `TemplateIrStore`
 //!   -> composition, render-unit construction, and formatting
 //!   -> exact `TirView` reads

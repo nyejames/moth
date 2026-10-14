@@ -1,4 +1,4 @@
-values ~{Int} = {}
+values ~{I32} = {}
 ~values.push(1)
 ~values.push(2)
 

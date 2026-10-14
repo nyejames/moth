@@ -21,7 +21,9 @@ use crate::compiler_frontend::hir::numeric::{
     HirNumericOp, HirNumericOperands, NumericFailureMode, RangeStepFailureCause,
 };
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
-use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
+use crate::compiler_frontend::hir::terminators::{
+    HirAssertionMessageEvaluation, HirFallibleOperation, HirTerminator,
+};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceProvenance,
@@ -206,7 +208,7 @@ impl HirModuleLinkFacts {
                     .direct_generated_calls
                     .iter()
                     .cloned()
-                    .map(|identity| (block.function_id, CallTarget::Generated(identity))),
+                    .map(|identity| (block.function_id, CallTarget::Generated(Box::new(identity)))),
             );
         }
         targets
@@ -304,6 +306,21 @@ impl HirBackendSelection {
                         )));
                     }
                 }
+                if let HirTerminator::Invoke {
+                    operation:
+                        HirFallibleOperation::Call {
+                            target: CallTarget::Local(callee),
+                            ..
+                        },
+                    ..
+                } = &block.terminator
+                    && !self.contains_function(*callee)
+                {
+                    return Err(hir_reachability_error(format!(
+                        "Backend selection omits callee {callee:?} reached from function {:?}",
+                        function.id
+                    )));
+                }
             }
         }
 
@@ -380,10 +397,10 @@ pub(crate) struct ReachableExternalCall {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ReachableRuntimeCastForm {
     Expression,
-    Statement,
+    Invoke,
 }
 
-/// A reachable compiler-owned builtin runtime cast expression or statement.
+/// A reachable compiler-owned builtin runtime cast expression or Invoke operation.
 ///
 /// WHY: some backends (currently HTML-Wasm) cannot lower most runtime casts. Recording the cast
 ///      site, policy, and HIR form lets backend feature validation reject unsupported casts without
@@ -395,6 +412,13 @@ pub(crate) struct ReachableRuntimeCastUse {
     pub(crate) form: ReachableRuntimeCastForm,
 }
 
+/// Failure delivery retained independently of the exact numeric operation payload.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ReachableNumericDelivery {
+    Statement(NumericFailureMode),
+    Invoke,
+}
+
 /// A reachable compiler-owned checked numeric operation.
 ///
 /// WHY: backends that do not yet implement checked numeric semantics must reject the reachable HIR
@@ -402,7 +426,7 @@ pub(crate) struct ReachableRuntimeCastUse {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ReachableNumericOpUse {
     pub(crate) op: HirNumericOp,
-    pub(crate) failure_mode: NumericFailureMode,
+    pub(crate) delivery: ReachableNumericDelivery,
     pub(crate) span: Option<SourceSpan>,
 }
 
@@ -410,18 +434,18 @@ pub(crate) struct ReachableNumericOpUse {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ReachableRangeStepFailureUse {
     pub(crate) cause: RangeStepFailureCause,
-    pub(crate) failure_mode: NumericFailureMode,
+    pub(crate) delivery: ReachableNumericDelivery,
     pub(crate) span: Option<SourceSpan>,
 }
 
-/// A reachable compiler-owned Float formatting or validation statement.
+/// A reachable compiler-owned binary-float formatting or validation statement.
 ///
-/// WHY: backend feature validation needs the statement's exact failure mode and source span to
-///      distinguish supported trap-mode boundary checks from unsupported formatting/recovery.
+/// WHY: backend feature validation needs exact delivery and source spans to distinguish
+///      supported trap-mode boundary checks from unsupported formatting/recovery.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ReachableFloatStatementUse {
     pub(crate) kind: ReachableFloatStatementKind,
-    pub(crate) failure_mode: NumericFailureMode,
+    pub(crate) delivery: ReachableNumericDelivery,
     pub(crate) span: Option<SourceSpan>,
 }
 
@@ -719,57 +743,63 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
     }
 
     fn visit_block_statements(&mut self, block: &HirBlock) {
-        // HIR lowering flattens calls into statements; expression trees intentionally do not
-        // carry call targets. Keep the reachability boundary here unless HIR gains a call
-        // expression variant in a later design.
+        // Both statement calls and Invoke calls contribute the same stable call facts.
         for statement in &block.statements {
             self.collect_runtime_feature_uses_from_statement(statement);
 
             let HirStatementKind::Call { target, .. } = &statement.kind else {
                 continue;
             };
-            match target {
-                CallTarget::Local(function_id) => {
-                    if self.seen_user_calls.insert(*function_id) {
-                        self.direct_facts.direct_user_calls.push(*function_id);
-                    }
+            self.collect_call_target(target, statement.span);
+        }
+    }
+
+    fn collect_call_target(&mut self, target: &CallTarget, span: Option<SourceSpan>) {
+        match target {
+            CallTarget::Local(function_id) => {
+                if self.seen_user_calls.insert(*function_id) {
+                    self.direct_facts.direct_user_calls.push(*function_id);
                 }
-                CallTarget::CrossModule(origin) => {
-                    if !self.direct_facts.direct_cross_module_calls.contains(origin) {
-                        self.direct_facts
-                            .direct_cross_module_calls
-                            .push(origin.clone());
-                    }
+            }
+            CallTarget::CrossModule(origin) => {
+                if !self.direct_facts.direct_cross_module_calls.contains(origin) {
+                    self.direct_facts
+                        .direct_cross_module_calls
+                        .push(origin.clone());
                 }
-                CallTarget::ModulePrivate(identity) => {
-                    if !self
-                        .direct_facts
+            }
+            CallTarget::ModulePrivate(identity) => {
+                if !self
+                    .direct_facts
+                    .direct_module_private_calls
+                    .contains(identity)
+                {
+                    self.direct_facts
                         .direct_module_private_calls
-                        .contains(identity)
-                    {
-                        self.direct_facts
-                            .direct_module_private_calls
-                            .push(identity.clone());
-                    }
+                        .push(identity.clone());
                 }
-                CallTarget::Generated(identity) => {
-                    if !self.direct_facts.direct_generated_calls.contains(identity) {
-                        self.direct_facts
-                            .direct_generated_calls
-                            .push(identity.clone());
-                    }
-                }
-                CallTarget::External(function_id) => {
+            }
+            CallTarget::Generated(identity) => {
+                if !self
+                    .direct_facts
+                    .direct_generated_calls
+                    .contains(identity.as_ref())
+                {
                     self.direct_facts
-                        .reachable_external_functions
-                        .insert(*function_id);
-                    self.direct_facts
-                        .reachable_external_calls
-                        .push(ReachableExternalCall {
-                            function_id: *function_id,
-                            span: statement.span,
-                        });
+                        .direct_generated_calls
+                        .push(identity.as_ref().clone());
                 }
+            }
+            CallTarget::External(function_id) => {
+                self.direct_facts
+                    .reachable_external_functions
+                    .insert(*function_id);
+                self.direct_facts
+                    .reachable_external_calls
+                    .push(ReachableExternalCall {
+                        function_id: *function_id,
+                        span,
+                    });
             }
         }
     }
@@ -833,7 +863,7 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                     .reachable_numeric_ops
                     .push(ReachableNumericOpUse {
                         op: *op,
-                        failure_mode: *failure_mode,
+                        delivery: ReachableNumericDelivery::Statement(*failure_mode),
                         span,
                     });
 
@@ -856,21 +886,10 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                 self.direct_facts.reachable_range_step_failures.push(
                     ReachableRangeStepFailureUse {
                         cause: *cause,
-                        failure_mode: *failure_mode,
+                        delivery: ReachableNumericDelivery::Statement(*failure_mode),
                         span,
                     },
                 );
-            }
-
-            HirStatementKind::CastOp { policy, source, .. } => {
-                self.direct_facts
-                    .reachable_runtime_casts
-                    .push(ReachableRuntimeCastUse {
-                        span,
-                        policy: *policy,
-                        form: ReachableRuntimeCastForm::Statement,
-                    });
-                expression_collector.collect(&mut self.direct_facts, *source, span);
             }
 
             HirStatementKind::FormatFloat {
@@ -882,7 +901,7 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                     .reachable_float_statements
                     .push(ReachableFloatStatementUse {
                         kind: ReachableFloatStatementKind::FormatFloat,
-                        failure_mode: *failure_mode,
+                        delivery: ReachableNumericDelivery::Statement(*failure_mode),
                         span,
                     });
                 expression_collector.collect(&mut self.direct_facts, *source, span);
@@ -897,11 +916,76 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                     .reachable_float_statements
                     .push(ReachableFloatStatementUse {
                         kind: ReachableFloatStatementKind::ValidateFloat,
-                        failure_mode: *failure_mode,
+                        delivery: ReachableNumericDelivery::Statement(*failure_mode),
                         span,
                     });
                 expression_collector.collect(&mut self.direct_facts, *source, span);
             }
+        }
+    }
+
+    fn collect_runtime_feature_uses_from_invoke(
+        &mut self,
+        operation: &HirFallibleOperation,
+        span: Option<SourceSpan>,
+    ) {
+        match operation {
+            HirFallibleOperation::Call { target, .. } => {
+                self.collect_call_target(target, span);
+            }
+            HirFallibleOperation::MapOp { op, .. } => {
+                self.direct_facts.reachable_map_uses.push(ReachableMapUse {
+                    kind: ReachableMapUseKind::Operation(*op),
+                    span,
+                });
+            }
+            HirFallibleOperation::NumericOp { op, .. } => {
+                self.direct_facts
+                    .reachable_numeric_ops
+                    .push(ReachableNumericOpUse {
+                        op: *op,
+                        delivery: ReachableNumericDelivery::Invoke,
+                        span,
+                    });
+            }
+            HirFallibleOperation::CastOp { policy, .. } => {
+                self.direct_facts
+                    .reachable_runtime_casts
+                    .push(ReachableRuntimeCastUse {
+                        span,
+                        policy: *policy,
+                        form: ReachableRuntimeCastForm::Invoke,
+                    });
+            }
+            HirFallibleOperation::RangeStepFailure { cause } => {
+                self.direct_facts.reachable_range_step_failures.push(
+                    ReachableRangeStepFailureUse {
+                        cause: *cause,
+                        delivery: ReachableNumericDelivery::Invoke,
+                        span,
+                    },
+                );
+            }
+            HirFallibleOperation::FormatFloat { .. }
+            | HirFallibleOperation::ValidateFloat { .. } => {
+                let kind = match operation {
+                    HirFallibleOperation::FormatFloat { .. } => {
+                        ReachableFloatStatementKind::FormatFloat
+                    }
+                    _ => ReachableFloatStatementKind::ValidateFloat,
+                };
+                self.direct_facts
+                    .reachable_float_statements
+                    .push(ReachableFloatStatementUse {
+                        kind,
+                        delivery: ReachableNumericDelivery::Invoke,
+                        span,
+                    });
+            }
+        }
+        let collector = RuntimeFeatureUseCollector::new(self.index.hir, self.owner_function);
+        for operand in operation.operands(&self.index.hir.expressions) {
+            collector.collect(&mut self.direct_facts, operand, span);
         }
     }
 
@@ -916,8 +1000,11 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
                 expression_collector.collect(&mut self.direct_facts, *condition, fallback_span);
             }
 
-            HirTerminator::FallibleBranch { result, .. } => {
-                expression_collector.collect(&mut self.direct_facts, *result, fallback_span);
+            HirTerminator::Invoke {
+                operation, span, ..
+            } => {
+                let span = span.or(fallback_span);
+                self.collect_runtime_feature_uses_from_invoke(operation, span);
             }
 
             HirTerminator::Match { scrutinee, .. } => {
@@ -925,13 +1012,16 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
             }
 
             // Terminators that return a value.
-            HirTerminator::Return(value)
-            | HirTerminator::ReturnSuccess(value)
-            | HirTerminator::ReturnError(value) => {
+            HirTerminator::Return(values) => {
+                for value in self.index.hir.expressions.values(*values) {
+                    expression_collector.collect(&mut self.direct_facts, *value, fallback_span);
+                }
+            }
+            HirTerminator::ReturnError(value) => {
                 expression_collector.collect(&mut self.direct_facts, *value, fallback_span);
             }
 
-            // Terminators with no sub-expressions to inspect.
+            // Jump operands transfer locals, not new expression graphs.
             HirTerminator::Jump { .. }
             | HirTerminator::Break { .. }
             | HirTerminator::Continue { .. }
@@ -1024,8 +1114,6 @@ impl<'hir> RuntimeFeatureUseCollector<'hir> {
                 self.collect(direct_facts, *operand, expression_span);
             }
             HirExpressionKind::UnaryOp { operand, .. }
-            | HirExpressionKind::FallibleUnwrapSuccess { result: operand }
-            | HirExpressionKind::FallibleUnwrapError { result: operand }
             | HirExpressionKind::VariantPayloadGet {
                 source: operand, ..
             } => self.collect(direct_facts, *operand, expression_span),
@@ -1034,8 +1122,7 @@ impl<'hir> RuntimeFeatureUseCollector<'hir> {
                     self.collect(direct_facts, *value, expression_span);
                 }
             }
-            HirExpressionKind::Collection(elements)
-            | HirExpressionKind::TupleConstruct { elements } => {
+            HirExpressionKind::Collection(elements) => {
                 for element in self.hir.expressions.values(*elements) {
                     self.collect(direct_facts, *element, expression_span);
                 }
@@ -1043,9 +1130,6 @@ impl<'hir> RuntimeFeatureUseCollector<'hir> {
             HirExpressionKind::Range { start, end } => {
                 self.collect(direct_facts, *start, expression_span);
                 self.collect(direct_facts, *end, expression_span);
-            }
-            HirExpressionKind::TupleGet { tuple, .. } => {
-                self.collect(direct_facts, *tuple, expression_span);
             }
             HirExpressionKind::VariantConstruct { fields, .. } => {
                 for field in self.hir.expressions.variant_fields(*fields) {
@@ -1076,10 +1160,7 @@ impl<'hir> RuntimeFeatureUseCollector<'hir> {
                     }
                 }
             }
-            HirExpressionKind::Uint(_)
-            | HirExpressionKind::Int(_)
-            | HirExpressionKind::Float(_)
-            | HirExpressionKind::FixedScalar(_)
+            HirExpressionKind::FixedScalar(_)
             | HirExpressionKind::Bool(_)
             | HirExpressionKind::Char(_)
             | HirExpressionKind::StringLiteral(_)
@@ -1098,15 +1179,12 @@ fn terminator_successors(terminator: &HirTerminator) -> Result<Vec<BlockId>, Com
             else_block,
             ..
         } => vec![*then_block, *else_block],
-        HirTerminator::FallibleBranch {
-            success_block,
-            error_block,
-            ..
-        } => vec![*success_block, *error_block],
+        HirTerminator::Invoke {
+            success, failure, ..
+        } => vec![*success, *failure],
         HirTerminator::Match { arms, .. } => arms.iter().map(|arm| arm.body).collect(),
         HirTerminator::Break { target } | HirTerminator::Continue { target } => vec![*target],
         HirTerminator::Return(_)
-        | HirTerminator::ReturnSuccess(_)
         | HirTerminator::ReturnError(_)
         | HirTerminator::RuntimeFailure { .. }
         | HirTerminator::AssertFailure { .. } => Vec::new(),

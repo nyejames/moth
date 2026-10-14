@@ -1,12 +1,13 @@
 @core/text length
 @core/random random_int
 
-format_checked_offset |value Int| -> String, Error!:
-    adjusted = value + 9007199254740990
+format_checked_offset |value I32| -> String, Error!:
+    wide I64 = cast value
+    adjusted = wide + 9007199254740990
     return cast adjusted
 ;
 
--- Error.code remains U32 in the Int64 profile. Widen directly to U64 to
+-- Error.code remains U32. Widen directly to U64 to
 -- observe it above the JavaScript safe-integer boundary.
 format_u32_checked_offset |code U32| -> String, Error!:
     wide U64 = cast code
@@ -14,15 +15,15 @@ format_u32_checked_offset |code U32| -> String, Error!:
     return cast total
 ;
 
-sum_collection_with_index |items {Int}| -> Int:
-    total ~= 0
+sum_collection_with_index |items {I64}| -> I64:
+    total ~I64 = 0
     loop items |value, index|:
         total = total + value + index
     ;
     return total
 ;
 
-values ~= {10, 20}
+values ~{I64} = {10, 20}
 initial_length = values.length()
 initial_length_checked = format_checked_offset(initial_length) catch:
     then "overflow"
@@ -49,22 +50,25 @@ text_length = length("A🦋B")
 text_length_checked = format_checked_offset(text_length) catch:
     then "overflow"
 ;
-text_length_safe_boundary = text_length + 9007199254740992
+wide_text_length I64 = cast text_length
+text_length_safe_boundary = wide_text_length + 9007199254740992
 
-range_total ~= 0
-loop 0 to 4 |value, index|:
+range_total ~I64 = 0
+range_start I64 = 0
+range_end I64 = 4
+loop range_start to range_end |value, index|:
     range_total = range_total + value + index
 ;
 
 iteration_total = sum_collection_with_index(values)
 
 glyph = '🦋'
-code_point Int = cast glyph
+code_point I32 = cast glyph
 round_trip Char = cast code_point catch:
     then '?'
 ;
 
-divide |numerator Int, denominator Int| -> Int, Error!:
+divide |numerator I64, denominator I64| -> I64, Error!:
     return numerator // denominator
 ;
 division_code ~U32 = 0
@@ -90,7 +94,7 @@ default_code_checked = format_u32_checked_offset(default_code) catch:
 ;
 default_code_plus_one = default_code + 1
 
-bounded ~{2 Int} = {7, 8}
+bounded ~{2 I64} = {7, 8}
 fixed_push_code ~U32 = 0
 ~bounded.push(9) catch |fixed_error|:
     fixed_push_code = fixed_error.code
@@ -104,7 +108,7 @@ fixed_length_checked = format_checked_offset(fixed_length) catch:
     then "overflow"
 ;
 
-collision_map ~{Int = String} = {
+collision_map ~{I64 = String} = {
     9007199254740992 = "a",
     9007199254740993 = "b"
 }
@@ -119,10 +123,10 @@ collision_length_checked = format_checked_offset(collision_length) catch:
     then "overflow"
 ;
 
-random_value = random_int(9007199254740995, 9007199254740992)
-random_in_bounds = random_value >= 9007199254740992 and random_value <= 9007199254740995
+random_value = random_int(2147483647, 2147483644)
+random_in_bounds = random_value >= 2147483644 and random_value <= 2147483647
 
-subtract |left Float, right Float| -> Float:
+subtract |left F64, right F64| -> F64:
     return left - right
 ;
 float_zero = subtract(1.0, 1.0)

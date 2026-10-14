@@ -1,15 +1,21 @@
-//! All-path value-production exit analysis and produced-value traversal.
+//! All-path value-production exit analysis and `then` group traversal.
 //!
 //! WHAT: summarises whether a statement sequence can fall through, produce values
-//! or terminate, and visits every reachable `ThenValue` group.
+//! or terminate. Reachable traversal feeds inference and completeness. Authored
+//! traversal visits every `ThenValue` group, including groups after a terminal
+//! statement, so receiving validation and coercion still apply to dead groups.
 //! WHY: value-producing `if`, match and catch share one completeness contract.
-//! Mixed produce/terminate paths are complete; any real fallthrough is not.
+//! Mixed produce/terminate paths are complete; any real fallthrough is not. Dead
+//! values must not constrain an inferred type, so inference keeps reachable-only traversal.
 //!
 //! This module does not own missing-`else` syntax checks.
 
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::const_values::{ConstValuePayload, ConstValueStore};
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, ExpressionOperationView,
+};
 use crate::compiler_frontend::ast::statements::match_patterns::MatchArm;
 use crate::compiler_frontend::ast::statements::value_production::types::{
     BranchExitSummary, ProducedValues,
@@ -25,11 +31,15 @@ use crate::compiler_frontend::source::SourceSpan;
 /// paths that still fall through.
 /// WHY: nested `if`/`match` can produce on one path and terminate on another;
 /// later statements must not run on those exited paths.
-pub fn analyze_branch_exits(body: &[AstNode]) -> BranchExitSummary {
+pub fn analyze_branch_exits(
+    body: &[AstNode],
+    expressions: &AstExpressionBuilder,
+    constants: &ConstValueStore,
+) -> BranchExitSummary {
     let mut summary = BranchExitSummary::FALLS_THROUGH;
 
     for statement in body {
-        summary = summary.then_sequence(statement_exits(statement));
+        summary = summary.then_sequence(statement_exits(statement, expressions, constants));
         if !summary.can_fall_through {
             break;
         }
@@ -43,11 +53,13 @@ pub fn validate_value_match_completeness(
     arms: &[MatchArm],
     default: Option<&[AstNode]>,
     span: Option<SourceSpan>,
+    expressions: &AstExpressionBuilder,
+    constants: &ConstValueStore,
 ) -> Result<(), ExpressionParseError> {
     let mut combined: Option<BranchExitSummary> = None;
 
     for arm in arms {
-        let arm_exits = analyze_branch_exits(&arm.body);
+        let arm_exits = analyze_branch_exits(&arm.body, expressions, constants);
         reject_fallthrough(arm_exits, span)?;
         combined = Some(match combined {
             Some(existing) => existing.union(arm_exits),
@@ -56,7 +68,7 @@ pub fn validate_value_match_completeness(
     }
 
     if let Some(default_body) = default {
-        let default_exits = analyze_branch_exits(default_body);
+        let default_exits = analyze_branch_exits(default_body, expressions, constants);
         reject_fallthrough(default_exits, span)?;
         combined = Some(match combined {
             Some(existing) => existing.union(default_exits),
@@ -79,6 +91,8 @@ pub fn validate_value_match_completeness(
 pub fn visit_reachable_then_values<E>(
     body: &[AstNode],
     visitor: &mut impl FnMut(&ProducedValues) -> Result<(), E>,
+    expressions: &AstExpressionBuilder,
+    constants: &ConstValueStore,
 ) -> Result<(), E> {
     let mut reachable = true;
 
@@ -87,55 +101,93 @@ pub fn visit_reachable_then_values<E>(
             break;
         }
 
-        visit_statement_then_values(statement, visitor)?;
-        reachable = statement_exits(statement).can_fall_through;
+        visit_statement_then_values(statement, visitor, expressions, constants)?;
+        reachable = statement_exits(statement, expressions, constants).can_fall_through;
     }
 
     Ok(())
 }
 
-/// Mutably visits every reachable `ThenValue` group for post-inference coercion.
-pub fn visit_reachable_then_values_mut<E>(
+/// Mutably visits every authored `ThenValue` group, including groups after a terminal statement.
+///
+/// WHAT: walks each statement body in authored order and recurses through `if`, `match` and
+///       lexical-scope bodies. Loop bodies are not searched: `then` is rejected inside a loop body
+///       because loop contexts never inherit a value target.
+/// WHY: a statically inactive branch or a tail after a terminal statement keeps its authored group
+///      until module finalization erases it, so every group still receives receiving validation.
+///      Reachability still governs inference contributions, which use the reachable visitors.
+pub fn visit_authored_then_values_mut<E>(
     body: &mut [AstNode],
     visitor: &mut impl FnMut(&mut ProducedValues) -> Result<(), E>,
 ) -> Result<(), E> {
-    let mut reachable = true;
-
     for statement in body {
-        if !reachable {
-            break;
-        }
+        match &mut statement.kind {
+            NodeKind::ThenValue(produced_values) => visitor(produced_values)?,
 
-        visit_statement_then_values_mut(statement, visitor)?;
-        reachable = statement_exits(statement).can_fall_through;
+            NodeKind::If(_, then_body, Some(else_body), _) => {
+                visit_authored_then_values_mut(then_body, visitor)?;
+                visit_authored_then_values_mut(else_body, visitor)?;
+            }
+
+            NodeKind::If(_, then_body, None, _) => {
+                visit_authored_then_values_mut(then_body, visitor)?;
+            }
+
+            NodeKind::Match {
+                arms,
+                default: maybe_default_body,
+                ..
+            } => {
+                for arm in arms {
+                    visit_authored_then_values_mut(&mut arm.body, visitor)?;
+                }
+                if let Some(default_body) = maybe_default_body {
+                    visit_authored_then_values_mut(default_body, visitor)?;
+                }
+            }
+
+            NodeKind::LexicalScope { body } => visit_authored_then_values_mut(body, visitor)?,
+
+            _ => {}
+        }
     }
 
     Ok(())
 }
 
-fn statement_exits(statement: &AstNode) -> BranchExitSummary {
+fn statement_exits(
+    statement: &AstNode,
+    expressions: &AstExpressionBuilder,
+    constants: &ConstValueStore,
+) -> BranchExitSummary {
     match &statement.kind {
         NodeKind::ThenValue(_) => BranchExitSummary::PRODUCES,
 
         NodeKind::Return(_) | NodeKind::ReturnError(_) => BranchExitSummary::TERMINATES,
 
-        NodeKind::If(_, then_body, Some(else_body), _) => {
-            analyze_branch_exits(then_body).union(analyze_branch_exits(else_body))
-        }
+        NodeKind::If(_, then_body, Some(else_body), _) => analyze_branch_exits(
+            then_body,
+            expressions,
+            constants,
+        )
+        .union(analyze_branch_exits(else_body, expressions, constants)),
 
         NodeKind::If(_, then_body, None, _) => {
-            analyze_branch_exits(then_body).union(BranchExitSummary::FALLS_THROUGH)
+            analyze_branch_exits(then_body, expressions, constants)
+                .union(BranchExitSummary::FALLS_THROUGH)
         }
 
         NodeKind::Match {
             arms,
             default: maybe_default_body,
             ..
-        } => match_exits(arms, maybe_default_body.as_deref()),
+        } => match_exits(arms, maybe_default_body.as_deref(), expressions, constants),
 
-        NodeKind::LexicalScope { body } => analyze_branch_exits(body),
+        NodeKind::LexicalScope { body } => analyze_branch_exits(body, expressions, constants),
 
-        NodeKind::Assert { condition, .. } if assert_condition_is_statically_false(condition) => {
+        NodeKind::Assert { condition, .. }
+            if assert_condition_is_statically_false(*condition, expressions, constants) =>
+        {
             BranchExitSummary::TERMINATES
         }
 
@@ -144,11 +196,16 @@ fn statement_exits(statement: &AstNode) -> BranchExitSummary {
     }
 }
 
-fn match_exits(arms: &[MatchArm], default_body: Option<&[AstNode]>) -> BranchExitSummary {
+fn match_exits(
+    arms: &[MatchArm],
+    default_body: Option<&[AstNode]>,
+    expressions: &AstExpressionBuilder,
+    constants: &ConstValueStore,
+) -> BranchExitSummary {
     let mut combined: Option<BranchExitSummary> = None;
 
     for arm in arms {
-        let arm_exits = analyze_branch_exits(&arm.body);
+        let arm_exits = analyze_branch_exits(&arm.body, expressions, constants);
         combined = Some(match combined {
             Some(existing) => existing.union(arm_exits),
             None => arm_exits,
@@ -156,7 +213,7 @@ fn match_exits(arms: &[MatchArm], default_body: Option<&[AstNode]>) -> BranchExi
     }
 
     if let Some(default_body) = default_body {
-        let default_exits = analyze_branch_exits(default_body);
+        let default_exits = analyze_branch_exits(default_body, expressions, constants);
         combined = Some(match combined {
             Some(existing) => existing.union(default_exits),
             None => default_exits,
@@ -169,16 +226,20 @@ fn match_exits(arms: &[MatchArm], default_body: Option<&[AstNode]>) -> BranchExi
 fn visit_statement_then_values<E>(
     statement: &AstNode,
     visitor: &mut impl FnMut(&ProducedValues) -> Result<(), E>,
+    expressions: &AstExpressionBuilder,
+    constants: &ConstValueStore,
 ) -> Result<(), E> {
     match &statement.kind {
         NodeKind::ThenValue(produced_values) => visitor(produced_values),
 
         NodeKind::If(_, then_body, Some(else_body), _) => {
-            visit_reachable_then_values(then_body, visitor)?;
-            visit_reachable_then_values(else_body, visitor)
+            visit_reachable_then_values(then_body, visitor, expressions, constants)?;
+            visit_reachable_then_values(else_body, visitor, expressions, constants)
         }
 
-        NodeKind::If(_, then_body, None, _) => visit_reachable_then_values(then_body, visitor),
+        NodeKind::If(_, then_body, None, _) => {
+            visit_reachable_then_values(then_body, visitor, expressions, constants)
+        }
 
         NodeKind::Match {
             arms,
@@ -186,49 +247,17 @@ fn visit_statement_then_values<E>(
             ..
         } => {
             for arm in arms {
-                visit_reachable_then_values(&arm.body, visitor)?;
+                visit_reachable_then_values(&arm.body, visitor, expressions, constants)?;
             }
             if let Some(default_body) = maybe_default_body {
-                visit_reachable_then_values(default_body, visitor)?;
+                visit_reachable_then_values(default_body, visitor, expressions, constants)?;
             }
             Ok(())
         }
 
-        NodeKind::LexicalScope { body } => visit_reachable_then_values(body, visitor),
-
-        _ => Ok(()),
-    }
-}
-
-fn visit_statement_then_values_mut<E>(
-    statement: &mut AstNode,
-    visitor: &mut impl FnMut(&mut ProducedValues) -> Result<(), E>,
-) -> Result<(), E> {
-    match &mut statement.kind {
-        NodeKind::ThenValue(produced_values) => visitor(produced_values),
-
-        NodeKind::If(_, then_body, Some(else_body), _) => {
-            visit_reachable_then_values_mut(then_body, visitor)?;
-            visit_reachable_then_values_mut(else_body, visitor)
+        NodeKind::LexicalScope { body } => {
+            visit_reachable_then_values(body, visitor, expressions, constants)
         }
-
-        NodeKind::If(_, then_body, None, _) => visit_reachable_then_values_mut(then_body, visitor),
-
-        NodeKind::Match {
-            arms,
-            default: maybe_default_body,
-            ..
-        } => {
-            for arm in arms {
-                visit_reachable_then_values_mut(&mut arm.body, visitor)?;
-            }
-            if let Some(default_body) = maybe_default_body {
-                visit_reachable_then_values_mut(default_body, visitor)?;
-            }
-            Ok(())
-        }
-
-        NodeKind::LexicalScope { body } => visit_reachable_then_values_mut(body, visitor),
 
         _ => Ok(()),
     }
@@ -277,6 +306,16 @@ fn no_producing_path(span: Option<SourceSpan>) -> ExpressionParseError {
 /// WHAT: checks only source-level/lowered literal `false`.
 /// WHY: branch completeness deliberately recognizes only literal false assertions
 ///      and must stay aligned with HIR's direct assertion-failure lowering.
-fn assert_condition_is_statically_false(condition: &Expression) -> bool {
-    matches!(&condition.kind, ExpressionKind::Bool(false))
+fn assert_condition_is_statically_false(
+    condition: ExprId,
+    expressions: &AstExpressionBuilder,
+    constants: &ConstValueStore,
+) -> bool {
+    expressions.view(condition).is_ok_and(|view| {
+        matches!(
+            view.operation(),
+            ExpressionOperationView::Constant(id)
+                if matches!(constants.payload(id), Some(ConstValuePayload::Bool(false)))
+        )
+    })
 }

@@ -1,0 +1,22 @@
+-- Independent F16 receivers fix the operands after both collection literals. Named arithmetic
+-- completes at F16 before storage, and its raw sibling receives that exact natural result type.
+receive_f16 |value F16| -> String:
+    return cast value
+;
+
+render_forward_f16_collection || -> String, Error!:
+    left = 2048.0
+    right = 1.0
+    values = {left + right, 0.5}
+    total = left + right
+    forwarded = {total}
+    left_text = receive_f16(left)
+    right_text = receive_f16(right)
+    actual = values.get(0)!
+    peer = values.get(1)!
+    named = forwarded.get(0)!
+    return [:forward_f16_collection left=[left_text] right=[right_text] result=[actual] peer=[peer] named=[named]]
+;
+
+result = render_forward_f16_collection() catch then "failed"
+[:[result]]

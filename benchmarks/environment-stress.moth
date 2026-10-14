@@ -5,11 +5,11 @@
 -- Dense declarations with minimal runtime body.
 
 -- Scalar aliases
-Px as Int
-Rem as Float
+Px as I32
+Rem as F64
 HexColor as String
 CssClass as String
-EpochMs as Int
+EpochMs as I32
 
 -- Collection / option aliases
 ClassList as {CssClass}
@@ -26,10 +26,10 @@ Border = | width Px, style String |
 Shadow = | x Px, y Px, blur Px, color HexColor |
 
 -- Small structs (group 2: style primitives)
-Font = | family String, size Px, weight Int |
-ColorStop = | position Float, color HexColor |
+Font = | family String, size Px, weight I32 |
+ColorStop = | position F64, color HexColor |
 Gradient = | start HexColor, end HexColor |
-Layer = | index Int, name String |
+Layer = | index I32, name String |
 Frame = | origin Point, size Size |
 
 -- Cross-referencing structs
@@ -40,7 +40,7 @@ Decorated = | border Border, radius Radius, gradient Gradient |
 
 -- Large field-count structs
 NodeConfig = |
-    id Int,
+    id I32,
     tag String,
     classes ClassList,
     width Px,
@@ -119,7 +119,7 @@ Pair type L, R = |
 
 Wrap type Inner = |
     inner Inner,
-    count Int,
+    count I32,
 |
 
 -- Generic choices
@@ -242,7 +242,7 @@ set_font_size |this ~Font, size Px|:
     this.size = size
 ;
 
-set_layer_index |this ~Layer, index Int|:
+set_layer_index |this ~Layer, index I32|:
     this.index = index
 ;
 
@@ -271,7 +271,7 @@ identity type T |value T| -> T:
     return value
 ;
 
-bump_int_wrapper |wrapper ~Wrap of Int|:
+bump_int_wrapper |wrapper ~Wrap of I32|:
     wrapper.count = wrapper.count + 1
 ;
 

@@ -1,5 +1,5 @@
 Bucket = |
-    values {Int},
+    values {I32},
 |
 
 mutate |this Bucket| -> Error!:

@@ -1,6 +1,6 @@
 -- Positive: nested map values.
 
-read_a |m {String = {String = Int}}| -> Int:
+read_a |m {String = {String = I32}}| -> I32:
     a = m.get("a") catch:
         then {}
     ;
@@ -9,7 +9,7 @@ read_a |m {String = {String = Int}}| -> Int:
     ;
 ;
 
-read_b |m {String = {String = Int}}| -> Int:
+read_b |m {String = {String = I32}}| -> I32:
     b = m.get("b") catch:
         then {}
     ;
@@ -18,5 +18,5 @@ read_b |m {String = {String = Int}}| -> Int:
     ;
 ;
 
-outer ~{String = {String = Int}} = {"a" = {"x" = 1, "y" = 2}, "b" = {"z" = 3}}
+outer ~{String = {String = I32}} = {"a" = {"x" = 1, "y" = 2}, "b" = {"z" = 3}}
 [:nested_map_values a=[read_a(outer)] b=[read_b(outer)]]

@@ -1,13 +1,11 @@
 //! HIR checked numeric operations.
 //!
-//! WHAT: defines the statement-level numeric operation surface used by HIR to expose checked
-//!       arithmetic, division/modulo-by-zero handling, and recoverable vs trapping failure modes
-//!       as a backend-neutral operator plus a canonical numeric domain.
+//! WHAT: defines checked arithmetic and division/modulo-by-zero handling as a backend-neutral
+//!       operator plus a canonical numeric domain. Statement operations trap or are proven
+//!       infallible, while `Invoke` owns recoverable success and error delivery.
 //! WHY: numeric failures are semantic effects that belong in HIR, not in source expression trees,
-//!      so backends receive an explicit operation with a known failure mode instead of rediscovering
-//!      source operator fallibility. Recording the operator and the domain separately keeps one
-//!      small operator vocabulary while later slices add fixed-width domains without multiplying
-//!      variants.
+//!      so backends consume explicit operations and failure edges instead of rediscovering source
+//!      operator fallibility. Keeping the operator and domain separate avoids multiplying variants.
 
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
@@ -16,36 +14,10 @@ use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::ids::HirValueId;
 
-/// How a checked numeric operation should behave on failure.
-///
-/// WHAT: selects between returning a recoverable builtin `Error!` carrier and trapping.
-/// WHY: the choice depends on the delivery edge available at lowering time. An enclosing
-///      builtin-accepting catch or a builtin `Error!` return slot recovers numeric failures
-///      through the normal fallible-carrier path. Every other context initially lowers to
-///      `Trap`; the private failure lane later retargets the code-carrying trapping producers
-///      of inferred-lane private functions onto the inferred builtin-`Error` edge.
+/// Failure behaviour for statement operations. Recoverable delivery belongs to `Invoke`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NumericFailureMode {
-    /// Produce an internal fallible carrier (success value or builtin `Error`).
-    ///
-    /// WHAT: a builtin-accepting catch or the builtin `Error!` return slot receives the
-    ///       failure through the normal fallible-carrier path.
-    /// WHY: this keeps recoverable numeric failures in the same control-flow shape as explicit
-    ///      `cast!` propagation and lets later lowering emit `HirTerminator::FallibleBranch`.
-    ReturnError,
-
-    /// Stop execution on failure.
-    ///
-    /// WHAT: the lowering-time mode for every operation without builtin delivery:
-    ///       non-fallible functions, custom error slots and private no-slot helpers before lane
-    ///       installation. The synthetic entry `start()` owns the builtin slot, so its
-    ///       ordinary arithmetic lowers to `ReturnError`; only its float integrity guards
-    ///       (`FormatFloat`, `ValidateFloat`) use `Trap` because they are not implicit
-    ///       failures. The result local receives only the scalar success value; failure is a
-    ///       runtime trap/throw. Operations with an empty shared code set (`Float` negation,
-    ///       exact `Dec` arithmetic) never become lane producers, so their `Trap` is final.
-    /// WHY: without a builtin delivery edge the failure cannot be represented as a
-    ///      user-visible value, so the backend must halt.
+    /// Stop execution on failure, producing only a scalar success value.
     Trap,
 
     /// Semantically proven unable to fail; no failure edge.
@@ -76,8 +48,8 @@ impl RangeStepFailureCause {
 
 /// A checked numeric operation: a backend-neutral operator plus its canonical numeric domain.
 ///
-/// WHAT: identifies scalar arithmetic and its result domain (`Int`, `Uint`, `Float`, a fixed
-///       scalar, or one exact `Dec` scale).
+/// WHAT: identifies scalar arithmetic and its result domain (one exact fixed scalar or one exact
+///       `Dec` scale).
 /// WHY: backends consume one operator/domain fact rather than a target-specific operation family.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct HirNumericOp {
@@ -103,7 +75,7 @@ impl Display for HirNumericOp {
 /// WHAT: represents either a unary or binary numeric operation in one HIR-local shape.
 /// WHY: keeps `HirStatementKind::NumericOp` a single variant while still distinguishing unary
 ///      negation from binary arithmetic. Lowering converts operands to the domain except for the
-///      profile-`Int` exponent of a Dec power operation.
+///      exact `I32` exponent of a Dec power operation.
 #[derive(Debug, Clone)]
 pub enum HirNumericOperands {
     Unary { operand: HirValueId },

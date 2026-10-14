@@ -1,6 +1,6 @@
--- Validates that Float cannot be implicitly narrowed to Int.
--- Coercion only goes Int → Float, never Float → Int.
+-- Validates that F64 cannot be implicitly narrowed to I32.
+-- Bound integer and floating-point values require explicit casts in either direction.
 
-result Int = 1.5
+result I32 = 1.5
 
 io.line("should not reach here")

@@ -10,9 +10,11 @@
 //! HIR transformation or lowering invariant failure only.
 
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, MatchExhaustiveness};
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    ExpressionStore, ExpressionView,
+};
 use crate::compiler_frontend::ast::statements::match_patterns::{
-    MatchArm, MatchPattern, RelationalPatternOp,
+    MatchArm, MatchPattern, PatternValue, PatternValueKind, RelationalPatternOp,
 };
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::hir::blocks::HirBlock;
@@ -42,7 +44,7 @@ struct CfgMatchGuardLowering<'a> {
     arm: &'a MatchArm,
     capture_locals: &'a [LocalId],
     scrutinee_hir: HirValueId,
-    scrutinee_ast: &'a Expression,
+    scrutinee_ast: ExpressionView<'a>,
     guard_block: BlockId,
     arm_body_block: BlockId,
     next_dispatch: BlockId,
@@ -52,6 +54,7 @@ struct CfgMatchGuardLowering<'a> {
 impl<'a> HirBuilder<'a> {
     pub(super) fn lower_lexical_scope(
         &mut self,
+        expressions: &ExpressionStore,
         body: &[AstNode],
         span: &Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
@@ -62,7 +65,7 @@ impl<'a> HirBuilder<'a> {
 
         self.emit_jump_to(entry_block, body_block, span, "lexical-scope.enter")?;
         self.set_current_block(body_block, span)?;
-        self.lower_statement_sequence(body)?;
+        self.lower_statement_sequence(expressions, body)?;
 
         let body_tail_block = self.current_block_id_or_error(span)?;
         if self.block_has_explicit_terminator(body_tail_block, span)? {
@@ -76,13 +79,14 @@ impl<'a> HirBuilder<'a> {
 
     pub(super) fn lower_if_statement(
         &mut self,
-        condition: &Expression,
+        expressions: &ExpressionStore,
+        condition: ExpressionView<'_>,
         then_body: &[AstNode],
         else_body: Option<&[AstNode]>,
         span: &Option<SourceSpan>,
         authored_span: Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
-        if matches!(condition.kind, ExpressionKind::Bool(_)) {
+        if self.expression_constant_bool(condition).is_some() {
             increment_frontend_counter(FrontendCounter::HirStaticBoolIfNodes);
             return_hir_transformation_error!(
                 "Stage 4 passed a statically decided Bool `if` to HIR",
@@ -94,10 +98,10 @@ impl<'a> HirBuilder<'a> {
             condition,
             span,
             authored_span,
-            |builder| builder.lower_statement_sequence(then_body),
+            |builder| builder.lower_statement_sequence(expressions, then_body),
             |builder| {
                 if let Some(else_nodes) = else_body {
-                    builder.lower_statement_sequence(else_nodes)?;
+                    builder.lower_statement_sequence(expressions, else_nodes)?;
                 }
 
                 Ok(())
@@ -113,7 +117,7 @@ impl<'a> HirBuilder<'a> {
     ///      but branch bodies append render pieces instead of lowering statement nodes.
     pub(crate) fn lower_if_with_body_emitters(
         &mut self,
-        condition: &Expression,
+        condition: ExpressionView<'_>,
         span: &Option<SourceSpan>,
         authored_span: Option<SourceSpan>,
         emit_then: impl FnOnce(&mut HirBuilder<'_>) -> Result<(), HirConstructionFailure>,
@@ -245,12 +249,13 @@ impl<'a> HirBuilder<'a> {
 
     pub(super) fn lower_while_statement(
         &mut self,
-        condition: &Expression,
+        expressions: &ExpressionStore,
+        condition: ExpressionView<'_>,
         body: &[AstNode],
         span: &Option<SourceSpan>,
         authored_span: Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
-        self.lower_while_statement_impl(condition, body, span, authored_span)
+        self.lower_while_statement_impl(expressions, condition, body, span, authored_span)
     }
 
     /// Lower an AST match statement into explicit CFG blocks and a `Match` terminator.
@@ -261,9 +266,14 @@ impl<'a> HirBuilder<'a> {
     /// WHY: HIR represents control flow as a flat block graph, so structured match
     /// syntax must be decomposed here. Lazy merge-block creation avoids empty blocks
     /// when every arm terminates explicitly.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "match dispatch keeps the mutable builder, scrutinee, arms, default, exhaustiveness and spans separate"
+    )]
     pub(super) fn lower_match_statement(
         &mut self,
-        scrutinee: &Expression,
+        expressions: &ExpressionStore,
+        scrutinee: ExpressionView<'_>,
         arms: &[MatchArm],
         default: Option<&[AstNode]>,
         exhaustiveness: MatchExhaustiveness,
@@ -272,8 +282,9 @@ impl<'a> HirBuilder<'a> {
     ) -> Result<(), HirConstructionFailure> {
         self.validate_match_exhaustiveness_contract(exhaustiveness, default, span)?;
 
-        if self.match_guards_need_current_block_lowering(arms) {
+        if self.match_guards_need_current_block_lowering(expressions, arms)? {
             return self.lower_match_statement_with_cfg_guards(
+                expressions,
                 scrutinee,
                 arms,
                 default,
@@ -284,6 +295,7 @@ impl<'a> HirBuilder<'a> {
         }
 
         self.lower_match_statement_with_inline_guards(
+            expressions,
             scrutinee,
             arms,
             default,
@@ -318,17 +330,29 @@ impl<'a> HirBuilder<'a> {
         Ok(())
     }
 
-    fn match_guards_need_current_block_lowering(&self, arms: &[MatchArm]) -> bool {
-        arms.iter().any(|arm| {
-            arm.guard
-                .as_ref()
-                .is_some_and(|guard| self.expression_needs_current_block_lowering(guard))
-        })
+    fn match_guards_need_current_block_lowering(
+        &self,
+        expressions: &ExpressionStore,
+        arms: &[MatchArm],
+    ) -> Result<bool, HirConstructionFailure> {
+        for arm in arms {
+            if let Some(id) = arm.guard
+                && self.expression_needs_current_block_lowering(expressions.view(id)?)
+            {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "inline guard lowering keeps the mutable builder, scrutinee, arms, default, exhaustiveness and spans separate"
+    )]
     fn lower_match_statement_with_inline_guards(
         &mut self,
-        scrutinee: &Expression,
+        expressions: &ExpressionStore,
+        scrutinee: ExpressionView<'_>,
         arms: &[MatchArm],
         default: Option<&[AstNode]>,
         exhaustiveness: MatchExhaustiveness,
@@ -368,8 +392,10 @@ impl<'a> HirBuilder<'a> {
             let locals = self.register_match_arm_capture_locals(arm, scrutinee, span)?;
             arm_capture_locals.push(locals);
 
-            let lowered_pattern = self.lower_match_pattern(&arm.pattern, scrutinee.type_id)?;
+            let lowered_pattern =
+                self.lower_match_pattern(expressions, &arm.pattern, scrutinee.value_type_id()?)?;
             let lowered_guard = self.lower_inline_match_guard(
+                expressions,
                 arm,
                 &arm_capture_locals[index],
                 scrutinee,
@@ -412,6 +438,7 @@ impl<'a> HirBuilder<'a> {
             self.set_current_block(arm_block, span)?;
 
             self.lower_match_arm_body(
+                expressions,
                 arm,
                 &arm_capture_locals[index],
                 scrutinee_for_captures,
@@ -434,6 +461,7 @@ impl<'a> HirBuilder<'a> {
         }
 
         self.lower_match_default_body(
+            expressions,
             default_block,
             default,
             parent_region,
@@ -454,9 +482,14 @@ impl<'a> HirBuilder<'a> {
     /// Those edges cannot be hidden inside the pure guard expression stored on a `Match`
     /// terminator, and evaluating the guard before pattern dispatch would run side effects for
     /// arms that did not match.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "fallible guard lowering keeps the mutable builder, scrutinee, arms, default, exhaustiveness and spans separate"
+    )]
     fn lower_match_statement_with_cfg_guards(
         &mut self,
-        scrutinee: &Expression,
+        expressions: &ExpressionStore,
+        scrutinee: ExpressionView<'_>,
         arms: &[MatchArm],
         default: Option<&[AstNode]>,
         exhaustiveness: MatchExhaustiveness,
@@ -488,7 +521,8 @@ impl<'a> HirBuilder<'a> {
             let arm_body_block = self.create_block(arm_region, span, "match-arm")?;
             let guard_needs_cfg = arm
                 .guard
-                .as_ref()
+                .map(|id| expressions.view(id))
+                .transpose()?
                 .is_some_and(|guard| self.expression_needs_current_block_lowering(guard));
             let guard_block = if guard_needs_cfg {
                 Some(self.create_block(arm_region, span, "match-guard")?)
@@ -508,11 +542,13 @@ impl<'a> HirBuilder<'a> {
             let capture_registration_block = guard_block.unwrap_or(arm_body_block);
             self.set_current_block(capture_registration_block, span)?;
             let capture_locals = self.register_match_arm_capture_locals(arm, scrutinee, span)?;
-            let pattern = self.lower_match_pattern(&arm.pattern, scrutinee.type_id)?;
+            let pattern =
+                self.lower_match_pattern(expressions, &arm.pattern, scrutinee.value_type_id()?)?;
             let inline_guard = if guard_needs_cfg {
                 None
             } else {
                 self.lower_inline_match_guard(
+                    expressions,
                     arm,
                     &capture_locals,
                     scrutinee,
@@ -543,20 +579,24 @@ impl<'a> HirBuilder<'a> {
             )?;
 
             if let Some(guard_block_id) = guard_block {
-                self.lower_cfg_match_guard(CfgMatchGuardLowering {
-                    arm,
-                    capture_locals: &capture_locals,
-                    scrutinee_hir: scrutinee_value,
-                    scrutinee_ast: scrutinee,
-                    guard_block: guard_block_id,
-                    arm_body_block,
-                    next_dispatch,
-                    span,
-                })?;
+                self.lower_cfg_match_guard(
+                    expressions,
+                    CfgMatchGuardLowering {
+                        arm,
+                        capture_locals: &capture_locals,
+                        scrutinee_hir: scrutinee_value,
+                        scrutinee_ast: scrutinee,
+                        guard_block: guard_block_id,
+                        arm_body_block,
+                        next_dispatch,
+                        span,
+                    },
+                )?;
             }
 
             self.set_current_block(arm_body_block, span)?;
             self.lower_match_arm_body(
+                expressions,
                 arm,
                 &capture_locals,
                 scrutinee_value,
@@ -581,6 +621,7 @@ impl<'a> HirBuilder<'a> {
         }
 
         self.lower_match_default_body(
+            expressions,
             default_block,
             default,
             parent_region,
@@ -631,8 +672,13 @@ impl<'a> HirBuilder<'a> {
         )
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "default arm lowering keeps the mutable builder, block, body, region, span and mutable block anchors separate"
+    )]
     fn lower_match_default_body(
         &mut self,
+        expressions: &ExpressionStore,
         default_block: Option<BlockId>,
         default: Option<&[AstNode]>,
         parent_region: RegionId,
@@ -645,7 +691,7 @@ impl<'a> HirBuilder<'a> {
         };
 
         self.set_current_block(default_block_id, span)?;
-        self.lower_statement_sequence(default_body)?;
+        self.lower_statement_sequence(expressions, default_body)?;
 
         let default_tail_block = self.current_block_id_or_error(span)?;
         let default_terminated = self.block_has_explicit_terminator(default_tail_block, span)?;
@@ -689,6 +735,7 @@ impl<'a> HirBuilder<'a> {
 
     fn lower_cfg_match_guard(
         &mut self,
+        expressions: &ExpressionStore,
         context: CfgMatchGuardLowering<'_>,
     ) -> Result<(), HirConstructionFailure> {
         let CfgMatchGuardLowering {
@@ -720,6 +767,7 @@ impl<'a> HirBuilder<'a> {
                 );
             };
 
+            let guard = expressions.view(*guard)?;
             let guard_value = builder.lower_match_guard_value_to_current_block(guard)?;
             let guard_tail_block = builder.current_block_id_or_error(span)?;
             // Authored guard branch carries the guard expression span.
@@ -731,19 +779,24 @@ impl<'a> HirBuilder<'a> {
                     else_block: next_dispatch,
                 },
                 span,
-                guard.span,
+                guard.span(),
             )?;
             builder.log_control_flow_edge(guard_tail_block, next_dispatch, "match.guard.false");
             Ok(())
         })
     }
 
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "arm body lowering keeps the mutable builder, HIR and AST scrutinee, capture locals, span and flag separate"
+    )]
     fn lower_match_arm_body(
         &mut self,
+        expressions: &ExpressionStore,
         arm: &MatchArm,
         capture_locals: &[LocalId],
         scrutinee_hir: HirValueId,
-        scrutinee_ast: &Expression,
+        scrutinee_ast: ExpressionView<'_>,
         span: &Option<SourceSpan>,
         emit_capture_assignments: bool,
     ) -> Result<(), HirConstructionFailure> {
@@ -758,15 +811,16 @@ impl<'a> HirBuilder<'a> {
                 )?;
             }
 
-            builder.lower_statement_sequence(&arm.body)
+            builder.lower_statement_sequence(expressions, &arm.body)
         })
     }
 
     fn lower_inline_match_guard(
         &mut self,
+        expressions: &ExpressionStore,
         arm: &MatchArm,
         capture_locals: &[LocalId],
-        scrutinee_ast: &Expression,
+        scrutinee_ast: ExpressionView<'_>,
         scrutinee_hir: HirValueId,
         span: &Option<SourceSpan>,
     ) -> Result<Option<HirValueId>, HirConstructionFailure> {
@@ -774,7 +828,7 @@ impl<'a> HirBuilder<'a> {
             return Ok(None);
         };
 
-        let guard_expr = self.lower_match_guard_expression(guard)?;
+        let guard_expr = self.lower_match_guard_expression(expressions.view(*guard)?)?;
         if let MatchPattern::ChoiceVariant { captures, .. } = &arm.pattern {
             if !captures.is_empty() && !capture_locals.is_empty() {
                 return Ok(Some(self.substitute_match_guard_captures(
@@ -835,65 +889,64 @@ impl<'a> HirBuilder<'a> {
     /// here produces clear HIR-stage errors instead of miscompilation.
     fn lower_match_literal_pattern(
         &mut self,
-        condition: &Expression,
+        expressions: &ExpressionStore,
+        pattern: &PatternValue,
         scrutinee_type_id: TypeId,
     ) -> Result<HirValueId, HirConstructionFailure> {
-        let lowered_pattern = self.lower_expression(condition)?;
-        if !lowered_pattern.prelude.is_empty() {
-            return_hir_transformation_error!(
-                "Match arm pattern lowering produced side-effect statements; only literal patterns are supported",
-                self.hir_error_location(&condition.span)
-            );
-        }
-
-        let lowered_pattern_row = self.module.expressions.expression(lowered_pattern.value);
-        if lowered_pattern_row.value_kind != ValueKind::Const {
+        let value = match pattern.kind {
+            PatternValueKind::Constant(value) => {
+                self.lower_const_store_expression(value, &pattern.span)?
+            }
+            PatternValueKind::Runtime(id) => {
+                let lowered = self.lower_expression(expressions.view(id)?)?;
+                if !lowered.prelude.is_empty() {
+                    return_hir_transformation_error!(
+                        "Match arm pattern lowering produced side-effect statements; only literal patterns are supported",
+                        self.hir_error_location(&pattern.span)
+                    );
+                }
+                lowered.value
+            }
+        };
+        let row = self.module.expressions.expression(value);
+        if row.value_kind != ValueKind::Const {
             return_hir_transformation_error!(
                 "Match arm patterns must be compile-time literals",
-                self.hir_error_location(&condition.span)
+                self.hir_error_location(&pattern.span)
             );
         }
-
-        if !matches!(
-            &lowered_pattern_row.kind,
-            HirExpressionKind::Uint(_)
-                | HirExpressionKind::Int(_)
-                | HirExpressionKind::Float(_)
-                | HirExpressionKind::Bool(_)
-                | HirExpressionKind::Char(_)
-                | HirExpressionKind::StringLiteral(_)
-                | HirExpressionKind::FixedScalar(_)
-                | HirExpressionKind::Number(_)
-        ) {
-            return_hir_transformation_error!(
-                "Match arm patterns currently support only literal int/float/fixed-scalar/number/bool/char/string values",
-                self.hir_error_location(&condition.span)
-            );
+        match &row.kind {
+            HirExpressionKind::FixedScalar(value) => {
+                if self.type_environment.fixed_scalar(scrutinee_type_id) != Some(value.scalar()) {
+                    return_hir_transformation_error!(
+                        "Fixed-scalar match pattern type does not match the scrutinee",
+                        self.hir_error_location(&pattern.span)
+                    );
+                }
+            }
+            HirExpressionKind::Number(value) => {
+                if self.type_environment.number_scale(scrutinee_type_id) != Some(value.scale()) {
+                    return_hir_transformation_error!(
+                        "Dec match pattern scale does not match the scrutinee type",
+                        self.hir_error_location(&pattern.span)
+                    );
+                }
+            }
+            HirExpressionKind::Bool(_)
+            | HirExpressionKind::Char(_)
+            | HirExpressionKind::StringLiteral(_) => {}
+            _ => return_hir_transformation_error!(
+                "Match arm patterns currently support only literal fixed-scalar/number/bool/char/string values",
+                self.hir_error_location(&pattern.span)
+            ),
         }
-
-        if let ExpressionKind::FixedScalar(value) = &condition.kind
-            && self.type_environment.fixed_scalar(scrutinee_type_id) != Some(value.scalar())
-        {
-            return_hir_transformation_error!(
-                "Fixed-scalar match pattern type does not match the scrutinee",
-                self.hir_error_location(&condition.span)
-            );
-        }
-        if let HirExpressionKind::Number(value) = &lowered_pattern_row.kind
-            && self.type_environment.number_scale(scrutinee_type_id) != Some(value.scale())
-        {
-            return_hir_transformation_error!(
-                "Dec match pattern scale does not match the scrutinee type",
-                self.hir_error_location(&condition.span)
-            );
-        }
-
-        Ok(lowered_pattern.value)
+        Ok(value)
     }
 
     /// Lower an AST match pattern into its HIR counterpart.
     pub(crate) fn lower_match_pattern(
         &mut self,
+        expressions: &ExpressionStore,
         pattern: &MatchPattern,
         scrutinee_type_id: TypeId,
     ) -> Result<HirPattern, HirConstructionFailure> {
@@ -903,15 +956,19 @@ impl<'a> HirBuilder<'a> {
             .unwrap_or(scrutinee_type_id);
         match pattern {
             MatchPattern::Literal(expression) => {
-                let lowered =
-                    self.lower_match_literal_pattern(expression, pattern_value_type_id)?;
+                let lowered = self.lower_match_literal_pattern(
+                    expressions,
+                    expression,
+                    pattern_value_type_id,
+                )?;
                 Ok(HirPattern::Literal(lowered))
             }
 
             MatchPattern::OptionNone { .. } => Ok(HirPattern::OptionNone),
 
             MatchPattern::OptionValue { value, .. } => {
-                let lowered = self.lower_match_literal_pattern(value, pattern_value_type_id)?;
+                let lowered =
+                    self.lower_match_literal_pattern(expressions, value, pattern_value_type_id)?;
                 Ok(HirPattern::OptionValue { value: lowered })
             }
 
@@ -919,7 +976,7 @@ impl<'a> HirBuilder<'a> {
 
             MatchPattern::Relational { op, value, .. } => {
                 let lowered_value =
-                    self.lower_match_literal_pattern(value, pattern_value_type_id)?;
+                    self.lower_match_literal_pattern(expressions, value, pattern_value_type_id)?;
                 let hir_op = lower_relational_pattern_op(*op);
 
                 if self
@@ -957,13 +1014,13 @@ impl<'a> HirBuilder<'a> {
     /// Lower a match arm guard and ensure it remains a pure boolean expression.
     fn lower_match_guard_expression(
         &mut self,
-        guard: &Expression,
+        guard: ExpressionView<'_>,
     ) -> Result<HirValueId, HirConstructionFailure> {
         let lowered_guard = self.lower_expression(guard)?;
         if !lowered_guard.prelude.is_empty() {
             return_hir_transformation_error!(
                 "Match arm guard lowering produced side-effect statements; guards must stay pure boolean expressions",
-                self.hir_error_location(&guard.span)
+                self.hir_error_location(&guard.span())
             );
         }
 
@@ -972,7 +1029,7 @@ impl<'a> HirBuilder<'a> {
         {
             return_hir_transformation_error!(
                 "Match arm guards must lower to Bool expressions",
-                self.hir_error_location(&guard.span)
+                self.hir_error_location(&guard.span())
             );
         }
 
@@ -987,7 +1044,7 @@ impl<'a> HirBuilder<'a> {
     /// `Match` terminator expression, but they still must run only after their pattern matches.
     fn lower_match_guard_value_to_current_block(
         &mut self,
-        guard: &Expression,
+        guard: ExpressionView<'_>,
     ) -> Result<HirValueId, HirConstructionFailure> {
         let guard_value = self.lower_expression_value_to_current_block(guard)?;
         if self.module.expressions.expression(guard_value).ty
@@ -995,7 +1052,7 @@ impl<'a> HirBuilder<'a> {
         {
             return_hir_transformation_error!(
                 "Match arm guards must lower to Bool expressions",
-                self.hir_error_location(&guard.span)
+                self.hir_error_location(&guard.span())
             );
         }
 
@@ -1100,35 +1157,6 @@ impl<'a> HirBuilder<'a> {
         })
     }
 
-    pub(super) fn expression_from_return_values(
-        &mut self,
-        values: &[HirValueId],
-        span: &Option<SourceSpan>,
-    ) -> Result<HirValueId, HirConstructionFailure> {
-        let region = self.current_region_or_error(span)?;
-
-        match values {
-            [] => self.unit_expression(span, region),
-            [single] => Ok(*single),
-            many => {
-                let field_types = many
-                    .iter()
-                    .map(|value| self.module.expressions.expression(*value).ty)
-                    .collect::<Vec<_>>();
-                let tuple_type = self.type_environment.intern_tuple(field_types);
-                let elements = self.module.expressions.append_values(many, *span)?;
-
-                self.make_expression(
-                    span,
-                    HirExpressionKind::TupleConstruct { elements },
-                    tuple_type,
-                    ValueKind::RValue,
-                    region,
-                )
-            }
-        }
-    }
-
     pub(crate) fn emit_jump_to(
         &mut self,
         from_block: BlockId,
@@ -1144,7 +1172,7 @@ impl<'a> HirBuilder<'a> {
     /// WHAT: reads the live continuation block, then terminates that block with a jump.
     /// WHY: expression and checked-operation lowering may split the block it started in. A `!`
     /// propagation, or compiler-generated checked arithmetic inside a builtin `Error!` function,
-    /// ends the current block with a `FallibleBranch` and continues in a fresh success block.
+    /// ends the current block with an `Invoke` and continues in a fresh success block.
     /// A caller that remembered the earlier block id would try to give it a second terminator.
     pub(crate) fn emit_jump_from_current_block(
         &mut self,
@@ -1221,9 +1249,5 @@ impl<'a> HirBuilder<'a> {
         };
 
         Ok(targets)
-    }
-
-    pub(crate) fn is_unit_type(&self, ty: TypeId) -> bool {
-        ty == self.type_environment.builtins().none
     }
 }

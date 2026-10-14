@@ -53,7 +53,7 @@ fn schema_rejected_map_fixture(
     key_type: SchemaType,
     map_value: &str,
 ) -> ParityFixture {
-    let declarations = format!("MapHolder = | items {{{key_type_name} = Int}} |\n");
+    let declarations = format!("MapHolder = | items {{{key_type_name} = I32}} |\n");
     fixture(
         name,
         format!("items = {map_value}"),
@@ -62,7 +62,7 @@ fn schema_rejected_map_fixture(
             "items",
             SchemaType::Map {
                 key: Box::new(key_type),
-                value: Box::new(SchemaType::Int),
+                value: Box::new(SchemaType::I32),
             },
         )]),
         SourceExpectation::Reject {
@@ -84,10 +84,10 @@ fn map_fixtures() -> Vec<ParityFixture> {
     fixtures.push(map_fixture(
         "typed_string_map_with_nested_collections",
         nested_map.to_owned(),
-        map_source(nested_map, "String", "{Int}"),
+        map_source(nested_map, "String", "{I32}"),
         SchemaType::String,
         SchemaType::Collection {
-            element: Box::new(SchemaType::Int),
+            element: Box::new(SchemaType::I32),
         },
         SourceExpectation::Accept,
         MonExpectation::Accept(Value::Record(vec![(
@@ -95,19 +95,19 @@ fn map_fixtures() -> Vec<ParityFixture> {
             Value::Map(vec![
                 (
                     Value::String("alpha".into()),
-                    Value::Collection(vec![Value::Int(1), Value::Int(2)]),
+                    Value::Collection(vec![Value::I32(1), Value::I32(2)]),
                 ),
                 (
                     Value::String("beta".into()),
-                    Value::Collection(vec![Value::Int(3)]),
+                    Value::Collection(vec![Value::I32(3)]),
                 ),
             ]),
         )])),
     ));
 
     let fixed_map = "{5 = 10, 255 = 20}";
-    let fixed_source = "MapHolder = | items {U8 = Int} |\n\
-entries {U8 = Int} = {5 = 10, 255 = 20}\n\
+    let fixed_source = "MapHolder = | items {U8 = I32} |\n\
+entries {U8 = I32} = {5 = 10, 255 = 20}\n\
 data = MapHolder(items = entries)\n"
         .to_owned();
     fixtures.push(map_fixture(
@@ -115,26 +115,26 @@ data = MapHolder(items = entries)\n"
         fixed_map.into(),
         fixed_source,
         SchemaType::U8,
-        SchemaType::Int,
+        SchemaType::I32,
         SourceExpectation::Accept,
         MonExpectation::Accept(Value::Record(vec![(
             "items".into(),
             Value::Map(vec![
-                (Value::U8(5), Value::Int(10)),
-                (Value::U8(255), Value::Int(20)),
+                (Value::U8(5), Value::I32(10)),
+                (Value::U8(255), Value::I32(20)),
             ]),
         )])),
     ));
 
     let numeric_map = "{10 = 1, 1_0 = 2}";
-    let numeric_source = map_source(numeric_map, "Int", "Int");
+    let numeric_source = map_source(numeric_map, "I32", "I32");
     let numeric_root = format!("items = {numeric_map}");
     fixtures.push(map_fixture(
         "numeric_separator_equivalent_keys_are_duplicate",
         numeric_map.into(),
         numeric_source.clone(),
-        SchemaType::Int,
-        SchemaType::Int,
+        SchemaType::I32,
+        SchemaType::I32,
         SourceExpectation::Reject {
             code: "MOTH-SYNTAX-0033",
             reason: SourceReason::DuplicateMapKey,
@@ -152,7 +152,7 @@ data = MapHolder(items = entries)\n"
 
     let tab_key = "a\t";
     let escaped_map = format!(r#"{{"a\t" = 1, "{tab_key}" = 2}}"#);
-    let escaped_source = map_source(&escaped_map, "String", "Int");
+    let escaped_source = map_source(&escaped_map, "String", "I32");
     let escaped_root = format!("items = {escaped_map}");
     let second_spelling = format!("\"{tab_key}\"");
     fixtures.push(map_fixture(
@@ -160,7 +160,7 @@ data = MapHolder(items = entries)\n"
         escaped_map,
         escaped_source.clone(),
         SchemaType::String,
-        SchemaType::Int,
+        SchemaType::I32,
         SourceExpectation::Reject {
             code: "MOTH-SYNTAX-0033",
             reason: SourceReason::DuplicateMapKey,
@@ -196,20 +196,20 @@ fn collection_fixtures() -> Vec<ParityFixture> {
     let cells = SchemaType::Collection {
         element: Box::new(SchemaType::Struct {
             name: "Cell".into(),
-            fields: vec![Field::required("value", SchemaType::Int)],
+            fields: vec![Field::required("value", SchemaType::I32)],
         }),
     };
     let nested = SchemaType::Collection {
         element: Box::new(SchemaType::Collection {
-            element: Box::new(SchemaType::Int),
+            element: Box::new(SchemaType::I32),
         }),
     };
 
     let literal =
         "scalars = {1, -2, 3}, cells = {Cell(value = 4), Cell(value = 5)}, nested = {{1, 2}, {3}}";
     let source = format!(
-        "Cell = | value Int |\n\
-         CollectionHolder = | scalars {{Int}}, cells {{Cell}}, nested {{{{Int}}}} |\n\
+        "Cell = | value I32 |\n\
+         CollectionHolder = | scalars {{I32}}, cells {{Cell}}, nested {{{{I32}}}} |\n\
          data = CollectionHolder({literal})\n"
     );
     let fixture = fixture(
@@ -220,7 +220,7 @@ fn collection_fixtures() -> Vec<ParityFixture> {
             Field::required(
                 "scalars",
                 SchemaType::Collection {
-                    element: Box::new(SchemaType::Int),
+                    element: Box::new(SchemaType::I32),
                 },
             ),
             Field::required("cells", cells),
@@ -230,20 +230,20 @@ fn collection_fixtures() -> Vec<ParityFixture> {
         MonExpectation::Accept(Value::Record(vec![
             (
                 "scalars".into(),
-                Value::Collection(vec![Value::Int(1), Value::Int(-2), Value::Int(3)]),
+                Value::Collection(vec![Value::I32(1), Value::I32(-2), Value::I32(3)]),
             ),
             (
                 "cells".into(),
                 Value::Collection(vec![
-                    Value::Record(vec![("value".into(), Value::Int(4))]),
-                    Value::Record(vec![("value".into(), Value::Int(5))]),
+                    Value::Record(vec![("value".into(), Value::I32(4))]),
+                    Value::Record(vec![("value".into(), Value::I32(5))]),
                 ]),
             ),
             (
                 "nested".into(),
                 Value::Collection(vec![
-                    Value::Collection(vec![Value::Int(1), Value::Int(2)]),
-                    Value::Collection(vec![Value::Int(3)]),
+                    Value::Collection(vec![Value::I32(1), Value::I32(2)]),
+                    Value::Collection(vec![Value::I32(3)]),
                 ]),
             ),
         ])),

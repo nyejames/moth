@@ -1,5 +1,5 @@
 Inner = |
-    value Int,
+    value I32,
 |
 
 Outer = |

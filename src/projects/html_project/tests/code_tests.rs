@@ -208,7 +208,7 @@ fn code_formatter_wraps_an_opaque_only_body() {
 #[test]
 fn moth_highlighter_uses_compiler_word_classes() {
     let highlighted = highlight_code_html(
-        "if import return assert is not and or Int Float Bool String Char None True False async yield checked block group region",
+        "if import return assert is not and or Int Uint Float I8 I16 I32 I64 U8 U16 U32 U64 Byte F16 F32 F64 Dec Dec0 Dec1 Dec256 Bool String Char None True False async yield checked block group region",
         CodeLanguage::Moth,
     );
 
@@ -237,12 +237,33 @@ fn moth_highlighter_uses_compiler_word_classes() {
     }
 
     for word in [
-        "Int", "Float", "Bool", "String", "Char", "None", "True", "False",
+        "I8", "I16", "I32", "I64", "U8", "U16", "U32", "U64", "Byte", "F16", "F32", "F64", "Dec",
+        "Dec0", "Dec1", "Dec256", "Bool", "String", "Char", "None", "True", "False",
     ] {
         assert!(
             highlighted.contains(&format!("<span class='moth-code-type'>{word}</span>")),
             "expected type span for {word:?} in: {highlighted}"
         );
+    }
+
+    for word in ["Int", "Uint", "Float"] {
+        assert!(
+            !highlighted.contains(&format!("<span class='moth-code-type'>{word}</span>")),
+            "removed builtin {word} must not keep a type role: {highlighted}"
+        );
+    }
+}
+
+#[test]
+fn foreign_numeric_words_keep_their_host_language_type_roles() {
+    for language in [CodeLanguage::C, CodeLanguage::Sql] {
+        let highlighted = highlight_code_html("int float", language);
+        for word in ["int", "float"] {
+            assert!(
+                highlighted.contains(&format!("<span class='moth-code-type'>{word}</span>")),
+                "host-language type {word} must retain its role: {highlighted}"
+            );
+        }
     }
 }
 
@@ -679,14 +700,14 @@ fn moth_highlighter_keeps_expression_path_followers_plain() {
 
 #[test]
 fn moth_highlighter_keeps_non_directive_dollar_prefix_as_operator() {
-    let type_dollar = highlight_code_html("$Int", CodeLanguage::Moth);
+    let type_dollar = highlight_code_html("$Bool", CodeLanguage::Moth);
     assert!(
         type_dollar.contains("<span class='moth-code-operator'>$</span>"),
-        "$Int must keep $ as an operator, got: {type_dollar}"
+        "$Bool must keep $ as an operator, got: {type_dollar}"
     );
     assert!(
-        type_dollar.contains("<span class='moth-code-type'>Int</span>"),
-        "Int after $ must keep its type role, got: {type_dollar}"
+        type_dollar.contains("<span class='moth-code-type'>Bool</span>"),
+        "Bool after $ must keep its type role, got: {type_dollar}"
     );
 }
 
@@ -816,7 +837,7 @@ fn highlighted_output_preserves_every_source_byte_exactly_once() {
         "@core/io print, line",
         "a //= b += c .. d :: e -> f => g",
         "return! cast! value",
-        "record Dec2 into scratch = cast! value",
+        "record Dec2 into scratch = cast value",
         "Label must DISPLAY_TEXT",
         "value 42\n-- note",
     ];

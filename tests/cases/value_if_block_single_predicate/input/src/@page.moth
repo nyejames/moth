@@ -19,7 +19,7 @@ display |maybe_name String?| -> String:
     return name
 ;
 
-score_for |status Status| -> Int:
+score_for |status Status| -> I32:
     score = if status is Ready:
         then 1
     else
@@ -28,7 +28,7 @@ score_for |status Status| -> Int:
     return score
 ;
 
-qualified_score_for |status Status| -> Int:
+qualified_score_for |status Status| -> I32:
     score ~= 0
     score = if status is Status::Ready:
         then 1
@@ -55,8 +55,8 @@ aliased_error |response Response| -> String:
     ;
 ;
 
-pair_for |maybe_name String?| -> String, Int:
-    label String, count Int = if maybe_name is |name|:
+pair_for |maybe_name String?| -> String, I32:
+    label String, count I32 = if maybe_name is |name|:
         then name, 1
     else
         then "guest", 0

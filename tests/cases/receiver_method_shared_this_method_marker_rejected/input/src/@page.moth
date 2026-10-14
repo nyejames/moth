@@ -1,9 +1,9 @@
-Bucket = | values {Int} |
+Bucket = | values {I32} |
 
-count |this Bucket| -> Int:
+count |this Bucket| -> I32:
     return this.values.length()
 ;
 
-marked_count |this ~Bucket| -> Int:
+marked_count |this ~Bucket| -> I32:
     return ~this.count()
 ;

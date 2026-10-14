@@ -6,8 +6,8 @@ Growable collections use `{T}`. Fixed collections use `{N T}` with a compile-tim
 
 [codeblock, $code("moth"):
     values ~= {1, 2, 3}
-    empty_values ~{Int} = {}
-    fixed_values ~{2 Int} = {}
+    empty_values ~{I32} = {}
+    fixed_values ~{2 I32} = {}
 ]
 
 Non-empty literals infer their element type from their items. Empty literals need an explicit collection type.
@@ -34,7 +34,7 @@ Collection methods use receiver syntax. `get`, `set` and `remove` take the falli
 ]
 
 [codeblock, $code("moth"):
-    fixed_values ~{2 Int} = {1}
+    fixed_values ~{2 I32} = {1}
 
     ~fixed_values.push(2) catch:
     ;

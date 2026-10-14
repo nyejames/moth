@@ -1,17 +1,17 @@
-add |left Float, right Float| -> Float:
+add |left F32, right F32| -> F32:
     return left + right
 ;
 
-multiply |left Float, right Float| -> Float, Error!:
+multiply |left F32, right F32| -> F32, Error!:
     return left * right
 ;
 
-format_float |value Float| -> String:
+format_float |value F32| -> String:
     return cast value
 ;
 
-parse_float |text String| -> Float, Error!:
-    return cast! text
+parse_float |text String| -> F32, Error!:
+    return cast text
 ;
 
 sum_text = format_float(add(0.1, 0.2))

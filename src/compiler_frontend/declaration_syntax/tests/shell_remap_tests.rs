@@ -11,6 +11,7 @@ use crate::compiler_frontend::declaration_syntax::declaration_shell::{
     DeclarationSyntax, InitializerReference,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 #[test]
 fn collection_capacity_bare_constant_remap() {
@@ -20,7 +21,10 @@ fn collection_capacity_bare_constant_remap() {
     let cap_name = local.intern("capacity");
 
     let mut parsed = ParsedTypeRef::Collection {
-        element: Box::new(ParsedTypeRef::BuiltinInt { span: None }),
+        element: Box::new(ParsedTypeRef::BuiltinFixedScalar {
+            scalar: FixedScalar::I32,
+            span: None,
+        }),
         span: None,
         fixed_capacity: Some(ParsedCollectionCapacity::BareConstant {
             name: cap_name,
@@ -37,7 +41,13 @@ fn collection_capacity_bare_constant_remap() {
             fixed_capacity,
             ..
         } => {
-            assert_eq!(*element, ParsedTypeRef::BuiltinInt { span: None });
+            assert_eq!(
+                *element,
+                ParsedTypeRef::BuiltinFixedScalar {
+                    scalar: FixedScalar::I32,
+                    span: None,
+                }
+            );
             let capacity = fixed_capacity.expect("capacity should be present");
             match capacity {
                 ParsedCollectionCapacity::BareConstant { name, .. } => {

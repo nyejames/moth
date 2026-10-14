@@ -31,6 +31,7 @@ use crate::compiler_frontend::public_call_summary::{
 use crate::compiler_frontend::semantic_identity::{
     OriginDeclarationId, OriginFunctionId, OriginTypeId,
 };
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 fn empty_public_call_summary() -> PublicCallSummary {
     PublicCallSummary {
@@ -60,7 +61,9 @@ fn public_call_summary_for_access(access: PublicCallParameterAccess) -> PublicCa
 fn public_parameter() -> PublicParameterTypeSlot {
     PublicParameterTypeSlot {
         name: None,
-        type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int),
+        type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::FixedScalar(
+            FixedScalar::I32,
+        )),
         access: PublicCallParameterAccess::Shared,
         folded_default: None,
     }

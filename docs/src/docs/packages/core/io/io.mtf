@@ -201,13 +201,13 @@ Pointer helpers track button state and position.
 
     [td:
         [: `pointer_x(input)`]
-        [: `Input -> Float`]
+        [: `Input -> F64`]
         [: shared]
     ]
 
     [td:
         [: `pointer_y(input)`]
-        [: `Input -> Float`]
+        [: `Input -> F64`]
         [: shared]
     ]
 
@@ -226,7 +226,7 @@ Pointer helpers track button state and position.
 
 Pointer buttons use `"left"`, `"middle"` and `"right"`. Other buttons record no transitions.
 
-Pointer coordinates are `Float` logical host-client coordinates. The origin is the top-left corner of the host surface's client area, X increases rightward and Y increases downward. HTML-JS uses viewport-relative CSS pixels from the pointer event's `clientX` and `clientY`. A native host may use equivalent window-client logical coordinates. Canvas-local, physical-pixel and DPI-scaled coordinates belong to specialised APIs.
+Pointer coordinates are `F64` logical host-client coordinates. The origin is the top-left corner of the host surface's client area, X increases rightward and Y increases downward. HTML-JS uses viewport-relative CSS pixels from the pointer event's `clientX` and `clientY`. A native host may use equivalent window-client logical coordinates. Canvas-local, physical-pixel and DPI-scaled coordinates belong to specialised APIs.
 
 ### Teardown
 

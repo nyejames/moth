@@ -1,0 +1,3 @@
+dividend #I32 = 10
+divisor #I32 = 0
+result #I32 = dividend // divisor

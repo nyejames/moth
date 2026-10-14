@@ -17,15 +17,22 @@
 
 use super::config_resolution::resolve_config_declaration;
 use crate::compiler_frontend::FrontendBuildProfile;
-use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::ast_nodes::{Declaration, DeclarationValue};
 use crate::compiler_frontend::ast::const_eval::{
     ConstantFoldError, ConstantFoldOutcome, constant_fold,
 };
+use crate::compiler_frontend::ast::const_values::binding::{
+    bound_constant_initializer, resolve_const_expression_content,
+};
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
-use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
+use crate::compiler_frontend::ast::const_values::store::{
+    ConstStringValue, ConstValuePayload, ConstValueStore,
+};
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExpressionOperationView, OccurrenceFacts,
+};
 use crate::compiler_frontend::ast::module_ast::environment::{
     ResolvedConstantSet, TopLevelDeclarationTable,
 };
@@ -33,7 +40,7 @@ use crate::compiler_frontend::ast::module_ast::scope_context::{
     ContextKind, FileValueResolutionServices, ScopeContext,
 };
 use crate::compiler_frontend::ast::statements::declarations::{
-    DeclarationLoweringTables, resolve_declaration_syntax,
+    DeclarationLowering, DeclarationLoweringTables, resolve_declaration_syntax,
 };
 use crate::compiler_frontend::ast::templates::template::{TemplateConstValueKind, TemplateType};
 use crate::compiler_frontend::ast::templates::template_folding::TemplateEmission;
@@ -49,9 +56,9 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic,
 };
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
+use crate::compiler_frontend::datatypes::{DataType, diagnostic_type_spelling};
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariant;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::SyntheticContentPayload;
@@ -65,7 +72,6 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 use crate::compiler_frontend::value_mode::ValueMode;
-use moth_lexical::numeric::profile::NumericProfile;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -95,8 +101,6 @@ pub(crate) struct ConstantResolutionSessionInput {
     pub source_token_owners: crate::compiler_frontend::headers::SourceTokenOwners,
     pub build_profile: FrontendBuildProfile,
     pub template_const_loop_iteration_limit: usize,
-    /// The compilation boundary's numeric widths constant folding and materialisation read.
-    pub numeric_profile: NumericProfile,
 }
 /// State that changes between constants, supplied by the environment builder per call.
 ///
@@ -120,6 +124,8 @@ pub(crate) struct ConstantHeaderInput<'a> {
     /// declaration path.
     pub source_file_scope: PathId,
     pub type_environment: &'a mut TypeEnvironment,
+    pub expression_builder: &'a mut AstExpressionBuilder,
+    pub const_values: &'a mut ConstValueStore,
     pub warnings: &'a mut Vec<CompilerDiagnostic>,
     pub path_fork: &'a mut PathInternerFork,
 }
@@ -173,6 +179,8 @@ impl ConstantResolutionSession {
             file_visibility,
             source_file_scope,
             type_environment,
+            expression_builder,
+            const_values,
             warnings,
             path_fork,
         } = input;
@@ -224,7 +232,14 @@ impl ConstantResolutionSession {
         let mut declaration = match payload {
             Some(SyntheticContentPayload::RenderedHtml(rendered_html)) => Declaration {
                 id: header.declaration_path,
-                value: Expression::string_slice(rendered_html, None, ValueMode::ImmutableOwned),
+                type_id: builtin_type_ids::STRING,
+                diagnostic_type: DataType::StringSlice,
+                value_mode: ValueMode::ImmutableOwned,
+                value: DeclarationValue::Initializer(
+                    expression_builder
+                        .string_slice(const_values, rendered_html, None, ValueMode::ImmutableOwned)?
+                        .id(),
+                ),
                 binding_span: None,
                 config_qualifier: declaration.config_qualifier.clone(),
             },
@@ -266,6 +281,8 @@ impl ConstantResolutionSession {
                     header.declaration_path,
                     &template_context,
                     &mut type_interner,
+                    expression_builder,
+                    const_values,
                     vec![],
                     string_table,
                     path_fork,
@@ -301,40 +318,47 @@ impl ConstantResolutionSession {
                         TemplateTirPhase::Composed,
                         reference.context,
                     )?;
-                    let mut fold_context = template_context.new_tir_fold_context(string_table);
+                    let mut fold_context = template_context.new_tir_fold_context(
+                        string_table,
+                        expression_builder,
+                        const_values,
+                    );
                     let fold_result =
                         fold_prepared_template(&preparation, view, &mut fold_context)?;
-                    let mut folded_expression = match fold_result.emission {
-                        TemplateEmission::Output(ConstStringValue::Text(value)) => {
-                            Expression::string_slice(
-                                value,
-                                template_span,
-                                ValueMode::ImmutableOwned,
-                            )
+                    let value = match fold_result.emission {
+                        TemplateEmission::Output(value) => value,
+                        TemplateEmission::NoOutput => {
+                            ConstStringValue::Text(fold_context.string_table.intern(""))
                         }
-                        TemplateEmission::Output(ConstStringValue::Pieces(pieces)) => {
-                            Expression::new(
-                                ExpressionKind::StructuralString { pieces },
-                                template_span,
-                                builtin_type_ids::STRING,
-                                DataType::StringSlice,
-                                ValueMode::ImmutableOwned,
-                            )
-                        }
-                        TemplateEmission::NoOutput => Expression::string_slice(
-                            fold_context.string_table.intern(""),
-                            template_span,
-                            ValueMode::ImmutableOwned,
-                        ),
                     };
-                    folded_expression.synthetic_interface_provenance = fold_result.provenance;
-                    folded_expression
+                    let value = const_values.insert_resolved(
+                        builtin_type_ids::STRING,
+                        ConstValuePayload::String(value),
+                        template_span,
+                    )?;
+                    let folded_expression = expression_builder.constant(
+                        value,
+                        builtin_type_ids::STRING,
+                        template_span,
+                        ValueMode::ImmutableOwned,
+                    )?;
+                    let mut input = expression_builder
+                        .view_owned(folded_expression)?
+                        .to_completed_input(expression_builder)?;
+                    input.occurrence = Some(OccurrenceFacts {
+                        provenance: fold_result.provenance,
+                        diagnostic_spelling: None,
+                    });
+                    expression_builder.commit_replacement(input)?
                 } else {
-                    Expression::template(template, ValueMode::ImmutableOwned)
+                    expression_builder.template(template, ValueMode::ImmutableOwned)?
                 };
                 Declaration {
                     id: header.declaration_path,
-                    value,
+                    type_id: expression_builder.view_owned(value)?.value_type_id()?,
+                    diagnostic_type: DataType::StringSlice,
+                    value_mode: expression_builder.view_owned(value)?.value_mode(),
+                    value: DeclarationValue::Initializer(value.id()),
                     binding_span: None,
                     config_qualifier: declaration.config_qualifier.clone(),
                 }
@@ -361,17 +385,33 @@ impl ConstantResolutionSession {
                 })
                 .transpose()?;
                 let declaration_syntax = declaration.clone();
-                resolve_declaration_syntax(
+                match resolve_declaration_syntax(
                     declaration_syntax,
                     header.declaration_path.to_owned(),
+                    // The top-level constant's binding anchor is its header name token; the
+                    // lowering path itself leaves the anchor empty for every `Ready` outcome.
+                    header.name_span,
                     body_cursor.as_ref(),
                     &mut scope_context,
                     &mut type_interner,
+                    expression_builder,
+                    const_values,
                     DeclarationLoweringTables {
                         string_table,
                         path_fork,
                     },
-                )?
+                )? {
+                    DeclarationLowering::Ready(declaration) => declaration,
+                    // A constant header is parsed in `ContextKind::ConstantHeader`, so its
+                    // declaration lowering never retains a pending numeric origin: compile-time
+                    // constants fold at their own boundary and cannot return pending state.
+                    DeclarationLowering::PendingNumeric(_) => {
+                        return Err(ExpressionParseError::from(CompilerError::compiler_error(
+                            "a numeric-dependent declaration outcome reached a constant header \
+                             boundary, which cannot retain or complete it before the body root",
+                        )));
+                    }
+                }
             }
         };
 
@@ -383,6 +423,8 @@ impl ConstantResolutionSession {
                 &mut declaration,
                 &scope_context,
                 &mut type_interner,
+                expression_builder,
+                const_values,
                 config_resolution,
                 string_table,
                 path_fork,
@@ -393,31 +435,65 @@ impl ConstantResolutionSession {
         // After resolution, the initializer must be fully foldable at compile time.
         // Runtime expressions in constants are rejected here. Template payloads keep
         // their module-local reference, phase and overlay identity during classification.
-        let initializer_is_compile_time_constant = declaration
-            .value
-            .const_value_kind_with_template_classifier(&mut |template| {
-                classify_template_from_effective_tir(template, &scope_context.template_ir_store)
+        let initializer = declaration.value.initializer().ok_or_else(|| {
+            CompilerError::compiler_error(
+                "Constant header resolution completed without an initializer.",
+            )
+        })?;
+        let initializer = expression_builder.view(initializer)?;
+        declaration.type_id = initializer.value_type_id()?;
+        declaration.diagnostic_type =
+            diagnostic_type_spelling(declaration.type_id, type_interner.environment());
+        declaration.value_mode = initializer.value_mode();
+        let initializer_is_compile_time_constant = initializer
+            .const_value_kind_with_template_classifier(const_values, &mut |template| {
+                classify_template_from_effective_tir(
+                    template,
+                    &scope_context.template_ir_store,
+                    expression_builder,
+                    const_values,
+                )
             })
             .map(|kind| kind.is_compile_time_value())
             .map_err(ExpressionParseError::from)?;
         if !initializer_is_compile_time_constant {
-            if let ExpressionKind::Runtime(rpn) = &declaration.value.kind {
-                non_constant_initializer_fold_refusal(constant_fold(
-                    rpn.items.clone(),
-                    string_table,
-                    self.module_view.numeric_profile,
-                    Some(&scope_context),
-                ))?;
-            }
+            non_constant_initializer_fold_refusal(constant_fold(
+                initializer.id(),
+                expression_builder,
+                const_values,
+                string_table,
+                Some(&scope_context),
+            ))?;
 
             return Err(CompilerDiagnostic::compile_time_evaluation_error(
                 CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,
                 path_fork.component(declaration.id),
                 header.name_span,
-                None,
             )
             .into());
         }
+        let authored = initializer.id();
+        let authored_is_template = matches!(
+            expression_builder.view(authored)?.operation(),
+            ExpressionOperationView::Template(_)
+        );
+        let content = resolve_const_expression_content(
+            authored,
+            expression_builder,
+            const_values,
+            type_interner.environment(),
+            &scope_context,
+            string_table,
+        )?;
+        const_values.bind_module_constant(declaration.id, content)?;
+        let bound = bound_constant_initializer(
+            &declaration,
+            authored,
+            authored_is_template,
+            content,
+            expression_builder,
+        )?;
+        declaration.value = DeclarationValue::Initializer(bound);
 
         increment_ast_counter(AstCounter::ConstantsResolved);
 
@@ -456,7 +532,6 @@ impl ConstantResolutionSession {
             Arc::clone(&module_view.external_package_registry),
             0,
             Rc::clone(&module_view.template_ir_store),
-            module_view.numeric_profile,
         )
         .with_style_directives(&module_view.style_directives)
         .with_build_profile(module_view.build_profile)
@@ -494,7 +569,8 @@ impl ConstantResolutionSession {
 /// Map the fold of a runtime constant initializer onto the header's error lanes.
 ///
 /// A text-unavailable refusal keeps its precise diagnostic and a broken compiler invariant stays
-/// on the infrastructure lane. `Ok(())` leaves the caller to report the ordinary
+/// on the infrastructure lane. A builder capacity diagnostic stays on the diagnostic lane so it
+/// reaches the module build. `Ok(())` leaves the caller to report the ordinary
 /// `ConstantInitializerNotFoldable` refusal, which also covers source fold diagnostics.
 fn non_constant_initializer_fold_refusal(
     fold: Result<ConstantFoldOutcome, ConstantFoldError>,
@@ -506,6 +582,12 @@ fn non_constant_initializer_fold_refusal(
         // A broken compiler invariant must not surface as a source refusal.
         Err(ConstantFoldError::Infrastructure(error)) => {
             Err(ExpressionParseError::Infrastructure(error))
+        }
+        // A builder capacity failure is not a source refusal: it must reach the module build.
+        Err(ConstantFoldError::Diagnostic(diagnostic))
+            if diagnostic.is_compiler_capacity_exceeded() =>
+        {
+            Err(ExpressionParseError::Diagnostic(diagnostic))
         }
         Ok(_) | Err(ConstantFoldError::Diagnostic(_)) => Ok(()),
     }

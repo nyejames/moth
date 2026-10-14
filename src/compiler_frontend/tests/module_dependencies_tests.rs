@@ -145,7 +145,7 @@ fn sorts_strict_top_level_dependencies_before_dependents_and_appends_start_last(
         &[
             ("src/a.moth", "@b Middle\nTop #Middle = Middle\n"),
             ("src/b.moth", "@c Thing\nMiddle #Thing = Thing\n"),
-            ("src/c.moth", "Thing #Int = 1\n"),
+            ("src/c.moth", "Thing #I32 = 1\n"),
         ],
         "src/a.moth",
     );
@@ -259,7 +259,7 @@ fn constant_initializer_creates_dependency_sort_edge() {
             // ValueHolder's initializer references Value.
             // That reference creates a dependency edge from ValueHolder to Value.
             ("src/a.moth", "@b Value\nValueHolder #= Value\n"),
-            ("src/b.moth", "Value #Int = 42\n"),
+            ("src/b.moth", "Value #I32 = 42\n"),
         ],
         "src/a.moth",
     );
@@ -292,7 +292,7 @@ fn same_file_backward_constant_reference_is_accepted() {
     // WHY: a constant that references an earlier constant in the same file is a backward
     // reference and must be accepted in source order.
     let (headers, mut string_table, mut path_fork) = parse_module_headers(
-        &[("src/a.moth", "Value #Int = 42\nValueHolder #= Value\n")],
+        &[("src/a.moth", "Value #I32 = 42\nValueHolder #= Value\n")],
         "src/a.moth",
     );
 
@@ -316,6 +316,17 @@ fn same_file_backward_constant_reference_is_accepted() {
         vec!["Value", "ValueHolder"],
         "same-file backward constant reference should preserve source order"
     );
+    let typed_constant = sorted.module_symbols.ordered_semantic_declarations[0]
+        .declaration
+        .as_ref()
+        .expect("the typed constant retains its header declaration");
+    assert_eq!(
+        typed_constant.type_id,
+        crate::compiler_frontend::datatypes::builtin_type_ids::fixed_scalar(
+            moth_lexical::numeric::fixed_scalar::FixedScalar::I32,
+        ),
+        "pending constant references retain the exact seeded annotation identity",
+    );
 }
 
 #[test]
@@ -326,7 +337,7 @@ fn function_body_references_do_not_influence_header_provided_sort_order() {
     let (headers, mut string_table, mut path_fork) = parse_module_headers(
         &[(
             "src/a.moth",
-            "first|| -> Int:\n    return second()\n;\n\nsecond|| -> Int:\n    return 1\n;\n",
+            "first|| -> I32:\n    return second()\n;\n\nsecond|| -> I32:\n    return 1\n;\n",
         )],
         "src/a.moth",
     );
@@ -361,7 +372,7 @@ fn function_error_return_dependency_orders_error_type_before_function() {
         &[
             (
                 "src/app.moth",
-                "@errors AppError\nparse|| -> Int, AppError!:\n    return 1\n;\n",
+                "@errors AppError\nparse|| -> I32, AppError!:\n    return 1\n;\n",
             ),
             ("src/errors.moth", "AppError = |message String|\n"),
         ],
@@ -398,9 +409,9 @@ fn capacity_reference_in_collection_type_orders_constant_before_user() {
         &[
             (
                 "src/a.moth",
-                "@b capacity\nmake |items ~{capacity Int}| -> Int:\n    return 1\n;\n",
+                "@b capacity\nmake |items ~{capacity I32}| -> I32:\n    return 1\n;\n",
             ),
-            ("src/b.moth", "capacity #Int = 64\n"),
+            ("src/b.moth", "capacity #I32 = 64\n"),
         ],
         "src/a.moth",
     );
@@ -454,7 +465,7 @@ fn capacity_reference_same_file_forward_reference_is_rejected() {
         .expect("test path should be UTF-8");
     let mut span_builder = ExtendedSpanBuilder::new();
     let lexed = tokenize(
-        "make |items ~{capacity Int}| -> Int:\n    return 1\n;\ncapacity #Int = 64\n",
+        "make |items ~{capacity I32}| -> I32:\n    return 1\n;\ncapacity #I32 = 64\n",
         interned_path,
         TokenizerEntryMode::SourceFile,
         &style_directives,
@@ -528,9 +539,9 @@ fn capacity_reference_in_function_signature_creates_dependency_edge() {
         &[
             (
                 "src/a.moth",
-                "@b size\nmake |items ~{size Int}| -> Int:\n    return 1\n;\n",
+                "@b size\nmake |items ~{size I32}| -> I32:\n    return 1\n;\n",
             ),
-            ("src/b.moth", "size #Int = 8\n"),
+            ("src/b.moth", "size #I32 = 8\n"),
         ],
         "src/a.moth",
     );
@@ -561,8 +572,8 @@ fn capacity_reference_in_function_signature_creates_dependency_edge() {
 fn capacity_reference_in_type_alias_creates_dependency_edge() {
     let (headers, mut string_table, mut path_fork) = parse_module_headers(
         &[
-            ("src/a.moth", "@b limit\nItems as {limit Int}\n"),
-            ("src/b.moth", "limit #Int = 16\n"),
+            ("src/a.moth", "@b limit\nItems as {limit I32}\n"),
+            ("src/b.moth", "limit #I32 = 16\n"),
         ],
         "src/a.moth",
     );
@@ -597,16 +608,16 @@ fn capacity_references_across_header_type_surfaces_create_dependency_edges() {
                 "src/a.moth",
                 "@b limit\n\
                  Buffer = |\n\
-                     items {limit Int},\n\
+                     items {limit I32},\n\
                  |\n\
                  Status :: Pending |\n\
-                     items {limit Int},\n\
+                     items {limit I32},\n\
                  |;\n\
-                 make|| -> {limit Int}:\n\
+                 make|| -> {limit I32}:\n\
                      return {}\n\
                  ;\n",
             ),
-            ("src/b.moth", "limit #Int = 16\n"),
+            ("src/b.moth", "limit #I32 = 16\n"),
         ],
         "src/a.moth",
     );
@@ -641,7 +652,7 @@ fn qualified_alias_target_orders_provider_declaration_before_alias() {
                 "src/app.moth",
                 "@models as models\nAlias as models.Target\n",
             ),
-            ("src/models.moth", "Target = |value Int|\n"),
+            ("src/models.moth", "Target = |value I32|\n"),
         ],
         "src/app.moth",
     );
@@ -677,8 +688,8 @@ fn qualified_type_hint_ignores_colliding_structural_provider_path() {
                  @models/Target as other\n\
                  Alias as models.Target\n",
             ),
-            ("src/models.moth", "Target = |value Int|\n"),
-            ("src/models/Target.moth", "Other = |value Int|\n"),
+            ("src/models.moth", "Target = |value I32|\n"),
+            ("src/models/Target.moth", "Other = |value I32|\n"),
         ],
         "src/app.moth",
     );
@@ -719,7 +730,7 @@ fn qualified_alias_in_struct_field_orders_provider_declaration_before_struct() {
                 "src/app.moth",
                 "@models as models\nHolder = |value models.Target|\n",
             ),
-            ("src/models.moth", "Target = |value Int|\n"),
+            ("src/models.moth", "Target = |value I32|\n"),
         ],
         "src/app.moth",
     );
@@ -752,7 +763,7 @@ fn qualified_alias_transitively_waits_for_fixed_capacity_constant() {
             ("src/app.moth", "@limits as limits\nNames as limits.Fixed\n"),
             (
                 "src/limits.moth",
-                "limit #Int = 2\nFixed as {limit String}\n",
+                "limit #I32 = 2\nFixed as {limit String}\n",
             ),
         ],
         "src/app.moth",
@@ -789,8 +800,8 @@ fn qualified_aliases_with_duplicate_terminal_names_keep_distinct_edges() {
                  @right as right\n\
                  Holder = |left left.Shared, right right.Shared|\n",
             ),
-            ("src/left.moth", "Shared = |value Int|\n"),
-            ("src/right.moth", "Shared = |value Int|\n"),
+            ("src/left.moth", "Shared = |value I32|\n"),
+            ("src/right.moth", "Shared = |value I32|\n"),
         ],
         "src/app.moth",
     );

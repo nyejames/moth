@@ -1,0 +1,22 @@
+-- Pending member diagnostic after independent resolution.
+--
+-- `count.unsupported()` is an invalid member occurrence on an unresolved
+-- numeric origin, authored before the direct U64 receiver that selects the
+-- origin's single static type. The occurrence must wait for that resolution and
+-- then report the ordinary unknown-member diagnostic against the resolved U64
+-- receiver, never a premature default, the whole literal's range failure or an
+-- internal compiler failure.
+--
+-- The whole `4_294_967_296` does not fit I32, so a member resolution path that
+-- selected or defaulted the origin's type itself would report the literal's
+-- range before the later receiver registers the origin's type.
+
+take_u64 |value U64| -> U64:
+    return value
+;
+
+count = 4_294_967_296
+count.unsupported()
+received = take_u64(count)
+
+[:unreachable]

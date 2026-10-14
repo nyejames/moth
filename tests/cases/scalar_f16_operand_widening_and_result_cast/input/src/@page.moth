@@ -1,0 +1,16 @@
+-- F16 + F16 completes at F16, so 2048 + 1 rounds to 2048 and the later F32
+-- result cast preserves that rounding. Widening both operands first requests
+-- F32 arithmetic, so the same values produce the exact 2049 instead.
+large #F16 = 2048
+one #F16 = 1
+rounded #= large + one
+rounded_wider #F32 = cast rounded
+
+wide_large #F32 = cast large
+wide_one #F32 = cast one
+widened #= wide_large + wide_one
+
+rounded_text #String = cast rounded_wider
+widened_text #String = cast widened
+
+[:scalar f16 widening rounded=[rounded_text] widened=[widened_text]]

@@ -1,0 +1,4 @@
+value #U8 = 1
+reject ||:
+    negated = -value
+;

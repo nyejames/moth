@@ -26,6 +26,8 @@ A second name receives the zero-based position of the item.
 
 The first item has index `0`.
 
+The position binding has type `I32`.
+
 ### Ignore the item when only the repetition matters
 
 Bindings are optional.

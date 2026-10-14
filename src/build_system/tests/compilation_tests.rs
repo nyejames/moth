@@ -27,7 +27,7 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValue};
-use moth_lexical::numeric::profile::NumericProfile;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId};
@@ -91,7 +91,10 @@ fn resource_association(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "test publication mirrors the production boundary with mutable module/generated/materialisation/resource owners, module identity and expected origin, artifact, generated delta and resource associations kept separate"
+)]
 fn publish_module_and_generated(
     modules: &mut ModuleArtifactStore,
     generated: &mut BoundaryGeneratedFunctionStore,
@@ -183,7 +186,9 @@ fn generated_identity(name: &str) -> GeneratedFunctionIdentity {
             name.to_owned(),
             None,
         )),
-        Box::new([CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)]),
+        Box::new([CanonicalTypeIdentity::Builtin(
+            CanonicalBuiltinType::FixedScalar(FixedScalar::I32),
+        )]),
         Box::new([]),
     )
 }
@@ -227,7 +232,8 @@ fn generated_sidecar(
         id: FunctionId(0),
         entry: BlockId(0),
         params: Vec::new(),
-        return_type: crate::compiler_frontend::datatypes::ids::TypeId(0),
+        returns: Box::new([]),
+        error_return: None,
     });
     module
         .executable
@@ -486,10 +492,15 @@ fn combined_publication_rejects_module_after_valid_generated_preflight_without_m
 
 #[test]
 fn project_metadata_fingerprint_tracks_name_type_and_value_structure() {
-    let int_type = CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int);
+    let int_type =
+        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::FixedScalar(FixedScalar::I32));
     let bool_type = CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Bool);
-    let one = PublicFoldedValue::Int(1);
-    let two = PublicFoldedValue::Int(2);
+    let one = PublicFoldedValue::FixedScalar(
+        FixedScalarValue::signed(FixedScalar::I32, 1).expect("a test value fits I32"),
+    );
+    let two = PublicFoldedValue::FixedScalar(
+        FixedScalarValue::signed(FixedScalar::I32, 2).expect("a test value fits I32"),
+    );
 
     assert_eq!(
         super::config_boundary::project_metadata_fingerprint("count", &int_type, &one),
@@ -523,12 +534,8 @@ fn effective_project_fields_exclude_internal_unschematized_defaults() {
     });
     let mut string_table = StringTable::new();
 
-    let fields = super::config_boundary::effective_project_fields(
-        &config,
-        &mut string_table,
-        NumericProfile::STANDARD,
-    )
-    .expect("the effective project snapshot should build");
+    let fields = super::config_boundary::effective_project_fields(&config, &mut string_table)
+        .expect("the effective project snapshot should build");
     let names = fields
         .iter()
         .map(|field| field.name.as_str())
@@ -556,12 +563,8 @@ fn effective_project_fields_classify_fixed_and_metadata_kinds() {
     });
     let mut string_table = StringTable::new();
 
-    let fields = super::config_boundary::effective_project_fields(
-        &config,
-        &mut string_table,
-        NumericProfile::STANDARD,
-    )
-    .expect("the effective project snapshot should build");
+    let fields = super::config_boundary::effective_project_fields(&config, &mut string_table)
+        .expect("the effective project snapshot should build");
 
     assert_eq!(
         fields
@@ -625,7 +628,6 @@ fn effective_project_fields_keep_private_input_and_receiving_field_distinct() {
                 input_name.as_str(),
                 input_contract,
                 input_value.as_ref(),
-                NumericProfile::STANDARD,
             ),
             qualifier_span: None,
             value_location: None,
@@ -641,12 +643,8 @@ fn effective_project_fields_keep_private_input_and_receiving_field_distinct() {
             span: None,
         });
 
-    let fields = super::config_boundary::effective_project_fields(
-        &config,
-        &mut string_table,
-        NumericProfile::STANDARD,
-    )
-    .expect("the effective project snapshot should build");
+    let fields = super::config_boundary::effective_project_fields(&config, &mut string_table)
+        .expect("the effective project snapshot should build");
     assert_eq!(
         fields
             .iter()

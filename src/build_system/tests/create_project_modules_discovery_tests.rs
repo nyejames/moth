@@ -1,6 +1,5 @@
 use super::*;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-use moth_lexical::numeric::profile::NumericProfile;
 #[test]
 fn discover_modules_uses_reachable_files_only() {
     let _tmp_root = tempfile::tempdir().expect("should create temp dir");
@@ -1122,7 +1121,6 @@ fn compile_single_file_frontend_retains_ordinary_boundary_registry() {
     let frontend = super::compilation::compile_single_file_frontend_with_inputs(
         &config,
         crate::compiler_frontend::FrontendBuildProfile::Dev,
-        NumericProfile::STANDARD,
         &test_style_directives(),
         &mut builder_surface,
         entry.extension().expect("entry should have an extension"),

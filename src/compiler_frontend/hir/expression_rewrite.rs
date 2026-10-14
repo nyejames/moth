@@ -25,10 +25,7 @@ pub(crate) fn rewrite_expression_bottom_up(
     let row = store.expression(expression);
     if matches!(
         row.kind,
-        HirExpressionKind::Uint(_)
-            | HirExpressionKind::Int(_)
-            | HirExpressionKind::Float(_)
-            | HirExpressionKind::FixedScalar(_)
+        HirExpressionKind::FixedScalar(_)
             | HirExpressionKind::Number(_)
             | HirExpressionKind::Bool(_)
             | HirExpressionKind::Char(_)
@@ -54,17 +51,13 @@ pub(crate) fn rewrite_expression_bottom_up(
             left_changed || right_changed
         }
         HirExpressionKind::UnaryOp { operand, .. }
-        | HirExpressionKind::TupleGet { tuple: operand, .. }
-        | HirExpressionKind::FallibleUnwrapSuccess { result: operand }
-        | HirExpressionKind::FallibleUnwrapError { result: operand }
         | HirExpressionKind::Cast {
             source: operand, ..
         }
         | HirExpressionKind::VariantPayloadGet {
             source: operand, ..
         } => rewrite_edge(store, side_table, operand, rewrite)?,
-        HirExpressionKind::Collection(elements)
-        | HirExpressionKind::TupleConstruct { elements } => {
+        HirExpressionKind::Collection(elements) => {
             rewrite_values(store, side_table, elements, row.span, rewrite)?
         }
         HirExpressionKind::StructConstruct { fields, .. } => {
@@ -127,10 +120,7 @@ pub(crate) fn rewrite_expression_bottom_up(
             }
         }
         // These leaves returned before cloning their potentially allocated value content.
-        HirExpressionKind::Uint(_)
-        | HirExpressionKind::Int(_)
-        | HirExpressionKind::Float(_)
-        | HirExpressionKind::FixedScalar(_)
+        HirExpressionKind::FixedScalar(_)
         | HirExpressionKind::Number(_)
         | HirExpressionKind::Bool(_)
         | HirExpressionKind::Char(_)

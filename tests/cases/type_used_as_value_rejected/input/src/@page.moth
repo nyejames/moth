@@ -1,6 +1,6 @@
-MyType as Int
+MyType as I32
 
-foo || -> Int:
+foo || -> I32:
     result = MyType
     return result
 ;

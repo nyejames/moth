@@ -4,6 +4,8 @@
 //! layers, and resolves each layer from a carried slot layout plus one
 //! routing of its fill nodes.
 
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{TemplateSegmentOrigin, TemplateType};
 use crate::compiler_frontend::ast::templates::tir::refs::TemplateWrapperReference;
@@ -26,9 +28,11 @@ use super::helpers::{
 type HeadChainResult<T> = Result<T, TemplateError>;
 
 /// Carries the immutable services shared by recursive chain resolution.
-struct HeadChainResolutionInputs<'a> {
-    string_table: &'a StringTable,
-    allow_runtime_plans: bool,
+pub(super) struct HeadChainResolutionInputs<'a> {
+    pub(super) string_table: &'a StringTable,
+    pub(super) expressions: &'a AstExpressionBuilder,
+    pub(super) const_values: &'a ConstValueStore,
+    pub(super) allow_runtime_plans: bool,
 }
 
 /// A layer in the TIR head-chain: a wrapper template and the items that should
@@ -74,6 +78,8 @@ enum TirChainItem {
 #[cfg(test)]
 pub(crate) fn compose_tir_head_chain(
     store: &mut TemplateIrStore,
+    expressions: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
     template_id: TemplateIrId,
     string_table: &StringTable,
     allow_runtime_plans: bool,
@@ -84,7 +90,14 @@ pub(crate) fn compose_tir_head_chain(
         )
     })?;
     let root_node_id = template.root;
-    compose_tir_head_chain_from_root(store, root_node_id, string_table, allow_runtime_plans)
+    compose_tir_head_chain_from_root(
+        store,
+        expressions,
+        const_values,
+        root_node_id,
+        string_table,
+        allow_runtime_plans,
+    )
 }
 
 /// Composes a head-chain directly from a root node, without requiring a
@@ -99,12 +112,16 @@ pub(crate) fn compose_tir_head_chain(
 ///      a referencing identity.
 pub(crate) fn compose_tir_head_chain_from_root(
     store: &mut TemplateIrStore,
+    expressions: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
     root_node_id: TemplateIrNodeId,
     string_table: &StringTable,
     allow_runtime_plans: bool,
 ) -> HeadChainResult<TemplateIrNodeId> {
     let inputs = HeadChainResolutionInputs {
         string_table,
+        expressions,
+        const_values,
         allow_runtime_plans,
     };
     compose_tir_head_chain_from_root_into(store, root_node_id, &inputs)
@@ -403,12 +420,11 @@ fn resolve_tir_chain_layer(
 
     let resolved = compose_wrapper_application(
         store,
+        inputs,
         layer.wrapper_reference,
         &layer.layout,
         resolved_fill_node_ids,
         original_span,
-        inputs.string_table,
-        inputs.allow_runtime_plans,
     )?;
 
     let occurrence_id = store.next_child_template_occurrence_id();

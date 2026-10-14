@@ -1,4 +1,4 @@
-reject_float_mix |value Float| -> String:
+reject_float_mix |value F64| -> String:
     result Dec4 = value + 1
     return [result]
 ;

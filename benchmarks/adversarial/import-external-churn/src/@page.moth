@@ -22,7 +22,7 @@ loop 0 to base_count |i|:
 
 metrics ~{Metric} = {}
 loop 0 to scaled_count() |i|:
-    phase = (i / 1.0) * pi_value()
+    phase = (i / 1) * pi_value()
     ~metrics.push(build_metric([: metric-[i]], phase))
 ;
 

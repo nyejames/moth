@@ -8,8 +8,8 @@
 use super::config_boundary::build_config_resolution_failure;
 use crate::compiler_frontend::build_config::{
     BuildCommandLocation, BuildConfigContractFact, BuildConfigInputEntry, BuildConfigInputSet,
-    BuildConfigResolutionError, BuildConfigValueLocation, BuildInputName, BuildInputType,
-    BuilderConfigGlobalSet, PrimitiveBuildInputType, PrimitiveBuildValue,
+    BuildConfigInputValue, BuildConfigResolutionError, BuildConfigValueLocation, BuildInputName,
+    BuildInputType, BuilderConfigGlobalSet, PrimitiveBuildInputType, PrimitiveBuildValue,
     resolve_build_config_values,
 };
 use crate::compiler_frontend::compiler_messages::{
@@ -17,7 +17,8 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use moth_lexical::numeric::profile::NumericProfile;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+use moth_lexical::numeric::parse::NumberLiteralErrorReason;
 
 fn exact_span(source_index: usize, start: u32, length: u32) -> SourceSpan {
     let mut builder = ExtendedSpanBuilder::new();
@@ -29,12 +30,21 @@ fn command_location(argument_index: usize) -> BuildConfigValueLocation {
     BuildConfigValueLocation::Command(BuildCommandLocation::new(argument_index))
 }
 
-fn input(name: &str, value: PrimitiveBuildValue, argument_index: usize) -> BuildConfigInputEntry {
+fn input(
+    name: &str,
+    value: impl Into<BuildConfigInputValue>,
+    argument_index: usize,
+) -> BuildConfigInputEntry {
     BuildConfigInputEntry::new(
         BuildInputName::new(name).expect("test input name should be lower_snake_case"),
         value,
         command_location(argument_index),
     )
+}
+
+fn i32_value(value: i64) -> PrimitiveBuildValue {
+    let fixed = FixedScalarValue::signed(FixedScalar::I32, value);
+    PrimitiveBuildValue::Fixed(fixed.expect("test integer should fit I32"))
 }
 
 fn assert_config_identity_and_span<'a>(
@@ -65,7 +75,7 @@ fn mapped_config_contract_conflict_preserves_payload_spans_and_labels() {
     let source_facts = [
         BuildConfigContractFact::new(
             name.clone(),
-            BuildInputType::Primitive(PrimitiveBuildInputType::Int),
+            BuildInputType::Primitive(PrimitiveBuildInputType::Fixed(FixedScalar::I32)),
             true,
             None,
             Some(first_span),
@@ -85,7 +95,6 @@ fn mapped_config_contract_conflict_preserves_payload_spans_and_labels() {
         &[],
         &BuildConfigInputSet::new(),
         &BuilderConfigGlobalSet::new(),
-        NumericProfile::STANDARD,
     )
     .expect_err("different source contracts should produce a conflict");
     assert!(matches!(
@@ -125,7 +134,7 @@ fn mapped_config_contract_conflict_preserves_payload_spans_and_labels() {
     assert_eq!(messages.string_table.resolve(*key), "setting");
     assert_eq!(
         messages.string_table.resolve(*first),
-        "Int; required; no default"
+        "I32; required; no default"
     );
     assert_eq!(
         messages.string_table.resolve(*conflicting),
@@ -140,7 +149,7 @@ fn mapped_unknown_build_config_input_preserves_spanlessness_and_argument_index()
 
     let mut explicit_inputs = BuildConfigInputSet::new();
     explicit_inputs
-        .insert(input("mystery_input", PrimitiveBuildValue::Int(42), 17))
+        .insert(input("mystery_input", i32_value(42), 17))
         .expect("test input should insert");
     let error = resolve_build_config_values(
         &[],
@@ -148,7 +157,6 @@ fn mapped_unknown_build_config_input_preserves_spanlessness_and_argument_index()
         &[],
         &explicit_inputs,
         &BuilderConfigGlobalSet::new(),
-        NumericProfile::STANDARD,
     )
     .expect_err("an input without a selected contract should be unknown");
     assert!(matches!(
@@ -195,7 +203,7 @@ fn mapped_config_input_type_mismatch_preserves_contract_span_and_argument_index(
 
     let source_facts = [BuildConfigContractFact::new(
         BuildInputName::new("count").expect("test input name should be valid"),
-        BuildInputType::Primitive(PrimitiveBuildInputType::Int),
+        BuildInputType::Primitive(PrimitiveBuildInputType::Fixed(FixedScalar::I32)),
         true,
         None,
         Some(contract_span),
@@ -215,9 +223,8 @@ fn mapped_config_input_type_mismatch_preserves_contract_span_and_argument_index(
         &[],
         &explicit_inputs,
         &BuilderConfigGlobalSet::new(),
-        NumericProfile::STANDARD,
     )
-    .expect_err("a String should not satisfy an Int contract");
+    .expect_err("a String should not satisfy an I32 contract");
     assert!(matches!(
         &error,
         BuildConfigResolutionError::ValueTypeMismatch { .. }
@@ -248,8 +255,72 @@ fn mapped_config_input_type_mismatch_preserves_contract_span_and_argument_index(
     };
     assert_eq!(messages.string_table.resolve(*key), "count");
     assert_eq!(messages.string_table.resolve(*provided), "String");
-    assert_eq!(messages.string_table.resolve(*expected), "Int");
+    assert_eq!(messages.string_table.resolve(*expected), "I32");
     assert_eq!(*provided_argument_index, Some(23));
+}
+
+#[test]
+fn mapped_command_literal_outside_its_contract_scalar_keeps_the_argument_index() {
+    let mut boundary_table = StringTable::new();
+    boundary_table.intern("boundary-table-prefix");
+    let contract_span = exact_span(2, 41, 7);
+
+    let source_facts = [BuildConfigContractFact::new(
+        BuildInputName::new("count").expect("test input name should be valid"),
+        BuildInputType::Primitive(PrimitiveBuildInputType::Fixed(FixedScalar::I32)),
+        true,
+        None,
+        Some(contract_span),
+    )];
+    let mut explicit_inputs = BuildConfigInputSet::new();
+    explicit_inputs
+        .insert(input(
+            "count",
+            BuildConfigInputValue::from_command_text("4_294_967_296")
+                .expect("whole-number command text should classify"),
+            5,
+        ))
+        .expect("test input should insert");
+
+    let error = resolve_build_config_values(
+        &source_facts,
+        &[],
+        &[],
+        &explicit_inputs,
+        &BuilderConfigGlobalSet::new(),
+    )
+    .expect_err("a value above the I32 maximum should not satisfy an I32 contract");
+
+    let failure = build_config_resolution_failure(error, None, &mut boundary_table);
+    let PremergeFailure::Diagnosed(batch) = failure else {
+        panic!("mapped config failure should be diagnosed, not infrastructure");
+    };
+    let messages = batch.into_messages();
+    let diagnostic = assert_config_identity_and_span(
+        &messages,
+        Some(contract_span),
+        "invalid_config.config_input_out_of_range",
+    );
+
+    let DiagnosticPayload::InvalidConfig {
+        key: Some(key),
+        reason:
+            InvalidConfigReason::ConfigInputOutOfRange {
+                literal,
+                reason,
+                provided_argument_index,
+            },
+    } = &diagnostic.payload
+    else {
+        panic!("expected a structured config input range payload");
+    };
+    assert_eq!(messages.string_table.resolve(*key), "count");
+    assert_eq!(messages.string_table.resolve(*literal), "4_294_967_296");
+    assert_eq!(
+        *reason,
+        NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I32)
+    );
+    assert_eq!(*provided_argument_index, Some(5));
 }
 
 #[test]
@@ -260,7 +331,7 @@ fn mapped_missing_source_contract_publishes_exact_primary_span() {
 
     let source_facts = [BuildConfigContractFact::new(
         BuildInputName::new("count").expect("test input name should be valid"),
-        BuildInputType::Primitive(PrimitiveBuildInputType::Int),
+        BuildInputType::Primitive(PrimitiveBuildInputType::Fixed(FixedScalar::I32)),
         true,
         None,
         Some(source_span),
@@ -271,7 +342,6 @@ fn mapped_missing_source_contract_publishes_exact_primary_span() {
         &[],
         &BuildConfigInputSet::new(),
         &BuilderConfigGlobalSet::new(),
-        NumericProfile::STANDARD,
     )
     .expect_err("a required source contract without a value should fail");
     assert!(matches!(

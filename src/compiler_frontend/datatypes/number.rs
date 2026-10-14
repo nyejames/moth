@@ -96,7 +96,7 @@ impl std::error::Error for NumberArithmeticError {}
 
 /// Immutable arbitrary-precision decimal coefficient and canonical scale.
 ///
-/// WHAT: stores `coefficient / 10^scale` without a profile integer or floating-point intermediate.
+/// WHAT: stores `coefficient / 10^scale` without an integer or floating-point intermediate.
 /// WHY: frontend value handoffs share the exact coefficient while retaining one immutable value
 ///      identity; backends own the runtime representation.
 ///
@@ -352,7 +352,10 @@ impl NumberValue {
         Ok(Self::new(coefficient, self.scale))
     }
 
-    /// Raise this Dec to a non-negative Int exponent, rounding only the final result.
+    /// Raise this Dec to a non-negative exponent, rounding only the final result.
+    ///
+    /// The language boundary requires `I32`; this arithmetic helper receives the exponent
+    /// through an `i64` host carrier.
     pub fn checked_power(&self, exponent: i64) -> Result<Self, NumberArithmeticError> {
         if exponent < 0 {
             return Err(NumberArithmeticError::InvalidExponent);

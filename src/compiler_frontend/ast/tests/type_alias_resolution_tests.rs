@@ -9,6 +9,7 @@ use crate::compiler_frontend::ast::Ast;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticPayload, NameNamespace,
 };
+use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::ids::{BuiltinTypeConstructor, TypeConstructor, TypeId};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -16,6 +17,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 fn page_path(
     name: &str,
@@ -58,9 +60,9 @@ fn field_type_id(
 }
 
 #[test]
-fn builtin_alias_field_uses_int_identity() {
+fn builtin_alias_field_uses_i32_identity() {
     let source = r#"
-TaskId as Int
+TaskId as I32
 
 Task = |
     id TaskId,
@@ -70,14 +72,14 @@ Task = |
     let task_type_id = nominal_type_id(&ast, &mut string_table, "Task", &mut path_fork);
     assert_eq!(
         field_type_id(&ast, task_type_id, "id", &mut string_table, &path_fork),
-        ast.type_environment.builtins().int
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
     );
 }
 
 #[test]
 fn local_nominal_option_and_collection_aliases_keep_nominal_identity() {
     let source = r#"
-TaskId as Int
+TaskId as I32
 
 Task = |
     id TaskId,
@@ -97,7 +99,7 @@ Holder = |
 
     assert_eq!(
         field_type_id(&ast, task_type_id, "id", &mut string_table, &path_fork),
-        ast.type_environment.builtins().int
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
     );
 
     let items_type_id = field_type_id(&ast, holder_type_id, "items", &mut string_table, &path_fork);
@@ -153,7 +155,7 @@ Holder = |
 fn alias_chain_resolves_to_the_final_local_nominal() {
     let source = r#"
 Item = |
-    n Int,
+    n I32,
 |
 
 Alias as Item
@@ -177,7 +179,7 @@ Holder = |
 #[test]
 fn alias_chain_through_a_capacity_constant_resolves_to_the_folded_capacity() {
     let source = r#"
-capacity #Int = 2
+capacity #I32 = 2
 
 Names as {capacity String}
 MoreNames as Names

@@ -8,7 +8,7 @@
 //!
 //! AST resolves all cast targets, evidence, fallibility, and optional wrapping flags before HIR.
 //! HIR only carries compiler-owned builtin runtime casts as `HirExpressionKind::Cast` or
-//! `HirStatementKind::CastOp`. User-defined cast evidence lowers to a direct user-function call
+//! `HirFallibleOperation::CastOp`. User-defined cast evidence lowers to a direct user-function call
 //! during HIR lowering, and `ResolvedCastEvidence::GenericBound` is validation-only and must not
 //! reach HIR.
 
@@ -27,16 +27,12 @@ use moth_lexical::numeric::fixed_scalar::FixedScalarValue;
 
 /// Shared carrier tag for variant construction in HIR.
 ///
-/// WHY: Choices, Options, and Results all construct variant-shaped values. A shared carrier
+/// WHY: Choices and Options construct variant-shaped values. A shared carrier
 /// keeps backend lowering uniform while preserving distinct semantic type identity.
 #[derive(Debug, Clone)]
 pub enum HirVariantCarrier {
-    Choice {
-        choice_id: ChoiceId,
-    },
+    Choice { choice_id: ChoiceId },
     Option,
-    #[cfg(test)]
-    Fallible,
 }
 
 /// Variant index used for `some` inside `HirVariantCarrier::Option`.
@@ -128,10 +124,6 @@ pub enum HirExpressionKind {
     // -------------------------
     //  Literals
     // -------------------------
-    /// One unsigned 64-bit integer literal.
-    Uint(u64),
-    Int(i64),
-    Float(f64),
     /// One materialised fixed-width scalar or `Byte` value with exact-bit identity.
     ///
     /// WHY: HTML-JS lowers the value through `JsNumericCarrier::fixed_literal`, while HTML-Wasm
@@ -182,36 +174,6 @@ pub enum HirExpressionKind {
     },
 
     // -------------------------
-    //  Tuple Operations
-    // -------------------------
-    /// Construct a tuple value (for multi-return)
-    /// Example: return (42, "hello")
-    /// EMPTY TUPLE IS THE UNIT TYPE ()
-    /// EMPTY TUPLE == the builtin none `TypeId`.
-    TupleConstruct {
-        elements: HirValueRange,
-    },
-
-    /// Project a tuple slot by flat index.
-    TupleGet {
-        tuple: HirValueId,
-        index: usize,
-    },
-
-    // -------------------------
-    //  Fallible Carrier Handling
-    // -------------------------
-    /// Extracts the success payload from an internal fallible carrier.
-    FallibleUnwrapSuccess {
-        result: HirValueId,
-    },
-
-    /// Extracts the error payload from an internal fallible carrier.
-    FallibleUnwrapError {
-        result: HirValueId,
-    },
-
-    // -------------------------
     //  Type Conversion
     // -------------------------
     /// Builtin cast applied to an already-evaluated source value.
@@ -220,7 +182,7 @@ pub enum HirExpressionKind {
     ///      the correct runtime helper without re-deriving source/target pairs.
     /// WHY: AST already resolved the target, evidence, fallibility, and optional wrap flag;
     ///      HIR only materializes the resulting builtin runtime cast. Infallible casts stay as
-    ///      pure expressions, while fallible casts lower through `HirStatementKind::CastOp` so
+    ///      pure expressions, while fallible casts lower through `HirTerminator::Invoke` so
     ///      success/error control flow remains explicit.
     Cast {
         source: HirValueId,
@@ -232,7 +194,7 @@ pub enum HirExpressionKind {
     // -------------------------
     /// Construct a variant value through a shared carrier.
     ///
-    /// WHY: unifies choice/option/result construction in HIR while keeping type kinds distinct.
+    /// WHY: unifies choice/option construction in HIR while keeping type kinds distinct.
     VariantConstruct {
         carrier: HirVariantCarrier,
         variant_index: usize,

@@ -1,0 +1,12 @@
+-- A retained mutable collection binding still validates its receiver access.
+-- The unannotated `count` keeps `items` retained through the call argument.
+-- `length()` is shared, so the authored `~` is contradictory and must retain
+-- the ordinary receiver-access diagnostic at the marker.
+
+make_items |count U64| -> {I32}:
+    return {1, 2, 3}
+;
+
+count = 1
+items ~= make_items(count)
+~items.length()

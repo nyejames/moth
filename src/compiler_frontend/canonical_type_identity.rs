@@ -77,7 +77,6 @@ pub(crate) enum CanonicalTypeIdentity {
         value: Box<CanonicalTypeIdentity>,
     },
     Option(Box<CanonicalTypeIdentity>),
-    FallibleCarrier(FallibleCarrierTypeIdentity),
     /// Generic identity is keyed by stable base origin plus recursively canonical arguments.
     GenericInstance {
         base: OriginTypeId,
@@ -101,7 +100,7 @@ impl CanonicalTypeIdentity {
     /// structural occurrence.
     ///
     /// Canonical type consumers use this owner instead of each reimplementing the option,
-    /// collection, map, fallible and generic-instance recursion rules.
+    /// collection, map and generic-instance recursion rules.
     pub(crate) fn visit(&self, visitor: &mut impl FnMut(&CanonicalTypeIdentity)) {
         visitor(self);
 
@@ -112,10 +111,6 @@ impl CanonicalTypeIdentity {
                 value.visit(visitor);
             }
             Self::Option(inner) => inner.visit(visitor),
-            Self::FallibleCarrier(carrier) => {
-                carrier.success().visit(visitor);
-                carrier.error().visit(visitor);
-            }
             Self::GenericInstance { arguments, .. } => {
                 for argument in arguments.iter() {
                     argument.visit(visitor);
@@ -174,10 +169,6 @@ impl ModulePrivateNominalIdentity {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum CanonicalBuiltinType {
     Bool,
-    Int,
-    /// Profile-sized unsigned integer, following the selected `Int` width.
-    Uint,
-    Float,
     String,
     Char,
     Range,
@@ -185,8 +176,7 @@ pub(crate) enum CanonicalBuiltinType {
     Error,
     /// Explicit-width builtin scalar or the `Byte` octet type.
     ///
-    /// Distinct from `Int`/`Float`: a fixed width is part of the identity, so a matching
-    /// `NumericProfile` width never unifies the two.
+    /// The width is part of the identity.
     FixedScalar(FixedScalar),
     /// Arbitrary-precision decimal identity at one canonical scale.
     ///
@@ -226,33 +216,6 @@ impl ExternalOpaqueTypeIdentity {
 
     pub(crate) fn symbol_path(&self) -> &ExternalSymbolPath {
         &self.symbol_path
-    }
-}
-
-/// Fallible carrier canonical identity. Success and error are stored in order.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) struct FallibleCarrierTypeIdentity {
-    success: Box<CanonicalTypeIdentity>,
-    error: Box<CanonicalTypeIdentity>,
-}
-
-impl FallibleCarrierTypeIdentity {
-    /// Construct a fallible carrier identity from canonical success and error identities.
-    ///
-    /// Compiler-internal: only the projection owner builds these.
-    pub(crate) fn new(success: CanonicalTypeIdentity, error: CanonicalTypeIdentity) -> Self {
-        Self {
-            success: Box::new(success),
-            error: Box::new(error),
-        }
-    }
-
-    pub(crate) fn success(&self) -> &CanonicalTypeIdentity {
-        &self.success
-    }
-
-    pub(crate) fn error(&self) -> &CanonicalTypeIdentity {
-        &self.error
     }
 }
 
@@ -734,9 +697,6 @@ pub(crate) fn project_type_id_to_canonical_identity(
 pub(crate) fn canonical_builtin_for_key(key: BuiltinTypeKey) -> CanonicalBuiltinType {
     match key {
         BuiltinTypeKey::Bool => CanonicalBuiltinType::Bool,
-        BuiltinTypeKey::Int => CanonicalBuiltinType::Int,
-        BuiltinTypeKey::Uint => CanonicalBuiltinType::Uint,
-        BuiltinTypeKey::Float => CanonicalBuiltinType::Float,
         BuiltinTypeKey::String => CanonicalBuiltinType::String,
         BuiltinTypeKey::Char => CanonicalBuiltinType::Char,
         BuiltinTypeKey::Range => CanonicalBuiltinType::Range,
@@ -760,9 +720,6 @@ pub(crate) fn builtin_key_for_canonical_builtin(
 ) -> Option<BuiltinTypeKey> {
     Some(match builtin {
         CanonicalBuiltinType::Bool => BuiltinTypeKey::Bool,
-        CanonicalBuiltinType::Int => BuiltinTypeKey::Int,
-        CanonicalBuiltinType::Uint => BuiltinTypeKey::Uint,
-        CanonicalBuiltinType::Float => BuiltinTypeKey::Float,
         CanonicalBuiltinType::String => BuiltinTypeKey::String,
         CanonicalBuiltinType::Char => BuiltinTypeKey::Char,
         CanonicalBuiltinType::Range => BuiltinTypeKey::Range,
@@ -818,22 +775,6 @@ fn project_constructed(
                 project_type_id_to_canonical_identity(*inner_id, type_environment, context)?;
             Ok(CanonicalTypeIdentity::Option(Box::new(inner)))
         }
-        TypeConstructor::Builtin(BuiltinTypeConstructor::FallibleCarrier) => {
-            let [success_id, error_id] = arguments else {
-                return Err(malformed_arity_error(
-                    "fallible carrier",
-                    2,
-                    arguments.len(),
-                ));
-            };
-            let success =
-                project_type_id_to_canonical_identity(*success_id, type_environment, context)?;
-            let error =
-                project_type_id_to_canonical_identity(*error_id, type_environment, context)?;
-            Ok(CanonicalTypeIdentity::FallibleCarrier(
-                FallibleCarrierTypeIdentity::new(success, error),
-            ))
-        }
         TypeConstructor::Builtin(BuiltinTypeConstructor::OrderedMap) => {
             let [key_id, value_id] = arguments else {
                 return Err(malformed_arity_error("ordered map", 2, arguments.len()));
@@ -845,12 +786,6 @@ fn project_constructed(
                 key: Box::new(key),
                 value: Box::new(value),
             })
-        }
-        TypeConstructor::Builtin(BuiltinTypeConstructor::Tuple) => {
-            Err(CompilerError::compiler_error(
-                "canonical type projection does not support tuple or internal-only constructed \
-                 shapes; tuples are not part of the canonical closed-type identity vocabulary",
-            ))
         }
     }
 }

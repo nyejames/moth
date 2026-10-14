@@ -1,0 +1,21 @@
+-- A retained known-result receiver stays a mutable place through a field projection.
+-- `seed` keeps the factory call retained; mutating `items` must change the binding.
+
+Holder = |
+    items {I32},
+|
+
+make_holder |seed I32| -> Holder:
+    return Holder(items = {seed})
+;
+
+seed = 1
+holder ~= make_holder(seed)
+initial = holder.items.length()
+~holder.items.push(2)
+final = holder.items.length()
+appended = holder.items.get(1) catch:
+    then 0
+;
+
+[:retained projected mutable receiver initial=[initial] final=[final] appended=[appended]]

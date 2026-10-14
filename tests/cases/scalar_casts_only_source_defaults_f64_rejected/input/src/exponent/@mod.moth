@@ -1,0 +1,2 @@
+source = 1e0
+same F64 = cast source

@@ -1,4 +1,4 @@
-mutate |value ~Int| -> Int:
+mutate |value ~I32| -> I32:
     value = value + 1
     return value
 ;

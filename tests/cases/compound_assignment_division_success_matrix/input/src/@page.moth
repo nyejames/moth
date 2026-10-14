@@ -1,7 +1,7 @@
-count ~Int = 10
+count ~I32 = 10
 count //= 4
 
-ratio ~Float = 10
+ratio ~F64 = 10
 ratio /= 4
 
 [: count=[count], ratio=[ratio] ]

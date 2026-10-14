@@ -17,10 +17,12 @@
 //! - Explicit `#` constants keep their existing top-level dependency/sorting
 //!   semantics; this module does not replace that path.
 
-pub(crate) mod body_local;
+pub(crate) mod binding;
 pub(crate) mod facts;
 pub(crate) mod resolver;
 pub(crate) mod store;
+
+pub(crate) use store::{ConstValueId, ConstValuePayload, ConstValueStore, ConstValueStoreError};
 
 #[cfg(test)]
 mod tests;

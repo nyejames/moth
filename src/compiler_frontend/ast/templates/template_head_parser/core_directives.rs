@@ -14,7 +14,9 @@ use super::directive_args::{
     reject_unexpected_directive_arguments,
 };
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::styles::markdown::markdown_formatter;
 use crate::compiler_frontend::ast::templates::styles::raw::configure_raw_style;
@@ -41,6 +43,8 @@ pub(super) fn maybe_parse_slot_or_insert_helper_directive(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     build_state: &mut TemplateBuildState,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
@@ -55,6 +59,8 @@ pub(super) fn maybe_parse_slot_or_insert_helper_directive(
             token_stream,
             context,
             type_interner,
+            expression_builder,
+            const_values,
             string_table,
             path_fork,
         )?;
@@ -72,6 +78,8 @@ pub(super) fn maybe_parse_slot_or_insert_helper_directive(
             token_stream,
             context,
             type_interner,
+            expression_builder,
+            const_values,
             string_table,
             path_fork,
         )?;
@@ -90,6 +98,8 @@ pub(super) fn parse_core_style_directive(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     build_state: &mut TemplateBuildState,
     directive_name: &str,
     kind: CoreStyleDirectiveKind,
@@ -111,6 +121,8 @@ pub(super) fn parse_core_style_directive(
                 token_stream,
                 context,
                 type_interner,
+                expression_builder,
+                const_values,
                 build_state,
                 string_table,
                 path_fork,

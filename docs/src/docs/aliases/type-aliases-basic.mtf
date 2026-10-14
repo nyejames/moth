@@ -5,7 +5,7 @@ A type alias gives an existing type a clearer name. It does not create a new typ
 Use a type alias when a type annotation would be repetitive or when a name carries domain meaning.
 
 [codeblock, $code("moth"):
-    UserId as Int
+    UserId as I32
     HtmlFragment as String
     RouteParts as {String}
 ]
@@ -15,30 +15,30 @@ Use a type alias when a type annotation would be repetitive or when a name carri
 An alias is another spelling of the same type.
 
 [codeblock, $code("moth"):
-    UserId as Int
+    UserId as I32
 
     id UserId = 42
-    raw Int = id
+    raw I32 = id
 ]
 
-`id` has type `UserId`, but it is also an `Int`. You can pass it anywhere an `Int` is expected.
+`id` has type `UserId`, but it is also an `I32`. You can pass it anywhere an `I32` is expected.
 
-`UserId as Int` makes annotations clearer, but it does not stop an ordinary
-`Int` from being used as `UserId`.
+`UserId as I32` makes annotations clearer, but it does not stop an ordinary
+`I32` from being used as `UserId`.
 
 ### Alias versus struct
 
 A struct creates a brand new type with its own fields and constructor. An alias does not.
 
 [codeblock, $code("moth"):
-    UserId as Int
+    UserId as I32
 
     User = |
-        id Int,
+        id I32,
     |
 ]
 
-`UserId` is `Int`. `User` is a separate type.
+`UserId` is `I32`. `User` is a separate type.
 
 ### One collection alias
 

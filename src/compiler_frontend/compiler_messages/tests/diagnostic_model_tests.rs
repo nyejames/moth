@@ -1,6 +1,6 @@
 use super::{
     BorrowAccessKind, BorrowDiagnosticKind, BuiltinFailureOriginKind, BuiltinFailureWitness,
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic, ConfigDiagnosticKind,
+    CapacityResource, CompileTimeEvaluationErrorReason, CompilerDiagnostic, ConfigDiagnosticKind,
     DeferredFeatureDiagnosticKind, DeferredFeatureReason, DependencyClauseKind, DiagnosticBag,
     DiagnosticCategory, DiagnosticKind, DiagnosticLabel, DiagnosticLabelMessage,
     DiagnosticOperator, DiagnosticPayload, DiagnosticPlace, DiagnosticSeverity, DiagnosticToken,
@@ -9,14 +9,14 @@ use super::{
     InvalidAssignmentTargetReason, InvalidCallShapeReason, InvalidCastReason,
     InvalidChoiceVariantReason, InvalidCollectionTypeReason, InvalidConfigReason,
     InvalidDependencyClauseReason, InvalidExpressionReason, InvalidFallibleHandlingReason,
-    InvalidFallibleOperandReason, InvalidFunctionSignatureReason, InvalidGenericParameterReason,
-    InvalidImportPathReason, InvalidMapTypeReason, InvalidOutputFolderReason,
-    InvalidReceiverCallReason, InvalidSignatureMemberReason, InvalidStandaloneStatementReason,
-    InvalidStatementPositionReason, InvalidStringEscapeReason, InvalidTemplateDirectiveReason,
-    InvalidTemplateStructureReason, InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason,
-    NameNamespace, NamespaceTypeValueMisuseKind, PathKind, ReceiverCallKind, RuleDiagnosticKind,
+    InvalidFunctionSignatureReason, InvalidGenericParameterReason, InvalidImportPathReason,
+    InvalidMapTypeReason, InvalidOutputFolderReason, InvalidReceiverCallReason,
+    InvalidSignatureMemberReason, InvalidStandaloneStatementReason, InvalidStatementPositionReason,
+    InvalidStringEscapeReason, InvalidTemplateDirectiveReason, InvalidTemplateStructureReason,
+    InvalidTraitKeywordUsageReason, InvalidTypeAnnotationReason, NameNamespace,
+    NamespaceTypeValueMisuseKind, PathKind, ReceiverCallKind, RuleDiagnosticKind,
     SyntaxDiagnosticKind, TokenTag, TypeAnnotationContext, TypeDiagnosticKind, TypeMismatchContext,
-    UnsupportedBackendFeatureReason, UnsupportedOperatorCategory, is_well_formed_reason_key,
+    UnsupportedBackendFeatureReason, ValueReceiverContext, is_well_formed_reason_key,
 };
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
@@ -183,7 +183,7 @@ fn compiler_capacity_diagnostic_keeps_the_triggering_span_and_resource() {
     assert_eq!(
         diagnostic.payload,
         DiagnosticPayload::CompilerCapacityExceeded {
-            resource: HirCapacityResource::ExpressionRows,
+            resource: CapacityResource::Hir(HirCapacityResource::ExpressionRows),
         }
     );
 
@@ -317,6 +317,47 @@ fn unsupported_backend_feature_exposes_stable_reason_key() {
         diagnostic.identity().reason_key,
         Some("unsupported_backend_feature.hashmap_operation")
     );
+}
+
+#[test]
+fn body_declaration_placement_preserves_source_name_and_stable_reason() {
+    use super::InvalidDeclarationReason;
+
+    let mut string_table = StringTable::new();
+    let name = string_table.intern("nested");
+    let mut span_builder = ExtendedSpanBuilder::new();
+    let name_span = Some(exact_span(
+        SourceId::from_index(1),
+        12,
+        6,
+        &mut span_builder,
+    ));
+    let diagnostic = CompilerDiagnostic::invalid_declaration(
+        InvalidDeclarationReason::DeclarationRequiresModuleTopLevel,
+        Some(name),
+        name_span,
+    );
+
+    assert_eq!(diagnostic.primary_span, name_span);
+    assert_eq!(diagnostic.identity().code, "MOTH-RULE-0043");
+    assert_eq!(
+        diagnostic.identity().reason_key,
+        Some("invalid_declaration.declaration_requires_module_top_level"),
+    );
+    assert!(matches!(
+        &diagnostic.payload,
+        DiagnosticPayload::InvalidDeclaration {
+            reason: InvalidDeclarationReason::DeclarationRequiresModuleTopLevel,
+            name: Some(source_name),
+        } if *source_name == name
+    ));
+    let guidance = terminal::format_payload_guidance(
+        &diagnostic.payload,
+        DiagnosticRenderContext::new(&string_table),
+    )
+    .join("\n");
+    assert!(guidance.contains("Declaration 'nested' cannot appear inside an executable body"));
+    assert!(guidance.contains("Declare it at module top level"));
 }
 
 #[test]
@@ -898,7 +939,7 @@ fn attach_retains_table_for_nominal_type_render_context_without_path_payloads() 
     });
     let diagnostic = CompilerDiagnostic::type_mismatch(
         nominal_type,
-        type_environment.builtins().int,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         TypeMismatchContext::Assignment,
         None,
     );
@@ -922,7 +963,7 @@ fn attach_retains_table_for_nominal_type_render_context_without_path_payloads() 
         )
         .join("\n");
     assert!(
-        rendered.contains("expected NominalType, found Int"),
+        rendered.contains("expected NominalType, found I32"),
         "nominal type rendering lost its path context after aggregation: {rendered}"
     );
 }
@@ -950,7 +991,7 @@ fn batch_attaches_table_for_nominal_type_context_and_survives_canonical_round_tr
     });
     let diagnostic = CompilerDiagnostic::type_mismatch(
         nominal_type,
-        type_environment.builtins().int,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         TypeMismatchContext::Assignment,
         None,
     );
@@ -993,7 +1034,7 @@ fn batch_attaches_table_for_nominal_type_context_and_survives_canonical_round_tr
         )
         .join("\n");
     assert!(
-        rendered.contains("Type mismatch in assignment: expected NominalType, found Int"),
+        rendered.contains("Type mismatch in assignment: expected NominalType, found I32"),
         "batch-level nominal type rendering lost its path context through the canonical \
          round trip and append: {rendered}"
     );
@@ -1050,7 +1091,7 @@ fn compiler_messages_preserve_type_context_ranges_when_prepending_and_appending(
     });
     let first_error = CompilerDiagnostic::type_mismatch(
         point_type,
-        first_environment.builtins().int,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         TypeMismatchContext::Assignment,
         None,
     );
@@ -1098,7 +1139,7 @@ fn compiler_messages_preserve_type_context_ranges_when_prepending_and_appending(
         2..3
     );
     assert!(
-        rendered[0].contains("expected Point, found Int"),
+        rendered[0].contains("expected Point, found I32"),
         "errors should render before warnings; first rendered line should be the Point error, got: {}",
         rendered[0]
     );
@@ -1147,7 +1188,7 @@ fn append_preserves_frozen_and_remaps_unfrozen_string_and_type_owners() {
             CompilerDiagnostic::unknown_value_name(frozen_name, None),
             CompilerDiagnostic::type_mismatch(
                 frozen_type,
-                type_environment.builtins().int,
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 TypeMismatchContext::Assignment,
                 None,
             ),
@@ -1181,7 +1222,7 @@ fn append_preserves_frozen_and_remaps_unfrozen_string_and_type_owners() {
                 CompilerDiagnostic::unknown_value_name(unfrozen_name, None),
                 CompilerDiagnostic::type_mismatch(
                     unfrozen_type,
-                    type_environment.builtins().int,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     TypeMismatchContext::Assignment,
                     None,
                 ),
@@ -1481,7 +1522,7 @@ fn colliding_owner_messages(
         ]);
     let type_mismatch = CompilerDiagnostic::type_mismatch(
         expected_type,
-        type_environment.builtins().int,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         TypeMismatchContext::Assignment,
         primary_span,
     );
@@ -1752,7 +1793,6 @@ fn remap_string_ids_updates_compile_time_evaluation_operation() {
         CompileTimeEvaluationErrorReason::StructuralStringRequiresFinalText,
         Some(operation),
         span(source_path),
-        None,
     );
     let mut bag = DiagnosticBag::from_diagnostics(vec![diagnostic]);
 
@@ -1784,6 +1824,55 @@ fn remap_string_ids_updates_compile_time_evaluation_operation() {
         "string equality comparison",
         "the operation name must survive a module table merge"
     );
+}
+
+#[test]
+fn remap_string_ids_updates_receiver_declaration_names() {
+    use crate::compiler_frontend::compiler_messages::InvalidReceiverDeclarationReason;
+
+    let mut local_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let source_path = path_fork
+        .try_intern_portable_path("main.moth", &mut local_table)
+        .expect("test path fits");
+    let function_name = local_table.intern("describe");
+    let type_name = local_table.intern("Option of Label");
+
+    let diagnostic = CompilerDiagnostic::invalid_receiver_declaration(
+        InvalidReceiverDeclarationReason::UnsupportedType {
+            function_name,
+            type_name,
+        },
+        span(source_path),
+    );
+    let mut bag = DiagnosticBag::from_diagnostics(vec![diagnostic]);
+
+    // A shifting remap: stale ids would name another module's strings in the rendered message.
+    let mut merged_table = StringTable::new();
+    merged_table.intern("a string owned by another module");
+    merged_table.intern("a second string owned by another module");
+    let remap = merged_table.merge_from(&local_table);
+    assert!(
+        !remap.is_identity(),
+        "the fixture must exercise a shifting remap"
+    );
+    bag.remap_string_ids(&remap);
+
+    let DiagnosticPayload::InvalidReceiverDeclaration {
+        reason:
+            InvalidReceiverDeclarationReason::UnsupportedType {
+                function_name,
+                type_name,
+            },
+    } = &bag.diagnostics()[0].payload
+    else {
+        panic!(
+            "unexpected receiver payload after remap: {:?}",
+            bag.diagnostics()[0].payload
+        );
+    };
+    assert_eq!(merged_table.resolve(*function_name), "describe");
+    assert_eq!(merged_table.resolve(*type_name), "Option of Label");
 }
 
 #[test]
@@ -1858,6 +1947,54 @@ fn duplicate_declaration_without_previous_location_omits_secondary_label() {
 }
 
 #[test]
+fn value_receiver_diagnostic_preserves_factual_arity_and_producer_span() {
+    let mut spans = ExtendedSpanBuilder::new();
+    let producer_span = Some(exact_span(SourceId::from_index(1), 12, 6, &mut spans));
+    let local_table = StringTable::new();
+    let mut merged_table = StringTable::new();
+    merged_table.intern("unrelated");
+    let remap = merged_table.merge_from(&local_table);
+
+    for produced_count in [0, 2] {
+        let mut diagnostic = CompilerDiagnostic::invalid_value_receiver(
+            ValueReceiverContext::Declaration,
+            1,
+            produced_count,
+            producer_span,
+        );
+        diagnostic.payload.remap_string_ids(&remap);
+        assert_eq!(
+            diagnostic.kind,
+            DiagnosticKind::Rule(RuleDiagnosticKind::InvalidValueReceiver)
+        );
+        assert_eq!(diagnostic.identity().code, "MOTH-RULE-0087");
+        assert_eq!(diagnostic.identity().reason_key, None);
+        assert_eq!(diagnostic.primary_span, producer_span);
+        assert_eq!(
+            diagnostic.payload,
+            DiagnosticPayload::InvalidValueReceiver {
+                receiver: ValueReceiverContext::Declaration,
+                target_count: 1,
+                produced_count,
+            }
+        );
+        let context = DiagnosticRenderContext::new(&merged_table);
+        let rendered = terse::format_terse_diagnostic_with_context(&diagnostic, context);
+        assert!(rendered.contains(&format!(
+            "Invalid declaration receiver: expected 1 success slot(s), but this expression produces {produced_count}."
+        )));
+        let guidance = terminal::format_payload_guidance(&diagnostic.payload, context).join("\n");
+        if produced_count == 0 {
+            assert!(
+                guidance.contains("Use an expression that produces the required success values.")
+            );
+        } else {
+            assert!(guidance.contains("Use a multi-bind with one target per success slot."));
+        }
+    }
+}
+
+#[test]
 fn type_mismatch_constructor_carries_type_ids_without_rendering() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
@@ -1866,7 +2003,7 @@ fn type_mismatch_constructor_carries_type_ids_without_rendering() {
         .expect("test path fits");
 
     let diagnostic = CompilerDiagnostic::type_mismatch(
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         builtin_type_ids::STRING,
         TypeMismatchContext::Declaration,
         span(source_path),
@@ -1881,7 +2018,7 @@ fn type_mismatch_constructor_carries_type_ids_without_rendering() {
         DiagnosticPayload::TypeMismatch {
             expected, found, ..
         } => {
-            assert_eq!(expected, builtin_type_ids::INT);
+            assert_eq!(expected, builtin_type_ids::fixed_scalar(FixedScalar::I32));
             assert_eq!(found, builtin_type_ids::STRING);
         }
         payload => panic!("unexpected payload: {payload:?}"),
@@ -1898,7 +2035,7 @@ fn type_mismatch_terminal_guidance_renders_type_names_with_context() {
     let type_environment = TypeEnvironment::new();
 
     let diagnostic = CompilerDiagnostic::type_mismatch(
-        type_environment.builtins().int,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         type_environment.builtins().string,
         TypeMismatchContext::Declaration,
         span(source_path),
@@ -1910,7 +2047,7 @@ fn type_mismatch_terminal_guidance_renders_type_names_with_context() {
 
     let guidance = terminal::format_payload_guidance(&diagnostic.payload, render_context);
 
-    assert!(guidance.iter().any(|line| line == "Expected: Int"));
+    assert!(guidance.iter().any(|line| line == "Expected: I32"));
     assert!(guidance.iter().any(|line| line == "Found: String"));
     assert!(!guidance.iter().any(|line| line.contains("type id")));
 }
@@ -1925,7 +2062,7 @@ fn type_mismatch_terse_renderer_renders_type_names_with_context() {
     let type_environment = TypeEnvironment::new();
 
     let diagnostic = CompilerDiagnostic::type_mismatch(
-        type_environment.builtins().int,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         type_environment.builtins().string,
         TypeMismatchContext::FunctionArgument,
         span(source_path),
@@ -1936,7 +2073,7 @@ fn type_mismatch_terse_renderer_renders_type_names_with_context() {
         .with_path_table(&path_table);
     let line = terse::format_terse_diagnostic_with_context(&diagnostic, render_context);
 
-    assert!(line.contains("expected Int"));
+    assert!(line.contains("expected I32"));
     assert!(line.contains("found String"));
     assert!(!line.contains("Expected type id"));
     assert!(!line.contains("Found type id"));
@@ -2388,14 +2525,6 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
         ),
         (
             CompilerDiagnostic::invalid_collection_type(
-                InvalidCollectionTypeReason::CapacityNotConstant,
-                span(source_path),
-            ),
-            "Collection capacity must be a positive integer literal or the bare name of a visible compile-time `Int` constant.",
-            "CapacityNotConstant",
-        ),
-        (
-            CompilerDiagnostic::invalid_collection_type(
                 InvalidCollectionTypeReason::CapacityOverflow,
                 span(source_path),
             ),
@@ -2490,21 +2619,11 @@ fn syntax_renderers_keep_typed_prose_without_error_conversion() {
             CompilerDiagnostic::unsupported_operator_types(
                 DiagnosticOperator::Add,
                 builtin_type_ids::STRING,
-                Some(builtin_type_ids::INT),
+                Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
                 span(source_path),
             ),
             "Operator `+` cannot concatenate",
             "Add",
-        ),
-        (
-            CompilerDiagnostic::invalid_fallible_operand(
-                InvalidFallibleOperandReason::FallibleValueNotHandled,
-                UnsupportedOperatorCategory::Arithmetic,
-                builtin_type_ids::STRING,
-                span(source_path),
-            ),
-            "arithmetic operator cannot use a fallible value that has not been handled",
-            "FallibleValueNotHandled",
         ),
     ];
     let render_context = DiagnosticRenderContext::new(&string_table);
@@ -2624,8 +2743,21 @@ fn failure_handling_diagnostics_preserve_producer_types_and_spans() {
     let second_span = Some(exact_span(source, 11, 9, &mut span_builder));
     let reasons = [
         (
+            InvalidFallibleHandlingReason::FunctionHasMultipleSuccessReturns { count: 3 },
+            "invalid_fallible_handling.function_has_multiple_success_returns",
+            vec![],
+        ),
+        (
+            InvalidFallibleHandlingReason::EntryHasIncompatibleError {
+                produced_error_type: builtin_type_ids::STRING,
+                entry_error_type: builtin_type_ids::BOOL,
+            },
+            "invalid_fallible_handling.entry_has_incompatible_error",
+            vec![],
+        ),
+        (
             InvalidFallibleHandlingReason::IncompatibleCatchErrorTypes {
-                first_error_type_id: builtin_type_ids::INT,
+                first_error_type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 second_error_type_id: builtin_type_ids::STRING,
                 first_producer_span: first_span,
                 second_producer_span: second_span,
@@ -2635,7 +2767,7 @@ fn failure_handling_diagnostics_preserve_producer_types_and_spans() {
         ),
         (
             InvalidFallibleHandlingReason::CustomErrorMixedWithImplicitFailure {
-                error_type_id: builtin_type_ids::INT,
+                error_type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 typed_producer_span: first_span,
                 implicit_producer_span: second_span,
             },
@@ -2644,7 +2776,7 @@ fn failure_handling_diagnostics_preserve_producer_types_and_spans() {
         ),
         (
             InvalidFallibleHandlingReason::UnhandledBuiltinFailureInCustomErrorFunction {
-                error_type_id: builtin_type_ids::INT,
+                error_type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 witness: Box::new(BuiltinFailureWitness {
                     codes: vec![BuiltinErrorCode::IntOverflow],
                     call_spans: vec![first_span, None],
@@ -2691,6 +2823,78 @@ fn failure_handling_diagnostics_preserve_producer_types_and_spans() {
                 .collect::<Vec<_>>(),
             producer_spans,
         );
+    }
+}
+
+#[test]
+fn propagation_boundary_renderers_preserve_authored_count_and_semantic_error_types() {
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let mut type_environment = TypeEnvironment::new();
+    let error_path = path_fork
+        .try_intern_portable_path("ParseFailure", &mut string_table)
+        .expect("test path fits");
+    let (_, produced_error_type) = type_environment.register_nominal_struct(StructTypeDefinition {
+        id: NominalTypeId(0),
+        path: error_path,
+        fields: Box::new([]),
+        generic_parameters: None,
+        const_record: false,
+    });
+    let entry_error_path = path_fork
+        .try_intern_portable_path("Error", &mut string_table)
+        .expect("test path fits");
+    let (_, entry_error_type) = type_environment.register_nominal_struct(StructTypeDefinition {
+        id: NominalTypeId(0),
+        path: entry_error_path,
+        fields: Box::new([]),
+        generic_parameters: None,
+        const_record: false,
+    });
+    let path_table = path_fork.snapshot_table();
+    let context = DiagnosticRenderContext::new(&string_table)
+        .with_optional_type_environment(Some(&type_environment))
+        .with_path_table(&path_table);
+
+    for count in [2, 5] {
+        let diagnostic = CompilerDiagnostic::invalid_fallible_handling(
+            InvalidFallibleHandlingReason::FunctionHasMultipleSuccessReturns { count },
+            None,
+        );
+        let guidance = terminal::format_payload_guidance(&diagnostic.payload, context).join("\n");
+        let terse = terse::format_terse_diagnostic_with_context(&diagnostic, context);
+        let count_fact = format!("{count} authored success return slots");
+        for message in [&guidance, &terse] {
+            assert!(message.contains(&count_fact), "{message}");
+            assert!(message.contains("Inspect the option locally"), "{message}");
+            assert!(
+                message.contains("use a single optional success return slot"),
+                "{message}",
+            );
+            assert!(!message.contains("FunctionHasMultipleSuccessReturns"));
+        }
+    }
+
+    let diagnostic = CompilerDiagnostic::invalid_fallible_handling(
+        InvalidFallibleHandlingReason::EntryHasIncompatibleError {
+            produced_error_type,
+            entry_error_type,
+        },
+        None,
+    );
+    let guidance = terminal::format_payload_guidance(&diagnostic.payload, context).join("\n");
+    let terse = terse::format_terse_diagnostic_with_context(&diagnostic, context);
+    for message in [&guidance, &terse] {
+        assert!(message.contains("produces `ParseFailure!`"), "{message}");
+        assert!(message.contains("`start` `Error!` boundary"), "{message}");
+        assert!(
+            message.contains("Handle `ParseFailure` locally with `catch` or recover explicitly"),
+            "{message}",
+        );
+        assert!(!message.contains("EntryHasIncompatibleError"));
+        assert!(!message.contains("TypeId"));
+        assert!(!message.contains("declare"));
+        assert!(!message.contains("add"));
     }
 }
 
@@ -2811,12 +3015,6 @@ fn phase_1_2_renderers_keep_source_language_terminology() {
             InvalidTemplateStructureReason::TemplateIfConditionNotConst,
             span(source_path),
         ),
-        CompilerDiagnostic::invalid_fallible_operand(
-            InvalidFallibleOperandReason::FallibleValueNotHandled,
-            UnsupportedOperatorCategory::Arithmetic,
-            builtin_type_ids::STRING,
-            span(source_path),
-        ),
         CompilerDiagnostic::invalid_fallible_handling(
             InvalidFallibleHandlingReason::CatchOnOptional,
             span(source_path),
@@ -2840,7 +3038,6 @@ fn phase_1_2_renderers_keep_source_language_terminology() {
             CompileTimeEvaluationErrorReason::NoneLiteralRequiresOptionalTypeContext,
             None,
             span(source_path),
-            None,
         ),
         CompilerDiagnostic::deferred_feature_reason(
             DeferredFeatureReason::AsyncBlock,
@@ -3011,7 +3208,7 @@ fn render_boundary_smoke_coverage_hides_internal_debug_names_by_family() {
     let diagnostics = vec![
         CompilerDiagnostic::invalid_path(PathKind::WhitespaceMustBeQuoted, span(source_path)),
         CompilerDiagnostic::type_mismatch(
-            type_environment.builtins().int,
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
             type_environment.builtins().string,
             TypeMismatchContext::Declaration,
             span(source_path),
@@ -3090,7 +3287,7 @@ fn incompatible_choice_comparison_renderer_hides_reason_debug_names() {
     let diagnostic = CompilerDiagnostic::incompatible_choice_comparison(
         IncompatibleChoiceComparisonReason::ChoiceWithNonChoice,
         builtin_type_ids::BOOL,
-        builtin_type_ids::INT,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
         span(source_path),
     );
     let render_context = DiagnosticRenderContext::new(&string_table);
@@ -3791,7 +3988,7 @@ fn generic_conflict_rendering_resolves_concrete_type_names() {
             subject: crate::compiler_frontend::compiler_messages::GenericInferenceSubject::Function,
             parameter_id: GenericParameterId(0),
             parameter_name,
-            existing_type_id: type_environment.builtins().int,
+            existing_type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
             replacement_type_id: type_environment.builtins().string,
         },
         span,
@@ -3807,7 +4004,7 @@ fn generic_conflict_rendering_resolves_concrete_type_names() {
         guidance
             .iter()
             .any(|line| line.contains("Generic parameter 'T'")
-                && line.contains("Int")
+                && line.contains("I32")
                 && line.contains("String")),
         "expected rendered type names in guidance, got: {guidance:?}"
     );
@@ -3819,11 +4016,11 @@ fn builtin_cast_shape_diagnostic_preserves_stable_code_and_rendering() {
 
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let int_name = string_table.intern("Int");
+    let scalar_name = string_table.intern("I32");
 
     let diagnostic = CompilerDiagnostic::invalid_builtin_call(
         InvalidBuiltinCallReason::CastMissingArgument,
-        Some(int_name),
+        Some(scalar_name),
         None,
     );
 
@@ -3832,7 +4029,7 @@ fn builtin_cast_shape_diagnostic_preserves_stable_code_and_rendering() {
 
     assert_eq!(diagnostic.kind.descriptor().code, "MOTH-RULE-0046");
     assert!(
-        terse_line.contains("'Int' cast requires exactly one argument"),
+        terse_line.contains("'I32' cast requires exactly one argument"),
         "{terse_line}"
     );
 }
@@ -4084,7 +4281,6 @@ impl TypeDiagnosticKind {
             Self::TypeMismatch,
             Self::EmptyCollectionTypeAmbiguity,
             Self::UnsupportedOperatorTypes,
-            Self::InvalidFallibleOperand,
             Self::IncompatibleChoiceComparison,
         ]
         .into_iter()
@@ -4117,6 +4313,7 @@ impl RuleDiagnosticKind {
             Self::InvalidDeclaration,
             Self::InvalidAssignmentTarget,
             Self::InvalidMultiBind,
+            Self::InvalidValueReceiver,
             Self::InvalidBuiltinCall,
             Self::InvalidCast,
             Self::InvalidReceiverCall,

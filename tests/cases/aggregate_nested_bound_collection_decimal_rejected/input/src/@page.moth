@@ -1,0 +1,9 @@
+-- A named integer collection keeps its integer family as a nested element beside a raw
+-- decimal collection. The nested decimal literal cannot rewrite the whole leaf to a float.
+render_nested_bound_decimal || -> String:
+    whole = {1}
+    rows = {whole, {2.5}}
+    return [:unreachable]
+;
+
+[:[render_nested_bound_decimal()]]

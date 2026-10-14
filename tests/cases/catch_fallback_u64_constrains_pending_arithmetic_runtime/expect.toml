@@ -1,0 +1,16 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "inline=4294967296 block=4294967297"
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "inline=4294967296 block=4294967297"
+
+[[backends.html_wasm.artifact_assertions]]
+path = "page.wasm"
+kind = "wasm"
+validate_wasm = true

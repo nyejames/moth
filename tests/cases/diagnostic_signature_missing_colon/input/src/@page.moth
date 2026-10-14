@@ -1,3 +1,3 @@
 -- Missing ':' after return declarations
-f|| -> Int
+f|| -> I32
 ;

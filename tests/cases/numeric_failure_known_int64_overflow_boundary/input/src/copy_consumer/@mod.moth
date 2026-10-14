@@ -1,5 +1,5 @@
-max_value #Int = 9223372036854775807
+max_value #I64 = 9223372036854775807
 
-overflow || -> Int:
+overflow || -> I64:
     return copy max_value + 1
 ;

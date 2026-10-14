@@ -19,7 +19,7 @@ mod render;
 #[allow(unused_imports)]
 pub(crate) use compile::compile_moth_template;
 #[allow(unused_imports)]
-pub(crate) use input::{MothTemplateCompileRequest, MothTemplateInput, MothTemplateSource};
+pub(crate) use input::{MothTemplateInput, MothTemplateSource};
 #[allow(unused_imports)]
 pub(crate) use output::{CompiledMothTemplateDocument, MothTemplateCompileOutput};
 

@@ -1,14 +1,16 @@
 //! Tests for final AST type-boundary validation of template expression payloads.
 
 use super::*;
+use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
 use crate::compiler_frontend::ast::ast_nodes::{
     AstNode, Declaration, LoopBindings, NodeKind, RangeEndKind, RangeLoopSpec,
 };
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-use crate::compiler_frontend::ast::expressions::expression_rpn::{
-    ExpressionRpn, ExpressionRpnItem,
-};
+use crate::compiler_frontend::ast::expressions::expression::CollectionExpressionType;
+use crate::compiler_frontend::ast::expressions::expression_store::ExpressionOp;
+use crate::compiler_frontend::ast::expressions::expression_store::SuccessShape;
+use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
+use crate::compiler_frontend::ast::statements::value_production::types::ValueCatchBlock;
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template::{
     Style, TemplateSegmentOrigin, TemplateType,
@@ -37,38 +39,121 @@ use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork}
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
 
-fn invalid_string_expression(span: Option<SourceSpan>) -> Expression {
-    Expression::new(
-        ExpressionKind::Bool(true),
-        span,
-        TypeId(9999),
-        DataType::Bool,
-        ValueMode::ImmutableOwned,
+/// Runs the production walk from one statement and returns the first error in source order.
+fn validate_node(node: &AstNode, context: &TypeValidationContext) -> Result<(), CompilerError> {
+    validate_roots(
+        *context,
+        |children| {
+            push_nodes(std::slice::from_ref(node), context, children);
+            Ok(())
+        },
+        &mut || {},
     )
 }
 
-fn orphan_bool_expression() -> Expression {
-    Expression::new(
-        ExpressionKind::Bool(true),
-        None,
-        TypeId(9999),
-        DataType::Bool,
-        ValueMode::ImmutableOwned,
+fn validate_expression(
+    expression: &ExprId,
+    context: &TypeValidationContext,
+) -> Result<(), CompilerError> {
+    validate_expression_counted(expression, context, &mut || {})
+}
+
+/// Walks one expression root and reports each expansion through `count`.
+fn validate_expression_counted(
+    expression: &ExprId,
+    context: &TypeValidationContext,
+    count: &mut impl FnMut(),
+) -> Result<(), CompilerError> {
+    validate_roots(
+        *context,
+        |children| {
+            push_expression(*expression, context, children);
+            Ok(())
+        },
+        count,
     )
+}
+
+fn validate_owned_runtime_template_handoff(
+    handoff: &OwnedRuntimeTemplateHandoff,
+    context: &TypeValidationContext,
+) -> Result<(), CompilerError> {
+    validate_roots(
+        *context,
+        |children| expand_owned_runtime_template_handoff(handoff, context, children),
+        &mut || {},
+    )
+}
+
+fn validate_owned_runtime_slot_application_handoff(
+    handoff: &OwnedRuntimeSlotApplicationHandoff,
+    context: &TypeValidationContext,
+) -> Result<(), CompilerError> {
+    validate_roots(
+        *context,
+        |children| expand_owned_runtime_slot_application_handoff(handoff, context, children),
+        &mut || {},
+    )
+}
+
+fn validate_template_expression_payloads(
+    template: &Template,
+    context: &TypeValidationContext,
+) -> Result<(), CompilerError> {
+    validate_roots(
+        *context,
+        |children| expand_template(template, context, children),
+        &mut || {},
+    )
+}
+
+fn invalid_string_expression(
+    builder: &mut AstExpressionBuilder,
+    span: Option<SourceSpan>,
+) -> ExprId {
+    builder
+        .reference_with_type_id(
+            PathId::ROOT,
+            TypeId(9999),
+            span,
+            ValueMode::ImmutableOwned,
+            ConstRecordState::RuntimeValue,
+        )
+        .expect("fixture row")
+        .id()
+}
+
+fn orphan_bool_expression(builder: &mut AstExpressionBuilder) -> ExprId {
+    builder
+        .reference_with_type_id(
+            PathId::ROOT,
+            TypeId(9999),
+            None,
+            ValueMode::ImmutableOwned,
+            ConstRecordState::RuntimeValue,
+        )
+        .expect("fixture row")
+        .id()
 }
 
 fn owned_render_handoff(node: OwnedRuntimeTemplateNode) -> OwnedRuntimeTemplateHandoff {
     OwnedRuntimeTemplateHandoff {
         body: OwnedRuntimeTemplateBody::Render(node),
-        span: None,
     }
 }
 
-fn validate_owned_handoff_with_orphan_type_id(node: OwnedRuntimeTemplateNode) {
+fn validate_owned_handoff_with_orphan_type_id(
+    node: OwnedRuntimeTemplateNode,
+    expressions: &AstExpressionBuilder,
+    constants: &ConstValueStore,
+) {
     let handoff = owned_render_handoff(node);
     let type_environment = TypeEnvironment::new();
     let store = TemplateIrStore::new();
     let context = TypeValidationContext {
+        expression_builder: expressions,
+        const_values: constants,
+        recovery_allowed: false,
         type_environment: &type_environment,
         template_ir_store: &store,
     };
@@ -79,13 +164,63 @@ fn validate_owned_handoff_with_orphan_type_id(node: OwnedRuntimeTemplateNode) {
 }
 
 #[test]
+fn expression_type_validation_walks_all_success_slots_and_the_error_channel() {
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let constants = ConstValueStore::default();
+    let type_environment = TypeEnvironment::new();
+    let store = TemplateIrStore::new();
+    let call = expressions
+        .function_call_with_typed_arguments(PathId::ROOT, vec![], vec![], None)
+        .expect("call")
+        .id();
+    let context = TypeValidationContext {
+        expression_builder: &expressions,
+        const_values: &constants,
+        recovery_allowed: false,
+        type_environment: &type_environment,
+        template_ir_store: &store,
+    };
+    validate_expression(&call, &context).expect("zero results need no sentinel TypeId");
+    let multiple = expressions
+        .function_call_with_typed_arguments(
+            PathId::ROOT,
+            vec![],
+            vec![builtin_type_ids::BOOL, TypeId(9999)],
+            None,
+        )
+        .expect("call")
+        .id();
+    let fallible = expressions
+        .with_typed_error_producer(expressions.own(call), TypeId(9999), None)
+        .expect("typed producer")
+        .id();
+    let context = TypeValidationContext {
+        expression_builder: &expressions,
+        const_values: &constants,
+        recovery_allowed: false,
+        type_environment: &type_environment,
+        template_ir_store: &store,
+    };
+    for root in [multiple, fallible] {
+        let error = validate_expression(&root, &context)
+            .expect_err("every result and error channel must resolve");
+        assert!(error.msg.contains("9999"));
+    }
+}
+
+#[test]
 fn owned_runtime_conditional_selector_type_ids_are_validated_before_inactive_elision() {
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let mut strings = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let selectors = vec![
-        TemplateBranchSelector::Bool(orphan_bool_expression()),
+        TemplateBranchSelector::Bool(orphan_bool_expression(&mut expressions)),
         TemplateBranchSelector::OptionPresentCapture {
-            scrutinee: Expression::bool(true, None, ValueMode::ImmutableOwned),
+            scrutinee: expressions
+                .bool(&mut constants, true, None, ValueMode::ImmutableOwned)
+                .expect("fixture literal")
+                .id(),
             pattern: Box::new(MatchPattern::OptionPresentCapture {
                 name: strings.intern("value"),
                 binding_path: PathId::ROOT,
@@ -97,22 +232,33 @@ fn owned_runtime_conditional_selector_type_ids_are_validated_before_inactive_eli
     ];
 
     for selector in selectors {
-        validate_owned_handoff_with_orphan_type_id(OwnedRuntimeTemplateNode::Conditional {
-            selector: Box::new(selector),
-            body: Box::new(OwnedRuntimeTemplateNode::Sequence {
-                children: Vec::new(),
+        validate_owned_handoff_with_orphan_type_id(
+            OwnedRuntimeTemplateNode::Conditional {
+                selector: Box::new(selector),
+                body: Box::new(OwnedRuntimeTemplateNode::Sequence {
+                    children: Vec::new(),
+                    span: None,
+                }),
                 span: None,
-            }),
-            span: None,
-        });
+            },
+            &expressions,
+            &constants,
+        );
     }
 }
-fn orphan_declaration() -> Declaration {
-    Declaration {
-        id: PathId::ROOT,
-        value: orphan_bool_expression(),
-        binding_span: None,
-        config_qualifier: None,
+
+fn orphan_declaration(expressions: &mut AstExpressionBuilder) -> Declaration {
+    {
+        let value = orphan_bool_expression(expressions);
+        Declaration {
+            id: PathId::ROOT,
+            type_id: TypeId(9999),
+            diagnostic_type: DataType::Bool,
+            value_mode: ValueMode::ImmutableOwned,
+            value: DeclarationValue::Initializer(value),
+            binding_span: None,
+            config_qualifier: None,
+        }
     }
 }
 
@@ -125,15 +271,16 @@ fn empty_loop_body() -> Box<OwnedRuntimeTemplateNode> {
 
 #[test]
 fn owned_runtime_slot_handoff_validates_all_expression_payload_routes() {
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let slot_handoffs = vec![
         OwnedRuntimeSlotApplicationHandoff {
             wrapper: OwnedRuntimeTemplateNode::DynamicExpression {
-                expression: Box::new(orphan_bool_expression()),
+                expression: orphan_bool_expression(&mut expressions),
                 span: None,
             },
             contribution_sources: Vec::new(),
             slot_sites: Vec::new(),
-            span: None,
         },
         OwnedRuntimeSlotApplicationHandoff {
             wrapper: OwnedRuntimeTemplateNode::Sequence {
@@ -143,7 +290,9 @@ fn owned_runtime_slot_handoff_validates_all_expression_payload_routes() {
             contribution_sources: vec![OwnedRuntimeSlotContributionSource {
                 source: RuntimeSlotContributionSourceId(0),
                 render_root: OwnedRuntimeTemplateNode::Conditional {
-                    selector: Box::new(TemplateBranchSelector::Bool(orphan_bool_expression())),
+                    selector: Box::new(TemplateBranchSelector::Bool(orphan_bool_expression(
+                        &mut expressions,
+                    ))),
                     body: Box::new(OwnedRuntimeTemplateNode::Sequence {
                         children: Vec::new(),
                         span: None,
@@ -154,7 +303,6 @@ fn owned_runtime_slot_handoff_validates_all_expression_payload_routes() {
                 span: None,
             }],
             slot_sites: Vec::new(),
-            span: None,
         },
         OwnedRuntimeSlotApplicationHandoff {
             wrapper: OwnedRuntimeTemplateNode::Sequence {
@@ -167,12 +315,18 @@ fn owned_runtime_slot_handoff_validates_all_expression_payload_routes() {
                 render_root: OwnedRuntimeTemplateNode::Loop {
                     header: TemplateLoopHeader::Range {
                         bindings: Box::new(LoopBindings {
-                            item: Some(orphan_declaration()),
+                            item: Some(orphan_declaration(&mut expressions)),
                             index: None,
                         }),
                         range: Box::new(RangeLoopSpec {
-                            start: Expression::bool(true, None, ValueMode::ImmutableOwned),
-                            end: Expression::bool(true, None, ValueMode::ImmutableOwned),
+                            start: expressions
+                                .bool(&mut constants, true, None, ValueMode::ImmutableOwned)
+                                .expect("fixture literal")
+                                .id(),
+                            end: expressions
+                                .bool(&mut constants, true, None, ValueMode::ImmutableOwned)
+                                .expect("fixture literal")
+                                .id(),
                             end_kind: RangeEndKind::Exclusive,
                             step: None,
                         }),
@@ -183,7 +337,6 @@ fn owned_runtime_slot_handoff_validates_all_expression_payload_routes() {
                 },
                 span: None,
             }],
-            span: None,
         },
     ];
 
@@ -191,6 +344,9 @@ fn owned_runtime_slot_handoff_validates_all_expression_payload_routes() {
         let type_environment = TypeEnvironment::new();
         let store = TemplateIrStore::new();
         let context = TypeValidationContext {
+            expression_builder: &expressions,
+            const_values: &constants,
+            recovery_allowed: false,
             type_environment: &type_environment,
             template_ir_store: &store,
         };
@@ -202,24 +358,36 @@ fn owned_runtime_slot_handoff_validates_all_expression_payload_routes() {
 
 #[test]
 fn static_true_assertion_owned_handoff_is_validated_before_message_elision() {
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let handoff = owned_render_handoff(OwnedRuntimeTemplateNode::Conditional {
-        selector: Box::new(TemplateBranchSelector::Bool(orphan_bool_expression())),
+        selector: Box::new(TemplateBranchSelector::Bool(orphan_bool_expression(
+            &mut expressions,
+        ))),
         body: Box::new(OwnedRuntimeTemplateNode::Sequence {
             children: Vec::new(),
             span: None,
         }),
         span: None,
     });
+    let runtime_template = expressions
+        .append_runtime_template(handoff, None)
+        .expect("handoff");
     let node = AstNode {
         kind: NodeKind::Assert {
-            condition: Expression::bool(true, None, ValueMode::ImmutableOwned),
-            message: Box::new(Expression::new(
-                ExpressionKind::RuntimeTemplateHandoff(Box::new(handoff)),
-                None,
-                builtin_type_ids::STRING,
-                DataType::Template,
-                ValueMode::ImmutableOwned,
-            )),
+            condition: expressions
+                .bool(&mut constants, true, None, ValueMode::ImmutableOwned)
+                .expect("fixture literal")
+                .id(),
+            message: expressions
+                .append_expression(
+                    ExpressionOp::RuntimeTemplate(runtime_template),
+                    None,
+                    builtin_type_ids::STRING,
+                    ValueMode::ImmutableOwned,
+                )
+                .expect("fixture operation")
+                .id(),
         },
         span: None,
         scope: PathId::ROOT,
@@ -227,6 +395,9 @@ fn static_true_assertion_owned_handoff_is_validated_before_message_elision() {
     let type_environment = TypeEnvironment::new();
     let store = TemplateIrStore::new();
     let context = TypeValidationContext {
+        expression_builder: &expressions,
+        const_values: &constants,
+        recovery_allowed: false,
         type_environment: &type_environment,
         template_ir_store: &store,
     };
@@ -238,25 +409,34 @@ fn static_true_assertion_owned_handoff_is_validated_before_message_elision() {
 
 #[test]
 fn static_true_assertion_slot_handoff_is_validated_before_message_elision() {
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let slot_handoff = OwnedRuntimeSlotApplicationHandoff {
         wrapper: OwnedRuntimeTemplateNode::DynamicExpression {
-            expression: Box::new(orphan_bool_expression()),
+            expression: orphan_bool_expression(&mut expressions),
             span: None,
         },
         contribution_sources: Vec::new(),
         slot_sites: Vec::new(),
-        span: None,
     };
+    let runtime_slot_application = expressions
+        .append_runtime_slot_application(slot_handoff, None)
+        .expect("handoff");
     let node = AstNode {
         kind: NodeKind::Assert {
-            condition: Expression::bool(true, None, ValueMode::ImmutableOwned),
-            message: Box::new(Expression::new(
-                ExpressionKind::RuntimeSlotApplicationHandoff(Box::new(slot_handoff)),
-                None,
-                builtin_type_ids::STRING,
-                DataType::Template,
-                ValueMode::ImmutableOwned,
-            )),
+            condition: expressions
+                .bool(&mut constants, true, None, ValueMode::ImmutableOwned)
+                .expect("fixture literal")
+                .id(),
+            message: expressions
+                .append_expression(
+                    ExpressionOp::RuntimeSlotApplication(runtime_slot_application),
+                    None,
+                    builtin_type_ids::STRING,
+                    ValueMode::ImmutableOwned,
+                )
+                .expect("fixture operation")
+                .id(),
         },
         span: None,
         scope: PathId::ROOT,
@@ -264,6 +444,9 @@ fn static_true_assertion_slot_handoff_is_validated_before_message_elision() {
     let type_environment = TypeEnvironment::new();
     let store = TemplateIrStore::new();
     let context = TypeValidationContext {
+        expression_builder: &expressions,
+        const_values: &constants,
+        recovery_allowed: false,
         type_environment: &type_environment,
         template_ir_store: &store,
     };
@@ -275,9 +458,11 @@ fn static_true_assertion_slot_handoff_is_validated_before_message_elision() {
 
 #[test]
 fn owned_runtime_loop_header_type_ids_are_validated_before_inactive_elision() {
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let headers = [
         TemplateLoopHeader::Conditional {
-            condition: Box::new(orphan_bool_expression()),
+            condition: orphan_bool_expression(&mut expressions),
         },
         TemplateLoopHeader::Range {
             bindings: Box::new(LoopBindings {
@@ -285,8 +470,11 @@ fn owned_runtime_loop_header_type_ids_are_validated_before_inactive_elision() {
                 index: None,
             }),
             range: Box::new(RangeLoopSpec {
-                start: orphan_bool_expression(),
-                end: Expression::bool(true, None, ValueMode::ImmutableOwned),
+                start: orphan_bool_expression(&mut expressions),
+                end: expressions
+                    .bool(&mut constants, true, None, ValueMode::ImmutableOwned)
+                    .expect("fixture literal")
+                    .id(),
                 end_kind: RangeEndKind::Exclusive,
                 step: None,
             }),
@@ -297,8 +485,11 @@ fn owned_runtime_loop_header_type_ids_are_validated_before_inactive_elision() {
                 index: None,
             }),
             range: Box::new(RangeLoopSpec {
-                start: Expression::bool(true, None, ValueMode::ImmutableOwned),
-                end: orphan_bool_expression(),
+                start: expressions
+                    .bool(&mut constants, true, None, ValueMode::ImmutableOwned)
+                    .expect("fixture literal")
+                    .id(),
+                end: orphan_bool_expression(&mut expressions),
                 end_kind: RangeEndKind::Exclusive,
                 step: None,
             }),
@@ -309,20 +500,32 @@ fn owned_runtime_loop_header_type_ids_are_validated_before_inactive_elision() {
                 index: None,
             }),
             range: Box::new(RangeLoopSpec {
-                start: Expression::bool(true, None, ValueMode::ImmutableOwned),
-                end: Expression::bool(true, None, ValueMode::ImmutableOwned),
+                start: expressions
+                    .bool(&mut constants, true, None, ValueMode::ImmutableOwned)
+                    .expect("fixture literal")
+                    .id(),
+                end: expressions
+                    .bool(&mut constants, true, None, ValueMode::ImmutableOwned)
+                    .expect("fixture literal")
+                    .id(),
                 end_kind: RangeEndKind::Exclusive,
-                step: Some(orphan_bool_expression()),
+                step: Some(orphan_bool_expression(&mut expressions)),
             }),
         },
         TemplateLoopHeader::Range {
             bindings: Box::new(LoopBindings {
-                item: Some(orphan_declaration()),
+                item: Some(orphan_declaration(&mut expressions)),
                 index: None,
             }),
             range: Box::new(RangeLoopSpec {
-                start: Expression::bool(true, None, ValueMode::ImmutableOwned),
-                end: Expression::bool(true, None, ValueMode::ImmutableOwned),
+                start: expressions
+                    .bool(&mut constants, true, None, ValueMode::ImmutableOwned)
+                    .expect("fixture literal")
+                    .id(),
+                end: expressions
+                    .bool(&mut constants, true, None, ValueMode::ImmutableOwned)
+                    .expect("fixture literal")
+                    .id(),
                 end_kind: RangeEndKind::Exclusive,
                 step: None,
             }),
@@ -332,69 +535,93 @@ fn owned_runtime_loop_header_type_ids_are_validated_before_inactive_elision() {
                 item: None,
                 index: None,
             }),
-            iterable: Box::new(orphan_bool_expression()),
+            iterable: orphan_bool_expression(&mut expressions),
         },
         TemplateLoopHeader::Collection {
             bindings: Box::new(LoopBindings {
                 item: None,
-                index: Some(orphan_declaration()),
+                index: Some(orphan_declaration(&mut expressions)),
             }),
-            iterable: Box::new(Expression::bool(true, None, ValueMode::ImmutableOwned)),
+            iterable: expressions
+                .bool(&mut constants, true, None, ValueMode::ImmutableOwned)
+                .expect("fixture literal")
+                .id(),
         },
     ];
 
     for header in headers {
-        validate_owned_handoff_with_orphan_type_id(OwnedRuntimeTemplateNode::Loop {
-            header,
-            body: Box::new(OwnedRuntimeTemplateNode::Sequence {
-                children: Vec::new(),
+        validate_owned_handoff_with_orphan_type_id(
+            OwnedRuntimeTemplateNode::Loop {
+                header,
+                body: Box::new(OwnedRuntimeTemplateNode::Sequence {
+                    children: Vec::new(),
+                    span: None,
+                }),
+                aggregate_wrapper: None,
                 span: None,
-            }),
-            aggregate_wrapper: None,
-            span: None,
-        });
+            },
+            &expressions,
+            &constants,
+        );
     }
 }
 
 #[test]
 fn static_true_assertion_message_reaches_type_validation_before_elision() {
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let mut strings = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let structural = Expression::string_slice(
-        strings.intern("structural"),
-        None,
-        ValueMode::ImmutableOwned,
-    );
+    let structural = expressions
+        .string_slice(
+            &mut constants,
+            strings.intern("structural"),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture literal")
+        .id();
     let mut store = TemplateIrStore::new();
     let template = template_with_dynamic_overlay(
         &mut store,
         structural,
-        invalid_string_expression(None),
+        invalid_string_expression(&mut expressions, None),
         TemplateTirPhase::Finalized,
     );
-    let template_expression = Expression::template(template, ValueMode::ImmutableOwned);
+    let template_expression = expressions
+        .template(template, ValueMode::ImmutableOwned)
+        .expect("template row")
+        .id();
 
     let mut type_environment = TypeEnvironment::new();
     let option_string_type_id = type_environment.intern_option(builtin_type_ids::STRING);
-    let message = Expression::new(
-        ExpressionKind::Coerced {
-            value: Box::new(template_expression),
-            to_type: option_string_type_id,
-        },
-        None,
-        option_string_type_id,
-        DataType::Option(Box::new(DataType::StringSlice)),
-        ValueMode::ImmutableOwned,
-    );
+    let message = expressions
+        .append_expression(
+            ExpressionOp::Coerce {
+                value: expressions.own(template_expression),
+                operation: CoercionOperation::ToType(option_string_type_id),
+            },
+            None,
+            option_string_type_id,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture operation")
+        .id();
     let node = AstNode {
         kind: NodeKind::Assert {
-            condition: Expression::bool(true, None, ValueMode::ImmutableOwned),
-            message: Box::new(message),
+            condition: expressions
+                .bool(&mut constants, true, None, ValueMode::ImmutableOwned)
+                .expect("fixture literal")
+                .id(),
+            message,
         },
         span: None,
         scope: PathId::ROOT,
     };
     let context = TypeValidationContext {
+        expression_builder: &expressions,
+        const_values: &constants,
+        recovery_allowed: false,
         type_environment: &type_environment,
         template_ir_store: &store,
     };
@@ -406,14 +633,14 @@ fn static_true_assertion_message_reaches_type_validation_before_elision() {
 
 fn template_with_dynamic_overlay(
     store: &mut TemplateIrStore,
-    structural: Expression,
-    overlay: Expression,
+    structural: ExprId,
+    overlay: ExprId,
     phase: TemplateTirPhase,
 ) -> Template {
     let site_id = store.next_expression_site_id();
     let node = store.push_node(TemplateIrNode::new(
         crate::compiler_frontend::ast::templates::tir::TemplateIrNodeKind::DynamicExpression {
-            expression: Box::new(structural),
+            expression: structural,
             origin: TemplateSegmentOrigin::Body,
             site_id,
         },
@@ -428,7 +655,7 @@ fn template_with_dynamic_overlay(
     ));
     let expression_overlay_id = store
         .allocate_expression_overlay(TirExpressionOverlay {
-            overrides: vec![(site_id, Box::new(overlay))],
+            overrides: vec![(site_id, overlay)],
         })
         .expect("test overlay allocation");
     let context = TemplateViewContext {
@@ -448,20 +675,29 @@ fn template_with_dynamic_overlay(
 
 #[test]
 fn validation_checks_effective_dynamic_expression_overlay() {
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let mut strings = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let structural = Expression::string_slice(
-        strings.intern("structural"),
-        None,
-        ValueMode::ImmutableOwned,
-    );
-    let overlay = invalid_string_expression(None);
+    let structural = expressions
+        .string_slice(
+            &mut constants,
+            strings.intern("structural"),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture literal")
+        .id();
+    let overlay = invalid_string_expression(&mut expressions, None);
     let mut store = TemplateIrStore::new();
     let template =
         template_with_dynamic_overlay(&mut store, structural, overlay, TemplateTirPhase::Finalized);
     let type_environment = TypeEnvironment::new();
     let store_borrow = store;
     let context = TypeValidationContext {
+        expression_builder: &expressions,
+        const_values: &constants,
+        recovery_allowed: false,
         type_environment: &type_environment,
         template_ir_store: &store_borrow,
     };
@@ -474,22 +710,31 @@ fn validation_checks_effective_dynamic_expression_overlay() {
 
 #[test]
 fn validation_rejects_non_finalized_template_reference() {
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let mut strings = StringTable::new();
     let _path_fork = PathInternerFork::empty();
-    let structural = Expression::string_slice(
-        strings.intern("structural"),
-        None,
-        ValueMode::ImmutableOwned,
-    );
+    let structural = expressions
+        .string_slice(
+            &mut constants,
+            strings.intern("structural"),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture literal")
+        .id();
     let mut store = TemplateIrStore::new();
     let template = template_with_dynamic_overlay(
         &mut store,
-        structural.clone(),
+        structural,
         structural,
         TemplateTirPhase::Composed,
     );
     let type_environment = TypeEnvironment::new();
     let context = TypeValidationContext {
+        expression_builder: &expressions,
+        const_values: &constants,
+        recovery_allowed: false,
         type_environment: &type_environment,
         template_ir_store: &store,
     };
@@ -502,6 +747,8 @@ fn validation_rejects_non_finalized_template_reference() {
 
 #[test]
 fn validation_reports_missing_template_root() {
+    let expressions = AstExpressionBuilder::new().unwrap();
+    let constants = ConstValueStore::default();
     let store = TemplateIrStore::new();
     let template = Template {
         tir_reference: TemplateTirReference {
@@ -513,6 +760,9 @@ fn validation_reports_missing_template_root() {
     };
     let type_environment = TypeEnvironment::new();
     let context = TypeValidationContext {
+        expression_builder: &expressions,
+        const_values: &constants,
+        recovery_allowed: false,
         type_environment: &type_environment,
         template_ir_store: &store,
     };
@@ -534,11 +784,11 @@ fn finalized_template_with_site_overlay(
     store: &mut TemplateIrStore,
     root: crate::compiler_frontend::ast::templates::tir::TemplateIrId,
     site_id: ExpressionSiteId,
-    overlay_expression: Expression,
+    overlay_expression: ExprId,
 ) -> Template {
     let expression_overlay_id = store
         .allocate_expression_overlay(TirExpressionOverlay {
-            overrides: vec![(site_id, Box::new(overlay_expression))],
+            overrides: vec![(site_id, overlay_expression)],
         })
         .expect("test overlay allocation");
     let context = TemplateViewContext {
@@ -556,95 +806,43 @@ fn finalized_template_with_site_overlay(
     }
 }
 
-fn invalid_bool_expression(value: bool, span: Option<SourceSpan>) -> Expression {
-    Expression::new(
-        ExpressionKind::Bool(value),
-        span,
-        TypeId(9999),
-        DataType::Bool,
-        ValueMode::ImmutableOwned,
-    )
-}
-
-fn pending_runtime_expression(item: ExpressionRpnItem) -> Expression {
-    Expression::new(
-        ExpressionKind::Runtime(ExpressionRpn { items: vec![item] }),
-        None,
-        builtin_type_ids::BOOL,
-        DataType::Bool,
-        ValueMode::ImmutableOwned,
-    )
-}
-
-#[test]
-fn pending_numeric_literal_is_a_final_validation_invariant() {
-    let mut strings = StringTable::new();
-    let source_text = strings.intern("1");
-    let normalized_text = strings.intern("1");
-    let expression = pending_runtime_expression(ExpressionRpnItem::PendingNumericLiteral {
-        token: crate::compiler_frontend::numeric_text::token::NumericLiteralToken::new(
-            moth_lexical::numeric::grammar::NumericLiteralSign::Positive,
-            source_text,
-            normalized_text,
-            moth_lexical::numeric::grammar::NumericLiteralKind::WholeNumber,
-            1,
-            0,
-            0,
-            moth_lexical::numeric::grammar::NumericExponentSign::None,
-        ),
-        span: None,
-        value_mode: ValueMode::ImmutableOwned,
-    });
-    let type_environment = TypeEnvironment::new();
-    let store = TemplateIrStore::new();
-    let context = TypeValidationContext {
-        type_environment: &type_environment,
-        template_ir_store: &store,
-    };
-
-    let error = validate_expression(&expression, &context)
-        .expect_err("an escaped pending literal must fail final type validation");
-    assert!(
-        error
-            .msg
-            .contains("evaluate_expression must resolve it first"),
-        "unexpected invariant message: {error:?}"
-    );
-}
-
-#[test]
-fn pending_group_is_a_final_validation_invariant() {
-    let expression = pending_runtime_expression(ExpressionRpnItem::PendingGroup {
-        nodes: Vec::new(),
-        span: None,
-    });
-    let type_environment = TypeEnvironment::new();
-    let store = TemplateIrStore::new();
-    let context = TypeValidationContext {
-        type_environment: &type_environment,
-        template_ir_store: &store,
-    };
-
-    let error = validate_expression(&expression, &context)
-        .expect_err("an escaped pending group must fail final type validation");
-    assert!(
-        error
-            .msg
-            .contains("evaluate_expression must resolve it first"),
-        "unexpected invariant message: {error:?}"
-    );
+fn invalid_bool_expression(
+    builder: &mut AstExpressionBuilder,
+    _value: bool,
+    span: Option<SourceSpan>,
+) -> ExprId {
+    builder
+        .reference_with_type_id(
+            PathId::ROOT,
+            TypeId(9999),
+            span,
+            ValueMode::ImmutableOwned,
+            ConstRecordState::RuntimeValue,
+        )
+        .expect("fixture row")
+        .id()
 }
 
 #[test]
 fn finalized_tir_view_conditional_selector_payload_validates_effective_overlay_span() {
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let type_environment = TypeEnvironment::new();
     let mut store = TemplateIrStore::new();
 
     let structural_span = Some(authored_span(10));
-    let structural_selector = Expression::bool(true, structural_span, ValueMode::ImmutableOwned);
+    let structural_selector = expressions
+        .bool(
+            &mut constants,
+            true,
+            structural_span,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture literal")
+        .id();
 
     let overlay_span = Some(authored_span(20));
-    let overlay_selector = invalid_bool_expression(true, overlay_span);
+    let overlay_selector = invalid_bool_expression(&mut expressions, true, overlay_span);
 
     let (template_id, selector_site_id) = {
         let mut builder = TemplateIrBuilder::new(&mut store);
@@ -682,6 +880,9 @@ fn finalized_tir_view_conditional_selector_payload_validates_effective_overlay_s
         overlay_selector,
     );
     let context = TypeValidationContext {
+        expression_builder: &expressions,
+        const_values: &constants,
+        recovery_allowed: false,
         type_environment: &type_environment,
         template_ir_store: &store,
     };
@@ -699,20 +900,30 @@ fn finalized_tir_view_conditional_selector_payload_validates_effective_overlay_s
 
 #[test]
 fn finalized_tir_view_loop_header_payload_validates_effective_overlay_span() {
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
     let type_environment = TypeEnvironment::new();
     let mut store = TemplateIrStore::new();
 
     let structural_span = Some(authored_span(10));
-    let structural_condition = Expression::bool(false, structural_span, ValueMode::ImmutableOwned);
+    let structural_condition = expressions
+        .bool(
+            &mut constants,
+            false,
+            structural_span,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture literal")
+        .id();
 
     let overlay_span = Some(authored_span(30));
-    let overlay_condition = invalid_bool_expression(false, overlay_span);
+    let overlay_condition = invalid_bool_expression(&mut expressions, false, overlay_span);
 
     let (template_id, condition_site_id) = {
         let mut builder = TemplateIrBuilder::new(&mut store);
         let loop_body = builder.push_sequence_node(Vec::new(), None);
         let header = TemplateLoopHeader::Conditional {
-            condition: Box::new(structural_condition),
+            condition: structural_condition,
         };
         let loop_node_id = builder.push_loop_node(header, loop_body, None, structural_span);
         let template_id = builder.finish_template(
@@ -746,6 +957,9 @@ fn finalized_tir_view_loop_header_payload_validates_effective_overlay_span() {
         overlay_condition,
     );
     let context = TypeValidationContext {
+        expression_builder: &expressions,
+        const_values: &constants,
+        recovery_allowed: false,
         type_environment: &type_environment,
         template_ir_store: &store,
     };
@@ -758,5 +972,263 @@ fn finalized_tir_view_loop_header_payload_validates_effective_overlay_span() {
         error.source_span, overlay_span,
         "error span must point to the effective overlay loop header, not the structural header"
     );
+    assert!(error.msg.contains("9999"));
+}
+
+fn bool_reference(expressions: &mut AstExpressionBuilder) -> ExprId {
+    expressions
+        .reference_with_type_id(
+            PathId::ROOT,
+            builtin_type_ids::BOOL,
+            None,
+            ValueMode::ImmutableOwned,
+            ConstRecordState::RuntimeValue,
+        )
+        .expect("fixture leaf")
+        .id()
+}
+
+fn bool_collection(
+    expressions: &mut AstExpressionBuilder,
+    type_environment: &mut TypeEnvironment,
+    items: Vec<ExprId>,
+) -> ExprId {
+    let items = expressions.own_slice(&items);
+    expressions
+        .collection_with_type_id(
+            items,
+            CollectionExpressionType {
+                element_type_id: builtin_type_ids::BOOL,
+                fixed_capacity: None,
+                collection_type_id: None,
+            },
+            type_environment,
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture collection")
+        .id()
+}
+
+/// Builds a `depth`-deep DAG above `leaf`. Each collection row references the row below it twice.
+fn shared_chain(
+    expressions: &mut AstExpressionBuilder,
+    type_environment: &mut TypeEnvironment,
+    leaf: ExprId,
+    depth: usize,
+) -> ExprId {
+    (0..depth).fold(leaf, |below, _| {
+        bool_collection(expressions, type_environment, vec![below, below])
+    })
+}
+
+/// A recovering call that `catch` protects. It returns `BOOL` and its error channel is `STRING`.
+fn recovering_call(expressions: &mut AstExpressionBuilder) -> ExprId {
+    expressions
+        .handled_fallible_function_call_with_typed_arguments(
+            PathId::ROOT,
+            vec![],
+            vec![builtin_type_ids::BOOL],
+            builtin_type_ids::STRING,
+            FallibleExpressionHandling::Recover,
+            None,
+        )
+        .expect("recovering call fixture")
+        .id()
+}
+
+/// A value-producing `catch` over `handled`, with an empty handler body.
+fn catch_over(expressions: &mut AstExpressionBuilder, handled: ExprId) -> ExprId {
+    expressions
+        .value_block(
+            ValueBlock::Catch(ValueCatchBlock {
+                handled_value: handled,
+                handler: FallibleHandling::Handler {
+                    error: None,
+                    body: vec![],
+                },
+                result_type_ids: vec![builtin_type_ids::BOOL],
+            }),
+            None,
+            SuccessShape::One(builtin_type_ids::BOOL),
+            ValueMode::ImmutableOwned,
+        )
+        .expect("catch fixture")
+        .id()
+}
+
+#[test]
+fn shared_expression_dag_expands_each_row_once() {
+    const DEPTH: usize = 40;
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let constants = ConstValueStore::default();
+    let mut type_environment = TypeEnvironment::new();
+    let store = TemplateIrStore::new();
+    let leaf = bool_reference(&mut expressions);
+    let root = shared_chain(&mut expressions, &mut type_environment, leaf, DEPTH);
+    let context = TypeValidationContext {
+        expression_builder: &expressions,
+        const_values: &constants,
+        recovery_allowed: false,
+        type_environment: &type_environment,
+        template_ir_store: &store,
+    };
+
+    // Path recursion would expand 2^DEPTH paths. One expansion per row gives the leaf plus DEPTH rows.
+    let mut expansions = 0usize;
+    validate_expression_counted(&root, &context, &mut || expansions += 1)
+        .expect("shared collection DAG is well typed");
+    assert_eq!(expansions, DEPTH + 1);
+}
+
+#[test]
+fn shared_expression_dag_still_reports_an_invalid_leaf() {
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let constants = ConstValueStore::default();
+    let mut type_environment = TypeEnvironment::new();
+    let store = TemplateIrStore::new();
+    let leaf = invalid_string_expression(&mut expressions, None);
+    let root = shared_chain(&mut expressions, &mut type_environment, leaf, 40);
+    let context = TypeValidationContext {
+        expression_builder: &expressions,
+        const_values: &constants,
+        recovery_allowed: false,
+        type_environment: &type_environment,
+        template_ir_store: &store,
+    };
+
+    let error =
+        validate_expression(&root, &context).expect_err("the shared invalid leaf must be rejected");
+    assert!(error.msg.contains("9999"));
+}
+
+#[test]
+fn catch_protected_subexpression_shared_by_two_catches_is_accepted() {
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let constants = ConstValueStore::default();
+    let mut type_environment = TypeEnvironment::new();
+    let store = TemplateIrStore::new();
+    let recovering = recovering_call(&mut expressions);
+    let first = catch_over(&mut expressions, recovering);
+    let second = catch_over(&mut expressions, recovering);
+    let root = bool_collection(&mut expressions, &mut type_environment, vec![first, second]);
+    let context = TypeValidationContext {
+        expression_builder: &expressions,
+        const_values: &constants,
+        recovery_allowed: false,
+        type_environment: &type_environment,
+        template_ir_store: &store,
+    };
+
+    // Root, both catches, and the shared subject once under recovery. The second catch reuses it.
+    let mut expansions = 0usize;
+    validate_expression_counted(&root, &context, &mut || expansions += 1)
+        .expect("a recovering subject may be shared by catches");
+    assert_eq!(expansions, 4);
+}
+
+#[test]
+fn recovering_subject_reached_outside_its_catch_is_rejected_after_the_catch_visit() {
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let constants = ConstValueStore::default();
+    let mut type_environment = TypeEnvironment::new();
+    let store = TemplateIrStore::new();
+    let recovering = recovering_call(&mut expressions);
+    let protected = catch_over(&mut expressions, recovering);
+    // The catch visit validates `recovering` under recovery. The plain reference must still fail,
+    // whichever order the two appear in.
+    let roots = [
+        bool_collection(
+            &mut expressions,
+            &mut type_environment,
+            vec![protected, recovering],
+        ),
+        bool_collection(
+            &mut expressions,
+            &mut type_environment,
+            vec![recovering, protected],
+        ),
+    ];
+    let context = TypeValidationContext {
+        expression_builder: &expressions,
+        const_values: &constants,
+        recovery_allowed: false,
+        type_environment: &type_environment,
+        template_ir_store: &store,
+    };
+
+    for root in roots {
+        let error = validate_expression(&root, &context)
+            .expect_err("a plain use of a recovering subject must be rejected");
+        assert!(
+            error
+                .msg
+                .contains("Recovering expression reached finalization outside ValueBlock::Catch")
+        );
+    }
+}
+
+#[test]
+fn shared_template_overlay_dag_validates_on_the_tir_path() {
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let mut strings = StringTable::new();
+    let mut type_environment = TypeEnvironment::new();
+    let structural = expressions
+        .string_slice(
+            &mut constants,
+            strings.intern("structural"),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture literal")
+        .id();
+    let leaf = bool_reference(&mut expressions);
+    let overlay = shared_chain(&mut expressions, &mut type_environment, leaf, 30);
+    let mut store = TemplateIrStore::new();
+    let template =
+        template_with_dynamic_overlay(&mut store, structural, overlay, TemplateTirPhase::Finalized);
+    let context = TypeValidationContext {
+        expression_builder: &expressions,
+        const_values: &constants,
+        recovery_allowed: false,
+        type_environment: &type_environment,
+        template_ir_store: &store,
+    };
+
+    validate_template_expression_payloads(&template, &context)
+        .expect("a shared well-typed overlay DAG validates");
+}
+
+#[test]
+fn shared_template_overlay_dag_still_reports_an_invalid_leaf() {
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let mut strings = StringTable::new();
+    let mut type_environment = TypeEnvironment::new();
+    let structural = expressions
+        .string_slice(
+            &mut constants,
+            strings.intern("structural"),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture literal")
+        .id();
+    let leaf = invalid_string_expression(&mut expressions, None);
+    let overlay = shared_chain(&mut expressions, &mut type_environment, leaf, 30);
+    let mut store = TemplateIrStore::new();
+    let template =
+        template_with_dynamic_overlay(&mut store, structural, overlay, TemplateTirPhase::Finalized);
+    let context = TypeValidationContext {
+        expression_builder: &expressions,
+        const_values: &constants,
+        recovery_allowed: false,
+        type_environment: &type_environment,
+        template_ir_store: &store,
+    };
+
+    let error = validate_template_expression_payloads(&template, &context)
+        .expect_err("the shared invalid overlay leaf must be rejected");
     assert!(error.msg.contains("9999"));
 }

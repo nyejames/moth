@@ -17,13 +17,13 @@ use super::support::{
 
 fn box_fields() -> Vec<Field> {
     vec![
-        Field::required("first", SchemaType::Int),
-        Field::required("second", SchemaType::Int),
+        Field::required("first", SchemaType::I32),
+        Field::required("second", SchemaType::I32),
     ]
 }
 
 fn box_declaration() -> &'static str {
-    "Box = |\n    first Int,\n    second Int,\n|\n"
+    "Box = |\n    first I32,\n    second I32,\n|\n"
 }
 
 fn box_schema() -> Schema {
@@ -41,8 +41,8 @@ fn nominal_fixtures() -> Vec<ParityFixture> {
     let expected_box = Value::Record(vec![(
         "box".into(),
         Value::Record(vec![
-            ("first".into(), Value::Int(1)),
-            ("second".into(), Value::Int(2)),
+            ("first".into(), Value::I32(1)),
+            ("second".into(), Value::I32(2)),
         ]),
     )]);
 
@@ -117,8 +117,8 @@ fn nominal_fixtures() -> Vec<ParityFixture> {
             "wrong_nominal_qualifier_with_identical_fields",
             wrong_qualifier.clone(),
             concat!(
-                "Box = |\n    first Int,\n    second Int,\n|\n",
-                "Other = |\n    first Int,\n    second Int,\n|\n",
+                "Box = |\n    first I32,\n    second I32,\n|\n",
+                "Other = |\n    first I32,\n    second I32,\n|\n",
             ),
             box_schema(),
             SourceExpectation::AcceptObserved(expected_box.clone()),
@@ -132,8 +132,8 @@ fn nominal_fixtures() -> Vec<ParityFixture> {
         .with_outcome_difference("schema-versus-source-identity"),
     );
     let typed_declarations = concat!(
-        "Box = |\n    first Int,\n    second Int,\n|\n",
-        "Other = |\n    first Int,\n    second Int,\n|\n",
+        "Box = |\n    first I32,\n    second I32,\n|\n",
+        "Other = |\n    first I32,\n    second I32,\n|\n",
         "Holder = | box Box |\n",
     );
     let typed_source = format!("{typed_declarations}data = Holder({wrong_qualifier})\n");
@@ -162,7 +162,7 @@ fn nominal_fixtures() -> Vec<ParityFixture> {
         fixture(
             "nested_qualified_nominal_children",
             nested_literal,
-            concat!("Child = | code Int |\n", "Parent = | child Child |\n",),
+            concat!("Child = | code I32 |\n", "Parent = | child Child |\n",),
             Schema::record(vec![Field::required(
                 "parent",
                 SchemaType::Struct {
@@ -171,7 +171,7 @@ fn nominal_fixtures() -> Vec<ParityFixture> {
                         "child",
                         SchemaType::Struct {
                             name: "Child".into(),
-                            fields: vec![Field::required("code", SchemaType::Int)],
+                            fields: vec![Field::required("code", SchemaType::I32)],
                         },
                     )],
                 },
@@ -181,7 +181,7 @@ fn nominal_fixtures() -> Vec<ParityFixture> {
                 "parent".into(),
                 Value::Record(vec![(
                     "child".into(),
-                    Value::Record(vec![("code".into(), Value::Int(7))]),
+                    Value::Record(vec![("code".into(), Value::I32(7))]),
                 )]),
             )])),
         )

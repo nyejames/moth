@@ -1,8 +1,8 @@
-can_error || -> Int, Error!:
+can_error || -> I32, Error!:
     return 1
 ;
 
-outer || -> {Int}:
+outer || -> {I32}:
     return {can_error()}
 ;
 

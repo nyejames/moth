@@ -1,0 +1,42 @@
+-- Runtime U8 operands stay in the selected U8 result domain. Overflow and
+-- underflow fail with the checked-failure code instead of widening, wrapping
+-- or saturating. Operands arrive through parameters so nothing folds.
+add_u8 |left U8, right U8| -> U8, Error!:
+    return left + right
+;
+
+subtract_u8 |left U8, right U8| -> U8, Error!:
+    return left - right
+;
+
+multiply_u8 |left U8, right U8| -> U8, Error!:
+    return left * right
+;
+
+ok_sum = add_u8(200, 55) catch:
+    then 0
+;
+ok_sum_text String = cast ok_sum
+
+add_code ~U32 = 0
+add_value = add_u8(255, 1) catch |add_error|:
+    add_code = add_error.code
+    then 0
+;
+add_text String = cast add_value
+
+subtract_code ~U32 = 0
+subtract_value = subtract_u8(0, 1) catch |subtract_error|:
+    subtract_code = subtract_error.code
+    then 0
+;
+subtract_text String = cast subtract_value
+
+multiply_code ~U32 = 0
+multiply_value = multiply_u8(16, 16) catch |multiply_error|:
+    multiply_code = multiply_error.code
+    then 0
+;
+multiply_text String = cast multiply_value
+
+[:scalar u8 checked ok=[ok_sum_text] add=[add_code]/[add_text] subtract=[subtract_code]/[subtract_text] multiply=[multiply_code]/[multiply_text]]

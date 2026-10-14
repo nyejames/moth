@@ -10,3 +10,4 @@ kind = "html"
 must_contain = [
     "1.5707963267948966",
 ]
+must_not_contain = ["Math.PI", "Math[\"PI\"]"]

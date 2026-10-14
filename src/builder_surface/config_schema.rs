@@ -10,6 +10,7 @@
 
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValue};
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use std::collections::HashSet;
 
 /// Dense identifier of one schema node (a record surface) inside a [`ConfigSchema`].
@@ -80,8 +81,7 @@ impl ProjectFieldConfigPolicies {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ConfigFieldShape {
     String,
-    Int,
-    Float,
+    FixedScalar(FixedScalar),
     Bool,
     Char,
     Record(ConfigSchemaNodeId),
@@ -412,8 +412,7 @@ fn shape_accepts_closed_strings(shape: &ConfigFieldShape) -> bool {
     match shape {
         ConfigFieldShape::String => true,
         ConfigFieldShape::Optional(inner) => shape_accepts_closed_strings(inner),
-        ConfigFieldShape::Int
-        | ConfigFieldShape::Float
+        ConfigFieldShape::FixedScalar(_)
         | ConfigFieldShape::Bool
         | ConfigFieldShape::Char
         | ConfigFieldShape::Record(_)
@@ -443,8 +442,7 @@ fn validate_shape_node_references(
         }
 
         ConfigFieldShape::String
-        | ConfigFieldShape::Int
-        | ConfigFieldShape::Float
+        | ConfigFieldShape::FixedScalar(_)
         | ConfigFieldShape::Bool
         | ConfigFieldShape::Char => Ok(()),
     }
@@ -464,8 +462,10 @@ fn default_matches_shape(
             _ => false,
         },
 
-        ConfigFieldShape::Int => matches!(value, PublicFoldedValue::Int(_)),
-        ConfigFieldShape::Float => matches!(value, PublicFoldedValue::Float(_)),
+        ConfigFieldShape::FixedScalar(expected) => matches!(
+            value,
+            PublicFoldedValue::FixedScalar(scalar) if scalar.scalar() == *expected
+        ),
         ConfigFieldShape::Bool => matches!(value, PublicFoldedValue::Bool(_)),
         ConfigFieldShape::Char => matches!(value, PublicFoldedValue::Char(_)),
         ConfigFieldShape::Record(node_id) => default_matches_record(schema, *node_id, value),
@@ -547,12 +547,8 @@ impl ConfigSchemaField {
         Self::leaf(name, ConfigFieldShape::String)
     }
 
-    pub fn int(name: &'static str) -> Self {
-        Self::leaf(name, ConfigFieldShape::Int)
-    }
-
-    pub fn float(name: &'static str) -> Self {
-        Self::leaf(name, ConfigFieldShape::Float)
+    pub fn fixed_scalar(name: &'static str, scalar: FixedScalar) -> Self {
+        Self::leaf(name, ConfigFieldShape::FixedScalar(scalar))
     }
 
     pub fn bool(name: &'static str) -> Self {
@@ -634,8 +630,7 @@ impl ConfigFieldShape {
     pub fn describe(&self) -> String {
         match self {
             ConfigFieldShape::String => "a string value".to_owned(),
-            ConfigFieldShape::Int => "an integer value".to_owned(),
-            ConfigFieldShape::Float => "a floating-point value".to_owned(),
+            ConfigFieldShape::FixedScalar(scalar) => format!("a value of type {}", scalar.name()),
             ConfigFieldShape::Bool => "a boolean value".to_owned(),
             ConfigFieldShape::Char => "a character value".to_owned(),
             ConfigFieldShape::Record(_) => "a record value".to_owned(),
@@ -649,8 +644,7 @@ impl ConfigFieldShape {
     fn plural_description(&self) -> String {
         match self {
             ConfigFieldShape::String => "strings".to_owned(),
-            ConfigFieldShape::Int => "integers".to_owned(),
-            ConfigFieldShape::Float => "floating-point values".to_owned(),
+            ConfigFieldShape::FixedScalar(scalar) => format!("{} values", scalar.name()),
             ConfigFieldShape::Bool => "booleans".to_owned(),
             ConfigFieldShape::Char => "characters".to_owned(),
             ConfigFieldShape::Record(_) => "records".to_owned(),

@@ -284,6 +284,9 @@ fn collect_from_node(
         | TemplateIrNodeKind::AggregateOutput
         | TemplateIrNodeKind::RuntimeSlotSite { .. }
         | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => Ok(()),
+        // A retained position is a leaf for slot layout: it holds no placeholders yet and keeps
+        // its authored document position until completion installs its value.
+        TemplateIrNodeKind::RetainedNumericIntake(_) => Ok(()),
     };
 
     visiting_nodes.remove(&node_id);

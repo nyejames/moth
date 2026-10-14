@@ -1,5 +1,5 @@
-compute || -> Int, Error!:
-    local #Int = cast! "2147483648"
+compute || -> I32, Error!:
+    local #I32 = cast "2147483648"
     return local
 ;
 

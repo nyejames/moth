@@ -13,6 +13,6 @@ is_release |input String| -> Bool:
     return ends_with(input, "release")
 ;
 
-label_length |input String| -> Int:
+label_length |input String| -> I32:
     return length(input)
 ;

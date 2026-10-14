@@ -15,6 +15,8 @@ page_head #= theme_head
 
     This page carries two documents: the reference solver, and the operational contract for the bounded oracle that executes normalized problems.
 
+    @https://github.com/nyejames/moth/blob/main/docs/roadmap/plans/production-borrow-checker.md (Production borrow checker and Boracle development) tracks the live alpha implementation, performance findings and actionable research-to-production follow-ups.
+
     @../checked-proof-budget-research (Checked proof-budget research) records how current experiments should preserve room for a future opt-in deep analysis tier without turning Boracle into a public fallback checker.
 ]
 

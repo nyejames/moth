@@ -6,22 +6,19 @@
 //! reconstructing lookup indexes.
 //!
 //! Owned by the AST environment builder and consumed by AST emission, `ScopeContext`, and
-//! finalization. Root tables update their own rows during environment building. Generated tables
-//! inherit an immutable completed table and keep only local replacements and appends, so nested
-//! materialisation never copies or mutates requester rows.
+//! finalization. Each table owns flat semantic slots and construction indexes. Generated
+//! environments restore their declarations from stable canonical inputs rather than inheriting
+//! requester tables.
 
-use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::ast_nodes::{Declaration, DeclarationValue};
 use crate::compiler_frontend::compiler_errors::CompilerError;
-#[cfg(test)]
-use crate::compiler_frontend::headers::module_symbols::OrderedSemanticDeclarationKind;
 use crate::compiler_frontend::headers::module_symbols::{
-    DeclarationId, OrderedSemanticDeclaration,
+    DeclarationId, OrderedSemanticDeclaration, OrderedSemanticDeclarationKind,
 };
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringId;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::rc::Rc;
 
 /// Module constants that have completed dependency-ordered semantic resolution.
 ///
@@ -66,42 +63,38 @@ impl ResolvedConstantSet {
 /// Declarations are stored in dependency-sorted order and indexed by `DeclarationId`.
 #[derive(Debug)]
 pub(crate) struct TopLevelDeclarationTable {
-    /// Immutable declarations inherited by a generated-local table.
-    base: Option<Rc<TopLevelDeclarationTable>>,
-    inherited_len: usize,
-    /// Root semantic slots or slots appended only by this generated layer.
+    /// Dense semantic slots followed by compiler/generated declarations.
     ///
     /// Compile-time-only aliases and traits own stable IDs but no value declaration row.
     declarations: Vec<Option<Declaration>>,
-    /// Generated-local replacements for inherited declaration slots.
-    replacements: FxHashMap<DeclarationId, Declaration>,
-    /// Root semantic paths, including metadata-only rows, plus compiler/generated declaration paths.
+    /// Semantic paths, including metadata-only rows, plus compiler/generated declaration paths.
     by_path: FxHashMap<PathId, DeclarationId>,
     /// Name-to-IDs map for declarations that carry a simple name.
     ///
     /// Multiple declarations may share a name (overloads or different paths).
     by_name: FxHashMap<StringId, Vec<DeclarationId>>,
+    /// Top-level constant headers indexed by their Stage 3 semantic slot.
+    ///
+    /// WHAT: records the header role joined with `DeclarationValue::PendingConstant`.
+    /// WHY: declared type identity cannot distinguish a pending constant from a nominal shell.
+    /// Dense identity matches `ResolvedConstantSet`; ids beyond the vector are not constants.
+    constant_headers: Vec<bool>,
 }
 
 impl Clone for TopLevelDeclarationTable {
     fn clone(&self) -> Self {
-        // A generated layer owns only its local delta, so cloning it shares every inherited row.
-        // A flat root clone is the only table operation that copies rows which could otherwise
-        // have formed an inherited prefix, and the benchmark counter keeps that boundary visible.
-        if self.base.is_none() {
-            add_frontend_counter(
-                FrontendCounter::GeneratedDeclarationInheritedRowCopies,
-                self.declarations.len(),
-            );
-        }
+        // Keep flat row copies visible to the benchmark counter. Stable generated restoration
+        // constructs its own table rather than cloning requester rows.
+        add_frontend_counter(
+            FrontendCounter::GeneratedDeclarationInheritedRowCopies,
+            self.declarations.len(),
+        );
 
         Self {
-            base: self.base.clone(),
-            inherited_len: self.inherited_len,
             declarations: self.declarations.clone(),
-            replacements: self.replacements.clone(),
             by_path: self.by_path.clone(),
             by_name: self.by_name.clone(),
+            constant_headers: self.constant_headers.clone(),
         }
     }
 }
@@ -109,12 +102,10 @@ impl Clone for TopLevelDeclarationTable {
 impl TopLevelDeclarationTable {
     pub(crate) fn empty() -> Self {
         Self {
-            base: None,
-            inherited_len: 0,
             declarations: Vec::new(),
-            replacements: FxHashMap::default(),
             by_path: FxHashMap::default(),
             by_name: FxHashMap::default(),
+            constant_headers: Vec::new(),
         }
     }
 
@@ -143,6 +134,7 @@ impl TopLevelDeclarationTable {
     ) -> Result<Self, CompilerError> {
         let mut by_path = FxHashMap::default();
         let mut by_name: FxHashMap<StringId, Vec<DeclarationId>> = FxHashMap::default();
+        let mut constant_headers: Vec<bool> = Vec::new();
         let mut declaration_slots =
             Vec::with_capacity(ordered_declarations.len() + compiler_owned_declarations.len());
 
@@ -154,6 +146,12 @@ impl TopLevelDeclarationTable {
             }
             let declaration_id = ordered.declaration_id;
             let path = ordered.path;
+            if ordered.kind == OrderedSemanticDeclarationKind::Constant {
+                if constant_headers.len() <= declaration_id.index() {
+                    constant_headers.resize(declaration_id.index() + 1, false);
+                }
+                constant_headers[declaration_id.index()] = true;
+            }
             if let Some(name) = path_fork.component(path) {
                 by_name.entry(name).or_default().push(declaration_id);
             }
@@ -195,30 +193,15 @@ impl TopLevelDeclarationTable {
         }
 
         Ok(Self {
-            base: None,
-            inherited_len: 0,
             declarations: declaration_slots,
-            replacements: FxHashMap::default(),
             by_path,
             by_name,
+            constant_headers,
         })
     }
 
-    /// Start a generated-local layer over one immutable completed declaration table.
-    pub(crate) fn fork_for_generated(base: Rc<Self>) -> Self {
-        let inherited_len = base.len();
-        Self {
-            base: Some(base),
-            inherited_len,
-            declarations: Vec::new(),
-            replacements: FxHashMap::default(),
-            by_path: FxHashMap::default(),
-            by_name: FxHashMap::default(),
-        }
-    }
-
     pub(crate) fn iter(&self) -> impl Iterator<Item = &Declaration> {
-        (0..self.len()).filter_map(|index| self.get_by_id(DeclarationId::from_index(index)))
+        self.declarations.iter().filter_map(Option::as_ref)
     }
 
     // Path-based lookups
@@ -285,7 +268,7 @@ impl TopLevelDeclarationTable {
         visible: Option<&FxHashSet<PathId>>,
     ) -> Option<&Declaration> {
         let declaration = self.get_by_path(path)?;
-        if declaration.is_unresolved_constant_placeholder() {
+        if self.is_unresolved_constant_placeholder(declaration) {
             return None;
         }
         if let Some(visible) = visible
@@ -303,7 +286,7 @@ impl TopLevelDeclarationTable {
         visible: Option<&FxHashSet<PathId>>,
     ) -> Option<&Declaration> {
         self.find_visible_by_name(name, visible, |declaration| {
-            !declaration.is_unresolved_constant_placeholder()
+            !self.is_unresolved_constant_placeholder(declaration)
         })
     }
 
@@ -312,14 +295,8 @@ impl TopLevelDeclarationTable {
         &self,
         declaration_id: DeclarationId,
     ) -> Option<&Declaration> {
-        if let Some(replacement) = self.replacements.get(&declaration_id) {
-            return Some(replacement);
-        }
-        if declaration_id.index() < self.inherited_len {
-            return self.base.as_ref()?.get_by_id(declaration_id);
-        }
         self.declarations
-            .get(declaration_id.index() - self.inherited_len)
+            .get(declaration_id.index())
             .and_then(Option::as_ref)
     }
 
@@ -327,21 +304,9 @@ impl TopLevelDeclarationTable {
         &mut self,
         declaration_id: DeclarationId,
     ) -> Option<&mut Declaration> {
-        if declaration_id.index() >= self.len() {
-            return None;
-        }
-        if declaration_id.index() >= self.inherited_len {
-            return self
-                .declarations
-                .get_mut(declaration_id.index() - self.inherited_len)?
-                .as_mut();
-        }
-
-        if !self.replacements.contains_key(&declaration_id) {
-            let inherited = self.base.as_ref()?.get_by_id(declaration_id)?.clone();
-            self.replacements.insert(declaration_id, inherited);
-        }
-        self.replacements.get_mut(&declaration_id)
+        self.declarations
+            .get_mut(declaration_id.index())
+            .and_then(Option::as_mut)
     }
 
     /// Replace one known declaration row without repeating a source-path lookup.
@@ -360,11 +325,7 @@ impl TopLevelDeclarationTable {
             return false;
         }
 
-        if declaration_id.index() < self.inherited_len {
-            self.replacements.insert(declaration_id, declaration);
-        } else {
-            self.declarations[declaration_id.index() - self.inherited_len] = Some(declaration);
-        }
+        self.declarations[declaration_id.index()] = Some(declaration);
         true
     }
 
@@ -372,31 +333,38 @@ impl TopLevelDeclarationTable {
         &self,
         path: &PathId,
     ) -> Option<DeclarationId> {
-        self.by_path.get(path).copied().or_else(|| {
-            self.base
-                .as_ref()
-                .and_then(|base| base.declaration_id_by_path(path))
-        })
+        self.by_path.get(path).copied()
     }
 
-    fn declaration_ids_by_name(
-        &self,
-        name: StringId,
-    ) -> Box<dyn Iterator<Item = DeclarationId> + '_> {
-        let inherited = self
-            .base
-            .iter()
-            .flat_map(move |base| base.declaration_ids_by_name(name));
-        let local = self
-            .by_name
+    /// Whether a declaration ID names a top-level constant header.
+    fn is_constant_header(&self, declaration_id: DeclarationId) -> bool {
+        self.constant_headers
+            .get(declaration_id.index())
+            .copied()
+            .unwrap_or(false)
+    }
+
+    /// Whether a top-level placeholder is a constant header whose value has not been folded yet.
+    ///
+    /// The explicit pending state and retained header role jointly hide unresolved constants.
+    /// A typed constant may share its type with a nominal shell, so type identity cannot
+    /// determine whether a compile-time initializer is ready.
+    pub(crate) fn is_unresolved_constant_placeholder(&self, declaration: &Declaration) -> bool {
+        matches!(declaration.value, DeclarationValue::PendingConstant)
+            && self
+                .declaration_id_by_path(&declaration.id)
+                .is_some_and(|declaration_id| self.is_constant_header(declaration_id))
+    }
+
+    fn declaration_ids_by_name(&self, name: StringId) -> impl Iterator<Item = DeclarationId> + '_ {
+        self.by_name
             .get(&name)
             .into_iter()
-            .flat_map(|ids| ids.iter().copied());
-        Box::new(inherited.chain(local))
+            .flat_map(|ids| ids.iter().copied())
     }
 
     pub(crate) fn len(&self) -> usize {
-        self.inherited_len + self.declarations.len()
+        self.declarations.len()
     }
 
     /// Find the first declaration matching `name` that satisfies `predicate` and is visible.
@@ -427,5 +395,5 @@ impl TopLevelDeclarationTable {
 ///
 /// Extracted to keep the call site readable and to give the exclusion rule a name.
 fn is_receiver_method_declaration(declaration: &Declaration) -> bool {
-    declaration.value.is_receiver_function()
+    declaration.is_receiver_function()
 }

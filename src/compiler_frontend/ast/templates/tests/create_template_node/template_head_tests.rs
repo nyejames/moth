@@ -14,10 +14,18 @@ fn template_head_unknown_symbol_reports_unknown_value_name_not_unexpected_token(
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let file_tokens =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let source_path = file_tokens.source_path;
-    let context = runtime_template_context(&source_path, &mut string_table, &mut path_fork);
+    let context = runtime_template_context(
+        &source_path,
+        &mut expression_builder,
+        &mut const_values,
+        &mut string_table,
+        &mut path_fork,
+    );
     let canonical_owner = file_tokens
         .canonical_owner()
         .expect("test token stream must expose canonical source tokens");
@@ -34,6 +42,8 @@ fn template_head_unknown_symbol_reports_unknown_value_name_not_unexpected_token(
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -81,6 +91,8 @@ fn incompatible_head_item_retains_exact_extended_multibyte_span() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let file_tokens = template_tokens_from_source_with_style_directives(
         &source,
         &style_directives,
@@ -108,6 +120,8 @@ fn incompatible_head_item_retains_exact_extended_multibyte_span() {
             &mut token_stream,
             source_path,
             &context,
+            &mut expression_builder,
+            &mut const_values,
             vec![],
             &mut string_table,
             &mut path_fork,
@@ -146,6 +160,8 @@ fn template_head_expression_preserves_infrastructure_failure() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let file_tokens = template_tokens_from_source(
         "[stale_template]",
         &mut string_table,
@@ -173,14 +189,17 @@ fn template_head_expression_preserves_infrastructure_failure() {
         },
         span: None,
     };
-    let declaration = Declaration {
-        id: path_fork
+    let stale_value = expression_builder
+        .template(stale_template, ValueMode::ImmutableOwned)
+        .expect("stale template expression should construct")
+        .id();
+    let declaration = make_test_variable(
+        path_fork
             .try_intern_child(scope, stale_name)
             .expect("stale declaration path should intern"),
-        value: Expression::template(stale_template, ValueMode::ImmutableOwned),
-        binding_span: None,
-        config_qualifier: None,
-    };
+        stale_value,
+        &expression_builder,
+    );
     let style_directives = frontend_test_style_directives();
     let context = with_test_path_context(
         ScopeContext::new_for_tests(
@@ -207,6 +226,8 @@ fn template_head_expression_preserves_infrastructure_failure() {
         TemplateHeadParseRequest {
             context: &context,
             type_interner: &mut type_interner,
+            expression_builder: &mut expression_builder,
+            const_values: &mut const_values,
             build_state: &mut build_state,
             construction_context: &mut construction_context,
             control_flow_validation: TemplateControlFlowValidationMode::RuntimeCapable,
@@ -232,6 +253,8 @@ fn template_head_path_lookup_preserves_infrastructure_failure() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let file_tokens = template_tokens_from_source(
         "[@core/math]",
         &mut string_table,
@@ -263,7 +286,13 @@ fn template_head_path_lookup_preserves_infrastructure_failure() {
     let scope = source_path;
     let style_directives = frontend_test_style_directives();
     let context = with_test_path_context(
-        runtime_template_context(&scope, &mut string_table, &mut path_fork),
+        runtime_template_context(
+            &scope,
+            &mut expression_builder,
+            &mut const_values,
+            &mut string_table,
+            &mut path_fork,
+        ),
         &scope,
         &style_directives,
     );
@@ -281,6 +310,8 @@ fn template_head_path_lookup_preserves_infrastructure_failure() {
         TemplateHeadParseRequest {
             context: &context,
             type_interner: &mut type_interner,
+            expression_builder: &mut expression_builder,
+            const_values: &mut const_values,
             build_state: &mut build_state,
             construction_context: &mut construction_context,
             control_flow_validation: TemplateControlFlowValidationMode::RuntimeCapable,
@@ -310,6 +341,8 @@ fn template_head_content_path_uses_stage0_resolution_without_project_resolver() 
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let file_tokens = template_tokens_from_source(
         "[@docs/intro.mtf]",
         &mut string_table,
@@ -342,12 +375,16 @@ fn template_head_content_path_uses_stage0_resolution_without_project_resolver() 
         content_constant_path(content_logical_path, &mut path_fork, &mut string_table)
             .expect("content constant path should intern");
     let content_string = string_table.intern("resolved head content");
-    let content_declaration = Declaration {
-        id: content_path,
-        value: Expression::string_slice(content_string, None, ValueMode::ImmutableOwned),
-        binding_span: None,
-        config_qualifier: None,
-    };
+    let content_value = expression_builder
+        .string_slice(
+            &mut const_values,
+            content_string,
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("content string constant should construct")
+        .id();
+    let content_declaration = make_test_variable(content_path, content_value, &expression_builder);
 
     let mut resolved_references = ResolvedFileReferenceTable::new();
     resolved_references
@@ -402,13 +439,21 @@ fn template_head_content_path_uses_stage0_resolution_without_project_resolver() 
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
     )
     .expect("content path in a template head should resolve from Stage 0")
     .template;
-    let folded = fold_template_in_context(&template, &context, &mut string_table);
+    let folded = fold_template_in_context(
+        &template,
+        &context,
+        &mut string_table,
+        &mut expression_builder,
+        &mut const_values,
+    );
 
     assert_eq!(
         folded, content_string,
@@ -422,6 +467,8 @@ fn template_head_extensionless_path_retains_exact_span() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let file_tokens =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let path_syntax = file_tokens
@@ -493,6 +540,8 @@ fn template_head_extensionless_path_retains_exact_span() {
             &mut token_stream,
             source_path,
             &context,
+            &mut expression_builder,
+            &mut const_values,
             vec![],
             &mut string_table,
             &mut path_fork,
@@ -529,6 +578,8 @@ fn template_head_extensionless_path_retains_exact_span() {
 fn single_item_template_head_with_close_is_foldable() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let scope = path_fork
         .try_intern_portable_path("main.moth/#const_template0", &mut string_table)
         .expect("test path fits");
@@ -574,6 +625,8 @@ fn single_item_template_head_with_close_is_foldable() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -584,7 +637,13 @@ fn single_item_template_head_with_close_is_foldable() {
         effective_tir_kind(&template, &context),
         TemplateType::String
     ));
-    let folded = fold_template_in_context(&template, &context, &mut string_table);
+    let folded = fold_template_in_context(
+        &template,
+        &context,
+        &mut string_table,
+        &mut expression_builder,
+        &mut const_values,
+    );
     assert_eq!(string_table.resolve(folded), "3");
 }
 
@@ -593,6 +652,8 @@ fn parsed_template_tir_reference_carries_empty_view_context() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let file_tokens = template_tokens_from_source(
         "[: body]",
         &mut string_table,
@@ -617,6 +678,8 @@ fn parsed_template_tir_reference_carries_empty_view_context() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -632,6 +695,8 @@ fn template_control_flow_suffix_requires_comma_after_head_items() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let file_tokens = template_tokens_from_source(
         "[value if true: Visible]",
         &mut string_table,
@@ -639,7 +704,13 @@ fn template_control_flow_suffix_requires_comma_after_head_items() {
         &mut path_fork,
     );
     let source_path = file_tokens.source_path;
-    let context = runtime_template_context(&source_path, &mut string_table, &mut path_fork);
+    let context = runtime_template_context(
+        &source_path,
+        &mut expression_builder,
+        &mut const_values,
+        &mut string_table,
+        &mut path_fork,
+    );
     let canonical_owner = file_tokens
         .canonical_owner()
         .expect("test token stream must expose canonical source tokens");
@@ -656,6 +727,8 @@ fn template_control_flow_suffix_requires_comma_after_head_items() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -713,6 +786,8 @@ fn template_if_suffix_separator_retains_exact_multibyte_span() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let file_tokens =
         template_tokens_from_source(source, &mut string_table, &mut span_builder, &mut path_fork);
     let source_path = file_tokens.source_path;
@@ -734,6 +809,8 @@ fn template_if_suffix_separator_retains_exact_multibyte_span() {
             &mut token_stream,
             source_path,
             &context,
+            &mut expression_builder,
+            &mut const_values,
             vec![],
             &mut string_table,
             &mut path_fork,

@@ -1,4 +1,4 @@
-last_number || -> Int:
+last_number || -> I32:
     return 3
 ;
 

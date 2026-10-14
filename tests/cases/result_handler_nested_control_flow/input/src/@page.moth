@@ -1,4 +1,4 @@
-inner |name String| -> String, Int, Error!:
+inner |name String| -> String, I32, Error!:
     if name is "":
         return! Error("empty")
     ;
@@ -6,7 +6,7 @@ inner |name String| -> String, Int, Error!:
     return name, 1
 ;
 
-outer |name String| -> String, Int, Error!:
+outer |name String| -> String, I32, Error!:
     value, numeric_value = inner(name) catch |err|:
         return! err
     ;

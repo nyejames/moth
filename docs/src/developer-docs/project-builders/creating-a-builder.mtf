@@ -144,10 +144,11 @@ compatibility. It isn't a Rust type name, filesystem path or enum entry that
 requires editing the compiler for each builder. Source aliases don't change
 package or output ownership.
 
-One selected numeric profile governs directly linked Moth code. The
-`numeric_profile` definition helper selects that profile before configuration
-values are materialised. Build mode and physical target selection don't change
-it. Compiler-owned names and mandatory Core facilities remain authoritative.
+Numeric identities and literal defaults belong to the language. Builders don't
+select a semantic numeric profile. Source annotations and input contracts name
+exact types, with `I32` and `F64` as unconstrained literal defaults. Build mode
+and physical targets don't change them. See
+@../../docs/numbers/#numeric-types (Numeric types).
 
 ### Build-time code and runtime code
 

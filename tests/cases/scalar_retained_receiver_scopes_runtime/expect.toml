@@ -1,0 +1,13 @@
+entry = "."
+
+# HTML-only by design: this fixture asserts exact runtime values through the
+# retained receiver-scoped catch/fallback completion, unannotated value-block
+# declarations and inline pending branches. Checked U64 arithmetic and typed
+# runnable `Error!` recovery have no observed Wasm success fixture under the
+# capability validation, so only the backend whose output is asserted is
+# declared rather than pinning an unobserved Wasm disposition.
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "scalar retained return scopes inline=0/43 block=0/44\nscalar retained assignment scopes inline=0/45 block=0/46\nscalar retained nested scopes return=1/2 assignment=3/4 inferred=23/24\nscalar retained inferred declarations string=ready/waiting numeric=5/6 match=7/8\nscalar retained inline pending same=21/21 branches=9/10 option=11/13 choice=15/16\nscalar retained nested match fail assignment=3/4 inferred=23/24 pair=56/65 success=10/11/12\nscalar retained statement match recovery=0/1"

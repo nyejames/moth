@@ -1,5 +1,3 @@
-hidden ||:
-    x U8 = (5) + 1
-;
+x U8 = (5) + 1
 
-[:unreachable]
+[: grouped u8 literal operand=[x]]

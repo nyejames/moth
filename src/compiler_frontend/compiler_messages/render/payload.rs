@@ -32,6 +32,13 @@ pub(crate) fn render_payload(
         DiagnosticPayload::UnescapedImplicitTemplateClose { .. } => vec![
             "Insert a literal closing bracket through a nested string expression such as `[\"]\"]`.".to_owned(),
         ],
+        DiagnosticPayload::InvalidValueReceiver { produced_count, .. } => {
+            if *produced_count > 1 {
+                vec!["Use a multi-bind with one target per success slot.".to_owned()]
+            } else {
+                vec!["Use an expression that produces the required success values.".to_owned()]
+            }
+        }
         DiagnosticPayload::TypeMismatch {
             expected, found, ..
         } => vec![
@@ -49,13 +56,13 @@ pub(crate) fn render_payload(
             ..
         } => {
             vec![
-                "Add a type annotation to the receiving declaration, for example `value Int = ...`."
+                "Add a type annotation to the receiving declaration, for example `value I32 = ...`."
                     .to_owned(),
             ]
         }
         DiagnosticPayload::EmptyCollectionTypeAmbiguity => {
             vec![
-                "Add an explicit type annotation, for example `scores {String = Int} = {}` for an empty map or `items {Int} = {}` for an empty collection.".to_owned(),
+                "Add an explicit type annotation, for example `scores {String = I32} = {}` for an empty map or `items {I32} = {}` for an empty collection.".to_owned(),
             ]
         }
         DiagnosticPayload::InvalidTemplateDirective {
@@ -212,9 +219,7 @@ fn render_payload_message(
             length,
             resource,
         } => source_span_capacity_message(*start, *length, *resource),
-        DiagnosticPayload::CompilerCapacityExceeded { resource } => {
-            hir_capacity_message(*resource)
-        }
+        DiagnosticPayload::CompilerCapacityExceeded { resource } => capacity_message(*resource),
         DiagnosticPayload::InvalidStringEscape { reason } => invalid_string_escape_message(*reason),
         DiagnosticPayload::InvalidNumberLiteral {
             literal_text,
@@ -434,6 +439,16 @@ fn render_payload_message(
             *root_binding_name,
             context,
         ),
+        DiagnosticPayload::InvalidValueReceiver {
+            receiver,
+            target_count,
+            produced_count,
+        } => {
+            let receiver_name = value_receiver_context_name(*receiver);
+            format!(
+                "Invalid {receiver_name} receiver: expected {target_count} success slot(s), but this expression produces {produced_count}."
+            )
+        }
         DiagnosticPayload::InvalidMultiBind {
             reason,
             target_name,
@@ -493,11 +508,9 @@ fn render_payload_message(
         DiagnosticPayload::CompileTimeEvaluationError {
             reason,
             operation,
-            numeric_profile,
         } => compile_time_evaluation_error_message(
             *reason,
             *operation,
-            *numeric_profile,
             string_table,
         ),
         DiagnosticPayload::EmptyCollectionTypeAmbiguity => {
@@ -507,11 +520,6 @@ fn render_payload_message(
         DiagnosticPayload::UnsupportedOperatorTypes { operator, lhs, rhs } => {
             unsupported_operator_types_message(*operator, *lhs, *rhs, context)
         }
-        DiagnosticPayload::InvalidFallibleOperand {
-            reason,
-            category,
-            operand_type,
-        } => invalid_fallible_operand_message(*reason, *category, *operand_type, context),
         DiagnosticPayload::IncompatibleChoiceComparison { reason, lhs, rhs } => {
             incompatible_choice_comparison_message(reason, *lhs, *rhs, context)
         }
@@ -601,6 +609,13 @@ fn source_span_capacity_message(
     }
 }
 
+fn capacity_message(resource: CapacityResource) -> String {
+    match resource {
+        CapacityResource::Hir(resource) => hir_capacity_message(resource),
+        CapacityResource::Ast(resource) => ast_capacity_message(resource),
+    }
+}
+
 fn hir_capacity_message(resource: HirCapacityResource) -> String {
     let resource_name = match resource {
         HirCapacityResource::ExpressionRows => "expression rows",
@@ -612,6 +627,26 @@ fn hir_capacity_message(resource: HirCapacityResource) -> String {
         HirCapacityResource::PlaceProjections => "place projections",
     };
     format!("This source exceeds the compiler's capacity for HIR {resource_name}.")
+}
+
+fn ast_capacity_message(resource: AstCapacityResource) -> String {
+    match resource {
+        AstCapacityResource::ExpressionRows => {
+            "This source exceeds the compiler's capacity for AST expression rows.".into()
+        }
+        AstCapacityResource::ExpressionSideEntries => {
+            "This source exceeds the compiler's capacity for AST expression side entries.".into()
+        }
+        AstCapacityResource::ConstValues => {
+            "This source exceeds the compiler's capacity for constant values.".into()
+        }
+        AstCapacityResource::ChoiceTags => {
+            "This source exceeds the compiler's capacity for choice variant tags.".into()
+        }
+        AstCapacityResource::GroupDistances => {
+            "This source exceeds the compiler's capacity for expression group distances.".into()
+        }
+    }
 }
 
 fn source_kind_name(source_kind: SourceFileKind) -> &'static str {
@@ -766,6 +801,12 @@ fn invalid_trait_conformance_message(
         } => {
             format!(
                 "'{target}' cannot conform{trait_text} because return {return_index} of '{}' uses a different return channel.",
+                string_table.resolve(*requirement_name)
+            )
+        }
+        InvalidTraitConformanceReason::InferredFailureInInfallibleCast { requirement_name } => {
+            format!(
+                "'{target}' cannot conform{trait_text} because method '{}' has escaping inferred failure, which violates the infallible cast evidence contract. Handle the failure locally or use the corresponding TRY_CASTABLE_TO_* trait with its try_to_* method and declared Error! return slot.",
                 string_table.resolve(*requirement_name)
             )
         }

@@ -1,0 +1,12 @@
+-- Raw U64 map keys that materialise to the same exact value are duplicates.
+
+read_scores |scores {U64 = U64}| -> I32:
+    return scores.length
+;
+
+render_duplicate_late_u64_key || -> I32:
+    scores = {18_446_744_073_709_551_615 = 9, 18_446_744_073_709_551_615 = 7}
+    return read_scores(scores)
+;
+
+[:[render_duplicate_late_u64_key()]]

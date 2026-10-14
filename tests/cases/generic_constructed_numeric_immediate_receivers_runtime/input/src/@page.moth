@@ -1,0 +1,25 @@
+-- Immediate concrete annotations on direct generic constructors still
+-- materialise raw whole literals into the declared F32, Dec2, and Byte fields.
+
+Packet type T = |value T|
+
+read_f32 |value F32| -> String:
+    return cast value
+;
+read_decimal |value Dec2| -> String:
+    return cast value
+;
+read_byte |value Byte| -> String:
+    octet U8 = cast value
+    return cast octet
+;
+
+float_packet Packet of F32 = Packet(2)
+decimal_packet Packet of Dec2 = Packet(3)
+byte_packet Packet of Byte = Packet(7)
+
+float_text = read_f32(float_packet.value)
+decimal_text = read_decimal(decimal_packet.value)
+byte_text = read_byte(byte_packet.value)
+
+[:generic_constructed_numeric_immediate_receivers_runtime f32=[float_text] dec=[decimal_text] byte=[byte_text]]

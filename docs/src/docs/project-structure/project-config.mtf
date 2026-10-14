@@ -70,7 +70,7 @@ The required generated starter, once implementation lands, keeps the same versio
 
     [td:
         [: `template_const_loop_iteration_limit`]
-        [: `Int`]
+        [: `I32`]
         [: The existing compiler-owned default]
         [: No]
     ]

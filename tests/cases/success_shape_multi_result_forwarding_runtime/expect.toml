@@ -1,0 +1,10 @@
+entry = "."
+
+# HTML owns runtime ordering and once-only producer evaluation.
+# No HTML-Wasm block: this case does not expand its existing multi-result support.
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains_in_order = ["before-forward calls=0","after-forward label=first-slot number=42 calls=1"]
+rendered_output_contains_exactly_once = ["before-forward calls=0","after-forward label=first-slot number=42 calls=1"]

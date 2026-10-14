@@ -1,4 +1,4 @@
-parse_number |text String| -> Int, Error!:
+parse_number |text String| -> I32, Error!:
     return! Error(text)
 ;
 
@@ -6,7 +6,7 @@ load_name || -> String, Error!:
     return! Error("missing")
 ;
 
-load_user || -> String, Float, Error!:
+load_user || -> String, F64, Error!:
     return! Error("missing")
 ;
 
@@ -14,7 +14,7 @@ fallback_for |err Error| -> String:
     return "fallback"
 ;
 
-recover_number || -> Int:
+recover_number || -> I32:
     value = parse_number("bad") catch then 0
     return value
 ;
@@ -24,7 +24,7 @@ recover_name || -> String:
     return name
 ;
 
-recover_user || -> String, Float:
+recover_user || -> String, F64:
     name, score = load_user() catch then "guest", 0.0
     return name, score
 ;

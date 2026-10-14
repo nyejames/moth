@@ -1,0 +1,11 @@
+empty type T || -> {T}:
+    return {}
+;
+
+read_values |values {U64}| -> I32:
+    return values.length()
+;
+
+values = empty()
+count = read_values(values)
+[:[count]]

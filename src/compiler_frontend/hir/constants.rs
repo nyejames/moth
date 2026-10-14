@@ -18,15 +18,6 @@ pub struct HirConstField {
 
 #[derive(Debug, Clone)]
 pub enum HirConstValue {
-    /// Scalar payloads are preserved for data-model completeness even though
-    /// current validation matches them with `_`. Tests and future backends may
-    /// read these values.
-    #[allow(dead_code)]
-    Int(i64),
-    #[allow(dead_code)]
-    Uint(u64),
-    #[allow(dead_code)]
-    Float(f64),
     /// One materialised fixed-width scalar or `Byte` value with exact-bit identity.
     #[allow(dead_code)]
     FixedScalar(FixedScalarValue),
@@ -103,10 +94,7 @@ impl HirConstValue {
                 end.remap_string_ids(remap);
             }
             Self::OptionSome(inner) => inner.remap_string_ids(remap),
-            Self::Int(_)
-            | Self::Uint(_)
-            | Self::Float(_)
-            | Self::FixedScalar(_)
+            Self::FixedScalar(_)
             | Self::Number(_)
             | Self::Bool(_)
             | Self::Char(_)

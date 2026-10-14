@@ -11,13 +11,11 @@
 //! Contextual promotion lives in `type_coercion::contextual`.
 
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
-use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::external_packages::ExternalTypeId;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathTable};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 
 use super::definitions::TypeDefinition;
-use super::display::format_fallible_signature_parts;
 use super::environment::TypeEnvironment;
 use super::generic_identity_bridge::display_generic_instantiation_key;
 use super::generic_identity_bridge::{
@@ -28,7 +26,6 @@ use super::ids::{self, GenericParameterId, TypeId};
 use moth_lexical::numeric::decimal::NumberScale;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
-use super::{BuiltinScalarReceiver, ReceiverKey};
 #[derive(Debug, Clone)]
 pub enum DataType {
     // Meta-types used during earlier frontend stages.
@@ -63,24 +60,16 @@ pub enum DataType {
     Struct {
         nominal_path: PathId,
         type_id: TypeId,
-        /// Diagnostic/render-only marker. Semantic const-record decisions must
-        /// use `Expression::const_record_state`, not this field.
+        /// Diagnostic/render-only marker. Semantic const-record decisions must use
+        /// `TypeEnvironment::is_const_record` or `ExpressionView::is_const_record_value`,
+        /// not this field.
         const_record: bool,
         generic_instance_key: Option<GenericInstantiationKey>,
     },
     Range, // Iterable that must always be owned.
-    Returns(Vec<DataType>),
-    Function(Box<Option<ReceiverKey>>, FunctionSignature), // Receiver, signature
-
-    // Compile-time/frontend-specific composite values.
-    Template,
 
     // Scalar/runtime-leaf types.
     Bool,
-    Int,
-    /// Profile-sized unsigned integer: `Uint32` under `Int32`, `Uint64` under `Int64`.
-    Uint,
-    Float,
     /// Diagnostic spelling for one arbitrary-precision `Dec` scale identity.
     ///
     /// `Dec` and `Dec0` share scale zero; `Dec1`..`Dec256` carry their scale.
@@ -90,7 +79,6 @@ pub enum DataType {
     Char,
     /// Explicit-width builtin scalar or the `Byte` octet type.
     ///
-    /// These are nominally distinct from `Int`/`Float` even when a profile width matches, and
     /// `Byte` is distinct from `U8`, `I8` and `Char`.
     FixedScalar(FixedScalar),
 
@@ -114,16 +102,6 @@ pub enum DataType {
     /// Semantic option identity is owned by `TypeEnvironment::intern_option`.
     /// AST/HIR type checks should use `TypeId` queries instead of this variant.
     Option(Box<DataType>), // Shorthand for a choice of a type or None
-    /// Temporary diagnostic/control-flow bridge for fallible operation handling.
-    ///
-    /// V1 fallibility is represented by function return metadata and explicit
-    /// control flow. This variant is implementation machinery for fallible
-    /// casts, collection operations, and external/source calls that are
-    /// immediately consumed by postfix `!` or boundary `catch`.
-    FallibleCarrier {
-        success: Box<DataType>,
-        error: Box<DataType>,
-    },
     #[allow(dead_code)] // Planned: explicit None literal/type flows.
     None, // The None result of an option, or empty argument
     #[allow(dead_code)] // Planned: boolean literal singleton typing extensions.
@@ -158,58 +136,9 @@ impl DataType {
         }
     }
 
-    pub fn const_struct_record(nominal_path: PathId, type_id: TypeId) -> Self {
-        Self::const_struct_record_with_generic_key(nominal_path, type_id, None)
-    }
-
-    pub fn const_struct_record_with_generic_key(
-        nominal_path: PathId,
-        type_id: TypeId,
-        generic_instance_key: Option<GenericInstantiationKey>,
-    ) -> Self {
-        Self::Struct {
-            nominal_path,
-            type_id,
-            const_record: true,
-            generic_instance_key,
-        }
-    }
-
     // -----------------
     //  Queries
     // -----------------
-
-    /// Returns the receiver key for this type.
-    ///
-    /// WHAT: derives a receiver key from inline `DataType` fields for HIR/diagnostic
-    ///       compatibility paths that do not have `TypeEnvironment` access.
-    /// WHY: HIR lowering and some diagnostic paths still need `DataType`-shaped
-    ///      receiver keys; this is display/compatibility logic, not semantic identity.
-    pub fn receiver_key_from_type(&self) -> Option<ReceiverKey> {
-        match self {
-            DataType::Struct {
-                nominal_path,
-                const_record,
-                generic_instance_key: None,
-                ..
-            } if !const_record => Some(ReceiverKey::Struct(*nominal_path)),
-            DataType::Choices {
-                nominal_path,
-                generic_instance_key: None,
-                ..
-            } => Some(ReceiverKey::Choice(*nominal_path)),
-            DataType::Int => Some(ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Int)),
-            DataType::Uint => Some(ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Uint)),
-            DataType::Float => Some(ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Float)),
-            DataType::Bool => Some(ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Bool)),
-            DataType::StringSlice => {
-                Some(ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::String))
-            }
-            DataType::Char => Some(ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Char)),
-            DataType::External { type_id } => Some(ReceiverKey::External(*type_id)),
-            _ => None,
-        }
-    }
 
     /// Constructs a growable collection type using the canonical generic instance representation.
     ///
@@ -252,24 +181,6 @@ impl DataType {
         }
     }
 
-    /// Test-only diagnostic spelling query for collection fixtures.
-    #[cfg(test)]
-    pub fn is_collection(&self) -> bool {
-        self.is_builtin_generic_collection()
-    }
-
-    /// Test-only implementation shared by collection fixture queries.
-    #[cfg(test)]
-    pub fn is_builtin_generic_collection(&self) -> bool {
-        matches!(
-            self,
-            DataType::GenericInstance {
-                base: GenericBaseType::Builtin(BuiltinGenericType::Collection { .. }),
-                arguments,
-            } if arguments.len() == 1
-        )
-    }
-
     // -----------------
     //  Display
     // -----------------
@@ -293,9 +204,6 @@ impl DataType {
             DataType::StringSlice => "String".to_string(),
             DataType::Char => "Char".to_string(),
             DataType::FixedScalar(scalar) => scalar.name().to_string(),
-            DataType::Float => "Float".to_string(),
-            DataType::Int => "Int".to_string(),
-            DataType::Uint => "Uint".to_string(),
             DataType::Number(scale) => scale.to_string(),
             DataType::Parameters(args) => {
                 let mut arg_str = String::new();
@@ -304,8 +212,7 @@ impl DataType {
                     arg_str.push_str(&format!(
                         "{}: {}, ",
                         name,
-                        arg.value
-                            .diagnostic_type
+                        arg.diagnostic_type
                             .display_with_table(string_table, path_table)
                     ));
                 }
@@ -334,36 +241,7 @@ impl DataType {
                 // External types are opaque; display uses the stable ID.
                 format!("External({})", type_id.0)
             }
-            DataType::Returns(returns) => {
-                let returns_string = returns
-                    .iter()
-                    .map(|return_type| return_type.display_with_table(string_table, path_table))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("Returns({returns_string})")
-            }
-            DataType::Function(_, signature) => {
-                let mut arg_str = String::new();
-                for arg in &signature.parameters {
-                    let name = path_table
-                        .try_component(arg.id)
-                        .map(|name| string_table.resolve(name))
-                        .unwrap_or("<parameter>");
-                    arg_str.push_str(&format!(
-                        "{}: {}, ",
-                        name,
-                        arg.value
-                            .diagnostic_type
-                            .display_with_table(string_table, path_table)
-                    ));
-                }
 
-                let returns_string =
-                    display_function_return_signature(signature, string_table, path_table);
-                format!("Function({arg_str} -> {returns_string})")
-            }
-
-            DataType::Template => "Template".to_string(),
             DataType::None => "None".to_string(),
             DataType::True => "True".to_string(),
             DataType::False => "False".to_string(),
@@ -380,9 +258,6 @@ impl DataType {
                         inner_type.display_with_table(string_table, path_table)
                     )
                 }
-            }
-            DataType::FallibleCarrier { success, error } => {
-                display_fallible_data_type_signature(success, error, string_table, path_table)
             }
             DataType::Choices {
                 nominal_path,
@@ -520,21 +395,7 @@ impl PartialEq for DataType {
             (DataType::StringSlice, DataType::StringSlice) => true,
             (DataType::Char, DataType::Char) => true,
             (DataType::FixedScalar(left), DataType::FixedScalar(right)) => left == right,
-            (DataType::Float, DataType::Float) => true,
-            (DataType::Int, DataType::Int) => true,
-            (DataType::Uint, DataType::Uint) => true,
             (DataType::Number(left), DataType::Number(right)) => left == right,
-            (
-                DataType::FallibleCarrier {
-                    success: success_a,
-                    error: error_a,
-                },
-                DataType::FallibleCarrier {
-                    success: success_b,
-                    error: error_b,
-                },
-            ) => success_a == success_b && error_a == error_b,
-            (DataType::Template, DataType::Template) => true,
             (DataType::Option(a), DataType::Option(b)) => a == b,
             // For Args, Struct, Function, and Choices, we compare by name/structure
             // but not by the actual Arg values since they contain Expressions
@@ -562,16 +423,6 @@ impl PartialEq for DataType {
                 (None, None) => path_a == path_b && const_a == const_b,
                 _ => false,
             },
-            (DataType::Function(_, signature1), DataType::Function(_, signature2)) => {
-                // If both functions have the same signature.returns types,
-                // then they are equal
-                signature1.returns.len() == signature2.returns.len()
-                    && signature1
-                        .returns
-                        .iter()
-                        .zip(signature2.returns.iter())
-                        .all(|(return1, return2)| return1.data_type() == return2.data_type())
-            }
             (
                 DataType::Choices {
                     nominal_path: path_a,
@@ -597,46 +448,6 @@ impl PartialEq for DataType {
     }
 }
 
-fn display_fallible_data_type_signature(
-    success_type: &DataType,
-    error_type: &DataType,
-    string_table: &StringTable,
-    path_table: &PathTable,
-) -> String {
-    let success_parts = match success_type {
-        DataType::None => Vec::new(),
-        DataType::Returns(success_types) => success_types
-            .iter()
-            .map(|success_type| success_type.display_with_table(string_table, path_table))
-            .collect(),
-        success_type => vec![success_type.display_with_table(string_table, path_table)],
-    };
-    let error_part = error_type.display_with_table(string_table, path_table);
-
-    format_fallible_signature_parts(success_parts, error_part)
-}
-
-fn display_function_return_signature(
-    signature: &FunctionSignature,
-    string_table: &StringTable,
-    path_table: &PathTable,
-) -> String {
-    let parts = signature
-        .success_returns()
-        .iter()
-        .map(|return_value| return_value.display_with_table(string_table, path_table))
-        .collect::<Vec<_>>();
-
-    if let Some(error_return) = signature.error_return() {
-        return format_fallible_signature_parts(
-            parts,
-            error_return.display_with_table(string_table, path_table),
-        );
-    }
-
-    parts.join(", ")
-}
-
 // -----------------------------------------------------------
 //  TypeId -> DataType Conversion
 // -----------------------------------------------------------
@@ -644,8 +455,9 @@ fn display_function_return_signature(
 /// Converts a canonical `TypeId` back into a `DataType`.
 /// Diagnostic and display-only reverse bridge from canonical `TypeId` to `DataType` spelling.
 ///
-/// WHAT: converts a resolved `TypeId` back to a `DataType` suitable for diagnostics,
-///      display, and non-authoritative `Expression.diagnostic_type` fields.
+/// WHAT: converts a resolved `TypeId` back to a `DataType` suitable for diagnostics and display.
+///      Its output feeds the non-authoritative `diagnostic_type` fields on `Declaration`
+///      and signature members.
 /// WHY: AST nodes and error messages still carry `DataType` as written/display spelling.
 ///
 /// DO NOT use this for semantic type decisions. Semantic identity is `TypeId` equality
@@ -654,9 +466,6 @@ fn type_id_to_data_type(type_id: ids::TypeId, type_environment: &TypeEnvironment
     match type_environment.get(type_id) {
         Some(TypeDefinition::Builtin(builtin)) => match builtin.key {
             ids::BuiltinTypeKey::Bool => DataType::Bool,
-            ids::BuiltinTypeKey::Int => DataType::Int,
-            ids::BuiltinTypeKey::Uint => DataType::Uint,
-            ids::BuiltinTypeKey::Float => DataType::Float,
             ids::BuiltinTypeKey::Number(scale) => DataType::Number(scale),
             ids::BuiltinTypeKey::String => DataType::StringSlice,
             ids::BuiltinTypeKey::Char => DataType::Char,
@@ -701,16 +510,6 @@ fn type_id_to_data_type(type_id: ids::TypeId, type_environment: &TypeEnvironment
                     DataType::None
                 }
             }
-            ids::TypeConstructor::Builtin(ids::BuiltinTypeConstructor::FallibleCarrier) => {
-                if let [success_id, error_id] = con.arguments.as_ref() {
-                    DataType::fallible_carrier(
-                        type_id_to_data_type(*success_id, type_environment),
-                        type_id_to_data_type(*error_id, type_environment),
-                    )
-                } else {
-                    DataType::None
-                }
-            }
             ids::TypeConstructor::Builtin(ids::BuiltinTypeConstructor::OrderedMap) => {
                 if let [key_id, value_id] = con.arguments.as_ref() {
                     DataType::map(
@@ -721,19 +520,10 @@ fn type_id_to_data_type(type_id: ids::TypeId, type_environment: &TypeEnvironment
                     DataType::None
                 }
             }
-            ids::TypeConstructor::Builtin(ids::BuiltinTypeConstructor::Tuple) => DataType::Returns(
-                con.arguments
-                    .iter()
-                    .map(|argument| type_id_to_data_type(*argument, type_environment))
-                    .collect(),
-            ),
         },
         Some(TypeDefinition::Function(_)) => {
-            // Function types cannot be fully reconstructed as DataType because
-            // FunctionSignature contains Declaration nodes with Expressions.
-            // Function types cannot be represented as `DataType` because
-            // `FunctionSignature` contains AST nodes. Return a placeholder.
-            DataType::None
+            // Callable signatures have their own semantic owner, not a diagnostic type shape.
+            DataType::Inferred
         }
         Some(TypeDefinition::External(def)) => DataType::External {
             type_id: def.type_id,
@@ -768,7 +558,7 @@ fn type_id_to_data_type(type_id: ids::TypeId, type_environment: &TypeEnvironment
 
 /// Converts a canonical `TypeId` to a diagnostic `DataType` spelling.
 ///
-/// WHAT: narrow display helper for sites that create new `Expression`/`Declaration` nodes
+/// WHAT: narrow display helper for sites that create new `Declaration` nodes
 ///      and need a non-authoritative `diagnostic_type`.
 /// WHY: makes display-only bridge use explicit at call sites so semantic code cannot
 ///      accidentally call the reverse bridge.

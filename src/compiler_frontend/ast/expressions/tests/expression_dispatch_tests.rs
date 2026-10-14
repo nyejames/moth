@@ -4,15 +4,22 @@
 //! WHY: dispatch owns both token advancement and context-sensitive reference validation, so focused
 //!      tests keep those decisions aligned without exercising unrelated statement parsing.
 
-use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
+use crate::compiler_frontend::ast::ast_nodes::{Declaration, NodeKind};
+use crate::compiler_frontend::ast::const_values::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
-use crate::compiler_frontend::ast::expressions::expression::{
-    Expression, ExpressionKind, Operator,
-};
+use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
-use crate::compiler_frontend::ast::expressions::parse_expression::create_expression;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExpressionOperationView,
+};
+use crate::compiler_frontend::ast::expressions::expression_types::CastHandling;
+use crate::compiler_frontend::ast::expressions::parse_expression::create_expression_with_trailing_newline_policy;
 use crate::compiler_frontend::ast::expressions::parse_expression_dispatch::{
     ExpressionDispatchState, ExpressionTokenStep, dispatch_expression_token,
+};
+use crate::compiler_frontend::ast::expressions::parse_expression_input::{
+    ExpressionParseInput, ExpressionParseResources,
 };
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template::{SlotKey, Style, TemplateType};
@@ -25,12 +32,14 @@ use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarati
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticPayload, InvalidExpressionReason,
 };
+use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{
     TestSourceTokensBuilder, TokenTag, TokenizerEntryMode,
@@ -42,6 +51,43 @@ use crate::compiler_frontend::value_mode::ValueMode;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
+
+#[test]
+fn group_distance_capacity_is_a_typed_diagnostic() {
+    let maximum = u32::MAX as usize;
+    assert_eq!(
+        super::group_open_distance(maximum, 0, None).unwrap(),
+        u32::MAX
+    );
+    let oversized = maximum.checked_add(1).expect("test requires a 64-bit host");
+    let Err(super::ExpressionParseError::Diagnostic(diagnostic)) =
+        super::group_open_distance(oversized, 0, None)
+    else {
+        panic!("an exhausted group distance must be a typed capacity diagnostic");
+    };
+    assert!(diagnostic.is_compiler_capacity_exceeded());
+}
+
+#[test]
+fn malformed_group_distances_return_invariant_errors() {
+    use crate::compiler_frontend::ast::expressions::expression_rpn::{
+        single_operand, trailing_operand_start,
+    };
+
+    let items = [ExpressionRpnItem::GroupClose {
+        open_distance: 1,
+        anchor_span: None,
+    }];
+    assert!(trailing_operand_start(&items).is_err());
+    assert!(super::group_content_facts(&items, 0).is_err());
+    assert!(super::group_open_distance(0, 1, None).is_err());
+    let zero_distance = [ExpressionRpnItem::GroupClose {
+        open_distance: 0,
+        anchor_span: None,
+    }];
+    assert!(trailing_operand_start(&zero_distance).is_err());
+    assert!(single_operand(&zero_distance).is_some());
+}
 
 fn test_scope(string_table: &mut StringTable) -> (PathId, ScopeContext, PathInternerFork) {
     let mut path_fork = PathInternerFork::empty();
@@ -100,6 +146,9 @@ fn hash_in_expression_position_rejected() {
     let mut expression = vec![];
     let mut expected_type = ExpectedType::Infer;
     let mut next_number_negative = false;
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let mut group_frames = Vec::new();
     let mut state = ExpressionDispatchState {
         expected_type: &mut expected_type,
         cast_target_context: &mut CastTargetContext::None,
@@ -109,6 +158,10 @@ fn hash_in_expression_position_rejected() {
         allow_expected_result_evidence: true,
         expression: &mut expression,
         next_number_negative: &mut next_number_negative,
+        retain_pending_numeric_fragment: false,
+        expression_builder: &mut expression_builder,
+        const_values: &mut const_values,
+        group_frames: &mut group_frames,
     };
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
@@ -162,6 +215,9 @@ fn hash_before_template_head_allowed() {
     let mut expression = vec![];
     let mut expected_type = ExpectedType::Infer;
     let mut next_number_negative = false;
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let mut group_frames = Vec::new();
     let mut state = ExpressionDispatchState {
         expected_type: &mut expected_type,
         cast_target_context: &mut CastTargetContext::None,
@@ -171,6 +227,10 @@ fn hash_before_template_head_allowed() {
         allow_expected_result_evidence: true,
         expression: &mut expression,
         next_number_negative: &mut next_number_negative,
+        retain_pending_numeric_fragment: false,
+        expression_builder: &mut expression_builder,
+        const_values: &mut const_values,
+        group_frames: &mut group_frames,
     };
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
@@ -213,6 +273,9 @@ fn negative_token_before_identifier_pushes_unary_negation_operator() {
     let mut expression = vec![];
     let mut expected_type = ExpectedType::Infer;
     let mut next_number_negative = false;
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let mut group_frames = Vec::new();
     let mut state = ExpressionDispatchState {
         expected_type: &mut expected_type,
         cast_target_context: &mut CastTargetContext::None,
@@ -222,6 +285,10 @@ fn negative_token_before_identifier_pushes_unary_negation_operator() {
         allow_expected_result_evidence: true,
         expression: &mut expression,
         next_number_negative: &mut next_number_negative,
+        retain_pending_numeric_fragment: false,
+        expression_builder: &mut expression_builder,
+        const_values: &mut const_values,
+        group_frames: &mut group_frames,
     };
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
@@ -297,18 +364,26 @@ fn hash_from_tokenized_source_rejected() {
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut expected_type = ExpectedType::Infer;
 
-    let result = create_expression(
-        &mut stream,
-        &context,
-        &mut type_interner,
-        &mut expected_type,
-        &ValueMode::ImmutableOwned,
+    let mut cast_target_context = CastTargetContext::None;
+    let result = create_expression_with_trailing_newline_policy(ExpressionParseInput::ordinary(
+        ExpressionParseResources {
+            token_stream: &mut stream,
+            scope_context: &context,
+            type_interner: &mut type_interner,
+            expression_builder: &mut expression_builder,
+            const_values: &mut const_values,
+            expected_type: &mut expected_type,
+            cast_target_context: &mut cast_target_context,
+            value_mode: &ValueMode::ImmutableOwned,
+            string_table: &mut string_table,
+            path_fork: &mut path_fork,
+        },
         false,
-        &mut string_table,
-        &mut path_fork,
-    );
+    ));
 
     assert!(
         result.is_err(),
@@ -316,6 +391,7 @@ fn hash_from_tokenized_source_rejected() {
     );
 }
 
+use crate::compiler_frontend::tests::ast_fixture_support::start_function_body;
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
@@ -375,17 +451,33 @@ fn constant_identifier_uses_module_store_tir() {
         0,
     )
     .with_template_ir_store(Rc::clone(&store));
-    context.set_local_declarations(
-        vec![Declaration {
-            id: path_fork
-                .try_intern_components(&[constant_name])
-                .expect("test path fits"),
-            value: Expression::template(template, ValueMode::ImmutableOwned),
-            binding_span: None,
-            config_qualifier: None,
-        }],
-        &path_fork,
-    );
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let template_expression = expression_builder
+        .template(template, ValueMode::ImmutableOwned)
+        .expect("test template expression should construct");
+    let template_type_id = expression_builder
+        .view_owned(template_expression)
+        .expect("test template expression must be a valid expression")
+        .value_type_id()
+        .expect("test template expression must carry a type");
+    context
+        .set_local_declarations(
+            vec![Declaration {
+                id: path_fork
+                    .try_intern_components(&[constant_name])
+                    .expect("test path fits"),
+                type_id: template_type_id,
+                diagnostic_type: DataType::StringSlice,
+                value_mode: ValueMode::ImmutableOwned,
+                value: DeclarationValue::Initializer(template_expression.id()),
+                binding_span: None,
+                config_qualifier: None,
+            }],
+            &path_fork,
+            &string_table,
+        )
+        .expect("the local template binding must remain visible");
 
     let mut builder = TestSourceTokensBuilder::new(SourceId::COMPILATION_ROOT);
     builder
@@ -405,19 +497,29 @@ fn constant_identifier_uses_module_store_tir() {
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
     let mut expected_type = ExpectedType::Infer;
 
-    let parsed = create_expression(
-        &mut token_stream,
-        &context,
-        &mut type_interner,
-        &mut expected_type,
-        &ValueMode::ImmutableOwned,
+    let mut cast_target_context = CastTargetContext::None;
+    let parsed = create_expression_with_trailing_newline_policy(ExpressionParseInput::ordinary(
+        ExpressionParseResources {
+            token_stream: &mut token_stream,
+            scope_context: &context,
+            type_interner: &mut type_interner,
+            expression_builder: &mut expression_builder,
+            const_values: &mut const_values,
+            expected_type: &mut expected_type,
+            cast_target_context: &mut cast_target_context,
+            value_mode: &ValueMode::ImmutableOwned,
+            string_table: &mut string_table,
+            path_fork: &mut path_fork,
+        },
         false,
-        &mut string_table,
-        &mut path_fork,
-    )
+    ))
     .expect("module-store constant reference should inline through effective TIR");
 
-    let ExpressionKind::Template(parsed_template) = parsed.kind else {
+    let ExpressionOperationView::Template(parsed_template) = expression_builder
+        .view_owned(parsed)
+        .expect("the parsed constant reference must be a valid expression")
+        .operation()
+    else {
         panic!("constant reference should preserve the existing inlined template behavior");
     };
     assert_eq!(parsed_template.tir_reference.root, template_id);
@@ -511,4 +613,69 @@ fn adjacent_copy_reports_missing_operator_at_copy_keyword() {
 #[test]
 fn value_template_followed_by_comment_template_stays_valid() {
     let _ = parse_single_file_ast("value = [: one] [$note:ignored]");
+}
+
+// ----------------------------------
+//  Cast operand statement boundaries
+// ----------------------------------
+
+/// A cast whose operand ends on its own statement boundary must not adopt the `catch` of a
+/// later statement.
+///
+/// WHAT: parses sibling statements where an earlier implicit cast is followed by a later
+///       `catch`; the cast must stay implicit and every later binding must survive.
+/// WHY: the cast operand lookahead once treated the next statement's `catch` as the cast's
+///      suffix, which swallowed the statements in between and left `recovered` undeclared.
+#[test]
+fn cast_operand_ends_at_statement_boundary_before_later_catch() {
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        r#"
+octet U8 = 7
+value ~U64 = 0
+value = cast octet
+parse_int |text String| -> I32, Error!:
+    return cast text
+;
+maybe String = "not an integer"
+recovered = parse_int(maybe) catch then 0
+assert(value is 7)
+assert(recovered is 0)
+"#,
+    );
+    let body = start_function_body(&ast, &path_fork, &string_table);
+
+    let declared_names: Vec<String> = body
+        .iter()
+        .filter_map(|node| match &node.kind {
+            NodeKind::VariableDeclaration(declaration) => Some(declaration.id),
+            _ => None,
+        })
+        .filter_map(|id| path_fork.component(id))
+        .map(|component| string_table.resolve(component).to_owned())
+        .collect();
+    for expected in ["octet", "value", "maybe", "recovered"] {
+        assert!(
+            declared_names.iter().any(|name| name.as_str() == expected),
+            "declaration '{expected}' must survive the cast operand boundary, found {declared_names:?}"
+        );
+    }
+
+    let assignment_value = *body
+        .iter()
+        .find_map(|node| match &node.kind {
+            NodeKind::Assignment { value, .. } => Some(value),
+            _ => None,
+        })
+        .expect("the cast assignment must be present");
+    let assignment_view = ast
+        .expressions
+        .view(assignment_value)
+        .expect("the cast assignment value must be a valid expression");
+    let ExpressionOperationView::Cast { facts, .. } = assignment_view.operation() else {
+        panic!("expected the assignment to carry a resolved cast");
+    };
+    assert!(
+        matches!(facts.handling, CastHandling::Implicit),
+        "a later statement's `catch` must not become this cast's suffix"
+    );
 }

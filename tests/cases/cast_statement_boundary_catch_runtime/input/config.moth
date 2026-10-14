@@ -1,0 +1,5 @@
+project #= (
+    name = "cast_statement_boundary_catch_runtime",
+    entry_root = "src",
+)
+html #= ()

@@ -1,0 +1,18 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "generic_constructed_numeric_immediate_receivers_runtime f32=2 dec=3 byte=7"
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0064"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0064"
+reason = "unsupported_backend_feature.fixed_width_scalar_values"
+path = "input/@page.moth"
+line = 17
+column = 1

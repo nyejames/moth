@@ -11,7 +11,6 @@ use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap};
 
 use moth_lexical::numeric::parse::NumberLiteralErrorReason;
-use moth_lexical::numeric::profile::NumericProfile;
 mod reason_keys;
 use self::reason_keys::StableReasonKey;
 mod remap;
@@ -57,6 +56,11 @@ macro_rules! emit_diagnostic_payload_enum {
                 expected: TypeId,
                 found: TypeId,
                 context: TypeMismatchContext,
+            },
+            InvalidValueReceiver {
+                receiver: ValueReceiverContext,
+                target_count: usize,
+                produced_count: usize,
             },
             DuplicateDeclaration {
                 name: StringId,
@@ -187,7 +191,7 @@ macro_rules! emit_diagnostic_payload_enum {
                 resource: SourceSpanCapacityResource,
             },
             CompilerCapacityExceeded {
-                resource: HirCapacityResource,
+                resource: CapacityResource,
             },
             InvalidCharacter {
                 character: char,

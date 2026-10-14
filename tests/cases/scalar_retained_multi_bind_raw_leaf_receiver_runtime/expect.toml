@@ -1,0 +1,13 @@
+entry = "."
+
+# HTML owns the exact runtime output for the annotated-immediate receiver forms, each in
+# known-first and forward-first branch order and exercised on both dynamic branches. Unannotated
+# named-operand Forward slots are not runtime receivers here: a later consumer validates their
+# natural result, which the boundary rejection cases pin. This case does not claim a Wasm
+# disposition: the beside-named checked arithmetic is rejected there with MOTH-RULE-0064, as in
+# the immediate control case, so no html_wasm expectation is listed.
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "immediate_ready=total=11 label=ready base=10 immediate_waiting=total=4294967306 label=waiting base=10 immediate_known_first_ready=total=0 label=ready base=10 immediate_known_first_waiting=total=4294967306 label=waiting base=10 immediate_forward_first_ready=total=4294967306 label=waiting base=10 immediate_forward_first_waiting=total=0 label=ready base=10"

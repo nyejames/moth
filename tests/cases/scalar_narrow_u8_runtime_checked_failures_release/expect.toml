@@ -1,0 +1,19 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+flags = ["release"]
+warnings = "forbid"
+rendered_output_exact = "scalar u8 checked ok=255 add=301/0 subtract=301/0 multiply=301/0"
+
+[backends.html_wasm]
+mode = "failure"
+flags = ["release"]
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0064"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0064"
+reason = "unsupported_backend_feature.checked_numeric_operations"
+line = 5
+column = 17

@@ -3,13 +3,17 @@
 //! WHAT: validates collection item parsing and unterminated-literal diagnostics.
 //! WHY: collections use expression recursion and can silently drift without focused coverage.
 
+use crate::compiler_frontend::ast::Ast;
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
-use crate::compiler_frontend::ast::expressions::expression::{
-    Expression, ExpressionKind, FallibleExpressionHandling,
+use crate::compiler_frontend::ast::const_values::{ConstValuePayload, ConstValueStore};
+use crate::compiler_frontend::ast::expressions::expression::FallibleExpressionHandling;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, ExpressionOperationView, ExpressionView,
 };
-use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::expressions::failure_classification::pending_expression_failure_facts;
 use crate::compiler_frontend::ast::expressions::failure_facts::FailureDisposition;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
+use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::builtins::CollectionBuiltinOp;
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
 use crate::compiler_frontend::compiler_messages::{
@@ -25,33 +29,109 @@ use crate::compiler_frontend::tests::ast_fixture_support::{
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
-fn runtime_collection_builtin_op(expression: &Expression) -> CollectionBuiltinOp {
-    let ExpressionKind::CollectionBuiltinCall { op, .. } = &expression.kind else {
-        panic!("expected collection builtin call expression");
-    };
-
-    *op
+/// One exact `I32` scalar value for collection-item fixtures.
+///
+/// WHY: an unconstrained whole literal defaults to `I32`, so completed collection items carry
+///      the exact `I32` identity.
+fn i32_value(value: i64) -> FixedScalarValue {
+    FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32")
 }
 
-fn handled_collection_builtin_op(expression: &Expression) -> CollectionBuiltinOp {
-    let handled_expression = match &expression.kind {
-        ExpressionKind::HandledFallibleExpression { value, .. } => value.as_ref(),
-        ExpressionKind::ValueBlock { block } => {
-            let ValueBlock::Catch(value_catch) = block.as_ref() else {
+#[test]
+fn rejects_non_single_collection_and_map_entries() {
+    let producers = "pair || -> I32, I32:\nreturn 1, 2\n;\nempty ||:\nreturn\n;\n";
+    for (entry, produced_count) in [
+        ("values = {pair()}\n", 2),
+        ("values = {empty()}\n", 0),
+        ("values = {pair() = 1}\n", 2),
+        ("values = {empty() = 1}\n", 0),
+        ("values = {1 = pair()}\n", 2),
+        ("values = {1 = empty()}\n", 0),
+    ] {
+        let source = format!("{producers}{entry}");
+        let diagnostic = parse_single_file_ast_diagnostic(&source);
+        assert!(matches!(
+            &diagnostic.payload,
+            DiagnosticPayload::InvalidValueReceiver {
+                target_count: 1,
+                produced_count: actual,
+                ..
+            } if *actual == produced_count
+        ));
+    }
+}
+
+fn expression_view(ast: &Ast, expression: ExprId) -> ExpressionView<'_> {
+    ast.expressions
+        .view(expression)
+        .expect("fixture expression view")
+}
+
+fn constant_payload(ast: &Ast, expression: ExprId) -> Option<&ConstValuePayload> {
+    let view = expression_view(ast, expression);
+    let ExpressionOperationView::Constant(constant_id) = view.operation() else {
+        return None;
+    };
+    ast.const_values.payload(constant_id)
+}
+
+fn fixed_scalar_constant(ast: &Ast, expression: ExprId) -> Option<FixedScalarValue> {
+    match constant_payload(ast, expression)? {
+        ConstValuePayload::FixedScalar(value) => Some(*value),
+        _ => None,
+    }
+}
+
+fn collection_items(ast: &Ast, expression: ExprId) -> Vec<ExprId> {
+    let view = expression_view(ast, expression);
+    let ExpressionOperationView::Collection(items) = view.operation() else {
+        panic!("expected collection expression");
+    };
+    items.iter().map(|item| item.id()).collect()
+}
+
+fn map_entries(ast: &Ast, expression: ExprId) -> Vec<(ExprId, ExprId)> {
+    let view = expression_view(ast, expression);
+    let ExpressionOperationView::Map(entries) = view.operation() else {
+        panic!("expected map literal expression");
+    };
+    entries
+        .iter()
+        .map(|entry| (entry.key().id(), entry.value().id()))
+        .collect()
+}
+
+/// Returns the runtime call under a `catch` or propagation handler.
+fn handled_runtime_call(ast: &Ast, expression: ExprId) -> ExprId {
+    let view = expression_view(ast, expression);
+    match view.operation() {
+        ExpressionOperationView::HandleFallible { value, .. } => value.id(),
+        ExpressionOperationView::ValueBlock(block) => {
+            let ValueBlock::Catch(value_catch) = block else {
                 panic!("expected catch value block");
             };
-            let ExpressionKind::HandledFallibleExpression { value, .. } =
-                &value_catch.handled_value.kind
-            else {
+            let inner = expression_view(ast, value_catch.handled_value);
+            let ExpressionOperationView::HandleFallible { value, .. } = inner.operation() else {
                 panic!("expected handled fallible expression inside catch value block");
             };
-            value.as_ref()
+            value.id()
         }
         _ => panic!("expected handled fallible expression"),
-    };
+    }
+}
 
-    runtime_collection_builtin_op(handled_expression)
+fn runtime_collection_builtin_op(ast: &Ast, expression: ExprId) -> CollectionBuiltinOp {
+    let view = expression_view(ast, expression);
+    let ExpressionOperationView::CollectionBuiltin { facts, .. } = view.operation() else {
+        panic!("expected collection builtin call expression");
+    };
+    facts.operation
+}
+
+fn handled_collection_builtin_op(ast: &Ast, expression: ExprId) -> CollectionBuiltinOp {
+    runtime_collection_builtin_op(ast, handled_runtime_call(ast, expression))
 }
 
 // --------------------------
@@ -67,19 +147,23 @@ fn parses_collection_literal_items() {
         panic!("expected collection declaration");
     };
 
-    let ExpressionKind::Collection(items) = &values_decl.value.kind else {
-        panic!("expected collection expression");
-    };
+    let items = collection_items(
+        &ast,
+        values_decl
+            .value
+            .initializer()
+            .expect("fixture initializer"),
+    );
 
     assert_eq!(items.len(), 3);
-    assert!(matches!(items[0].kind, ExpressionKind::Int(1)));
-    assert!(matches!(items[1].kind, ExpressionKind::Int(2)));
-    assert!(matches!(items[2].kind, ExpressionKind::Int(3)));
+    assert!(matches!(fixed_scalar_constant(&ast, items[0]), Some(value) if value == i32_value(1)));
+    assert!(matches!(fixed_scalar_constant(&ast, items[1]), Some(value) if value == i32_value(2)));
+    assert!(matches!(fixed_scalar_constant(&ast, items[2]), Some(value) if value == i32_value(3)));
 }
 
 #[test]
 fn parses_multiline_inferred_collection_literal_with_constructor_items() {
-    let source = "Entry = |\n    value Int,\n|\n\nrender || -> String:\n    entries = {\n        Entry(1),\n        Entry(2),\n    }\n    return [entries.length()]\n;\n";
+    let source = "Entry = |\n    value I32,\n|\n\nrender || -> String:\n    entries = {\n        Entry(1),\n        Entry(2),\n    }\n    return [entries.length()]\n;\n";
     let (ast, path_fork, string_table) = parse_single_file_ast(source);
     let body = function_body_by_name(&ast, &path_fork, &string_table, "render");
 
@@ -87,14 +171,17 @@ fn parses_multiline_inferred_collection_literal_with_constructor_items() {
         panic!("expected collection declaration");
     };
 
-    let ExpressionKind::Collection(items) = &entries_decl.value.kind else {
-        panic!("expected collection expression");
-    };
+    let items = collection_items(
+        &ast,
+        entries_decl
+            .value
+            .initializer()
+            .expect("fixture initializer"),
+    );
 
     assert_eq!(items.len(), 2);
     assert_eq!(
         entries_decl
-            .value
             .diagnostic_type
             .display_with_table(&string_table, &path_fork.snapshot_table()),
         "{Entry}"
@@ -112,17 +199,16 @@ fn infers_collection_element_type_from_non_empty_literal() {
 
     assert_eq!(
         values_decl
-            .value
             .diagnostic_type
             .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
-        "{Int}"
+        "{I32}"
     );
 }
 
 #[test]
 fn parses_empty_collection_with_explicit_element_type() {
     let (ast, path_fork, string_table) =
-        parse_single_file_ast("Reading = |\n    value Float,\n|\n\nreadings ~{Reading} = {}\n");
+        parse_single_file_ast("Reading = |\n    value F64,\n|\n\nreadings ~{Reading} = {}\n");
     let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(readings_decl) = &body[0].kind else {
@@ -131,7 +217,6 @@ fn parses_empty_collection_with_explicit_element_type() {
 
     assert_eq!(
         readings_decl
-            .value
             .diagnostic_type
             .display_with_table(&string_table, &path_fork.snapshot_table()),
         "{Reading}"
@@ -153,7 +238,7 @@ fn rejects_mixed_item_types_in_inferred_collection() {
 
 #[test]
 fn rejects_item_that_does_not_match_explicit_collection_type() {
-    let diagnostic = parse_single_file_ast_diagnostic("values ~{Int} = {1, \"bad\"}\n");
+    let diagnostic = parse_single_file_ast_diagnostic("values ~{I32} = {1, \"bad\"}\n");
 
     assert!(matches!(
         diagnostic.payload,
@@ -167,7 +252,7 @@ fn rejects_item_that_does_not_match_explicit_collection_type() {
 #[test]
 fn parses_growable_push_after_explicit_empty_collection() {
     let (ast, path_fork, string_table) =
-        parse_single_file_ast("values ~{Int} = {}\n~values.push(1)\n");
+        parse_single_file_ast("values ~{I32} = {}\n~values.push(1)\n");
     let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::ExpressionStatement(push_expr) = &body[1].kind else {
@@ -175,7 +260,7 @@ fn parses_growable_push_after_explicit_empty_collection() {
     };
 
     assert_eq!(
-        runtime_collection_builtin_op(push_expr),
+        runtime_collection_builtin_op(&ast, *push_expr),
         CollectionBuiltinOp::PushGrowable
     );
 }
@@ -207,29 +292,39 @@ fn rejects_missing_collection_item_after_comma() {
 #[test]
 fn parses_collection_get_with_fallback_handler_and_propagation() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
-        "read_or_default |values {Int}, idx Int| -> Int:\n    return values.get(idx) catch:\n        then 0\n    ;\n;\n\nread_with_handler |values {Int}, idx Int| -> Int:\n    return values.get(idx) catch |err|:\n        io.line([: [err.message]])\n        then 0\n    ;\n;\n\nforward_read |values {Int}, idx Int| -> Int, Error!:\n    return values.get(idx)!\n;\n",
+        "read_or_default |values {I32}, idx I32| -> I32:\n    return values.get(idx) catch:\n        then 0\n    ;\n;\n\nread_with_handler |values {I32}, idx I32| -> I32:\n    return values.get(idx) catch |err|:\n        io.line([: [err.message]])\n        then 0\n    ;\n;\n\nforward_read |values {I32}, idx I32| -> I32, Error!:\n    return values.get(idx)!\n;\n",
     );
 
     let fallback_body = function_body_by_name(&ast, &path_fork, &string_table, "read_or_default");
     let NodeKind::Return(values) = &fallback_body[0].kind else {
         panic!("expected return statement in fallback function");
     };
-    assert!(matches!(values[0].kind, ExpressionKind::ValueBlock { .. }));
+    assert!(matches!(
+        expression_view(&ast, values[0]).operation(),
+        ExpressionOperationView::ValueBlock(_)
+    ));
 
     let handler_body = function_body_by_name(&ast, &path_fork, &string_table, "read_with_handler");
     let NodeKind::Return(values) = &handler_body[0].kind else {
         panic!("expected return statement in handler function");
     };
-    assert!(matches!(values[0].kind, ExpressionKind::ValueBlock { .. }));
+    assert!(matches!(
+        expression_view(&ast, values[0]).operation(),
+        ExpressionOperationView::ValueBlock(_)
+    ));
 
     let propagation_body = function_body_by_name(&ast, &path_fork, &string_table, "forward_read");
     let NodeKind::Return(values) = &propagation_body[0].kind else {
         panic!("expected return statement in propagation function");
     };
-    let ExpressionKind::HandledFallibleExpression { handling, .. } = &values[0].kind else {
+    let view = expression_view(&ast, values[0]);
+    let ExpressionOperationView::HandleFallible { handling, .. } = view.operation() else {
         panic!("expected handled fallible expression for propagation");
     };
-    assert!(matches!(handling, FallibleExpressionHandling::Propagate));
+    assert!(matches!(
+        handling.handling,
+        FallibleExpressionHandling::Propagate
+    ));
 }
 
 // --------------------------
@@ -247,7 +342,7 @@ fn parses_collection_mutators_and_length_calls() {
         panic!("expected set(...) statement");
     };
     assert_eq!(
-        handled_collection_builtin_op(set_expr),
+        handled_collection_builtin_op(&ast, *set_expr),
         CollectionBuiltinOp::Set
     );
 
@@ -255,7 +350,7 @@ fn parses_collection_mutators_and_length_calls() {
         panic!("expected push(...) statement");
     };
     assert_eq!(
-        runtime_collection_builtin_op(push_expr),
+        runtime_collection_builtin_op(&ast, *push_expr),
         CollectionBuiltinOp::PushGrowable
     );
 
@@ -263,16 +358,28 @@ fn parses_collection_mutators_and_length_calls() {
         panic!("expected removed declaration");
     };
     assert_eq!(
-        handled_collection_builtin_op(&removed_decl.value),
+        handled_collection_builtin_op(
+            &ast,
+            removed_decl
+                .value
+                .initializer()
+                .expect("fixture initializer"),
+        ),
         CollectionBuiltinOp::Remove
     );
 
     let NodeKind::VariableDeclaration(size_decl) = &body[4].kind else {
         panic!("expected length declaration");
     };
-    assert_eq!(size_decl.value.type_id, builtin_type_ids::INT);
     assert_eq!(
-        runtime_collection_builtin_op(&size_decl.value),
+        size_decl.type_id,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
+    );
+    assert_eq!(
+        runtime_collection_builtin_op(
+            &ast,
+            size_decl.value.initializer().expect("fixture initializer")
+        ),
         CollectionBuiltinOp::Length
     );
 }
@@ -288,7 +395,7 @@ fn parses_collection_mutators_with_explicit_receiver_tilde_prefix() {
         panic!("expected push(...) statement");
     };
     assert_eq!(
-        runtime_collection_builtin_op(push_expr),
+        runtime_collection_builtin_op(&ast, *push_expr),
         CollectionBuiltinOp::PushGrowable
     );
 
@@ -296,7 +403,7 @@ fn parses_collection_mutators_with_explicit_receiver_tilde_prefix() {
         panic!("expected set(...) statement");
     };
     assert_eq!(
-        handled_collection_builtin_op(set_expr),
+        handled_collection_builtin_op(&ast, *set_expr),
         CollectionBuiltinOp::Set
     );
 
@@ -304,7 +411,13 @@ fn parses_collection_mutators_with_explicit_receiver_tilde_prefix() {
         panic!("expected removed declaration");
     };
     assert_eq!(
-        handled_collection_builtin_op(&removed_decl.value),
+        handled_collection_builtin_op(
+            &ast,
+            removed_decl
+                .value
+                .initializer()
+                .expect("fixture initializer"),
+        ),
         CollectionBuiltinOp::Remove
     );
 }
@@ -319,23 +432,18 @@ fn accepts_unhandled_growable_collection_push() {
         panic!("expected push statement");
     };
 
-    let ExpressionKind::CollectionBuiltinCall {
-        op,
-        result_type_ids,
-        ..
-    } = &push_expr.kind
-    else {
+    let view = expression_view(&ast, *push_expr);
+    let ExpressionOperationView::CollectionBuiltin { facts, .. } = view.operation() else {
         panic!("expected collection builtin call");
     };
 
-    assert_eq!(*op, CollectionBuiltinOp::PushGrowable);
-    assert!(result_type_ids.is_empty());
-    assert_eq!(push_expr.type_id, builtin_type_ids::NONE);
+    assert_eq!(facts.operation, CollectionBuiltinOp::PushGrowable);
+    assert!(view.success_types().is_empty());
 }
 
 #[test]
 fn rejects_unhandled_fixed_collection_push_result() {
-    let diagnostic = parse_single_file_ast_diagnostic("items ~{2 Int} = {1, 2}\n~items.push(3)\n");
+    let diagnostic = parse_single_file_ast_diagnostic("items ~{2 I32} = {1, 2}\n~items.push(3)\n");
 
     assert!(matches!(
         diagnostic.payload,
@@ -382,7 +490,7 @@ fn rejects_propagation_on_growable_collection_push() {
 #[test]
 fn parses_fixed_collection_push_with_fallback_handler() {
     let (ast, path_fork, string_table) =
-        parse_single_file_ast("items ~{2 Int} = {1, 2}\n~items.push(3) catch:\n;\n");
+        parse_single_file_ast("items ~{2 I32} = {1, 2}\n~items.push(3) catch:\n;\n");
     let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::ExpressionStatement(push_expr) = &body[1].kind else {
@@ -390,7 +498,7 @@ fn parses_fixed_collection_push_with_fallback_handler() {
     };
 
     assert_eq!(
-        handled_collection_builtin_op(push_expr),
+        handled_collection_builtin_op(&ast, *push_expr),
         CollectionBuiltinOp::PushFixed
     );
 }
@@ -399,7 +507,7 @@ fn parses_fixed_collection_push_with_fallback_handler() {
 fn parses_fixed_collection_push_postfix_propagation() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
         "append || -> Error!:
-        items ~{2 Int} = {1, 2}
+        items ~{2 I32} = {1, 2}
         ~items.push(3)!
     ;
     ",
@@ -411,7 +519,7 @@ fn parses_fixed_collection_push_postfix_propagation() {
     };
 
     assert_eq!(
-        handled_collection_builtin_op(push_expr),
+        handled_collection_builtin_op(&ast, *push_expr),
         CollectionBuiltinOp::PushFixed
     );
 }
@@ -419,7 +527,7 @@ fn parses_fixed_collection_push_postfix_propagation() {
 #[test]
 fn rejects_fixed_collection_push_fallback_value() {
     let diagnostic = parse_single_file_ast_diagnostic(
-        "items ~{2 Int} = {1, 2}
+        "items ~{2 I32} = {1, 2}
 ~items.push(3) catch:
     then 0
 ;
@@ -448,7 +556,7 @@ fn rejects_mutating_collection_method_without_explicit_receiver_tilde() {
     ));
 
     let fixed_diagnostic =
-        parse_single_file_ast_diagnostic("items ~{2 Int} = {1, 2}\nitems.push(3)\n");
+        parse_single_file_ast_diagnostic("items ~{2 I32} = {1, 2}\nitems.push(3)\n");
 
     assert!(matches!(
         fixed_diagnostic.payload,
@@ -485,7 +593,7 @@ fn rejects_explicit_receiver_tilde_for_collection_get_and_length() {
 
 #[test]
 fn parses_multiline_zero_argument_collection_and_map_builtins() {
-    let source = "values = {1, 2}\ncount = values.length(\n)\nscores ~{String = Int} = {\"Ada\" = 10}\n~scores.clear(\n)\n";
+    let source = "values = {1, 2}\ncount = values.length(\n)\nscores ~{String = I32} = {\"Ada\" = 10}\n~scores.clear(\n)\n";
 
     parse_single_file_ast(source);
 }
@@ -546,40 +654,66 @@ fn rejects_unhandled_collection_get_result() {
 #[test]
 fn preserves_nested_builtin_diagnostic_origin_under_whole_expression_catch() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
-        "read |values {Int}, index Int| -> Int:\n    return values.get(index) + 1 catch then 0\n;\n",
+        "read |values {I32}, index I32| -> I32:\n    return values.get(index) + 1 catch then 0\n;\n",
     );
     let body = function_body_by_name(&ast, &path_fork, &string_table, "read");
     let NodeKind::Return(values) = &body[0].kind else {
         panic!("expected return");
     };
-    let ExpressionKind::ValueBlock { block } = &values[0].kind else {
+    let whole = expression_view(&ast, values[0]);
+    let ExpressionOperationView::ValueBlock(block) = whole.operation() else {
         panic!("expected whole-expression catch");
     };
-    let ValueBlock::Catch(catch) = block.as_ref() else {
+    let ValueBlock::Catch(catch) = block else {
         panic!("expected catch value block");
     };
 
-    assert!(values[0].unhandled_typed_error_diagnostic().is_none());
-    let mut pending = catch.handled_value.as_ref().clone();
-    pending.failure_facts.disposition = FailureDisposition::Pending;
-    let ExpressionKind::Runtime(rpn) = &pending.kind else {
+    assert!(whole.unhandled_typed_error_diagnostic().is_none());
+
+    let protected = expression_view(&ast, catch.handled_value);
+    let ExpressionOperationView::NumericBinary { left, .. } = protected.operation() else {
         panic!("expected protected addition");
     };
-    let ExpressionRpnItem::Operand(builtin_call) = &rpn.items[0] else {
-        panic!("expected nested builtin operand");
-    };
+    let mut constants = ConstValueStore::default();
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let stand_in = builder
+        .fixed_scalar(
+            &mut constants,
+            i32_value(0),
+            protected.span(),
+            protected.value_mode(),
+        )
+        .expect("fixture pending stand-in");
+    let mut pending_facts = protected.failure_facts().cloned().unwrap_or_default();
+    pending_facts.disposition = FailureDisposition::Pending;
+    let pending = builder
+        .with_failure_facts(stand_in, pending_facts)
+        .expect("fixture pending failure facts");
+    let pending = builder.view_owned(pending).expect("fixture pending view");
+    let facts = pending_expression_failure_facts(pending, &TemplateIrStore::new(), &builder)
+        .expect("pending failure facts for projected addition");
+    assert_eq!(facts.disposition, FailureDisposition::Pending);
+    let producer = facts
+        .summary
+        .first_typed
+        .expect("unhandled nested get needs a typed error producer");
+    let builtin_name = producer
+        .builtin_name
+        .expect("unhandled nested get names its builtin");
+    assert_eq!(string_table.resolve(builtin_name), "get");
+    assert_eq!(producer.span.or(protected.span()), left.span());
     let diagnostic = pending
         .unhandled_typed_error_diagnostic()
         .expect("unhandled nested get needs a builtin diagnostic");
     let DiagnosticPayload::InvalidBuiltinCall {
         reason: InvalidBuiltinCallReason::UnhandledFallibleCall,
-        builtin_name: Some(builtin_name),
+        builtin_name: Some(diagnostic_builtin),
     } = diagnostic.payload
     else {
         panic!("expected unhandled builtin diagnostic");
     };
-    assert_eq!(string_table.resolve(builtin_name), "get");
-    assert_eq!(diagnostic.primary_span, builtin_call.span);
+    assert_eq!(string_table.resolve(diagnostic_builtin), "get");
+    assert_eq!(diagnostic.primary_span, left.span());
 }
 
 #[test]
@@ -649,7 +783,7 @@ fn rejects_removed_builtin_error_helper_methods() {
 
 #[test]
 fn fixed_collection_literal_within_capacity_is_accepted() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("items {2 Int} = {1, 2}\n");
+    let (ast, path_fork, string_table) = parse_single_file_ast("items {2 I32} = {1, 2}\n");
     let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(decl) = &body[0].kind else {
@@ -657,10 +791,9 @@ fn fixed_collection_literal_within_capacity_is_accepted() {
     };
 
     assert_eq!(
-        decl.value
-            .diagnostic_type
+        decl.diagnostic_type
             .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
-        "{2 Int}"
+        "{2 I32}"
     );
 }
 
@@ -678,44 +811,50 @@ fn parses_inferred_map_literal() {
         panic!("expected scores declaration");
     };
 
-    let ExpressionKind::MapLiteral(entries) = &scores_decl.value.kind else {
-        panic!("expected map literal expression");
-    };
+    let entries = map_entries(
+        &ast,
+        scores_decl
+            .value
+            .initializer()
+            .expect("fixture initializer"),
+    );
 
     assert_eq!(entries.len(), 2);
     assert!(
-        ast.type_environment.is_map_type(scores_decl.value.type_id),
+        ast.type_environment.is_map_type(scores_decl.type_id),
         "expected map type id"
     );
     assert_eq!(
         scores_decl
-            .value
             .diagnostic_type
             .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
-        "{String = Int}"
+        "{String = I32}"
     );
 }
 
 #[test]
 fn parses_explicit_empty_map_literal() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("scores {String = Int} = {}\n");
+    let (ast, path_fork, string_table) = parse_single_file_ast("scores {String = I32} = {}\n");
     let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(scores_decl) = &body[0].kind else {
         panic!("expected scores declaration");
     };
 
-    let ExpressionKind::MapLiteral(entries) = &scores_decl.value.kind else {
-        panic!("expected map literal expression");
-    };
+    let entries = map_entries(
+        &ast,
+        scores_decl
+            .value
+            .initializer()
+            .expect("fixture initializer"),
+    );
 
     assert!(entries.is_empty());
     assert_eq!(
         scores_decl
-            .value
             .diagnostic_type
             .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
-        "{String = Int}"
+        "{String = I32}"
     );
 }
 
@@ -730,13 +869,20 @@ fn parses_map_literal_with_runtime_key_expression() {
         panic!("expected scores declaration");
     };
 
-    let ExpressionKind::MapLiteral(entries) = &scores_decl.value.kind else {
-        panic!("expected map literal expression");
-    };
+    let entries = map_entries(
+        &ast,
+        scores_decl
+            .value
+            .initializer()
+            .expect("fixture initializer"),
+    );
 
     assert_eq!(entries.len(), 1);
     assert!(
-        matches!(entries[0].key.kind, ExpressionKind::FunctionCall { .. }),
+        matches!(
+            expression_view(&ast, entries[0].0).operation(),
+            ExpressionOperationView::Call(_)
+        ),
         "expected runtime key expression"
     );
 }
@@ -751,16 +897,20 @@ fn parses_map_literal_with_bare_identifier_key_as_variable() {
         panic!("expected scores declaration, got: {:?}", body[1].kind);
     };
 
-    let ExpressionKind::MapLiteral(entries) = &scores_decl.value.kind else {
-        panic!(
-            "expected map literal expression, got: {:?}",
-            scores_decl.value.kind
-        );
-    };
+    let entries = map_entries(
+        &ast,
+        scores_decl
+            .value
+            .initializer()
+            .expect("fixture initializer"),
+    );
 
     assert_eq!(entries.len(), 1);
     assert!(
-        matches!(entries[0].key.kind, ExpressionKind::Reference { .. }),
+        matches!(
+            expression_view(&ast, entries[0].0).operation(),
+            ExpressionOperationView::Reference(_)
+        ),
         "expected bare identifier key to be parsed as variable reference"
     );
 }
@@ -768,20 +918,27 @@ fn parses_map_literal_with_bare_identifier_key_as_variable() {
 #[test]
 fn parses_map_literal_with_contextual_none_value() {
     let (ast, path_fork, string_table) =
-        parse_single_file_ast("scores ~{String = Int?} = {\"Ada\" = none, \"Grace\" = 12}\n");
+        parse_single_file_ast("scores ~{String = I32?} = {\"Ada\" = none, \"Grace\" = 12}\n");
     let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(scores_decl) = &body[0].kind else {
         panic!("expected scores declaration");
     };
 
-    let ExpressionKind::MapLiteral(entries) = &scores_decl.value.kind else {
-        panic!("expected map literal expression");
-    };
+    let entries = map_entries(
+        &ast,
+        scores_decl
+            .value
+            .initializer()
+            .expect("fixture initializer"),
+    );
 
     assert_eq!(entries.len(), 2);
     assert!(
-        matches!(entries[0].value.kind, ExpressionKind::OptionNone),
+        matches!(
+            constant_payload(&ast, entries[0].1),
+            Some(ConstValuePayload::OptionNone)
+        ),
         "expected none in value position with option context"
     );
 }
@@ -789,20 +946,27 @@ fn parses_map_literal_with_contextual_none_value() {
 #[test]
 fn parses_map_literal_with_string_key_coercion() {
     let (ast, path_fork, string_table) =
-        parse_single_file_ast("scores ~{String = Int} = {\"Ada\" = 10}\n");
+        parse_single_file_ast("scores ~{String = I32} = {\"Ada\" = 10}\n");
     let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(scores_decl) = &body[0].kind else {
         panic!("expected scores declaration");
     };
 
-    let ExpressionKind::MapLiteral(entries) = &scores_decl.value.kind else {
-        panic!("expected map literal expression");
-    };
+    let entries = map_entries(
+        &ast,
+        scores_decl
+            .value
+            .initializer()
+            .expect("fixture initializer"),
+    );
 
     assert_eq!(entries.len(), 1);
     assert!(
-        matches!(entries[0].key.kind, ExpressionKind::StringSlice(_)),
+        matches!(
+            constant_payload(&ast, entries[0].0),
+            Some(ConstValuePayload::String(_))
+        ),
         "expected string literal key"
     );
 }
@@ -810,20 +974,27 @@ fn parses_map_literal_with_string_key_coercion() {
 #[test]
 fn parses_nested_map_literal_value() {
     let (ast, path_fork, string_table) =
-        parse_single_file_ast("scores ~{String = {String = Int}} = {\"group\" = {\"Ada\" = 10}}\n");
+        parse_single_file_ast("scores ~{String = {String = I32}} = {\"group\" = {\"Ada\" = 10}}\n");
     let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(scores_decl) = &body[0].kind else {
         panic!("expected scores declaration");
     };
 
-    let ExpressionKind::MapLiteral(entries) = &scores_decl.value.kind else {
-        panic!("expected map literal expression");
-    };
+    let entries = map_entries(
+        &ast,
+        scores_decl
+            .value
+            .initializer()
+            .expect("fixture initializer"),
+    );
 
     assert_eq!(entries.len(), 1);
     assert!(
-        matches!(entries[0].value.kind, ExpressionKind::MapLiteral(_)),
+        matches!(
+            expression_view(&ast, entries[0].1).operation(),
+            ExpressionOperationView::Map(_)
+        ),
         "expected nested map literal value"
     );
 }
@@ -831,24 +1002,27 @@ fn parses_nested_map_literal_value() {
 #[test]
 fn parses_map_type_alias_literal() {
     let (ast, path_fork, string_table) =
-        parse_single_file_ast("Scores as {String = Int}\nscores Scores = {\"Ada\" = 10}\n");
+        parse_single_file_ast("Scores as {String = I32}\nscores Scores = {\"Ada\" = 10}\n");
     let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(scores_decl) = &body[0].kind else {
         panic!("expected scores declaration");
     };
 
-    let ExpressionKind::MapLiteral(entries) = &scores_decl.value.kind else {
-        panic!("expected map literal expression");
-    };
+    let entries = map_entries(
+        &ast,
+        scores_decl
+            .value
+            .initializer()
+            .expect("fixture initializer"),
+    );
 
     assert_eq!(entries.len(), 1);
     assert_eq!(
         scores_decl
-            .value
             .diagnostic_type
             .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
-        "{String = Int}"
+        "{String = I32}"
     );
 }
 
@@ -894,7 +1068,7 @@ fn rejects_double_equal_inside_collection_as_common_syntax_mistake() {
 #[test]
 fn rejects_unknown_bare_identifier_key() {
     let diagnostic =
-        parse_single_file_ast_diagnostic("scores ~{String = Int} = {unknown_key = 10}\n");
+        parse_single_file_ast_diagnostic("scores ~{String = I32} = {unknown_key = 10}\n");
 
     assert!(matches!(
         diagnostic.payload,
@@ -906,35 +1080,16 @@ fn rejects_unknown_bare_identifier_key() {
 //  Map builtin helpers
 // --------------------------
 
-fn runtime_map_builtin_op(expression: &Expression) -> MapBuiltinOp {
-    let ExpressionKind::MapBuiltinCall { op, .. } = &expression.kind else {
-        panic!(
-            "expected map builtin call expression, got {:?}",
-            expression.kind
-        );
+fn runtime_map_builtin_op(ast: &Ast, expression: ExprId) -> MapBuiltinOp {
+    let view = expression_view(ast, expression);
+    let ExpressionOperationView::MapBuiltin { facts, .. } = view.operation() else {
+        panic!("expected map builtin call expression");
     };
-
-    *op
+    facts.operation
 }
 
-fn handled_map_builtin_op(expression: &Expression) -> MapBuiltinOp {
-    let handled_expression = match &expression.kind {
-        ExpressionKind::HandledFallibleExpression { value, .. } => value.as_ref(),
-        ExpressionKind::ValueBlock { block } => {
-            let ValueBlock::Catch(value_catch) = block.as_ref() else {
-                panic!("expected catch value block");
-            };
-            let ExpressionKind::HandledFallibleExpression { value, .. } =
-                &value_catch.handled_value.kind
-            else {
-                panic!("expected handled fallible expression inside catch value block");
-            };
-            value.as_ref()
-        }
-        _ => panic!("expected handled fallible expression"),
-    };
-
-    runtime_map_builtin_op(handled_expression)
+fn handled_map_builtin_op(ast: &Ast, expression: ExprId) -> MapBuiltinOp {
+    runtime_map_builtin_op(ast, handled_runtime_call(ast, expression))
 }
 
 // --------------------------
@@ -944,7 +1099,7 @@ fn handled_map_builtin_op(expression: &Expression) -> MapBuiltinOp {
 #[test]
 fn parses_map_get_with_catch_handler() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
-        "scores ~{String = Int} = {\"Ada\" = 10}\nvalue = scores.get(\"Ada\") catch:\n    then 0\n;\n",
+        "scores ~{String = I32} = {\"Ada\" = 10}\nvalue = scores.get(\"Ada\") catch:\n    then 0\n;\n",
     );
     let body = start_function_body(&ast, &path_fork, &string_table);
 
@@ -952,13 +1107,19 @@ fn parses_map_get_with_catch_handler() {
         panic!("expected value declaration");
     };
 
-    assert_eq!(handled_map_builtin_op(&value_decl.value), MapBuiltinOp::Get);
+    assert_eq!(
+        handled_map_builtin_op(
+            &ast,
+            value_decl.value.initializer().expect("fixture initializer")
+        ),
+        MapBuiltinOp::Get
+    );
 }
 
 #[test]
 fn parses_map_get_with_propagation() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
-        "get_value |scores {String = Int}| -> Int, Error!:\n    return scores.get(\"Ada\")!\n;\n",
+        "get_value |scores {String = I32}| -> I32, Error!:\n    return scores.get(\"Ada\")!\n;\n",
     );
     let body = function_body_by_name(&ast, &path_fork, &string_table, "get_value");
 
@@ -966,13 +1127,13 @@ fn parses_map_get_with_propagation() {
         panic!("expected return statement");
     };
 
-    assert_eq!(handled_map_builtin_op(&values[0]), MapBuiltinOp::Get);
+    assert_eq!(handled_map_builtin_op(&ast, values[0]), MapBuiltinOp::Get);
 }
 
 #[test]
 fn parses_map_contains() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
-        "scores ~{String = Int} = {\"Ada\" = 10}\nfound = scores.contains(\"Ada\")\n",
+        "scores ~{String = I32} = {\"Ada\" = 10}\nfound = scores.contains(\"Ada\")\n",
     );
     let body = start_function_body(&ast, &path_fork, &string_table);
 
@@ -981,7 +1142,10 @@ fn parses_map_contains() {
     };
 
     assert_eq!(
-        runtime_map_builtin_op(&found_decl.value),
+        runtime_map_builtin_op(
+            &ast,
+            found_decl.value.initializer().expect("fixture initializer")
+        ),
         MapBuiltinOp::Contains
     );
 }
@@ -989,7 +1153,7 @@ fn parses_map_contains() {
 #[test]
 fn parses_map_set_with_mutable_receiver() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
-        "scores ~{String = Int} = {\"Ada\" = 10}\n~scores.set(\"Linus\", 7) catch:\n;\n",
+        "scores ~{String = I32} = {\"Ada\" = 10}\n~scores.set(\"Linus\", 7) catch:\n;\n",
     );
     let body = start_function_body(&ast, &path_fork, &string_table);
 
@@ -997,13 +1161,13 @@ fn parses_map_set_with_mutable_receiver() {
         panic!("expected expression statement");
     };
 
-    assert_eq!(handled_map_builtin_op(expr), MapBuiltinOp::Set);
+    assert_eq!(handled_map_builtin_op(&ast, *expr), MapBuiltinOp::Set);
 }
 
 #[test]
 fn parses_map_remove_with_mutable_receiver() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
-        "scores ~{String = Int} = {\"Ada\" = 10}\nremoved = ~scores.remove(\"Ada\") catch:\n    then 0\n;\n",
+        "scores ~{String = I32} = {\"Ada\" = 10}\nremoved = ~scores.remove(\"Ada\") catch:\n    then 0\n;\n",
     );
     let body = start_function_body(&ast, &path_fork, &string_table);
 
@@ -1012,7 +1176,13 @@ fn parses_map_remove_with_mutable_receiver() {
     };
 
     assert_eq!(
-        handled_map_builtin_op(&removed_decl.value),
+        handled_map_builtin_op(
+            &ast,
+            removed_decl
+                .value
+                .initializer()
+                .expect("fixture initializer"),
+        ),
         MapBuiltinOp::Remove
     );
 }
@@ -1020,20 +1190,20 @@ fn parses_map_remove_with_mutable_receiver() {
 #[test]
 fn parses_map_clear_with_mutable_receiver() {
     let (ast, path_fork, string_table) =
-        parse_single_file_ast("scores ~{String = Int} = {\"Ada\" = 10}\n~scores.clear()\n");
+        parse_single_file_ast("scores ~{String = I32} = {\"Ada\" = 10}\n~scores.clear()\n");
     let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::ExpressionStatement(expr) = &body[1].kind else {
         panic!("expected expression statement");
     };
 
-    assert_eq!(runtime_map_builtin_op(expr), MapBuiltinOp::Clear);
+    assert_eq!(runtime_map_builtin_op(&ast, *expr), MapBuiltinOp::Clear);
 }
 
 #[test]
 fn parses_map_length_as_property() {
     let (ast, path_fork, string_table) =
-        parse_single_file_ast("scores ~{String = Int} = {\"Ada\" = 10}\ncount = scores.length\n");
+        parse_single_file_ast("scores ~{String = I32} = {\"Ada\" = 10}\ncount = scores.length\n");
     let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(count_decl) = &body[1].kind else {
@@ -1041,7 +1211,10 @@ fn parses_map_length_as_property() {
     };
 
     assert_eq!(
-        runtime_map_builtin_op(&count_decl.value),
+        runtime_map_builtin_op(
+            &ast,
+            count_decl.value.initializer().expect("fixture initializer")
+        ),
         MapBuiltinOp::Length
     );
 }
@@ -1049,7 +1222,7 @@ fn parses_map_length_as_property() {
 #[test]
 fn rejects_map_get_index_assignment() {
     let diagnostic = parse_single_file_ast_diagnostic(
-        "scores ~{String = Int} = {\"Ada\" = 10}\nscores.get(\"Ada\") = 5\n",
+        "scores ~{String = I32} = {\"Ada\" = 10}\nscores.get(\"Ada\") = 5\n",
     );
 
     assert!(matches!(
@@ -1064,7 +1237,7 @@ fn rejects_map_get_index_assignment() {
 #[test]
 fn rejects_map_mutation_on_immutable_binding() {
     let diagnostic = parse_single_file_ast_diagnostic(
-        "scores {String = Int} = {\"Ada\" = 10}\n~scores.set(\"Linus\", 7)!\n",
+        "scores {String = I32} = {\"Ada\" = 10}\n~scores.set(\"Linus\", 7)!\n",
     );
 
     assert!(matches!(
@@ -1079,7 +1252,7 @@ fn rejects_map_mutation_on_immutable_binding() {
 #[test]
 fn rejects_map_contains_with_fallible_suffix() {
     let diagnostic = parse_single_file_ast_diagnostic(
-        "scores ~{String = Int} = {\"Ada\" = 10}\nvalue = scores.contains(\"Ada\")!\n",
+        "scores ~{String = I32} = {\"Ada\" = 10}\nvalue = scores.contains(\"Ada\")!\n",
     );
 
     assert!(matches!(
@@ -1094,7 +1267,7 @@ fn rejects_map_contains_with_fallible_suffix() {
 #[test]
 fn rejects_map_clear_with_fallible_suffix() {
     let diagnostic = parse_single_file_ast_diagnostic(
-        "scores ~{String = Int} = {\"Ada\" = 10}\n~scores.clear()!\n",
+        "scores ~{String = I32} = {\"Ada\" = 10}\n~scores.clear()!\n",
     );
 
     assert!(matches!(
@@ -1109,7 +1282,7 @@ fn rejects_map_clear_with_fallible_suffix() {
 #[test]
 fn rejects_map_length_with_fallible_suffix() {
     let diagnostic = parse_single_file_ast_diagnostic(
-        "scores ~{String = Int} = {\"Ada\" = 10}\ncount = scores.length!\n",
+        "scores ~{String = I32} = {\"Ada\" = 10}\ncount = scores.length!\n",
     );
 
     assert!(matches!(
@@ -1124,7 +1297,7 @@ fn rejects_map_length_with_fallible_suffix() {
 #[test]
 fn rejects_map_builtin_as_free_function() {
     let diagnostic = parse_single_file_ast_diagnostic(
-        "scores ~{String = Int} = {\"Ada\" = 10}\nvalue = get(scores, \"Ada\")!\n",
+        "scores ~{String = I32} = {\"Ada\" = 10}\nvalue = get(scores, \"Ada\")!\n",
     );
 
     assert!(matches!(
@@ -1138,7 +1311,7 @@ fn map_builtin_wins_before_visible_value_name() {
     // A visible free function named `get` must not capture `scores.get(...)`.
     // Map member syntax is compiler-owned once the receiver has a map type.
     let (ast, path_fork, string_table) = parse_single_file_ast(
-        "get |key String| -> Int:\n    return 0\n;\n\nget_value |scores {String = Int}| -> Int, Error!:\n    return scores.get(\"Ada\")!\n;\n",
+        "get |key String| -> I32:\n    return 0\n;\n\nget_value |scores {String = I32}| -> I32, Error!:\n    return scores.get(\"Ada\")!\n;\n",
     );
     let body = function_body_by_name(&ast, &path_fork, &string_table, "get_value");
 
@@ -1146,5 +1319,5 @@ fn map_builtin_wins_before_visible_value_name() {
         panic!("expected return statement");
     };
 
-    assert_eq!(handled_map_builtin_op(&values[0]), MapBuiltinOp::Get);
+    assert_eq!(handled_map_builtin_op(&ast, values[0]), MapBuiltinOp::Get);
 }

@@ -1,13 +1,13 @@
 -- Positive: aliases, struct fields, function parameter/return maps.
 
-Scores as {String = Int}
+Scores as {String = I32}
 
 Person = |
     name String,
-    scores {String = Int},
+    scores {String = I32},
 |
 
-get_score |p Person, key String| -> Int:
+get_score |p Person, key String| -> I32:
     return p.scores.get(key) catch:
         then 0
     ;

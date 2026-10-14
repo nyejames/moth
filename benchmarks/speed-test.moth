@@ -673,27 +673,27 @@ compile_card_e #= [card, compile_e_head, compile_e_foot:
 BenchmarkBlock = |
     title String,
     body String,
-    seed Int,
+    seed I32,
     group String,
 |
 
 RuntimeMetric = |
     label String,
-    base Int,
-    stride Int,
+    base I32,
+    stride I32,
 |
 
 MatrixSpec = |
-    width Int,
-    height Int,
-    offset Int,
+    width I32,
+    height I32,
+    offset I32,
 |
 
-compute_score |this BenchmarkBlock, index Int| -> Int:
+compute_score |this BenchmarkBlock, index I32| -> I32:
     return (this.seed * (index + 3)) + (index * index) + 17
 ;
 
-render |this BenchmarkBlock, index Int| -> String:
+render |this BenchmarkBlock, index I32| -> String:
     tone ~= "even"
     residue = this.compute_score(index) % 3
     if residue is 1:
@@ -719,16 +719,16 @@ render |this BenchmarkBlock, index Int| -> String:
     ]
 ;
 
-bump |this ~RuntimeMetric, amount Int|:
+bump |this ~RuntimeMetric, amount I32|:
     this.base = this.base + amount
     this.stride = this.stride + 1
 ;
 
-value_at |this RuntimeMetric, index Int| -> Int:
+value_at |this RuntimeMetric, index I32| -> I32:
     return this.base + ((index + 1) * this.stride) + (index * index)
 ;
 
-render_row |this RuntimeMetric, index Int| -> String:
+render_row |this RuntimeMetric, index I32| -> String:
     row_class ~= "even"
     if index % 2 is not 0:
         row_class = "odd"
@@ -793,7 +793,7 @@ render_matrix |this MatrixSpec| -> String:
     return matrix
 ;
 
-pair_values |seed Int| -> Int, Int:
+pair_values |seed I32| -> I32, I32:
     left = (seed * 3) + 7
     right = (seed * seed) + 11
     return left, right

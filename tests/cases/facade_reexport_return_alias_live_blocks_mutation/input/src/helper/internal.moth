@@ -1,7 +1,7 @@
 -- Ordinary implementation file private to the helper module; re-exported by the facade.
 
 Counter = |
-    step Int,
+    step I32,
 |
 
 alias_of |value Counter| -> Counter:

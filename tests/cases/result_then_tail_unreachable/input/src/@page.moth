@@ -1,8 +1,8 @@
-can_error || -> Int, Error!:
+can_error || -> I32, Error!:
     return! Error("bad")
 ;
 
-recover || -> Int:
+recover || -> I32:
     return can_error() catch:
         then 0
         io.line("late")

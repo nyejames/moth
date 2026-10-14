@@ -1,12 +1,12 @@
 Box = |
-    value Int,
+    value I32,
 |
 
-scaled |this Box, factor Int| -> Int:
+scaled |this Box, factor I32| -> I32:
     return this.value + factor + 2147483647
 ;
 
-double |value Int| -> Int:
+double |value I32| -> I32:
     return value + 2147483647
 ;
 

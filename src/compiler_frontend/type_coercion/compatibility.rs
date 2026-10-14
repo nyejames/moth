@@ -173,37 +173,6 @@ pub(crate) fn is_postfix_error_compatible(
         || type_environment.option_inner_type(expected_error_id) == Some(actual_error_id)
 }
 
-/// Returns true when `actual_id` is acceptable at an explicit declaration site
-/// expecting `expected_id`.
-///
-/// WHAT: the compatibility predicate for `result T = expr` declarations.
-/// WHY: declarations accept exact structural matches plus the narrow implicit numeric
-/// promotions `Int → Float` and `Uint → Float`.
-pub(crate) fn is_declaration_compatible(
-    expected_id: TypeId,
-    actual_id: TypeId,
-    type_environment: &TypeEnvironment,
-) -> bool {
-    is_type_compatible(expected_id, actual_id, type_environment)
-        || is_numeric_coercible_by_id(actual_id, expected_id, type_environment)
-}
-
-/// Returns true when `actual_id` can be implicitly promoted to `expected_id` as a
-/// contextual numeric coercion.
-///
-/// WHAT: the narrow set of implicit numeric promotions the language allows.
-/// WHY: only `Int → Float` and `Uint → Float` are supported. All other numeric combinations
-/// require an explicit `cast` at a typed receiving boundary. There is no transitive
-/// `Uint`/`Int` compatibility through `Float`: each direction checks one exact pair.
-pub(crate) fn is_numeric_coercible_by_id(
-    actual_id: TypeId,
-    expected_id: TypeId,
-    type_environment: &TypeEnvironment,
-) -> bool {
-    let builtins = type_environment.builtins();
-    expected_id == builtins.float && (actual_id == builtins.int || actual_id == builtins.uint)
-}
-
 // --------------------------------------------------------
 // Internal helpers
 // --------------------------------------------------------

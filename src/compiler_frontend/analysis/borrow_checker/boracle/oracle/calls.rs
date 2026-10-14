@@ -8,8 +8,8 @@
 use super::OracleLimitReason;
 use super::execute::{
     AccessExecutionResult, EventExecutionResult, OracleExecutionContext, execute_access,
-    finish_definition_transition, is_place_available_without_materialising, oracle_error,
-    require_call, require_origin, require_place, require_use,
+    finish_definition_transition, oracle_error, require_call, require_origin, require_place,
+    require_use,
 };
 use super::state::{CapabilitySource, DefinitionEventKind, DefinitionRole, RuntimeAccessTarget};
 use crate::compiler_frontend::analysis::borrow_checker::problem::{
@@ -17,7 +17,7 @@ use crate::compiler_frontend::analysis::borrow_checker::problem::{
     EventKind, OriginKind, PlaceId,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub(super) fn execute_call_argument<'a>(
     context: &mut OracleExecutionContext<'a, '_>,
@@ -118,177 +118,180 @@ pub(super) fn execute_call_effect<'a>(
         .state
         .extend_call_capabilities(effect.call, trace_index);
 
-    let Some(result) = effect.result else {
-        return Ok(EventExecutionResult::Continue);
-    };
-    let destination = result.destination;
-    let result_place = destination.place();
-    let place_row = require_place(problem, result_place, "call result place")?;
-    let origin = require_origin(problem, result.origin, "call result origin")?;
-    let OriginKind::CallResult {
-        call: origin_call,
-        provenance,
-    } = &origin.kind
-    else {
-        return Err(oracle_error(format!(
-            "call result origin {:?} is not a CallResult origin",
-            result.origin
-        )));
-    };
-    if *origin_call != effect.call {
-        return Err(oracle_error(format!(
-            "call result origin {:?} belongs to {:?}, not {:?}",
-            result.origin, origin_call, effect.call
-        )));
-    }
-
-    // LEAVE-LOCAL: independent static four-way provenance dispatch is at boracle/origins.rs:1547.
-    // Independence contract: boracle/oracle/mod.rs:5-6 and docs/src/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf:22; differential evidence: boracle/tests/differential.rs:21-32.
-    let target = match provenance {
-        CallResultProvenance::Fresh => {
-            // As with the value-producing events the write-through check precedes the
-            // generation allocation, so an alias-backed result cannot consume the bound.
-            if let Some(target) =
-                context
-                    .state
-                    .write_through_target(problem, context.place_index, destination)?
-            {
-                let transition = context.state.apply_definition_transition(
-                    problem,
-                    context.place_index,
-                    destination,
-                    DefinitionEventKind::Value,
-                    DefinitionRole::Slot {
-                        current: target.node,
-                    },
-                    trace_index,
-                )?;
-                finish_definition_transition(context, &transition);
-                return Ok(EventExecutionResult::Continue);
-            }
-            let generation = match context
-                .state
-                .issue_generation(bounds.max_dynamic_generations)
-            {
-                Ok(generation) => generation,
+    // Capture every incoming provenance relationship before any destination is replaced.
+    let mut argument_targets = BTreeMap::new();
+    for result in &effect.results {
+        let origin = require_origin(problem, result.origin, "call result origin")?;
+        if let OriginKind::CallResult {
+            provenance: CallResultProvenance::AliasParams(indices),
+            ..
+        } = &origin.kind
+            && !argument_targets.contains_key(&result.origin)
+        {
+            let targets = match resolve_alias_params_arguments(context, effect, indices)? {
+                Ok(targets) => targets,
                 Err(reason) => return Ok(EventExecutionResult::Inconclusive(reason)),
             };
-            let transition = context.state.apply_definition_transition(
-                problem,
-                context.place_index,
-                destination,
-                DefinitionEventKind::Value,
-                DefinitionRole::Slot {
-                    current: generation,
-                },
-                trace_index,
-            )?;
-            finish_definition_transition(context, &transition);
-            transition.target().clone()
+            argument_targets.insert(result.origin, targets);
         }
-        CallResultProvenance::AliasParams(parameter_indices) => {
-            // A write-through result ignores its incoming value, but every argument remains a
-            // validated input and its provenance relationship is still emitted by the reference.
-            if let Some(target) =
-                context
-                    .state
-                    .write_through_target(problem, context.place_index, destination)?
-            {
-                for parameter_index in parameter_indices {
-                    let argument = effect.arguments.get(*parameter_index).ok_or_else(|| {
-                        oracle_error(format!(
-                            "call result origin {:?} references argument {} outside call {:?}",
-                            result.origin, parameter_index, effect.call
-                        ))
-                    })?;
-                    require_place(problem, argument.place, "call result argument place")?;
-                    if !is_place_available_without_materialising(
+    }
+    // A shared normalized origin is conservative result-alias evidence, not independent slots.
+    let mut generations = BTreeMap::new();
+    for result in &effect.results {
+        let destination = result.destination;
+        let result_place = destination.place();
+        let place_row = require_place(problem, result_place, "call result place")?;
+        let origin = require_origin(problem, result.origin, "call result origin")?;
+        let OriginKind::CallResult {
+            call: origin_call,
+            provenance,
+        } = &origin.kind
+        else {
+            return Err(oracle_error(format!(
+                "call result origin {:?} is not a CallResult origin",
+                result.origin
+            )));
+        };
+        if *origin_call != effect.call {
+            return Err(oracle_error(format!(
+                "call result origin {:?} belongs to {:?}, not {:?}",
+                result.origin, origin_call, effect.call
+            )));
+        }
+
+        // LEAVE-LOCAL: independent static four-way provenance dispatch is at boracle/origins.rs:1547.
+        // Independence contract: boracle/oracle/mod.rs:5-6 and docs/src/developer-docs/memory-management/boracle/boracle-operational-oracle.mtf:22; differential evidence: boracle/tests/differential.rs:21-32.
+        let target = match provenance {
+            CallResultProvenance::Fresh => {
+                // As with the value-producing events the write-through check precedes the
+                // generation allocation, so an alias-backed result cannot consume the bound.
+                if let Some(target) =
+                    context
+                        .state
+                        .write_through_target(problem, context.place_index, destination)?
+                {
+                    let transition = context.state.apply_definition_transition(
                         problem,
-                        context.state,
-                        argument.place,
-                    )? {
-                        return Err(oracle_error(format!(
-                            "call result argument place {:?} is unavailable",
-                            argument.place
-                        )));
-                    }
+                        context.place_index,
+                        destination,
+                        DefinitionEventKind::Value,
+                        DefinitionRole::Slot {
+                            current: target.node,
+                        },
+                        trace_index,
+                    )?;
+                    finish_definition_transition(context, &transition);
+                    continue;
                 }
-                let transition = context.state.apply_definition_transition(
-                    problem,
-                    context.place_index,
-                    destination,
-                    DefinitionEventKind::Value,
-                    DefinitionRole::Slot {
-                        current: target.node,
-                    },
-                    trace_index,
-                )?;
-                finish_definition_transition(context, &transition);
-                let source_targets =
-                    match resolve_alias_params_arguments(context, effect, parameter_indices)? {
-                        Ok(source_targets) => source_targets,
+                let generation = if let Some(generation) = generations.get(&result.origin) {
+                    *generation
+                } else {
+                    let generation = match context
+                        .state
+                        .issue_generation(bounds.max_dynamic_generations)
+                    {
+                        Ok(generation) => generation,
                         Err(reason) => return Ok(EventExecutionResult::Inconclusive(reason)),
                     };
-                issue_call_result_provenance(context, event, result_place, &source_targets)?;
-                return Ok(EventExecutionResult::Continue);
-            }
-
-            let source_targets =
-                match resolve_alias_params_arguments(context, effect, parameter_indices)? {
-                    Ok(source_targets) => source_targets,
-                    Err(reason) => return Ok(EventExecutionResult::Inconclusive(reason)),
+                    generations.insert(result.origin, generation);
+                    generation
                 };
-            let generation = match context
+                let transition = context.state.apply_definition_transition(
+                    problem,
+                    context.place_index,
+                    destination,
+                    DefinitionEventKind::Value,
+                    DefinitionRole::Slot {
+                        current: generation,
+                    },
+                    trace_index,
+                )?;
+                finish_definition_transition(context, &transition);
+                transition.target().clone()
+            }
+            CallResultProvenance::AliasParams(_) => {
+                // A write-through result ignores its incoming value, but every argument remains a
+                // validated input and its provenance relationship is still emitted by the reference.
+                if let Some(target) =
+                    context
+                        .state
+                        .write_through_target(problem, context.place_index, destination)?
+                {
+                    let transition = context.state.apply_definition_transition(
+                        problem,
+                        context.place_index,
+                        destination,
+                        DefinitionEventKind::Value,
+                        DefinitionRole::Slot {
+                            current: target.node,
+                        },
+                        trace_index,
+                    )?;
+                    finish_definition_transition(context, &transition);
+                    let source_targets = &argument_targets[&result.origin];
+                    issue_call_result_provenance(context, event, result_place, source_targets)?;
+                    continue;
+                }
+
+                let source_targets = &argument_targets[&result.origin];
+                let generation = if let Some(generation) = generations.get(&result.origin) {
+                    *generation
+                } else {
+                    let generation = match context
+                        .state
+                        .issue_generation(bounds.max_dynamic_generations)
+                    {
+                        Ok(generation) => generation,
+                        Err(reason) => return Ok(EventExecutionResult::Inconclusive(reason)),
+                    };
+                    generations.insert(result.origin, generation);
+                    generation
+                };
+                let transition = context.state.apply_definition_transition(
+                    problem,
+                    context.place_index,
+                    destination,
+                    DefinitionEventKind::Value,
+                    DefinitionRole::Slot {
+                        current: generation,
+                    },
+                    trace_index,
+                )?;
+                finish_definition_transition(context, &transition);
+                issue_call_result_provenance(context, event, result_place, source_targets)?;
+                transition.target().clone()
+            }
+            CallResultProvenance::Alias(origins) => {
+                return Ok(EventExecutionResult::Inconclusive(
+                    OracleLimitReason::CallResultAliasOrigins {
+                        call: effect.call,
+                        origins: origins.clone(),
+                    },
+                ));
+            }
+            CallResultProvenance::Unknown(reason) => {
+                return Ok(EventExecutionResult::Inconclusive(
+                    OracleLimitReason::CallResultUnknown {
+                        call: effect.call,
+                        reason: *reason,
+                    },
+                ));
+            }
+        };
+        // The pending entry is bound to the exact generation the transition above just installed:
+        // only the confirming binding write to the result place consumes it, and the state layer rejects any
+        // other event that retires or replaces that place first (`apply_definition_transition`,
+        // `end_holders`). Keeping that binding is what keeps the confirming write's exemptions in
+        // `execute_access` from suppressing detection through a stale entry.
+        //
+        // The builder emits call results and their confirming writes into local root places.
+        // Projected operation fixtures have no such confirmation, so they register no pending entry.
+        if place_row.projections.is_empty() {
+            context
                 .state
-                .issue_generation(bounds.max_dynamic_generations)
-            {
-                Ok(generation) => generation,
-                Err(reason) => return Ok(EventExecutionResult::Inconclusive(reason)),
-            };
-            let transition = context.state.apply_definition_transition(
-                problem,
-                context.place_index,
-                destination,
-                DefinitionEventKind::Value,
-                DefinitionRole::Slot {
-                    current: generation,
-                },
-                trace_index,
-            )?;
-            finish_definition_transition(context, &transition);
-            issue_call_result_provenance(context, event, result_place, &source_targets)?;
-            transition.target().clone()
+                .pending_call_results
+                .insert(result_place, target);
         }
-        CallResultProvenance::Alias(origins) => {
-            return Ok(EventExecutionResult::Inconclusive(
-                OracleLimitReason::CallResultAliasOrigins {
-                    call: effect.call,
-                    origins: origins.clone(),
-                },
-            ));
-        }
-        CallResultProvenance::Unknown(reason) => {
-            return Ok(EventExecutionResult::Inconclusive(
-                OracleLimitReason::CallResultUnknown {
-                    call: effect.call,
-                    reason: *reason,
-                },
-            ));
-        }
-    };
-    // The pending entry is bound to the exact generation the transition above just installed:
-    // only the confirming binding write to the result place consumes it, and the state layer rejects any
-    // other event that retires or replaces that place first (`apply_definition_transition`,
-    // `end_holders`). Keeping that binding is what keeps the confirming write's exemptions in
-    // `execute_access` from suppressing detection through a stale entry.
-    //
-    // The builder emits call results and their confirming writes into local root places.
-    // Projected operation fixtures have no such confirmation, so they register no pending entry.
-    if place_row.projections.is_empty() {
-        context
-            .state
-            .pending_call_results
-            .insert(result_place, target);
     }
     Ok(EventExecutionResult::Continue)
 }

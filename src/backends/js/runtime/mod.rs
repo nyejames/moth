@@ -7,7 +7,7 @@
 //! The collection group is the compiler-owned JavaScript implementation of `@core/collections`.
 //! [`collection_javascript_helpers`] is consumed by both runtime emission and first-party
 //! dependency validation. The remaining prelude groups — binding, alias, computed-place, clone,
-//! error, result, map, string, cast, numeric, and choice — are compiler-runtime
+//! error, map, string, cast, numeric, and choice — are compiler-runtime
 //! infrastructure rather than first-party package implementations. They intentionally stay out of
 //! the first-party package inventory; new package-facing JS must not be added here without an
 //! inventory source.
@@ -30,7 +30,6 @@ mod errors;
 mod maps;
 mod numeric;
 mod places;
-mod results;
 mod strings;
 
 pub(crate) use collections::collection_javascript_helpers;
@@ -47,6 +46,7 @@ pub(crate) struct NumericRuntimeHelperUsage {
     pub(crate) number_integer_ops: bool,
     pub(crate) big_integer_ops: bool,
     pub(crate) number_decimal_ops: bool,
+    pub(crate) binary16_ops: bool,
     pub(crate) binary32_ops: bool,
     pub(crate) binary64_ops: bool,
     pub(crate) binary_float_power: bool,
@@ -79,6 +79,7 @@ impl NumericRuntimeHelperUsage {
         self.number_integer_ops
             || self.big_integer_ops
             || self.number_decimal_ops
+            || self.binary16_ops
             || self.binary32_ops
             || self.binary64_ops
             || self.binary_float_power
@@ -102,15 +103,14 @@ impl<'hir> JsEmitter<'hir> {
     ///   computed-place helpers  — closures capturing base reference + key for field/index access
     ///   clone helpers           — deep value copy for explicit `copy` semantics
     ///   error helpers           — normalises file paths, constructs canonical error records
-    ///   result helpers          — `?` propagation and `or` fallback helpers
     ///   collection helpers      — guarded get/push/remove/length for ordered collections
     ///   map helpers             — guarded get/set/remove and infallible contains/clear/length for ordered maps
     ///   string helpers          — generic value-to-string conversion
     ///   cast helpers            — numeric and string casting with Result-typed errors
-    ///   numeric helpers         — checked Number/BigInt integer and profile-precision Float arithmetic
+    ///   numeric helpers         — checked Number/BigInt integer and exact-precision binary-float arithmetic
     ///   choice helpers          — structural equality for nominal choice carriers
     ///
-    /// Most groups use hoisted JS `function` declarations. Float power also initialises
+    /// Most groups use hoisted JS `function` declarations. Binary-float power also initialises
     /// top-level constants, so the complete prelude must precede emitted user functions and start.
     pub(crate) fn emit_runtime_prelude(
         &mut self,
@@ -122,7 +122,6 @@ impl<'hir> JsEmitter<'hir> {
         self.emit_runtime_computed_place_helpers();
         self.emit_runtime_clone_helpers(emitted_code_uses_maps);
         self.emit_runtime_error_helpers();
-        self.emit_runtime_result_helpers();
         self.emit_runtime_collection_helpers();
         if emitted_code_uses_maps {
             self.emit_runtime_map_helpers();

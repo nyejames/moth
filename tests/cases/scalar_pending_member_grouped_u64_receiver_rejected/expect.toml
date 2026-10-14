@@ -1,0 +1,25 @@
+entry = "."
+
+# The grouped receiver `(count + 1)` is a multi-item operand, so its invalid member must still
+# report the U64 receiver that the nested argument registers for `count`. The resolved receiver
+# identity is part of this diagnostic contract.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0048"]
+message_contains = ["'U64'"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0048"
+reason = "invalid_field_access.unknown_member"
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0048"]
+message_contains = ["'U64'"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0048"
+reason = "invalid_field_access.unknown_member"

@@ -1,3 +1,3 @@
-step Int = 1
-mixed ~Uint = 5
+step I32 = 1
+mixed ~U64 = 5
 mixed += step

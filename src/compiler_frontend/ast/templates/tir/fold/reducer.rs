@@ -9,10 +9,12 @@
 //! Branch/loop semantics and virtual wrapper insertion live in sibling modules.
 
 use crate::compiler_frontend::ast::const_values::store::{ConstStringPiece, ConstStringValue};
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::const_values::{ConstValuePayload, ConstValueStore};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, ExpressionOperationView, ExpressionView,
+};
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::SlotKey;
-use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template::TemplateType;
 use crate::compiler_frontend::ast::templates::template_folding::{
     TemplateEmission, TemplateFoldResult, TirFoldContext, resolve_fold_bindings_in_expression,
@@ -40,7 +42,7 @@ use crate::compiler_frontend::instrumentation::{
 };
 use crate::compiler_frontend::paths::module_resources::ResourceId;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
-use crate::compiler_frontend::type_coercion::string::fold_expression_kind_to_string;
+use crate::compiler_frontend::type_coercion::string::fold_expression_to_string;
 
 use super::control_flow::{fold_tir_conditional_with_insertion, fold_tir_loop};
 use super::estimate::{
@@ -106,9 +108,13 @@ impl<'view, 'store> FoldTraversalInput<'view, 'store> {
     ///       carried by the current view while changing other dimensions.
     pub(super) fn effective_expression_for_site(
         &self,
+        expressions: &AstExpressionBuilder,
         site_id: ExpressionSiteId,
-    ) -> Result<Option<&'store Expression>, TemplateError> {
-        Ok(self.view.effective_expression_for_site(site_id)?)
+    ) -> Result<Option<ExprId>, TemplateError> {
+        Ok(self
+            .view
+            .effective_expression_for_site(expressions, site_id)?
+            .map(|view| view.id()))
     }
 }
 /// AST-local result used to project a folded const-template value into a public interface.
@@ -669,8 +675,9 @@ pub(super) fn fold_tir_node_into_buffer(
         }
 
         TemplateIrNodeKind::DynamicExpression { expression, site_id, .. } => {
-            let effective_expression = fold_input.effective_expression_for_site(*site_id)?;
-            let expression_to_fold = effective_expression.unwrap_or(expression);
+            let effective_expression = fold_input
+                .effective_expression_for_site(&*fold_context.expression_builder, *site_id)?;
+            let expression_to_fold = effective_expression.unwrap_or(*expression);
             fold_tir_dynamic_expression(
                 expression_to_fold,
                 output_state,
@@ -835,6 +842,13 @@ pub(super) fn fold_tir_node_into_buffer(
             )
             .into(),
         ),
+
+        // A retained position is unfinished compiler scratch: body-root numeric completion
+        // installs its value before any template is folded.
+        TemplateIrNodeKind::RetainedNumericIntake(_) => Err(CompilerError::compiler_error(
+            "TIR fold: a retained numeric intake position cannot enter the constant-fold reducer.",
+        )
+        .into()),
     }
 }
 
@@ -855,7 +869,7 @@ fn fold_tir_sequence(
 
 /// Folds a dynamic expression node after resolving fold bindings.
 fn fold_tir_dynamic_expression(
-    expression: &Expression,
+    expression: ExprId,
     output_state: &mut FoldOutputState,
     fold_context: &mut TirFoldContext<'_>,
     expression_span: Option<crate::compiler_frontend::source::SourceSpan>,
@@ -863,33 +877,25 @@ fn fold_tir_dynamic_expression(
 ) -> Result<(), TemplateError> {
     let store = fold_input.view.store();
     let resolved = resolve_fold_bindings_in_expression(expression, fold_context)?;
-    let expression_ref: &Expression = match &resolved {
-        crate::compiler_frontend::ast::templates::template_folding::FoldResolvedExpression::Borrowed(
-            expr,
-        ) => expr,
-        crate::compiler_frontend::ast::templates::template_folding::FoldResolvedExpression::Owned(
-            expr,
-        ) => expr,
-    };
 
     // This is the exact selected dynamic-expression payload. Binding
     // substitution has already happened, so its metadata includes any
     // resolved loop/branch binding provenance without a second AST walk.
-    output_state
-        .provenance
-        .merge(&expression_ref.synthetic_interface_provenance);
+    output_state.provenance.merge(&expression_provenance(
+        fold_context.expression_builder.view(resolved)?,
+    ));
 
     if matches!(
-        expression_ref.kind,
-        ExpressionKind::RuntimeSlotApplicationHandoff(_)
+        fold_context.expression_builder.view(resolved)?.operation(),
+        ExpressionOperationView::RuntimeSlotApplication(_)
     ) {
         // Runtime slot applications are helper-owned payloads. They contribute
         // no compile-time text when a surrounding const fold selects this path.
         return Ok(());
     }
 
-    if let Some(template) = nested_template_value(expression_ref) {
-        let template_kind = nested_template_kind(template, store)?;
+    if let Some(tir_reference) = nested_template_reference(resolved, fold_context)? {
+        let template_kind = nested_template_kind(&tir_reference, store)?;
 
         // Comments are compile-time metadata and intentionally contribute no
         // rendered output. Slot inserts remain composition helpers and must be
@@ -900,7 +906,7 @@ fn fold_tir_dynamic_expression(
         reject_slot_insert_template(template_kind)?;
 
         let nested_result = fold_template_reference(
-            FoldTemplateReference::Nested(&template.tir_reference),
+            FoldTemplateReference::Nested(&tir_reference),
             fold_context,
             fold_input,
         )?;
@@ -908,8 +914,12 @@ fn fold_tir_dynamic_expression(
         return append_template_result_to_buffer(nested_result, output_state, fold_context);
     }
 
-    if let Some(pieces) = structural_string_pieces(&expression_ref.kind) {
-        for piece in pieces {
+    if let Some(pieces) = structural_string_pieces(
+        resolved,
+        fold_context.expression_builder,
+        fold_context.const_values,
+    )? {
+        for piece in &pieces {
             match piece {
                 ConstStringPiece::Text(text) => {
                     output_state.append_text(fold_context.string_table.resolve(*text));
@@ -923,11 +933,11 @@ fn fold_tir_dynamic_expression(
         return Ok(());
     }
 
-    match fold_expression_kind_to_string(
-        &expression_ref.kind,
-        fold_context.string_table,
-        fold_context.numeric_profile,
-    ) {
+    match fold_expression_to_string(
+        fold_context.expression_builder.view(resolved)?,
+        &*fold_context.const_values,
+        &*fold_context.string_table,
+    )? {
         Some(text) => {
             output_state.append_text(&text);
             output_state.emitted_output = true;
@@ -946,38 +956,77 @@ fn fold_tir_dynamic_expression(
 /// scalar string-coercion helper to render unresolved anchors.
 /// WHY: structural strings and scalar values share the language-level `String` type, but only the
 /// TIR reducer owns ordered template output and can preserve anchor boundaries.
-fn structural_string_pieces(kind: &ExpressionKind) -> Option<&[ConstStringPiece]> {
-    match kind {
-        ExpressionKind::StructuralString { pieces } => Some(pieces),
-        ExpressionKind::Coerced { value, .. } => structural_string_pieces(&value.kind),
-        _ => None,
+fn structural_string_pieces(
+    expression: ExprId,
+    expressions: &mut AstExpressionBuilder,
+    constants: &ConstValueStore,
+) -> Result<Option<Vec<ConstStringPiece>>, TemplateError> {
+    let view = expressions.view(expression)?;
+    match view.operation() {
+        ExpressionOperationView::Constant(id) => match constants.payload(id) {
+            Some(ConstValuePayload::String(value)) => match value {
+                ConstStringValue::Pieces(pieces) => Ok(Some(pieces.clone())),
+                ConstStringValue::Text(_) => Ok(None),
+            },
+            Some(ConstValuePayload::Coerced(inner)) => {
+                let inner = *inner;
+                let metadata = constants.metadata(inner).ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "TIR fold: coerced string constant is missing const metadata.",
+                    )
+                })?;
+                let (span, mode) = (view.span(), view.value_mode());
+                let narrowed = expressions.constant(inner, metadata.type_id, span, mode)?;
+                // Cost: one scratch constant per coercion layer on this niche path only.
+                structural_string_pieces(narrowed.id(), expressions, constants)
+            }
+            _ => Ok(None),
+        },
+        ExpressionOperationView::Coerce { value, .. } => {
+            let inner = value.id();
+            structural_string_pieces(inner, expressions, constants)
+        }
+        _ => Ok(None),
     }
 }
 
 /// Reads a nested AST template's kind from its authoritative TIR entry.
-fn nested_template_kind<'a>(
-    template: &Template,
-    store: &'a TemplateIrStore,
-) -> Result<&'a TemplateType, TemplateError> {
+fn nested_template_kind<'store>(
+    tir_reference: &TemplateTirReference,
+    store: &'store TemplateIrStore,
+) -> Result<&'store TemplateType, TemplateError> {
     store
-        .get_template(template.tir_reference.root)
+        .get_template(tir_reference.root)
         .map(|template_ir| &template_ir.kind)
         .ok_or_else(|| {
             CompilerError::compiler_error(format!(
                 "TIR fold: nested template kind for {} was not found in the module store.",
-                template.tir_reference.root
+                tir_reference.root
             ))
             .into()
         })
 }
 
-/// Finds a nested template wrapped by contextual coercion nodes.
-fn nested_template_value(expression: &Expression) -> Option<&Template> {
-    match &expression.kind {
-        ExpressionKind::Template(template) => Some(template),
-        ExpressionKind::Coerced { value, .. } => nested_template_value(value),
-        _ => None,
-    }
+/// Finds a nested template reference wrapped by contextual coercion nodes.
+fn nested_template_reference(
+    expression: ExprId,
+    fold_context: &TirFoldContext<'_>,
+) -> Result<Option<TemplateTirReference>, TemplateError> {
+    let view = fold_context.expression_builder.view(expression)?;
+    let inner = match view.operation() {
+        ExpressionOperationView::Template(template) => return Ok(Some(template.tir_reference)),
+        ExpressionOperationView::Coerce { value, .. } => value.id(),
+        _ => return Ok(None),
+    };
+    nested_template_reference(inner, fold_context)
+}
+
+fn expression_provenance(expression: ExpressionView<'_>) -> SyntheticInterfaceProvenance {
+    expression
+        .occurrence_facts()
+        .map_or_else(SyntheticInterfaceProvenance::empty, |facts| {
+            facts.provenance.clone()
+        })
 }
 
 /// Folds a module-local child-template reference against the module store.

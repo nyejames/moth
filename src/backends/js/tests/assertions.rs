@@ -19,6 +19,7 @@ use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirStatementKind, HirWriteTarget};
 use crate::compiler_frontend::hir::terminators::{HirAssertionMessageEvaluation, HirTerminator};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 fn optional_message(
     type_id: crate::compiler_frontend::datatypes::ids::TypeId,
@@ -64,7 +65,8 @@ fn function_with_assertion(
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: type_environment.builtins().none,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
     let module = build_module(
         expressions,
@@ -99,12 +101,12 @@ fn structured_assertion_message_is_lowered_once_and_selected() {
         HirExpressionKind::Cast {
             source: expression(
                 HirExpressionKind::Load(HirPlace::local(LocalId(0))),
-                types.int,
+                types.i32,
                 RegionId(0),
                 ValueKind::RValue,
                 &mut expressions,
             ),
-            policy: BuiltinCastPolicyId::NumericToString(NumericScalar::Int),
+            policy: BuiltinCastPolicyId::NumericToString(NumericScalar::Fixed(FixedScalar::I32)),
         },
         types.string,
         RegionId(0),
@@ -123,12 +125,12 @@ fn structured_assertion_message_is_lowered_once_and_selected() {
         vec![HirBlock {
             id: BlockId(0),
             region: RegionId(0),
-            locals: vec![local(0, types.int, RegionId(0))],
+            locals: vec![local(0, types.i32, RegionId(0))],
             statements: vec![statement(
                 4,
                 HirStatementKind::Write {
                     target: HirWriteTarget::DefineLocal(LocalId(0)),
-                    value: int_expression(42, types.int, RegionId(0), &mut expressions),
+                    value: i32_expression(42, types.i32, RegionId(0), &mut expressions),
                 },
             )],
             terminator: HirTerminator::AssertFailure {
@@ -338,11 +340,11 @@ fn assertion_message_map_metadata_emits_map_helpers() {
         HirExpressionKind::MapLiteral(append_map_entries(
             &[HirMapEntry {
                 key: string_expression("key", types.string, RegionId(0), &mut expressions),
-                value: int_expression(1, types.int, RegionId(0), &mut expressions),
+                value: i32_expression(1, types.i32, RegionId(0), &mut expressions),
             }],
             &mut expressions,
         )),
-        types.map_string_int,
+        types.map_string_i32,
         RegionId(0),
         ValueKind::RValue,
         &mut expressions,

@@ -1,5 +1,3 @@
-hidden ||:
-    v U8 = 1 + 1
-;
+v U8 = 1 + 2
 
-[:unreachable]
+[: u8 literal operator result=[v]]

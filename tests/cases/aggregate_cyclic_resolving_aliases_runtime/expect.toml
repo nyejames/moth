@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "resolving_aliases shared=first=1 second=2 copy=first=1 second=2 multi=first=1 second=2 count=0"

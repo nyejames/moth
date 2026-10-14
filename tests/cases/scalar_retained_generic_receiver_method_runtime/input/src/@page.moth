@@ -1,0 +1,32 @@
+Box type A = |
+    value A,
+|
+
+Label = |
+    text String,
+|
+
+label type A |this Box of A| -> A:
+    return this.value
+;
+
+choose type A |this Box of A, fallback Label| -> A:
+    return this.value
+;
+
+make_box |seed I32| -> Box of String:
+    return Box(value = "retained generic")
+;
+
+make_label_box |seed I32| -> Box of Label:
+    return Box(value = Label(text = "field projection"))
+;
+
+seed = 1
+boxed ~= make_box(seed)
+result String = boxed.label()
+label_box ~= make_label_box(seed)
+projected String = label_box.label().text
+chosen String = label_box.choose(fallback = Label(text = "fallback")).text
+
+[:retained generic method result=[result] projection=[projected] choose=[chosen]]

@@ -8,7 +8,9 @@
 //! This module reports `HirTransformation` infrastructure errors only. Normal
 //! user-facing source diagnostics must be produced before HIR validation runs.
 mod blocks;
+mod channels;
 mod definitions;
+mod dominance;
 mod expressions;
 mod functions;
 mod metadata;
@@ -18,6 +20,9 @@ mod support;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+#[cfg(test)]
+use crate::compiler_frontend::hir::ids::HirValueId;
 use crate::compiler_frontend::hir::ids::{
     BlockId, FieldId, FunctionId, HirNodeId, LocalId, RegionId, StructId,
 };
@@ -28,14 +33,32 @@ use std::cell::Cell;
 pub(crate) fn validate_hir_module(
     module: &HirModule,
     type_environment: &TypeEnvironment,
+    external_packages: &ExternalPackageRegistry,
 ) -> Result<(), CompilerError> {
-    let mut validator = HirValidator::new(module, type_environment);
+    let mut validator = HirValidator::new(module, type_environment, external_packages);
     validator.validate()
+}
+
+/// Retries one expression without rebuilding the validator's active-path state.
+#[cfg(test)]
+pub(super) fn validate_expression_twice_for_tests(
+    module: &HirModule,
+    type_environment: &TypeEnvironment,
+    external_packages: &ExternalPackageRegistry,
+    expression_id: HirValueId,
+) -> Result<[Result<(), CompilerError>; 2], CompilerError> {
+    let mut validator = HirValidator::new(module, type_environment, external_packages);
+    validator.collect_definition_ids()?;
+    Ok([
+        validator.validate_expression(expression_id, None),
+        validator.validate_expression(expression_id, None),
+    ])
 }
 
 struct HirValidator<'a> {
     module: &'a HirModule,
     type_environment: &'a TypeEnvironment,
+    external_packages: &'a ExternalPackageRegistry,
 
     block_ids: FxHashSet<BlockId>,
     block_index_by_id: FxHashMap<BlockId, usize>,
@@ -59,11 +82,16 @@ impl<'a> HirValidator<'a> {
     //  Constructor
     // -------------------------
 
-    fn new(module: &'a HirModule, type_environment: &'a TypeEnvironment) -> Self {
+    fn new(
+        module: &'a HirModule,
+        type_environment: &'a TypeEnvironment,
+        external_packages: &'a ExternalPackageRegistry,
+    ) -> Self {
         let expression_count = module.expressions.expression_count();
         Self {
             module,
             type_environment,
+            external_packages,
             block_ids: FxHashSet::default(),
             block_index_by_id: FxHashMap::default(),
             block_owner_by_id: FxHashMap::default(),
@@ -106,6 +134,7 @@ impl<'a> HirValidator<'a> {
         // 5. Validate core HIR entities.
         self.validate_functions()?;
         self.validate_blocks()?;
+        self.validate_function_definitions()?;
 
         Ok(())
     }

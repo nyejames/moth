@@ -1,6 +1,6 @@
 export:
     Bounds = |
-        maximum Int,
+        maximum I32,
     |
     Limits = |
         inner Bounds,

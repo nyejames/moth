@@ -1,8 +1,8 @@
-capacity || -> Int:
+capacity || -> I32:
     return 2
 ;
 
 render || -> String:
-    items {capacity() Int} = {}
+    items {capacity() I32} = {}
     return ""
 ;

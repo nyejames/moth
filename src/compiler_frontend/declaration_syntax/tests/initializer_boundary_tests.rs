@@ -461,8 +461,8 @@ fn authored_assign_with_no_initializer_rejects_inferred_declarations_at_each_bou
 #[test]
 fn authored_assign_with_no_initializer_rejects_explicit_type_and_binding_modes() {
     let cases = [
-        ("value Int =\n", "explicit type at newline boundary"),
-        ("value Int =", "explicit type at EOF boundary"),
+        ("value I32 =\n", "explicit type at newline boundary"),
+        ("value I32 =", "explicit type at EOF boundary"),
         ("value ~=\n", "mutable binding"),
         ("value #=\n", "compile-time binding"),
     ];
@@ -478,7 +478,7 @@ fn authored_assign_with_no_initializer_rejects_explicit_type_and_binding_modes()
 fn omitted_assign_rejects_at_each_boundary_and_binding_mode() {
     let cases = [
         ("value\n", "inferred declaration at newline boundary"),
-        ("value Int", "explicit type at EOF boundary"),
+        ("value I32", "explicit type at EOF boundary"),
     ];
 
     for (source, case) in cases {

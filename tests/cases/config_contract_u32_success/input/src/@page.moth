@@ -1,0 +1,3 @@
+limit #Config of U32 = 7
+
+[:unsigned config [limit]]

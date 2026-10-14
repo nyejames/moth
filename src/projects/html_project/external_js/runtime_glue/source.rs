@@ -9,7 +9,6 @@ use crate::backends::js::{
     JsNumericCarrier, builtin_error_code_js_field_name, builtin_error_message_js_field_name,
     external_module_export_glue_function_name,
 };
-use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::{
@@ -18,16 +17,21 @@ use crate::compiler_frontend::external_packages::{
 use crate::projects::html_project::external_js::runtime_glue::exports::ReferencedExport;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use moth_lexical::numeric::precision::BinaryFloatPrecision;
-use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
 use std::collections::HashMap;
 use std::fmt::Write as _;
+
+/// The largest integer a foreign JavaScript `Number` represents exactly, `2^53 - 1`.
+///
+/// `I64`/`U64` keep the exact BigInt carrier inside Moth and cross the foreign boundary as
+/// Numbers only inside this window. The JS backend's carrier selection uses the same exactness
+/// threshold, but the bridge window written into generated checks is owned here.
+const MAX_SAFE_FOREIGN_INTEGER: i128 = (1_i128 << 53) - 1;
 
 /// Generate the glue module ES module source.
 pub(super) fn generate_glue_module_source(
     exports: &[ReferencedExport],
     package_asset_paths: &HashMap<ExternalPackageId, String>,
     release_build: bool,
-    numeric_profile: NumericProfile,
 ) -> Result<String, CompilerError> {
     let mut source = String::new();
 
@@ -74,7 +78,6 @@ pub(super) fn generate_glue_module_source(
                 &wrapper_name,
                 &export.raw_import_name,
                 release_build,
-                numeric_profile,
                 &export.parameter_types,
                 &export.return_types,
             )?);
@@ -84,7 +87,6 @@ pub(super) fn generate_glue_module_source(
                 &export.raw_import_name,
                 &export.parameter_types,
                 &export.return_types,
-                numeric_profile,
             )?);
         }
     }
@@ -98,17 +100,14 @@ pub(super) fn generate_infallible_wrapper(
     export_name: &str,
     parameter_types: &[ExternalSignatureType],
     return_types: &[ExternalSignatureType],
-    numeric_profile: NumericProfile,
 ) -> Result<String, CompilerError> {
-    validate_supported_signature(wrapper_name, parameter_types, return_types, numeric_profile)?;
-    let arguments = prepare_call_arguments(parameter_types, numeric_profile);
-    let return_adapter = return_adapter_for_signature(return_types, numeric_profile);
+    validate_supported_signature(wrapper_name, parameter_types, return_types)?;
+    let arguments = prepare_call_arguments(parameter_types);
+    let return_adapter = return_adapter_for_signature(return_types);
     let return_body = adapted_return_body(
         return_adapter,
         &format!("{export_name}({})", arguments.arguments),
-        numeric_profile,
         "    ",
-        false,
         false,
     );
 
@@ -119,27 +118,26 @@ pub(super) fn generate_infallible_wrapper(
 }
 
 /// Generates a fallible wrapper that validates the external result shape and converts it to
-/// Moth's internal fallible carrier.
+/// Moth's JavaScript ABI envelope.
 ///
-/// WHAT: calls the raw JS export, expects `{ ok: boolean, value? }` or `{ ok: false, error }`,
-///       and returns `{ tag: "ok", value: ... }` or an internal Moth `Error` struct value. The
-///       foreign `error.code` is read once and projected onto the builtin `U32` code domain:
+/// WHAT: calls the raw JS export, expects `{ ok: boolean, value? }` or `{ ok: false, error }`
+///       and returns `{ tag: "ok", value: ... }` or `{ tag: "err", value: ... }` with a Moth `Error`.
+///       The foreign `error.code` is read once and projected onto the builtin `U32` code domain:
 ///       exact JS Number integers in `0..=4294967295` pass,
-///       integer `-0` normalizes to `0`, and every other value (negative, oversized,
+///       integer `-0` normalises to `0` and every other value (negative, oversized,
 ///       non-finite, fractional, non-Number, missing) falls back to the zero code.
-/// WHY: the JS backend consumes this carrier shape, and `Error.code` uses the exact Number
-///      representation of `U32` independently of the numeric profile.
+/// WHY: the JS boundary consumes this ABI envelope and `Error.code` uses the exact Number
+///      representation of `U32`.
 pub(super) fn generate_fallible_wrapper(
     wrapper_name: &str,
     export_name: &str,
     release_build: bool,
-    numeric_profile: NumericProfile,
     parameter_types: &[ExternalSignatureType],
     return_types: &[ExternalSignatureType],
 ) -> Result<String, CompilerError> {
-    validate_supported_signature(wrapper_name, parameter_types, return_types, numeric_profile)?;
-    let arguments = prepare_call_arguments(parameter_types, numeric_profile);
-    let return_adapter = return_adapter_for_signature(return_types, numeric_profile);
+    validate_supported_signature(wrapper_name, parameter_types, return_types)?;
+    let arguments = prepare_call_arguments(parameter_types);
+    let return_adapter = return_adapter_for_signature(return_types);
     let zero_code = "0";
     // The single `error.code` snapshot is validated against the builtin U32 code domain, and
     // integer -0 canonicalizes at ingress like every other integer boundary in these wrappers.
@@ -160,14 +158,7 @@ pub(super) fn generate_fallible_wrapper(
             "        throw new Error(\n            \"Invalid result wrapper from external function '{wrapper_name}': \" +\n            \"expected {{ ok: boolean, value? }} or {{ ok: false, error: {{ code, message }} }}\"\n        );"
         )
     };
-    let success_return = adapted_return_body(
-        return_adapter,
-        "result.value",
-        numeric_profile,
-        "            ",
-        true,
-        release_build,
-    );
+    let success_return = adapted_return_body(return_adapter, "result.value", "            ", true);
 
     Ok(format!(
         "export function {wrapper_name}({}) {{\n{}    let result;\n    try {{\n        result = {export_name}({});\n    }} catch (e) {{\n        return {{ tag: \"err\", value: {catch_error} }};\n    }}\n\n    if (result && typeof result.ok === \"boolean\") {{\n        if (result.ok === true) {{\n{success_return}\n        }}\n        if (result.ok === false) {{\n            const error = result.error || {{ message: \"Unknown error\", code: 0 }};\n            const errorMessage = error.message || \"Unknown error\";\n            const errorCode = error.code;\n            return {{ tag: \"err\", value: {returned_error} }};\n        }}\n    }}\n\n{invalid_wrapper_handling}\n}}",
@@ -178,26 +169,29 @@ pub(super) fn generate_fallible_wrapper(
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum ReturnAdapter {
     Identity,
-    NativeInt32,
-    NativeInt64,
-    NativeUint32,
-    NativeUint64,
-    NativeFloat32,
     Fixed(FixedScalarAdapter),
 }
 
 /// How one fixed foreign scalar crosses the HTML-JS boundary.
 ///
 /// WHAT: derived from the JS backend's carrier for that scalar. Exact-Number integers check
-///       their own inclusive range, and binary floats round once at their precision and must
-///       stay finite.
+///       their own inclusive range, 64-bit integers stay BigInt inside Moth and bridge through
+///       a safe foreign Number, and binary floats keep their carrier precision so the
+///       parameter check and the HIR binary-float boundary agree on one Number representation.
 /// WHY: the backend's `JsNumericCarrier` already owns each scalar's runtime representation, so
-///      the glue validates against that one fact instead of a private width table. Fixed
-///      scalars never follow the selected `Int` or `Float` profile.
+///      the glue validates against that one fact instead of a private width table.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum FixedScalarAdapter {
     ExactInteger {
         scalar: FixedScalar,
+        minimum: i128,
+        maximum: i128,
+    },
+    /// `I64`/`U64`: BigInt inside Moth, safe Number across the foreign boundary.
+    SafeNumber64 {
+        scalar: FixedScalar,
+        /// Inclusive exactly-representable foreign window, clamped to
+        /// `MAX_SAFE_FOREIGN_INTEGER`.
         minimum: i128,
         maximum: i128,
     },
@@ -212,31 +206,42 @@ impl FixedScalarAdapter {
     ///
     /// Carrier availability alone does not authorise another binding form. Other fixed scalars
     /// remain unsupported even when the JS backend can represent them internally.
-    fn for_scalar(scalar: FixedScalar, numeric_profile: NumericProfile) -> Option<Self> {
+    fn for_scalar(scalar: FixedScalar) -> Option<Self> {
         if !matches!(
             scalar,
-            FixedScalar::I32 | FixedScalar::U32 | FixedScalar::F32 | FixedScalar::F64
+            FixedScalar::I32
+                | FixedScalar::I64
+                | FixedScalar::U32
+                | FixedScalar::U64
+                | FixedScalar::F32
+                | FixedScalar::F64
         ) {
             return None;
         }
 
-        match JsNumericCarrier::for_scalar(NumericScalar::Fixed(scalar), numeric_profile)? {
+        match JsNumericCarrier::for_scalar(NumericScalar::Fixed(scalar))? {
             JsNumericCarrier::ExactInteger { min, max } => Some(Self::ExactInteger {
                 scalar,
                 minimum: min,
                 maximum: max,
             }),
+            // The 64-bit integers ride the exact BigInt carrier; only the foreign Number side
+            // of the bridge is narrowed to what a Number represents exactly.
+            JsNumericCarrier::BigInteger { min, max } => Some(Self::SafeNumber64 {
+                scalar,
+                minimum: min.max(-MAX_SAFE_FOREIGN_INTEGER),
+                maximum: max.min(MAX_SAFE_FOREIGN_INTEGER),
+            }),
             JsNumericCarrier::BinaryFloat {
                 precision:
                     precision @ (BinaryFloatPrecision::Binary32 | BinaryFloatPrecision::Binary64),
             } => Some(Self::BinaryFloat { scalar, precision }),
-            JsNumericCarrier::BinaryFloat { .. }
-            | JsNumericCarrier::BigInteger { .. }
-            | JsNumericCarrier::ScaledInteger { .. } => None,
+            JsNumericCarrier::BinaryFloat { .. } | JsNumericCarrier::ScaledInteger { .. } => None,
         }
     }
 
-    /// Rounds a JavaScript Number to this float precision. Binary64 Numbers are already exact.
+    /// Rounds a fixed-float parameter candidate to this precision for the exactness check.
+    /// Binary64 Numbers are already exact.
     fn rounded_float_source(precision: BinaryFloatPrecision, value: &str) -> String {
         match precision {
             BinaryFloatPrecision::Binary32 => format!("Math.fround({value})"),
@@ -255,7 +260,6 @@ fn validate_supported_signature(
     wrapper_name: &str,
     parameter_types: &[ExternalSignatureType],
     return_types: &[ExternalSignatureType],
-    numeric_profile: NumericProfile,
 ) -> Result<(), CompilerError> {
     if parameter_types
         .iter()
@@ -270,7 +274,7 @@ fn validate_supported_signature(
     // Fixed scalars must have an exact adapter before any adapter is selected below.
     for signature_type in parameter_types.iter().chain(return_types) {
         if let ExternalSignatureType::Abi(ExternalAbiType::Fixed(scalar)) = signature_type
-            && FixedScalarAdapter::for_scalar(*scalar, numeric_profile).is_none()
+            && FixedScalarAdapter::for_scalar(*scalar).is_none()
         {
             return Err(CompilerError::compiler_error(format!(
                 "HTML JS glue has no JavaScript Number adapter for fixed {} in external function '{wrapper_name}'.",
@@ -280,9 +284,9 @@ fn validate_supported_signature(
     }
 
     if return_types.len() > 1
-        && return_types.iter().any(|value_type| {
-            return_adapter_for_type(value_type, numeric_profile) != ReturnAdapter::Identity
-        })
+        && return_types
+            .iter()
+            .any(|value_type| return_adapter_for_type(value_type) != ReturnAdapter::Identity)
     {
         return Err(CompilerError::compiler_error(format!(
             "HTML JS glue cannot adapt multiple numeric success slots for external function '{wrapper_name}'."
@@ -304,57 +308,28 @@ fn contains_optional_numeric_payload(signature_type: &ExternalSignatureType) -> 
 fn is_numeric_signature_type(signature_type: &ExternalSignatureType) -> bool {
     matches!(
         signature_type,
-        ExternalSignatureType::NativeInt
-            | ExternalSignatureType::NativeUint
-            | ExternalSignatureType::NativeFloat
-            | ExternalSignatureType::Abi(ExternalAbiType::Fixed(_))
+        ExternalSignatureType::Abi(ExternalAbiType::Fixed(_))
     )
 }
 
-fn return_adapter_for_signature(
-    return_types: &[ExternalSignatureType],
-    numeric_profile: NumericProfile,
-) -> ReturnAdapter {
+fn return_adapter_for_signature(return_types: &[ExternalSignatureType]) -> ReturnAdapter {
     return_types
         .first()
-        .map(|value_type| return_adapter_for_type(value_type, numeric_profile))
+        .map(return_adapter_for_type)
         .unwrap_or(ReturnAdapter::Identity)
 }
 
-fn return_adapter_for_type(
-    value_type: &ExternalSignatureType,
-    numeric_profile: NumericProfile,
-) -> ReturnAdapter {
+fn return_adapter_for_type(value_type: &ExternalSignatureType) -> ReturnAdapter {
     match value_type {
-        ExternalSignatureType::NativeInt if numeric_profile.int_width == IntWidth::Bits32 => {
-            ReturnAdapter::NativeInt32
-        }
-        ExternalSignatureType::NativeInt if numeric_profile.int_width == IntWidth::Bits64 => {
-            ReturnAdapter::NativeInt64
-        }
-        ExternalSignatureType::NativeUint if numeric_profile.int_width == IntWidth::Bits32 => {
-            ReturnAdapter::NativeUint32
-        }
-        ExternalSignatureType::NativeUint if numeric_profile.int_width == IntWidth::Bits64 => {
-            ReturnAdapter::NativeUint64
-        }
-        ExternalSignatureType::NativeFloat
-            if numeric_profile.float_precision == FloatPrecision::Bits32 =>
-        {
-            ReturnAdapter::NativeFloat32
-        }
         ExternalSignatureType::Abi(ExternalAbiType::Fixed(scalar)) => ReturnAdapter::Fixed(
-            FixedScalarAdapter::for_scalar(*scalar, numeric_profile)
+            FixedScalarAdapter::for_scalar(*scalar)
                 .expect("validate_supported_signature rejects fixed scalars without an adapter"),
         ),
         _ => ReturnAdapter::Identity,
     }
 }
 
-fn prepare_call_arguments(
-    parameter_types: &[ExternalSignatureType],
-    numeric_profile: NumericProfile,
-) -> PreparedCallArguments {
+fn prepare_call_arguments(parameter_types: &[ExternalSignatureType]) -> PreparedCallArguments {
     let mut parameters = String::new();
     let mut arguments = String::new();
     let mut prelude = String::new();
@@ -367,39 +342,18 @@ fn prepare_call_arguments(
         write!(&mut parameters, "arg{index}")
             .expect("writing generated wrapper parameters into a String cannot fail");
 
-        if matches!(
-            parameter_type,
-            ExternalSignatureType::NativeInt | ExternalSignatureType::NativeUint
-                if numeric_profile.int_width == IntWidth::Bits64
-        ) {
-            // Int64 and Uint64 travel as BigInt inside Moth JS but cross to foreign
-            // JS as a Number. The unsigned lane additionally rejects negative or
-            // unsafe values before precision can be lost; it never widens the bridge.
-            let is_unsigned = matches!(parameter_type, ExternalSignatureType::NativeUint);
-            let (carrier, exactness_message) = if is_unsigned {
-                (
-                    "Uint64",
-                    "Native Uint64 parameter is not exactly representable as a JavaScript Number",
-                )
-            } else {
-                (
-                    "Int64",
-                    "Native Int64 parameter is not exactly representable as a JavaScript Number",
-                )
-            };
-            if is_unsigned {
-                writeln!(
-                    &mut prelude,
-                    "    if (typeof arg{index} !== \"bigint\") {{\n        throw new RangeError(\"Native {carrier} parameter must be a BigInt\");\n    }}\n    if (arg{index} < 0n || arg{index} > 9007199254740991n) {{\n        throw new RangeError(\"Native Uint64 parameter is outside the safe Number range\");\n    }}\n    const __moth_arg{index}_number = Number(arg{index});\n    if (!Number.isSafeInteger(__moth_arg{index}_number)) {{\n        throw new RangeError(\"{exactness_message}\");\n    }}"
-                )
-                .expect("writing generated wrapper checks into a String cannot fail");
-            } else {
-                writeln!(
-                    &mut prelude,
-                    "    if (typeof arg{index} !== \"bigint\") {{\n        throw new RangeError(\"Native {carrier} parameter must be a BigInt\");\n    }}\n    const __moth_arg{index}_number = Number(arg{index});\n    if (!Number.isSafeInteger(__moth_arg{index}_number)) {{\n        throw new RangeError(\"{exactness_message}\");\n    }}"
-                )
-                .expect("writing generated wrapper checks into a String cannot fail");
+        let fixed_adapter = match parameter_type {
+            ExternalSignatureType::Abi(ExternalAbiType::Fixed(scalar)) => {
+                FixedScalarAdapter::for_scalar(*scalar)
             }
+            _ => None,
+        };
+
+        if let Some(adapter @ FixedScalarAdapter::SafeNumber64 { .. }) = fixed_adapter {
+            // Fixed I64 and U64 travel as BigInt inside Moth JS but cross to foreign JS as a
+            // Number. The guard rejects wrong carriers, negatives on the unsigned lane and
+            // unsafe magnitudes before precision can be lost or the raw export observes them.
+            prelude.push_str(&safe_number64_parameter_check(adapter, index));
             write!(&mut arguments, "__moth_arg{index}_number")
                 .expect("writing generated wrapper arguments into a String cannot fail");
         } else {
@@ -415,24 +369,12 @@ fn prepare_call_arguments(
                     // Existing F64 parameters keep their pass-through policy.
                     FixedScalar::F64 => {}
                     _ => {
-                        let adapter = FixedScalarAdapter::for_scalar(*scalar, numeric_profile)
-                            .expect(
-                                "validate_supported_signature rejects unsupported fixed scalars",
-                            );
+                        let adapter = fixed_adapter.expect(
+                            "validate_supported_signature rejects unsupported fixed scalars",
+                        );
                         prelude.push_str(&fixed_parameter_check(adapter, index));
                     }
                 }
-            }
-            if matches!(parameter_type, ExternalSignatureType::NativeUint)
-                && numeric_profile.int_width == IntWidth::Bits32
-            {
-                // Uint32 rides an exact Number. Integer -0 canonicalises through the
-                // `=== 0` check shared with the Int32/I32 return gates.
-                writeln!(
-                    &mut prelude,
-                    "    if (typeof arg{index} !== \"number\" || !Number.isInteger(arg{index}) || arg{index} < 0 || arg{index} > 4294967295) {{\n        throw new RangeError(\"Native Uint32 parameter is outside unsigned 32-bit range\");\n    }}\n    arg{index} = arg{index} === 0 ? 0 : arg{index};"
-                )
-                .expect("writing generated wrapper checks into a String cannot fail");
             }
             write!(&mut arguments, "arg{index}")
                 .expect("writing generated wrapper arguments into a String cannot fail");
@@ -449,10 +391,8 @@ fn prepare_call_arguments(
 fn adapted_return_body(
     adapter: ReturnAdapter,
     value_expression: &str,
-    numeric_profile: NumericProfile,
     indent: &str,
     fallible: bool,
-    release_build: bool,
 ) -> String {
     let success_value = |expression: &str| {
         if fallible {
@@ -463,30 +403,20 @@ fn adapted_return_body(
     };
 
     match adapter {
-        ReturnAdapter::Identity => {
+        // A fixed binary-float success value crosses as the raw foreign carrier: the HIR binary-float
+        // boundary owns the single rounding and finite check at the resolved source precision,
+        // so glue must not round or reject the snapshot first. The float adapter stays distinct
+        // from `Identity` so multi-slot returns, which the single-slot HIR guard cannot cover,
+        // are still rejected during signature validation.
+        ReturnAdapter::Identity | ReturnAdapter::Fixed(FixedScalarAdapter::BinaryFloat { .. }) => {
             format!("{indent}return {};", success_value(value_expression))
         }
-        ReturnAdapter::NativeFloat32 => {
-            let raw_value = "__moth_external_float32_raw";
-            let adapted_value = "__moth_external_float32";
-            let returned_value = success_value(adapted_value);
-            format!(
-                "{indent}const {raw_value} = {value_expression};\n{indent}const {adapted_value} = typeof {raw_value} === \"number\" ? Math.fround({raw_value}) : Number.NaN;\n{indent}return {returned_value};"
-            )
-        }
-        // Native Int32, native Uint32 and exact-Number fixed integers share one value-gate shape,
-        // not a semantic identity. Integer zero must be canonical before a later float
-        // conversion can observe its sign. Only the bounds and the message differ:
-        // the unsigned gates reject negatives where the signed gates admit them.
-        ReturnAdapter::NativeInt32
-        | ReturnAdapter::NativeUint32
-        | ReturnAdapter::Fixed(FixedScalarAdapter::ExactInteger { .. }) => {
+        // Fixed I32 and U32 are exact-Number integers that share one value-gate shape, not a
+        // semantic identity. Integer zero must be canonical before a later float conversion can
+        // observe its sign. Only the bounds and the message differ: the unsigned gate rejects
+        // negatives where the signed gate admits them.
+        ReturnAdapter::Fixed(FixedScalarAdapter::ExactInteger { .. }) => {
             let (boundary_message, minimum, maximum): (&str, i128, i128) = match adapter {
-                ReturnAdapter::NativeUint32 => (
-                    "External native Uint32 result is not an integer within the unsigned 32-bit range",
-                    0,
-                    4294967295,
-                ),
                 ReturnAdapter::Fixed(FixedScalarAdapter::ExactInteger {
                     scalar,
                     minimum,
@@ -500,70 +430,59 @@ fn adapted_return_body(
                     minimum,
                     maximum,
                 ),
-                _ => (
-                    "External native Int32 result is not an integer within the signed 32-bit range",
-                    -2147483648,
-                    2147483647,
-                ),
+                _ => unreachable!("only exact-Number fixed integers use the integer result gate"),
             };
             let returned_value = success_value("__moth_external_canonical_integer");
             format!(
                 "{indent}const __moth_external_integer = {value_expression};\n{indent}if (typeof __moth_external_integer !== \"number\" || !Number.isInteger(__moth_external_integer) || __moth_external_integer < {minimum} || __moth_external_integer > {maximum}) {{\n{indent}    throw new RangeError(\"{boundary_message}\");\n{indent}}}\n{indent}const __moth_external_canonical_integer = __moth_external_integer === 0 ? 0 : __moth_external_integer;\n{indent}return {returned_value};"
             )
         }
-        // Int64 and Uint64 share one safe-Number bridge gate: check bounds before
-        // BigInt conversion, since safe JavaScript integers are a strict subset of
-        // either Moth range. BigInt(number) already canonicalizes integer -0.
-        // The unsigned lane narrows the bridge to non-negative safe integers; it
-        // never extends the Moth Uint64 range.
-        ReturnAdapter::NativeInt64 | ReturnAdapter::NativeUint64 => {
+        // Fixed I64 and U64 share one safe-Number bridge gate: check bounds before BigInt
+        // conversion, since safe JavaScript integers are a strict subset of either Moth range.
+        // BigInt(number) already canonicalizes integer -0. The unsigned lane narrows the bridge
+        // to non-negative safe integers and never extends the Moth Uint64 range. Both use the
+        // exactly-representable window.
+        ReturnAdapter::Fixed(FixedScalarAdapter::SafeNumber64 { .. }) => {
             let returned_value = success_value("__moth_external_integer");
-            let (boundary_message, minimum, maximum) = if adapter == ReturnAdapter::NativeUint64 {
-                (
-                    "External native Uint64 result is not a safe integer within the foreign Number range",
-                    0,
-                    9007199254740991,
-                )
-            } else {
-                (
-                    "External native Int64 result is not a safe integer within the Moth Int64 range",
-                    numeric_profile.int_width.min_value(),
-                    numeric_profile.int_width.max_value(),
-                )
+            let (boundary_message, minimum, maximum): (&str, i128, i128) = match adapter {
+                ReturnAdapter::Fixed(FixedScalarAdapter::SafeNumber64 {
+                    scalar: FixedScalar::U64,
+                    minimum,
+                    maximum,
+                }) => (
+                    "External U64 result is not a safe integer within the foreign Number range",
+                    minimum,
+                    maximum,
+                ),
+                ReturnAdapter::Fixed(FixedScalarAdapter::SafeNumber64 {
+                    scalar: FixedScalar::I64,
+                    minimum,
+                    maximum,
+                }) => (
+                    "External I64 result is not a safe integer within the foreign Number range",
+                    minimum,
+                    maximum,
+                ),
+                _ => unreachable!("only the 64-bit lanes use the safe-Number result gate"),
             };
-            format!(
-                "{indent}const __moth_external_number = {value_expression};\n{indent}if (typeof __moth_external_number !== \"number\" || !Number.isSafeInteger(__moth_external_number) || __moth_external_number < {minimum} || __moth_external_number > {maximum}) {{\n{indent}    throw new RangeError(\"{boundary_message}\");\n{indent}}}\n{indent}const __moth_external_integer = BigInt(__moth_external_number);\n{indent}return {returned_value};"
-            )
-        }
-        // Fixed binary floats round once at their own precision, independent of the Float
-        // profile, and keep signed zero. A non-Number or a value that rounds outside the finite
-        // range is the shared Float boundary failure: code 304 in a fallible wrapper, a thrown
-        // RangeError otherwise.
-        ReturnAdapter::Fixed(FixedScalarAdapter::BinaryFloat { precision, .. }) => {
-            let raw_value = "__moth_external_fixed_float_raw";
-            let value = "__moth_external_fixed_float";
-            let rounded_value = FixedScalarAdapter::rounded_float_source(precision, raw_value);
-            let returned_value = success_value(value);
-            let invalid_value = if fallible {
-                let error = float_boundary_error_source(release_build);
-                format!("{indent}    return {{ tag: \"err\", value: {error} }};")
-            } else {
-                format!(
-                    "{indent}    throw new RangeError(\"{}\");",
-                    BuiltinErrorCode::FloatBoundaryNonFinite.default_message()
-                )
-            };
-            format!(
-                "{indent}const {raw_value} = {value_expression};\n{indent}const {value} = typeof {raw_value} === \"number\" ? {rounded_value} : Number.NaN;\n{indent}if (!Number.isFinite({value})) {{\n{invalid_value}\n{indent}}}\n{indent}return {returned_value};"
+            safe_number64_result_gate(
+                value_expression,
+                minimum,
+                maximum,
+                boundary_message,
+                indent,
+                &returned_value,
             )
         }
     }
 }
 
-/// Validates a new `U32` or `F32` argument before the foreign call observes it.
+/// Validates a fixed `U32` or `F32` argument before the foreign call observes it.
 ///
 /// Moth already produces valid fixed values. Direct wrapper misuse must not coerce a foreign
 /// carrier: `U32` canonicalises integer zero and `F32` must be exact while preserving signed zero.
+/// `I32`/`F64` keep their own pass-through or inline checks, and the 64-bit integers use the
+/// BigInt ingress bridge instead of a foreign Number carrier.
 fn fixed_parameter_check(adapter: FixedScalarAdapter, index: usize) -> String {
     let argument = format!("arg{index}");
     match adapter {
@@ -584,16 +503,69 @@ fn fixed_parameter_check(adapter: FixedScalarAdapter, index: usize) -> String {
                 "    if (typeof {argument} !== \"number\" || !Number.isFinite({argument}) || {rounded} !== {argument}) {{\n        throw new RangeError(\"External {name} parameter is not a finite {name} value\");\n    }}\n"
             )
         }
+        FixedScalarAdapter::SafeNumber64 { .. } => {
+            unreachable!("fixed 64-bit parameters use the safe-Number bridge")
+        }
     }
 }
 
-fn float_boundary_error_source(release_build: bool) -> String {
-    let error = BuiltinErrorCode::FloatBoundaryNonFinite;
-    let message = format!("{:?}", error.default_message());
-    // U32 builtin `Error.code` literals are plain decimal Number spellings, independent of the
-    // build's `NumericProfile` Int/BigInt spellings.
-    let code = error.as_u32().to_string();
-    internal_error_object_source(&message, &code, release_build)
+/// Emits the BigInt-to-safe-Number ingress guard for one fixed `I64`/`U64` parameter.
+///
+/// WHAT: requires the Moth BigInt carrier, rejects magnitudes whose conversion to a foreign
+///       Number would lose precision, and leaves the safe Number in `__moth_arg{index}_number`
+///       for the call.
+/// WHY: the guard runs before the raw export call, so an unbridgeable carrier or an unsafe
+///      magnitude never reaches foreign code and never loses precision on the way.
+fn safe_number64_parameter_check(adapter: FixedScalarAdapter, index: usize) -> String {
+    let FixedScalarAdapter::SafeNumber64 {
+        scalar,
+        minimum,
+        maximum,
+    } = adapter
+    else {
+        unreachable!("only I64 and U64 use the fixed safe-Number parameter bridge");
+    };
+
+    let name = scalar.name();
+    let argument = format!("arg{index}");
+    let number = format!("__moth_arg{index}_number");
+    let carrier_check = format!(
+        "    if (typeof {argument} !== \"bigint\") {{\n        throw new RangeError(\"External {name} parameter must be a BigInt\");\n    }}\n"
+    );
+    // The unsigned lane names its lower bound explicitly, so a negative BigInt fails with the
+    // range message before any conversion; the signed lane's `Number.isSafeInteger` is
+    // symmetric and already owns that failure.
+    let window_check = if scalar == FixedScalar::U64 {
+        format!(
+            "    if ({argument} < {minimum}n || {argument} > {maximum}n) {{\n        throw new RangeError(\"External U64 parameter is outside the safe Number range\");\n    }}\n"
+        )
+    } else {
+        String::new()
+    };
+
+    format!(
+        "{carrier_check}{window_check}    const {number} = Number({argument});\n    if (!Number.isSafeInteger({number})) {{\n        throw new RangeError(\"External {name} parameter is not exactly representable as a JavaScript Number\");\n    }}\n"
+    )
+}
+
+/// Gates one 64-bit integer result crossing back from a foreign Number.
+///
+/// WHAT: evaluates the foreign value once, checks it is a Number inside the inclusive bridge
+///       window, and only then converts it to the Moth BigInt carrier. `BigInt(number)`
+///       canonicalizes integer `-0`.
+/// WHY: the gate is fatal in both wrapper lanes because a foreign contract violation must not
+///      become a new implicit failure or `Error` code.
+fn safe_number64_result_gate(
+    value_expression: &str,
+    minimum: i128,
+    maximum: i128,
+    boundary_message: &str,
+    indent: &str,
+    returned_value: &str,
+) -> String {
+    format!(
+        "{indent}const __moth_external_number = {value_expression};\n{indent}if (typeof __moth_external_number !== \"number\" || !Number.isSafeInteger(__moth_external_number) || __moth_external_number < {minimum} || __moth_external_number > {maximum}) {{\n{indent}    throw new RangeError(\"{boundary_message}\");\n{indent}}}\n{indent}const __moth_external_integer = BigInt(__moth_external_number);\n{indent}return {returned_value};"
+    )
 }
 
 /// Generates an internal Error object with build-specific field names.

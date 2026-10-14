@@ -16,13 +16,15 @@ use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expression_store::HirProjection;
 use crate::compiler_frontend::hir::expressions::HirExpressionKind;
 use crate::compiler_frontend::hir::functions::HirFunction;
-use crate::compiler_frontend::hir::ids::{BlockId, FieldId, FunctionId, HirValueId, LocalId};
+use crate::compiler_frontend::hir::ids::{
+    BlockId, FieldId, FunctionId, HirNodeId, HirValueId, LocalId,
+};
 use crate::compiler_frontend::hir::module::HirModule;
-use crate::compiler_frontend::hir::numeric::HirNumericOperands;
+use crate::compiler_frontend::hir::numeric::{HirNumericOp, HirNumericOperands};
 use crate::compiler_frontend::hir::patterns::HirPattern;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirStatementKind, HirWriteTarget};
-use crate::compiler_frontend::hir::terminators::HirTerminator;
+use crate::compiler_frontend::hir::terminators::{HirFallibleOperation, HirTerminator};
 use crate::compiler_frontend::symbols::path_interner::PathTable;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::collections::{HashMap, HashSet};
@@ -133,7 +135,7 @@ impl<'hir> JsEmitter<'hir> {
         self.collect_used_cast_policies(&functions)?;
         for policy in &self.used_cast_policies {
             if let BuiltinCastPolicyId::NumericToString(scalar) = *policy
-                && let Some(precision) = scalar.binary_float_precision(self.config.numeric_profile)
+                && let Some(precision) = scalar.binary_float_precision()
             {
                 emitted_code_uses_numeric_helpers.require_float_formatter(precision);
             }
@@ -229,7 +231,7 @@ impl<'hir> JsEmitter<'hir> {
     /// Records the carrier families needed by reachable numeric statements.
     ///
     /// WHAT: scans the emitted function/block subset and selects each checked operation family
-    ///       through the same profile-aware carrier owner used by expression and cast lowering.
+    ///       through the same exact-scalar carrier owner used by expression and cast lowering.
     /// WHY: a BigInt operator must not inherit a Number helper merely because both domains are
     ///      semantically integers.
     fn emitted_functions_use_numeric_helpers(
@@ -245,65 +247,15 @@ impl<'hir> JsEmitter<'hir> {
                 for statement in &block.statements {
                     match &statement.kind {
                         HirStatementKind::NumericOp { op, .. } => {
-                            let carrier = JsNumericCarrier::for_scalar(
-                                op.domain,
-                                self.config.numeric_profile,
-                            )
-                            .ok_or_else(|| {
-                                CompilerError::compiler_error(format!(
-                                    "JS backend has no numeric carrier for {:?}",
-                                    op.domain
-                                ))
-                            })?;
-                            let helper_family = carrier.helper_family();
-                            // WHAT: proven-safe integer operations lower to exact native carrier
-                            //       arithmetic without any checked helper call — Trap mode as a
-                            //       raw scalar, ReturnError mode inside the existing
-                            //       `{tag, value}` success carrier its HIR consumers branch on.
-                            // WHY: their helper family is needed only by retained operations, so
-                            //       families used exclusively by proven statements stay out of
-                            //       the prelude while genuinely unsafe sibling uses keep their
-                            //       demand.
-                            let proven_safe = matches!(
-                                op.operator,
-                                NumericOperator::Add
-                                    | NumericOperator::Subtract
-                                    | NumericOperator::Multiply
-                                    | NumericOperator::IntegerDivide
-                                    | NumericOperator::Remainder
-                                    | NumericOperator::Negate
-                            ) && matches!(
-                                carrier,
-                                JsNumericCarrier::ExactInteger { .. }
-                                    | JsNumericCarrier::BigInteger { .. }
-                            ) && self.numeric_proofs.integer_operation_is_safe(
-                                statement.id,
-                                self.config.numeric_profile,
-                            );
-                            if !proven_safe {
-                                match helper_family {
-                                    Some("int") => usage.number_integer_ops = true,
-                                    Some("number") => usage.number_decimal_ops = true,
-                                    Some("bigint") => usage.big_integer_ops = true,
-                                    Some("float32") => usage.binary32_ops = true,
-                                    Some("float") => usage.binary64_ops = true,
-                                    _ => {
-                                        return Err(CompilerError::compiler_error(format!(
-                                            "JS backend received an unreachable numeric operation domain {:?}",
-                                            op.domain
-                                        )));
-                                    }
-                                }
-                            }
-                            if op.operator == NumericOperator::Power
-                                && matches!(helper_family, Some("float32") | Some("float"))
-                            {
-                                usage.binary_float_power = true;
-                            }
+                            self.collect_numeric_operation_helpers(*op, statement.id, &mut usage)?;
                         }
-                        HirStatementKind::FormatFloat { .. } => usage.require_float_formatter(
-                            self.config.numeric_profile.float_precision.into(),
-                        ),
+                        HirStatementKind::FormatFloat { source, .. } => {
+                            // The formatted source's own exact precision selects the formatter the
+                            // prelude must carry, exactly like statement lowering.
+                            let (_scalar, precision) =
+                                self.float_source_scalar(*source, "FormatFloat")?;
+                            usage.require_float_formatter(precision);
+                        }
                         HirStatementKind::ValidateFloat { .. } => usage.validate_float = true,
                         HirStatementKind::RangeStepFailure { .. } => {
                             usage.range_step_failure = true
@@ -311,10 +263,83 @@ impl<'hir> JsEmitter<'hir> {
                         _ => {}
                     }
                 }
+                if let HirTerminator::Invoke { id, operation, .. } = &block.terminator {
+                    match operation {
+                        HirFallibleOperation::NumericOp { op, .. } => {
+                            self.collect_numeric_operation_helpers(*op, *id, &mut usage)?;
+                        }
+                        HirFallibleOperation::FormatFloat { source } => {
+                            let (_, precision) =
+                                self.float_source_scalar(*source, "FormatFloat")?;
+                            usage.require_float_formatter(precision);
+                        }
+                        HirFallibleOperation::ValidateFloat { .. } => usage.validate_float = true,
+                        HirFallibleOperation::RangeStepFailure { .. } => {
+                            usage.range_step_failure = true;
+                        }
+                        HirFallibleOperation::Call { .. }
+                        | HirFallibleOperation::CastOp { .. }
+                        | HirFallibleOperation::MapOp { .. } => {}
+                    }
+                }
             }
         }
 
         Ok(usage)
+    }
+
+    fn collect_numeric_operation_helpers(
+        &self,
+        op: HirNumericOp,
+        id: HirNodeId,
+        usage: &mut NumericRuntimeHelperUsage,
+    ) -> Result<(), CompilerError> {
+        let carrier = JsNumericCarrier::for_scalar(op.domain).ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "JS backend has no numeric carrier for {:?}",
+                op.domain
+            ))
+        })?;
+        let helper_family = carrier.helper_family();
+        // Proof elision uses the operation's stable identity for statements and Invoke alike.
+        // The failure continuation remains intact even when no checked helper is demanded.
+        let proven_safe = matches!(
+            op.operator,
+            NumericOperator::Add
+                | NumericOperator::Subtract
+                | NumericOperator::Multiply
+                | NumericOperator::IntegerDivide
+                | NumericOperator::Remainder
+                | NumericOperator::Negate
+        ) && matches!(
+            carrier,
+            JsNumericCarrier::ExactInteger { .. } | JsNumericCarrier::BigInteger { .. }
+        ) && self.numeric_proofs.integer_operation_is_safe(id);
+        if !proven_safe {
+            match helper_family {
+                Some("int") => usage.number_integer_ops = true,
+                Some("number") => usage.number_decimal_ops = true,
+                Some("bigint") => usage.big_integer_ops = true,
+                Some("float16") => usage.binary16_ops = true,
+                Some("float32") => usage.binary32_ops = true,
+                Some("float") => usage.binary64_ops = true,
+                _ => {
+                    return Err(CompilerError::compiler_error(format!(
+                        "JS backend received an unreachable numeric operation domain {:?}",
+                        op.domain
+                    )));
+                }
+            }
+        }
+        if op.operator == NumericOperator::Power
+            && matches!(
+                helper_family,
+                Some("float16") | Some("float32") | Some("float")
+            )
+        {
+            usage.binary_float_power = true;
+        }
+        Ok(())
     }
 
     /// Returns true when any emitted reachable JS body can construct, store, copy, display, or
@@ -328,7 +353,12 @@ impl<'hir> JsEmitter<'hir> {
         functions: &[&'hir HirFunction],
     ) -> Result<bool, CompilerError> {
         for function in functions {
-            if self.type_environment.is_map_type(function.return_type) {
+            if function
+                .returns
+                .iter()
+                .chain(function.error_return.iter())
+                .any(|ty| self.type_environment.is_map_type(*ty))
+            {
                 return Ok(true);
             }
 
@@ -376,8 +406,6 @@ impl<'hir> JsEmitter<'hir> {
                 .values(*args)
                 .iter()
                 .any(|argument| self.expression_uses_maps(*argument)),
-
-            HirStatementKind::CastOp { source, .. } => self.expression_uses_maps(*source),
 
             HirStatementKind::FormatFloat { source, .. }
             | HirStatementKind::ValidateFloat { source, .. } => self.expression_uses_maps(*source),
@@ -431,36 +459,33 @@ impl<'hir> JsEmitter<'hir> {
                 let block = self.block_by_id(block_id)?;
 
                 for statement in &block.statements {
-                    match &statement.kind {
-                        // WHAT: a proven-safe fallible integer narrowing lowers to a direct
-                        //       carrier conversion without helper calls, so only the source
-                        //       expression's own cast demands remain.
-                        // WHY: any retained use of the same policy elsewhere still inserts it
-                        //       through the ordinary walk, so its helpers stay demanded.
-                        HirStatementKind::CastOp { policy, source, .. }
-                            if self.integer_narrowing_is_proven(statement.id, *policy) =>
-                        {
-                            collect_expression_cast_policies(
-                                self.hir,
-                                *source,
-                                &mut self.used_cast_policies,
-                            );
-                        }
-                        kind => {
-                            collect_statement_cast_policies(
-                                self.hir,
-                                kind,
-                                &mut self.used_cast_policies,
-                            );
-                        }
-                    }
+                    collect_statement_cast_policies(
+                        self.hir,
+                        &statement.kind,
+                        &mut self.used_cast_policies,
+                    );
                 }
 
-                collect_terminator_cast_policies(
-                    self.hir,
-                    &block.terminator,
-                    &mut self.used_cast_policies,
-                );
+                // Proven Invoke narrowings need only their source expression's cast helpers.
+                // Retained uses of the same policy elsewhere still demand its runtime helper.
+                match &block.terminator {
+                    HirTerminator::Invoke {
+                        id,
+                        operation: HirFallibleOperation::CastOp { policy, source },
+                        ..
+                    } if self.integer_narrowing_is_proven(*id, *policy) => {
+                        collect_expression_cast_policies(
+                            self.hir,
+                            *source,
+                            &mut self.used_cast_policies,
+                        );
+                    }
+                    terminator => collect_terminator_cast_policies(
+                        self.hir,
+                        terminator,
+                        &mut self.used_cast_policies,
+                    ),
+                }
             }
         }
 
@@ -471,7 +496,24 @@ impl<'hir> JsEmitter<'hir> {
         match terminator {
             HirTerminator::If { condition, .. } => self.expression_uses_maps(*condition),
 
-            HirTerminator::FallibleBranch { result, .. } => self.expression_uses_maps(*result),
+            HirTerminator::Invoke { operation, .. } => match operation {
+                HirFallibleOperation::MapOp { .. } => true,
+                HirFallibleOperation::Call { args, .. } => self
+                    .hir
+                    .expressions
+                    .values(*args)
+                    .iter()
+                    .any(|value| self.expression_uses_maps(*value)),
+                HirFallibleOperation::CastOp { source, .. }
+                | HirFallibleOperation::FormatFloat { source }
+                | HirFallibleOperation::ValidateFloat { source } => {
+                    self.expression_uses_maps(*source)
+                }
+                HirFallibleOperation::NumericOp { operands, .. } => {
+                    self.numeric_operands_use_maps(operands)
+                }
+                HirFallibleOperation::RangeStepFailure { .. } => false,
+            },
 
             HirTerminator::Match { scrutinee, arms } => {
                 self.expression_uses_maps(*scrutinee)
@@ -482,9 +524,13 @@ impl<'hir> JsEmitter<'hir> {
                     })
             }
 
-            HirTerminator::Return(value)
-            | HirTerminator::ReturnSuccess(value)
-            | HirTerminator::ReturnError(value) => self.expression_uses_maps(*value),
+            HirTerminator::Return(values) => self
+                .hir
+                .expressions
+                .values(*values)
+                .iter()
+                .any(|value| self.expression_uses_maps(*value)),
+            HirTerminator::ReturnError(value) => self.expression_uses_maps(*value),
 
             HirTerminator::AssertFailure { message, .. } => self.expression_uses_maps(*message),
 
@@ -534,8 +580,7 @@ impl<'hir> JsEmitter<'hir> {
                 .iter()
                 .any(|(_, field_value)| self.expression_uses_maps(*field_value)),
 
-            HirExpressionKind::Collection(elements)
-            | HirExpressionKind::TupleConstruct { elements } => hir
+            HirExpressionKind::Collection(elements) => hir
                 .expressions
                 .values(*elements)
                 .iter()
@@ -545,13 +590,6 @@ impl<'hir> JsEmitter<'hir> {
 
             HirExpressionKind::Range { start, end } => {
                 self.expression_uses_maps(*start) || self.expression_uses_maps(*end)
-            }
-
-            HirExpressionKind::TupleGet { tuple, .. } => self.expression_uses_maps(*tuple),
-
-            HirExpressionKind::FallibleUnwrapSuccess { result }
-            | HirExpressionKind::FallibleUnwrapError { result } => {
-                self.expression_uses_maps(*result)
             }
 
             HirExpressionKind::Cast { source, .. } => self.expression_uses_maps(*source),
@@ -566,10 +604,7 @@ impl<'hir> JsEmitter<'hir> {
                 self.expression_uses_maps(*source)
             }
 
-            HirExpressionKind::Int(_)
-            | HirExpressionKind::Uint(_)
-            | HirExpressionKind::Float(_)
-            | HirExpressionKind::FixedScalar(_)
+            HirExpressionKind::FixedScalar(_)
             | HirExpressionKind::Number(_)
             | HirExpressionKind::Bool(_)
             | HirExpressionKind::Char(_)
@@ -609,10 +644,6 @@ fn collect_statement_cast_policies(
             for argument in hir.expressions.values(*args) {
                 collect_expression_cast_policies(hir, *argument, policies);
             }
-        }
-        HirStatementKind::CastOp { policy, source, .. } => {
-            policies.insert(*policy);
-            collect_expression_cast_policies(hir, *source, policies);
         }
         HirStatementKind::FormatFloat { source, .. }
         | HirStatementKind::ValidateFloat { source, .. } => {
@@ -658,9 +689,37 @@ fn collect_terminator_cast_policies(
         HirTerminator::If { condition, .. } => {
             collect_expression_cast_policies(hir, *condition, policies)
         }
-        HirTerminator::FallibleBranch { result, .. } => {
-            collect_expression_cast_policies(hir, *result, policies);
-        }
+        HirTerminator::Invoke { operation, .. } => match operation {
+            HirFallibleOperation::Call { args, .. } => {
+                for argument in hir.expressions.values(*args) {
+                    collect_expression_cast_policies(hir, *argument, policies);
+                }
+            }
+            HirFallibleOperation::MapOp { receiver, args, .. } => {
+                collect_expression_cast_policies(hir, *receiver, policies);
+                for argument in hir.expressions.values(*args) {
+                    collect_expression_cast_policies(hir, *argument, policies);
+                }
+            }
+            HirFallibleOperation::CastOp { policy, source } => {
+                policies.insert(*policy);
+                collect_expression_cast_policies(hir, *source, policies);
+            }
+            HirFallibleOperation::FormatFloat { source }
+            | HirFallibleOperation::ValidateFloat { source } => {
+                collect_expression_cast_policies(hir, *source, policies);
+            }
+            HirFallibleOperation::NumericOp { operands, .. } => match operands {
+                HirNumericOperands::Unary { operand } => {
+                    collect_expression_cast_policies(hir, *operand, policies);
+                }
+                HirNumericOperands::Binary { left, right } => {
+                    collect_expression_cast_policies(hir, *left, policies);
+                    collect_expression_cast_policies(hir, *right, policies);
+                }
+            },
+            HirFallibleOperation::RangeStepFailure { .. } => {}
+        },
         HirTerminator::Match { scrutinee, arms } => {
             collect_expression_cast_policies(hir, *scrutinee, policies);
             for arm in arms {
@@ -670,9 +729,12 @@ fn collect_terminator_cast_policies(
                 collect_pattern_cast_policies(hir, &arm.pattern, policies);
             }
         }
-        HirTerminator::Return(value)
-        | HirTerminator::ReturnSuccess(value)
-        | HirTerminator::ReturnError(value) => {
+        HirTerminator::Return(values) => {
+            for value in hir.expressions.values(*values) {
+                collect_expression_cast_policies(hir, *value, policies);
+            }
+        }
+        HirTerminator::ReturnError(value) => {
             collect_expression_cast_policies(hir, *value, policies)
         }
         HirTerminator::AssertFailure { message, .. } => {
@@ -724,8 +786,7 @@ fn collect_expression_cast_policies(
                 collect_expression_cast_policies(hir, *value, policies);
             }
         }
-        HirExpressionKind::Collection(elements)
-        | HirExpressionKind::TupleConstruct { elements } => {
+        HirExpressionKind::Collection(elements) => {
             for element in hir.expressions.values(*elements) {
                 collect_expression_cast_policies(hir, *element, policies);
             }
@@ -733,13 +794,6 @@ fn collect_expression_cast_policies(
         HirExpressionKind::Range { start, end } => {
             collect_expression_cast_policies(hir, *start, policies);
             collect_expression_cast_policies(hir, *end, policies);
-        }
-        HirExpressionKind::TupleGet { tuple, .. } => {
-            collect_expression_cast_policies(hir, *tuple, policies);
-        }
-        HirExpressionKind::FallibleUnwrapSuccess { result }
-        | HirExpressionKind::FallibleUnwrapError { result } => {
-            collect_expression_cast_policies(hir, *result, policies);
         }
         HirExpressionKind::Cast { source, policy } => {
             policies.insert(*policy);
@@ -759,10 +813,7 @@ fn collect_expression_cast_policies(
                 collect_expression_cast_policies(hir, entry.value, policies);
             }
         }
-        HirExpressionKind::Int(_)
-        | HirExpressionKind::Uint(_)
-        | HirExpressionKind::Float(_)
-        | HirExpressionKind::FixedScalar(_)
+        HirExpressionKind::FixedScalar(_)
         | HirExpressionKind::Number(_)
         | HirExpressionKind::Bool(_)
         | HirExpressionKind::Char(_)

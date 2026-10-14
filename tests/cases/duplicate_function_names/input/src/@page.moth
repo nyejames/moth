@@ -1,10 +1,10 @@
 -- Test duplicate function names should be detected
 
-simple_function |numeric_value Int| -> Int:
+simple_function |numeric_value I32| -> I32:
     return numeric_value + 1
 ;
 
-simple_function |value Int| -> Int:
+simple_function |value I32| -> I32:
     return value + 2
 ;
 

@@ -1,0 +1,14 @@
+entry = "."
+
+# HTML-only by design: this fixture asserts exact runtime values through the
+# retained known-result postfix, builtin-member and statement paths. HTML-Wasm
+# rejects reachable mutable function parameters at their declaration, reachable
+# mutable receiver methods have no observed Wasm success fixture under the
+# capability validation, and the map path is target-gated, so only the backend
+# whose output is asserted is declared rather than pinning an unobserved Wasm
+# disposition.
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "scalar retained known result postfix method=7 source=9 grouped=11 chain=13 items=3 method_items=3 scores=3 mutable=9/11"

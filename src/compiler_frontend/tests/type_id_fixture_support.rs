@@ -1,25 +1,26 @@
-//! TypeId-first test helpers for HIR lowering tests.
+//! Canonical type and phase-owner fixtures for AST-to-HIR tests.
 //!
-//! WHAT: wraps AST construction that still requires `DataType` internally so
-//!       HIR test files can remain free of parse-era type-syntax references.
-//! WHY: production AST nodes carry `diagnostic_type` for render support;
-//!      test fixtures should set canonical `TypeId`s and let this module
-//!      handle the diagnostic-only placeholder.
+//! Completed expressions are appended to one explicit builder and frozen with their constants
+//! and issuing type environment. No fixture repairs semantic types after publication.
 
 use crate::compiler_frontend::ast::Ast;
 use crate::compiler_frontend::ast::ast_nodes::{
-    AstNode, Declaration, MultiBindTarget, MultiBindTargetKind, NodeKind,
+    AstNode, Declaration, DeclarationValue, MultiBindTarget, MultiBindTargetKind, NodeKind,
 };
 use crate::compiler_frontend::ast::const_values::facts::AstConstFacts;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::eval_expression::result_type::resolve_expression_result_type;
 use crate::compiler_frontend::ast::expressions::expression::{
-    ConstRecordState, Expression, ExpressionKind, FallibleExpressionHandling, FallibleHandling,
-    Operator,
+    ChoiceConstructInput, CollectionExpressionType,
 };
-use crate::compiler_frontend::ast::expressions::expression_rpn::{
-    ExpressionRpn, ExpressionRpnItem,
+use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
+use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ConstructorField, ExprId,
 };
-use crate::compiler_frontend::ast::statements::fallible_handling::wrap_catch_expression;
+use crate::compiler_frontend::ast::expressions::expression_types::{
+    ConstRecordState, FallibleExpressionHandling, FallibleHandling,
+};
 use crate::compiler_frontend::ast::statements::functions::{ReturnChannel, ReturnSlot};
 use crate::compiler_frontend::compiler_errors::CompilerMessages;
 use crate::compiler_frontend::datatypes::DataType;
@@ -28,8 +29,9 @@ use crate::compiler_frontend::datatypes::definitions::{
     StructTypeDefinition,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId, builtin_type_ids};
+use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId};
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariant;
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::terminators::HirTerminator;
@@ -37,8 +39,6 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
-
-use crate::compiler_frontend::tests::ast_fixture_support::param_with_type_id;
 
 // ---------------------------------------------------------------------------
 // Choice definition helper used by build_ast_with_choices
@@ -66,7 +66,15 @@ pub(crate) fn error_return_slot(type_id: TypeId) -> ReturnSlot {
 // ---------------------------------------------------------------------------
 
 pub(crate) fn loop_binding_with_type_id(name: PathId, type_id: TypeId) -> Declaration {
-    param_with_type_id(name, type_id, false, None)
+    Declaration {
+        id: name,
+        type_id,
+        diagnostic_type: DataType::Inferred,
+        value_mode: ValueMode::ImmutableOwned,
+        value: DeclarationValue::Absent,
+        binding_span: None,
+        config_qualifier: None,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -74,53 +82,76 @@ pub(crate) fn loop_binding_with_type_id(name: PathId, type_id: TypeId) -> Declar
 // ---------------------------------------------------------------------------
 
 pub(crate) fn const_record_reference_expr(
+    builder: &mut AstExpressionBuilder,
     name: PathId,
     type_id: TypeId,
     span: Option<SourceSpan>,
     value_mode: ValueMode,
-) -> Expression {
-    Expression::reference_with_type_id(
-        name,
-        DataType::Inferred,
-        type_id,
-        span,
-        value_mode,
-        ConstRecordState::ConstRecord,
-    )
+) -> ExprId {
+    builder
+        .reference_with_type_id(
+            name,
+            type_id,
+            span,
+            value_mode,
+            ConstRecordState::ConstRecord,
+        )
+        .expect("fixture reference fits expression store")
+        .id()
 }
 
-pub(crate) fn no_value_expr(
-    type_id: TypeId,
-    span: Option<SourceSpan>,
-    value_mode: ValueMode,
-) -> Expression {
-    Expression::new(
-        ExpressionKind::NoValue,
-        span,
-        type_id,
-        DataType::Inferred,
-        value_mode,
-    )
-}
-
+/// Resolve transient fixture RPN once, then retain only completed operation nodes.
 pub(crate) fn runtime_expr(
-    items: Vec<ExpressionRpnItem>,
+    builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    mut items: Vec<ExpressionRpnItem>,
     type_id: TypeId,
     span: Option<SourceSpan>,
     value_mode: ValueMode,
-) -> Expression {
-    let contains_regular_division = items.iter().any(rpn_item_has_regular_division);
-    Expression::new(
-        ExpressionKind::Runtime(ExpressionRpn { items }),
+    type_environment: &TypeEnvironment,
+) -> ExprId {
+    let mut string_table = StringTable::new();
+    let path_fork = PathInternerFork::empty();
+    let resolved = resolve_expression_result_type(
+        &mut items,
         span,
-        type_id,
-        DataType::Inferred,
-        value_mode,
+        None,
+        builder,
+        const_values,
+        &mut string_table,
+        type_environment,
+        &path_fork,
     )
-    .with_regular_division_provenance(contains_regular_division)
+    .unwrap_or_else(|_| panic!("runtime fixture operators should resolve"));
+    assert_eq!(resolved.type_id, type_id, "runtime fixture result type");
+    let mut stack = Vec::new();
+    for item in items {
+        match item {
+            ExpressionRpnItem::Operand(id) => stack.push(builder.own(id)),
+            ExpressionRpnItem::ResolvedOperator(operation) => {
+                let right = if operation.operator.required_values() == 2 {
+                    Some(
+                        stack
+                            .pop()
+                            .expect("resolved binary fixture has right operand"),
+                    )
+                } else {
+                    None
+                };
+                let left = stack.pop().expect("resolved fixture has left operand");
+                let id = builder
+                    .resolved_operation(left, right, operation, value_mode)
+                    .expect("resolved fixture operation fits store");
+                stack.push(id);
+            }
+            _ => panic!("fixture RPN must contain only resolved completed operands"),
+        }
+    }
+    assert_eq!(stack.len(), 1, "fixture RPN must produce one root");
+    stack.pop().expect("one fixture root").id()
 }
 
-pub(crate) fn runtime_operand_item(expression: Expression) -> ExpressionRpnItem {
+pub(crate) fn runtime_operand_item(expression: ExprId) -> ExpressionRpnItem {
     ExpressionRpnItem::Operand(expression)
 }
 
@@ -132,68 +163,40 @@ pub(crate) fn runtime_operator_item(
 }
 
 pub(crate) fn runtime_function_call_item(
+    builder: &mut AstExpressionBuilder,
     name: PathId,
     result_type_ids: Vec<TypeId>,
     span: Option<SourceSpan>,
 ) -> ExpressionRpnItem {
-    let expression_type_id = single_fixture_result_type_id(&result_type_ids);
-
-    runtime_operand_item(Expression::new(
-        ExpressionKind::FunctionCall {
-            name,
-            args: vec![],
-            result_type_ids,
-        },
-        span,
-        expression_type_id,
-        DataType::Inferred,
-        ValueMode::MutableOwned,
-    ))
-}
-
-pub(crate) fn runtime_handled_function_call_item(
-    name: PathId,
-    result_type_ids: Vec<TypeId>,
-    handling: FallibleHandling,
-    span: Option<SourceSpan>,
-) -> ExpressionRpnItem {
-    let expression_type_id = single_fixture_result_type_id(&result_type_ids);
-    let expression_handling = fixture_fallible_expression_handling(&handling);
-
-    runtime_operand_item(Expression::new(
-        ExpressionKind::HandledFallibleFunctionCall {
-            name,
-            args: vec![],
-            result_type_ids,
-            handling: expression_handling,
-            propagation_span: None,
-        },
-        span,
-        expression_type_id,
-        DataType::Inferred,
-        ValueMode::MutableOwned,
-    ))
-}
-
-fn rpn_item_has_regular_division(item: &ExpressionRpnItem) -> bool {
-    matches!(
-        item,
-        ExpressionRpnItem::Operator {
-            operator: Operator::Divide,
-            ..
-        }
+    runtime_operand_item(
+        builder
+            .function_call_with_typed_arguments(name, vec![], result_type_ids, span)
+            .expect("fixture call fits expression store")
+            .id(),
     )
 }
 
-fn single_fixture_result_type_id(result_type_ids: &[TypeId]) -> TypeId {
-    match result_type_ids {
-        [] => builtin_type_ids::NONE,
-        [single] => *single,
-        multiple => panic!(
-            "test fixture runtime RPN call operand must have at most one result, got {}",
-            multiple.len()
-        ),
-    }
+pub(crate) fn runtime_handled_function_call_item(
+    builder: &mut AstExpressionBuilder,
+    name: PathId,
+    result_type_ids: Vec<TypeId>,
+    error_type: TypeId,
+    handling: FallibleHandling,
+    span: Option<SourceSpan>,
+) -> ExpressionRpnItem {
+    runtime_operand_item(
+        builder
+            .handled_fallible_function_call_with_typed_arguments(
+                name,
+                vec![],
+                result_type_ids,
+                error_type,
+                fixture_fallible_expression_handling(&handling),
+                span,
+            )
+            .expect("fixture handled call fits expression store")
+            .id(),
+    )
 }
 
 fn fixture_fallible_expression_handling(handling: &FallibleHandling) -> FallibleExpressionHandling {
@@ -204,19 +207,35 @@ fn fixture_fallible_expression_handling(handling: &FallibleHandling) -> Fallible
 }
 
 pub(crate) fn collection_expr(
-    items: Vec<Expression>,
+    builder: &mut AstExpressionBuilder,
+    items: Vec<ExprId>,
     span: Option<SourceSpan>,
     value_mode: ValueMode,
-) -> Expression {
-    let contains_regular_division = items.iter().any(|item| item.contains_regular_division);
-    Expression::new(
-        ExpressionKind::Collection(items),
-        span,
-        builtin_type_ids::NONE,
-        DataType::Inferred,
-        value_mode,
-    )
-    .with_regular_division_provenance(contains_regular_division)
+    type_environment: &mut TypeEnvironment,
+) -> ExprId {
+    let element_type_id = builder
+        .view(
+            *items
+                .first()
+                .expect("empty fixture collection needs explicit type"),
+        )
+        .expect("fixture collection child")
+        .value_type_id()
+        .expect("single-valued child");
+    builder
+        .collection_with_type_id(
+            builder.own_slice(&items),
+            CollectionExpressionType {
+                element_type_id,
+                fixed_capacity: None,
+                collection_type_id: None,
+            },
+            type_environment,
+            span,
+            value_mode,
+        )
+        .expect("fixture collection fits store")
+        .id()
 }
 
 pub(crate) fn multi_bind_target(
@@ -235,239 +254,45 @@ pub(crate) fn multi_bind_target(
     }
 }
 
-pub(crate) fn field_access_node(
-    base: Expression,
-    field: crate::compiler_frontend::symbols::string_interning::StringId,
-    type_id: TypeId,
-    const_record_state: ConstRecordState,
-    value_mode: ValueMode,
-    span: Option<SourceSpan>,
-) -> AstNode {
-    let mut expression = Expression::new(
-        ExpressionKind::FieldAccess {
-            base: Box::new(base),
-            field,
-        },
-        span,
-        type_id,
-        DataType::Inferred,
-        value_mode,
-    );
-    expression.const_record_state = const_record_state;
-
-    AstNode {
-        kind: NodeKind::ExpressionStatement(expression),
-        span,
-        scope: PathId::ROOT,
-    }
-}
-
 pub(crate) fn choice_construct_expr(
-    nominal_path: PathId,
+    builder: &mut AstExpressionBuilder,
+    _nominal_path: PathId,
     tag: usize,
-    fields: Vec<Declaration>,
+    fields: Vec<ConstructorField>,
     type_id: TypeId,
     span: Option<SourceSpan>,
     value_mode: ValueMode,
-) -> Expression {
-    Expression::choice_construct(
-        crate::compiler_frontend::ast::expressions::expression::ChoiceConstructInput {
-            nominal_path,
+) -> ExprId {
+    builder
+        .choice_construct(ChoiceConstructInput {
             tag,
-            fields,
-            diagnostic_type: DataType::Inferred,
+            fields: builder.own_slice(&fields),
             type_id,
             span,
             value_mode,
-        },
-    )
+        })
+        .expect("fixture choice fits expression store")
+        .id()
 }
 
 pub(crate) fn option_none_expr(
+    builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     inner_type_id: TypeId,
     type_environment: &mut TypeEnvironment,
     span: Option<SourceSpan>,
-) -> Expression {
-    Expression::option_none_with_type_id(inner_type_id, DataType::Inferred, type_environment, span)
-}
-
-pub(crate) fn result_carrier_type_id(
-    type_environment: &mut TypeEnvironment,
-    success_type_id: TypeId,
-    error_type_id: TypeId,
-) -> TypeId {
-    type_environment.intern_fallible_carrier(success_type_id, error_type_id)
-}
-
-pub(crate) fn handled_result_expr(
-    value: Expression,
-    handling: FallibleHandling,
-    result_type_id: TypeId,
-    result_type_ids: Vec<TypeId>,
-    span: Option<SourceSpan>,
-) -> Expression {
-    let expression_handling = match &handling {
-        FallibleHandling::Propagate => FallibleExpressionHandling::Propagate,
-        FallibleHandling::Handler { .. } => FallibleExpressionHandling::Recover,
-    };
-
-    let handled_expression = Expression::handled_result_with_type_id(
-        value,
-        expression_handling,
-        result_type_id,
-        DataType::Inferred,
-        span,
-    );
-
-    match handling {
-        FallibleHandling::Propagate => handled_expression,
-        FallibleHandling::Handler { .. } => {
-            wrap_catch_expression(handled_expression, handling, result_type_ids)
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// AST construction
-// ---------------------------------------------------------------------------
-
-fn register_collection_types_from_nodes(
-    nodes: &mut [AstNode],
-    type_environment: &mut TypeEnvironment,
-) {
-    for node in nodes.iter_mut() {
-        register_collection_types_from_node(node, type_environment);
-    }
-}
-
-fn register_collection_types_from_node(node: &mut AstNode, type_environment: &mut TypeEnvironment) {
-    match &mut node.kind {
-        NodeKind::Return(exprs) => {
-            for expr in exprs {
-                register_collection_types_from_expression(expr, type_environment);
-            }
-        }
-        NodeKind::ReturnError(expr) => {
-            register_collection_types_from_expression(expr, type_environment);
-        }
-        NodeKind::If(condition, then_body, else_body, _) => {
-            register_collection_types_from_expression(condition, type_environment);
-            register_collection_types_from_nodes(then_body, type_environment);
-            if let Some(else_nodes) = else_body {
-                register_collection_types_from_nodes(else_nodes, type_environment);
-            }
-        }
-        NodeKind::Match {
-            scrutinee,
-            arms,
-            default,
-            ..
-        } => {
-            register_collection_types_from_expression(scrutinee, type_environment);
-            for arm in arms {
-                register_collection_types_from_nodes(&mut arm.body, type_environment);
-            }
-            if let Some(default_nodes) = default {
-                register_collection_types_from_nodes(default_nodes, type_environment);
-            }
-        }
-        NodeKind::LexicalScope { body } => {
-            register_collection_types_from_nodes(body, type_environment);
-        }
-        NodeKind::RangeLoop { range, body, .. } => {
-            register_collection_types_from_expression(&mut range.start, type_environment);
-            register_collection_types_from_expression(&mut range.end, type_environment);
-            if let Some(step) = &mut range.step {
-                register_collection_types_from_expression(step, type_environment);
-            }
-            register_collection_types_from_nodes(body, type_environment);
-        }
-        NodeKind::CollectionLoop { iterable, body, .. } => {
-            register_collection_types_from_expression(iterable, type_environment);
-            register_collection_types_from_nodes(body, type_environment);
-        }
-        NodeKind::WhileLoop(condition, body) => {
-            register_collection_types_from_expression(condition, type_environment);
-            register_collection_types_from_nodes(body, type_environment);
-        }
-        NodeKind::VariableDeclaration(Declaration { value, .. }) => {
-            register_collection_types_from_expression(value, type_environment);
-        }
-        NodeKind::PushStartRuntimeFragment(expr) => {
-            register_collection_types_from_expression(expr, type_environment);
-        }
-        NodeKind::StructDefinition(_, fields) => {
-            for field in fields.iter_mut() {
-                register_collection_types_from_expression(&mut field.value, type_environment);
-            }
-        }
-        NodeKind::Function(_, _, body) => {
-            register_collection_types_from_nodes(body, type_environment);
-        }
-        NodeKind::ThenValue(produced_values) => {
-            for expr in &mut produced_values.expressions {
-                register_collection_types_from_expression(expr, type_environment);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn register_collection_types_from_expression(
-    expr: &mut Expression,
-    type_environment: &mut TypeEnvironment,
-) {
-    if let ExpressionKind::Collection(items) = &mut expr.kind {
-        if let Some(first) = items.first() {
-            let collection_type_id = type_environment.intern_collection(first.type_id, None);
-            expr.type_id = collection_type_id;
-        }
-        for item in items {
-            register_collection_types_from_expression(item, type_environment);
-        }
-        return;
-    }
-
-    match &mut expr.kind {
-        ExpressionKind::Runtime(rpn) => {
-            for item in &mut rpn.items {
-                if let ExpressionRpnItem::Operand(expression) = item {
-                    register_collection_types_from_expression(expression, type_environment);
-                }
-            }
-        }
-        ExpressionKind::Copy(_) => {
-            // Places carry no nested expressions that need collection-type registration.
-        }
-        ExpressionKind::Function(_) => {}
-        ExpressionKind::FunctionCall { args, .. }
-        | ExpressionKind::HandledFallibleFunctionCall { args, .. }
-        | ExpressionKind::HandledFallibleHostFunctionCall { args, .. }
-        | ExpressionKind::HostFunctionCall { args, .. } => {
-            for arg in args {
-                register_collection_types_from_expression(&mut arg.value, type_environment);
-            }
-        }
-        ExpressionKind::StructDefinition(fields)
-        | ExpressionKind::StructInstance(fields)
-        | ExpressionKind::ChoiceConstruct { fields, .. } => {
-            for field in fields {
-                register_collection_types_from_expression(&mut field.value, type_environment);
-            }
-        }
-        ExpressionKind::Range(start, end) => {
-            register_collection_types_from_expression(start, type_environment);
-            register_collection_types_from_expression(end, type_environment);
-        }
-        _ => {}
-    }
+) -> ExprId {
+    builder
+        .option_none_with_type_id(const_values, inner_type_id, type_environment, span)
+        .expect("fixture optional constant fits store")
+        .id()
 }
 
 pub(crate) fn choice_type_id(
+    type_environment: &mut TypeEnvironment,
     path: PathId,
     variants: &[crate::compiler_frontend::declaration_syntax::choice::ChoiceVariant],
 ) -> TypeId {
-    let mut type_environment = TypeEnvironment::new();
     let variant_definitions = variants
         .iter()
         .enumerate()
@@ -485,8 +310,8 @@ pub(crate) fn choice_type_id(
                         .iter()
                         .map(|field| FieldDefinition {
                             name: field.id,
-                            type_id: field.value.type_id,
-                            span: field.value.span,
+                            type_id: field.type_id,
+                            span: field.binding_span,
                         })
                         .collect::<Vec<_>>();
                     ChoiceVariantPayloadDefinition::Record {
@@ -509,24 +334,32 @@ pub(crate) fn choice_type_id(
     type_id
 }
 
-/// Builds an `Ast` after registering every struct and choice definition its nodes mention.
-///
-/// WHAT: the single AST fixture constructor. It walks `nodes` for struct and choice definitions
-///       and registers them in a fresh `TypeEnvironment` before construction.
-/// WHY:  named for what it does rather than `build_ast_with_registered_types`, because HIR lowering resolves frontend
-///       `TypeId`s during declaration registration and a fixture that skipped that step would
-///       fail for reasons that have nothing to do with the test's subject.
-pub(crate) fn build_ast_with_registered_types(nodes: Vec<AstNode>, entry_path: PathId) -> Ast {
-    build_ast_with_choices(nodes, entry_path, vec![])
+/// Freeze the fixture's issuing expression domain while retaining its canonical types.
+pub(crate) fn build_ast_with_registered_types(
+    nodes: Vec<AstNode>,
+    entry_path: PathId,
+    builder: AstExpressionBuilder,
+    const_values: ConstValueStore,
+    type_environment: TypeEnvironment,
+) -> Ast {
+    build_ast_with_choices(
+        nodes,
+        entry_path,
+        vec![],
+        builder,
+        const_values,
+        type_environment,
+    )
 }
 
 pub(crate) fn build_ast_with_choices(
     mut nodes: Vec<AstNode>,
     entry_path: PathId,
     choice_definitions: Vec<HirTestChoiceDefinition>,
+    builder: AstExpressionBuilder,
+    const_values: ConstValueStore,
+    mut type_environment: TypeEnvironment,
 ) -> Ast {
-    let mut type_environment = TypeEnvironment::new();
-
     // Register struct definitions from AST nodes so that HIR lowering can
     // resolve frontend TypeIds during declaration registration.
     for node in &nodes {
@@ -535,8 +368,8 @@ pub(crate) fn build_ast_with_choices(
                 .iter()
                 .map(|field| FieldDefinition {
                     name: field.id,
-                    type_id: field.value.type_id,
-                    span: field.value.span,
+                    type_id: field.type_id,
+                    span: field.binding_span,
                 })
                 .collect::<Vec<_>>();
 
@@ -555,6 +388,14 @@ pub(crate) fn build_ast_with_choices(
     // Register choice definitions so expression canonicalization can resolve
     // choice TypeIds before HIR lowering.
     for choice_def in &choice_definitions {
+        // Already interned via choice_type_id into this environment; registering again
+        // would allocate a second nominal for the same path.
+        if type_environment
+            .nominal_id_for_path(&choice_def.nominal_path)
+            .is_some()
+        {
+            continue;
+        }
         let variant_definitions = choice_def
             .variants
             .iter()
@@ -573,8 +414,8 @@ pub(crate) fn build_ast_with_choices(
                             .iter()
                             .map(|field| FieldDefinition {
                                 name: field.id,
-                                type_id: field.value.type_id,
-                                span: field.value.span,
+                                type_id: field.type_id,
+                                span: field.binding_span,
                             })
                             .collect::<Vec<_>>();
                         ChoiceVariantPayloadDefinition::Record {
@@ -596,14 +437,16 @@ pub(crate) fn build_ast_with_choices(
         let _ = type_environment.register_nominal_choice(definition);
     }
 
-    // Scan AST for collection literals and register their constructed types so
-    // that HIR loop lowering can resolve collection type identities.
-    register_collection_types_from_nodes(&mut nodes, &mut type_environment);
+    // Constructed expression types were selected in the issuing environment before append.
+    let expressions = builder
+        .freeze(&mut nodes)
+        .expect("completed fixture expression store");
 
     Ast {
         root_role: crate::compiler_frontend::semantic_identity::ModuleRootRole::Normal,
         nodes,
-        const_values: ConstValueStore::default(),
+        const_values,
+        expressions,
         doc_fragments: vec![],
         entry_path,
         const_top_level_fragments: vec![],
@@ -619,6 +462,7 @@ pub(crate) fn build_ast_with_choices(
         type_environment,
         const_facts: AstConstFacts::default(),
         imported_functions_by_local_path: Default::default(),
+        infallible_cast_evidence: Default::default(),
         imported_struct_definitions: vec![],
         static_if_function_provenance: Default::default(),
     }
@@ -633,6 +477,7 @@ pub(crate) fn lower_ast(
     ast: Ast,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
+    external_packages: &ExternalPackageRegistry,
 ) -> Result<
     (
         HirModule,
@@ -640,7 +485,7 @@ pub(crate) fn lower_ast(
     ),
     CompilerMessages,
 > {
-    let result = lower_ast_with_metadata(ast, string_table, path_fork)?;
+    let result = lower_ast_with_metadata(ast, string_table, path_fork, external_packages)?;
     Ok((result.hir_module, result.type_environment))
 }
 
@@ -653,6 +498,7 @@ pub(crate) fn lower_ast_with_metadata(
     ast: Ast,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
+    external_packages: &ExternalPackageRegistry,
 ) -> Result<crate::compiler_frontend::module_metadata::HirLoweringResult, CompilerMessages> {
     let type_environment = ast.type_environment.clone();
     HirBuilder::new(
@@ -662,7 +508,7 @@ pub(crate) fn lower_ast_with_metadata(
         crate::compiler_frontend::hir::functions::HirFunctionOriginLookup::default(),
         Default::default(),
     )
-    .build_hir_module(ast)
+    .build_hir_module(ast, external_packages)
 }
 
 /// Assert that no block ends with a placeholder `Uninitialized` terminator.

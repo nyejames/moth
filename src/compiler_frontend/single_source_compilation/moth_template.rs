@@ -60,7 +60,6 @@ use crate::compiler_frontend::{
     CompilerFrontend, FrontendBuildProfile, FrontendFilePrepareContext, FrontendFilePrepareInput,
     FrontendFilePrepareSource,
 };
-use moth_lexical::numeric::profile::NumericProfile;
 
 use std::cell::RefCell;
 use std::path::{Path, PathBuf};
@@ -80,12 +79,6 @@ pub(crate) struct MothTemplateCompilationRequest<'a> {
     pub(crate) style_directives: &'a StyleDirectiveRegistry,
     /// Prepared Stage 0 file-value inputs, present when the source names file values.
     pub(crate) file_value_resolution: Option<MothTemplateFileValueBundle>,
-    /// The compilation boundary's `Int` width and `Float` precision.
-    ///
-    /// WHY: a template folds under the same boundary widths as any other source in the calling
-    ///      project, so the caller supplies the selected profile instead of this service choosing
-    ///      one. Test-only callers compile standalone fixtures and pass `NumericProfile::STANDARD`.
-    pub(crate) numeric_profile: NumericProfile,
 }
 
 /// Prepared file-value inputs one direct Moth template folds against.
@@ -646,10 +639,6 @@ fn attach_finalized_source_database(
 /// Prepare the standalone template source exactly once.
 ///
 /// The preparation owner lends its split database and span-builder view for this one call, so
-#[allow(
-    clippy::too_many_arguments,
-    reason = "template source preparation keeps the shared database, request, source text, entry id, mutable string/path state, and span builder as separate inputs"
-)]
 fn prepare_template_source(
     source_files: &Arc<SourceDatabase>,
     request: &MothTemplateCompilationRequest<'_>,
@@ -689,8 +678,6 @@ fn fold_template_ast(
     path_fork: &mut PathInternerFork,
     file_value_resolution: Option<Rc<FileValueResolutionServices>>,
 ) -> Result<Ast, CompilerMessages> {
-    let numeric_profile = request.numeric_profile;
-
     Ok(Ast::new(
         AstBuildInput {
             headers: sorted.headers,
@@ -708,7 +695,6 @@ fn fold_template_ast(
             path_fork,
             entry_dir: entry_scope,
             build_profile: FrontendBuildProfile::Dev,
-            numeric_profile,
             file_value_resolution,
             config_resolution: None,
             build_config_values: Arc::new(Default::default()),

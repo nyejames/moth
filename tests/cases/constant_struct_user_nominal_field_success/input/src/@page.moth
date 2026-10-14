@@ -3,7 +3,7 @@
 -- references in constructor shells could silently fall back to builtin `none`.
 
 Inner = |
-    value Int,
+    value I32,
 |
 
 Outer = |

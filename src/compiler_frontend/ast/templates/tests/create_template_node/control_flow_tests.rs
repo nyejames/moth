@@ -1,9 +1,12 @@
 use super::*;
+use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 #[test]
 fn template_option_capture_binding_is_scoped_to_selected_body() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
@@ -30,8 +33,13 @@ fn template_option_capture_binding_is_scoped_to_selected_body() {
     token_stream
         .set_position(file_tokens.opener_index)
         .expect("test token stream position must remain in canonical range");
-    let mut context =
-        runtime_template_context(&source_path.clone(), &mut string_table, &mut path_fork);
+    let mut context = runtime_template_context(
+        &source_path.clone(),
+        &mut expression_builder,
+        &mut const_values,
+        &mut string_table,
+        &mut path_fork,
+    );
 
     let mut type_environment = TypeEnvironment::new();
     let maybe_name_type_id = type_environment.intern_option(type_environment.builtins().string);
@@ -44,13 +52,10 @@ fn template_option_capture_binding_is_scoped_to_selected_body() {
         id: path_fork
             .try_intern_child(source_path, maybe_name)
             .expect("test path fits"),
-        value: Expression::new(
-            ExpressionKind::NoValue,
-            None,
-            maybe_name_type_id,
-            DataType::Option(Box::new(DataType::StringSlice)),
-            ValueMode::ImmutableOwned,
-        ),
+        type_id: maybe_name_type_id,
+        diagnostic_type: DataType::Option(Box::new(DataType::StringSlice)),
+        value_mode: ValueMode::ImmutableOwned,
+        value: DeclarationValue::Absent,
         binding_span: None,
         config_qualifier: None,
     };
@@ -61,6 +66,8 @@ fn template_option_capture_binding_is_scoped_to_selected_body() {
         source_path,
         &context,
         &mut type_interner,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -95,10 +102,14 @@ fn match_style_template_if_is_rejected() {
 
 #[test]
 fn template_loop_composition_formats_body_without_repeating_shared_head_prefix() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let (template, context, string_table) = parse_control_flow_template_after_composition(
         "[\"prefix\", $md, loop 0 to 3 |i|:
             # Item
         ]",
+        &mut expression_builder,
+        &mut const_values,
     );
 
     let loop_node = expect_loop_node(&template, &context);
@@ -107,18 +118,24 @@ fn template_loop_composition_formats_body_without_repeating_shared_head_prefix()
         loop_aggregate_wrapper_node(loop_node, &context),
         &context,
         &string_table,
+        &expression_builder,
+        &const_values,
         "prefix",
     );
     assert_body_node_static_contains(
         loop_body_node(loop_node, &context),
         &context,
         &string_table,
+        &expression_builder,
+        &const_values,
         "<h1 id=\"item\">Item</h1>",
     );
     assert_body_node_static_excludes(
         loop_body_node(loop_node, &context),
         &context,
         &string_table,
+        &expression_builder,
+        &const_values,
         "prefix",
     );
 }

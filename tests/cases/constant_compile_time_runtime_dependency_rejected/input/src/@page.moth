@@ -1,6 +1,6 @@
 -- Body-local compile-time constant referencing a runtime parameter must fail.
 
-helper |param Int| -> Int:
+helper |param I32| -> I32:
     value #= param + 1
     return value
 ;

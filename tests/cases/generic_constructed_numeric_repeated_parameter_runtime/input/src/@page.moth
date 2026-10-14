@@ -1,0 +1,14 @@
+-- One constructor parameter shared by two fields keeps one numeric origin.
+-- The exact receiver for either field selects the shared canonical instance.
+
+Pair type T = |left T, right T|
+
+read_u64 |value U64| -> String:
+    return cast value
+;
+
+pair = Pair(4294967306, 7)
+right_text = read_u64(pair.right)
+left_text = read_u64(pair.left)
+
+[:generic_constructed_numeric_repeated_parameter_runtime left=[left_text] right=[right_text]]

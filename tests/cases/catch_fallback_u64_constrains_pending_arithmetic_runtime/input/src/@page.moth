@@ -1,0 +1,22 @@
+-- The U64 catch fallback must type each pending arithmetic before the protected
+-- default is erased. The inline and block forms share the same U64 fallback.
+-- The block handler's fallback arm cannot run, so `scratch` is declared only.
+
+probe || -> String:
+    fallback U64 = 0
+    value ~= 1 + 2 catch then fallback
+    value = 4294967296
+    return [:[value]]
+;
+
+probe_block || -> String:
+    fallback U64 = 0
+    value ~= 1 + 2 catch:
+        scratch = 1
+        then fallback
+    ;
+    value = 4294967297
+    return [:[value]]
+;
+
+[:inline=[probe()] block=[probe_block()]]

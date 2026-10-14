@@ -10,9 +10,9 @@ panel = [:
 
 show = true
 label = "runtime"
-empty_producer_calls ~{Int} = {}
+empty_producer_calls ~{I32} = {}
 
-empty_producer |calls ~{Int}| -> String:
+empty_producer |calls ~{I32}| -> String:
     ~calls.push(1)
     return ""
 ;

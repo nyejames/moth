@@ -1,7 +1,7 @@
--- Task 5A: a Uint value does not silently satisfy an Int binding.
+-- Task 5A: a U32 value does not silently satisfy an I32 binding.
 -- Crossing the boundary needs an explicit handled cast (covered by
 -- uint_cast_conversions_success).
 
-source Uint = 7
-target Int = source
+source U32 = 7
+target I32 = source
 [:test]

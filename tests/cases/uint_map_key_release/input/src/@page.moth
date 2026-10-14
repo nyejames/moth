@@ -1,10 +1,10 @@
--- Task 5A (Int64 profile): exact Uint map keys reuse the existing key
+-- Task 5A (I64/U64 domain): exact U64 map keys reuse the existing key
 -- eligibility, hashing and execution owners. Insertion, replacement, lookup,
--- removal, containment and length run against small and full-Uint64 keys,
+-- removal, containment and length run against small and full-U64 keys,
 -- including values above i64::MAX and the inclusive maximum.
 
 render || -> String:
-    scores ~{Uint = String} = {1 = "one", 7 = "seven"}
+    scores ~{U64 = String} = {1 = "one", 7 = "seven"}
     len_after_literal = scores.length
 
     has_one_before = scores.contains(1)
@@ -27,7 +27,7 @@ render || -> String:
 
     one_seen String = copy one_value
     missing_seen String = copy missing_value
-    removed_map ~{Uint = String} = {1 = one_seen, 7 = "seven", 9 = "nine"}
+    removed_map ~{U64 = String} = {1 = one_seen, 7 = "seven", 9 = "nine"}
     removed = ~removed_map.remove(7) catch:
         then "missing"
     ;
@@ -35,10 +35,10 @@ render || -> String:
     len_after_remove = removed_map.length
     has_seven_after = removed_map.contains(7)
 
-    above Uint = 9223372036854775808
-    huge Uint = 18446744073709551615
-    narrow Uint = 4294967295
-    wide ~{Uint = Int} = {above = 100, huge = 200}
+    above U64 = 9223372036854775808
+    huge U64 = 18446744073709551615
+    narrow U64 = 4294967295
+    wide ~{U64 = I64} = {above = 100, huge = 200}
     wide_len = wide.length
     narrow_seen = wide.get(narrow) catch:
         then -1

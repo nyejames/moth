@@ -45,6 +45,10 @@ pub(crate) mod generic_functions;
 mod module_ast;
 mod receiver_methods;
 
+/// Body-owned numeric construction state for the Phase 4 scalar inference path.
+pub(crate) mod numeric_construction;
+pub(crate) mod numeric_known_shape;
+
 #[cfg(feature = "timers")]
 pub(crate) use module_ast::build_context::AstTimingMetricFamily;
 
@@ -54,9 +58,8 @@ pub(crate) mod type_resolution;
 pub(crate) mod expressions {
     //! Expression parsing, evaluation, and AST-owned value contracts.
     //!
-    //! Runtime expressions and copy targets use the narrowed expression-owned
-    //! `ExpressionRpn` and `PlaceExpression` payloads. Broad `AstNode` fragments
-    //! must not be stored inside expression variants that survive AST evaluation.
+    //! Completed semantic values use one phase-owned dense expression store.
+    //! Parser RPN and body-local deferred expressions remain transient construction scratch.
 
     pub(crate) mod anonymous_const_record;
     pub(crate) mod assertion_message_effects;
@@ -69,16 +72,16 @@ pub(crate) mod expressions {
     pub(crate) mod eval_expression;
     pub(crate) mod expression;
     pub(crate) mod expression_kind;
+    pub(crate) mod expression_rewrite;
     pub(crate) mod expression_rpn;
-    #[cfg(test)]
-    #[path = "tests/expression_test_support.rs"]
-    pub(crate) mod expression_test_support;
+    pub(crate) mod expression_store;
     pub(crate) mod expression_types;
     pub(crate) mod external_namespace_members;
     pub(crate) mod failure_classification;
     pub(crate) mod failure_facts;
     pub(crate) mod function_calls;
     pub(crate) mod generic_nominal_inference;
+    pub(crate) mod generic_nominal_retention;
     pub(crate) mod mutation;
     pub(crate) mod namespace_access;
     pub(crate) mod option_propagation;
@@ -115,6 +118,7 @@ pub(crate) mod statements {
     pub(crate) mod match_headers;
     pub(crate) mod match_patterns;
     pub(crate) mod multi_bind;
+    pub(crate) mod numeric_body_completion;
     pub(crate) mod terminality;
     pub(crate) mod value_production;
 }
@@ -152,6 +156,9 @@ use crate::compiler_frontend::ast::ast_nodes::AstNode;
 use crate::compiler_frontend::ast::const_values::facts::AstConstFacts;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExpressionStore,
+};
 use crate::compiler_frontend::ast::module_ast::build_context::AstPhaseContext;
 use crate::compiler_frontend::ast::module_ast::emission::AstEmitter;
 use crate::compiler_frontend::ast::module_ast::environment::{
@@ -160,7 +167,9 @@ use crate::compiler_frontend::ast::module_ast::environment::{
 use crate::compiler_frontend::ast::module_ast::finalization::{
     AstFinalizer, MaterialisationContextRetention,
 };
-use crate::compiler_frontend::ast::statements::body_dispatch::parse_function_body_statements;
+use crate::compiler_frontend::ast::statements::body_dispatch::{
+    ParsedBody, parse_function_body_statements,
+};
 use crate::compiler_frontend::ast::templates::top_level_templates::AstConstTopLevelFragment;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::instrumentation::{log_ast_counters, reset_ast_counters};
@@ -184,6 +193,7 @@ use crate::compiler_frontend::semantic_identity::ModuleRootRole;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
+use crate::compiler_frontend::traits::evidence::environment::InfallibleCastEvidenceContract;
 use crate::timing_scope_attributed;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
@@ -219,6 +229,8 @@ pub struct Ast {
     /// compiler services. Authored declarations remain in the declaration table during
     /// finalization and are not duplicated into an AST declaration vector.
     pub const_values: ConstValueStore,
+    /// Immutable semantic expression authority for all executable roots.
+    pub(crate) expressions: ExpressionStore,
     pub doc_fragments: Vec<AstDocFragment>,
 
     pub entry_path: PathId,
@@ -255,6 +267,8 @@ pub struct Ast {
     ///      const-ness without re-walking the AST.
     pub const_facts: AstConstFacts,
     pub(crate) imported_functions_by_local_path: FxHashMap<PathId, AstImportedFunctionContract>,
+    /// Canonical infallible cast requirements, projected onto local executable method paths.
+    pub(crate) infallible_cast_evidence: FxHashMap<PathId, InfallibleCastEvidenceContract>,
     /// Provenance introduced by static configuration branch selection, keyed by function path
     /// until HIR allocates the build-local function IDs.
     pub(crate) static_if_function_provenance: FxHashMap<PathId, SyntheticInterfaceProvenance>,
@@ -262,14 +276,15 @@ pub struct Ast {
 
 /// Consumer-local semantic contract for one imported concrete source function.
 ///
-/// Header binding owns the stable target and public summary. AST adds the locally projected
-/// function and fallible-carrier handles needed by HIR without leaking `TypeId` back into the
-/// provider interface or header-stage binding vocabulary.
+/// Header binding owns the stable target and public summary. AST adds consumer-local ordered
+/// success slots and the separate error channel needed by HIR without leaking `TypeId` back
+/// into the provider interface or header-stage binding vocabulary.
 #[derive(Clone, Debug)]
 pub(crate) struct AstImportedFunctionContract {
     pub(crate) target: crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget,
     pub(crate) summary: crate::compiler_frontend::public_call_summary::PublicCallSummary,
-    pub(crate) fallible_carrier_type_id: Option<TypeId>,
+    pub(crate) returns: Vec<TypeId>,
+    pub(crate) error_return: Option<TypeId>,
 }
 
 /// Closed typed AST construction result carrying executable `Ast` and the three semantic
@@ -289,10 +304,11 @@ pub struct AstBuildResult {
     /// Direct public-interface projection input consumed by the public-interface draft builder.
     pub public_interface_projection_input: AstPublicInterfaceProjectionInput,
 
-    /// Construction-only declaring-module context frozen before successful publication.
+    /// Construction-only declaring-module capture consumed before HIR lowering.
     ///
-    /// Module builds always retain it. A generated sidecar retains it only when its body deferred
-    /// nested generic requests, because the context is then their requester.
+    /// Module builds always retain it. A generated sidecar retains it for nested executable or
+    /// assertion-validation requests. The caller resolves stable callable identities, then
+    /// detaches owned syntax, canonical signatures/defaults and constants before AST release.
     pub(crate) materialisation_context: Option<ModuleMaterialisationPreparationBuilder>,
     /// The same module-local resource table used while resolving file-valued expressions.
     ///
@@ -303,6 +319,10 @@ pub struct AstBuildResult {
     /// Imported generic requests inferred against provider contracts. The requester carries only
     /// stable declaration/type evidence into the compiler-owned generated-function transaction.
     pub(crate) deferred_generic_requests: Vec<GenericFunctionInstantiationRequest>,
+
+    /// Generic instances needed only to validate retained inactive assertion-message witnesses.
+    /// These requests own no executable demand and exclude instances already requested above.
+    pub(crate) assertion_validation_generic_requests: Vec<GenericFunctionInstantiationRequest>,
 }
 
 /// Complete header-stage output consumed by AST construction.
@@ -355,8 +375,8 @@ impl Ast {
 
         let header_count = headers.len();
         let ast_header_counts = AstHeaderCounterSnapshot::from_headers(&headers);
-        let (phase_context, string_table, path_fork) =
-            AstPhaseContext::from_build_context(context, source_build_config_contract_names);
+        let (mut phase_context, string_table, path_fork) =
+            AstPhaseContext::from_build_context(context, source_build_config_contract_names)?;
 
         timing_scope_attributed!(
             timing_guard_ast_total,
@@ -364,15 +384,16 @@ impl Ast {
             phase_context.timing_context
         );
 
-        let mut environment = AstModuleEnvironmentBuilder::new(&phase_context, path_fork).build(
-            &headers,
-            AstEnvironmentInput {
-                module_symbols,
-                binding_environment,
-                source_token_owners: source_token_owners.clone(),
-            },
-            string_table,
-        )?;
+        let mut environment = AstModuleEnvironmentBuilder::new(&mut phase_context, path_fork)
+            .build(
+                &headers,
+                AstEnvironmentInput {
+                    module_symbols,
+                    binding_environment,
+                    source_token_owners: source_token_owners.clone(),
+                },
+                string_table,
+            )?;
         let generic_template_count = environment.lookups.generic_declarations_by_path.len();
         let receiver_method_count = environment.lookups.receiver_methods.by_function_path.len();
 
@@ -383,7 +404,7 @@ impl Ast {
                 phase_context.timing_context
             );
             AstEmitter::new(
-                &phase_context,
+                &mut phase_context,
                 &mut environment,
                 header_count,
                 path_fork,
@@ -398,7 +419,7 @@ impl Ast {
                 phase_context.timing_metric_family.finalise(),
                 phase_context.timing_context
             );
-            AstFinalizer::new(&phase_context, environment, path_fork).finalize(
+            AstFinalizer::new(phase_context, environment, path_fork).finalize(
                 emitted,
                 &top_level_const_fragments,
                 MaterialisationContextRetention::Always,
@@ -500,19 +521,35 @@ impl AstHeaderCounterSnapshot {
 
 // WHAT: public(crate) entrypoint for function/start-function body parsing.
 // WHY: callers should import one obvious `ast`-root function while detailed statement parsing
-// lives in focused helper modules.
+//      lives in focused helper modules.
+//
+// The result distinguishes the two body kinds explicitly:
+// - a caller that passed an independent body root receives `ParsedBody::Complete` (nodes only,
+//   after every numeric constraint, ordered resumption and construction-table release);
+// - a caller that passed a nested construct context receives `ParsedBody::Draft`, whose pending
+//   positions resolve when the enclosing root completes. Nested callers must retain the draft
+//   (`DeferredBody`/`DeferredConstruct`) or reject the position with `into_nodes_for_host`; they
+//   must never unwrap a draft into published nodes.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "body entry forwards the cursor, scope and mutable parser state unchanged"
+)]
 pub(crate) fn function_body_to_ast(
     token_stream: &mut AstCursor,
     context: ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     warnings: &mut Vec<CompilerDiagnostic>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<Vec<AstNode>, ExpressionParseError> {
+) -> Result<ParsedBody, ExpressionParseError> {
     parse_function_body_statements(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         warnings,
         string_table,
         path_fork,
@@ -542,3 +579,11 @@ mod file_value_resolution_tests;
 #[cfg(test)]
 #[path = "tests/cursor_tests.rs"]
 mod cursor_tests;
+
+#[cfg(test)]
+#[path = "tests/numeric_construction_tests.rs"]
+mod numeric_construction_tests;
+
+#[cfg(test)]
+#[path = "tests/numeric_known_shape_tests.rs"]
+mod numeric_known_shape_tests;

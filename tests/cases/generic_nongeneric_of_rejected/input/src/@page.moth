@@ -1,5 +1,5 @@
 MyStruct = |
-    value Int,
+    value I32,
 |
 
-bad MyStruct of Int = MyStruct(42)
+bad MyStruct of I32 = MyStruct(42)

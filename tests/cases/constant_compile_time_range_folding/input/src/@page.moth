@@ -11,7 +11,7 @@
 
 span #= 1 to 10
 
-copied || -> Int:
+copied || -> I32:
     local = span
     return 1
 ;

@@ -1,241 +1,141 @@
 ## Testing standards
 
-This document owns test selection, test structure, assertions, fixture design
-and test pruning for compiler work.
+This document owns test selection, ownership, structure, assertions, fixture design
+and conservative pruning. `validation.mtf` owns completion gates and commands.
 
-It does not define the final validation command. For completion gates, read
-`docs/src/developer-docs/style-guide/validation.mtf`.
-
-The primary goal is end-to-end language and artifact correctness. Prefer real
-usage patterns and complete Moth snippets over narrow implementation-shaped
-tests.
+The goal is high-confidence language and artifact correctness with the smallest
+maintainable test footprint. Tests must protect distinct, credible failures, not
+increase counts or cover syntax for its own sake. Rich Moth integration programs
+stress interactions through the real compiler and runtime. Focused Rust unit
+tests protect local invariants, individual failure paths and diagnostics that a
+large program cannot isolate reliably. Neither test level replaces the other.
 
 ### Task-reading guide for testing
 
-Heading paths use `>` to name nested sections. Read the selected heading through
-the next heading of the same or higher level, including nested subsections
-unless the route narrows further. Read this document in full for test
-infrastructure, suite policy, broad fixture cleanup or audits.
+Read this document in full for test infrastructure, suite policy and broad audits.
+Otherwise read the relevant sections through the next heading of the same or
+higher level, including subsections.
 
 [table:
     [th:
         [: **Task**]
         [: **Read**]
     ]
-
     [td:
-        [: Choosing the test owner, level or location]
-        [:
-            - `Default testing preference`
-            - `Supporting rules`
-            - `Test ownership`
-            - `Test location and module layout`
-        ]
+        [: Choosing, adding, or locating tests]
+        [: `Admission and ownership`, `Unit tests`, `Integration cases` and `Test location and module layout`]
     ]
-
     [td:
-        [: Unit or subsystem-invariant coverage]
-        [:
-            - `Unit tests`
-            - `HIR and internal-IR assertions` when IR or side-table facts are involved
-            - `Fixtures and temporary files`
-        ]
+        [: New compiler or backend behavior]
+        [: `Rich integration scenarios`, `Successful backend intent`, `Runtime output assertions` and `Backend matrices and artifact assertions`]
     ]
-
     [td:
-        [: User-visible language or project behaviour]
-        [:
-            - `Integration cases`
-            - `Successful backend intent`
-            - `Focused integration selection and inventory`
-        ]
+        [: Diagnostics or hidden IR facts]
+        [: `Diagnostics assertions` and `HIR and internal-IR assertions`]
     ]
-
     [td:
-        [: Runtime output]
-        [:
-            - `Runtime output assertions`
-            - `Backend matrices and artifact assertions` when structure also matters
-        ]
+        [: Runner inventory, selection or suite policy]
+        [: `Successful backend intent` and `Focused integration selection and inventory`]
     ]
-
     [td:
-        [: Threads, shared state, timing or repeated execution]
-        [: `Concurrency and repetition`]
+        [: Feature, platform or timing behavior]
+        [: `Feature and platform lanes` and `Concurrency and repetition`]
     ]
-
     [td:
-        [: Diagnostics or warnings]
-        [:
-            - `Diagnostics assertions`
-            - `Integration cases`
-        ]
+        [: Source audits, fixtures or performance]
+        [: `Source-text assertions`, `Fixtures and temporary files` and `Benchmarks are not correctness tests`]
     ]
-
     [td:
-        [: Backend structure, target parity, Wasm validation or goldens]
-        [:
-            - `Successful backend intent`
-            - `Backend matrices and artifact assertions`
-            - `HIR and internal-IR assertions` only for hidden compiler invariants
-        ]
-    ]
-
-    [td:
-        [: Manifest policy, suite inventory, filtering or audit behaviour]
-        [:
-            - `Successful backend intent`
-            - `Focused integration selection and inventory`
-        ]
-    ]
-
-    [td:
-        [: Adding or changing a Cargo feature, or a feature- or platform-gated test]
-        [: `Feature and platform lanes`]
-    ]
-
-    [td:
-        [: Asserting on source text, or adding an architecture ban]
-        [: `Source-text assertions`]
-    ]
-
-    [td:
-        [: Fixtures, temporary paths or test support]
-        [: `Fixtures and temporary files`]
-    ]
-
-    [td:
-        [: Removing duplicate or obsolete coverage]
-        [:
-            - `Pruning and duplicate coverage`
-            - `Benchmarks are not correctness tests`
-        ]
-    ]
-
-    [td:
-        [: Final coverage review]
-        [: `Testing checklist`]
+        [: Review or removal of existing tests]
+        [: `Pruning and duplicate coverage` and `Testing checklist`]
     ]
 ]
 
-### Default testing preference
+### Admission and ownership
 
-Integration tests written in Moth are the default for user-visible language behaviour. They exercise the real compiler path and usually provide the strongest regression coverage.
+Before writing a test, inspect nearby unit tests, related subsystems and the
+canonical `tests/cases/` inventory. Identify the existing primary owner and
+ask whether extending it would expose the same failure. Prefer, in order:
 
-- Prefer integration coverage for user-visible language behaviour
-- Add or update unit tests only where subsystem-local behaviour genuinely benefits from them
-- Avoid redundant fixtures that assert the same behaviour in slightly different forms
-- Prefer meaningful end-to-end cases over brittle implementation-shaped assertions
-- When backend or runtime behaviour matters, strengthen artifact assertions where goldens alone are too vague
+1. Extend an existing test or scenario with a meaningful new interaction or assertion.
+2. Consolidate overlapping tests into one clearer test with all distinct failure paths retained.
+3. Add a new test only for a credible regression that neither option can protect well.
 
-### Supporting rules
+A proposed test must have a clear answer to **what realistic bug would fail this
+test, which assertion would catch it and why existing tests would miss it**.
+Reject cases that merely vary literals, names, syntax spelling or setup without
+changing a semantic boundary or failure path. A new test should add enough
+regression value to justify its source, setup, maintenance and execution cost.
+Keep tests understandable and deterministic. Do not build fixture frameworks or
+shared helpers for a few callers. Do not widen the suite solely to raise a
+coverage metric.
 
-- Prefer externally observable behaviour over implementation detail.
-- Use unit tests for hidden invariants that integration output cannot inspect.
-- Use one clear primary test owner per behaviour.
-- Do not create multiple fixtures that prove the same contract without a distinct stage or backend reason.
-- Prefer realistic end-to-end snippets.
-- Tests should remain understandable without reading the implementation first.
-- Do not make exact internal layout contractual unless that layout is the invariant.
-- When tests compare or report paths, use the shared `portable_path_text` normalisation helper
-  instead of raw or native path strings. Keep `Path` or `PathBuf` values for filesystem
-  operations, converting to portable text only at assertion or display boundaries so tests
-  remain robust across platforms.
-
-### Test ownership
+Choose the primary owner by the contract being protected:
 
 [table:
     [th:
-        [: **Behavior**]
-        [: **Owner**]
+        [: **Contract**]
+        [: **Primary owner**]
     ]
-
     [td:
-        [: Pure data or invariant behavior]
-        [: Focused unit test near the owning subsystem]
+        [: Pure algorithms, parser decisions, diagnostic reasons, impossible states and side-table invariants]
+        [: Focused unit test close to the owning subsystem]
     ]
-
     [td:
-        [: Compiler-stage invariant]
-        [: Stage-local unit test naming the invariant]
+        [: Language semantics, multi-feature behavior and user-visible project results]
+        [: Real Moth scenario in `tests/cases/`]
     ]
-
     [td:
-        [: Stage-boundary orchestration]
-        [: Minimal pipeline/build smoke test]
+        [: Compiler-stage orchestration]
+        [: Minimal pipeline/build test when the boundary itself is not already exercised]
     ]
-
     [td:
-        [: User-facing language behavior]
-        [: Integration case under `tests/cases/`]
+        [: Backend-specific artifact structure or target validation]
+        [: Narrow artifact assertion or contractual golden]
     ]
-
     [td:
-        [: Backend artifact behavior]
-        [: Backend-specific artifact assertions or contractual goldens]
-    ]
-
-    [td:
-        [: Side-table or hidden compiler fact]
-        [: Focused unit test if external output cannot expose it]
-    ]
-
-    [td:
-        [: Cross-backend semantic parity]
-        [: One integration input with backend-specific assertions]
+        [: Cross-backend parity]
+        [: One Moth input with distinct backend assertions]
     ]
 ]
 
-Each behavior should have one primary owner. Secondary coverage is justified only when it protects a distinct boundary, target, diagnostic lane or internal invariant.
+A contract may be exercised incidentally by many integration scenarios without
+making each scenario its primary owner. Keep secondary tests only when they
+protect a different stage, failure mechanism, diagnostic, target or observable
+interaction. Check the actual assertions, not just matching feature names.
 
 ### Test location and module layout
 
-- Tests do not live in production implementation files.
-- Module-specific tests belong under the module's test directory, for example:
-
-[codeblock, $code("text"):
-    src/compiler_frontend/hir/tests/
-]
-
-- End-to-end or multi-module Rust harness tests belong under:
-
-[codeblock, $code("text"):
-    src/compiler_tests/
-]
-
-- Language and project integration cases belong under:
-
-[codeblock, $code("text"):
-    tests/cases/
-]
-
-- Test-only utilities should live with the tests that own them.
-- Do not create broad shared test utility modules for one or two callers.
-- Split cross-stage test support only when actual ownership boundaries justify it.
+- Tests live outside production implementation files. Put module-specific Rust
+  tests under the module's `tests/` directory, for example
+  `src/compiler_frontend/hir/tests/`.
+- Rust harness and cross-stage tests belong under `src/compiler_tests/` when a
+  smaller module owner is insufficient.
+- Language and project integration scenarios belong under `tests/cases/`.
+- Keep fixture data and test-only helpers with their owner. Share a helper only
+  across genuine repeated use, without hiding the meaningful source shape.
+- Use shared `portable_path_text` for asserted or displayed paths. Keep
+  `Path` and `PathBuf` for filesystem operations and normalize only at the
+  assertion/display boundary.
 
 ### MON and shared lexical coverage
 
 `crates/moth-lexical/src/tests/` and `crates/moth-lexical/src/numeric/tests/`
 own shared identifier, word and numeric leaf invariants.
 `crates/moth-mon/src/tests/` owns codec-local invariants.
-`crates/moth-mon/tests/` owns the public standalone API, numeric profiles,
-defaults, limits and errors. The compiler keeps only focused convenience
+`crates/moth-mon/tests/` owns the public standalone API, exact numeric schemas,
+raw numeric data, limits and errors. The compiler keeps only focused convenience
 re-export identity coverage rather than a second copy of the public codec suite.
 
-The cross-parser harness at `src/compiler_tests/mon_syntax_parity/` tokenises
-and parses real Moth source and independently reads MON with equivalent
-receiving types/schemas and the same numeric profile. Common accepted cases
-assert expected typed values in both parsers before comparing them. Common
-invalid cases assert each parser's intended rejection reason and source span.
-Do not substitute fabricated source tokens or helper-return comparisons.
-
-`gaps.rs` names the supported differences and checks both outcomes independently:
-document framing, schema versus source nominal identity, literal data versus
-expressions, quoted text and resource limits. Its accepted but undelivered
-source cases cover `{=}`, Unicode escapes and contextual `::Variant`.
-Keep these gaps linked to the progress matrix and roadmap, not silently skipped
-or treated as permanent grammar divergence. Moth-native `$mon`, automatic
-schema extraction and the static builder remain separate undelivered work.
+`src/compiler_tests/mon_syntax_parity/` compares real Moth source parsing
+with independently decoded MON using equivalent types/schemas. Accepted cases
+assert typed values before comparison. Invalid cases assert each parser's own
+rejection reason and span. Never compare fabricated tokens or helper outputs.
+`gaps.rs` documents and independently checks framing, nominal identity,
+literal-data/expression differences, quoted text and resource limits. Keep
+undelivered `{=}`, Unicode escapes and contextual `::Variant` linked to the
+roadmap and progress matrix. Moth-native `$mon`, automatic schemas and the
+static builder remain separate future work.
 
 Use package-scoped commands so standalone tests don't depend on compiler feature
 unification:
@@ -250,31 +150,96 @@ unification:
 
 ### Unit tests
 
-Retain unit tests for:
+Use focused Rust tests for behavior best isolated at the subsystem boundary:
+pure algorithms, tokenization and parsing distinctions, precise diagnostics,
+negative and overflow boundaries, malformed HIR, borrow/ownership proofs,
+side-table facts, property tests and oracle or differential checks. These can
+protect edge cases a successful end-to-end program cannot reach or distinguish.
 
-- pure data invariants
-- impossible states
-- side-table facts
-- transfer rules
-- backend planning policy not observable from artifacts
-- narrow parser or formatter algorithms
-
-Prefer integration tests for user-visible behavior.
-Once a subsystem is stable, prune superseded unit tests.
-Rewrite obsolete tests rather than preserving old API shapes.
-A unit test should name the invariant it protects.
-Do not use unit coverage as a substitute for an end-to-end case when user behavior changed.
+A good unit test names one invariant, exercises its relevant success and failure
+boundaries and asserts facts at the layer that owns them. Use compact table-driven
+cases for closely related inputs when each row remains identifiable on failure.
+Reuse local fixtures, but avoid large construction scaffolds and tests that
+assert incidental representation or call order. Preserve focused regression
+tests for real bugs even when a rich integration scenario also touches the
+feature. Prune implementation-specific tests only after proving their contract
+is obsolete or protected at the same required boundary elsewhere.
 
 ### Integration cases
 
-- `moth tests` runs the integration test runner.
-- Use real Moth snippets.
-- Each canonical case is one self-contained scenario directory.
-- Keep helper source files inside the owning case's `input/` directory.
-- Do not let helper files become unintended standalone cases.
-- Add strong output assertions where behavior is visible.
-- Prefer top-level templates to simulate output.
-- Avoid `io.line(...)` unless console behavior is itself under test.
+`moth tests` runs the manifest-driven integration runner. Each canonical case is
+one self-contained scenario under `tests/cases/`, with all helper source files
+inside its `input/` directory. Helpers must not become standalone cases.
+
+Integration tests should favor **richness over specificity**. Write real,
+purposeful mini programs or deliberately adversarial Moth programs that exercise
+several related language features together through parsing, typing, lowering,
+borrow validation, target selection and execution. Stress surprising
+interactions rather than repeating the simplest legal syntax form. A basic
+`if` belongs in a focused unit test; a nested decision that calls functions,
+mutates data, joins control flow and returns or handles an error belongs in a
+larger scenario.
+
+Protect observable results, not merely successful compilation. Prefer
+deterministic state transitions, exact outputs, ordered events, error outcomes
+and invariants that fail when the computed result is wrong. Use top-level
+templates for output. Use `io.line(...)` only when console behavior matters.
+Avoid goldens or emitted-code snapshots when runtime behavior is the contract.
+
+### Rich integration scenarios
+
+Useful scenarios include a small inventory/checkout engine, route planner,
+record processor, task scheduler, parser for a tiny data format or deterministic
+game simulation. They should have a purpose and deliberately combine:
+
+- Nested branches, loop exits, value-producing control flow and function calls.
+- Structs, choice variants, generics, collections and changing state.
+- Error or optional propagation/recovery across function boundaries.
+- Aliasing, mutation, copies, last uses and calls across modules when relevant.
+- Constant folding, templates, numeric types and backend behavior where relevant.
+- Edge cases such as empty collections, alternate branches, failed operations,
+  boundary values and repeated updates within the same run.
+
+For example, a logistics simulation can validate conservation across several
+mutating functions rather than merely checking that each function compiles:
+
+[codeblock, $code("moth"):
+    -- Excerpt from a larger scenario, not a standalone fixture.
+    validate_state |game Simulation|:
+        carried ~= 0
+        loop game.agents |agent|:
+            if agent.health > 0:
+                assert(agent.tile >= 0 and agent.tile < board_cells)
+            ;
+            carried += agent.cargo
+        ;
+        mined = counter_value(game.counters, "mined")
+        delivered = counter_value(game.counters, "delivered")
+        lost = counter_value(game.counters, "lost")
+        assert(mined is delivered + lost + carried)
+    ;
+]
+
+A good scenario has multiple independently observable outcomes and a few
+meaningful invariant checks, so a compiler bug is likely to produce a visible
+mismatch even if execution completes. Include at least one path that is
+*not* the trivial happy path. Negative compile-time diagnostics need separate
+focused failure cases because a rejected program cannot execute the rest of
+its intended scenario.
+
+Aim for a cohesive mini program, not an exhaustive language sampler. The
+attached Ember Relay simulation is an exceptional upper bound: it demonstrates
+how realistic interacting logic finds bugs missed by shallow tests, but its
+scale, canvas presentation and feature breadth are not targets for ordinary
+new cases. Prefer smaller scenarios with identifiable failure surfaces. When
+a scenario becomes difficult to diagnose, split it by coherent behavior, not
+by individual syntax construct. Favor enriching an existing relevant scenario
+over adding another trivial standalone fixture.
+
+For new language syntax, verify that the *suite as a whole* covers applicable
+positive use, negative type/namespace/visibility cases, duplicates,
+cross-file behavior and target rejection. Add only missing distinct contracts,
+and place precise negative cases near their existing owners.
 
 ### Successful backend intent
 
@@ -303,28 +268,19 @@ boundary or backend role when another backend owns a stronger contract.
 A successful backend with only the universal baseline is invalid. Typed fixture loading rejects it
 before policy evaluation, listing, audit, or execution.
 
-For new type-system syntax, include:
-
-- positive usage
-- value/type namespace misuse
-- binding visibility
-- duplicates
-- cross-file resolution
-- target/backend rejection where relevant
-
 Canonical fixture shape:
 
 [codeblock, $code("text"):
     tests/cases/
-    ├── manifest.toml
-    └── case_name/
-        ├── input/
-        │   ├── main.moth
-        │   └── helper.moth
-        ├── expect.toml
-        └── golden/
-            ├── html/
-            └── html_wasm/
+    +-- manifest.toml
+    +-- case_name/
+        +-- input/
+        |   +-- main.moth
+        |   +-- helper.moth
+        +-- expect.toml
+        +-- golden/
+            +-- html/
+            +-- html_wasm/
 ]
 
 - `manifest.toml` is the authoritative case order. Every case declares a unique canonical `id`,
@@ -339,12 +295,10 @@ Canonical fixture shape:
 - Every non-smoke case declares a `contract`. A whole-case acceptance-only smoke may remain
   contractless because it has no case-specific semantic owner. Do not invent a contract for it.
 - A `primary` case requires a contract, and one contract may have at most one primary case.
-- A contract family without a primary is reported once in manifest order. Backend-only and
-  adversarial-only families are deliberate advisories. Mixed or ordinary secondary-only families
-  remain visible for ownership review.
+- A contract family without a primary is reported once. Backend-only and
+  adversarial-only families are advisories; other secondary-only families still require review.
 - Case IDs, tags, contracts and roles are retained as typed runner metadata. Do not reconstruct
   them from display text or fixture paths.
-- One case folder owns all inputs and expectations for that scenario.
 
 Manifest entry shape:
 
@@ -392,41 +346,20 @@ Audit cannot be combined with filters or `--list`. It writes the reporting-owned
 expectation facts, hard-policy violations and primary-less contract-family advisories. The report
 is review input only; it never deletes, merges or rewrites fixtures.
 
-The schema 10 inventory reports acceptance-only, rendered-output, artifact, golden, absence and
-expected-warning backend counts, plus the zero baseline-only invariant. It reports exact, ordered
-and exact-once runtime contracts separately. Per-backend fields keep `baseline_applied`,
-`acceptance_only`, `assertion_kinds`, `golden_present`, `golden_mode`, every rendered-output form,
-exact warning codes, diagnostic match mode and any contains-mode reason separate so the report
-matches what ran.
+The current inventory reports acceptance-only, rendered-output, artifact,
+golden, absence, expected-warning, Wasm trap and uncaught Moth Error contracts,
+including per-backend assertion kinds and the zero baseline-only invariant.
+It distinguishes exact, ordered and exactly-once output, warning codes,
+diagnostic match modes and any contains-mode justification. Weak-contract
+review fields identify smoke roles, ignored warnings and contains-mode
+diagnostics; they are review signals, not automatic rejection. A new weak
+contract must be justified rather than inherited by accident.
 
-Schema 7 added the weak-contract review fields. `smoke_role_cases`, `warning_ignore_backend_blocks`
-and `diagnostic_contains_backend_blocks` count the three legal weak contracts, and
-`weak_contract_review_backend_blocks` counts blocks carrying at least one of them. Every backend
-block lists its own `weak_contract_reviews`. These are review fields, not policy: a smoke case, an
-ignored warning contract and a contains-mode failure all remain valid. The canonical suite
-currently declares none of them, so any non-zero count is a new weaker contract to review rather
-than an inherited one to explain.
-
-Schema 8 added report identity. Every report carries `run` — a run id, the command, the host OS and
-architecture, the features the binary was built with, the runner thread count and whether the run
-finished — and the inventory replaced `repository_commit` with `repository_revision`, which reports
-a discovered `commit`, `not_a_repository`, or `unknown` with the reason discovery failed. A failed
-discovery and a genuine absence are different facts, and a report that names neither its command
-nor its build cannot be told apart from a stale one.
-
-Schema 10 distinguishes explicit Wasm trap assertions from uncaught Moth runtime Error
-assertions in per-backend counts and summary totals.
-
-Reports are written to a sibling temporary file and renamed into place, so a reader never sees a
-partial file. Before the work begins, each report is replaced by one whose run says `completed:
-false`; an interrupted run therefore leaves a report that says it did not finish rather than the
-previous run's passing output.
-
-Hard policy has one suite-policy owner. Missing roles, missing non-smoke contracts, duplicate
-primary contracts, a primary without a contract and a whole-case acceptance-only fixture without
-`role = "smoke"` are hard findings. Normal list and execution modes reject hard findings before
-selection or compilation. Audit still writes the complete JSON report, then returns failure.
-Primary-less contract-family advisories remain non-fatal.
+Every report records the command, run ID, host OS/architecture, compiled
+features, runner thread count, completion state and repository revision (or a
+reason it is unavailable). Reports use atomic replacement. An interrupted run
+leaves `completed = false`, not an old success. Audit output is evidence for
+review, never permission to delete, merge or rewrite fixtures automatically.
 
 ### Runtime output assertions
 
@@ -486,24 +419,10 @@ output also protects success-only runtime fragment publication:
     rendered_output_exact = ""
 ]
 
-Use a runtime-error contract for an intended fatal integrity guard or assertion:
-
-[codeblock, $code("toml"):
-    [backends.html]
-    mode = "success"
-    warnings = "forbid"
-    runtime_error_contains = ["assertion failed"]
-]
-
-Use a separate Wasm trap contract for an emitted checked stop. A different engine trap, such as
-an out-of-bounds memory access, does not satisfy this `unreachable` expectation:
-
-[codeblock, $code("toml"):
-    [backends.html_wasm]
-    mode = "success"
-    warnings = "forbid"
-    runtime_trap_contains = ["unreachable"]
-]
+Use `runtime_error_contains = ["assertion failed"]` for fatal Moth Error
+conditions. Use `runtime_trap_contains = ["unreachable"]` on `html_wasm` for an
+intended Wasm trap. Keep traps and Moth Errors distinct from unrelated host
+exceptions or Wasm memory faults.
 
 Use exact output for small deterministic behaviours such as loop or map operation results. Use
 ordered and exact-once fragments when unrelated output may coexist. Prefer these runtime contracts
@@ -549,8 +468,8 @@ reaching it takes.
   result.
 - Do not make an arbitrary sleep, a yield count or a machine-speed threshold part of a contract.
 
-Stateful owners — the timing collector, the frontend counter stores, output writes,
-current-directory guards and the Node harness — only misbehave under a thread schedule or a repeat
+Stateful owners - the timing collector, the frontend counter stores, output writes,
+current-directory guards and the Node harness - only misbehave under a thread schedule or a repeat
 that one default-parallelism run never produces. That schedule has an owned command:
 
 [codeblock, $code("bash"):
@@ -637,7 +556,6 @@ Use one `expect.toml` per case with backend-specific assertion blocks.
 
 [codeblock, $code("toml"):
     entry = "."
-    numeric_profile = "Int32/Float64"
 
     [backends.html]
     mode = "success"
@@ -655,26 +573,15 @@ Use one `expect.toml` per case with backend-specific assertion blocks.
     must_export = ["memory", "moth_str_ptr", "moth_str_len", "moth_release"]
 ]
 
-The optional top-level `numeric_profile` selects the compiler-boundary `Int` width and `Float`
-precision reported by the case's builder for every backend block. Its exact accepted values are
-`Int32/Float32`, `Int32/Float64`, `Int64/Float32` and `Int64/Float64`; omitting the key selects the
-default `Int32/Float64`. This is builder-owned selection, not a source or command-line setting.
+Pair HTML-JS and `html_wasm` cases for supported exact scalar values, comparisons
+and casts. Use @../../docs/numbers/#numeric-types (Numeric types) and
+@../../docs/numbers/#operators (Operators) for semantic expectations, not a
+profile matrix or a minimum arithmetic width. Keep numeric failures within the
+ordinary diagnostic, recovered-output or returned-entry assertion contracts.
+Assert the intended target rejection for unsupported paths. The
+@../../docs/progress (Progress matrix) owns current backend support, including
+the remaining Wasm gates.
 
-The paired `html_wasm` profile matrix covers supported scalar paths in all four numeric profiles:
-values, comparisons, F16 scalar conversion and supported infallible numeric expression casts,
-including `Byte -> U8` and `U8 -> Byte`. Checked integer arithmetic cases pair HTML-JS success
-with the structured Wasm recoverable-numeric rejection; semantically discharged arithmetic, such
-as `U8 + U8 -> U32`, succeeds on both. A paired `NumericToString` expression-cast case covers profile `Int` and
-fixed signed/unsigned integers in the `Int32/Float32` profile only; generated-Wasm UTF-8
-helper tests cover signed and unsigned output. Separate paired cases exercise trap-mode
-`Float`/`F16`/`F32`/`F64` text at the default and `Int32/Float32` profiles.
-Recoverable numeric `Error!` paths and reachable `ReturnError` `FormatFloat` and
-`ValidateFloat` remain target-gated, as do fallible conversions, other defined
-conversions involving `Bool`, `Char`, `Error` or `String` (including `Char -> Int` and
-String-to-numeric parsing), and statement-form casts. Fixed-scalar aggregates and
-source-level external finite-value validation retain separate target gates.
-
-- Use backend-specific blocks within one case.
 - `entry = "."` is the one supported current-directory sentinel and selects the case's `input/`
   directory. Every other entry is a relative contained path with no absolute, platform-prefix,
   parent or current-directory component. Its canonical path must remain inside the owning
@@ -697,7 +604,7 @@ source-level external finite-value validation retain separate target gates.
   `golden_mode = null`.
 - Prefer semantic or rendered-output assertions for behavior-first cases.
 - Strengthen artifact assertions when a golden can pass while structural behavior is wrong.
-- Do not require unsupported backends to succeed merely for matrix symmetry. Assert the intended rejection contract.
+- Assert intended rejections for unsupported backends rather than forcing matrix symmetry.
 
 ### HIR and internal-IR assertions
 
@@ -816,22 +723,13 @@ Feature coverage is checked mechanically, without running a lane:
     just feature-lane-check
 ]
 
-The check reads the manifests for `moth`, `moth-lexical`, `moth-mon` and `xtask`.
-It scans every `cfg` attribute in `src`, `crates/moth-lexical/src`,
-`crates/moth-mon/src`, `crates/moth-mon/tests` and `xtask/src`, including nested
-subsystem test directories. It fails when a declared feature has no lane, when
-a lane names a feature its package does not declare, or when a `cfg` names a
-feature that does not exist. Missing configured roots fail closed. A misspelled
-feature name can never compile and never reports, which is why the check reads
-the tree instead of a list in prose.
-It writes `target/test-reports/feature_lane_coverage.json`, which names the actual
-scanned source roots and, for every feature, its standard lanes, opt-in lanes
-and files whose `cfg` attributes mention it. The console prints the same roots.
-That report is a coverage map and states no lane outcome. Running standard lanes
-is `just test-feature-matrix`, which writes outcomes to
-`target/test-reports/feature_matrix_results.json`. The opt-in `boracle` and
-`boracle-campaign` lanes run only through their named commands, not through the
-standard lane set.
+`just feature-lane-check` checks the compiler, lexical, MON and `xtask`
+manifests against `cfg` references in their source and test directories. It
+fails on uncovered or unknown features and missing roots. Its report at
+`target/test-reports/feature_lane_coverage.json` maps features to lanes and
+files, not outcomes. `just test-feature-matrix` records executed standard
+lanes in `target/test-reports/feature_matrix_results.json`; `boracle` and
+`boracle-campaign` run only through their named opt-in commands.
 
 Adding a Cargo feature means adding it to a standard or opt-in lane in the same change. The gate
 fails otherwise.
@@ -873,7 +771,7 @@ Platform-gated tests are owned by the platform that has the API:
 CI runs every gate on Linux, macOS and Windows, so a platform-gated owner executes wherever its API
 exists. A platform-specific test may be absent only when the underlying API does not exist there;
 an equivalent portable policy test should still run everywhere. Windows results are currently
-non-blocking — `validation.mtf` owns that status and the conditions that end it.
+non-blocking - `validation.mtf` owns that status and the conditions that end it.
 
 ### Source-text assertions
 
@@ -896,12 +794,32 @@ An alias, a reformat or an equivalent reimplementation all pass it.
 
 ### Pruning and duplicate coverage
 
-- Remove tests tied only to deleted implementation paths.
-- Avoid several fixtures that differ only cosmetically.
-- Preserve duplicates only when they protect different stages, diagnostic reasons, backends, source locations or artifact contracts.
-- Localize one-caller fixtures.
-- When two tests overlap, identify the primary owner and either merge them, narrow each to a distinct invariant or delete the weaker one.
-- Do not preserve obsolete fixtures for historical compatibility.
+Pruning is an evidence-based behavior audit, not a line-count exercise. Similar
+source text, repeated setup and a feature appearing in both suites do not by
+themselves establish redundancy. For each candidate cluster:
+
+1. Inventory its actual assertions and failure paths. Check related unit tests,
+   `tests/cases/`, the suite inventory and `test_honesty_inventory.json`.
+2. Mark each contract `keep`, `extend`, `merge`, `promote` or `remove`. State the
+   retained owner and why it can still catch each distinct regression.
+3. Consolidate equivalent local cases with a table or a small existing helper.
+   Extend a meaningful integration scenario when the missing risk is an
+   interaction visible through the full compiler.
+4. Remove a unit test only when its behavior is obsolete or the surviving
+   tests cover the same important boundary and failure paths. Preserve exact
+   diagnostic, malformed-IR, algorithmic, property, oracle, borrow and numeric
+   corner cases unless equivalent protection is demonstrated.
+5. Change small clusters at a time. Record affected files, contracts, surviving
+   test IDs, before/after test counts and noncomment LOC, plus any uncovered
+   gaps. Run the focused tests and the relevant full integration, feature,
+   platform and benchmark/CI lanes. Investigate regressions instead of
+   weakening assertions.
+
+Prefer deletion to new infrastructure. Keep small, clear duplicates when their
+separate failure localization or boundary protection is valuable. There is no
+mandatory LOC or test-count reduction target and no assumption that a longer
+integration program supersedes focused units. The desired outcome is less
+maintenance for stronger distinct regression protection.
 
 ### Benchmarks are not correctness tests
 
@@ -915,21 +833,21 @@ already been established by ordinary tests.
 
 ### Testing checklist
 
-Before considering test coverage complete, check:
+Before accepting a test addition or cleanup, verify:
 
-- The behavior has one clear primary test owner.
-- User-visible behavior has end-to-end integration coverage.
-- Internal-only invariants have focused unit coverage where needed.
-- Failure cases assert stable diagnostic codes.
-- Rendered text is asserted only when it is contractual.
-- Backend behavior uses the narrowest useful artifact assertions.
-- Goldens are used only where exact output is a contract.
-- HIR tests avoid incidental block and local numbering.
-- Multi-file fixtures remain inside one case directory.
-- Temporary files use owned cleanup.
-- No benchmark fixture is being used as a correctness substitute.
-- Redundant or obsolete coverage has been removed.
-- Every new Cargo feature was added to a lane in the same change.
-- Every platform-gated test names the API that makes the gate necessary.
-- No source-text assertion is the only evidence for a behaviour.
-- No concurrency test waits on a sleep or a machine-speed threshold.
+- Related unit and integration tests were inspected before adding new coverage.
+- Every new test protects a credible distinct failure and has an assertion that
+  would expose it. Extending an existing owner was considered first.
+- Integration scenarios are realistic or adversarial, exercise nontrivial
+  interactions and assert meaningful observable outcomes.
+- Unit tests retain precise negative paths, private invariants and useful
+  failure localization. A complex end-to-end case is not their automatic replacement.
+- Diagnostics use stable codes/reasons. HIR assertions avoid incidental IDs.
+- Runtime output and artifact checks match the actual contract. Goldens are
+  reserved for cases where exact emitted bytes are important.
+- Backend differences, multi-file ownership and feature/platform lanes are
+  respected. Temporary paths have owned cleanup.
+- A proposed removal has a documented surviving owner and preserves distinct
+  edge cases and failure paths.
+- No benchmark is counted as correctness coverage. Validation follows
+  `validation.mtf` and weakened expectations are treated as regressions.

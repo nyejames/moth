@@ -16,8 +16,7 @@ fn benchmark_test_guard() -> std::sync::MutexGuard<'static, ()> {
 fn frontend_benchmark_runs_for_simple_file() {
     let _guard = benchmark_test_guard();
     #[cfg(all(feature = "timers", feature = "benchmark_counters"))]
-    let _counter_capture =
-        crate::compiler_frontend::instrumentation::capture_frontend_counters_for_test();
+    let _counter_capture = crate::compiler_frontend::instrumentation::capture_counters_for_test();
 
     let temp_dir = tempfile::tempdir().expect("should create temp dir");
     let file_path = temp_dir.path().join("test.moth");
@@ -223,12 +222,12 @@ fn frontend_benchmark_retains_source_package_warning() {
     std::fs::write(src.join("@page.moth"), "value = 1\n").expect("should write project root");
     std::fs::write(
         package.join("+package.moth"),
-        "export:\n    run || -> Int:\n        value ~= \"hello\"\n        result ~= \"unset\"\n\n        if value is:\n            \"one\" => result = \"one\"\n            \"one\" => result = \"one\"\n            else => result = \"other\"\n        ;\n        return 1\n    ;\n;\n",
+        "export:\n    run || -> I32:\n        value ~= \"hello\"\n        result ~= \"unset\"\n\n        if value is:\n            \"one\" => result = \"one\"\n            \"one\" => result = \"one\"\n            else => result = \"other\"\n        ;\n        return 1\n    ;\n;\n",
     )
     .expect("should write warning package root");
     std::fs::write(
         clean_package.join("+package.moth"),
-        "export:\n    run || -> Int:\n        return 1\n    ;\n;\n",
+        "export:\n    run || -> I32:\n        return 1\n    ;\n;\n",
     )
     .expect("should write diagnostic-free package root");
 

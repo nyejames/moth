@@ -1,0 +1,11 @@
+identity type T |value T| -> T:
+    return value
+;
+
+invalid type T |value T| -> T:
+    return absent
+;
+
+valid U64 = identity(4_294_967_296)
+failed U64 = invalid(4_294_967_296)
+[:[valid]]

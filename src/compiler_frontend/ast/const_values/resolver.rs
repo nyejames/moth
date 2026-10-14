@@ -9,15 +9,14 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
-use crate::compiler_frontend::ast::const_eval::{ConstantFoldOutcome, constant_fold};
+use crate::compiler_frontend::ast::const_eval::{
+    ConstantFoldError, fold_expression_with_constants,
+};
 use crate::compiler_frontend::ast::const_values::facts::ConstFactValueKind;
 use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValueStore};
-use crate::compiler_frontend::ast::expressions::eval_expression::pending_expression_item_bug;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-use crate::compiler_frontend::ast::expressions::expression_rpn::{
-    ExpressionRpn, ExpressionRpnItem,
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, ExpressionOperationView, ExpressionView,
 };
-use crate::compiler_frontend::ast::expressions::expression_types::ConstValueKind;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template::TemplateConstValueKind;
@@ -28,26 +27,17 @@ use crate::compiler_frontend::ast::templates::tir::{
 };
 #[cfg(test)]
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::symbols::path_interner::PathId;
-use moth_lexical::numeric::profile::NumericProfile;
 
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use rustc_hash::FxHashMap;
 
-/// Const bindings visible in the current scope: a shared module base and a lexical overlay.
-///
-/// WHAT: module constants are held as `ConstValueId`, the store's own identity for an
-///       already-folded value. Only bindings a lexical scope introduced itself - private
-///       top-level and body-local declarations - are held as expressions here.
-/// WHY:  reference resolution needs a narrow, explicit environment instead of reaching into
-///       broader AST or scope context structures, and it needs it without giving an authored
-///       module constant a second representation. The module base is shared by every scope in
-///       the module, so entering a scope copies the overlay and nothing else, and a module
-///       constant is materialised into an expression only where one is actually referenced.
+/// Folded lexical bindings share the phase's canonical content owner.
 #[derive(Clone, Debug, Default)]
 pub struct ConstValueEnvironment {
     module: Rc<FxHashMap<PathId, ConstValueId>>,
-    local: FxHashMap<PathId, Expression>,
+    local: FxHashMap<PathId, ConstValueId>,
 }
 
 impl ConstValueEnvironment {
@@ -63,13 +53,13 @@ impl ConstValueEnvironment {
     ///
     /// A local binding shadows a module constant of the same path, which is what
     /// [`Self::module_constant`] relies on being consulted second.
-    pub fn insert(&mut self, path: PathId, expression: Expression) {
-        self.local.insert(path, expression);
+    pub(crate) fn insert(&mut self, path: PathId, value: ConstValueId) {
+        self.local.insert(path, value);
     }
 
     /// Look up a binding introduced by this scope or an enclosing one.
-    pub(crate) fn lookup_local(&self, path: &PathId) -> Option<&Expression> {
-        self.local.get(path)
+    pub(crate) fn lookup_local(&self, path: &PathId) -> Option<ConstValueId> {
+        self.local.get(path).copied()
     }
 
     /// Look up an authored module constant by path.
@@ -141,288 +131,192 @@ impl PartialEq for ConstResolutionError {
 
 impl Eq for ConstResolutionError {}
 
-/// Transient resolved const declaration.
-///
-/// WHAT: carries the owned resolved expression plus its advisory classification
-///       from declaration resolution to fact collection without storing it.
-/// WHY: the collector moves the expression once into the lexical environment
-///      and records only metadata in the fact table; this result itself is
-///      never retained in facts or projected into HIR.
+/// The advisory declaration result retains content identity, never a duplicate expression.
 #[derive(Debug)]
 pub(crate) struct ResolvedConstDeclaration {
-    pub(crate) expression: Expression,
+    pub(crate) value: ConstValueId,
     pub(crate) value_kind: ConstFactValueKind,
 }
 
-/// Resolves AST expressions against a [`ConstValueEnvironment`] to determine
-/// whether they are compile-time constants.
-pub struct ConstValueResolver<'a> {
+pub(crate) struct ConstValueResolver<'a> {
     string_table: &'a mut StringTable,
-    const_values: &'a ConstValueStore,
+    const_values: &'a mut ConstValueStore,
+    expression_builder: &'a mut AstExpressionBuilder,
     template_ir_store: Rc<RefCell<TemplateIrStore>>,
-    numeric_profile: NumericProfile,
+    type_environment: &'a TypeEnvironment,
+    // Reuse heap traversal storage across resolutions, including after advisory failures.
+    pending_references: Vec<ExprId>,
 }
 
 impl<'a> ConstValueResolver<'a> {
-    /// Creates a resolver backed by the module TIR store.
-    ///
-    /// WHAT: the caller supplies the module store so each template is
-    ///       classified through its exact effective TIR view.
-    /// WHY: const-fact collection runs after template normalization and must
-    ///      classify each template through its exact module-local view, including
-    ///      its overlay identity.
-    ///      The boundary profile travels with the resolver so substituted RPN
-    ///      folds under the same `Int` width and `Float` precision as parsing.
-    pub fn new(
+    pub(crate) fn new(
         string_table: &'a mut StringTable,
-        const_values: &'a ConstValueStore,
+        const_values: &'a mut ConstValueStore,
+        expression_builder: &'a mut AstExpressionBuilder,
         template_ir_store: Rc<RefCell<TemplateIrStore>>,
-        numeric_profile: NumericProfile,
+        type_environment: &'a TypeEnvironment,
     ) -> Self {
         Self {
             string_table,
             const_values,
+            expression_builder,
             template_ir_store,
-            numeric_profile,
+            type_environment,
+            pending_references: Vec::new(),
         }
     }
 
-    // ------------------------------
-    //  Declaration resolution
-    // ------------------------------
+    pub(crate) fn builder(&self) -> &AstExpressionBuilder {
+        self.expression_builder
+    }
+    pub(crate) fn builder_mut(&mut self) -> &mut AstExpressionBuilder {
+        self.expression_builder
+    }
+    pub(crate) fn const_values(&self) -> &ConstValueStore {
+        self.const_values
+    }
 
-    /// Resolve a private inferred top-level declaration (`=` in start body).
-    ///
-    /// WHAT: mutable declarations are rejected; immutable declarations return the
-    ///       owned resolved initializer plus its classification for the caller to
-    ///       move into the lexical environment and record as metadata-only fact.
-    pub fn resolve_private_top_level_declaration(
+    pub(crate) fn resolve_private_top_level_declaration(
         &mut self,
         declaration: &Declaration,
         environment: &ConstValueEnvironment,
     ) -> Result<ResolvedConstDeclaration, ConstResolutionError> {
-        if declaration.value.value_mode.is_mutable() {
+        if declaration.value_mode.is_mutable() {
             return Err(ConstResolutionError::MutableDeclaration);
         }
-
-        let resolved = self.resolve_expression(&declaration.value, environment)?;
-        let value_kind = self.fact_value_kind(&resolved)?;
-
+        let initializer = declaration
+            .value
+            .initializer()
+            .ok_or(ConstResolutionError::NonConstExpression)?;
+        let value = self.resolve_expression(initializer, environment)?;
+        let metadata = self
+            .const_values
+            .metadata(value)
+            .ok_or(ConstResolutionError::NonConstExpression)?;
         Ok(ResolvedConstDeclaration {
-            expression: resolved,
-            value_kind,
+            value,
+            value_kind: ConstFactValueKind::from_const_value_kind(metadata.value_kind),
         })
     }
 
-    /// Resolve a body-local private inferred declaration.
-    ///
-    /// WHAT: same rules as [`Self::resolve_private_top_level_declaration`] but
-    ///       tagged with `ConstBindingScope::BodyLocal`.
-    pub fn resolve_body_local_declaration(
+    pub(crate) fn resolve_body_local_declaration(
         &mut self,
         declaration: &Declaration,
         environment: &ConstValueEnvironment,
     ) -> Result<ResolvedConstDeclaration, ConstResolutionError> {
-        if declaration.value.value_mode.is_mutable() {
-            return Err(ConstResolutionError::MutableDeclaration);
-        }
-
-        let resolved = self.resolve_expression(&declaration.value, environment)?;
-        let value_kind = self.fact_value_kind(&resolved)?;
-
-        Ok(ResolvedConstDeclaration {
-            expression: resolved,
-            value_kind,
-        })
+        self.resolve_private_top_level_declaration(declaration, environment)
     }
 
-    // ------------------------------
-    //  Expression resolution
-    // ------------------------------
-
-    /// Resolve an arbitrary expression against the given environment.
-    ///
-    /// WHAT: the core resolution algorithm that handles literals, references,
-    ///       runtime RPN, and coercion nodes.
-    pub fn resolve_expression(
+    pub(crate) fn resolve_expression(
         &mut self,
-        expression: &Expression,
+        expression: ExprId,
         environment: &ConstValueEnvironment,
-    ) -> Result<Expression, ConstResolutionError> {
-        // Fast path: expressions that are already compile-time constants
-        // (literals, composite collections, templates, etc.) need no substitution.
-        if self.is_compile_time_constant(expression)? {
-            return Ok(expression.clone());
-        }
-
-        match &expression.kind {
-            ExpressionKind::Reference(path) => self.resolve_reference(path, environment),
-
-            ExpressionKind::Runtime(rpn) => self.resolve_runtime_rpn(rpn, environment),
-
-            ExpressionKind::Coerced { value, .. } => {
-                // A coercion does not change whether the inner value is const.
-                self.resolve_expression(value, environment)
+    ) -> Result<ConstValueId, ConstResolutionError> {
+        fn validate_references(
+            mut expression: ExpressionView<'_>,
+            environment: &ConstValueEnvironment,
+            pending: &mut Vec<ExprId>,
+        ) -> Result<(), ConstResolutionError> {
+            let store = expression.store();
+            loop {
+                if let ExpressionOperationView::Reference(path) = expression.operation()
+                    && environment
+                        .lookup_local(&path)
+                        .or_else(|| environment.module_constant(&path))
+                        .is_none()
+                {
+                    return Err(ConstResolutionError::UnresolvedReference);
+                }
+                let children_start = pending.len();
+                expression
+                    .visit_child_ids(&mut |child| pending.push(child))
+                    .map_err(|error| {
+                        ConstResolutionError::TemplateClassification(TemplateError::Infrastructure(
+                            Box::new(error),
+                        ))
+                    })?;
+                // Reverse only newly scheduled children to retain authored depth-first order.
+                pending[children_start..].reverse();
+                let Some(next) = pending.pop() else {
+                    return Ok(());
+                };
+                expression = store.view(next).map_err(|error| {
+                    ConstResolutionError::TemplateClassification(TemplateError::Infrastructure(
+                        Box::new(error),
+                    ))
+                })?;
             }
-
-            // Any call shape is treated as non-const. This includes function calls,
-            // host calls, handled fallible calls, collection builtins, and method
-            // calls (the latter two appear inside Runtime RPN, not as ExpressionKind).
-            ExpressionKind::FunctionCall { .. }
-            | ExpressionKind::HostFunctionCall { .. }
-            | ExpressionKind::HandledFallibleFunctionCall { .. }
-            | ExpressionKind::HandledFallibleHostFunctionCall { .. }
-            | ExpressionKind::MethodCall { .. }
-            | ExpressionKind::CollectionBuiltinCall { .. }
-            | ExpressionKind::MapBuiltinCall { .. }
-            | ExpressionKind::FieldAccess { .. } => Err(ConstResolutionError::CallInConstContext),
-
+        }
+        self.pending_references.clear();
+        let view = self.expression_builder.view(expression).map_err(|error| {
+            ConstResolutionError::TemplateClassification(TemplateError::Infrastructure(Box::new(
+                error,
+            )))
+        })?;
+        validate_references(view, environment, &mut self.pending_references)?;
+        let resolved = fold_expression_with_constants(
+            expression,
+            self.expression_builder,
+            self.const_values,
+            self.string_table,
+            self.type_environment,
+            |path| {
+                environment
+                    .lookup_local(&path)
+                    .or_else(|| environment.module_constant(&path))
+            },
+        )
+        .map_err(|error| match error {
+            // Builder capacity stays on the template lane: runtime classification would hide it.
+            ConstantFoldError::Diagnostic(diagnostic)
+                if diagnostic.is_compiler_capacity_exceeded() =>
+            {
+                ConstResolutionError::TemplateClassification(TemplateError::Diagnostic(diagnostic))
+            }
+            ConstantFoldError::Diagnostic(_) => ConstResolutionError::NonFoldableRuntimeExpression,
+            ConstantFoldError::Infrastructure(error) => {
+                ConstResolutionError::TemplateClassification(TemplateError::Infrastructure(error))
+            }
+        })?;
+        let view = self.expression_builder.view(resolved).map_err(|error| {
+            ConstResolutionError::TemplateClassification(TemplateError::Infrastructure(Box::new(
+                error,
+            )))
+        })?;
+        match view.operation() {
+            ExpressionOperationView::Constant(value) => {
+                self.const_values
+                    .value(value)
+                    .ok_or(ConstResolutionError::NonConstExpression)?;
+                Ok(value)
+            }
+            ExpressionOperationView::Reference(path) => {
+                let value = environment
+                    .lookup_local(&path)
+                    .or_else(|| environment.module_constant(&path))
+                    .ok_or(ConstResolutionError::UnresolvedReference)?;
+                self.const_values
+                    .value(value)
+                    .ok_or(ConstResolutionError::NonConstReference)?;
+                Ok(value)
+            }
+            ExpressionOperationView::Template(template) => {
+                classify_template_from_effective_tir(
+                    template,
+                    &self.template_ir_store,
+                    self.expression_builder,
+                    self.const_values,
+                )?;
+                Err(ConstResolutionError::NonConstExpression)
+            }
+            ExpressionOperationView::Call(_)
+            | ExpressionOperationView::MethodCall { .. }
+            | ExpressionOperationView::CollectionBuiltin { .. }
+            | ExpressionOperationView::MapBuiltin { .. } => {
+                Err(ConstResolutionError::CallInConstContext)
+            }
             _ => Err(ConstResolutionError::NonConstExpression),
         }
-    }
-
-    // ------------------------------
-    //  Internal helpers
-    // ------------------------------
-
-    fn resolve_reference(
-        &mut self,
-        path: &PathId,
-        environment: &ConstValueEnvironment,
-    ) -> Result<Expression, ConstResolutionError> {
-        // A binding the scope introduced itself shadows a module constant of the same path, so
-        // the overlay is consulted first.
-        if let Some(local) = environment.lookup_local(path) {
-            let local = local.clone();
-            return if self.is_compile_time_constant(&local)? {
-                Ok(local)
-            } else {
-                Err(ConstResolutionError::NonConstReference)
-            };
-        }
-
-        let value_id = environment
-            .module_constant(path)
-            .ok_or(ConstResolutionError::UnresolvedReference)?;
-
-        // The store is the module constant's one representation. An expression is built here,
-        // at the only point that consumes one, and only for the constants a body actually
-        // references. Wrapper and slot-insert templates have no expression form: they were
-        // absent from the environment before this was lazy, and stay unresolved now.
-        let resolved = self
-            .const_values
-            .expression_for_resolution(value_id)
-            .map_err(|_| ConstResolutionError::UnresolvedReference)?;
-
-        if self.is_compile_time_constant(&resolved)? {
-            Ok(resolved)
-        } else {
-            Err(ConstResolutionError::NonConstReference)
-        }
-    }
-
-    /// Substitute known const references into an RPN stack, fold, and accept
-    /// only when the result is a single compile-time expression.
-    fn resolve_runtime_rpn(
-        &mut self,
-        rpn: &ExpressionRpn,
-        environment: &ConstValueEnvironment,
-    ) -> Result<Expression, ConstResolutionError> {
-        let mut substituted = Vec::with_capacity(rpn.items.len());
-
-        for item in &rpn.items {
-            let new_item = match item {
-                ExpressionRpnItem::Operand(expression) => {
-                    self.resolve_runtime_rvalue_operand(expression, environment)?
-                }
-                operator @ ExpressionRpnItem::Operator { .. } => operator.clone(),
-                // Pending syntax never survives evaluation. This resolver reports it through
-                // the template-classification infrastructure lane so fact-collection skips
-                // (which swallow every other variant) propagate the broken invariant instead
-                // of recording it as an ordinary non-const fact.
-                ExpressionRpnItem::PendingNumericLiteral { .. }
-                | ExpressionRpnItem::PendingGroup { .. } => {
-                    return Err(ConstResolutionError::TemplateClassification(
-                        TemplateError::Infrastructure(Box::new(pending_expression_item_bug(
-                            "const resolution",
-                        ))),
-                    ));
-                }
-            };
-            substituted.push(new_item);
-        }
-
-        let mut stack =
-            match constant_fold(substituted, self.string_table, self.numeric_profile, None) {
-                Ok(ConstantFoldOutcome::Folded(stack)) => stack,
-                Ok(ConstantFoldOutcome::NotConstant(_)) => {
-                    return Err(ConstResolutionError::NonFoldableRuntimeExpression);
-                }
-                // Const fact collection deliberately skips non-const resolution, so this refusal
-                // cannot reach a user-facing diagnostic at this advisory boundary.
-                Ok(ConstantFoldOutcome::TextUnavailable { .. }) => {
-                    return Err(ConstResolutionError::NonFoldableRuntimeExpression);
-                }
-                // Fold errors are advisory here: fact collection skips the declaration
-                // rather than reporting a user-facing diagnostic at this boundary.
-                Err(_) => return Err(ConstResolutionError::NonFoldableRuntimeExpression),
-            };
-
-        if stack.len() == 1
-            && let Some(ExpressionRpnItem::Operand(expression)) = stack.pop()
-            && self.is_compile_time_constant(&expression)?
-        {
-            return Ok(expression);
-        }
-
-        Err(ConstResolutionError::NonFoldableRuntimeExpression)
-    }
-
-    fn resolve_runtime_rvalue_operand(
-        &mut self,
-        expression: &Expression,
-        environment: &ConstValueEnvironment,
-    ) -> Result<ExpressionRpnItem, ConstResolutionError> {
-        let resolved = match &expression.kind {
-            ExpressionKind::Reference(..) | ExpressionKind::Coerced { .. } => {
-                Some(self.resolve_expression(expression, environment)?)
-            }
-            _ => None,
-        };
-
-        if let Some(resolved_expression) = resolved {
-            return Ok(ExpressionRpnItem::Operand(resolved_expression));
-        }
-
-        Ok(ExpressionRpnItem::Operand(expression.clone()))
-    }
-
-    fn fact_value_kind(
-        &mut self,
-        expression: &Expression,
-    ) -> Result<ConstFactValueKind, ConstResolutionError> {
-        let kind = self.const_value_kind(expression)?;
-        Ok(ConstFactValueKind::from_const_value_kind(kind))
-    }
-
-    fn is_compile_time_constant(
-        &mut self,
-        expression: &Expression,
-    ) -> Result<bool, ConstResolutionError> {
-        Ok(self.const_value_kind(expression)?.is_compile_time_value())
-    }
-
-    fn const_value_kind(
-        &mut self,
-        expression: &Expression,
-    ) -> Result<ConstValueKind, ConstResolutionError> {
-        let store = Rc::clone(&self.template_ir_store);
-
-        expression
-            .const_value_kind_with_template_classifier(&mut |template| {
-                classify_template_from_effective_tir(template, &store)
-            })
-            .map_err(ConstResolutionError::from)
     }
 }
 
@@ -436,6 +330,8 @@ impl<'a> ConstValueResolver<'a> {
 pub(crate) fn classify_template_from_effective_tir(
     template: &Template,
     store: &Rc<RefCell<TemplateIrStore>>,
+    expression_builder: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
 ) -> Result<TemplateConstValueKind, TemplateError> {
     let reference = &template.tir_reference;
     let store = store.borrow();
@@ -446,7 +342,12 @@ pub(crate) fn classify_template_from_effective_tir(
         TemplateTirPhase::Composed,
         reference.context,
     )?;
-    let preparation = prepare_tir_view(&view, TemplatePreparationMode::Value)?;
+    let preparation = prepare_tir_view(
+        &view,
+        expression_builder,
+        const_values,
+        TemplatePreparationMode::Value,
+    )?;
     Ok(preparation.facts.final_value_kind)
 }
 
@@ -454,6 +355,8 @@ pub(crate) fn classify_template_from_effective_tir(
 pub(crate) fn prepare_template_tir_facts(
     template: &Template,
     store: &Rc<RefCell<TemplateIrStore>>,
+    expression_builder: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
 ) -> Result<TemplatePreparationFacts, TemplateError> {
     let reference = &template.tir_reference;
 
@@ -473,5 +376,11 @@ pub(crate) fn prepare_template_tir_facts(
         TemplateTirPhase::Composed,
         reference.context,
     )?;
-    Ok(prepare_tir_view(&view, TemplatePreparationMode::Value)?.facts)
+    Ok(prepare_tir_view(
+        &view,
+        expression_builder,
+        const_values,
+        TemplatePreparationMode::Value,
+    )?
+    .facts)
 }

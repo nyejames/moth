@@ -10,7 +10,7 @@
 //! This module owns:
 //! - counting inline map nesting depth in parsed type references and rejecting depth
 //!   greater than two before the map type is resolved.
-//! - accepting `String`, `Int`, `Uint`, `Bool`, `Char`, fixed-width integers, and `Byte` keys.
+//! - accepting `String`, `Bool`, `Char`, fixed-width integers, and `Byte` keys.
 //!
 //! This module does NOT own:
 //! - `TypeEnvironment::intern_map` or canonical map `TypeId` construction.
@@ -31,9 +31,9 @@ use moth_lexical::numeric::fixed_scalar::FixedScalarClass;
 ///      reset the depth because they provide a named abstraction.
 ///
 /// Depth rules:
-/// - `{String = Int}` has depth 1.
-/// - `{String = {String = Int}}` has depth 2.
-/// - `{String = {String = {String = Int}}}` has depth 3 and is rejected.
+/// - `{String = I32}` has depth 1.
+/// - `{String = {String = I32}}` has depth 2.
+/// - `{String = {String = {String = I32}}}` has depth 3 and is rejected.
 /// - Named types (`MyAlias`) and namespaced types (`Ns::Alias`) reset depth to 0
 ///   because the name abstracts the shape.
 pub(super) fn map_nesting_depth(parsed: &ParsedTypeRef) -> usize {
@@ -55,7 +55,7 @@ pub(super) fn map_nesting_depth(parsed: &ParsedTypeRef) -> usize {
 
 /// Validates that a map key type belongs to a supported source scalar family.
 ///
-/// WHAT: accepts `String`, `Int`, `Uint`, `Bool`, `Char`, fixed-width integers, and `Byte`.
+/// WHAT: accepts `String`, `Bool`, `Char`, fixed-width integers, and `Byte`.
 /// WHY: builtin maps are deliberately scalar-keyed. This helper is the canonical owner
 ///      of that policy, so generic parameters and user-defined types follow the same
 ///      rejection path as every other unsupported key.
@@ -77,8 +77,6 @@ pub(crate) fn validate_map_key_type(
                 )
             });
     let is_supported_scalar = key_type_id == builtins.string
-        || key_type_id == builtins.int
-        || key_type_id == builtins.uint
         || key_type_id == builtins.bool
         || key_type_id == builtins.char
         || is_supported_fixed_scalar;

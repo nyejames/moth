@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "named_forward_writes push_first=1 push_second=4294967297 set_first=4294967297 left=4294967296 right=1"

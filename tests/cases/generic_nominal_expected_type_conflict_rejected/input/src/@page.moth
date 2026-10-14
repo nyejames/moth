@@ -3,4 +3,4 @@ Pair type T = |
     right T,
 |
 
-bad Pair of Int = Pair("two", 1)
+bad Pair of I32 = Pair("two", 1)

@@ -62,7 +62,7 @@ pub(crate) use resolve_type::resolve_diagnostic_type_to_type_id_opt;
 pub(crate) use resolve_type::{
     resolve_diagnostic_type_to_type_id_checked, resolve_parsed_type_annotation, resolve_type,
 };
-pub(crate) use signatures::resolve_function_signature;
+pub(crate) use signatures::{intern_resolved_function_signature, resolve_function_signature};
 pub(crate) use struct_fields::{
     StructFieldResolutionError, resolve_struct_constructor_shell_types, resolve_struct_field_types,
 };

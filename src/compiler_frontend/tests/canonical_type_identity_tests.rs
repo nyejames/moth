@@ -15,10 +15,11 @@ use crate::compiler_frontend::builtins::casts::targets::{
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalCoreTraitIdentity, CanonicalTraitIdentity,
     CanonicalTypeIdentity, CanonicalTypeProjectionContext, ExportedGenericParameterIdentity,
-    ExternalOpaqueTypeIdentity, FallibleCarrierTypeIdentity, GenericDeclarationOrigin,
-    GenericParameterOriginResolver, NominalOriginResolver, project_type_id_to_canonical_identity,
+    ExternalOpaqueTypeIdentity, GenericDeclarationOrigin, GenericParameterOriginResolver,
+    NominalOriginResolver, project_type_id_to_canonical_identity,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, FieldDefinition, FunctionParameterDefinition,
     FunctionTypeDefinition, StructTypeDefinition,
@@ -40,6 +41,7 @@ use crate::compiler_frontend::semantic_identity::{
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use moth_lexical::numeric::decimal::NumberScale;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 use rustc_hash::FxHashMap;
 use std::collections::HashSet;
@@ -287,8 +289,14 @@ fn projects_every_builtin_scalar() {
 
     let cases = [
         (env.builtins().bool, CanonicalBuiltinType::Bool),
-        (env.builtins().int, CanonicalBuiltinType::Int),
-        (env.builtins().float, CanonicalBuiltinType::Float),
+        (
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            CanonicalBuiltinType::FixedScalar(FixedScalar::I32),
+        ),
+        (
+            builtin_type_ids::fixed_scalar(FixedScalar::F64),
+            CanonicalBuiltinType::FixedScalar(FixedScalar::F64),
+        ),
         (env.builtins().string, CanonicalBuiltinType::String),
         (env.builtins().char, CanonicalBuiltinType::Char),
         (env.builtins().range, CanonicalBuiltinType::Range),
@@ -582,13 +590,13 @@ fn projects_external_opaque_from_test_registry() {
 }
 
 // ---------------------------------------------------------------------------
-//  Option, collection, map and fallible carrier projection
+//  Option, collection and map projection
 // ---------------------------------------------------------------------------
 
 #[test]
 fn projects_option_of_builtin() {
     let mut env = TypeEnvironment::new();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let option_id = env.intern_option(int_id);
 
     let resolver = MapNominalOriginResolver::new();
@@ -602,9 +610,9 @@ fn projects_option_of_builtin() {
     assert_eq!(
         identity,
         CanonicalTypeIdentity::Option(Box::new(CanonicalTypeIdentity::Builtin(
-            CanonicalBuiltinType::Int
+            CanonicalBuiltinType::FixedScalar(FixedScalar::I32)
         ))),
-        "Option<Int> must project recursively"
+        "Option<I32> must project recursively"
     );
 }
 
@@ -635,7 +643,7 @@ fn projects_growable_collection() {
 #[test]
 fn projects_fixed_collection_distinct_from_growable() {
     let mut env = TypeEnvironment::new();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let fixed_id = env.intern_collection(int_id, Some(4));
     let growable_id = env.intern_collection(int_id, None);
 
@@ -655,7 +663,9 @@ fn projects_fixed_collection_distinct_from_growable() {
     );
 
     let expected_fixed = CanonicalTypeIdentity::Collection {
-        element: Box::new(CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)),
+        element: Box::new(CanonicalTypeIdentity::Builtin(
+            CanonicalBuiltinType::FixedScalar(FixedScalar::I32),
+        )),
         fixed_capacity: Some(4),
     };
     assert_eq!(fixed_identity, expected_fixed);
@@ -665,7 +675,7 @@ fn projects_fixed_collection_distinct_from_growable() {
 fn projects_ordered_map_preserving_key_value_order() {
     let mut env = TypeEnvironment::new();
     let key_id = env.builtins().string;
-    let value_id = env.builtins().int;
+    let value_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let map_id = env.intern_map(key_id, value_id);
 
     let resolver = MapNominalOriginResolver::new();
@@ -678,11 +688,13 @@ fn projects_ordered_map_preserving_key_value_order() {
 
     let expected = CanonicalTypeIdentity::OrderedMap {
         key: Box::new(CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String)),
-        value: Box::new(CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)),
+        value: Box::new(CanonicalTypeIdentity::Builtin(
+            CanonicalBuiltinType::FixedScalar(FixedScalar::I32),
+        )),
     };
     assert_eq!(
         identity, expected,
-        "{{String = Int}} must preserve key/value order"
+        "{{String = I32}} must preserve key/value order"
     );
 
     // Swapping key and value must produce a distinct identity.
@@ -692,41 +704,6 @@ fn projects_ordered_map_preserving_key_value_order() {
     assert_ne!(
         identity, swapped_identity,
         "swapping map key and value must change identity"
-    );
-}
-
-#[test]
-fn projects_fallible_carrier_preserving_success_error_order() {
-    let mut env = TypeEnvironment::new();
-    let success_id = env.builtins().int;
-    let error_id = env.builtins().string;
-    let carrier_id = env.intern_fallible_carrier(success_id, error_id);
-
-    let resolver = MapNominalOriginResolver::new();
-    let generic_resolver = MapGenericParameterOriginResolver::new();
-    let registry = ExternalPackageRegistry::new();
-    let context = projection_context(&resolver, &generic_resolver, &registry);
-
-    let identity = project_type_id_to_canonical_identity(carrier_id, &env, &context)
-        .expect("fallible carrier projection should succeed");
-
-    let expected = CanonicalTypeIdentity::FallibleCarrier(FallibleCarrierTypeIdentity::new(
-        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int),
-        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String),
-    ));
-    assert_eq!(
-        identity, expected,
-        "Int!String must preserve success/error order"
-    );
-
-    // Swapping success and error must produce a distinct identity.
-    let swapped_carrier_id = env.intern_fallible_carrier(error_id, success_id);
-    let swapped_identity =
-        project_type_id_to_canonical_identity(swapped_carrier_id, &env, &context)
-            .expect("swapped carrier projection should succeed");
-    assert_ne!(
-        identity, swapped_identity,
-        "swapping success and error channels must change identity"
     );
 }
 
@@ -743,7 +720,7 @@ fn projects_concrete_generic_nominal_instance() {
     let (box_nominal_id, _) =
         register_generic_struct(&mut env, &mut string_table, "Box", param_list_id);
 
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let instance_id = env.intern_generic_instance(box_nominal_id, Box::new([int_id]));
 
     let mut resolver = MapNominalOriginResolver::new();
@@ -757,17 +734,21 @@ fn projects_concrete_generic_nominal_instance() {
 
     let expected = CanonicalTypeIdentity::GenericInstance {
         base: struct_origin("Box"),
-        arguments: Box::new([CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)]),
+        arguments: Box::new([CanonicalTypeIdentity::Builtin(
+            CanonicalBuiltinType::FixedScalar(FixedScalar::I32),
+        )]),
     };
     assert_eq!(
         identity, expected,
-        "Box<Int> must project to base origin plus canonical concrete arguments"
+        "Box<I32> must project to base origin plus canonical concrete arguments"
     );
 }
 
 #[test]
 fn generic_instance_identity_is_equal_for_equal_base_and_arguments() {
-    let arguments = Box::new([CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)]);
+    let arguments = Box::new([CanonicalTypeIdentity::Builtin(
+        CanonicalBuiltinType::FixedScalar(FixedScalar::I32),
+    )]);
     let a = CanonicalTypeIdentity::GenericInstance {
         base: struct_origin("Box"),
         arguments: arguments.clone(),
@@ -790,7 +771,9 @@ fn generic_instance_identity_is_equal_for_equal_base_and_arguments() {
 fn generic_instance_distinguishes_different_concrete_arguments() {
     let int_instance = CanonicalTypeIdentity::GenericInstance {
         base: struct_origin("Box"),
-        arguments: Box::new([CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)]),
+        arguments: Box::new([CanonicalTypeIdentity::Builtin(
+            CanonicalBuiltinType::FixedScalar(FixedScalar::I32),
+        )]),
     };
     let string_instance = CanonicalTypeIdentity::GenericInstance {
         base: struct_origin("Box"),
@@ -887,7 +870,7 @@ fn unresolved_generic_parameter_returns_compiler_error() {
 #[test]
 fn function_type_returns_compiler_error() {
     let mut env = TypeEnvironment::new();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let function_id = env.insert_function_type_for_test(FunctionTypeDefinition {
         parameters: Box::new([FunctionParameterDefinition {
             name: None,
@@ -909,28 +892,6 @@ fn function_type_returns_compiler_error() {
     assert!(
         error.msg.contains("function"),
         "error should name the function type state: {}",
-        error.msg
-    );
-}
-
-#[test]
-fn tuple_type_returns_compiler_error() {
-    let mut env = TypeEnvironment::new();
-    let int_id = env.builtins().int;
-    let tuple_id = env.intern_tuple(vec![int_id, int_id]);
-
-    let resolver = MapNominalOriginResolver::new();
-    let generic_resolver = MapGenericParameterOriginResolver::new();
-    let registry = ExternalPackageRegistry::new();
-    let context = projection_context(&resolver, &generic_resolver, &registry);
-
-    let error = project_type_id_to_canonical_identity(tuple_id, &env, &context)
-        .expect_err("tuple type must return an error");
-
-    assert_eq!(error.error_type, ErrorType::Compiler);
-    assert!(
-        error.msg.contains("tuple"),
-        "error should name the tuple state: {}",
         error.msg
     );
 }
@@ -965,7 +926,7 @@ fn malformed_collection_arity_returns_compiler_error() {
 #[test]
 fn malformed_map_arity_returns_compiler_error() {
     let mut env = TypeEnvironment::new();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     // Directly intern an ordered map with one argument, which is a malformed arity.
     let malformed_id = env.intern_constructed(
         TypeConstructor::Builtin(BuiltinTypeConstructor::OrderedMap),
@@ -1120,8 +1081,8 @@ fn generic_instance_with_missing_parameter_list_returns_compiler_error() {
 
 #[test]
 fn equal_construction_yields_equal_and_hash_equal_identity() {
-    let a = CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int);
-    let b = CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int);
+    let a = CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::FixedScalar(FixedScalar::I32));
+    let b = CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::FixedScalar(FixedScalar::I32));
 
     assert_eq!(a, b, "equal construction must yield equal identity");
     let mut set = HashSet::new();
@@ -1134,7 +1095,7 @@ fn equal_construction_yields_equal_and_hash_equal_identity() {
 
 #[test]
 fn distinct_builtins_are_distinct_identities() {
-    let int = CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int);
+    let int = CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::FixedScalar(FixedScalar::I32));
     let string = CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String);
     assert_ne!(int, string, "distinct builtins must be distinct");
 }
@@ -1174,8 +1135,8 @@ fn recursive_generic_instance_arguments_are_canonical() {
     let (box_nominal_id, _) =
         register_generic_struct(&mut env, &mut string_table, "Box", param_list_id);
 
-    // Box<Option<Int>>
-    let int_id = env.builtins().int;
+    // Box<Option<I32>>
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let option_id = env.intern_option(int_id);
     let nested_instance_id = env.intern_generic_instance(box_nominal_id, Box::new([option_id]));
 
@@ -1191,12 +1152,12 @@ fn recursive_generic_instance_arguments_are_canonical() {
     let expected = CanonicalTypeIdentity::GenericInstance {
         base: struct_origin("Box"),
         arguments: Box::new([CanonicalTypeIdentity::Option(Box::new(
-            CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int),
+            CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::FixedScalar(FixedScalar::I32)),
         ))]),
     };
     assert_eq!(
         identity, expected,
-        "Box<Option<Int>> must recursively project inner option to canonical identity"
+        "Box<Option<I32>> must recursively project inner option to canonical identity"
     );
 }
 
@@ -1584,13 +1545,13 @@ fn displayable_core_trait_identity_is_equal_to_itself() {
 #[test]
 fn infallible_cast_core_trait_identity_preserves_target_and_fallibility() {
     let identity = CanonicalTraitIdentity::Core(CanonicalCoreTraitIdentity::Castable {
-        target: BuiltinCastTarget::Int,
+        target: BuiltinCastTarget::Fixed(FixedScalar::I32),
         fallibility: BuiltinCastFallibility::Infallible,
     });
 
     let debug = format!("{identity:?}");
     assert!(
-        debug.contains("Int") && debug.contains("Infallible"),
+        debug.contains("I32") && debug.contains("Infallible"),
         "infallible cast core trait identity must carry target and fallibility: {debug}"
     );
 }
@@ -1598,13 +1559,13 @@ fn infallible_cast_core_trait_identity_preserves_target_and_fallibility() {
 #[test]
 fn fallible_cast_core_trait_identity_preserves_target_and_fallibility() {
     let identity = CanonicalTraitIdentity::Core(CanonicalCoreTraitIdentity::Castable {
-        target: BuiltinCastTarget::Int,
+        target: BuiltinCastTarget::Fixed(FixedScalar::I32),
         fallibility: BuiltinCastFallibility::Fallible,
     });
 
     let debug = format!("{identity:?}");
     assert!(
-        debug.contains("Int") && debug.contains("Fallible"),
+        debug.contains("I32") && debug.contains("Fallible"),
         "fallible cast core trait identity must carry target and fallibility: {debug}"
     );
 }
@@ -1612,11 +1573,11 @@ fn fallible_cast_core_trait_identity_preserves_target_and_fallibility() {
 #[test]
 fn cast_core_trait_distinguishes_infallible_from_fallible() {
     let infallible = CanonicalTraitIdentity::Core(CanonicalCoreTraitIdentity::Castable {
-        target: BuiltinCastTarget::Int,
+        target: BuiltinCastTarget::Fixed(FixedScalar::I32),
         fallibility: BuiltinCastFallibility::Infallible,
     });
     let fallible = CanonicalTraitIdentity::Core(CanonicalCoreTraitIdentity::Castable {
-        target: BuiltinCastTarget::Int,
+        target: BuiltinCastTarget::Fixed(FixedScalar::I32),
         fallibility: BuiltinCastFallibility::Fallible,
     });
 
@@ -1626,7 +1587,7 @@ fn cast_core_trait_distinguishes_infallible_from_fallible() {
 #[test]
 fn cast_core_trait_distinguishes_different_targets() {
     let to_int = CanonicalTraitIdentity::Core(CanonicalCoreTraitIdentity::Castable {
-        target: BuiltinCastTarget::Int,
+        target: BuiltinCastTarget::Fixed(FixedScalar::I32),
         fallibility: BuiltinCastFallibility::Infallible,
     });
     let to_string = CanonicalTraitIdentity::Core(CanonicalCoreTraitIdentity::Castable {

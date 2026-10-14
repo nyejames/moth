@@ -1,8 +1,25 @@
-@provider Card
+@provider Card, show_box
+@nominal Box
+@receiver Ticket, show_ticket
+@witness CUSTOM_DISPLAY as PRINTABLE, WitnessLabel, WitnessBox, make_label
 
 render type Item is CASTABLE_TO_STRING |item Item| -> String:
     text String = cast item
     return text
 ;
 
+show_label type Item is PRINTABLE |item Item| -> String:
+    return item.display()
+;
+
+boxed WitnessBox of WitnessLabel = WitnessBox(make_label("provider"))
+message String = show_box(boxed)
+direct String = show_label(make_label("direct"))
+ticket_message String = show_ticket(Ticket("ticket"))
+assert(message is "provider")
+assert(direct is "direct")
+assert(ticket_message is "ticket|neighbour(note)")
+
 [:cast_generic_imported_user_evidence_success [render(Card("provider"))]]
+[:imported generic nominal box: [render(Box(Card("boxed")))]]
+[:imported same-name receiver evidence: [ticket_message]]

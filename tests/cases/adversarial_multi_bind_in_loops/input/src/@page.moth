@@ -1,4 +1,4 @@
-pair |value Int| -> Int, Int:
+pair |value I32| -> I32, I32:
     return value, value + 1
 ;
 

@@ -9,8 +9,8 @@
 use crate::compiler_frontend::ast::Ast;
 use crate::compiler_frontend::ast::AstDocFragmentKind;
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
-use crate::compiler_frontend::ast::expressions::failure_classification::pending_function_failure_facts;
+use crate::compiler_frontend::ast::expressions::expression_store::ExpressionView;
+use crate::compiler_frontend::ast::expressions::failure_classification::AstBuiltinFailureSummaries;
 use crate::compiler_frontend::ast::expressions::failure_facts::{
     ImplicitFailureContributor, ImplicitFailureSource,
 };
@@ -29,25 +29,27 @@ use crate::compiler_frontend::hir::hir_builder::HirBuilder;
 use crate::compiler_frontend::module_metadata::{ModuleDocFragment, ModuleDocFragmentKind};
 
 impl<'a> HirBuilder<'a> {
-    /// Accumulate this expression's synthetic-interface provenance into the current function's
-    /// direct provenance fact.
+    /// Record this expression's synthetic-interface provenance in its owning HIR block.
     ///
-    /// WHAT: merges the expression's `synthetic_interface_provenance` into the current function's
-    /// entry in `module.function_provenance`. This reuses the existing expression-lowering
-    /// traversal so no separate AST walker is needed.
-    /// WHY: the per-function link-fact lane needs the sorted, duplicate-free union of all
-    /// expression provenance lowered from the function body. The fact is pre-populated as empty
-    /// during declaration registration and accumulates during body lowering.
-    pub(crate) fn accumulate_function_provenance(&mut self, expression: &Expression) {
-        if expression.synthetic_interface_provenance.is_empty() {
+    /// WHAT: retains a transient block projection so post-convergence catch pruning can remove
+    ///       inactive handler provenance before link facts are published.
+    /// WHY: expression lowering already visits every provenance-bearing AST value; this avoids
+    ///      introducing another AST walk or storing provenance on every HIR expression.
+    pub(crate) fn accumulate_function_provenance(&mut self, expression: ExpressionView<'_>) {
+        let Some(occurrence) = expression.occurrence_facts() else {
+            return;
+        };
+        if occurrence.provenance.is_empty() {
             return;
         }
         let Some(function_id) = self.current_function else {
             return;
         };
-        if let Some(provenance) = self.module.function_provenance.get_mut(&function_id) {
-            provenance.merge(&expression.synthetic_interface_provenance);
-        }
+        self.module
+            .function_provenance_by_block
+            .entry((function_id, self.current_block))
+            .or_default()
+            .merge(&occurrence.provenance);
     }
 
     pub(super) fn assign_function_origins(&mut self) -> Result<(), CompilerError> {
@@ -154,9 +156,14 @@ impl<'a> HirBuilder<'a> {
                 ));
         // Completed AST contains owned runtime handoffs, never unresolved TIR references.
         let template_ir_store = TemplateIrStore::new();
+        let summaries = AstBuiltinFailureSummaries::compute(
+            &[&ast.nodes],
+            &template_ir_store,
+            &ast.expressions,
+        )?;
 
         for node in &ast.nodes {
-            let NodeKind::Function(path, signature, body) = &node.kind else {
+            let NodeKind::Function(path, signature, _) = &node.kind else {
                 continue;
             };
             let function_id = self.resolve_function_id_or_error(path, &node.span)?;
@@ -167,19 +174,26 @@ impl<'a> HirBuilder<'a> {
                 Some(error_type) => HirBuiltinFailureBoundary::CustomErrorSlot(error_type),
                 None => HirBuiltinFailureBoundary::InferPrivate,
             };
-            let pending = pending_function_failure_facts(body, &template_ir_store)?;
-            let contributors = self.project_failure_contributors(pending.body.implicit)?;
+            let pending = summaries.function_facts(*path).ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "completed function has no converged AST failure facts",
+                )
+            })?;
+            let contributors = self.project_failure_contributors(&pending.body.implicit)?;
+            // Inert messages still carry private-call obligations. The module service installs
+            // canonical generated contracts for these validation-only roots before AST release;
+            // resolving their targets here creates no executable call or link dependency.
             let assertion_message_calls =
-                self.project_failure_contributors(pending.assertion_message_calls)?;
+                self.project_failure_contributors(&pending.assertion_message_calls)?;
             let mut deferred_custom_catches =
                 Vec::with_capacity(pending.body.deferred_custom_catches.len());
-            for check in pending.body.deferred_custom_catches {
+            for check in &pending.body.deferred_custom_catches {
                 deferred_custom_catches.push(HirDeferredCustomCatchCheck {
                     catch_span: check.catch_span,
                     error_type_id: check.error_type_id,
                     typed_producer_span: check.typed_producer_span,
                     eligibility_only: check.eligibility_only,
-                    candidates: self.project_failure_contributors(check.candidates)?,
+                    candidates: self.project_failure_contributors(&check.candidates)?,
                 });
             }
             self.module.function_failure_facts.insert(
@@ -187,6 +201,7 @@ impl<'a> HirBuilder<'a> {
                 HirFunctionFailureFacts {
                     span: node.span,
                     boundary,
+                    infallible_cast_evidence: ast.infallible_cast_evidence.get(path).copied(),
                     contributors,
                     assertion_message_calls,
                     deferred_custom_catches,
@@ -199,13 +214,16 @@ impl<'a> HirBuilder<'a> {
 
     fn project_failure_contributors(
         &self,
-        pending: Vec<ImplicitFailureContributor>,
+        pending: &[ImplicitFailureContributor],
     ) -> Result<Vec<HirBuiltinFailureContributor>, HirConstructionFailure> {
         let mut contributors = Vec::with_capacity(pending.len());
         for contributor in pending {
             let source = match contributor.source {
                 ImplicitFailureSource::NumericOperation => {
                     HirBuiltinFailureSource::NumericOperation
+                }
+                ImplicitFailureSource::AuthoredCastConversion => {
+                    HirBuiltinFailureSource::AuthoredCastConversion
                 }
                 ImplicitFailureSource::CompoundWriteBack {
                     target,

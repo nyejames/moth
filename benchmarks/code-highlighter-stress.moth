@@ -16,7 +16,7 @@ code_snippet #= [$code("moth"):
 -- nominal types
 Label = |
     text String,
-    count Int,
+    count I32,
     active Bool,
 |
 
@@ -39,13 +39,13 @@ Color ::
     Red,
     Green,
     Blue,
-    Rgb | red Float, green Float, blue Float, |,
+    Rgb | red F64, green F64, blue F64, |,
 ;
 
 Status ::
     Ready,
-    Running | progress Float, |,
-    Failed | message String, code Int, |,
+    Running | progress F64, |,
+    Failed | message String, code I32, |,
 ;
 
 -- traits and conformances
@@ -57,7 +57,7 @@ SERIALIZABLE must:
 ;
 
 COMPARABLE must:
-    compare |this Label, other Label| -> Int
+    compare |this Label, other Label| -> I32
 ;
 
 FROZEN must:
@@ -74,7 +74,7 @@ identity type A is SERIALIZABLE |value A| -> A:
 ;
 
 -- functions
-render |title String, lines Int| -> String:
+render |title String, lines I32| -> String:
     if lines is:
         0 => return ""
         1 => return title
@@ -90,12 +90,12 @@ paint |canvas Canvas, color Color| -> Bool:
     return true
 ;
 
-parse |source String| -> Maybe Int:
-    catch number = Int.from_text(source)
+parse |source String| -> Maybe I32:
+    catch number = I32.from_text(source)
     return Some(number)
 ;
 
-total |values {Int}| -> Int:
+total |values {I32}| -> I32:
     copy sum = 0
     for value in values:
         sum += value
@@ -107,7 +107,7 @@ display |this Label| -> String:
     return this.text
 ;
 
-compare |this Label, other Label| -> Int:
+compare |this Label, other Label| -> I32:
     if this.count is:
         other.count => return 0
         less => return -1
@@ -115,12 +115,12 @@ compare |this Label, other Label| -> Int:
     ;
 ;
 
-scale |this Point Float| -> Point Float:
+scale |this Point F64| -> Point F64:
     copy value = this.x * 2.0
     return Point(value, this.y * 2.0)
 ;
 
-push |this {Int}, value Int|:
+push |this {I32}, value I32|:
     this += value
 ;
 
@@ -219,7 +219,7 @@ block_scope #= false
 
 -- attached bang forms
 return! value
-cast! value
+casted_text String = cast 'x'
 catch error!:
 
 -- strings and characters with escapes
@@ -321,7 +321,7 @@ describe |color Color| -> String:
 ;
 
 -- option handling
-first |values {Int}| -> Maybe Int:
+first |values {I32}| -> Maybe I32:
     if values:
         return Some(values[0])
     return Empty
@@ -339,7 +339,7 @@ scores #= {"alpha" = 10, "beta" = 20, "gamma" = 30}
 nested #= { {1, 2}, {3, 4}, {5, 6} }
 
 -- loops over collections
-sum_all |values {Int}| -> Int:
+sum_all |values {I32}| -> I32:
     copy result = 0
     for value in values:
         result += value
@@ -358,14 +358,14 @@ pair type A, B = |
 
 -- aliases
 type Name = String
-type Index = Int
-type Lookup = {String = Int}
+type Index = I32
+type Lookup = {String = I32}
 
 -- casts
-as_int = value as Int
-as_float = value as Float
+as_int = value as I32
+as_float = value as F64
 as_string = value as String
-cast_value = cast! value
+cast_value String = cast 'x'
 return_value = return! value
 
 -- assertions
@@ -414,8 +414,8 @@ CONFIG_PATH #= "@project/config"
 
 -- trait requirements
 SHAPE must:
-    area |this| -> Float
-    perimeter |this| -> Float
+    area |this| -> F64
+    perimeter |this| -> F64
 ;
 
 DRAWABLE must:
@@ -499,13 +499,13 @@ section_7 #= "References"
 section_8 #= "Appendix"
 
 -- helper functions with mixed bodies
-validate |value Int| -> Bool:
+validate |value I32| -> Bool:
     if value < 0 or value > 100:
         return false
     return true
 ;
 
-classify |score Float| -> String:
+classify |score F64| -> String:
     if score >= 90.0:
         return "excellent"
     else if score >= 75.0:
@@ -851,15 +851,15 @@ assert value is not none
 assert index >= 0 and index < length
 
 -- type usage in signatures
-convert |value String| -> Int:
-    return value as Int
+convert |value String| -> I32:
+    return value as I32
 ;
 
-convert |value Int| -> Float:
-    return value as Float
+convert |value I32| -> F64:
+    return value as F64
 ;
 
-convert |value Float| -> String:
+convert |value F64| -> String:
     return value as String
 ;
 
@@ -882,21 +882,21 @@ greet |name String| -> String:
     return "Hello, " + name
 ;
 
-add |a Int, b Int| -> Int:
+add |a I32, b I32| -> I32:
     return a + b
 ;
 
-multiply |a Float, b Float| -> Float:
+multiply |a F64, b F64| -> F64:
     return a * b
 ;
 
-divide |a Float, b Float| -> Float:
+divide |a F64, b F64| -> F64:
     assert b != 0.0
     return a / b
 ;
 
 -- nested control flow
-process_all |values {Int}| -> Int:
+process_all |values {I32}| -> I32:
     copy total = 0
     for value in values:
         if value is 0:
@@ -1118,8 +1118,8 @@ w_29 = or
 w_30 = true
 w_31 = false
 w_32 = none
-w_33 = Int
-w_34 = Float
+w_33 = I32
+w_34 = F64
 w_35 = Bool
 w_36 = String
 w_37 = Char
@@ -1158,7 +1158,7 @@ render_document |renderer| -> String:
 ;
 
 -- Example: batch processing
-batch |items {Int}| -> Int:
+batch |items {I32}| -> I32:
     copy processed = 0
     for item in items:
         if item is 0:
@@ -1168,7 +1168,7 @@ batch |items {Int}| -> Int:
 ;
 
 -- Example: geometry helpers
-distance |a Point Float, b Point Float| -> Float:
+distance |a Point F64, b Point F64| -> F64:
     copy dx = a.x - b.x
     copy dy = a.y - b.y
     return (dx * dx + dy * dy) ^ 0.5
@@ -1185,7 +1185,7 @@ join |parts {String}, separator String| -> String:
 ;
 
 -- Example: lookup table
-find |table {String = Int}, key String| -> Maybe Int:
+find |table {String = I32}, key String| -> Maybe I32:
     if key in table:
         return Some(table[key])
     return Empty
@@ -1222,7 +1222,7 @@ next_state |current String, event String| -> String:
 ;
 -- Example: cache with fixed capacity
 cache = |
-    capacity Int,
+    capacity I32,
     entries {String = String},
 |
 
@@ -1262,7 +1262,7 @@ report |title String, rows {Row}| -> String:
 ;
 
 -- Example: retry with backoff
-retry |action || -> Bool, attempts Int| -> Bool:
+retry |action || -> Bool, attempts I32| -> Bool:
     for attempt to attempts:
         if action():
             return true
@@ -1270,7 +1270,7 @@ retry |action || -> Bool, attempts Int| -> Bool:
 ;
 
 -- Example: weighted choice
-choose |weights {Float}| -> Int:
+choose |weights {F64}| -> I32:
     copy total_weight = 0.0
     for weight in weights:
         total_weight += weight
@@ -1290,7 +1290,7 @@ Node type A ::
 ;
 
 -- Example: tree walk
-walk |node Node Int| -> {Int}:
+walk |node Node I32| -> {I32}:
     match node:
         Leaf | value, | => return {value}
         Branch | left, right, | => return walk(left) + walk(right)
@@ -1298,11 +1298,11 @@ walk |node Node Int| -> {Int}:
 ;
 
 -- Example: formatting numbers
-format_float |value Float| -> String:
+format_float |value F64| -> String:
     return value as String
 ;
 
-format_int |value Int| -> String:
+format_int |value I32| -> String:
     return value as String
 ;
 
@@ -1363,7 +1363,7 @@ fold_19 #= ((49 + 50) * (51 + 52)) / (53 + 54)
 fold_20 #= (55 ^ 2) * (56 ^ 2) / (57 ^ 2)
 
 -- Example: string builder
-build_message |name String, count Int| -> String:
+build_message |name String, count I32| -> String:
     copy message = "Hello " + name
     if count > 1:
         message += " you have " + count + " messages"
@@ -1373,7 +1373,7 @@ build_message |name String, count Int| -> String:
 ;
 
 -- Example: guard clauses
-guard |value Int| -> Bool:
+guard |value I32| -> Bool:
     if value < 0:
         return false
     if value > 1_000:
@@ -1382,7 +1382,7 @@ guard |value Int| -> Bool:
 ;
 
 -- Example: default parameters
-render_box |title String = "Untitled", padding Int = 8| -> String:
+render_box |title String = "Untitled", padding I32 = 8| -> String:
     return [:
         <div class="box" style="padding: [padding]px;">
             <h2>[title]</h2>
@@ -1434,7 +1434,7 @@ handle |status Status| -> String:
 ;
 
 -- Example: option composition
-compose |a Maybe Int, b Maybe Int| -> Maybe Int:
+compose |a Maybe I32, b Maybe I32| -> Maybe I32:
     match a:
         Empty => return Empty
         Some | x, | => match b:

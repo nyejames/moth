@@ -2,4 +2,4 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-SYNTAX-0008"]
-message_contains = ["finite Float"]
+message_contains = ["finite F64"]

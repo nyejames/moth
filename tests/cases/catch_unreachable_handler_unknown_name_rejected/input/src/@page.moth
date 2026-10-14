@@ -1,0 +1,6 @@
+hidden ||:
+    value = 1 + 2 catch:
+        sink = missing_name
+        then 0
+    ;
+;

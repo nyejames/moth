@@ -4,4 +4,4 @@ entry = "."
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-SYNTAX-0029"]
-message_contains = ["Collection loop source", "{String = Int}"]
+message_contains = ["Collection loop source", "{String = I32}"]

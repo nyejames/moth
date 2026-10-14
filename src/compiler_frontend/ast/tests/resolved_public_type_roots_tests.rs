@@ -16,8 +16,10 @@ use super::environment::{
 use super::scope_context::{ReceiverMethodCatalog, ReceiverMethodEntry};
 use crate::compiler_frontend::ast::ResolvedTraitSourceFact;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
-use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ReturnSlot};
+use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
+use crate::compiler_frontend::ast::statements::functions::{
+    FunctionParameter, FunctionSignature, ReturnSlot,
+};
 use crate::compiler_frontend::ast::type_resolution::{
     ResolvedFunctionSignature, ResolvedTypeAlias,
 };
@@ -29,7 +31,9 @@ use crate::compiler_frontend::datatypes::definitions::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_parameters::TypeParameterId;
-use crate::compiler_frontend::datatypes::ids::{GenericParameterListId, NominalTypeId, TypeId};
+use crate::compiler_frontend::datatypes::ids::{
+    GenericParameterListId, NominalTypeId, TypeId, builtin_type_ids,
+};
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::DeclarationSyntax;
@@ -45,6 +49,7 @@ use crate::compiler_frontend::traits::environment::{CoreTraitKind, TraitEnvironm
 use crate::compiler_frontend::traits::ids::TraitId;
 use crate::compiler_frontend::value_mode::ValueMode;
 
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 fn path(name: &str, string_table: &mut StringTable, path_fork: &mut PathInternerFork) -> PathId {
@@ -119,18 +124,15 @@ fn constant_kind() -> HeaderKind {
 }
 
 fn resolved_free_signature(int_type_id: TypeId) -> ResolvedFunctionSignature {
-    let parameter = Declaration {
+    let parameter = FunctionParameter {
         id: PathId::ROOT,
-        value: Expression::no_value_with_type_id(
-            None,
-            DataType::Int,
-            int_type_id,
-            ValueMode::default(),
-        ),
+        type_id: int_type_id,
+        diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+        value_mode: ValueMode::default(),
+        default: None,
         binding_span: None,
-        config_qualifier: None,
     };
-    let mut return_slot = ReturnSlot::success(DataType::Int);
+    let mut return_slot = ReturnSlot::success(DataType::FixedScalar(FixedScalar::I32));
     return_slot.type_id = Some(int_type_id);
     ResolvedFunctionSignature {
         receiver: None,
@@ -142,16 +144,13 @@ fn resolved_free_signature(int_type_id: TypeId) -> ResolvedFunctionSignature {
 }
 
 fn receiver_signature(int_type_id: TypeId) -> FunctionSignature {
-    let parameter = Declaration {
+    let parameter = FunctionParameter {
         id: PathId::ROOT,
-        value: Expression::no_value_with_type_id(
-            None,
-            DataType::Int,
-            int_type_id,
-            ValueMode::default(),
-        ),
+        type_id: int_type_id,
+        diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+        value_mode: ValueMode::default(),
+        default: None,
         binding_span: None,
-        config_qualifier: None,
     };
     FunctionSignature {
         parameters: vec![parameter],
@@ -170,12 +169,10 @@ fn resolved_alias(target_type_id: TypeId) -> ResolvedTypeAlias {
 fn constant_declaration(type_id: TypeId, decl_path: PathId) -> Declaration {
     Declaration {
         id: decl_path,
-        value: Expression::no_value_with_type_id(
-            None,
-            DataType::Int,
-            type_id,
-            ValueMode::default(),
-        ),
+        type_id,
+        diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+        value_mode: ValueMode::default(),
+        value: DeclarationValue::PendingConstant,
         binding_span: None,
         config_qualifier: None,
     }
@@ -199,7 +196,10 @@ fn receiver_entry(
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the root-table fixture keeps owned headers, signatures, nominal ids, aliases, declarations, struct fields and receiver catalog separate from shared type/trait environments and string/path tables"
+)]
 fn build_table(
     headers: Vec<Header>,
     signatures: FxHashMap<PathId, ResolvedFunctionSignature>,
@@ -236,7 +236,7 @@ fn retains_every_public_root_category_in_sorted_header_order() {
     let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let trait_environment = TraitEnvironment::new();
-    let int_type_id = type_environment.builtins().int;
+    let int_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let func_path = path("free_func", &mut string_table, &mut path_fork);
     let struct_path = path("public_struct", &mut string_table, &mut path_fork);
@@ -351,7 +351,7 @@ fn retains_every_public_root_category_in_sorted_header_order() {
         panic!("expected Function root");
     };
     assert_eq!(signature.parameters.len(), 1);
-    assert_eq!(signature.parameters[0].value.type_id, int_type_id);
+    assert_eq!(signature.parameters[0].type_id, int_type_id);
     assert_eq!(signature.returns.len(), 1);
     assert_eq!(signature.returns[0].type_id, Some(int_type_id));
 
@@ -380,7 +380,7 @@ fn excludes_imported_root_private_and_non_declaration_headers() {
     let mut path_fork = PathInternerFork::empty();
     let type_environment = TypeEnvironment::new();
     let trait_environment = TraitEnvironment::new();
-    let int_type_id = type_environment.builtins().int;
+    let int_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let imported_struct = path("imported_struct", &mut string_table, &mut path_fork);
     let private_func = path("private_func", &mut string_table, &mut path_fork);
@@ -462,7 +462,7 @@ fn retains_private_receiver_methods_for_public_nominal_receivers_in_order_indepe
     let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let trait_environment = TraitEnvironment::new();
-    let int_type_id = type_environment.builtins().int;
+    let int_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let public_struct = path("public_struct", &mut string_table, &mut path_fork);
     let private_struct = path("private_struct", &mut string_table, &mut path_fork);
@@ -769,7 +769,7 @@ fn missing_receiver_catalog_entry_is_internal_error() {
     let mut path_fork = PathInternerFork::empty();
     let type_environment = TypeEnvironment::new();
     let trait_environment = TraitEnvironment::new();
-    let int_type_id = type_environment.builtins().int;
+    let int_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let public_struct = path("public_struct", &mut string_table, &mut path_fork);
     let method_path = path("orphan_method", &mut string_table, &mut path_fork);
@@ -836,7 +836,7 @@ fn missing_active_root_function_signature_in_method_pass_is_internal_error() {
     let mut path_fork = PathInternerFork::empty();
     let type_environment = TypeEnvironment::new();
     let trait_environment = TraitEnvironment::new();
-    let int_type_id = type_environment.builtins().int;
+    let int_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let public_struct = path("public_struct", &mut string_table, &mut path_fork);
     let method_path = path("orphan_method", &mut string_table, &mut path_fork);
@@ -962,7 +962,7 @@ fn retains_source_trait_fact_for_generic_struct_bound() {
     let mut path_fork = PathInternerFork::empty();
     let mut type_environment = TypeEnvironment::new();
     let mut trait_environment = TraitEnvironment::new();
-    let int_type_id = type_environment.builtins().int;
+    let int_type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let source_trait_id = register_source_trait(
         &mut trait_environment,

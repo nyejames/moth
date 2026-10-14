@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "numeric_boundaries default=7 field=18446744073709551615 fixed=value=18446744073709551615 length=1"

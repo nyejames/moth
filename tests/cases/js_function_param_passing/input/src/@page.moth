@@ -1,11 +1,11 @@
 -- Test that function parameters are normalized through __moth_param_binding
 -- and that call arguments use the reference ABI (__moth_binding wrapping).
 
-double |n Int| -> Int:
+double |n I32| -> I32:
     return n * 2
 ;
 
-identity |value Int| -> Int:
+identity |value I32| -> I32:
     return value
 ;
 

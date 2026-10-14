@@ -1,6 +1,6 @@
 -- io.line([: []]) rejects unhandled error-returning operands before string-content typing.
 
-can_error || -> Int, Error!:
+can_error || -> I32, Error!:
     return! Error("not a number")
 ;
 

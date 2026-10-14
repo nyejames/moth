@@ -1,0 +1,20 @@
+entry = "."
+
+# The protected `1 + 2` cannot fail, so this handler is unreachable. Its `then`
+# follows terminal `return 0`, which must not exempt the authored group from the
+# completed I32 slot check. The String is rejected at the `then` value (line 4,
+# column 14). TYPE0001 carries no stable reason key, so the expected/found pair
+# is asserted through message_contains rather than a reason field.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-TYPE-0001"]
+message_contains = ["expected I32, found String"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+path = "input/@page.moth"
+line = 4
+column = 14
+count = 1

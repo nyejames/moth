@@ -1,4 +1,4 @@
-clamp |value Int, minimum Int, maximum Int| -> Int:
+clamp |value I32, minimum I32, maximum I32| -> I32:
     if value < minimum:
         return minimum
     ;
@@ -8,10 +8,11 @@ clamp |value Int, minimum Int, maximum Int| -> Int:
     return value
 ;
 
-scale_value |value Int, factor Float| -> Float:
-    return value * factor
+scale_value |value I32, factor F64| -> F64:
+    converted F64 = cast value
+    return converted * factor
 ;
 
-squared |value Int| -> Int:
+squared |value I32| -> I32:
     return value * value
 ;

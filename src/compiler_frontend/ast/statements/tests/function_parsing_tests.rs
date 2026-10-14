@@ -3,29 +3,64 @@
 //! WHAT: validates the AST shapes produced for function declarations and call sites.
 //! WHY: statement parsing should preserve signature metadata and host/user call dispatch.
 
-use crate::compiler_frontend::ast::ast_nodes::{MatchExhaustiveness, NodeKind};
-use crate::compiler_frontend::ast::expressions::expression::{
-    ExpressionKind, FallibleExpressionHandling, FallibleHandling,
+use crate::compiler_frontend::ast::ast_nodes::{
+    MatchExhaustiveness, MultiBindTargetKind, NodeKind,
+};
+use crate::compiler_frontend::ast::const_values::store::{
+    ConstValueId, ConstValuePayload, ConstValueStore,
+};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    ExpressionOperationView, ResolvedCallableTarget,
+};
+use crate::compiler_frontend::ast::expressions::expression_types::{
+    FallibleExpressionHandling, FallibleHandling,
 };
 use crate::compiler_frontend::ast::statements::functions::ReturnChannel;
 use crate::compiler_frontend::ast::statements::match_patterns::MatchPattern;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, InvalidCallShapeReason, InvalidFunctionSignatureReason,
-    InvalidGenericInstantiationReason, InvalidMatchPatternReason, InvalidReceiverCallReason,
-    InvalidReceiverDeclarationReason, InvalidThisUsageReason, NameNamespace, TypeMismatchContext,
+    DiagnosticPayload, InvalidCallShapeReason, InvalidDeclarationReason,
+    InvalidFunctionSignatureReason, InvalidGenericInstantiationReason, InvalidMatchPatternReason,
+    InvalidReceiverCallReason, InvalidReceiverDeclarationReason, InvalidThisUsageReason,
+    NameNamespace, TypeMismatchContext, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::tests::ast_fixture_support::{
     function_body_by_name, function_signature_by_name, start_function_body,
 };
 use crate::compiler_frontend::tests::parse_support::{
-    parse_single_file_ast, parse_single_file_ast_build_result,
-    parse_single_file_ast_build_result_with_profile, parse_single_file_ast_diagnostic,
+    parse_single_file_ast, parse_single_file_ast_build_result, parse_single_file_ast_diagnostic,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
-use moth_lexical::numeric::profile::{FloatPrecision, IntWidth, NumericProfile};
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
+
+fn assert_optional_string_default(
+    constants: &ConstValueStore,
+    default: ConstValueId,
+    optional_type: crate::compiler_frontend::datatypes::ids::TypeId,
+    string_type: crate::compiler_frontend::datatypes::ids::TypeId,
+) {
+    assert_eq!(
+        constants
+            .metadata(default)
+            .expect("default metadata")
+            .type_id,
+        optional_type
+    );
+    let Some(ConstValuePayload::OptionSome(inner)) = constants.payload(default) else {
+        panic!("present String default must retain its optional wrapping");
+    };
+    assert_eq!(
+        constants.metadata(*inner).expect("inner metadata").type_id,
+        string_type
+    );
+    assert!(matches!(
+        constants.payload(*inner),
+        Some(ConstValuePayload::String(_))
+    ));
+}
 
 fn parse_function_diagnostic_payload(source: &str) -> DiagnosticPayload {
     parse_single_file_ast_diagnostic(source).payload
@@ -66,6 +101,31 @@ fn assert_invalid_receiver_call(source: &str, expected_reason: InvalidReceiverCa
 // --------------------------
 
 #[test]
+fn generic_declarations_in_executable_bodies_require_module_top_level() {
+    for declaration in [
+        "nested type A |value A|:\n        return\n    ;",
+        "Nested type A = |value A|",
+        "Nested type A :: Item |value A|;",
+        "Nested type A as A",
+    ] {
+        let source = format!("outer ||:\n    {declaration}\n;\n");
+        let diagnostic = parse_single_file_ast_diagnostic(&source);
+        assert_eq!(diagnostic.kind.code(), "MOTH-RULE-0043", "{declaration}");
+        assert!(
+            matches!(
+                diagnostic.payload,
+                DiagnosticPayload::InvalidDeclaration {
+                    reason: InvalidDeclarationReason::DeclarationRequiresModuleTopLevel,
+                    ..
+                }
+            ),
+            "{declaration}: {:?}",
+            diagnostic.payload
+        );
+    }
+}
+
+#[test]
 fn function_default_path_token_reports_structured_diagnostic_not_panic() {
     // A path token nested in a template default lives in the detached parameter
     // default buffer; the header must own its path row so AST parsing reports the
@@ -86,9 +146,105 @@ fn function_default_path_token_reports_structured_diagnostic_not_panic() {
 }
 
 #[test]
+fn parameters_cannot_shadow_bound_external_symbols_or_namespaces() {
+    for (source, name) in [
+        ("read |io I32|:\n;\n", "io"),
+        ("read |io ~I32|:\n;\n", "io"),
+        ("read type T |io T|:\n;\n", "io"),
+        ("Point = |value I32|\nread |this Point, io I32|:\n;\n", "io"),
+        (
+            "@core/io line as host_line\nread |host_line I32|:\n;\n",
+            "host_line",
+        ),
+        ("@core/io as output\nread |output I32|:\n;\n", "output"),
+    ] {
+        let diagnostic = parse_single_file_ast_diagnostic(source);
+        assert_eq!(diagnostic.kind.code(), "MOTH-RULE-0038", "{source}");
+        assert!(matches!(
+            diagnostic.payload,
+            DiagnosticPayload::ShadowedName { .. }
+        ));
+        let start = source.rfind(name).expect("the parameter name must occur") as u32;
+        let mut builder = ExtendedSpanBuilder::new();
+        let span = LocalSpan::exact(start, name.len() as u32, &mut builder)
+            .expect("the name span must fit");
+        assert_eq!(
+            diagnostic.primary_span,
+            Some(SourceSpan::new(SourceId::COMPILATION_ROOT, span)),
+            "{source}",
+        );
+        assert!(diagnostic.labels.is_empty(), "{source}");
+    }
+}
+
+#[test]
+fn parameters_cannot_shadow_visible_source_declarations() {
+    for (source, name) in [
+        ("read |read I32|:\n;\n", "read"),
+        ("top_value #= 1\nread |top_value I32|:\n;\n", "top_value"),
+        ("available ||:\n;\nread |available I32|:\n;\n", "available"),
+        (
+            "top_value #= 1\nPoint = |value I32|\nread |this Point, top_value I32|:\n;\n",
+            "top_value",
+        ),
+    ] {
+        let diagnostic = parse_single_file_ast_build_result(source)
+            .err()
+            .unwrap_or_else(|| {
+                panic!("the visible source declaration must reject its parameter: {source}")
+            });
+        assert_eq!(diagnostic.kind.code(), "MOTH-RULE-0038", "{source}");
+        assert!(matches!(
+            diagnostic.payload,
+            DiagnosticPayload::ShadowedName { .. }
+        ));
+        let start = source.rfind(name).expect("the parameter name must occur") as u32;
+        let mut builder = ExtendedSpanBuilder::new();
+        let span = LocalSpan::exact(start, name.len() as u32, &mut builder)
+            .expect("the name span must fit");
+        assert_eq!(
+            diagnostic.primary_span,
+            Some(SourceSpan::new(SourceId::COMPILATION_ROOT, span)),
+            "{source}",
+        );
+    }
+}
+
+#[test]
+fn ordinary_mutable_parameters_keep_single_and_multi_bind_updates() {
+    let (ast, paths, strings) = parse_single_file_ast(
+        "pair || -> I32, I32:\n    return 1, 2\n;\n\
+         rebind |first ~I32, second ~I32| -> I32, I32:\n\
+             first = 3\n\
+             first, second = pair()\n\
+             return first, second\n;\n",
+    );
+    let body = function_body_by_name(&ast, &paths, &strings, "rebind");
+    assert!(matches!(body[0].kind, NodeKind::Assignment { .. }));
+    let NodeKind::MultiBind { targets, .. } = &body[1].kind else {
+        panic!("the existing parameter updates must remain a multi-bind");
+    };
+    assert_eq!(targets.len(), 2);
+    for (target, name) in targets.iter().zip(["first", "second"]) {
+        assert!(matches!(target.kind, MultiBindTargetKind::Assignment));
+        assert_eq!(target.value_mode, ValueMode::MutableOwned);
+        assert_eq!(
+            target.type_id,
+            builtin_type_ids::fixed_scalar(FixedScalar::I32)
+        );
+        assert_eq!(
+            strings.resolve(paths.component(target.id).expect("the target has a name")),
+            name,
+        );
+    }
+    assert!(matches!(body[2].kind, NodeKind::Return(_)));
+    assert_eq!(body.len(), 3);
+}
+
+#[test]
 fn parses_function_parameters_and_return_types() {
     let (ast, path_fork, string_table) =
-        parse_single_file_ast("add |left Int, right Int| -> Int:\n    return left + right\n;\n");
+        parse_single_file_ast("add |left I32, right I32| -> I32:\n    return left + right\n;\n");
 
     let signature = function_signature_by_name(&ast, &path_fork, &string_table, "add");
 
@@ -106,7 +262,10 @@ fn parses_function_parameters_and_return_types() {
         Some("right")
     );
     assert_eq!(signature.returns.len(), 1);
-    assert_eq!(signature.returns[0].value, DataType::Int);
+    assert_eq!(
+        signature.returns[0].value,
+        DataType::FixedScalar(FixedScalar::I32)
+    );
     assert_eq!(signature.returns[0].channel, ReturnChannel::Success);
     assert!(
         signature.returns[0].type_id.is_some(),
@@ -117,12 +276,15 @@ fn parses_function_parameters_and_return_types() {
 #[test]
 fn parses_final_error_return_slot_in_function_signature() {
     let (ast, path_fork, string_table) =
-        parse_single_file_ast("compute |x Int| -> Int, Error!:\n    return x\n;\n");
+        parse_single_file_ast("compute |x I32| -> I32, Error!:\n    return x\n;\n");
 
     let signature = function_signature_by_name(&ast, &path_fork, &string_table, "compute");
 
     assert_eq!(signature.returns.len(), 2);
-    assert_eq!(signature.returns[0].value, DataType::Int);
+    assert_eq!(
+        signature.returns[0].value,
+        DataType::FixedScalar(FixedScalar::I32)
+    );
     assert_eq!(signature.returns[0].channel, ReturnChannel::Success);
     assert!(
         signature.returns[0].type_id.is_some(),
@@ -142,7 +304,7 @@ fn parses_final_error_return_slot_in_function_signature() {
 #[test]
 fn parses_optional_final_error_return_slot() {
     let (ast, path_fork, string_table) =
-        parse_single_file_ast("compute |x Int| -> Int, String?!:\n    return x\n;\n");
+        parse_single_file_ast("compute |x I32| -> I32, String?!:\n    return x\n;\n");
 
     let signature = function_signature_by_name(&ast, &path_fork, &string_table, "compute");
 
@@ -161,7 +323,7 @@ fn parses_optional_final_error_return_slot() {
 #[test]
 fn rejects_non_final_error_return_slot() {
     let payload =
-        parse_function_diagnostic_payload("compute |x Int| -> Error!, Int:\n    return 42\n;\n");
+        parse_function_diagnostic_payload("compute |x I32| -> Error!, I32:\n    return 42\n;\n");
 
     assert_eq!(
         payload,
@@ -174,7 +336,7 @@ fn rejects_non_final_error_return_slot() {
 #[test]
 fn rejects_multiple_error_return_slots() {
     let payload = parse_function_diagnostic_payload(
-        "compute |x Int| -> Int, String!, Error!:\n    return 42\n;\n",
+        "compute |x I32| -> I32, String!, Error!:\n    return 42\n;\n",
     );
 
     assert_eq!(
@@ -232,26 +394,45 @@ fn same_file_generic_calls_emit_requests_without_eager_function_bodies() {
     let NodeKind::VariableDeclaration(declaration) = &start_body[0].kind else {
         panic!("expected start body to store the generic call result")
     };
-    let ExpressionKind::FunctionCall {
-        name,
-        result_type_ids,
-        ..
-    } = &declaration.value.kind
+    let ExpressionOperationView::Call(call) = ast
+        .expressions
+        .view(
+            declaration
+                .value
+                .initializer()
+                .expect("fixture initializer"),
+        )
+        .expect("bound initializer")
+        .operation()
     else {
         panic!("expected variable initializer to call the concrete generic instance")
+    };
+    let ResolvedCallableTarget::Function(name) = call.metadata().target else {
+        panic!("expected a user function target");
     };
 
     assert!(
         !ast.nodes
             .iter()
-            .any(|node| matches!(&node.kind, NodeKind::Function(path, ..) if path == name)),
+            .any(|node| matches!(&node.kind, NodeKind::Function(path, ..) if *path == name)),
         "generic calls must not materialise concrete bodies inside the requester AST"
     );
     let [request] = build_result.deferred_generic_requests.as_slice() else {
         panic!("one generic call should emit one deferred request")
     };
-    assert_eq!(name, &request.instance_path);
-    assert_eq!(request.key.type_arguments.as_ref(), result_type_ids);
+    assert_eq!(name, request.instance_path);
+    assert_eq!(
+        request.key.type_arguments.as_ref(),
+        ast.expressions
+            .view(
+                declaration
+                    .value
+                    .initializer()
+                    .expect("fixture initializer")
+            )
+            .expect("bound initializer")
+            .success_types(),
+    );
     let call_start = source
         .find("identity(1)")
         .expect("the generic call should be present") as u32;
@@ -262,7 +443,10 @@ fn same_file_generic_calls_emit_requests_without_eager_function_bodies() {
         request.call_span,
         Some(SourceSpan::new(SourceId::COMPILATION_ROOT, call_span))
     );
-    assert_eq!(declaration.value.diagnostic_type, DataType::Int);
+    assert_eq!(
+        declaration.diagnostic_type,
+        DataType::FixedScalar(FixedScalar::I32)
+    );
 }
 
 #[test]
@@ -330,7 +514,7 @@ fn fallible_generic_calls_remain_request_only() {
 }
 
 #[test]
-fn static_true_assertion_validates_but_discards_inactive_generic_message_requests() {
+fn static_true_assertion_retains_validation_only_generic_message_request() {
     let (build_result, path_fork, string_table) = parse_single_file_ast_build_result(
         "identity type T |value T| -> T:\n    return value\n;\n\nassert(true, identity(\"inactive\"))\n",
     )
@@ -338,7 +522,23 @@ fn static_true_assertion_validates_but_discards_inactive_generic_message_request
 
     assert!(
         build_result.deferred_generic_requests.is_empty(),
-        "static-true assertion messages must not publish generic requests"
+        "static-true assertion messages must not publish executable generic requests"
+    );
+    let [request] = build_result
+        .assertion_validation_generic_requests
+        .as_slice()
+    else {
+        panic!("the surviving concrete assertion must retain its generic validation request");
+    };
+    assert_eq!(
+        request.key.type_arguments.as_ref(),
+        &[build_result.ast.type_environment.builtins().string],
+    );
+    assert!(
+        !build_result.ast.nodes.iter().any(
+            |node| matches!(&node.kind, NodeKind::Function(path, ..) if *path == request.instance_path)
+        ),
+        "validation-only candidates must not eagerly materialise executable bodies",
     );
     let start_body = start_function_body(&build_result.ast, &path_fork, &string_table);
     assert!(
@@ -346,6 +546,158 @@ fn static_true_assertion_validates_but_discards_inactive_generic_message_request
             .iter()
             .any(|node| matches!(node.kind, NodeKind::Assert { .. })),
         "the assertion itself remains in the executable AST contract"
+    );
+}
+
+#[test]
+fn static_true_assertion_completes_pending_validation_ticket_without_dropping_sibling() {
+    for condition in ["true", "1 + 2 is 3"] {
+        let source = format!(
+            "\
+describe type T |value T| -> String:
+    return \"inactive\"
+;
+identity type T |value T| -> T:
+    return value
+;
+
+value = 1
+assert({condition}, describe(value))
+active = identity(value)
+"
+        );
+        let (build_result, path_fork, string_table) = parse_single_file_ast_build_result(&source)
+            .expect("retained assertion and sibling generic calls should both complete");
+
+        let [validation] = build_result
+            .assertion_validation_generic_requests
+            .as_slice()
+        else {
+            panic!("condition {condition}: the message must complete its own validation ticket");
+        };
+        let [active] = build_result.deferred_generic_requests.as_slice() else {
+            panic!("condition {condition}: the sibling's executable request must survive");
+        };
+        assert_eq!(
+            path_fork
+                .component(validation.key.function_path)
+                .map(|component| string_table.resolve(component)),
+            Some("describe"),
+            "condition {condition}",
+        );
+        assert_eq!(
+            path_fork
+                .component(active.key.function_path)
+                .map(|component| string_table.resolve(component)),
+            Some("identity"),
+            "condition {condition}",
+        );
+        let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
+        assert_eq!(validation.key.type_arguments.as_ref(), &[int]);
+        assert_eq!(active.key.type_arguments.as_ref(), &[int]);
+    }
+}
+
+#[test]
+fn numeric_true_condition_reclassifies_original_concrete_message_request_only() {
+    let source = "\
+identity type T |value T| -> T:
+    return value
+;
+check ||:
+    assert(1 + 2 is 3, identity(\"message\"))
+;
+
+active = identity(4)
+";
+    let (build_result, _path_fork, _string_table) = parse_single_file_ast_build_result(source)
+        .expect("the numeric condition should finish true after the message request was recorded");
+
+    let [validation] = build_result
+        .assertion_validation_generic_requests
+        .as_slice()
+    else {
+        panic!("the original concrete message request must become validation-only");
+    };
+    let [active] = build_result.deferred_generic_requests.as_slice() else {
+        panic!("the later active call must keep its executable request");
+    };
+    assert_eq!(
+        validation.key.type_arguments.as_ref(),
+        &[build_result.ast.type_environment.builtins().string],
+    );
+    assert_eq!(
+        active.key.type_arguments.as_ref(),
+        &[builtin_type_ids::fixed_scalar(FixedScalar::I32)],
+    );
+}
+
+#[test]
+fn executable_generic_request_takes_precedence_over_pending_assertion_validation() {
+    let source = "\
+describe type T |value T| -> String:
+    return \"message\"
+;
+
+value = 1
+assert(true, describe(value))
+active = describe(value)
+";
+    let (build_result, _path_fork, _string_table) = parse_single_file_ast_build_result(source)
+        .expect("duplicate validation and executable calls should both complete");
+
+    assert_eq!(build_result.deferred_generic_requests.len(), 1);
+    assert!(
+        build_result
+            .assertion_validation_generic_requests
+            .is_empty(),
+        "an executable request already supplies the canonical validation dependency",
+    );
+}
+
+#[test]
+fn inactive_static_if_drops_known_true_assertion_validation_requests() {
+    let source = "\
+describe type T |value T| -> String:
+    return \"inactive\"
+;
+
+value = 1
+if false:
+    assert(true, describe(value))
+;
+";
+    let (build_result, _path_fork, _string_table) = parse_single_file_ast_build_result(source)
+        .expect("inactive assertions should still finish numeric and generic validation");
+
+    assert!(build_result.deferred_generic_requests.is_empty());
+    assert!(
+        build_result
+            .assertion_validation_generic_requests
+            .is_empty(),
+        "an assertion removed with its static branch has no surviving validation witness",
+    );
+}
+
+#[test]
+fn abstract_generic_body_does_not_publish_assertion_validation_requests() {
+    let source = "\
+describe type T |value T| -> String:
+    return \"inactive\"
+;
+unused type T |value T|:
+    assert(true, describe(value))
+;
+";
+    let (build_result, _path_fork, _string_table) = parse_single_file_ast_build_result(source)
+        .expect("abstract generic bodies should validate without activating requests");
+
+    assert!(build_result.deferred_generic_requests.is_empty());
+    assert!(
+        build_result
+            .assertion_validation_generic_requests
+            .is_empty(),
+        "abstract template validation is not a surviving concrete assertion witness",
     );
 }
 
@@ -439,7 +791,7 @@ fn generic_template_terminality_uses_static_module_constant_selection() {
 #[test]
 fn start_function_distinguishes_user_and_host_calls() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
-        "identity |value Int| -> Int:\n    return value\n;\n\nresult = identity(1)\nio.line([: [result]])\n",
+        "identity |value I32| -> I32:\n    return value\n;\n\nresult = identity(1)\nio.line([: [result]])\n",
     );
 
     let body = start_function_body(&ast, &path_fork, &string_table);
@@ -448,14 +800,16 @@ fn start_function_distinguishes_user_and_host_calls() {
         panic!("expected variable declaration for function result");
     };
     assert!(matches!(
-        result_decl.value.kind,
-        ExpressionKind::FunctionCall { .. }
+        ast.expressions.view(result_decl.value.initializer().expect("fixture initializer"))
+            .expect("bound initializer").operation(),
+        ExpressionOperationView::Call(call) if matches!(call.metadata().target, ResolvedCallableTarget::Function(_))
     ));
 
     assert!(
         body.iter().any(|node| match &node.kind {
             NodeKind::ExpressionStatement(expression) => {
-                matches!(expression.kind, ExpressionKind::HostFunctionCall { .. })
+                matches!(ast.expressions.view(*expression).expect("bound expression").operation(),
+                    ExpressionOperationView::Call(call) if matches!(call.metadata().target, ResolvedCallableTarget::Host(_)))
             }
             _ => false,
         }),
@@ -478,7 +832,7 @@ fn start_function_distinguishes_user_and_host_calls() {
 #[test]
 fn rejects_immutable_collection_place_argument_to_mutable_parameter() {
     let payload = parse_function_diagnostic_payload(
-        "touch |items ~{Int}| -> Int:\n    return items.length()\n;\n\nvalues = {1, 2, 3}\ncount = touch(values)\n",
+        "touch |items ~{I32}| -> I32:\n    return items.length()\n;\n\nvalues = {1, 2, 3}\ncount = touch(values)\n",
     );
 
     assert!(
@@ -496,7 +850,7 @@ fn rejects_immutable_collection_place_argument_to_mutable_parameter() {
 #[test]
 fn rejects_collection_element_type_mismatch_with_mutability_relaxation() {
     assert_type_mismatch_context(
-        "sum |items {Int}| -> Int:\n    return items.length()\n;\n\nvalues ~= {true, false}\ncount = sum(values)\n",
+        "sum |items {I32}| -> I32:\n    return items.length()\n;\n\nvalues ~= {true, false}\ncount = sum(values)\n",
         TypeMismatchContext::FunctionArgument,
     );
 }
@@ -504,7 +858,7 @@ fn rejects_collection_element_type_mismatch_with_mutability_relaxation() {
 #[test]
 fn rejects_struct_constructor_argument_type_with_field_wording() {
     assert_type_mismatch_context(
-        "Point = |\n    x Int,\n    y Int,\n|\n\npoint = Point(x = 1, y = \"oops\")\n",
+        "Point = |\n    x I32,\n    y I32,\n|\n\npoint = Point(x = 1, y = \"oops\")\n",
         TypeMismatchContext::ConstructorArgument,
     );
 }
@@ -516,12 +870,12 @@ fn rejects_struct_constructor_argument_type_with_field_wording() {
 #[test]
 fn resolves_named_struct_type_in_function_parameters() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
-        "Point = |\n    x Int,\n|\n\nshow |value Point|:\n    io.line([: [value.x]])\n;\n",
+        "Point = |\n    x I32,\n|\n\nshow |value Point|:\n    io.line([: [value.x]])\n;\n",
     );
 
     let signature = function_signature_by_name(&ast, &path_fork, &string_table, "show");
     assert!(matches!(
-        signature.parameters[0].value.diagnostic_type,
+        signature.parameters[0].diagnostic_type,
         DataType::Struct {
             const_record: false,
             ..
@@ -532,7 +886,7 @@ fn resolves_named_struct_type_in_function_parameters() {
 #[test]
 fn resolves_named_struct_type_in_function_returns() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
-        "Point = |\n    x Int,\n|\n\nclone |value Point| -> Point:\n    return value\n;\n",
+        "Point = |\n    x I32,\n|\n\nclone |value Point| -> Point:\n    return value\n;\n",
     );
 
     let signature = function_signature_by_name(&ast, &path_fork, &string_table, "clone");
@@ -565,7 +919,7 @@ fn rejects_unknown_named_type_in_function_signatures() {
 #[test]
 fn rejects_unknown_named_return_type_in_function_signatures() {
     let payload =
-        parse_function_diagnostic_payload("clone |value Int| -> Missing:\n    return value\n;\n");
+        parse_function_diagnostic_payload("clone |value I32| -> Missing:\n    return value\n;\n");
 
     assert!(
         matches!(
@@ -586,7 +940,7 @@ fn rejects_unknown_named_return_type_in_function_signatures() {
 #[test]
 fn rejects_receiver_parameter_when_not_first() {
     let payload = parse_function_diagnostic_payload(
-        "Point = |\n    x Int,\n|\n\nreset |value Int, this Point|:\n    return value\n;\n",
+        "Point = |\n    x I32,\n|\n\nreset |value I32, this Point|:\n    return value\n;\n",
     );
 
     assert!(
@@ -603,14 +957,13 @@ fn rejects_receiver_parameter_when_not_first() {
 #[test]
 fn rejects_builtin_scalar_receiver_parameter() {
     let payload =
-        parse_function_diagnostic_payload("reset |this Int| -> Int:\n    return this\n;\n");
+        parse_function_diagnostic_payload("reset |this I32| -> I32:\n    return this\n;\n");
 
     assert!(
         matches!(
             payload,
             DiagnosticPayload::InvalidReceiverDeclaration {
-                reason: InvalidReceiverDeclarationReason::BuiltinScalarType,
-                ..
+                reason: InvalidReceiverDeclarationReason::BuiltinScalarType
             }
         ),
         "{payload:?}"
@@ -620,7 +973,7 @@ fn rejects_builtin_scalar_receiver_parameter() {
 #[test]
 fn rejects_multiple_this_parameters_in_one_signature() {
     let payload = parse_function_diagnostic_payload(
-        "Point = |\n    x Int = 0,\n|\n\nlength |this Point, this Point| -> Int:\n    return this.x\n;\n",
+        "Point = |\n    x I32 = 0,\n|\n\nlength |this Point, this Point| -> I32:\n    return this.x\n;\n",
     );
 
     assert!(
@@ -641,7 +994,7 @@ fn rejects_multiple_this_parameters_in_one_signature() {
 #[test]
 fn rejects_field_method_name_collisions() {
     let payload = parse_function_diagnostic_payload(
-        "Point = |\n    reset Int = 0,\n|\n\nreset |this Point| -> Int:\n    return this.reset\n;\n",
+        "Point = |\n    reset I32 = 0,\n|\n\nreset |this Point| -> I32:\n    return this.reset\n;\n",
     );
 
     assert_eq!(
@@ -655,7 +1008,7 @@ fn rejects_field_method_name_collisions() {
 #[test]
 fn rejects_free_function_call_syntax_for_receiver_methods() {
     assert_invalid_receiver_call(
-        "Point = |\n    x Int = 0,\n|\n\nreset |this Point|:\n    return\n;\n\npoint ~= Point()\nreset(point)\n",
+        "Point = |\n    x I32 = 0,\n|\n\nreset |this Point|:\n    return\n;\n\npoint ~= Point()\nreset(point)\n",
         InvalidReceiverCallReason::CalledAsFreeFunction,
     );
 }
@@ -663,7 +1016,7 @@ fn rejects_free_function_call_syntax_for_receiver_methods() {
 #[test]
 fn rejects_const_record_method_calls() {
     assert_invalid_receiver_call(
-        "Point = |\n    x Int = 0,\n|\n\nlength |this Point| -> Int:\n    return this.x\n;\n\norigin #= Point()\norigin.length()\n",
+        "Point = |\n    x I32 = 0,\n|\n\nlength |this Point| -> I32:\n    return this.x\n;\n\norigin #= Point()\norigin.length()\n",
         InvalidReceiverCallReason::ConstRecordNoRuntimeCalls,
     );
 }
@@ -671,7 +1024,7 @@ fn rejects_const_record_method_calls() {
 #[test]
 fn parses_mutable_receiver_methods_with_explicit_receiver_tilde() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
-        "Point = |\n    x Int = 0,\n|\n\nreset |this ~Point|:\n    this.x = 0\n;\n\npoint ~= Point()\n~point.reset()\n",
+        "Point = |\n    x I32 = 0,\n|\n\nreset |this ~Point|:\n    this.x = 0\n;\n\npoint ~= Point()\n~point.reset()\n",
     );
 
     let body = start_function_body(&ast, &path_fork, &string_table);
@@ -679,7 +1032,13 @@ fn parses_mutable_receiver_methods_with_explicit_receiver_tilde() {
         panic!("expected receiver method statement");
     };
     assert!(
-        matches!(call_expr.kind, ExpressionKind::MethodCall { .. }),
+        matches!(
+            ast.expressions
+                .view(*call_expr)
+                .expect("bound call")
+                .operation(),
+            ExpressionOperationView::MethodCall { .. }
+        ),
         "expected user-defined receiver method call expression"
     );
 }
@@ -687,14 +1046,14 @@ fn parses_mutable_receiver_methods_with_explicit_receiver_tilde() {
 #[test]
 fn parses_result_propagation_for_receiver_method_call() {
     parse_single_file_ast(
-        "Point = |\n    x Int = 1,\n|\n\nread |this Point| -> Int, Error!:\n    return this.x\n;\n\nforward |point Point| -> Int, Error!:\n    return point.read()!\n;\n",
+        "Point = |\n    x I32 = 1,\n|\n\nread |this Point| -> I32, Error!:\n    return this.x\n;\n\nforward |point Point| -> I32, Error!:\n    return point.read()!\n;\n",
     );
 }
 
 #[test]
 fn rejects_mutable_receiver_methods_on_immutable_bindings_without_marker() {
     assert_invalid_receiver_call(
-        "Point = |\n    x Int = 0,\n|\n\nreset |this ~Point|:\n    this.x = 0\n;\n\npoint = Point()\npoint.reset()\n",
+        "Point = |\n    x I32 = 0,\n|\n\nreset |this ~Point|:\n    this.x = 0\n;\n\npoint = Point()\npoint.reset()\n",
         InvalidReceiverCallReason::ImmutableReceiverMutableMethod,
     );
 }
@@ -702,7 +1061,7 @@ fn rejects_mutable_receiver_methods_on_immutable_bindings_without_marker() {
 #[test]
 fn rejects_explicit_receiver_tilde_for_shared_receiver_methods() {
     assert_invalid_receiver_call(
-        "Point = |\n    x Int = 0,\n|\n\nlength |this Point| -> Int:\n    return this.x\n;\n\npoint ~= Point()\nvalue = ~point.length()\n",
+        "Point = |\n    x I32 = 0,\n|\n\nlength |this Point| -> I32:\n    return this.x\n;\n\npoint ~= Point()\nvalue = ~point.length()\n",
         InvalidReceiverCallReason::UnneededMutableAccessMarker,
     );
 }
@@ -724,18 +1083,18 @@ fn parses_result_propagation_call_in_expression_position() {
 
     assert_eq!(values.len(), 1);
     assert!(matches!(
-        values[0].kind,
-        ExpressionKind::HandledFallibleFunctionCall {
-            handling: FallibleExpressionHandling::Propagate,
-            ..
-        }
+        ast.expressions.view(values[0]).expect("bound return").operation(),
+        ExpressionOperationView::Call(call) if matches!(
+            call.handling().map(|record| &record.handling),
+            Some(FallibleExpressionHandling::Propagate)
+        )
     ));
 }
 
 #[test]
 fn rejects_result_propagation_when_error_slot_types_do_not_match() {
     assert_type_mismatch_context(
-        "ErrA = |\n    message String,\n|\n\nErrB = |\n    message String,\n|\n\ninner || -> Int, ErrA!:\n    return! ErrA(\"failed\")\n;\n\nouter || -> Int, ErrB!:\n    value = inner()!\n    return value\n;\n",
+        "ErrA = |\n    message String,\n|\n\nErrB = |\n    message String,\n|\n\ninner || -> I32, ErrA!:\n    return! ErrA(\"failed\")\n;\n\nouter || -> I32, ErrB!:\n    value = inner()!\n    return value\n;\n",
         TypeMismatchContext::ErrorReturn,
     );
 }
@@ -751,7 +1110,7 @@ fn rejects_return_value_type_with_expected_found_and_value_details() {
 #[test]
 fn return_int_context_reports_targeted_guidance_for_regular_division() {
     assert_type_mismatch_context(
-        "render || -> Int:\n    return 5 / 2\n;\n\nrender()\n",
+        "render || -> I32:\n    return 5 / 2\n;\n\nrender()\n",
         TypeMismatchContext::ReturnValue,
     );
 }
@@ -768,18 +1127,29 @@ fn parses_result_fallback_call_in_expression_position() {
     };
 
     assert_eq!(values.len(), 1);
-    let ExpressionKind::ValueBlock { block } = &values[0].kind else {
+    let ExpressionOperationView::ValueBlock(block) = ast
+        .expressions
+        .view(values[0])
+        .expect("bound return")
+        .operation()
+    else {
         panic!("expected catch value block in recover return");
     };
-    let ValueBlock::Catch(value_catch) = block.as_ref() else {
+    let ValueBlock::Catch(value_catch) = block else {
         panic!("expected catch value block");
     };
-    let ExpressionKind::HandledFallibleFunctionCall { handling, .. } =
-        &value_catch.handled_value.kind
+    let ExpressionOperationView::Call(call) = ast
+        .expressions
+        .view(value_catch.handled_value)
+        .expect("bound handled value")
+        .operation()
     else {
         panic!("expected handled call expression in catch value block");
     };
-    assert!(matches!(handling, FallibleExpressionHandling::Recover));
+    assert!(matches!(
+        call.handling().map(|record| &record.handling),
+        Some(FallibleExpressionHandling::Recover)
+    ));
     let FallibleHandling::Handler { body, .. } = &value_catch.handler else {
         panic!("expected catch-block handling");
     };
@@ -791,7 +1161,7 @@ fn parses_result_fallback_call_in_expression_position() {
 fn parses_inline_choice_predicate_receiver_as_value_match() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
         "Status :: Ready, Waiting;\n\
-     score_for |status Status| -> Int:\n\
+     score_for |status Status| -> I32:\n\
          score = if status is Ready then 1 else 0\n\
          return score\n\
      ;\n",
@@ -801,10 +1171,15 @@ fn parses_inline_choice_predicate_receiver_as_value_match() {
     let NodeKind::VariableDeclaration(score_decl) = &body[0].kind else {
         panic!("expected score declaration in score_for()");
     };
-    let ExpressionKind::ValueBlock { block } = &score_decl.value.kind else {
+    let ExpressionOperationView::ValueBlock(block) = ast
+        .expressions
+        .view(score_decl.value.initializer().expect("fixture initializer"))
+        .expect("bound initializer")
+        .operation()
+    else {
         panic!("expected inline choice predicate to parse as a value block");
     };
-    let ValueBlock::Match(value_match) = block.as_ref() else {
+    let ValueBlock::Match(value_match) = block else {
         panic!("expected inline choice predicate to lower through value match");
     };
 
@@ -836,10 +1211,15 @@ fn parses_inline_option_present_capture_receiver_as_value_match() {
     let NodeKind::VariableDeclaration(name_decl) = &body[0].kind else {
         panic!("expected name declaration in display()");
     };
-    let ExpressionKind::ValueBlock { block } = &name_decl.value.kind else {
+    let ExpressionOperationView::ValueBlock(block) = ast
+        .expressions
+        .view(name_decl.value.initializer().expect("fixture initializer"))
+        .expect("bound initializer")
+        .operation()
+    else {
         panic!("expected inline option unwrap to parse as a value block");
     };
-    let ValueBlock::Match(value_match) = block.as_ref() else {
+    let ValueBlock::Match(value_match) = block else {
         panic!("expected inline option unwrap to lower through value match");
     };
 
@@ -929,10 +1309,15 @@ fn parses_block_option_present_capture_receiver_as_value_match() {
     let NodeKind::VariableDeclaration(name_decl) = &body[0].kind else {
         panic!("expected name declaration in display()");
     };
-    let ExpressionKind::ValueBlock { block } = &name_decl.value.kind else {
+    let ExpressionOperationView::ValueBlock(block) = ast
+        .expressions
+        .view(name_decl.value.initializer().expect("fixture initializer"))
+        .expect("bound initializer")
+        .operation()
+    else {
         panic!("expected block option unwrap to parse as a value block");
     };
-    let ValueBlock::Match(value_match) = block.as_ref() else {
+    let ValueBlock::Match(value_match) = block else {
         panic!("expected block option unwrap to lower through value match");
     };
 
@@ -982,7 +1367,7 @@ fn newline_between_is_and_option_capture_is_not_committed_at_block_receiver() {
 fn parses_block_choice_predicate_receiver_as_value_match() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
         "Status :: Ready, Waiting;\n\
-     score_for |status Status| -> Int:\n\
+     score_for |status Status| -> I32:\n\
          score = if status is Ready:\n\
              then 1\n\
          else\n\
@@ -996,10 +1381,15 @@ fn parses_block_choice_predicate_receiver_as_value_match() {
     let NodeKind::VariableDeclaration(score_decl) = &body[0].kind else {
         panic!("expected score declaration in score_for()");
     };
-    let ExpressionKind::ValueBlock { block } = &score_decl.value.kind else {
+    let ExpressionOperationView::ValueBlock(block) = ast
+        .expressions
+        .view(score_decl.value.initializer().expect("fixture initializer"))
+        .expect("bound initializer")
+        .operation()
+    else {
         panic!("expected block choice predicate to parse as a value block");
     };
-    let ValueBlock::Match(value_match) = block.as_ref() else {
+    let ValueBlock::Match(value_match) = block else {
         panic!("expected block choice predicate to lower through value match");
     };
 
@@ -1025,7 +1415,7 @@ fn parses_block_choice_predicate_receiver_as_value_match() {
 #[test]
 fn parses_inferred_multi_bind_inline_option_capture_as_value_match() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
-        "display |maybe_name String?| -> String, Int:\n\
+        "display |maybe_name String?| -> String, I32:\n\
          label, count = if maybe_name is |name| then name, 1 else \"guest\", 0\n\
          return label, count\n\
      ;\n",
@@ -1035,10 +1425,15 @@ fn parses_inferred_multi_bind_inline_option_capture_as_value_match() {
     let NodeKind::MultiBind { value, .. } = &body[0].kind else {
         panic!("expected inferred multi-bind statement");
     };
-    let ExpressionKind::ValueBlock { block } = &value.kind else {
+    let ExpressionOperationView::ValueBlock(block) = ast
+        .expressions
+        .view(*value)
+        .expect("bound value")
+        .operation()
+    else {
         panic!("expected inferred multi-bind option unwrap to parse as a value block");
     };
-    let ValueBlock::Match(value_match) = block.as_ref() else {
+    let ValueBlock::Match(value_match) = block else {
         panic!("expected inferred inline option unwrap to lower through value match");
     };
 
@@ -1059,7 +1454,7 @@ fn parses_inferred_multi_bind_inline_option_capture_as_value_match() {
 fn parses_inferred_multi_bind_block_choice_payload_as_value_match() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
         "Response :: Complete, Failed | message String |;\n\
-     label_for |response Response| -> String, Int:\n\
+     label_for |response Response| -> String, I32:\n\
          text, code = if response is Failed(message):\n\
              then message, 1\n\
          else\n\
@@ -1073,10 +1468,15 @@ fn parses_inferred_multi_bind_block_choice_payload_as_value_match() {
     let NodeKind::MultiBind { value, .. } = &body[0].kind else {
         panic!("expected inferred multi-bind statement");
     };
-    let ExpressionKind::ValueBlock { block } = &value.kind else {
+    let ExpressionOperationView::ValueBlock(block) = ast
+        .expressions
+        .view(*value)
+        .expect("bound value")
+        .operation()
+    else {
         panic!("expected inferred block choice payload to parse as a value block");
     };
-    let ValueBlock::Match(value_match) = block.as_ref() else {
+    let ValueBlock::Match(value_match) = block else {
         panic!("expected inferred block choice payload to lower through value match");
     };
 
@@ -1106,10 +1506,20 @@ fn parses_option_equality_receiver_as_bool_value_if() {
     let NodeKind::VariableDeclaration(result_decl) = &body[0].kind else {
         panic!("expected result declaration in compare()");
     };
-    let ExpressionKind::ValueBlock { block } = &result_decl.value.kind else {
+    let ExpressionOperationView::ValueBlock(block) = ast
+        .expressions
+        .view(
+            result_decl
+                .value
+                .initializer()
+                .expect("fixture initializer"),
+        )
+        .expect("bound initializer")
+        .operation()
+    else {
         panic!("expected option equality to parse as a value block");
     };
-    let ValueBlock::If(_) = block.as_ref() else {
+    let ValueBlock::If(_) = block else {
         panic!("non-pattern option equality must fall back to Bool value-if, not a match");
     };
 }
@@ -1125,18 +1535,34 @@ fn parses_catch_handler_with_fallback_scope_in_declaration_rhs() {
         panic!("expected declaration statement in recover()");
     };
 
-    let ExpressionKind::ValueBlock { block } = &output_decl.value.kind else {
+    let ExpressionOperationView::ValueBlock(block) = ast
+        .expressions
+        .view(
+            output_decl
+                .value
+                .initializer()
+                .expect("fixture initializer"),
+        )
+        .expect("bound initializer")
+        .operation()
+    else {
         panic!("expected catch value block in recover declaration");
     };
-    let ValueBlock::Catch(value_catch) = block.as_ref() else {
+    let ValueBlock::Catch(value_catch) = block else {
         panic!("expected catch value block");
     };
-    let ExpressionKind::HandledFallibleFunctionCall { handling, .. } =
-        &value_catch.handled_value.kind
+    let ExpressionOperationView::Call(call) = ast
+        .expressions
+        .view(value_catch.handled_value)
+        .expect("bound handled value")
+        .operation()
     else {
         panic!("expected handled call expression in catch value block");
     };
-    assert!(matches!(handling, FallibleExpressionHandling::Recover));
+    assert!(matches!(
+        call.handling().map(|record| &record.handling),
+        Some(FallibleExpressionHandling::Recover)
+    ));
     let FallibleHandling::Handler {
         error: Some(_),
         body,
@@ -1159,11 +1585,11 @@ fn parses_standalone_result_propagation_statement() {
         panic!("expected standalone handled call to parse as an expression statement");
     };
     assert!(matches!(
-        expression.kind,
-        ExpressionKind::HandledFallibleFunctionCall {
-            handling: FallibleExpressionHandling::Propagate,
-            ..
-        }
+        ast.expressions.view(*expression).expect("bound expression").operation(),
+        ExpressionOperationView::Call(call) if matches!(
+            call.handling().map(|record| &record.handling),
+            Some(FallibleExpressionHandling::Propagate)
+        )
     ));
 }
 
@@ -1173,7 +1599,7 @@ fn parses_standalone_result_propagation_statement() {
 
 #[test]
 fn rejects_trailing_comma_in_single_return() {
-    let payload = parse_function_diagnostic_payload("compute |x Int| -> Int,:\n    return 42\n;\n");
+    let payload = parse_function_diagnostic_payload("compute |x I32| -> I32,:\n    return 42\n;\n");
 
     assert_eq!(
         payload,
@@ -1186,7 +1612,7 @@ fn rejects_trailing_comma_in_single_return() {
 #[test]
 fn rejects_trailing_comma_in_error_return() {
     let payload =
-        parse_function_diagnostic_payload("compute |x Int| -> Int, Error!,:\n    return 42\n;\n");
+        parse_function_diagnostic_payload("compute |x I32| -> I32, Error!,:\n    return 42\n;\n");
 
     assert_eq!(
         payload,
@@ -1203,11 +1629,14 @@ fn rejects_trailing_comma_in_error_return() {
 #[test]
 fn parses_valid_single_return_without_trailing_comma() {
     let (ast, path_fork, string_table) =
-        parse_single_file_ast("compute |x Int| -> Int:\n    return 42\n;\n");
+        parse_single_file_ast("compute |x I32| -> I32:\n    return 42\n;\n");
 
     let signature = function_signature_by_name(&ast, &path_fork, &string_table, "compute");
     assert_eq!(signature.returns.len(), 1);
-    assert_eq!(signature.returns[0].value, DataType::Int);
+    assert_eq!(
+        signature.returns[0].value,
+        DataType::FixedScalar(FixedScalar::I32)
+    );
     assert_eq!(signature.returns[0].channel, ReturnChannel::Success);
     assert!(
         signature.returns[0].type_id.is_some(),
@@ -1218,11 +1647,14 @@ fn parses_valid_single_return_without_trailing_comma() {
 #[test]
 fn parses_valid_multiple_returns_without_trailing_comma() {
     let (ast, path_fork, string_table) =
-        parse_single_file_ast("compute |x Int| -> Int, String:\n    return 42, \"result\"\n;\n");
+        parse_single_file_ast("compute |x I32| -> I32, String:\n    return 42, \"result\"\n;\n");
 
     let signature = function_signature_by_name(&ast, &path_fork, &string_table, "compute");
     assert_eq!(signature.returns.len(), 2);
-    assert_eq!(signature.returns[0].value, DataType::Int);
+    assert_eq!(
+        signature.returns[0].value,
+        DataType::FixedScalar(FixedScalar::I32)
+    );
     assert_eq!(signature.returns[0].channel, ReturnChannel::Success);
     assert!(
         signature.returns[0].type_id.is_some(),
@@ -1239,7 +1671,7 @@ fn parses_valid_multiple_returns_without_trailing_comma() {
 #[test]
 fn parses_valid_single_parameter_without_trailing_comma() {
     let (ast, path_fork, string_table) =
-        parse_single_file_ast("compute |x Int| -> Int:\n    return x\n;\n");
+        parse_single_file_ast("compute |x I32| -> I32:\n    return x\n;\n");
 
     let signature = function_signature_by_name(&ast, &path_fork, &string_table, "compute");
     assert_eq!(signature.parameters.len(), 1);
@@ -1254,7 +1686,7 @@ fn parses_valid_single_parameter_without_trailing_comma() {
 #[test]
 fn parses_valid_multiple_parameters_without_trailing_comma() {
     let (ast, path_fork, string_table) =
-        parse_single_file_ast("compute |x Int, y Int| -> Int:\n    return x + y\n;\n");
+        parse_single_file_ast("compute |x I32, y I32| -> I32:\n    return x + y\n;\n");
 
     let signature = function_signature_by_name(&ast, &path_fork, &string_table, "compute");
     assert_eq!(signature.parameters.len(), 2);
@@ -1278,8 +1710,9 @@ fn optional_present_default_preserves_function_parameter_type() {
         "greet |name String? = \"guest\", required String?| -> String:\n    return \"ok\"\n;\n",
     );
     let signature = function_signature_by_name(&ast, &path_fork, &string_table, "greet");
-    let defaulted = &signature.parameters[0].value;
-    let required = &signature.parameters[1].value;
+    let defaulted = &signature.parameters[0];
+    let required = &signature.parameters[1];
+    assert!(required.default.is_none());
     let string = ast.type_environment.builtins().string;
 
     assert_eq!(
@@ -1291,17 +1724,11 @@ fn optional_present_default_preserves_function_parameter_type() {
         defaulted.diagnostic_type, required.diagnostic_type,
         "declared spelling must survive a present default"
     );
-    let ExpressionKind::Coerced { value, to_type } = &defaulted.kind else {
-        panic!(
-            "present String default should be an explicit String -> String? coercion, got {defaulted:?}"
-        );
-    };
-    assert_eq!(*to_type, defaulted.type_id);
-    assert_eq!(value.type_id, string);
-    assert!(
-        matches!(value.kind, ExpressionKind::StringSlice(_)),
-        "coercion must keep the inner string payload, got {:?}",
-        value.kind
+    assert_optional_string_default(
+        &ast.const_values,
+        defaulted.default.expect("present parameter default"),
+        defaulted.type_id,
+        string,
     );
 }
 
@@ -1313,8 +1740,9 @@ greet |name String? = FALLBACK_TEXT, required String?| -> String:\n\
 ;\n";
     let (ast, path_fork, string_table) = parse_single_file_ast(source);
     let signature = function_signature_by_name(&ast, &path_fork, &string_table, "greet");
-    let defaulted = &signature.parameters[0].value;
-    let required = &signature.parameters[1].value;
+    let defaulted = &signature.parameters[0];
+    let required = &signature.parameters[1];
+    assert!(required.default.is_none());
     let string = ast.type_environment.builtins().string;
 
     assert_eq!(
@@ -1327,57 +1755,11 @@ greet |name String? = FALLBACK_TEXT, required String?| -> String:\n\
         "the declared String? spelling must survive a constant-backed default"
     );
 
-    let ExpressionKind::Coerced { value, to_type } = &defaulted.kind else {
-        panic!(
-            "present String default should retain its explicit String -> String? coercion, got {defaulted:?}"
-        );
-    };
-    assert_eq!(*to_type, defaulted.type_id);
-    assert_eq!(value.type_id, string);
-    assert!(
-        matches!(value.kind, ExpressionKind::StringSlice(_)),
-        "the constant should inline as a String payload, got {:?}",
-        value.kind
-    );
-}
-
-#[test]
-fn optional_present_default_preserves_body_local_function_parameter_type() {
-    let source = "FALLBACK_TEXT #= \"guest\"\n\
-outer || -> String:\n\
-    local_greet |name String? = FALLBACK_TEXT, required String?|:\n\
-        return\n\
-    ;\n\
-    return \"outer\"\n\
-;\n";
-    let (ast, path_fork, string_table) = parse_single_file_ast(source);
-    let outer_body = function_body_by_name(&ast, &path_fork, &string_table, "outer");
-    let local_signature = outer_body
-        .iter()
-        .find_map(|node| match &node.kind {
-            NodeKind::Function(path, signature, ..)
-                if path_fork
-                    .component(*path)
-                    .map(|id| string_table.resolve(id))
-                    == Some("local_greet") =>
-            {
-                Some(signature)
-            }
-            _ => None,
-        })
-        .expect("outer should retain its body-local function");
-    let defaulted = &local_signature.parameters[0].value;
-    let required = &local_signature.parameters[1].value;
-    let string = ast.type_environment.builtins().string;
-
-    assert_eq!(
-        ast.type_environment.option_inner_type(defaulted.type_id),
-        Some(string),
-        "a body-local function's present default must keep its declared String? identity"
-    );
-    assert_eq!(
-        defaulted.diagnostic_type, required.diagnostic_type,
-        "the body-local function must retain the declared String? spelling"
+    assert_optional_string_default(
+        &ast.const_values,
+        defaulted.default.expect("present parameter default"),
+        defaulted.type_id,
+        string,
     );
 }
 
@@ -1385,15 +1767,16 @@ outer || -> String:\n\
 fn optional_present_default_preserves_receiver_method_parameter_type() {
     let source = "FALLBACK_TEXT #= \"guest\"\n\
 Holder = |\n\
-    id Int = 0,\n\
+    id I32 = 0,\n\
 |\n\
 greet |this Holder, name String? = FALLBACK_TEXT, required String?| -> String:\n\
     return \"ok\"\n\
 ;\n";
     let (ast, path_fork, string_table) = parse_single_file_ast(source);
     let signature = function_signature_by_name(&ast, &path_fork, &string_table, "greet");
-    let defaulted = &signature.parameters[1].value;
-    let required = &signature.parameters[2].value;
+    let defaulted = &signature.parameters[1];
+    let required = &signature.parameters[2];
+    assert!(required.default.is_none());
     let string = ast.type_environment.builtins().string;
 
     assert_eq!(
@@ -1416,7 +1799,7 @@ choose type T |value T, label String? = FALLBACK_TEXT, required String?| -> T:\n
 result = choose(7, required = none)\n";
     let (mut build_result, path_fork, string_table) =
         parse_single_file_ast_build_result(source).expect("generic default should resolve");
-    let int = build_result.ast.type_environment.builtins().int;
+    let int = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let string = build_result.ast.type_environment.builtins().string;
 
     {
@@ -1434,8 +1817,9 @@ result = choose(7, required = none)\n";
                     == Some("choose")
             })
             .expect("the generic function template should be retained");
-        let defaulted = &template.signature.parameters[1].value;
-        let required = &template.signature.parameters[2].value;
+        let defaulted = &template.signature.parameters[1];
+        let required = &template.signature.parameters[2];
+        assert!(required.default.is_none());
 
         assert_eq!(
             build_result
@@ -1449,17 +1833,11 @@ result = choose(7, required = none)\n";
             defaulted.diagnostic_type, required.diagnostic_type,
             "the generic function must retain the declared String? spelling"
         );
-        let ExpressionKind::Coerced { value, to_type } = &defaulted.kind else {
-            panic!(
-                "generic String? default should retain its receiving coercion, got {defaulted:?}"
-            );
-        };
-        assert_eq!(*to_type, defaulted.type_id);
-        assert_eq!(value.type_id, string);
-        assert!(
-            matches!(value.kind, ExpressionKind::StringSlice(_)),
-            "the generic default should keep its String payload, got {:?}",
-            value.kind
+        assert_optional_string_default(
+            &build_result.ast.const_values,
+            defaulted.default.expect("present parameter default"),
+            defaulted.type_id,
+            string,
         );
     }
 
@@ -1474,79 +1852,150 @@ result = choose(7, required = none)\n";
 }
 
 #[test]
-fn optional_present_default_float_coercion_obeys_numeric_profile() {
-    let source = "LARGE #Int = 16_777_217\n\
-as_float |value Float = LARGE, required Float| -> Float:\n\
+fn rejects_implicit_integer_default_for_float_parameter() {
+    // D00/D15: fixed integers and binary floats require an explicit conversion, so a typed I32
+    // constant is not accepted at an F64 receiving boundary without `cast`.
+    let payload = parse_function_diagnostic_payload(
+        "LARGE #I32 = 16_777_217\n\
+as_float |value F64 = LARGE, required F64| -> F64:\n\
     return value\n\
-;\n";
+;\n",
+    );
 
-    for int_width in [IntWidth::Bits32, IntWidth::Bits64] {
-        for (float_precision, expected_value) in [
-            (FloatPrecision::Bits32, 16_777_216.0_f64),
-            (FloatPrecision::Bits64, 16_777_217.0_f64),
-        ] {
-            let profile = NumericProfile {
-                int_width,
-                float_precision,
-            };
-            let (build_result, path_fork, string_table) =
-                parse_single_file_ast_build_result_with_profile(source, profile)
-                    .expect("typed Int default should coerce to Float");
-            let signature = function_signature_by_name(
-                &build_result.ast,
-                &path_fork,
-                &string_table,
-                "as_float",
-            );
-            let defaulted = &signature.parameters[0].value;
-
-            assert_eq!(
-                defaulted.type_id,
-                build_result.ast.type_environment.builtins().float,
-                "the default should retain declared Float identity under {profile:?}"
-            );
-            let ExpressionKind::Float(value) = &defaulted.kind else {
-                panic!(
-                    "Int -> Float default should materialise as Float, got {:?}",
-                    defaulted.kind
-                );
-            };
-            assert_eq!(
-                value.to_bits(),
-                expected_value.to_bits(),
-                "Int -> {float_precision:?} should keep the existing boundary rounding"
-            );
-        }
-    }
+    assert!(
+        matches!(
+            payload,
+            DiagnosticPayload::TypeMismatch {
+                context: TypeMismatchContext::Declaration,
+                ..
+            }
+        ),
+        "{payload:?}"
+    );
 }
 
 #[test]
-fn mutable_float_operator_default_keeps_parameter_access_mode() {
+fn mutable_f64_operator_default_keeps_parameter_access_mode() {
     let source = "\
-adjust |value ~Float = 1 + 1|:\n\
+adjust |value ~F64 = 1 + 1|:\n\
     value = value + 1.0\n\
 ;\n\
 \n\
-caller |input ~Float|:\n\
+caller |input ~F64|:\n\
     adjust(~input)\n\
 ;\n";
     let (ast, path_fork, string_table) = parse_single_file_ast(source);
     let signature = function_signature_by_name(&ast, &path_fork, &string_table, "adjust");
-    let parameter = &signature.parameters[0].value;
+    let parameter = &signature.parameters[0];
 
     assert_eq!(
         parameter.type_id,
-        ast.type_environment.builtins().float,
-        "the folded integer default must still carry the declared Float identity"
+        builtin_type_ids::fixed_scalar(FixedScalar::F64),
+        "the folded literal default must carry the declared F64 identity"
     );
     assert_eq!(
         parameter.value_mode,
         ValueMode::MutableOwned,
-        "numeric coercion must not replace the authored mutable parameter mode"
+        "receiving coercion must not replace the authored mutable parameter mode"
     );
+    let payload = ast
+        .const_values
+        .payload(parameter.default.expect("present parameter default"));
     assert!(
-        matches!(parameter.kind, ExpressionKind::Float(_)),
-        "the operator default should materialise as Float, got {:?}",
-        parameter.kind
+        matches!(payload, Some(ConstValuePayload::FixedScalar(value))
+            if value.scalar() == FixedScalar::F64 && value.as_f64() == Some(2.0)),
+        "the operator default should materialise as F64 two, got {payload:?}",
+    );
+}
+
+#[test]
+fn forwards_multiple_return_slots_without_a_tuple_value() {
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        "pair || -> I32, String:\n    return 1, \"one\"\n;\n\
+         forward || -> I32, String:\n    return pair()\n;\n",
+    );
+    let body = function_body_by_name(&ast, &path_fork, &string_table, "forward");
+    let NodeKind::Return(values) = &body[0].kind else {
+        panic!("expected forwarding return");
+    };
+    assert_eq!(values.len(), 1, "the producer must execute once");
+    assert_eq!(
+        ast.expressions
+            .view(values[0])
+            .expect("bound return")
+            .success_types(),
+        &[
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            builtin_type_ids::STRING
+        ],
+    );
+}
+
+#[test]
+fn single_return_rejects_zero_and_multiple_success_slots() {
+    for (producer, produced_count) in [
+        ("produce ||:\n    return\n;\n", 0),
+        ("produce || -> I32, String:\n    return 1, \"one\"\n;\n", 2),
+    ] {
+        let source = format!("{producer}\nforward || -> I32:\n    return produce()\n;\n");
+        let diagnostic = parse_single_file_ast_diagnostic(&source);
+        assert!(
+            matches!(
+                diagnostic.payload,
+                DiagnosticPayload::InvalidValueReceiver {
+                    receiver: ValueReceiverContext::Return,
+                    target_count: 1,
+                    produced_count: actual,
+                } if actual == produced_count
+            ),
+            "{diagnostic:?}"
+        );
+    }
+}
+
+#[test]
+fn forwards_retained_numeric_call_results_per_slot() {
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        "pair |number I64| -> I64, String:\n    return number, \"one\"\n;\n\
+         forward || -> I64, String:\n    number = 1\n    return pair(number)\n;\n",
+    );
+    let body = function_body_by_name(&ast, &path_fork, &string_table, "forward");
+    let NodeKind::Return(values) = &body[1].kind else {
+        panic!("expected resumed forwarding return");
+    };
+    assert_eq!(values.len(), 1);
+    assert_eq!(
+        ast.expressions
+            .view(values[0])
+            .expect("bound return")
+            .success_types(),
+        &[
+            builtin_type_ids::fixed_scalar(FixedScalar::I64),
+            builtin_type_ids::STRING
+        ],
+    );
+}
+
+#[test]
+fn forwarded_return_validates_compatible_optional_slots() {
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        "pair || -> I32, String:\n    return 1, \"one\"\n;\n\
+         forward || -> I32?, String?:\n    return pair()\n;\n",
+    );
+    let body = function_body_by_name(&ast, &path_fork, &string_table, "forward");
+    let NodeKind::Return(values) = &body[0].kind else {
+        panic!("expected compatible forwarding return");
+    };
+    assert_eq!(values.len(), 1);
+    assert_eq!(
+        ast.expressions
+            .view(values[0])
+            .expect("bound return")
+            .success_types(),
+        &[
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            builtin_type_ids::STRING
+        ],
+        "the producer keeps its natural slots at an optional receiving boundary",
     );
 }

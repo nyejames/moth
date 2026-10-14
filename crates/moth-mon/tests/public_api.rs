@@ -32,24 +32,24 @@ struct Save {
 
 fn save_schema() -> PreparedSchema {
     Schema::record(vec![
-        Field::required("format_version", SchemaType::Int),
+        Field::required("format_version", SchemaType::I64),
         Field::required("title", SchemaType::String),
         Field::with_default(
             "window",
             SchemaType::Struct {
                 name: "Window".to_owned(),
                 fields: vec![
-                    Field::required("width", SchemaType::Int),
-                    Field::with_default("height", SchemaType::Int, Value::Int(720)),
+                    Field::required("width", SchemaType::I64),
+                    Field::with_default("height", SchemaType::I64, Value::I64(720)),
                 ],
             },
-            Value::Record(vec![("width".to_owned(), Value::Int(1280))]),
+            Value::Record(vec![("width".to_owned(), Value::I64(1280))]),
         ),
         Field::required(
             "scores",
             SchemaType::Map {
                 key: Box::new(SchemaType::String),
-                value: Box::new(SchemaType::Int),
+                value: Box::new(SchemaType::I64),
             },
         ),
         Field::required(
@@ -80,8 +80,8 @@ fn native_save(value: Value) -> Save {
             .map(|(_, value)| value)
             .unwrap_or_else(|| panic!("completed schema result has {name}"))
     };
-    let Value::Int(format_version) = field("format_version") else {
-        panic!("format_version is Int");
+    let Value::I64(format_version) = field("format_version") else {
+        panic!("format_version is I64");
     };
     let Value::String(title) = field("title") else {
         panic!("title is String");
@@ -96,11 +96,11 @@ fn native_save(value: Value) -> Save {
             .map(|(_, value)| value)
             .unwrap_or_else(|| panic!("completed window has {name}"))
     };
-    let Value::Int(width) = window_field("width") else {
-        panic!("window.width is Int");
+    let Value::I64(width) = window_field("width") else {
+        panic!("window.width is I64");
     };
-    let Value::Int(height) = window_field("height") else {
-        panic!("window.height is Int");
+    let Value::I64(height) = window_field("height") else {
+        panic!("window.height is I64");
     };
     let Value::Map(entries) = field("scores") else {
         panic!("scores is a map");
@@ -111,8 +111,8 @@ fn native_save(value: Value) -> Save {
             let Value::String(key) = key else {
                 panic!("score key is String");
             };
-            let Value::Int(value) = value else {
-                panic!("score value is Int");
+            let Value::I64(value) = value else {
+                panic!("score value is I64");
             };
             (key.clone(), *value)
         })
@@ -161,13 +161,13 @@ fn native_save(value: Value) -> Save {
 fn consumer_save_round_trip_drops_source_and_converts_to_native() {
     let schema = save_schema();
     let document = Value::Record(vec![
-        ("format_version".into(), Value::Int(1)),
+        ("format_version".into(), Value::I64(1)),
         ("title".into(), Value::String("Strategy".into())),
         (
             "scores".into(),
             Value::Map(vec![
-                (Value::String("Priya".into()), Value::Int(10)),
-                (Value::String("Rob".into()), Value::Int(12)),
+                (Value::String("Priya".into()), Value::I64(10)),
+                (Value::String("Rob".into()), Value::I64(12)),
             ]),
         ),
         (
@@ -193,14 +193,14 @@ fn consumer_save_round_trip_drops_source_and_converts_to_native() {
     let window_schema = Schema::value(SchemaType::Struct {
         name: "Window".into(),
         fields: vec![
-            Field::required("width", SchemaType::Int),
-            Field::with_default("height", SchemaType::Int, Value::Int(720)),
+            Field::required("width", SchemaType::I64),
+            Field::with_default("height", SchemaType::I64, Value::I64(720)),
         ],
     })
     .prepare()
     .expect("window schema is valid");
     let fragment = encode_value(
-        &Value::Record(vec![("width".into(), Value::Int(1280))]),
+        &Value::Record(vec![("width".into(), Value::I64(1280))]),
         &window_schema,
     )
     .expect("nested values use the same writer");
@@ -223,12 +223,12 @@ fn consumer_save_round_trip_drops_source_and_converts_to_native() {
         (
             "scores".into(),
             Value::Map(vec![
-                (Value::String("Priya".into()), Value::Int(10)),
-                (Value::String("Rob".into()), Value::Int(12)),
+                (Value::String("Priya".into()), Value::I64(10)),
+                (Value::String("Rob".into()), Value::I64(12)),
             ]),
         ),
         ("title".into(), Value::String("Strategy".into())),
-        ("format_version".into(), Value::Int(1)),
+        ("format_version".into(), Value::I64(1)),
     ]);
     let re_encoded =
         encode_document(&shuffled, &schema).expect("field order does not change output");
@@ -301,16 +301,16 @@ fn prepared_schema_is_reusable_across_decodes() {
 #[test]
 fn record_name_lookup_preserves_unicode_order_and_diagnostics() {
     let schema = Schema::record(vec![
-        Field::required("zeta", SchemaType::Int),
-        Field::required("café", SchemaType::Int),
-        Field::required("alpha", SchemaType::Int),
+        Field::required("zeta", SchemaType::I64),
+        Field::required("café", SchemaType::I64),
+        Field::required("alpha", SchemaType::I64),
         Field::required(
             "panel",
             SchemaType::Struct {
                 name: "Panel".into(),
                 fields: vec![
-                    Field::required("left", SchemaType::Int),
-                    Field::required("right", SchemaType::Int),
+                    Field::required("left", SchemaType::I64),
+                    Field::required("right", SchemaType::I64),
                 ],
             },
         ),
@@ -318,14 +318,14 @@ fn record_name_lookup_preserves_unicode_order_and_diagnostics() {
     .prepare()
     .expect("record schema prepares");
     let expected = Value::Record(vec![
-        ("zeta".into(), Value::Int(1)),
-        ("café".into(), Value::Int(2)),
-        ("alpha".into(), Value::Int(3)),
+        ("zeta".into(), Value::I64(1)),
+        ("café".into(), Value::I64(2)),
+        ("alpha".into(), Value::I64(3)),
         (
             "panel".into(),
             Value::Record(vec![
-                ("left".into(), Value::Int(4)),
-                ("right".into(), Value::Int(5)),
+                ("left".into(), Value::I64(4)),
+                ("right".into(), Value::I64(5)),
             ]),
         ),
     ]);
@@ -341,13 +341,13 @@ fn record_name_lookup_preserves_unicode_order_and_diagnostics() {
         (
             "panel".into(),
             Value::Record(vec![
-                ("right".into(), Value::Int(5)),
-                ("left".into(), Value::Int(4)),
+                ("right".into(), Value::I64(5)),
+                ("left".into(), Value::I64(4)),
             ]),
         ),
-        ("alpha".into(), Value::Int(3)),
-        ("café".into(), Value::Int(2)),
-        ("zeta".into(), Value::Int(1)),
+        ("alpha".into(), Value::I64(3)),
+        ("café".into(), Value::I64(2)),
+        ("zeta".into(), Value::I64(1)),
     ]);
     let encoded = encode_document(&programmatic, &schema).expect("permuted value encodes");
     let output_positions: Vec<_> = ["zeta", "café", "alpha", "panel", "left", "right"]
@@ -370,7 +370,7 @@ fn record_name_lookup_preserves_unicode_order_and_diagnostics() {
     assert_eq!(unknown.code, MonErrorCode::UnknownField);
     assert_eq!(unknown.path, vec![PathSegment::Field("mystery".into())]);
 
-    let unknown_programmatic = Value::Record(vec![("mystery".into(), Value::Int(9))]);
+    let unknown_programmatic = Value::Record(vec![("mystery".into(), Value::I64(9))]);
     let unknown_programmatic_error = encode_document(&unknown_programmatic, &schema)
         .expect_err("programmatic values reject unknown fields");
     assert_eq!(unknown_programmatic_error.code, MonErrorCode::UnknownField);
@@ -385,10 +385,10 @@ fn record_name_lookup_preserves_unicode_order_and_diagnostics() {
     assert_eq!(duplicate.path, vec![PathSegment::Field("zeta".into())]);
 
     let duplicate_declaration = Schema::record(vec![
-        Field::required("zeta", SchemaType::Int),
-        Field::required("alpha", SchemaType::Int),
-        Field::required("zeta", SchemaType::Int),
-        Field::required("alpha", SchemaType::Int),
+        Field::required("zeta", SchemaType::I64),
+        Field::required("alpha", SchemaType::I64),
+        Field::required("zeta", SchemaType::I64),
+        Field::required("alpha", SchemaType::I64),
     ])
     .prepare()
     .expect_err("the earliest duplicate declaration remains the diagnostic");
@@ -424,9 +424,9 @@ fn choice_name_lookup_preserves_unicode_order_and_diagnostics() {
                 Variant::payload(
                     "Zebra",
                     vec![
-                        Field::required("zeta", SchemaType::Int),
-                        Field::required("café", SchemaType::Int),
-                        Field::required("alpha", SchemaType::Int),
+                        Field::required("zeta", SchemaType::I64),
+                        Field::required("café", SchemaType::I64),
+                        Field::required("alpha", SchemaType::I64),
                     ],
                 ),
                 Variant::unit("Amber"),
@@ -442,9 +442,9 @@ fn choice_name_lookup_preserves_unicode_order_and_diagnostics() {
             qualifier: None,
             variant: "Zebra".into(),
             fields: vec![
-                ("zeta".into(), Value::Int(1)),
-                ("café".into(), Value::Int(2)),
-                ("alpha".into(), Value::Int(3)),
+                ("zeta".into(), Value::I64(1)),
+                ("café".into(), Value::I64(2)),
+                ("alpha".into(), Value::I64(3)),
             ],
         },
     )]);
@@ -470,9 +470,9 @@ fn choice_name_lookup_preserves_unicode_order_and_diagnostics() {
             qualifier: None,
             variant: "Zebra".into(),
             fields: vec![
-                ("alpha".into(), Value::Int(3)),
-                ("café".into(), Value::Int(2)),
-                ("zeta".into(), Value::Int(1)),
+                ("alpha".into(), Value::I64(3)),
+                ("café".into(), Value::I64(2)),
+                ("zeta".into(), Value::I64(1)),
             ],
         },
     )]);
@@ -542,8 +542,8 @@ fn choice_name_lookup_preserves_unicode_order_and_diagnostics() {
             qualifier: None,
             variant: "Zebra".into(),
             fields: vec![
-                ("zeta".into(), Value::Int(1)),
-                ("zeta".into(), Value::Int(2)),
+                ("zeta".into(), Value::I64(1)),
+                ("zeta".into(), Value::I64(2)),
             ],
         },
     )]);
@@ -589,18 +589,18 @@ fn duplicate_declarations_keep_the_earliest_error() {
     // repeat that an earlier declaration's own error already outranks, and the earliest
     // declaration-order repeat must stay the diagnostic.
     let field_error_first = Schema::record(vec![
-        Field::required("zeta", SchemaType::Int),
-        Field::required("9bad", SchemaType::Int),
-        Field::required("zeta", SchemaType::Int),
+        Field::required("zeta", SchemaType::I64),
+        Field::required("9bad", SchemaType::I64),
+        Field::required("zeta", SchemaType::I64),
     ])
     .prepare()
     .expect_err("the earlier invalid field name remains the diagnostic");
     assert_eq!(field_error_first.code, MonErrorCode::InvalidSchema);
 
     let duplicate_field_first = Schema::record(vec![
-        Field::required("zeta", SchemaType::Int),
-        Field::required("zeta", SchemaType::Int),
-        Field::required("9bad", SchemaType::Int),
+        Field::required("zeta", SchemaType::I64),
+        Field::required("zeta", SchemaType::I64),
+        Field::required("9bad", SchemaType::I64),
     ])
     .prepare()
     .expect_err("a repeat outranks a later invalid field name");
@@ -610,7 +610,7 @@ fn duplicate_declarations_keep_the_earliest_error() {
         vec![PathSegment::Field("zeta".into())],
     );
     let duplicate_field_before_child_error = Schema::record(vec![
-        Field::required("zeta", SchemaType::Int),
+        Field::required("zeta", SchemaType::I64),
         Field::required(
             "zeta",
             SchemaType::Unsupported {
@@ -626,10 +626,10 @@ fn duplicate_declarations_keep_the_earliest_error() {
     );
 
     let duplicate_field_before_default_error = Schema::record(vec![
-        Field::required("zeta", SchemaType::Int),
+        Field::required("zeta", SchemaType::I64),
         Field::with_default(
             "zeta",
-            SchemaType::Int,
+            SchemaType::I64,
             Value::String("not an integer".into()),
         ),
     ])
@@ -668,7 +668,7 @@ fn duplicate_declarations_keep_the_earliest_error() {
             name: "Palette".into(),
             variants: vec![
                 Variant::unit("Zebra"),
-                Variant::payload("Zebra", vec![Field::required("9bad", SchemaType::Int)]),
+                Variant::payload("Zebra", vec![Field::required("9bad", SchemaType::I64)]),
                 Variant::unit("9bad"),
             ],
         },
@@ -691,8 +691,8 @@ fn duplicate_declarations_respect_the_node_budget_prefix() {
     // remaining node budget cannot reach must keep the budget error.
     let field_repeat = |max_nodes: usize| {
         Schema::record(vec![
-            Field::required("zeta", SchemaType::Int),
-            Field::required("zeta", SchemaType::Int),
+            Field::required("zeta", SchemaType::I64),
+            Field::required("zeta", SchemaType::I64),
         ])
         .with_limits(Limits {
             max_nodes,
@@ -765,8 +765,8 @@ fn invalid_utf8_bytes_report_stable_span() {
 fn default_expansion_budget_is_distinct_from_syntax() {
     let tight = Schema::record(vec![Field::with_default(
         "value",
-        SchemaType::Int,
-        Value::Int(1),
+        SchemaType::I64,
+        Value::I64(1),
     )])
     .with_limits(Limits {
         max_default_expansions: 0,
@@ -779,14 +779,14 @@ fn default_expansion_budget_is_distinct_from_syntax() {
 
     let normal = Schema::record(vec![Field::with_default(
         "value",
-        SchemaType::Int,
-        Value::Int(1),
+        SchemaType::I64,
+        Value::I64(1),
     )])
     .prepare()
     .expect("normal schema prepares");
     assert_eq!(
         decode_document("", &normal).expect("default applies"),
-        Value::Record(vec![("value".into(), Value::Int(1))])
+        Value::Record(vec![("value".into(), Value::I64(1))])
     );
 }
 
@@ -820,13 +820,13 @@ fn optional_and_default_rules_are_exact() {
         "layout",
         SchemaType::Record {
             fields: vec![
-                Field::required("width", SchemaType::Int),
-                Field::required("height", SchemaType::Int),
+                Field::required("width", SchemaType::I64),
+                Field::required("height", SchemaType::I64),
             ],
         },
         Value::Record(vec![
-            ("width".into(), Value::Int(1)),
-            ("height".into(), Value::Int(2)),
+            ("width".into(), Value::I64(1)),
+            ("height".into(), Value::I64(2)),
         ]),
     )])
     .prepare()
@@ -839,8 +839,8 @@ fn optional_and_default_rules_are_exact() {
 #[test]
 fn malformed_input_reports_syntax_not_budget() {
     let schema = Schema::record(vec![
-        Field::required("a", SchemaType::Int),
-        Field::required("b", SchemaType::Int),
+        Field::required("a", SchemaType::I64),
+        Field::required("b", SchemaType::I64),
     ])
     .prepare()
     .expect("schema prepares");
@@ -854,7 +854,7 @@ fn wide_input_hits_node_budget() {
     let schema = Schema::record(vec![Field::required(
         "values",
         SchemaType::Collection {
-            element: Box::new(SchemaType::Int),
+            element: Box::new(SchemaType::I64),
         },
     )])
     .with_limits(Limits {
@@ -870,7 +870,7 @@ fn wide_input_hits_node_budget() {
 
 #[test]
 fn deep_input_hits_depth_budget() {
-    let schema = Schema::record(vec![Field::required("value", SchemaType::Int)])
+    let schema = Schema::record(vec![Field::required("value", SchemaType::I64)])
         .with_limits(Limits {
             max_depth: 1,
             ..Limits::default()
@@ -884,14 +884,14 @@ fn deep_input_hits_depth_budget() {
 
 #[test]
 fn failure_then_success_shows_no_leaked_state() {
-    let schema = Schema::record(vec![Field::required("value", SchemaType::Int)])
+    let schema = Schema::record(vec![Field::required("value", SchemaType::I64)])
         .prepare()
         .expect("schema prepares");
     let bad = Value::Record(vec![("value".into(), Value::String("bad".into()))]);
     let encode_error = encode_document(&bad, &schema).expect_err("wrong value type fails encoding");
     assert_eq!(encode_error.code, MonErrorCode::TypeMismatch);
 
-    let good = Value::Record(vec![("value".into(), Value::Int(1))]);
+    let good = Value::Record(vec![("value".into(), Value::I64(1))]);
     let encoded = encode_document(&good, &schema).expect("encoding succeeds after a failure");
     let decoded = decode_document(&encoded, &schema).expect("encoded output is valid");
     assert_eq!(decoded, good);
@@ -925,7 +925,7 @@ fn nested_scalar_encoding_quotes_strings() {
 
 #[test]
 fn max_depth_policy_has_an_implementation_safe_ceiling() {
-    let schema = Schema::value(SchemaType::Int)
+    let schema = Schema::value(SchemaType::I64)
         .with_limits(Limits {
             max_depth: Limits::MAX_SAFE_DEPTH + 1,
             ..Limits::default()
@@ -941,7 +941,7 @@ fn encoder_preserves_decoded_node_budget() {
         "items",
         SchemaType::Collection {
             element: Box::new(SchemaType::Record {
-                fields: vec![Field::required("value", SchemaType::Int)],
+                fields: vec![Field::required("value", SchemaType::I64)],
             }),
         },
     )])
@@ -976,10 +976,10 @@ fn default_maps_use_the_same_node_cost_as_authored_maps() {
                     fields: vec![Field::with_default(
                         "m",
                         SchemaType::Map {
-                            key: Box::new(SchemaType::Int),
-                            value: Box::new(SchemaType::Int),
+                            key: Box::new(SchemaType::I64),
+                            value: Box::new(SchemaType::I64),
                         },
-                        Value::Map(vec![(Value::Int(1), Value::Int(2))]),
+                        Value::Map(vec![(Value::I64(1), Value::I64(2))]),
                     )],
                 }),
             },
@@ -1039,12 +1039,12 @@ fn default_maps_inside_choice_payload_share_the_same_node_cost() {
                                 fields: vec![Field::with_default(
                                     "m",
                                     SchemaType::Map {
-                                        key: Box::new(SchemaType::Int),
-                                        value: Box::new(SchemaType::Int),
+                                        key: Box::new(SchemaType::I64),
+                                        value: Box::new(SchemaType::I64),
                                     },
                                     Value::Map(vec![
-                                        (Value::Int(1), Value::Int(2)),
-                                        (Value::Int(3), Value::Int(4)),
+                                        (Value::I64(1), Value::I64(2)),
+                                        (Value::I64(3), Value::I64(4)),
                                     ]),
                                 )],
                             },
@@ -1149,14 +1149,14 @@ fn input_and_output_byte_limits_are_distinct() {
 fn encoded_duplicate_map_key_reports_the_key_path() {
     let schema = Schema::value(SchemaType::Map {
         key: Box::new(SchemaType::String),
-        value: Box::new(SchemaType::Int),
+        value: Box::new(SchemaType::I64),
     })
     .prepare()
     .expect("map schema prepares");
     let error = encode_value(
         &Value::Map(vec![
-            (Value::String("same".into()), Value::Int(1)),
-            (Value::String("same".into()), Value::Int(2)),
+            (Value::String("same".into()), Value::I64(1)),
+            (Value::String("same".into()), Value::I64(2)),
         ]),
         &schema,
     )
@@ -1170,7 +1170,7 @@ fn encoded_duplicate_map_key_reports_the_key_path() {
 fn encoded_duplicate_key_path_respects_decoded_byte_budget() {
     let schema = Schema::value(SchemaType::Map {
         key: Box::new(SchemaType::String),
-        value: Box::new(SchemaType::Int),
+        value: Box::new(SchemaType::I64),
     })
     .with_limits(Limits {
         max_decoded_bytes: 12,
@@ -1180,8 +1180,8 @@ fn encoded_duplicate_key_path_respects_decoded_byte_budget() {
     .expect("map schema prepares");
     let error = encode_value(
         &Value::Map(vec![
-            (Value::String("same".into()), Value::Int(1)),
-            (Value::String("same".into()), Value::Int(2)),
+            (Value::String("same".into()), Value::I64(1)),
+            (Value::String("same".into()), Value::I64(2)),
         ]),
         &schema,
     )

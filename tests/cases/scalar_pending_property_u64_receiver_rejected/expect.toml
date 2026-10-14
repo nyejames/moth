@@ -1,0 +1,26 @@
+entry = "."
+
+# The property access authors no argument list, so the member name itself is the whole
+# rejected region; the later independent `render_count(count)` use must still register
+# `count`'s concrete U64 receiver before the delayed unknown-member diagnostic reports it.
+# The resolved receiver identity is part of this diagnostic contract.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0048"]
+message_contains = ["'U64'"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0048"
+reason = "invalid_field_access.unknown_member"
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0048"]
+message_contains = ["'U64'"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0048"
+reason = "invalid_field_access.unknown_member"

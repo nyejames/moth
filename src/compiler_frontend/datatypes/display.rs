@@ -45,13 +45,9 @@ pub(crate) fn display_type_with_resolver(
 /// Formats the user-facing spelling for a fallible signature.
 ///
 /// WHAT: joins already-rendered success slots with the final error slot.
-/// WHY: internal fallible carriers and canonical function types both need to render
-///      through the same `A, B, E!` surface while the compiler migrates away
-///      from public first-class result values.
-pub(crate) fn format_fallible_signature_parts(
-    mut success_parts: Vec<String>,
-    error_part: String,
-) -> String {
+/// WHY: the optional error channel follows the ordered success slots without introducing
+///      a value type for the result list.
+fn format_fallible_signature_parts(mut success_parts: Vec<String>, error_part: String) -> String {
     success_parts.push(format!("{error_part}!"));
     success_parts.join(", ")
 }
@@ -80,9 +76,6 @@ fn display_definition(
     match definition {
         TypeDefinition::Builtin(builtin) => match builtin.key {
             super::ids::BuiltinTypeKey::Bool => "Bool".to_owned(),
-            super::ids::BuiltinTypeKey::Int => "Int".to_owned(),
-            super::ids::BuiltinTypeKey::Uint => "Uint".to_owned(),
-            super::ids::BuiltinTypeKey::Float => "Float".to_owned(),
             super::ids::BuiltinTypeKey::Number(scale) => scale.to_string(),
             super::ids::BuiltinTypeKey::String => "String".to_owned(),
             super::ids::BuiltinTypeKey::Char => "Char".to_owned(),
@@ -204,40 +197,7 @@ fn display_constructed(
                 "Option".to_owned()
             }
         }
-        TypeConstructor::Builtin(BuiltinTypeConstructor::FallibleCarrier) => {
-            if let [success, error] = constructed.arguments.as_ref() {
-                display_fallible_carrier(*success, *error, env, table, path_table)
-            } else {
-                "FallibleCarrier".to_owned()
-            }
-        }
-        TypeConstructor::Builtin(BuiltinTypeConstructor::Tuple) => {
-            let fields: Vec<String> = constructed
-                .arguments
-                .iter()
-                .map(|arg| display_type_with_resolver(*arg, env, table, path_table))
-                .collect();
-            format!("({})", fields.join(", "))
-        }
     }
-}
-
-fn display_fallible_carrier(
-    success_type: TypeId,
-    error_type: TypeId,
-    env: &TypeEnvironment,
-    table: &dyn StringTableResolver,
-    path_table: &PathTable,
-) -> String {
-    let success_types = if success_type == env.builtins().none {
-        Vec::new()
-    } else if let Some(tuple_fields) = env.tuple_field_ids(success_type) {
-        tuple_fields.to_vec()
-    } else {
-        vec![success_type]
-    };
-
-    display_fallible_signature(&success_types, error_type, env, table, path_table)
 }
 
 fn display_return_signature(

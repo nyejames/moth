@@ -1,0 +1,7 @@
+local_binding || -> I32:
+    ACTIVE = 1
+    return ACTIVE
+;
+
+ACTIVE must:
+;

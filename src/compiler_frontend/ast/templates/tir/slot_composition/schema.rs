@@ -4,6 +4,8 @@
 //! module rebuilds a wrapper tree with routed contributions spliced in place
 //! of `$slot` nodes.
 
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{Style, TemplateType};
 use crate::compiler_frontend::ast::templates::tir::contribution_shape::classify_tir_contribution_node;
@@ -28,6 +30,8 @@ type SlotSchemaResult<T> = Result<T, TemplateError>;
 
 pub(crate) fn expand_tir_slot_placeholders_into(
     store: &mut TemplateIrStore,
+    expressions: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
     wrapper_template_id: TemplateIrId,
     routed_contributions: &TirSlotContributions,
     string_table: &StringTable,
@@ -39,7 +43,14 @@ pub(crate) fn expand_tir_slot_placeholders_into(
     };
     let root = template.root;
 
-    expand_tir_slot_placeholders_from_node(store, root, routed_contributions, string_table)
+    expand_tir_slot_placeholders_from_node(
+        store,
+        expressions,
+        const_values,
+        root,
+        routed_contributions,
+        string_table,
+    )
 }
 
 /// Recursively walks TIR nodes and produces a new TIR tree with slots expanded.
@@ -52,6 +63,8 @@ pub(crate) fn expand_tir_slot_placeholders_into(
 ///      reachable slot and rebuild only the parts of the tree that changed.
 fn expand_tir_slot_placeholders_from_node(
     store: &mut TemplateIrStore,
+    expressions: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
     node_id: TemplateIrNodeId,
     routed_contributions: &TirSlotContributions,
     string_table: &StringTable,
@@ -70,6 +83,8 @@ fn expand_tir_slot_placeholders_from_node(
             for child_id in children {
                 let expanded_child_id = expand_tir_slot_placeholders_from_node(
                     store,
+                    expressions,
+                    const_values,
                     *child_id,
                     routed_contributions,
                     string_table,
@@ -132,6 +147,8 @@ fn expand_tir_slot_placeholders_from_node(
                 } else {
                     apply_tir_wrapper_sets_to_contribution(
                         store,
+                        expressions,
+                        const_values,
                         *node_id,
                         placeholder,
                         string_table,
@@ -166,6 +183,8 @@ fn expand_tir_slot_placeholders_from_node(
 
             let expanded_child_root = expand_tir_slot_placeholders_from_node(
                 store,
+                expressions,
+                const_values,
                 child_root,
                 routed_contributions,
                 string_table,
@@ -199,6 +218,8 @@ fn expand_tir_slot_placeholders_from_node(
         } => {
             let expanded_body_id = expand_tir_slot_placeholders_from_node(
                 store,
+                expressions,
+                const_values,
                 *body,
                 routed_contributions,
                 string_table,
@@ -226,6 +247,8 @@ fn expand_tir_slot_placeholders_from_node(
         } => {
             let expanded_body_id = expand_tir_slot_placeholders_from_node(
                 store,
+                expressions,
+                const_values,
                 *body,
                 routed_contributions,
                 string_table,
@@ -237,6 +260,8 @@ fn expand_tir_slot_placeholders_from_node(
                 Some(aggregate_wrapper_id) => {
                     let expanded_aggregate_wrapper_id = expand_tir_slot_placeholders_from_node(
                         store,
+                        expressions,
+                        const_values,
                         *aggregate_wrapper_id,
                         routed_contributions,
                         string_table,
@@ -278,6 +303,10 @@ fn expand_tir_slot_placeholders_from_node(
         TemplateIrNodeKind::AggregateOutput => Ok(node_id),
         TemplateIrNodeKind::RuntimeSlotSite { .. }
         | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => Ok(node_id),
+
+        // A retained position is a leaf for slot expansion: its value does not exist yet, so it
+        // carries no slot placeholders and stays at its authored position.
+        TemplateIrNodeKind::RetainedNumericIntake(_) => Ok(node_id),
     }
 }
 
@@ -289,6 +318,8 @@ fn expand_tir_slot_placeholders_from_node(
 ///       slot-less wrapper before it.
 fn apply_tir_wrapper_set_to_node(
     store: &mut TemplateIrStore,
+    expressions: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
     node_id: TemplateIrNodeId,
     wrapper_set_id: TemplateWrapperSetId,
     string_table: &StringTable,
@@ -299,7 +330,14 @@ fn apply_tir_wrapper_set_to_node(
 
     let wrapper_references = wrapper_set.wrappers.to_vec();
 
-    wrap_tir_node_in_wrappers_into(store, node_id, &wrapper_references, string_table)
+    wrap_tir_node_in_wrappers_into(
+        store,
+        expressions,
+        const_values,
+        node_id,
+        &wrapper_references,
+        string_table,
+    )
 }
 
 /// Applies both inherited and applied `$children(..)` wrapper sets to a single
@@ -314,6 +352,8 @@ fn apply_tir_wrapper_set_to_node(
 ///      placeholder while operating on TIR node IDs.
 fn apply_tir_wrapper_sets_to_contribution(
     store: &mut TemplateIrStore,
+    expressions: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
     node_id: TemplateIrNodeId,
     placeholder: &TirSlotPlaceholder,
     string_table: &StringTable,
@@ -325,8 +365,14 @@ fn apply_tir_wrapper_sets_to_contribution(
         && shape.is_child_template_contribution()
         && !shape.skips_parent_child_wrappers()
     {
-        current_node_id =
-            apply_tir_wrapper_set_to_node(store, current_node_id, wrapper_set_id, string_table)?;
+        current_node_id = apply_tir_wrapper_set_to_node(
+            store,
+            expressions,
+            const_values,
+            current_node_id,
+            wrapper_set_id,
+            string_table,
+        )?;
     }
 
     let post_shape = classify_tir_contribution_node(store, current_node_id)?;
@@ -334,8 +380,14 @@ fn apply_tir_wrapper_sets_to_contribution(
         && !placeholder.skip_parent_child_wrappers
         && post_shape.is_child_template_contribution()
     {
-        current_node_id =
-            apply_tir_wrapper_set_to_node(store, current_node_id, wrapper_set_id, string_table)?;
+        current_node_id = apply_tir_wrapper_set_to_node(
+            store,
+            expressions,
+            const_values,
+            current_node_id,
+            wrapper_set_id,
+            string_table,
+        )?;
     }
 
     Ok(current_node_id)

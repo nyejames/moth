@@ -1,6 +1,6 @@
-large_integer #Int = 16_777_217
+large_integer #I64 = 16_777_217
 
-from_default |value Float = large_integer| -> Float:
+from_default |value F64 = large_integer| -> F64:
     return value
 ;
 

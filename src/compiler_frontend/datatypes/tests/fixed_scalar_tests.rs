@@ -1,13 +1,15 @@
 //! Focused type-identity tests for the fixed-width builtin scalars.
 //!
 //! WHAT: proves `I8`..`F64` and `Byte` are seeded as distinct builtin identities that never alias
-//!       `Int`/`Float`, each other, or `Char`, including through canonical and generic identity.
-//! WHY: identity is the whole contract of these types; a width that resolved to `Int`, or a
-//!      profile width that made `Float` alias `F32`, would silently break the casts, operators
-//!      and foreign boundaries that later phases build on canonical identity.
+//!       each other or `Char`, including through canonical and generic identity. It also owns the
+//!       exact unsigned range facts and the canonical/bridge key round trip for one exact width.
+//! WHY: identity is the whole contract of these types; a width that shared another width's
+//!      identity, or an alias that collapsed an exact width, would silently break the casts,
+//!      operators and foreign boundaries that later phases build on canonical identity.
 
 use crate::compiler_frontend::canonical_type_identity::{
-    CanonicalBuiltinType, intern_canonical_builtin,
+    CanonicalBuiltinType, builtin_key_for_canonical_builtin, canonical_builtin_for_key,
+    intern_canonical_builtin,
 };
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::definitions::{StructTypeDefinition, TypeDefinition};
@@ -16,6 +18,7 @@ use crate::compiler_frontend::datatypes::generic_identity_bridge::{
     BuiltinTypeKey as BridgeBuiltinTypeKey, GenericInstantiationKey, TypeIdentityKey,
 };
 use crate::compiler_frontend::datatypes::ids::{BuiltinTypeKey, NominalTypeId, TypeId};
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerBuilder};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use moth_lexical::numeric::decimal::NumberScale;
@@ -58,14 +61,6 @@ fn seeded_fixed_scalars_are_distinct_builtin_identities() {
         );
         seen.push(type_id);
     }
-    assert_ne!(
-        builtin_type_ids::INT,
-        builtin_type_ids::fixed_scalar(FixedScalar::I32)
-    );
-    assert_ne!(
-        builtin_type_ids::FLOAT,
-        builtin_type_ids::fixed_scalar(FixedScalar::F32)
-    );
 }
 
 #[test]
@@ -148,5 +143,60 @@ fn generic_instances_of_different_fixed_scalars_are_distinct_identities() {
                 FixedScalar::U8
             ))],
         }))
+    );
+}
+
+/// The exact unsigned widths keep their own zero-based range facts, distinct from the same-width
+/// signed range.
+#[test]
+fn unsigned_fixed_scalar_ranges_are_exact_and_distinct_from_signed() {
+    assert_eq!(
+        NumericScalar::Fixed(FixedScalar::U32).integer_range(),
+        Some((0, i128::from(u32::MAX)))
+    );
+    assert_eq!(
+        NumericScalar::Fixed(FixedScalar::U64).integer_range(),
+        Some((0, i128::from(u64::MAX)))
+    );
+    assert_ne!(
+        NumericScalar::Fixed(FixedScalar::U32).integer_range(),
+        NumericScalar::Fixed(FixedScalar::I32).integer_range(),
+        "U32 starts at zero while I32 starts negative"
+    );
+}
+
+/// An unsigned width is an integer domain and carries no binary-float precision.
+#[test]
+fn unsigned_fixed_scalars_are_integers_without_binary_float_precision() {
+    let u32_scalar = NumericScalar::Fixed(FixedScalar::U32);
+    assert!(u32_scalar.is_integer());
+    assert!(
+        u32_scalar.binary_float_precision().is_none(),
+        "an unsigned integer has no binary-float precision"
+    );
+}
+
+/// Canonical and bridge keys round-trip the exact width.
+#[test]
+fn fixed_scalar_canonical_and_identity_keys_round_trip() {
+    let canonical = canonical_builtin_for_key(BuiltinTypeKey::FixedScalar(FixedScalar::U32));
+    assert_eq!(
+        canonical,
+        CanonicalBuiltinType::FixedScalar(FixedScalar::U32)
+    );
+    assert_eq!(
+        builtin_key_for_canonical_builtin(canonical),
+        Some(BuiltinTypeKey::FixedScalar(FixedScalar::U32))
+    );
+
+    // `TypeId` <-> identity-key round trip keeps the seeded U32 identity exact.
+    let environment = TypeEnvironment::new();
+    let u32_id = builtin_type_ids::fixed_scalar(FixedScalar::U32);
+    let key = environment
+        .type_id_to_type_identity_key(u32_id)
+        .expect("U32 has an identity key");
+    assert_eq!(
+        key,
+        TypeIdentityKey::Builtin(BridgeBuiltinTypeKey::FixedScalar(FixedScalar::U32))
     );
 }

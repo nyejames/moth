@@ -1,5 +1,5 @@
 export:
-    double |x Int| -> Int:
+    double |x I32| -> I32:
         return x * 2 catch then 0
     ;
 ;

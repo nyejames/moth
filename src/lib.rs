@@ -48,6 +48,8 @@ mod compiler_tests {
     #[cfg(test)]
     mod config_input_origin_tests;
     #[cfg(test)]
+    mod external_float_registration_tests;
+    #[cfg(test)]
     mod mon_syntax_parity;
     #[cfg(test)]
     pub mod test_diagnostics;

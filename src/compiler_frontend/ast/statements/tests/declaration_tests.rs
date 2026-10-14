@@ -4,17 +4,23 @@
 //! WHY: declaration parsing is the entrypoint for most AST values and must preserve type intent.
 
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
+use crate::compiler_frontend::ast::const_values::ConstValuePayload;
 use crate::compiler_frontend::ast::cursor::AstCursor;
-use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
+use crate::compiler_frontend::ast::expressions::expression_store::ExpressionOperationView;
 use crate::compiler_frontend::ast::module_ast::environment::TopLevelDeclarationTable;
 use crate::compiler_frontend::ast::module_ast::scope_context::{ContextKind, ScopeContext};
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticKind, DiagnosticLabelMessage, DiagnosticPayload, ReservedNameOwner,
-    RuleDiagnosticKind, TypeMismatchContext,
+    DiagnosticKind, DiagnosticLabelMessage, DiagnosticPayload, DiagnosticToken,
+    InvalidMultiBindReason, ReservedNameOwner, RuleDiagnosticKind, TypeMismatchContext,
+    ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::parse_declaration_syntax;
-use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
+use crate::compiler_frontend::external_packages::{
+    ExternalFunctionId, ExternalPackageRegistry, ExternalSymbolId,
+};
+use crate::compiler_frontend::source::test_support::TestSourceContext;
 use crate::compiler_frontend::source::{
     ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceId, SourceSpan,
 };
@@ -24,7 +30,8 @@ use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::start_function_body;
 use crate::compiler_frontend::tests::parse_support::{
-    parse_single_file_ast, parse_single_file_ast_diagnostic,
+    parse_single_file_ast, parse_single_file_ast_build_result_with_registry,
+    parse_single_file_ast_diagnostic,
 };
 use crate::compiler_frontend::tokenizer::lexer::tokenize;
 use crate::compiler_frontend::tokenizer::tokens::{TokenIndex, TokenTag, TokenizerEntryMode};
@@ -33,6 +40,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 // --------------------------
 //  Basic declarations
@@ -48,23 +56,33 @@ fn parses_mutable_and_explicitly_typed_declarations() {
     let NodeKind::VariableDeclaration(count_decl) = &body[0].kind else {
         panic!("expected mutable declaration");
     };
-    assert_eq!(count_decl.value.diagnostic_type, DataType::Int);
-    assert_eq!(count_decl.value.value_mode, ValueMode::MutableOwned);
+    assert_eq!(
+        count_decl.diagnostic_type,
+        DataType::FixedScalar(FixedScalar::I32)
+    );
+    assert_eq!(count_decl.value_mode, ValueMode::MutableOwned);
 
     let NodeKind::VariableDeclaration(name_decl) = &body[1].kind else {
         panic!("expected explicit string declaration");
     };
-    assert_eq!(name_decl.value.diagnostic_type, DataType::StringSlice);
+    assert_eq!(name_decl.diagnostic_type, DataType::StringSlice);
+    let initializer = ast
+        .expressions
+        .view(name_decl.value.initializer().expect("fixture initializer"))
+        .expect("initializer belongs to AST");
+    let ExpressionOperationView::Constant(value) = initializer.operation() else {
+        panic!("expected folded string initializer");
+    };
     assert!(matches!(
-        name_decl.value.kind,
-        ExpressionKind::StringSlice(..)
+        ast.const_values.payload(value),
+        Some(ConstValuePayload::String(_))
     ));
 }
 
 #[test]
 fn resolves_named_type_annotations_against_prior_structs() {
     let (ast, path_fork, string_table) =
-        parse_single_file_ast("Point = |\n    x Int,\n|\n\norigin Point = Point(0)\n");
+        parse_single_file_ast("Point = |\n    x I32,\n|\n\norigin Point = Point(0)\n");
 
     let body = start_function_body(&ast, &path_fork, &string_table);
 
@@ -72,16 +90,31 @@ fn resolves_named_type_annotations_against_prior_structs() {
         panic!("expected typed declaration");
     };
     assert!(matches!(
-        origin_decl.value.diagnostic_type,
+        origin_decl.diagnostic_type,
         DataType::Struct {
             const_record: false,
             ..
         }
     ));
-    assert!(matches!(
-        origin_decl.value.kind,
-        ExpressionKind::StructInstance(..)
-    ));
+    let initializer = ast
+        .expressions
+        .view(
+            origin_decl
+                .value
+                .initializer()
+                .expect("fixture initializer"),
+        )
+        .expect("initializer belongs to AST");
+    match initializer.operation() {
+        ExpressionOperationView::Struct { .. } => {}
+        ExpressionOperationView::Constant(value) => {
+            assert!(matches!(
+                ast.const_values.payload(value),
+                Some(ConstValuePayload::Record(_))
+            ));
+        }
+        _ => panic!("expected struct initializer"),
+    }
 }
 
 // --------------------------
@@ -122,7 +155,7 @@ fn rejects_struct_redefinition_of_reserved_error_symbol() {
 fn allows_user_declarations_named_old_error_family_symbols() {
     parse_single_file_ast(
         "ErrorKind = |\n    message String,\n|\n\n\
-         ErrorLocation = |\n    line Int,\n|\n\n\
+         ErrorLocation = |\n    line I32,\n|\n\n\
          StackFrame = |\n    name String,\n|\n\n\
          kind = ErrorKind(\"custom\")\n\
          location = ErrorLocation(12)\n\
@@ -145,7 +178,7 @@ fn rejects_keyword_shadow_variable_declarations() {
 
 #[test]
 fn shadowed_declaration_retains_exact_duplicate_name_span() {
-    let source = "value = \"π\"\nvalue Int = 2\n";
+    let source = "value = \"π\"\nvalue I32 = 2\n";
     let diagnostic = parse_single_file_ast_diagnostic(source);
 
     assert!(matches!(
@@ -154,7 +187,7 @@ fn shadowed_declaration_retains_exact_duplicate_name_span() {
     ));
 
     let duplicate_start = source
-        .rfind("value Int")
+        .rfind("value I32")
         .expect("the duplicate declaration should be present") as u32;
     let mut expected_builder = ExtendedSpanBuilder::new();
     let expected_span =
@@ -169,6 +202,152 @@ fn shadowed_declaration_retains_exact_duplicate_name_span() {
     assert_eq!(
         diagnostic.labels[0].message,
         Some(DiagnosticLabelMessage::PreviousDeclaration)
+    );
+    assert_eq!(
+        diagnostic.labels[0].span,
+        Some(SourceSpan::new(
+            SourceId::COMPILATION_ROOT,
+            LocalSpan::exact(0, "value".len() as u32, &mut expected_builder)
+                .expect("the original name span should fit"),
+        )),
+    );
+}
+
+fn body_prelude_registry() -> ExternalPackageRegistry {
+    let mut registry = ExternalPackageRegistry::new();
+    registry
+        .register_prelude_symbol(
+            "prelude_print",
+            ExternalSymbolId::Function(ExternalFunctionId::IoPrint),
+        )
+        .expect("the prelude function alias must register");
+    registry
+}
+
+#[test]
+fn body_local_prelude_collisions_retain_authored_name_span() {
+    for (source, name) in [
+        ("io = 1\n", "io"),
+        ("io I32 = 1\n", "io"),
+        ("prelude_print = 1\n", "prelude_print"),
+        ("prelude_print I32 = 1\n", "prelude_print"),
+        ("if true:\n    io = 1\n;\n", "io"),
+        (
+            "pair || -> I32, I32:\n    return 1, 2\n;\nvalue, io = pair()\n",
+            "io",
+        ),
+        (
+            "pair || -> I32, I32:\n    return 1, 2\n;\nvalue I32, io I32 = pair()\n",
+            "io",
+        ),
+        (
+            "@core/io line as host_line\nhost_line I32 = 1\n",
+            "host_line",
+        ),
+        ("@core/io as output\noutput = 1\n", "output"),
+        (
+            "@core/io line as host_line\npair || -> I32, I32:\n    return 1, 2\n;\nvalue, host_line I32 = pair()\n",
+            "host_line",
+        ),
+    ] {
+        let diagnostic =
+            parse_single_file_ast_build_result_with_registry(source, body_prelude_registry())
+                .err()
+                .expect("a body binding must not replace a visible prelude binding");
+        assert_eq!(diagnostic.kind.code(), "MOTH-RULE-0038", "{source}");
+        let DiagnosticPayload::ShadowedName {
+            name: authored_name,
+        } = diagnostic.payload
+        else {
+            panic!("the collision must retain the authored name payload");
+        };
+        let mut authored = TestSourceContext::new("@page.moth");
+        authored
+            .tokenize(
+                source,
+                &mut PathInternerFork::empty(),
+                &StyleDirectiveRegistry::built_ins(),
+                TokenizerEntryMode::SourceFile,
+            )
+            .expect("the authored diagnostic source must tokenize");
+        assert_eq!(authored.preparation_parts().0.resolve(authored_name), name);
+        let start = source.rfind(name).expect("the authored name must occur") as u32;
+        let mut builder = ExtendedSpanBuilder::new();
+        let span = LocalSpan::exact(start, name.len() as u32, &mut builder)
+            .expect("the authored name must fit");
+        assert_eq!(
+            diagnostic.primary_span,
+            Some(SourceSpan::new(SourceId::COMPILATION_ROOT, span)),
+            "{source}",
+        );
+        assert!(diagnostic.labels.is_empty(), "{source}");
+    }
+}
+
+#[test]
+fn body_local_prelude_lookup_preserves_namespace_and_function_calls() {
+    let (result, paths, strings) = parse_single_file_ast_build_result_with_registry(
+        "message = \"hello\"\nio.print(message)\nprelude_print(message)\n",
+        body_prelude_registry(),
+    )
+    .expect("ordinary locals and original prelude calls must remain valid");
+    let body = start_function_body(&result.ast, &paths, &strings);
+    assert!(matches!(body[0].kind, NodeKind::VariableDeclaration(_)));
+    for statement in &body[1..] {
+        let NodeKind::ExpressionStatement(expression) = statement.kind else {
+            panic!("the prelude use must remain an expression statement");
+        };
+        assert!(matches!(
+            result.ast.expressions.view(expression).unwrap().operation(),
+            ExpressionOperationView::Call(_)
+        ));
+    }
+    assert_eq!(body.len(), 3);
+}
+
+#[test]
+fn malformed_multi_bind_keeps_missing_target_priority_over_name_collision() {
+    let source = "pair || -> I32, I32:\n    return 1, 2\n;\nio, = pair()\n";
+    let diagnostic = parse_single_file_ast_diagnostic(source);
+    assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0002");
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::InvalidMultiBind {
+            reason: InvalidMultiBindReason::MissingTargetAfterComma,
+            target_name: None,
+        }
+    ));
+    let comma = source.rfind(',').expect("the target comma must occur") as u32;
+    let mut builder = ExtendedSpanBuilder::new();
+    let span = LocalSpan::exact(comma, 1, &mut builder).expect("the comma span must fit");
+    assert_eq!(
+        diagnostic.primary_span,
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, span)),
+    );
+}
+
+#[test]
+fn body_local_prelude_malformed_host_statement_keeps_missing_parenthesis_diagnostic() {
+    let source = "@core/io line as print\nprint\n";
+    let diagnostic = parse_single_file_ast_diagnostic(source);
+    assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0001");
+    let DiagnosticPayload::ExpectedToken { expected, found } = diagnostic.payload else {
+        panic!("the malformed host call must retain its expected-token payload");
+    };
+    assert_eq!(
+        expected,
+        DiagnosticToken::from_static_tag(TokenTag::OPEN_PARENTHESIS),
+    );
+    assert_eq!(
+        found,
+        Some(DiagnosticToken::from_static_tag(TokenTag::NEWLINE)),
+    );
+    let mut builder = ExtendedSpanBuilder::new();
+    let span = LocalSpan::exact((source.len() - 1) as u32, 1, &mut builder)
+        .expect("the newline span must fit");
+    assert_eq!(
+        diagnostic.primary_span,
+        Some(SourceSpan::new(SourceId::COMPILATION_ROOT, span)),
     );
 }
 
@@ -190,7 +369,7 @@ fn rejects_unconsumed_source_config_qualifier_at_declaration_boundary() {
 
 #[test]
 fn rejects_initializer_type_mismatch_with_target_and_value_details() {
-    let diagnostic = parse_single_file_ast_diagnostic("result Float = true\n");
+    let diagnostic = parse_single_file_ast_diagnostic("result F64 = true\n");
 
     let DiagnosticPayload::TypeMismatch {
         expected,
@@ -202,18 +381,26 @@ fn rejects_initializer_type_mismatch_with_target_and_value_details() {
     };
 
     assert_eq!(*context, TypeMismatchContext::Declaration);
-    assert_eq!(expected.0, 2);
-    assert_eq!(found.0, 0);
+    assert_eq!(
+        *expected,
+        builtin_type_ids::fixed_scalar(FixedScalar::F64),
+        "the declared F64 receiver is the expected identity"
+    );
+    assert_eq!(
+        *found,
+        builtin_type_ids::BOOL,
+        "the boolean value is the found identity"
+    );
 }
 
 #[test]
 fn rejects_multiline_regular_division_with_operator_on_next_line() {
-    assert_declaration_type_mismatch("result Int = 5\n / 2\n");
+    assert_declaration_type_mismatch("result I32 = 5\n / 2\n");
 }
 
 #[test]
 fn rejects_multiline_regular_division_with_operator_at_end_of_line() {
-    assert_declaration_type_mismatch("result Int = 5 /\n 2\n");
+    assert_declaration_type_mismatch("result I32 = 5 /\n 2\n");
 }
 
 fn assert_declaration_type_mismatch(source: &str) {
@@ -240,10 +427,9 @@ fn shorthand_fixed_collection_declaration_infers_element_type() {
     };
 
     assert_eq!(
-        decl.value
-            .diagnostic_type
+        decl.diagnostic_type
             .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
-        "{2 Int}"
+        "{2 I32}"
     );
 }
 
@@ -262,8 +448,7 @@ fn fixed_collection_alias_literal_is_accepted() {
     };
 
     assert_eq!(
-        decl.value
-            .diagnostic_type
+        decl.diagnostic_type
             .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
         "{2 String}"
     );
@@ -271,7 +456,7 @@ fn fixed_collection_alias_literal_is_accepted() {
 
 #[test]
 fn nested_fixed_collection_literal_is_accepted() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("grid {2 {3 Int}} = {{1}, {2}}\n");
+    let (ast, path_fork, string_table) = parse_single_file_ast("grid {2 {3 I32}} = {{1}, {2}}\n");
     let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(decl) = &body[0].kind else {
@@ -279,10 +464,9 @@ fn nested_fixed_collection_literal_is_accepted() {
     };
 
     assert_eq!(
-        decl.value
-            .diagnostic_type
+        decl.diagnostic_type
             .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
-        "{2 {3 Int}}"
+        "{2 {3 I32}}"
     );
 }
 
@@ -290,11 +474,11 @@ fn nested_fixed_collection_literal_is_accepted() {
 fn immutable_fixed_collection_from_function_call_is_allowed() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
         r#"
-    make || -> {2 Int}:
+    make || -> {2 I32}:
         return {1}
     ;
     
-    items {2 Int} = make()
+    items {2 I32} = make()
     "#,
     );
     let body = start_function_body(&ast, &path_fork, &string_table);
@@ -304,10 +488,9 @@ fn immutable_fixed_collection_from_function_call_is_allowed() {
     };
 
     assert_eq!(
-        decl.value
-            .diagnostic_type
+        decl.diagnostic_type
             .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
-        "{2 Int}"
+        "{2 I32}"
     );
 }
 
@@ -319,7 +502,7 @@ fn generic_identity_preserves_fixed_collection_shape() {
         return value
     ;
     
-    items {2 Int} = {1}
+    items {2 I32} = {1}
     same = identity(items)
     "#,
     );
@@ -330,10 +513,9 @@ fn generic_identity_preserves_fixed_collection_shape() {
     };
 
     assert_eq!(
-        decl.value
-            .diagnostic_type
+        decl.diagnostic_type
             .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
-        "{2 Int}"
+        "{2 I32}"
     );
 }
 
@@ -342,7 +524,7 @@ fn fixed_collection_struct_field_default_allows_empty_literal() {
     parse_single_file_ast(
         r#"
 Buffer = |
-    items {2 Int} = {},
+    items {2 I32} = {},
 |
 
 buffer ~= Buffer()
@@ -352,7 +534,7 @@ buffer ~= Buffer()
 
 #[test]
 fn mutable_empty_fixed_collection_is_allowed() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("items ~{2 Int} = {}\n");
+    let (ast, path_fork, string_table) = parse_single_file_ast("items ~{2 I32} = {}\n");
     let body = start_function_body(&ast, &path_fork, &string_table);
 
     let NodeKind::VariableDeclaration(decl) = &body[0].kind else {
@@ -360,25 +542,23 @@ fn mutable_empty_fixed_collection_is_allowed() {
     };
 
     assert_eq!(
-        decl.value
-            .diagnostic_type
+        decl.diagnostic_type
             .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
-        "{2 Int}"
+        "{2 I32}"
     );
 }
 
 #[test]
 fn normal_collection_declaration() {
-    let (ast, path_fork, string_table) = parse_single_file_ast("items {Int} = {1, 2}\n");
+    let (ast, path_fork, string_table) = parse_single_file_ast("items {I32} = {1, 2}\n");
     let body = start_function_body(&ast, &path_fork, &string_table);
     let NodeKind::VariableDeclaration(decl) = &body[0].kind else {
         panic!("expected declaration");
     };
     assert_eq!(
-        decl.value
-            .diagnostic_type
+        decl.diagnostic_type
             .display_with_table(&string_table, &PathInternerBuilder::new().freeze()),
-        "{Int}"
+        "{I32}"
     );
 }
 
@@ -386,8 +566,8 @@ fn normal_collection_declaration() {
 fn fixed_and_growable_assignment_mismatch_is_rejected() {
     let diagnostic = parse_single_file_ast_diagnostic(
         r#"
-growable {Int} = {1}
-items {2 Int} = growable
+growable {I32} = {1}
+items {2 I32} = growable
 "#,
     );
 
@@ -402,8 +582,8 @@ items {2 Int} = growable
 fn exact_fixed_capacity_mismatch_is_rejected() {
     let diagnostic = parse_single_file_ast_diagnostic(
         r#"
-three {3 Int} = {1}
-items {2 Int} = three
+three {3 I32} = {1}
+items {2 I32} = three
 "#,
     );
 
@@ -421,10 +601,10 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
     let long_target = format!("{long_type} = 1");
     for (target, expected_anchor) in [
         ("= 1", "="),
-        ("Int = 1", "Int"),
+        ("I32 = 1", "I32"),
         ("~= 1", "~"),
         ("#= 1", "#"),
-        ("#Config of Int = 1", "#"),
+        ("#Config of I32 = 1", "#"),
         (long_target.as_str(), long_type.as_str()),
     ] {
         let source = format!("padding #= \"{padding}\"\nvalue {target}\n");
@@ -550,6 +730,56 @@ fn initializer_terminator_preserves_the_parsed_declaration_anchor() {
             (range.start(), range.end()),
             expected_range,
             "target {target}"
+        );
+    }
+}
+
+#[test]
+fn single_declarations_reject_zero_and_multiple_success_slots() {
+    for (producer, produced_count) in [
+        ("none_here ||:\n    return\n;\n", 0),
+        (
+            "none_here || -> I32, String:\n    return 1, \"one\"\n;\n",
+            2,
+        ),
+    ] {
+        for receiver in ["value = none_here()", "value I32 = none_here()"] {
+            let source = format!("{producer}\n{receiver}\n");
+            let diagnostic = parse_single_file_ast_diagnostic(&source);
+            assert!(
+                matches!(
+                    diagnostic.payload,
+                    DiagnosticPayload::InvalidValueReceiver {
+                        receiver: ValueReceiverContext::Declaration,
+                        target_count: 1,
+                        produced_count: actual,
+                    } if actual == produced_count
+                ),
+                "{diagnostic:?}"
+            );
+            assert!(diagnostic.primary_span.is_some(), "{diagnostic:?}");
+        }
+    }
+}
+
+#[test]
+fn assignments_reject_zero_and_multiple_success_slots() {
+    for (producer, produced_count) in [
+        ("produce ||:\n    return\n;\n", 0),
+        ("produce || -> I32, String:\n    return 1, \"one\"\n;\n", 2),
+    ] {
+        let source = format!("{producer}\nvalue ~= 0\nvalue = produce()\n");
+        let diagnostic = parse_single_file_ast_diagnostic(&source);
+        assert!(
+            matches!(
+                diagnostic.payload,
+                DiagnosticPayload::InvalidValueReceiver {
+                    receiver: ValueReceiverContext::Assignment,
+                    target_count: 1,
+                    produced_count: actual,
+                } if actual == produced_count
+            ),
+            "{diagnostic:?}"
         );
     }
 }

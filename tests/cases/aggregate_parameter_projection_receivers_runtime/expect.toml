@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "aggregate_parameter_projection_receivers inline=4294967296 projected=4294967297 recovered=4294967298 absent=missing optional_array=1 optional_map=1 named=11 optional_named=11 optional_named_map=12"

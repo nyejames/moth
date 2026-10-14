@@ -6,14 +6,15 @@
 //! acceptance results.
 
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
-use moth_lexical::numeric::profile::NumericProfile;
 
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
 use crate::compiler_frontend::ast::const_values::store::{
     ConstStringPiece, ConstStringValue, ConstValueId, ConstValuePayload, ConstValueStore,
 };
-use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    ArgumentListView, ExprId, ExpressionOperationView, ExpressionView, FieldListView,
+    ResolvedCallableTarget,
+};
 use crate::compiler_frontend::ast::{Ast, AstBuildResult};
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::ids::{
@@ -25,7 +26,7 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable}
 use crate::compiler_frontend::tests::ast_fixture_support::{
     function_body_by_name, function_signature_by_name,
 };
-use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_build_result_with_profile;
+use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_build_result;
 use crate::mon::Value;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 
@@ -33,9 +34,6 @@ use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum SourceTypeIdentity {
     Bool,
-    Int,
-    Uint,
-    Float,
     String,
     Char,
     None,
@@ -59,10 +57,6 @@ pub(super) struct ObservedSourceValue {
 
 #[derive(Debug, Clone)]
 pub(super) enum ObservedSourceKind {
-    Int(i64),
-    /// One profile-sized unsigned integer observation; follows the selected `Int` width.
-    Uint(u64),
-    Float(f64),
     Number(NumberValue),
     FixedScalar(FixedScalarValue),
     Bool(bool),
@@ -155,7 +149,16 @@ pub(super) fn observe_data_value(
         NodeKind::VariableDeclaration(declaration)
             if path_component_text(declaration.id, &context) == "data" =>
         {
-            Some(observe_expression(&declaration.value, &context))
+            declaration.value.initializer().map(|value| {
+                observe_expression(
+                    context
+                        .ast
+                        .expressions
+                        .view(value)
+                        .expect("retained initializer"),
+                    &context,
+                )
+            })
         }
         _ => None,
     })
@@ -164,19 +167,16 @@ pub(super) fn observe_data_value(
 /// Parse a source-only start-body call and retain argument values plus the parser-selected slots.
 pub(super) fn observe_start_body_call_arguments(
     source: &str,
-    profile: NumericProfile,
     function_name: &str,
 ) -> Vec<ObservedCallArgument> {
-    let (build_result, path_fork, string_table) = parse_single_file_ast_build_result_with_profile(
-        source, profile,
-    )
-    .unwrap_or_else(|diagnostic| {
-        panic!(
-            "source call fixture could not be compiled: {} {:?}",
-            diagnostic.identity().code,
-            diagnostic.payload
-        )
-    });
+    let (build_result, path_fork, string_table) = parse_single_file_ast_build_result(source)
+        .unwrap_or_else(|diagnostic| {
+            panic!(
+                "source call fixture could not be compiled: {} {:?}",
+                diagnostic.identity().code,
+                diagnostic.payload
+            )
+        });
     let ast = &build_result.ast;
     let context = ObservationContext {
         ast,
@@ -189,7 +189,11 @@ pub(super) fn observe_start_body_call_arguments(
         .iter()
         .find_map(|node| {
             start_body_expression(node).and_then(|expression| {
-                call_arguments_for_function(expression, function_name, &context)
+                call_arguments_for_function(
+                    ast.expressions.view(expression).expect("retained call"),
+                    function_name,
+                    &context,
+                )
             })
         })
         .unwrap_or_else(|| panic!("start body did not contain a call to '{function_name}'"));
@@ -198,15 +202,9 @@ pub(super) fn observe_start_body_call_arguments(
     arguments
         .iter()
         .map(|argument| {
-            let parameter_slot = argument
-                .parameter_slot
-                .map(|slot| slot.index())
-                .unwrap_or_else(|| {
-                    panic!(
-                        "call to '{function_name}' did not retain a parameter slot for argument {:?}",
-                        argument.value.kind
-                    )
-                });
+            let metadata = argument.metadata();
+            let parameter_slot = metadata.parameter_slot
+                .expect("parsed call argument must retain a parameter slot") as usize;
             let parameter = signature
                 .parameters
                 .get(parameter_slot)
@@ -217,7 +215,7 @@ pub(super) fn observe_start_body_call_arguments(
                 });
             let parameter_name = path_component_text(parameter.id, &context);
 
-            if let Some(target_parameter) = argument.target_param {
+            if let Some(target_parameter) = metadata.target_param {
                 let target_name = resolve_string(target_parameter, &context);
                 assert_eq!(
                     target_name, parameter_name,
@@ -228,7 +226,7 @@ pub(super) fn observe_start_body_call_arguments(
             ObservedCallArgument {
                 parameter_slot,
                 parameter_name,
-                value: observe_expression(&argument.value, &context),
+                value: observe_expression(argument.value(), &context),
             }
         })
         .collect()
@@ -354,49 +352,6 @@ fn assert_source_matches_value(
             require_type(case, path, expected, observed, SourceTypeIdentity::String);
             match &observed.kind {
                 ObservedSourceKind::String(actual) if actual == expected_value => {}
-                _ => source_mismatch(case, path, expected, observed),
-            }
-        }
-        Value::Int(expected_value) => {
-            assert_identity_expectation_unused(
-                identity_expectation,
-                case,
-                path,
-                expected,
-                observed,
-            );
-            require_type(case, path, expected, observed, SourceTypeIdentity::Int);
-            match &observed.kind {
-                ObservedSourceKind::Int(actual) if *actual == *expected_value => {}
-                _ => source_mismatch(case, path, expected, observed),
-            }
-        }
-        Value::Uint(expected_value) => {
-            assert_identity_expectation_unused(
-                identity_expectation,
-                case,
-                path,
-                expected,
-                observed,
-            );
-            require_type(case, path, expected, observed, SourceTypeIdentity::Uint);
-            match &observed.kind {
-                ObservedSourceKind::Uint(actual) if *actual == *expected_value => {}
-                _ => source_mismatch(case, path, expected, observed),
-            }
-        }
-        Value::Float(expected_value) => {
-            assert_identity_expectation_unused(
-                identity_expectation,
-                case,
-                path,
-                expected,
-                observed,
-            );
-            require_type(case, path, expected, observed, SourceTypeIdentity::Float);
-            match &observed.kind {
-                ObservedSourceKind::Float(actual)
-                    if actual.to_bits() == expected_value.to_bits() => {}
                 _ => source_mismatch(case, path, expected, observed),
             }
         }
@@ -888,9 +843,6 @@ fn observe_stored_value(
         .payload(id)
         .expect("module constant row and child references must name stored values");
     let kind = match payload {
-        ConstValuePayload::Int(value) => ObservedSourceKind::Int(*value),
-        ConstValuePayload::Uint(value) => ObservedSourceKind::Uint(*value),
-        ConstValuePayload::Float(value) => ObservedSourceKind::Float(*value),
         ConstValuePayload::Number(value) => ObservedSourceKind::Number(value.clone()),
         ConstValuePayload::FixedScalar(value) => ObservedSourceKind::FixedScalar(*value),
         ConstValuePayload::Bool(value) => ObservedSourceKind::Bool(*value),
@@ -986,23 +938,22 @@ fn observe_string_pieces(
 }
 
 fn observe_expression(
-    expression: &Expression,
+    expression: ExpressionView<'_>,
     context: &ObservationContext<'_>,
 ) -> ObservedSourceValue {
-    let type_identity = source_type_identity(expression.type_id, context);
-    let kind = match &expression.kind {
-        ExpressionKind::Int(value) => ObservedSourceKind::Int(*value),
-        ExpressionKind::Uint(value) => ObservedSourceKind::Uint(*value),
-        ExpressionKind::Float(value) => ObservedSourceKind::Float(*value),
-        ExpressionKind::Number(value) => ObservedSourceKind::Number(value.clone()),
-        ExpressionKind::FixedScalar(value) => ObservedSourceKind::FixedScalar(*value),
-        ExpressionKind::Bool(value) => ObservedSourceKind::Bool(*value),
-        ExpressionKind::Char(value) => ObservedSourceKind::Char(*value),
-        ExpressionKind::StringSlice(value) => {
-            ObservedSourceKind::String(resolve_string(*value, context))
+    let type_identity = source_type_identity(
+        expression
+            .value_type_id()
+            .expect("observed value is single-valued"),
+        context,
+    );
+    let kind = match expression.operation() {
+        ExpressionOperationView::Constant(id) => {
+            let mut observed = observe_stored_value(&context.ast.const_values, id, context);
+            observed.type_identity = type_identity;
+            return observed;
         }
-        ExpressionKind::StructuralString { pieces } => observe_string_pieces(pieces, context),
-        ExpressionKind::Reference(path) => {
+        ExpressionOperationView::Reference(path) => {
             let start_body = function_body_by_name(
                 context.ast,
                 context.path_fork,
@@ -1010,7 +961,7 @@ fn observe_expression(
                 IMPLICIT_START_FUNC_NAME,
             );
             let declaration = start_body.iter().find_map(|node| match &node.kind {
-                NodeKind::VariableDeclaration(declaration) if declaration.id == *path => {
+                NodeKind::VariableDeclaration(declaration) if declaration.id == path => {
                     Some(declaration)
                 }
                 _ => None,
@@ -1023,83 +974,109 @@ fn observe_expression(
                     )),
                 };
             };
-            let mut observed = observe_expression(&declaration.value, context);
+            let initializer = declaration
+                .value
+                .initializer()
+                .expect("observed declaration initializer");
+            let mut observed = observe_expression(
+                context
+                    .ast
+                    .expressions
+                    .view(initializer)
+                    .expect("retained initializer"),
+                context,
+            );
             observed.type_identity = type_identity;
             return observed;
         }
-        ExpressionKind::Collection(values) => ObservedSourceKind::Collection(
+        ExpressionOperationView::Collection(values) => ObservedSourceKind::Collection(
             values
                 .iter()
                 .map(|value| observe_expression(value, context))
                 .collect(),
         ),
-        ExpressionKind::MapLiteral(entries) => ObservedSourceKind::Map(
+        ExpressionOperationView::Map(entries) => ObservedSourceKind::Map(
             entries
                 .iter()
                 .map(|entry| {
                     (
-                        observe_expression(&entry.key, context),
-                        observe_expression(&entry.value, context),
+                        observe_expression(entry.key(), context),
+                        observe_expression(entry.value(), context),
                     )
                 })
                 .collect(),
         ),
-        ExpressionKind::StructInstance(fields) => ObservedSourceKind::Record {
+        ExpressionOperationView::Struct { fields } => ObservedSourceKind::Record {
             nominal_name: match &type_identity {
                 SourceTypeIdentity::Struct(name) => Some(name.clone()),
                 _ => None,
             },
-            fields: observe_declarations(fields, context),
+            fields: observe_fields(fields, context),
         },
-        ExpressionKind::AnonymousConstRecord { fields } => ObservedSourceKind::Record {
-            nominal_name: None,
-            fields: observe_declarations(fields, context),
-        },
-        ExpressionKind::ChoiceConstruct {
-            nominal_path,
-            tag,
-            fields,
-        } => ObservedSourceKind::Choice {
-            nominal_name: path_component_text(*nominal_path, context),
-            variant_name: choice_variant_name(*nominal_path, *tag, context),
-            fields: observe_declarations(fields, context),
-        },
-        ExpressionKind::OptionNone => ObservedSourceKind::OptionNone,
-        ExpressionKind::Coerced { value, .. }
+        ExpressionOperationView::Choice { tag, fields } => {
+            let type_id = expression
+                .value_type_id()
+                .expect("choice value is single-valued");
+            let definition = context
+                .ast
+                .type_environment
+                .get(type_id)
+                .expect("registered choice type");
+            let nominal_path = match definition {
+                TypeDefinition::Choice(definition) => definition.path,
+                TypeDefinition::GenericInstance(definition) => {
+                    let base = context
+                        .ast
+                        .type_environment
+                        .type_id_for_nominal_id(definition.base)
+                        .expect("registered generic choice base");
+                    let Some(TypeDefinition::Choice(definition)) =
+                        context.ast.type_environment.get(base)
+                    else {
+                        panic!("choice value must have a choice base");
+                    };
+                    definition.path
+                }
+                _ => panic!("choice value must have a nominal choice type"),
+            };
+            ObservedSourceKind::Choice {
+                nominal_name: path_component_text(nominal_path, context),
+                variant_name: choice_variant_name(nominal_path, tag as usize, context),
+                fields: observe_fields(fields, context),
+            }
+        }
+        ExpressionOperationView::Coerce { value, .. }
             if matches!(type_identity, SourceTypeIdentity::Option) =>
         {
             ObservedSourceKind::OptionSome(Box::new(observe_expression(value, context)))
         }
-        ExpressionKind::Coerced { value, .. } => {
+        ExpressionOperationView::Coerce { value, .. } => {
             let mut observed = observe_expression(value, context);
-            observed.type_identity = type_identity.clone();
+            observed.type_identity = type_identity;
             return observed;
         }
-        ExpressionKind::Range(start, end) => ObservedSourceKind::Unsupported(format!(
-            "range from {:?} to {:?} is not a MON Value carrier",
-            start.kind, end.kind
-        )),
-        other => ObservedSourceKind::Unsupported(format!(
-            "source expression kind {:?} has no parity observation adapter",
-            other
-        )),
+        ExpressionOperationView::Range { .. } => {
+            ObservedSourceKind::Unsupported("range values are not a MON Value carrier".into())
+        }
+        _ => ObservedSourceKind::Unsupported(
+            "source expression operation has no parity observation adapter".into(),
+        ),
     };
-
     ObservedSourceValue {
         type_identity,
         kind,
     }
 }
 
-fn observe_declarations(
-    declarations: &[crate::compiler_frontend::ast::ast_nodes::Declaration],
+fn observe_fields(
+    fields: FieldListView<'_>,
     context: &ObservationContext<'_>,
 ) -> Vec<ObservedSourceField> {
-    declarations
+    fields
         .iter()
-        .map(|declaration| ObservedSourceField {
-            name: path_component_text(declaration.id, context),
-            value: observe_expression(&declaration.value, context),
+        .map(|field| ObservedSourceField {
+            name: path_component_text(field.name(), context),
+            value: observe_expression(field.value(), context),
         })
         .collect()
 }
@@ -1112,9 +1089,6 @@ fn source_type_identity(type_id: TypeId, context: &ObservationContext<'_>) -> So
     match definition {
         TypeDefinition::Builtin(builtin) => match builtin.key {
             BuiltinTypeKey::Bool => SourceTypeIdentity::Bool,
-            BuiltinTypeKey::Int => SourceTypeIdentity::Int,
-            BuiltinTypeKey::Uint => SourceTypeIdentity::Uint,
-            BuiltinTypeKey::Float => SourceTypeIdentity::Float,
             BuiltinTypeKey::String => SourceTypeIdentity::String,
             BuiltinTypeKey::Char => SourceTypeIdentity::Char,
             BuiltinTypeKey::None => SourceTypeIdentity::None,
@@ -1135,7 +1109,6 @@ fn source_type_identity(type_id: TypeId, context: &ObservationContext<'_>) -> So
             }
             TypeConstructor::Builtin(BuiltinTypeConstructor::OrderedMap) => SourceTypeIdentity::Map,
             TypeConstructor::Builtin(BuiltinTypeConstructor::Option) => SourceTypeIdentity::Option,
-            other => SourceTypeIdentity::Other(format!("constructed type {other:?}")),
         },
         TypeDefinition::GenericInstance(definition) => {
             let Some(base_type_id) = context
@@ -1182,24 +1155,26 @@ fn choice_variant_name(
     resolve_string(variant.name, context)
 }
 
-fn start_body_expression(node: &AstNode) -> Option<&Expression> {
+fn start_body_expression(node: &AstNode) -> Option<ExprId> {
     match &node.kind {
-        NodeKind::ExpressionStatement(expression) => Some(expression),
-        NodeKind::VariableDeclaration(declaration) => Some(&declaration.value),
+        NodeKind::ExpressionStatement(expression) => Some(*expression),
+        NodeKind::VariableDeclaration(declaration) => declaration.value.initializer(),
         _ => None,
     }
 }
 
 fn call_arguments_for_function<'a>(
-    expression: &'a Expression,
+    expression: ExpressionView<'a>,
     expected_function_name: &str,
     context: &ObservationContext<'_>,
-) -> Option<&'a [CallArgument]> {
-    let (name, arguments) = match &expression.kind {
-        ExpressionKind::FunctionCall { name, args, .. } => (*name, args),
-        _ => return None,
+) -> Option<ArgumentListView<'a>> {
+    let ExpressionOperationView::Call(call) = expression.operation() else {
+        return None;
     };
-    (path_component_text(name, context) == expected_function_name).then_some(arguments)
+    let ResolvedCallableTarget::Function(name) = call.metadata().target else {
+        return None;
+    };
+    (path_component_text(name, context) == expected_function_name).then(|| call.arguments())
 }
 
 fn path_component_text(path: PathId, context: &ObservationContext<'_>) -> String {

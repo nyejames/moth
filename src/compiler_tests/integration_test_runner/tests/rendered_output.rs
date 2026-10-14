@@ -1279,7 +1279,7 @@ fn rendered_output_decodes_typed_runtime_events() {
 #[test]
 fn rendered_output_decodes_one_runtime_error_after_captured_events() {
     let output = parse_harness_output(
-        r#"{"events":[{"type":"console","text":"before trap"},{"type":"runtime_error","message":"Int operation overflowed"}]}"#,
+        r#"{"events":[{"type":"console","text":"before trap"},{"type":"runtime_error","message":"Integer operation overflowed"}]}"#,
     )
     .expect("one terminal runtime error should decode");
 
@@ -1290,14 +1290,14 @@ fn rendered_output_decodes_one_runtime_error_after_captured_events() {
                 text: "before trap".to_owned(),
             },
             RuntimeEvent::RuntimeError {
-                message: "Int operation overflowed".to_owned(),
+                message: "Integer operation overflowed".to_owned(),
             },
         ]
     );
     assert_eq!(output.combined_output(), "before trap");
     assert_eq!(
         output.runtime_error_message(),
-        Some("Int operation overflowed")
+        Some("Integer operation overflowed")
     );
 }
 
@@ -1854,10 +1854,10 @@ fn rendered_output_expected_entry_code_never_matches_a_wasm_trap() {
 #[test]
 fn rendered_output_captures_output_before_a_runtime_error() {
     let (passed, kind, reason) = validate_html_script(
-        "console.log('before overflow'); throw new Error('Int operation overflowed');",
+        "console.log('before overflow'); throw new Error('Integer operation overflowed');",
         RenderedOutputExpectation {
             exact: Some("before overflow".to_owned()),
-            runtime_error_contains: vec!["Int operation".to_owned(), "overflowed".to_owned()],
+            runtime_error_contains: vec!["Integer operation".to_owned(), "overflowed".to_owned()],
             ..Default::default()
         },
     );

@@ -1,0 +1,242 @@
+-- Late numeric origins cross generic signatures and stay unresolved until a
+-- concrete U64 receiver selects their exact type. The I32 control keeps the
+-- ordinary default for an unconstrained generic result.
+-- Immediate I64, {I64} or {String = I64} results solve the generic, so raw leaves beside I32 `base` take I64.
+-- An immediate `Packet of {I64}` result reaches the same leaves directly and through `identity`.
+
+identity type T |value T| -> T:
+    return value
+;
+pair type A, B |first A, second B| -> A, B:
+    return first, second
+;
+identity_map type T |values {String = T}| -> {String = T}:
+    return values
+;
+
+wrap_optional type T |value T| -> T?:
+    return value
+;
+
+first_element type T |values {T}| -> T, Error!:
+    return values.get(0)!
+;
+
+bounded_identity type T is CASTABLE_TO_F16 |value T| -> T:
+    return value
+;
+
+Packet type T = |value T|
+Outcome type T ::
+    Some |value T|,
+    Empty,
+;
+
+wrap_packet type T |value T| -> Packet of T:
+    return Packet(value)
+;
+wrap_outcome type T |value T| -> Outcome of T:
+    return Outcome::Some(value)
+;
+relay_packet type T |value Packet of T| -> Packet of T:
+    return value
+;
+wrap_collection type T |values {T}| -> Packet of {T}:
+    return Packet(values)
+;
+
+split type T |value T| -> T, {T}:
+    return value, {value}
+;
+split_reverse type T |value T| -> {T}, T:
+    return {value}, value
+;
+
+Duo type T, U = |floating T, whole U|
+mixed type T, U |floating T, whole U| -> T, {Duo of T, U}:
+    return floating, {Duo(floating, whole)}
+;
+
+choose_same type T |left T, right T| -> T:
+    return left
+;
+
+same_pair type T |first T, second T| -> T, T:
+    return first, second
+;
+
+get_value type T |this Packet of T| -> T:
+    return this.value
+;
+
+choose_value type T |this Packet of T, replacement T| -> T:
+    return replacement
+;
+
+read_u64 |value U64| -> String:
+    return cast value
+;
+read_float |value F32| -> String:
+    return cast value
+;
+read_decimal |value Dec2| -> String:
+    return cast value
+;
+read_i64 |value I64| -> String:
+    return cast value
+;
+read_map_u64 |values {String = U64}| -> String, Error!:
+    value = values.get("max")!
+    return cast value
+;
+
+read_map_i64 |values {String = I64}| -> String, Error!:
+    value = values.get("max")!
+    return cast value
+;
+
+read_optional_u64 |value U64?| -> String:
+    return if value is:
+        |present| => then read_u64(present)
+        none => then "missing"
+    ;
+;
+
+read_packet_u64 |value Packet of U64| -> String:
+    return read_u64(value.value)
+;
+
+read_packet_collection_u64 |value Packet of {U64}| -> String, Error!:
+    element = value.value.get(0)!
+    return cast element
+;
+
+read_outcome_u64 |value Outcome of U64| -> String:
+    return if value is:
+        Some(value as payload) => then read_u64(payload)
+        Empty => then "missing"
+    ;
+;
+
+read_second_u64 |values {U64}| -> String, Error!:
+    second = values.get(1)!
+    return cast second
+;
+
+read_scalar_forward || -> String:
+    raw_value = identity(4294967296)
+    copied = copy raw_value
+    return read_u64(copied)
+;
+
+read_collection_forward || -> String, Error!:
+    numbers = identity({1, 4294967300})
+    text = read_second_u64(numbers)!
+    return text
+;
+
+read_first_forward || -> String, Error!:
+    numbers = {4294967297, 2}
+    first = first_element(numbers)!
+    return read_u64(first)
+;
+
+read_independent_forward || -> String:
+    source U64 = 4294967298
+    doubled = identity(source + source)
+    return read_u64(doubled)
+;
+
+immediate_probe |base I32| -> I64:
+    result I64 = identity(base + 1)
+    return result
+;
+
+immediate_collection_probe |base I32| -> {I64}:
+    result {I64} = identity({base + 1})
+    return result
+;
+
+immediate_map_probe |base I32| -> {String = I64}:
+    result {String = I64} = identity({"max" = base + 1})
+    return result
+;
+
+nominal_collection_probe |base I32| -> String, Error!:
+    direct Packet of {I64} = Packet({base + 1})
+    relayed Packet of {I64} = identity(Packet({base + 1}))
+    direct_first = direct.value.get(0)!
+    relayed_first = relayed.value.get(0)!
+    text = [:[read_i64(direct_first)]/[read_i64(relayed_first)]]
+    return text
+;
+
+scalar = read_scalar_forward()
+collection = read_collection_forward() catch then "failed"
+first = read_first_forward() catch then "failed"
+independent = read_independent_forward()
+control = identity(7)
+bound_small I8 = 1
+bound_result = bounded_identity(bound_small)
+raw_map_result = identity_map({"max" = 18_446_744_073_709_551_615})
+map_text = read_map_u64(raw_map_result) catch then "failed"
+optional_origin = wrap_optional(4294967301)
+optional_text = read_optional_u64(optional_origin)
+packet_origin = relay_packet(wrap_packet(4294967304))
+packet_text = read_packet_u64(packet_origin)
+packet_field_text = read_u64(packet_origin.value)
+outcome_origin = wrap_outcome(4294967305)
+outcome_text = read_outcome_u64(outcome_origin)
+pair_first, pair_second = pair(4294967310, -4294967311)
+pair_first_text = read_u64(pair_first)
+pair_second_text = read_i64(pair_second)
+
+field_only_origin = wrap_packet(4294967312)
+field_only_text = read_u64(field_only_origin.value)
+nested_left = wrap_packet({4294967313})
+nested_right = wrap_collection({4294967314})
+nested_chosen = choose_same(nested_left, nested_right)
+nested_text = read_packet_collection_u64(nested_chosen) catch then "failed"
+method_origin = wrap_packet(4294967315)
+method_text = read_u64(method_origin.get_value())
+argument_origin = wrap_packet(4294967317)
+method_argument_text = read_u64(argument_origin.choose_value(replacement = 4294967316))
+annotated_floating {F32} = identity({1})
+annotated_money {Dec2} = identity({1})
+annotated_float_text = [:[loop annotated_floating |item|:[read_float(item)]]]
+annotated_decimal_text = [:[loop annotated_money |item|:[read_decimal(item)]]]
+
+split_first F32, split_second = split(2)
+partial_float_text = [:[loop split_second |item|:[read_float(item)]]]
+reversed_second, reversed_first Dec2 = split_reverse(3)
+reversed_decimal_text = [:[loop reversed_second |item|:[read_decimal(item)]]]
+reversed_float_second, reversed_float_first F32 = split_reverse(4)
+reversed_float_text = [:[loop reversed_float_second |item|:[read_float(item)]]]
+duo_first F32, duo_second = mixed(1, 4294967297)
+duo_float_text = [:[loop duo_second |item|:[read_float(item.floating)]]]
+duo_whole_text = [:[loop duo_second |item|:[read_u64(item.whole)]]]
+count ~= 1
+wide U64, count = same_pair(4294967298, 4294967297)
+count_text String = cast count
+sample ~= 1.25
+narrow F32, sample = same_pair(2.5, 2.5)
+sample_text String = cast sample
+before_base = 1
+before_twice = before_base + before_base
+before_text = read_u64(before_base)
+before_pick = choose_same(before_twice, before_base)
+before_pick_text = read_u64(before_pick)
+after_base = 1
+after_twice = after_base + after_base
+after_pick = choose_same(after_twice, after_base)
+after_text = read_u64(after_base)
+after_pick_text = read_u64(after_pick)
+immediate_result = immediate_probe(10)
+immediate_text = read_i64(immediate_result)
+immediate_collection = immediate_collection_probe(10)
+immediate_collection_text = [:[loop immediate_collection |item|:[read_i64(item)]]]
+immediate_map = immediate_map_probe(10)
+immediate_map_text = read_map_i64(immediate_map) catch then "failed"
+nominal_text = nominal_collection_probe(10) catch then "failed"
+
+[:generic_numeric_signature_late_receivers scalar=[scalar] collection=[collection] first=[first] independent=[independent] control=[control] bound_i8=[bound_result] map=[map_text] optional=[optional_text] packet=[packet_text] field=[packet_field_text] choice=[outcome_text] pair_first=[pair_first_text] pair_second=[pair_second_text] field_only=[field_only_text] nested=[nested_text] method=[method_text] method_argument=[method_argument_text] annotated_float_loop=[annotated_float_text] annotated_decimal_loop=[annotated_decimal_text] partial_float_loop=[partial_float_text] reversed_float_loop=[reversed_float_text] reversed_decimal_loop=[reversed_decimal_text] duo_float_loop=[duo_float_text] duo_whole_loop=[duo_whole_text] count_text=[count_text] sample_text=[sample_text] reorder_before=[before_text]/[before_pick_text] reorder_after=[after_text]/[after_pick_text] immediate=[immediate_text] immediate_collection=[immediate_collection_text] immediate_map=[immediate_map_text] nominal=[nominal_text]]

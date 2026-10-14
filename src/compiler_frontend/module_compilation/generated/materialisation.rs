@@ -8,7 +8,7 @@
 //!       generated HIR or reruns generated borrow analysis.
 
 use crate::compiler_frontend::CompilerFrontend;
-use crate::compiler_frontend::analysis::numeric_proofs::analyse_numeric_proofs;
+use crate::compiler_frontend::analysis::numeric_proofs::NumericProofs;
 use crate::compiler_frontend::ast::AstBuildResult;
 use crate::compiler_frontend::ast::generic_functions::{
     MaterialisedGenericAst, ModuleMaterialisationInput, ModuleMaterialisationPreparation,
@@ -175,8 +175,15 @@ fn materialise_generated_request_inner<'build>(
         )))
     })?;
     let (declaring_source_identity_handle, materialised) = match &declaring_context {
-        DeclaringMaterialisation::Preparing(context) => {
-            let declaring_source_identity_handle = context.frozen_identity_handle.clone();
+        DeclaringMaterialisation::Prepared(context) => {
+            let (declaring_context, _) = context
+                .declaring_context_for_identity(request.identity.declaration())
+                .ok_or_else(|| {
+                    PremergeFailure::Infrastructure(CompilerError::compiler_error(
+                        "Prepared generic request lost its selected declaring context",
+                    ))
+                })?;
+            let declaring_source_identity_handle = declaring_context.frozen_identity_handle();
             let materialised = context.materialise_ast(
                 &request.identity,
                 requester_context,
@@ -239,7 +246,6 @@ fn materialise_generated_request_inner<'build>(
                         external_package_registry: context.external_packages.as_ref(),
                         style_directives: context.style_directives,
                         build_profile: context.build_profile,
-                        numeric_profile: context.options.numeric_profile,
                         template_const_loop_iteration_limit: context
                             .options
                             .template_const_loop_iteration_limit,
@@ -259,7 +265,6 @@ fn materialise_generated_request_inner<'build>(
                         external_package_registry: context.external_packages.as_ref(),
                         style_directives: context.style_directives,
                         build_profile: context.build_profile,
-                        numeric_profile: context.options.numeric_profile,
                         template_const_loop_iteration_limit: context
                             .options
                             .template_const_loop_iteration_limit,
@@ -279,6 +284,7 @@ fn materialise_generated_request_inner<'build>(
         ast: mut generated_ast,
         materialisation_context: generated_context_builder,
         deferred_generic_requests: nested_requests,
+        assertion_validation_generic_requests: nested_validation_requests,
         module_resources,
         ..
     } = build_result;
@@ -287,22 +293,29 @@ fn materialise_generated_request_inner<'build>(
             "generated AST finalization did not retain its sidecar resource table",
         ))
     })?;
-    // Finalization retains the generated preparation only when this body deferred nested
-    // requests; it is their requester context and has no other reader.
+    // Nested executable requests and inert assertion validation both need their declaring
+    // preparation until concrete summaries converge. Only executable reachability publishes
+    // their completed sidecars.
     let nested = match generated_context_builder {
         Some(builder) => {
-            let generated_context = builder
-                .finish_preparation()
-                .map_err(PremergeFailure::Infrastructure)?;
             let nested_requests = install_generated_request_contracts(
-                &nested_requests,
-                &generated_context,
-                generated_context.generic_function_templates(),
+                nested_requests
+                    .iter()
+                    .chain(nested_validation_requests.iter()),
+                builder.context(),
+                builder.context().generic_function_templates(),
                 context.external_packages.as_ref(),
                 &compiler.path_fork,
                 &mut generated_ast,
             )
             .map_err(PremergeFailure::Infrastructure)?;
+            let generated_context = builder
+                .finish_preparation(
+                    &generated_ast.const_values,
+                    &module_resources.borrow(),
+                    &compiler.path_fork,
+                )
+                .map_err(PremergeFailure::Infrastructure)?;
             let nested_request_ids =
                 transaction.register_requests(nested_requests.iter().map(|request| {
                     GeneratedRequestFacts {
@@ -316,7 +329,7 @@ fn materialise_generated_request_inner<'build>(
                 }));
             Some((generated_context, nested_request_ids))
         }
-        None if nested_requests.is_empty() => None,
+        None if nested_requests.is_empty() && nested_validation_requests.is_empty() => None,
         None => {
             return Err(PremergeFailure::Infrastructure(
                 CompilerError::compiler_error(
@@ -367,8 +380,8 @@ fn materialise_generated_request_inner<'build>(
                     entry_file_path,
                 )?;
             }
-            // The generated preparation retains a second handle to the sidecar resources while
-            // nested requests materialise; release it before lowering takes sole ownership.
+            // Nested materialisation consumes only detached facts. Release its requester services
+            // before lowering takes sole ownership of the sidecar resources.
             drop(generated_context);
         }
         let generated_warnings = generated_ast.warnings.clone();
@@ -453,20 +466,15 @@ fn materialise_generated_request_inner<'build>(
             context.external_dependency_resolution_table,
             context.builder_runtime_packages,
         );
-        // The generated sidecar computes its own proof table from its own HIR after borrow
-        // validation, so its executable carries the exact paired facts it publishes.
-        let numeric_proofs = analyse_numeric_proofs(
-            &hir_module,
-            &type_environment,
-            context.options.numeric_profile,
-        );
+        // The publication owner in convergence computes the paired table from the final HIR.
+        // Nothing reads this empty table before then, and an empty table retains every check.
         Ok(Module {
             executable: ModuleExecutable {
                 hir: hir_module,
                 resource_table,
                 type_environment,
                 borrow_analysis,
-                numeric_proofs,
+                numeric_proofs: NumericProofs::default(),
                 path_table: Arc::new(
                     crate::compiler_frontend::symbols::path_interner::PathInternerBuilder::new()
                         .freeze(),

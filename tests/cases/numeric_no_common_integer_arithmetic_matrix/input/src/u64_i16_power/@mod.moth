@@ -1,0 +1,5 @@
+hidden ||:
+    left U64 = 2
+    right I16 = 2
+    value = left ^ right
+;

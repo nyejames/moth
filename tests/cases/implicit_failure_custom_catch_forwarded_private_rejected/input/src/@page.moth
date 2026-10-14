@@ -2,18 +2,18 @@ DomainError ::
     Missing,
 ;
 
-as_domain_value |value Int| -> Int, DomainError!:
+as_domain_value |value I32| -> I32, DomainError!:
     return value
 ;
 
-forwarded |left Int, right Int| -> Int:
+forwarded |left I32, right I32| -> I32:
     return as_domain_value(forward(left, right)) catch then 0
 ;
 
-forward |left Int, right Int| -> Int:
+forward |left I32, right I32| -> I32:
     return multiply(left, right)
 ;
 
-multiply |left Int, right Int| -> Int:
+multiply |left I32, right I32| -> I32:
     return left * right
 ;

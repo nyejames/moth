@@ -34,30 +34,20 @@ fn plain_expression_load_and_copy_use_read_and_clone() {
     let (type_environment, types) = build_type_environment();
     let region = RegionId(0);
 
-    let expression_statement = statement(
+    let load_statement = statement(
         1,
         HirStatementKind::Expr(expression(
-            HirExpressionKind::TupleConstruct {
-                elements: append_values(
-                    &[
-                        expression(
-                            HirExpressionKind::Load(HirPlace::local(LocalId(0))),
-                            types.string,
-                            region,
-                            ValueKind::RValue,
-                            &mut expressions,
-                        ),
-                        expression(
-                            HirExpressionKind::Copy(HirPlace::local(LocalId(1))),
-                            types.string,
-                            region,
-                            ValueKind::RValue,
-                            &mut expressions,
-                        ),
-                    ],
-                    &mut expressions,
-                ),
-            },
+            HirExpressionKind::Load(HirPlace::local(LocalId(0))),
+            types.string,
+            region,
+            ValueKind::RValue,
+            &mut expressions,
+        )),
+    );
+    let copy_statement = statement(
+        2,
+        HirStatementKind::Expr(expression(
+            HirExpressionKind::Copy(HirPlace::local(LocalId(1))),
             types.string,
             region,
             ValueKind::RValue,
@@ -72,15 +62,16 @@ fn plain_expression_load_and_copy_use_read_and_clone() {
             local(0, types.string, region),
             local(1, types.string, region),
         ],
-        statements: vec![expression_statement],
-        terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
+        statements: vec![load_statement, copy_statement],
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -107,10 +98,16 @@ fn plain_expression_load_and_copy_use_read_and_clone() {
     let copied_name = expected_dev_local_name("copied", 1);
 
     assert!(
-        output.source.contains(&format!(
-            "[__moth_read({loaded_name}), __moth_clone_value(__moth_read({copied_name}))];"
-        )),
-        "plain expression lowering must read Load and clone Copy"
+        output
+            .source
+            .contains(&format!("__moth_read({loaded_name});")),
+        "plain Load expressions must read the binding"
+    );
+    assert!(
+        output
+            .source
+            .contains(&format!("__moth_clone_value(__moth_read({copied_name}));")),
+        "plain Copy expressions must clone the value"
     );
 }
 
@@ -179,14 +176,15 @@ fn load_and_copy_in_nonlocal_assignment_emit_concrete_values() {
             local(2, types.string, region),
         ],
         statements: vec![assign_source, copy_to_field, load_to_field],
-        terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let mut module = build_module(
@@ -276,18 +274,22 @@ fn load_and_copy_in_moth_call_arguments_use_reference_abi() {
         id: BlockId(0),
         region,
         locals: vec![
-            local(0, types.int, region),
-            local(2, types.int, region),
-            local(3, types.int, region),
+            local(0, types.i32, region),
+            local(2, types.i32, region),
+            local(3, types.i32, region),
         ],
         statements: vec![],
-        terminator: HirTerminator::Return(int_expression(42, types.int, region, &mut expressions)),
+        terminator: HirTerminator::Return(append_values(
+            &[i32_expression(42, types.i32, region, &mut expressions)],
+            &mut expressions,
+        )),
     };
     let callee = HirFunction {
         id: FunctionId(1),
         entry: BlockId(0),
         params: vec![LocalId(0), LocalId(2), LocalId(3)],
-        return_type: types.int,
+        returns: (vec![types.i32]).into_boxed_slice(),
+        error_return: None,
     };
 
     let call_stmt = statement(
@@ -298,21 +300,21 @@ fn load_and_copy_in_moth_call_arguments_use_reference_abi() {
                 &[
                     expression(
                         HirExpressionKind::Copy(HirPlace::local(LocalId(0))),
-                        types.int,
+                        types.i32,
                         region,
                         ValueKind::RValue,
                         &mut expressions,
                     ),
                     expression(
                         HirExpressionKind::Load(HirPlace::local(LocalId(2))),
-                        types.int,
+                        types.i32,
                         region,
                         ValueKind::Place,
                         &mut expressions,
                     ),
                     expression(
                         HirExpressionKind::Load(HirPlace::local(LocalId(2))),
-                        types.int,
+                        types.i32,
                         region,
                         ValueKind::RValue,
                         &mut expressions,
@@ -320,7 +322,7 @@ fn load_and_copy_in_moth_call_arguments_use_reference_abi() {
                 ],
                 &mut expressions,
             ),
-            result: Some(HirLocalDestination::Define(LocalId(1))),
+            results: vec![HirLocalDestination::Define(LocalId(1))],
         },
     );
 
@@ -328,18 +330,22 @@ fn load_and_copy_in_moth_call_arguments_use_reference_abi() {
         id: BlockId(1),
         region,
         locals: vec![
-            local(0, types.int, region),
-            local(1, types.int, region),
-            local(2, types.int, region),
+            local(0, types.i32, region),
+            local(1, types.i32, region),
+            local(2, types.i32, region),
         ],
         statements: vec![call_stmt],
-        terminator: HirTerminator::Return(int_expression(0, types.int, region, &mut expressions)),
+        terminator: HirTerminator::Return(append_values(
+            &[i32_expression(0, types.i32, region, &mut expressions)],
+            &mut expressions,
+        )),
     };
     let caller = HirFunction {
         id: FunctionId(0),
         entry: BlockId(1),
         params: vec![],
-        return_type: types.int,
+        returns: (vec![types.i32]).into_boxed_slice(),
+        error_return: None,
     };
 
     let mut module = HirModule::new();
@@ -442,7 +448,7 @@ fn load_and_copy_in_host_call_arguments_emit_raw_values() {
                 )],
                 &mut expressions,
             ),
-            result: None,
+            results: vec![],
         },
     );
 
@@ -460,7 +466,7 @@ fn load_and_copy_in_host_call_arguments_emit_raw_values() {
                 )],
                 &mut expressions,
             ),
-            result: None,
+            results: vec![],
         },
     );
 
@@ -472,14 +478,15 @@ fn load_and_copy_in_host_call_arguments_emit_raw_values() {
             local(1, types.string, region),
         ],
         statements: vec![load_call, copy_call],
-        terminator: HirTerminator::Return(unit_expression(types.unit, region, &mut expressions)),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -534,13 +541,16 @@ fn load_in_return_reads_value_without_cloning() {
     let block = HirBlock {
         id: BlockId(0),
         region,
-        locals: vec![local(0, types.int, region)],
+        locals: vec![local(0, types.i32, region)],
         statements: vec![],
-        terminator: HirTerminator::Return(expression(
-            HirExpressionKind::Load(HirPlace::local(LocalId(0))),
-            types.int,
-            region,
-            ValueKind::RValue,
+        terminator: HirTerminator::Return(append_values(
+            &[expression(
+                HirExpressionKind::Load(HirPlace::local(LocalId(0))),
+                types.i32,
+                region,
+                ValueKind::RValue,
+                &mut expressions,
+            )],
             &mut expressions,
         )),
     };
@@ -549,7 +559,8 @@ fn load_in_return_reads_value_without_cloning() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![LocalId(0)],
-        return_type: types.int,
+        returns: (vec![types.i32]).into_boxed_slice(),
+        error_return: None,
     };
 
     let mut module = HirModule::new();
@@ -619,13 +630,16 @@ fn copy_in_return_value_emits_clone_value() {
     let block = HirBlock {
         id: BlockId(0),
         region,
-        locals: vec![local(0, types.int, region)],
+        locals: vec![local(0, types.i32, region)],
         statements: vec![],
-        terminator: HirTerminator::Return(expression(
-            HirExpressionKind::Copy(HirPlace::local(LocalId(0))),
-            types.int,
-            region,
-            ValueKind::RValue,
+        terminator: HirTerminator::Return(append_values(
+            &[expression(
+                HirExpressionKind::Copy(HirPlace::local(LocalId(0))),
+                types.i32,
+                region,
+                ValueKind::RValue,
+                &mut expressions,
+            )],
             &mut expressions,
         )),
     };
@@ -634,7 +648,8 @@ fn copy_in_return_value_emits_clone_value() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![LocalId(0)],
-        return_type: types.int,
+        returns: (vec![types.i32]).into_boxed_slice(),
+        error_return: None,
     };
 
     let mut module = HirModule::new();
@@ -680,56 +695,46 @@ fn copy_in_return_value_emits_clone_value() {
     );
 }
 
-/// Verifies that tuple return values recursively apply return-value handling per element.
+/// Verifies that each native success slot applies return-value handling at the JS ABI boundary.
 #[test]
-fn tuple_return_preserves_return_value_handling_per_element() {
+fn multiple_returns_preserve_return_value_handling_per_slot() {
     let mut expressions = HirExpressionStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
     let region = RegionId(0);
 
-    let return_expr = expression(
-        HirExpressionKind::TupleConstruct {
-            elements: append_values(
-                &[
-                    expression(
-                        HirExpressionKind::Load(HirPlace::local(LocalId(0))),
-                        types.int,
-                        region,
-                        ValueKind::RValue,
-                        &mut expressions,
-                    ),
-                    expression(
-                        HirExpressionKind::Copy(HirPlace::local(LocalId(1))),
-                        types.string,
-                        region,
-                        ValueKind::RValue,
-                        &mut expressions,
-                    ),
-                ],
-                &mut expressions,
-            ),
-        },
-        types.int,
-        region,
-        ValueKind::RValue,
-        &mut expressions,
-    );
+    let return_values = [
+        expression(
+            HirExpressionKind::Load(HirPlace::local(LocalId(0))),
+            types.i32,
+            region,
+            ValueKind::RValue,
+            &mut expressions,
+        ),
+        expression(
+            HirExpressionKind::Copy(HirPlace::local(LocalId(1))),
+            types.string,
+            region,
+            ValueKind::RValue,
+            &mut expressions,
+        ),
+    ];
 
     let block = HirBlock {
         id: BlockId(0),
         region,
-        locals: vec![local(0, types.int, region), local(1, types.string, region)],
+        locals: vec![local(0, types.i32, region), local(1, types.string, region)],
         statements: vec![],
-        terminator: HirTerminator::Return(return_expr),
+        terminator: HirTerminator::Return(append_values(&return_values, &mut expressions)),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![LocalId(0), LocalId(1)],
-        return_type: types.int,
+        returns: (vec![types.i32, types.string]).into_boxed_slice(),
+        error_return: None,
     };
 
     let mut module = HirModule::new();
@@ -778,6 +783,6 @@ fn tuple_return_preserves_return_value_handling_per_element() {
         output.source.contains(&format!(
             "return [__moth_read({first_name}), __moth_clone_value(__moth_read({second_name}))];"
         )),
-        "tuple return must read Load elements and clone Copy elements"
+        "multiple returns must read Load slots and clone Copy slots at the ABI boundary"
     );
 }

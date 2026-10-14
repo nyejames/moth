@@ -1,11 +1,11 @@
 @support as support
 
 default_size #= 10
-Size as Int
+Size as I32
 
 Frozen type T = |
     value T,
-    size Int = default_size,
+    size I32 = default_size,
 |
 
 private_helper |value Size = default_size| -> Size:

@@ -32,27 +32,24 @@ fn value_definition_emits_fresh_binding() {
         1,
         HirStatementKind::Write {
             target: HirWriteTarget::DefineLocal(LocalId(0)),
-            value: int_expression(42, types.int, RegionId(0), &mut expressions),
+            value: i32_expression(42, types.i32, RegionId(0), &mut expressions),
         },
     );
 
     let block = HirBlock {
         id: BlockId(0),
         region: RegionId(0),
-        locals: vec![local(0, types.int, RegionId(0))],
+        locals: vec![local(0, types.i32, RegionId(0))],
         statements: vec![assign],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -100,7 +97,7 @@ fn value_definition_emits_fresh_binding() {
 /// Verifies that function parameters emit __moth_param_binding to normalize call arguments. [binding]
 #[test]
 fn function_parameters_emit_param_binding() {
-    let mut expressions = HirExpressionStore::default();
+    let expressions = HirExpressionStore::default();
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let (type_environment, types) = build_type_environment();
@@ -108,20 +105,17 @@ fn function_parameters_emit_param_binding() {
     let block = HirBlock {
         id: BlockId(0),
         region: RegionId(0),
-        locals: vec![local(0, types.int, RegionId(0))],
+        locals: vec![local(0, types.i32, RegionId(0))],
         statements: vec![],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![LocalId(0)],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -169,7 +163,7 @@ fn place_definition_emits_fresh_alias_binding() {
         1,
         HirStatementKind::Write {
             target: HirWriteTarget::DefineLocal(LocalId(0)),
-            value: int_expression(42, types.int, RegionId(0), &mut expressions),
+            value: i32_expression(42, types.i32, RegionId(0), &mut expressions),
         },
     );
 
@@ -179,7 +173,7 @@ fn place_definition_emits_fresh_alias_binding() {
             target: HirWriteTarget::DefineLocal(LocalId(1)),
             value: expression(
                 HirExpressionKind::Load(HirPlace::local(LocalId(0))),
-                types.int,
+                types.i32,
                 RegionId(0),
                 ValueKind::Place,
                 &mut expressions,
@@ -191,22 +185,19 @@ fn place_definition_emits_fresh_alias_binding() {
         id: BlockId(0),
         region: RegionId(0),
         locals: vec![
-            local(0, types.int, RegionId(0)),
-            local(1, types.int, RegionId(0)),
+            local(0, types.i32, RegionId(0)),
+            local(1, types.i32, RegionId(0)),
         ],
         statements: vec![assign_source, assign_alias],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -253,7 +244,7 @@ fn place_update_emits_assign_borrow() {
             target: HirWriteTarget::AssignPlace(HirPlace::local(LocalId(1))),
             value: expression(
                 HirExpressionKind::Load(HirPlace::local(LocalId(0))),
-                types.int,
+                types.i32,
                 RegionId(0),
                 ValueKind::Place,
                 &mut expressions,
@@ -264,21 +255,18 @@ fn place_update_emits_assign_borrow() {
         id: BlockId(0),
         region: RegionId(0),
         locals: vec![
-            local(0, types.int, RegionId(0)),
-            local(1, types.int, RegionId(0)),
+            local(0, types.i32, RegionId(0)),
+            local(1, types.i32, RegionId(0)),
         ],
         statements: vec![update],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![LocalId(0), LocalId(1)],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
     let module = build_module(
         expressions,
@@ -323,7 +311,7 @@ fn place_update_from_alias_of_destination_does_not_create_cycle() {
             target: HirWriteTarget::DefineLocal(LocalId(1)),
             value: expression(
                 HirExpressionKind::Load(HirPlace::local(LocalId(0))),
-                types.int,
+                types.i32,
                 RegionId(0),
                 ValueKind::Place,
                 &mut expressions,
@@ -336,7 +324,7 @@ fn place_update_from_alias_of_destination_does_not_create_cycle() {
             target: HirWriteTarget::AssignPlace(HirPlace::local(LocalId(0))),
             value: expression(
                 HirExpressionKind::Load(HirPlace::local(LocalId(1))),
-                types.int,
+                types.i32,
                 RegionId(0),
                 ValueKind::Place,
                 &mut expressions,
@@ -347,15 +335,18 @@ fn place_update_from_alias_of_destination_does_not_create_cycle() {
         id: BlockId(0),
         region: RegionId(0),
         locals: vec![
-            local(0, types.int, RegionId(0)),
-            local(1, types.int, RegionId(0)),
+            local(0, types.i32, RegionId(0)),
+            local(1, types.i32, RegionId(0)),
         ],
         statements: vec![define_alias, update_from_alias],
-        terminator: HirTerminator::Return(expression(
-            HirExpressionKind::Load(HirPlace::local(LocalId(0))),
-            types.int,
-            RegionId(0),
-            ValueKind::RValue,
+        terminator: HirTerminator::Return(append_values(
+            &[expression(
+                HirExpressionKind::Load(HirPlace::local(LocalId(0))),
+                types.i32,
+                RegionId(0),
+                ValueKind::RValue,
+                &mut expressions,
+            )],
             &mut expressions,
         )),
     };
@@ -363,7 +354,8 @@ fn place_update_from_alias_of_destination_does_not_create_cycle() {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![LocalId(0)],
-        return_type: types.int,
+        returns: (vec![types.i32]).into_boxed_slice(),
+        error_return: None,
     };
     let module = build_module(
         expressions,
@@ -411,7 +403,7 @@ fn alias_local_read_emits_bs_read() {
         1,
         HirStatementKind::Write {
             target: HirWriteTarget::DefineLocal(LocalId(0)),
-            value: int_expression(99, types.int, RegionId(0), &mut expressions),
+            value: i32_expression(99, types.i32, RegionId(0), &mut expressions),
         },
     );
 
@@ -421,7 +413,7 @@ fn alias_local_read_emits_bs_read() {
             target: HirWriteTarget::DefineLocal(LocalId(1)),
             value: expression(
                 HirExpressionKind::Load(HirPlace::local(LocalId(0))),
-                types.int,
+                types.i32,
                 RegionId(0),
                 ValueKind::Place,
                 &mut expressions,
@@ -436,14 +428,14 @@ fn alias_local_read_emits_bs_read() {
             args: append_values(
                 &[expression(
                     HirExpressionKind::Load(HirPlace::local(LocalId(1))),
-                    types.int,
+                    types.i32,
                     RegionId(0),
                     ValueKind::RValue,
                     &mut expressions,
                 )],
                 &mut expressions,
             ),
-            result: None,
+            results: vec![],
         },
     );
 
@@ -451,22 +443,19 @@ fn alias_local_read_emits_bs_read() {
         id: BlockId(0),
         region: RegionId(0),
         locals: vec![
-            local(0, types.int, RegionId(0)),
-            local(1, types.int, RegionId(0)),
+            local(0, types.i32, RegionId(0)),
+            local(1, types.i32, RegionId(0)),
         ],
         statements: vec![assign_source, assign_alias, log_alias],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -510,27 +499,24 @@ fn value_update_emits_assign_value() {
         1,
         HirStatementKind::Write {
             target: HirWriteTarget::AssignPlace(HirPlace::local(LocalId(0))),
-            value: int_expression(42, types.int, RegionId(0), &mut expressions),
+            value: i32_expression(42, types.i32, RegionId(0), &mut expressions),
         },
     );
 
     let block = HirBlock {
         id: BlockId(0),
         region: RegionId(0),
-        locals: vec![local(0, types.int, RegionId(0))],
+        locals: vec![local(0, types.i32, RegionId(0))],
         statements: vec![assign],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![LocalId(0)],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -582,27 +568,24 @@ fn field_place_emits_bs_field() {
                     .with_field(FieldId(0), &mut expressions, None)
                     .expect("test field projection should fit"),
             ),
-            value: int_expression(42, types.int, RegionId(0), &mut expressions),
+            value: i32_expression(42, types.i32, RegionId(0), &mut expressions),
         },
     );
 
     let block = HirBlock {
         id: BlockId(0),
         region: RegionId(0),
-        locals: vec![local(0, types.int, RegionId(0))],
+        locals: vec![local(0, types.i32, RegionId(0))],
         statements: vec![assign_to_field],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let mut module = build_module(
@@ -618,10 +601,10 @@ fn field_place_emits_bs_field() {
     // Register the struct and field so the field symbol map is populated.
     module.structs = vec![HirStruct {
         id: StructId(0),
-        frontend_type_id: types.int,
+        frontend_type_id: types.i32,
         fields: vec![HirField {
             id: FieldId(0),
-            ty: types.int,
+            ty: types.i32,
         }],
     }];
     module.side_table.bind_field_name(
@@ -663,32 +646,29 @@ fn index_place_emits_bs_index() {
         1,
         HirStatementKind::Write {
             target: HirWriteTarget::AssignPlace({
-                let index = int_expression(0, types.int, RegionId(0), &mut expressions);
+                let index = i32_expression(0, types.i32, RegionId(0), &mut expressions);
                 HirPlace::local(LocalId(0))
                     .with_index(index, &mut expressions, None)
                     .expect("test index projection should fit")
             }),
-            value: int_expression(42, types.int, RegionId(0), &mut expressions),
+            value: i32_expression(42, types.i32, RegionId(0), &mut expressions),
         },
     );
 
     let block = HirBlock {
         id: BlockId(0),
         region: RegionId(0),
-        locals: vec![local(0, types.int, RegionId(0))],
+        locals: vec![local(0, types.i32, RegionId(0))],
         statements: vec![assign_to_index],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let module = build_module(
@@ -740,34 +720,31 @@ fn computed_place_read_composes_with_bs_read() {
                     .expect("test field projection should fit");
                 let field_value = expression(
                     HirExpressionKind::Load(field_place),
-                    types.int,
+                    types.i32,
                     RegionId(0),
                     ValueKind::RValue,
                     &mut expressions,
                 );
                 append_values(&[field_value], &mut expressions)
             },
-            result: None,
+            results: vec![],
         },
     );
 
     let block = HirBlock {
         id: BlockId(0),
         region: RegionId(0),
-        locals: vec![local(0, types.int, RegionId(0))],
+        locals: vec![local(0, types.i32, RegionId(0))],
         statements: vec![log_field],
-        terminator: HirTerminator::Return(unit_expression(
-            types.unit,
-            RegionId(0),
-            &mut expressions,
-        )),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     };
 
     let function = HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: types.unit,
+        returns: (vec![]).into_boxed_slice(),
+        error_return: None,
     };
 
     let mut module = build_module(
@@ -782,10 +759,10 @@ fn computed_place_read_composes_with_bs_read() {
 
     module.structs = vec![HirStruct {
         id: StructId(0),
-        frontend_type_id: types.int,
+        frontend_type_id: types.i32,
         fields: vec![HirField {
             id: FieldId(0),
-            ty: types.int,
+            ty: types.i32,
         }],
     }];
     module.side_table.bind_field_name(

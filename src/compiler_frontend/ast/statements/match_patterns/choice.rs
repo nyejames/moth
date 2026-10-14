@@ -9,11 +9,15 @@ use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
+use crate::compiler_frontend::ast::numeric_construction::PendingChoicePattern;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::deferred_feature_diagnostics::deferred_feature_reason_diagnostic;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DeferredFeatureReason, InvalidMatchPatternReason,
 };
+use crate::compiler_frontend::datatypes::definitions::ChoiceVariantPayloadDefinition;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -23,8 +27,9 @@ use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use rustc_hash::FxHashMap;
 
 use super::diagnostics::reject_deferred_pattern_lead_token;
-use super::types::ParsedChoicePattern;
-use super::types::ParsedChoicePayloadCapture;
+use super::types::{
+    ChoicePayloadCapture, MatchPattern, ParsedChoicePattern, ParsedChoicePayloadCapture,
+};
 
 /// Typed result for choice-pattern parsing.
 ///
@@ -93,6 +98,57 @@ pub fn parse_choice_variant_pattern(
         tag: variant_index,
         captures,
         span: variant_span,
+    })
+}
+
+/// Build one pending choice arm's pattern once its subject instance is selected.
+///
+/// WHAT: keeps the variant identity and capture bindings fixed at parse time, and reads each
+///       captured field's type from the selected instance's pre-substituted variant view.
+/// WHY: a pending generic subject names its variant from the declared owner, but a payload
+///      field's type is only concrete once the origin selects the instance.
+pub(in crate::compiler_frontend::ast::statements) fn finish_pending_choice_pattern(
+    pattern: PendingChoicePattern,
+    subject_type_id: TypeId,
+    type_environment: &TypeEnvironment,
+) -> ChoicePatternResult<MatchPattern> {
+    let variant = type_environment
+        .variants_for(subject_type_id)
+        .and_then(|variants| variants.iter().find(|variant| variant.tag == pattern.tag))
+        .ok_or_else(|| {
+            CompilerError::compiler_error(
+                "a pending choice arm resumed against a subject without that variant",
+            )
+        })?;
+
+    let mut captures = Vec::with_capacity(pattern.captures.len());
+    for capture in pattern.captures {
+        let field_type_id = match &variant.payload {
+            ChoiceVariantPayloadDefinition::Record { fields } => {
+                fields.get(capture.field_index).map(|field| field.type_id)
+            }
+            ChoiceVariantPayloadDefinition::Unit => None,
+        }
+        .ok_or_else(|| {
+            CompilerError::compiler_error(
+                "a pending choice capture names a field its variant lacks",
+            )
+        })?;
+
+        captures.push(ChoicePayloadCapture {
+            field_index: capture.field_index,
+            type_id: field_type_id,
+            binding_path: capture.binding_path,
+            span: capture.span,
+            binding_span: capture.binding_span,
+        });
+    }
+
+    Ok(MatchPattern::ChoiceVariant {
+        nominal_path: pattern.nominal_path,
+        tag: pattern.tag,
+        captures,
+        span: pattern.span,
     })
 }
 
@@ -260,7 +316,7 @@ fn parse_choice_pattern_captures(
                 captures.push(ParsedChoicePayloadCapture {
                     binding_name,
                     field_index,
-                    type_id: field_decl.value.type_id,
+                    type_id: field_decl.type_id,
                     span: capture_span,
                     binding_span,
                 });
@@ -435,7 +491,11 @@ fn qualifier_resolves_to_choice(
 ) -> bool {
     match_context
         .get_reference(&qualifier)
-        .is_some_and(|declaration| declaration.id == *choice_nominal_path)
+        .is_some_and(|reference| {
+            reference
+                .ready_declaration()
+                .is_some_and(|declaration| declaration.id == *choice_nominal_path)
+        })
 }
 
 /// Look up a variant name in the declared choice variant list and return its positional tag.

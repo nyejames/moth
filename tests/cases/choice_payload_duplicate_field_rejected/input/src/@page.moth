@@ -1,1 +1,1 @@
-Response :: Err | message String, message Int |, Success;
+Response :: Err | message String, message I32 |, Success;

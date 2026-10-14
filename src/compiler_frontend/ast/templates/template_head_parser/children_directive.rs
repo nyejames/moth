@@ -12,8 +12,11 @@
 use super::directive_args::parse_required_parenthesized_expression;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::const_values::store::{ConstStringValue, ConstValuePayload};
 use crate::compiler_frontend::ast::cursor::AstCursor;
-use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
+use crate::compiler_frontend::ast::expressions::expression_store::ExpressionOperationView;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{Style, TemplateType};
 use crate::compiler_frontend::ast::templates::template_build_state::TemplateBuildState;
@@ -22,6 +25,7 @@ use crate::compiler_frontend::ast::templates::tir::{
     wrapper_reference_for_template,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateDirectiveReason,
 };
@@ -33,11 +37,17 @@ type ChildrenDirectiveResult<T> = Result<T, TemplateError>;
 
 /// Parses the `$children(template_or_string)` directive which specifies a
 /// wrapper template to apply around all direct child templates in the body.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the directive name and build state are extra inputs beside the usual parser borrows"
+)]
 pub(super) fn parse_children_style_directive(
     directive_name: StringId,
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     build_state: &mut TemplateBuildState,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
@@ -47,6 +57,8 @@ pub(super) fn parse_children_style_directive(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     )
@@ -70,13 +82,19 @@ pub(super) fn parse_children_style_directive(
             diagnostic
         }
     }))?;
-    let argument_span = directive_argument.span;
+    let directive_argument = expression_builder.view(directive_argument)?;
+    let argument_span = directive_argument.span();
 
     // The wrapper must be fully known at compile time; runtime expressions
     // cannot determine how children are composed.
     let argument_is_compile_time_constant = directive_argument
-        .const_value_kind_with_template_classifier(&mut |template| {
-            classify_template_from_effective_tir(template, &context.template_ir_store)
+        .const_value_kind_with_template_classifier(const_values, &mut |template| {
+            classify_template_from_effective_tir(
+                template,
+                &context.template_ir_store,
+                expression_builder,
+                const_values,
+            )
         })?
         .is_compile_time_value();
 
@@ -95,8 +113,8 @@ pub(super) fn parse_children_style_directive(
     // Normalize the argument at the directive boundary. Accepted wrappers
     // already have durable TIR authority, so later template construction
     // carries only the module-local wrapper reference.
-    let wrapper_reference = match directive_argument.kind {
-        ExpressionKind::Template(child_template) => {
+    let wrapper_reference = match directive_argument.operation() {
+        ExpressionOperationView::Template(child_template) => {
             let current_store = context.template_ir_store.borrow();
             let child_template_root = child_template.tir_reference.root;
             let child_kind = current_store
@@ -131,12 +149,26 @@ pub(super) fn parse_children_style_directive(
             // as `CompilerError`; carry them through `TemplateError` so the
             // diagnostic lane stays the infrastructure lane rather than a
             // fabricated user-facing directive diagnostic.
-            wrapper_reference_for_template(&child_template, &current_store)
+            wrapper_reference_for_template(child_template, &current_store)
                 .map_err(TemplateError::from)?
         }
 
-        ExpressionKind::StringSlice(value) => {
-            normalize_string_child_wrapper_reference(value, argument_span, context, string_table)?
+        ExpressionOperationView::Constant(value) => {
+            let ConstValuePayload::String(ConstStringValue::Text(text)) =
+                const_values.payload(value).ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "template expression references an absent constant value",
+                    )
+                })?
+            else {
+                return Err(CompilerDiagnostic::invalid_template_directive(
+                    Some(directive_name),
+                    InvalidTemplateDirectiveReason::InvalidChildrenArgument,
+                    argument_span,
+                )
+                .into());
+            };
+            normalize_string_child_wrapper_reference(*text, argument_span, context, string_table)?
         }
 
         _ => {

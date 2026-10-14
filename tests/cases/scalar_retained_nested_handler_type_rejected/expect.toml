@@ -1,0 +1,19 @@
+entry = "."
+
+# The nested handler body parses against a provisional catch slot and keeps
+# both runtime `if` branches as live validation paths: the I32 branch must pass
+# and the concrete String fallback must report the ordinary authored type
+# diagnostic for the resolved I32 slot. Coercing only top-level `then` nodes
+# would let the String reach HIR as a mismatched write instead. The specific
+# reason key is left to parent observation, and the code is asserted alone
+# rather than guessing message wording.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-TYPE-0001"]
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-TYPE-0001"]

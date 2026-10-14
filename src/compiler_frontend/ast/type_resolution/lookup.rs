@@ -28,7 +28,7 @@
 //! - collection capacity folding or map key validation (live in `collections.rs` and `maps.rs`).
 
 use crate::compiler_frontend::ast::TopLevelDeclarationTable;
-use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::ast_nodes::{Declaration, DeclarationShell, DeclarationValue};
 use crate::compiler_frontend::ast::type_resolution::{
     TypeResolutionResult, aliases, context::TypeResolutionContext,
 };
@@ -107,8 +107,9 @@ pub(super) fn resolve_named_type_from_context(
             canonical_path,
         )
     {
+        reject_callable_type_name(type_name, declaration, span)?;
         reject_bare_generic_type_name(type_name, canonical_path, span, context)?;
-        return Ok(declaration.value.diagnostic_type.to_owned());
+        return Ok(declaration.diagnostic_type.to_owned());
     }
 
     if let Some(declaration) = visible_declaration_by_name(
@@ -116,8 +117,9 @@ pub(super) fn resolve_named_type_from_context(
         context.visible_declaration_ids,
         type_name,
     ) {
+        reject_callable_type_name(type_name, declaration, span)?;
         reject_bare_generic_type_name(type_name, &declaration.id, span, context)?;
-        return Ok(declaration.value.diagnostic_type.to_owned());
+        return Ok(declaration.diagnostic_type.to_owned());
     }
 
     // 4) Visible external types.
@@ -251,8 +253,9 @@ pub(super) fn resolve_namespaced_type_from_context(
             if let Some(declaration) =
                 resolve_declaration_by_path(context.declaration_table, None, canonical_path)
             {
+                reject_callable_type_name(final_name, declaration, span)?;
                 reject_bare_generic_type_name(final_name, &declaration.id, span, context)?;
-                return Ok(declaration.value.diagnostic_type.to_owned());
+                return Ok(declaration.diagnostic_type.to_owned());
             }
             Err(CompilerDiagnostic::unknown_type_name(final_name, span))
         }
@@ -421,6 +424,28 @@ fn invalid_carrier_type_syntax(
     }
 }
 
+/// Callable shells carry no value type. Reject them before their display spelling can
+/// be mistaken for an omitted annotation, regardless of the visibility lookup path.
+fn reject_callable_type_name(
+    visible_name: StringId,
+    declaration: &Declaration,
+    span: Option<SourceSpan>,
+) -> TypeResolutionResult<()> {
+    if matches!(
+        declaration.value,
+        DeclarationValue::Shell(DeclarationShell::Function { .. })
+    ) {
+        return Err(CompilerDiagnostic::namespace_type_value_misuse(
+            visible_name,
+            NamespaceTypeValueMisuseKind::Type,
+            NamespaceTypeValueMisuseKind::Value,
+            span,
+        ));
+    }
+
+    Ok(())
+}
+
 /// Validate that a source declaration used as a bare type is not a generic struct/choice.
 ///
 /// WHAT: when a generic nominal declaration is referenced without arguments, report a missing-
@@ -529,8 +554,6 @@ fn visible_declaration_by_name<'a>(
 fn builtin_named_type(type_name: StringId, string_table: &StringTable) -> Option<DataType> {
     let resolved = string_table.resolve(type_name);
     let data_type = match resolved {
-        "Int" => DataType::Int,
-        "Float" => DataType::Float,
         "Bool" => DataType::Bool,
         "String" => DataType::StringSlice,
         "Char" => DataType::Char,

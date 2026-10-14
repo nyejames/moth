@@ -1,0 +1,34 @@
+-- Nested pending body drain.
+--
+-- Each construct below owns a nested body whose statements retained numeric
+-- continuations: both value-if branches declare an unannotated local (`held`,
+-- `alternate`) and reference it from `then`, and the safety catch's handler
+-- declares `fallback` and references it from `then`. Completing each enclosing
+-- binding's initializer drains its nested body exactly once, so the fixture
+-- fails on a second take of the same consumed continuation instead of merely
+-- checking that compilation did not panic.
+--
+-- I8 + U8 selects I16 and the addition is provably infallible, so the authored
+-- catch stays eligible: the handler's local binding and `then` reference are
+-- fully validated before the dead handler is pruned, and the protected success
+-- result still returns 200.
+
+pick_value |flag Bool| -> I16:
+    chosen I16 = if flag:
+        held = 7
+        then held
+    else
+        alternate = 9
+        then alternate
+    ;
+    return chosen
+;
+
+left I8 = 100
+right U8 = 100
+protected I16 = left + right catch:
+    fallback = 7
+    then fallback
+;
+
+[:scalar pending body drain branch=[pick_value(true)]/[pick_value(false)] protected=[protected]]

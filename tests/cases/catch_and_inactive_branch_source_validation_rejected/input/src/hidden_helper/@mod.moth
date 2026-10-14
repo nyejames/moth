@@ -1,0 +1,6 @@
+identity_text |value String| -> String:
+    return value
+;
+
+number I64 = 1
+value = identity_text([:[number]]) catch then ""

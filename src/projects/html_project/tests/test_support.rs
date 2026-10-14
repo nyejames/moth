@@ -16,7 +16,6 @@ use crate::compiler_frontend::external_packages::{
 };
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expression_store::HirValueRange;
-use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::functions::{HirFunction, HirFunctionOrigin};
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId, HirNodeId, RegionId};
 use crate::compiler_frontend::hir::module::HirModule;
@@ -46,33 +45,20 @@ use std::sync::Arc;
 /// Create the smallest valid HIR module with one entry start function.
 pub(crate) fn create_test_hir_module() -> HirModule {
     let mut module = HirModule::new();
-    let unit_type = crate::compiler_frontend::datatypes::ids::builtin_type_ids::NONE;
-    let return_value = module
-        .expressions
-        .append_expression(HirExpression {
-            kind: HirExpressionKind::TupleConstruct {
-                elements: HirValueRange::empty(),
-            },
-            ty: unit_type,
-            value_kind: ValueKind::Const,
-            region: RegionId(0),
-            span: None,
-        })
-        .expect("fixture expression fits");
-
     module.regions = vec![HirRegion::lexical(RegionId(0), None)];
     module.blocks = vec![HirBlock {
         id: BlockId(0),
         region: RegionId(0),
         locals: vec![],
         statements: vec![],
-        terminator: HirTerminator::Return(return_value),
+        terminator: HirTerminator::Return(HirValueRange::empty()),
     }];
     module.functions = vec![HirFunction {
         id: FunctionId(0),
         entry: BlockId(0),
         params: vec![],
-        return_type: unit_type,
+        returns: Box::new([]),
+        error_return: None,
     }];
     module
         .function_provenance
@@ -177,7 +163,7 @@ pub(crate) fn add_reachable_external_import(
         kind: HirStatementKind::Call {
             target: CallTarget::External(function_id),
             args: HirValueRange::empty(),
-            result: None,
+            results: Vec::new(),
         },
         span: None,
     });

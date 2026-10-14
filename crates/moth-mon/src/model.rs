@@ -4,31 +4,20 @@
 //! schema, reader, and writer owners.
 
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
-use moth_lexical::numeric::profile::NumericProfile;
 
 use super::{Limits, MonError};
 
 /// Owned MON data. The tree intentionally carries no source identity or alias relationship.
 ///
-/// The numeric payload carriers are fixed by this public type:
-/// - `Int` is `i64` because a schema prepared for an `Int64` profile must hold its whole range;
-///   the receiving schema's captured profile decides which values are valid.
-/// - `Uint` is `u64` because a schema prepared for a 64-bit `Int` width must hold values above
-///   `i64::MAX`; the captured profile decides which values this receiving boundary accepts.
-/// - `Float` stays `f64` because that carrier holds every `Float32` value exactly; the captured
-///   profile decides rounding and validity, exactly as it does for a decoded literal.
-/// - Explicit-width values use their own Rust width, and fixed binary floats use the `f64` carrier
-///   holding a value already rounded to their own precision. Explicit-width schemas are
-///   profile-independent.
+/// The numeric payload carriers are fixed by this public type: each fixed-width variant uses its
+/// own Rust width (`I64` holds `i64`, `U64` holds `u64`), and each binary-float variant uses the
+/// `f64` carrier holding a value already rounded to its own precision.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     None,
     Bool(bool),
     Char(char),
     String(String),
-    Int(i64),
-    Uint(u64),
-    Float(f64),
     Integer(String),
     Decimal(String),
     I8(i8),
@@ -106,20 +95,14 @@ impl Variant {
 
 /// Static data shape supplied by the Rust consumer.
 ///
-/// `Int`, `Uint` and `Float` are profile-dependent: their prepared nodes capture the receiving
-/// `NumericProfile`, which defaults to `NumericProfile::STANDARD`. `Uint` follows the profile's
-/// `Int` width, so the default is Uint32. `I8`..`F64` and `Byte` are
-/// explicit identities and never alias `Int`, `Uint` or `Float`, even under a matching profile.
+/// Every scalar is an explicit fixed identity (`I8`..`I64`, `U8`..`U64`, `F16`..`F64` and `Byte`),
+/// so a schema's meaning never depends on configuration. `Integer` and `Decimal` are exact data.
 #[derive(Clone, Debug, PartialEq)]
 pub enum SchemaType {
     None,
     Bool,
     Char,
     String,
-    Int,
-    /// Profile-dependent unsigned integer following the captured `Int` width.
-    Uint,
-    Float,
     Integer,
     /// Exact decimal data with a declared scale capacity of `0..=256`.
     Decimal {
@@ -163,9 +146,6 @@ pub enum SchemaType {
 }
 impl Value {
     /// The explicit fixed scalar this value carries, if it carries a fixed-scalar payload.
-    ///
-    /// `Int`, `Uint` and `Float` return `None`: they are profile-dependent families whose schema
-    /// decides validity, so a value of one profile width never satisfies an explicit-width schema.
     pub(super) fn fixed_scalar(&self) -> Option<FixedScalar> {
         match self {
             Value::I8(_) => Some(FixedScalar::I8),
@@ -184,17 +164,11 @@ impl Value {
         }
     }
 }
-/// Unprepared static schema plus receiver limits and the numeric profile to prepare under.
-///
-/// Standalone Rust consumers that never select a profile get `NumericProfile::STANDARD`, which is
-/// the delivered `Int32`/`Float64` boundary (`Uint` follows the `Int` width there too). A
-/// compilation boundary that types its own `Int`, `Uint` and `Float` differently passes its
-/// profile with [`Schema::with_profile`]; explicit-width members ignore it.
+/// Unprepared static schema plus receiver limits.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Schema {
     pub(super) root: SchemaType,
     pub(super) limits: Limits,
-    pub(super) profile: NumericProfile,
 }
 
 impl Schema {
@@ -202,7 +176,6 @@ impl Schema {
         Self {
             root: SchemaType::Record { fields },
             limits: Limits::default(),
-            profile: NumericProfile::STANDARD,
         }
     }
 
@@ -210,24 +183,12 @@ impl Schema {
         Self {
             root: ty,
             limits: Limits::default(),
-            profile: NumericProfile::STANDARD,
         }
     }
 
     pub fn with_limits(mut self, limits: Limits) -> Self {
         self.limits = limits;
         self
-    }
-
-    /// Select the numeric profile this schema's `Int`, `Uint` and `Float` members are prepared under.
-    pub fn with_profile(mut self, profile: NumericProfile) -> Self {
-        self.profile = profile;
-        self
-    }
-
-    /// The numeric profile this schema will be prepared under.
-    pub fn profile(&self) -> NumericProfile {
-        self.profile
     }
 
     pub fn prepare(self) -> Result<PreparedSchema, MonError> {
@@ -240,19 +201,10 @@ impl Schema {
 pub struct PreparedSchema {
     pub(super) root: super::schema::PreparedType,
     pub(super) limits: Limits,
-    pub(super) profile: NumericProfile,
 }
 
 impl PreparedSchema {
     pub fn limits(&self) -> &Limits {
         &self.limits
-    }
-
-    /// The numeric profile this schema's `Int`, `Uint` and `Float` members were prepared under.
-    ///
-    /// The profile is captured once during preparation; it is not re-read per call, and
-    /// explicit-width members do not consult it.
-    pub fn profile(&self) -> NumericProfile {
-        self.profile
     }
 }

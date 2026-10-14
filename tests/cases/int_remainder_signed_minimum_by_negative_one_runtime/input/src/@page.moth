@@ -1,8 +1,8 @@
--- Remainder by -1 is zero at every Int width: the signed-minimum overflow
+-- Remainder by -1 is zero at every I32 width: the signed-minimum overflow
 -- belongs to the paired quotient only. Both operands arrive through parameters
 -- so the remainder is computed at runtime instead of folded.
 
-remainder |dividend Int, divisor Int| -> Int:
+remainder |dividend I32, divisor I32| -> I32:
     return dividend % divisor
 ;
 

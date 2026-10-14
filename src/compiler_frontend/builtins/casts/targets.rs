@@ -26,18 +26,14 @@ use moth_lexical::numeric::fixed_scalar::FixedScalar;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum BuiltinCastTarget {
     Bool,
-    Int,
-    /// Profile-sized unsigned integer; follows the selected `Int` width.
-    Uint,
     String,
     Char,
-    Float,
     Error,
     /// An explicit-width scalar or the `Byte` octet type.
     ///
     /// WHAT: covers every `FixedScalar` identity, including `Byte`, as a builtin cast
-    ///      source or target. `Int`/`Float` never alias a matching-width fixed type.
-    /// WHY: numeric conversions between `Int`, `Float` and fixed scalars resolve through
+    ///      source or target.
+    /// WHY: numeric conversions between the bounded numeric identities resolve through
     ///      this one classification so evidence and policy owners share the same vocabulary.
     Fixed(FixedScalar),
     /// One exact decimal `Dec` scale as a cast source or target.
@@ -50,16 +46,13 @@ pub(crate) enum BuiltinCastTarget {
 }
 
 impl BuiltinCastTarget {
-    /// The bounded numeric domain of this target: `Int`, `Uint`, `Float` or a non-`Byte` fixed scalar.
+    /// The bounded numeric domain of this target: a non-`Byte` fixed scalar, else `None`.
     ///
     /// `BuiltinCastTarget::Number` deliberately stays outside this projection. Its exact
     /// conversions are classified pair-by-pair in the lazy evidence path, never by the
     /// bounded numeric matrices.
     pub(crate) fn numeric_scalar(self) -> Option<NumericScalar> {
         match self {
-            BuiltinCastTarget::Int => Some(NumericScalar::Int),
-            BuiltinCastTarget::Uint => Some(NumericScalar::Uint),
-            BuiltinCastTarget::Float => Some(NumericScalar::Float),
             BuiltinCastTarget::Fixed(FixedScalar::Byte) => None,
             BuiltinCastTarget::Fixed(scalar) => Some(NumericScalar::Fixed(scalar)),
             BuiltinCastTarget::Bool
@@ -74,9 +67,6 @@ impl BuiltinCastTarget {
 impl From<NumericScalar> for BuiltinCastTarget {
     fn from(scalar: NumericScalar) -> Self {
         match scalar {
-            NumericScalar::Int => BuiltinCastTarget::Int,
-            NumericScalar::Uint => BuiltinCastTarget::Uint,
-            NumericScalar::Float => BuiltinCastTarget::Float,
             NumericScalar::Fixed(scalar) => BuiltinCastTarget::Fixed(scalar),
             NumericScalar::Number(scale) => BuiltinCastTarget::Number(scale),
         }
@@ -110,14 +100,14 @@ pub(crate) enum BuiltinCastPolicyId {
     ByteToU8,
     /// Infallible `U8` to `Byte` conversion.
     U8ToByte,
-    /// Infallible numeric text conversion for `Int`, `Uint`, `Float`, fixed numeric scalars and `Dec`.
+    /// Infallible numeric text conversion for fixed numeric scalars and `Dec`.
     ///
     /// WHAT: carries the numeric domain whose canonical text the value formats to. Never holds
     ///       `Byte`, whose text conversion composes through `U8`.
     /// WHY: every numeric type shares one text contract, so the policy carries the domain and the
     ///      policy owner applies that domain's formatting rules.
     NumericToString(NumericScalar),
-    /// Fallible numeric text parse for `Int`, `Uint`, `Float`, fixed numeric scalars and `Dec`.
+    /// Fallible numeric text parse for fixed numeric scalars and `Dec`.
     ///
     /// The destination domain owns the accepted grammar, range, precision or exact Dec scale.
     StringToNumeric(NumericScalar),
@@ -173,22 +163,11 @@ pub(crate) fn builtin_cast_target_for_builtin_type(
     if type_id == builtins.bool {
         return Some(BuiltinCastTarget::Bool);
     }
-    if type_id == builtins.int {
-        return Some(BuiltinCastTarget::Int);
-    }
-    // `Uint` is a distinct profile-sized unsigned identity: it never aliases the
-    // fixed-width `U32`/`U64` targets matched below.
-    if type_id == builtins.uint {
-        return Some(BuiltinCastTarget::Uint);
-    }
     if type_id == builtins.string {
         return Some(BuiltinCastTarget::String);
     }
     if type_id == builtins.char {
         return Some(BuiltinCastTarget::Char);
-    }
-    if type_id == builtins.float {
-        return Some(BuiltinCastTarget::Float);
     }
 
     // Fixed scalars (including `Byte`) are distinct seeded identities. A direct
@@ -209,7 +188,6 @@ pub(crate) fn builtin_cast_target_for_builtin_type(
 ///
 /// WHAT: maps builtin identities through [`builtin_cast_target_for_builtin_type`] and resolves
 ///      `Error` by matching the type's nominal path against the preseeded builtin error path.
-///      `Int`/`Float` never alias a matching-width fixed type.
 /// WHY: classification is shared between cast target resolution and evidence
 ///      construction. Centralising it here means the policy table can stay
 ///      table-driven while still relying on one well-defined mapping rule.

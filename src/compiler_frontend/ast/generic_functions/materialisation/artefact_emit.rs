@@ -7,30 +7,31 @@ use super::nominal_blueprints::{
     materialised_nominal_declaration, materialised_struct_fields,
 };
 use super::semantic_closure::{StableSemanticClosure, install_private_semantic_closure};
-use super::sidecar_build::{
-    GeneratedSidecarRequest, emit_materialised_sidecar, fallible_carrier_from_type_ids,
-};
+use super::sidecar_build::{GeneratedSidecarRequest, emit_materialised_sidecar};
 use super::stable_types::{
     GeneratedFoldedValueMaterialiser, GeneratedValueMaterialisationServices,
     GenericTemplateArtefact, MaterialisationNominalSource, StableFunctionSignature,
-    StableFunctionTarget, generated_file_value_resolution_services,
+    StableFunctionTarget, const_store_error_into_compiler_error,
+    generated_file_value_resolution_services, import_canonical_folded_value,
 };
 use super::{MaterialisedGenericAst, ModuleMaterialisationInput};
 use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
 use crate::compiler_frontend::ast::AstBuildContext;
 use crate::compiler_frontend::ast::AstImportedFunctionContract;
-use crate::compiler_frontend::ast::ast_nodes::Declaration;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::AstImportedStructDefinition;
+use crate::compiler_frontend::ast::ast_nodes::{Declaration, DeclarationShell, DeclarationValue};
+use crate::compiler_frontend::ast::expressions::expression_store::ExpressionConstructionFailure;
 use crate::compiler_frontend::ast::module_ast::build_context::AstPhaseContext;
-use crate::compiler_frontend::ast::module_ast::environment::builder::import_projection::values::materialize_public_folded_value;
 use crate::compiler_frontend::ast::module_ast::environment::{
     AstEnvironmentInput, AstModuleEnvironment, AstModuleEnvironmentBuilder, AstModuleLookups,
 };
 use crate::compiler_frontend::ast::module_ast::scope_context::ReceiverMethodEntry;
 use crate::compiler_frontend::ast::statements::functions::{
-    FunctionSignature, ReturnChannel, ReturnSlot,
+    FunctionParameter, FunctionSignature, ReturnChannel, ReturnSlot,
 };
-use crate::compiler_frontend::ast::type_resolution::ResolvedFunctionSignature;
+use crate::compiler_frontend::ast::type_resolution::{
+    ResolvedFunctionSignature, intern_resolved_function_signature,
+};
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTypeIdentity, GenericDeclarationOrigin,
 };
@@ -38,7 +39,7 @@ use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages}
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_parameters::TypeParameterId;
-use crate::compiler_frontend::datatypes::ids::{FunctionTypeKey, GenericParameterListId, TypeId};
+use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::{DataType, ReceiverKey, diagnostic_type_spelling};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::binding_environment::{
@@ -48,7 +49,9 @@ use crate::compiler_frontend::headers::module_symbols::{GenericDeclarationKind, 
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 #[cfg(test)]
 use crate::compiler_frontend::public_call_summary::PublicCallSummary;
-use crate::compiler_frontend::public_interface::{PublicDeclarationRecord, PublicEvidenceRecord};
+use crate::compiler_frontend::public_interface::{
+    ConcreteCallSummaryRecord, PublicDeclarationRecord, PublicEvidenceRecord,
+};
 #[cfg(test)]
 use crate::compiler_frontend::semantic_identity::ModulePrivateExecutableIdentity;
 use crate::compiler_frontend::semantic_identity::{
@@ -62,7 +65,6 @@ use crate::compiler_frontend::symbols::path_interner::{
 use crate::compiler_frontend::symbols::string_interning::{
     FrozenStringTable, StringTable, StringTableResolver,
 };
-use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::value_mode::ValueMode;
 use rustc_hash::FxHashMap;
 use std::cell::RefCell;
@@ -79,6 +81,11 @@ mod test_support;
 pub(crate) struct ModuleMaterialisationContext {
     pub(super) declaration_closure: Box<[PublicDeclarationRecord]>,
     pub(super) evidence: Box<[PublicEvidenceRecord]>,
+    /// Exact published concrete evidence-method summaries, in stable-origin order.
+    ///
+    /// These precede AST evidence projection. Generic templates have no base summary, and
+    /// ordinary file visibility does not determine which evidence contracts must be retained.
+    pub(super) concrete_call_summaries: Box<[ConcreteCallSummaryRecord]>,
     pub(super) semantic_closure: StableSemanticClosure,
     pub(super) artefacts: Box<[GenericTemplateArtefact]>,
     pub(super) module_origin: Option<StableModuleOriginIdentity>,
@@ -294,6 +301,23 @@ pub(super) fn check_materialisation_row_identity(
     Ok(())
 }
 
+/// Converts an expression-store failure raised while materialising a generated constant.
+///
+/// WHY: a rejected generated constant node is an invariant break in the materialised body, not a
+/// user-facing diagnostic. This mirrors the constant-store conversion in `stable_types`.
+fn expression_construction_failure_into_compiler_error(
+    failure: ExpressionConstructionFailure,
+) -> CompilerError {
+    match failure {
+        ExpressionConstructionFailure::Diagnostic(diagnostic) => {
+            CompilerError::compiler_error(format!(
+                "Generated constant expression violated an expression store invariant: {diagnostic:?}"
+            ))
+        }
+        ExpressionConstructionFailure::Invariant(error) => error,
+    }
+}
+
 impl GenericTemplateArtefact {
     fn materialise_ast<'a>(
         &self,
@@ -309,7 +333,6 @@ impl GenericTemplateArtefact {
             external_package_registry,
             style_directives,
             build_profile,
-            numeric_profile,
             template_const_loop_iteration_limit,
             #[cfg(feature = "timers")]
             timing_context,
@@ -341,7 +364,6 @@ impl GenericTemplateArtefact {
             entry_dir,
             root_role: ModuleRootRole::Support,
             build_profile,
-            numeric_profile,
             file_value_resolution: Some(file_value_resolution),
             config_resolution: None,
             build_config_values: Arc::new(Default::default()),
@@ -352,8 +374,8 @@ impl GenericTemplateArtefact {
             #[cfg(feature = "timers")]
             timing_metric_family: crate::compiler_frontend::ast::AstTimingMetricFamily::Generated,
         };
-        let (phase_context, string_table_ref, path_fork_ref) =
-            AstPhaseContext::from_build_context(build_context, Arc::new(Default::default()));
+        let (mut phase_context, string_table_ref, path_fork_ref) =
+            AstPhaseContext::from_build_context(build_context, Arc::new(Default::default()))?;
         crate::timing_scope_attributed!(
             timing_guard_generated_ast_total,
             crate::timing::TimingMetric::FrontendGeneratedAstTotal,
@@ -384,25 +406,30 @@ impl GenericTemplateArtefact {
         module_symbols
             .struct_source_by_path
             .extend(builtin_manifest.struct_source_by_path);
-        let mut environment = AstModuleEnvironmentBuilder::new(&phase_context, path_fork_ref)
+        module_symbols
+            .folded_defaults_by_field_path
+            .extend(builtin_manifest.folded_defaults_by_field_path);
+        let mut environment = AstModuleEnvironmentBuilder::new(&mut phase_context, path_fork_ref)
             .build(
-                &[],
-                AstEnvironmentInput {
-                    module_symbols,
-                    binding_environment,
-                    source_token_owners: FxHashMap::default(),
-                },
-                string_table_ref,
-            )?;
-        let value_services = GeneratedValueMaterialisationServices {
+            &[],
+            AstEnvironmentInput {
+                module_symbols,
+                binding_environment,
+                source_token_owners: FxHashMap::default(),
+            },
+            string_table_ref,
+        )?;
+        let mut value_services = GeneratedValueMaterialisationServices {
             external_registry: external_package_registry,
             template_ir_store: &phase_context.template_ir_store,
             module_resources: Rc::clone(&module_resources),
+            expression_builder: &mut phase_context.expression_builder,
+            const_values: &mut phase_context.const_values,
         };
         self.install_closed_environment(
             context,
             &mut environment,
-            &value_services,
+            &mut value_services,
             string_table_ref,
             path_fork_ref,
             Some(materialised_body),
@@ -410,12 +437,13 @@ impl GenericTemplateArtefact {
         .map_err(|error| CompilerMessages::from_error_ref(error, string_table_ref))?;
 
         let (build_result, instance_path) = emit_materialised_sidecar(
-            &phase_context,
+            phase_context,
             environment,
             GeneratedSidecarRequest {
                 identity,
                 function_path,
                 requester_context,
+                declaring_context: context,
                 requester_call_span,
             },
             self,
@@ -461,6 +489,14 @@ impl GenericTemplateArtefact {
                 .imported_evidence_by_identity
                 .insert(record.identity.clone(), record.clone());
         }
+        // Reusable evidence names its requirement methods by stable origin, and the environment's
+        // AST builder projects those origins only once the provider's real summary is present. The
+        // context retained exactly the summaries the retained evidence names.
+        for record in &context.concrete_call_summaries {
+            environment
+                .imported_call_summaries_by_origin
+                .insert(record.origin.clone(), record.summary.clone());
+        }
         for callable in &self.callables {
             let local_path = callable.local_path;
             let target = callable.target.materialise(local_path);
@@ -483,7 +519,7 @@ impl GenericTemplateArtefact {
         &self,
         context: &ModuleMaterialisationContext,
         environment: &mut AstModuleEnvironment,
-        services: &GeneratedValueMaterialisationServices<'_>,
+        services: &mut GeneratedValueMaterialisationServices<'_>,
         string_table: &mut StringTable,
         path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
         mut materialised_self_body: Option<MaterialisedBody>,
@@ -491,7 +527,6 @@ impl GenericTemplateArtefact {
         let external_package_registry = services.external_registry;
         let template_ir_store = services.template_ir_store;
         let module_resources = Rc::clone(&services.module_resources);
-        let value_services = services;
         let identity_tables = context.retained_identity_arcs()?;
         for nominal in &self.nominals {
             let type_id = intern_generated_canonical_type(
@@ -551,7 +586,7 @@ impl GenericTemplateArtefact {
                     &mut environment.type_environment,
                     blueprint,
                     self,
-                    value_services,
+                    services,
                     string_table,
                     path_fork,
                 )?
@@ -594,51 +629,17 @@ impl GenericTemplateArtefact {
                 continue;
             }
             let local_path = callable.local_path;
-            let (signature, function_type_id, fallible_carrier_type_id) =
-                callable.signature.materialise(
-                    &local_path,
-                    &mut StableFunctionMaterialisationContext {
-                        generic_parameter_type_ids: &[],
-                        nominal_source: self,
-                        path_fork,
-                        type_environment: &mut environment.type_environment,
-                        external_package_registry,
-                        template_ir_store,
-                        module_resources: Rc::clone(&module_resources),
-                        string_table,
-                    },
-                )?;
-            let declaration = Declaration {
-                id: local_path,
-                value: Expression::new(
-                    ExpressionKind::NoValue,
-                    Default::default(),
-                    function_type_id,
-                    DataType::Function(Box::new(None), signature.clone()),
-                    ValueMode::ImmutableReference,
-                ),
-                binding_span: None,
-                config_qualifier: None,
-            };
-            let lookups = Rc::make_mut(&mut environment.lookups);
-            append_materialised_declaration(lookups, declaration, path_fork)?;
-            Rc::make_mut(&mut lookups.resolved_function_signatures_by_path).insert(
+            let contract = callable.materialise_requester_contract(
                 local_path,
-                ResolvedFunctionSignature {
-                    receiver: None,
-                    signature,
-                },
-            );
-            Rc::make_mut(&mut lookups.declaration_semantics)
-                .register_materialised_function(local_path);
-            lookups.imported_functions_by_local_path.insert(
-                local_path,
-                AstImportedFunctionContract {
-                    target: callable.target.materialise(local_path),
-                    summary: callable.summary.clone(),
-                    fallible_carrier_type_id,
-                },
-            );
+                environment,
+                services,
+                self,
+                string_table,
+                path_fork,
+            )?;
+            Rc::make_mut(&mut environment.lookups)
+                .imported_functions_by_local_path
+                .insert(local_path, contract);
         }
 
         for local_path_components in &self.local_declarations {
@@ -661,23 +662,37 @@ impl GenericTemplateArtefact {
                     type_environment: &mut environment.type_environment,
                     external_registry: external_package_registry,
                     nominal_source: self,
-                    template_ir_store: Rc::clone(template_ir_store),
                     module_resources: Rc::clone(&module_resources),
                     path_fork,
                 };
                 let span = constant.span;
-                let mut value = materialize_public_folded_value(
+                let value_id = import_canonical_folded_value(
                     &mut materialiser,
                     &constant.value,
                     type_id,
+                    services.const_values,
                     string_table,
                     span,
-                )?;
-                value.value_mode = ValueMode::ImmutableReference;
+                )
+                .map_err(const_store_error_into_compiler_error)?;
+                services
+                    .const_values
+                    .bind_module_constant(local_path, value_id)
+                    .map_err(const_store_error_into_compiler_error)?;
+                let value = services
+                    .expression_builder
+                    .constant(value_id, type_id, span, ValueMode::ImmutableReference)
+                    .map_err(expression_construction_failure_into_compiler_error)?;
                 let declaration = Declaration {
                     id: local_path,
-                    value,
-                    binding_span: None,
+                    type_id,
+                    diagnostic_type: diagnostic_type_spelling(
+                        type_id,
+                        &environment.type_environment,
+                    ),
+                    value_mode: ValueMode::ImmutableReference,
+                    value: DeclarationValue::Initializer(value.id()),
+                    binding_span: span,
                     config_qualifier: None,
                 };
                 let lookups = Rc::make_mut(&mut environment.lookups);
@@ -729,16 +744,16 @@ impl GenericTemplateArtefact {
                     "Generic receiver method has no retained materialisation artefact",
                 ));
             }
-            let (signature, function_type_id, fallible_carrier_type_id) =
+            let (signature, function_type_id, returns, error_return) =
                 method.signature.materialise(
                     &method_path,
                     &mut StableFunctionMaterialisationContext {
                         generic_parameter_type_ids: &[],
                         nominal_source: self,
                         type_environment: &mut environment.type_environment,
+                        const_values: &mut *services.const_values,
                         path_fork,
                         external_package_registry,
-                        template_ir_store,
                         module_resources: Rc::clone(&module_resources),
                         string_table,
                     },
@@ -749,13 +764,12 @@ impl GenericTemplateArtefact {
                 })?;
             let declaration = Declaration {
                 id: method_path,
-                value: Expression::new(
-                    ExpressionKind::NoValue,
-                    Default::default(),
-                    function_type_id,
-                    DataType::Function(Box::new(Some(receiver.clone())), signature.clone()),
-                    ValueMode::ImmutableReference,
-                ),
+                type_id: function_type_id,
+                diagnostic_type: DataType::Inferred,
+                value_mode: ValueMode::ImmutableReference,
+                value: DeclarationValue::Shell(DeclarationShell::Function {
+                    receiver: Some(receiver.clone()),
+                }),
                 binding_span: None,
                 config_qualifier: None,
             };
@@ -792,7 +806,8 @@ impl GenericTemplateArtefact {
                             "Concrete receiver method has no retained call summary",
                         )
                     })?,
-                    fallible_carrier_type_id,
+                    returns,
+                    error_return,
                 },
             );
         }
@@ -805,6 +820,25 @@ impl GenericTemplateArtefact {
             {
                 continue;
             }
+            let mut resolved_bounds_by_local = FxHashMap::default();
+            for (slot, parameter) in nested.generic_parameters.iter().enumerate() {
+                let bounds = parameter
+                    .bounds
+                    .iter()
+                    .map(|identity| {
+                        environment
+                            .lookups
+                            .trait_environment
+                            .id_for_canonical_identity(identity)
+                            .ok_or_else(|| {
+                                CompilerError::compiler_error(
+                                    "Materialised generic bound is absent from its trait closure",
+                                )
+                            })
+                    })
+                    .collect::<Result<Vec<_>, CompilerError>>()?;
+                resolved_bounds_by_local.insert(TypeParameterId(slot as u32), bounds);
+            }
             let (generic_parameter_list_id, generic_parameter_type_ids) = if let Some(
                 nominal_origin,
             ) = nested
@@ -812,10 +846,8 @@ impl GenericTemplateArtefact {
                 .as_ref()
                 .and_then(GenericDeclarationOrigin::nominal_type_origin)
             {
-                // A generic receiver method shares the enclosing nominal's local generic
-                // handles. Registering a second list for the method would assign one stable
-                // exported parameter identity to two TypeIds and make its generated sidecar
-                // internally inconsistent.
+                // Public methods share the nominal's exported parameter identities, but each
+                // callable retains its own names and bounds in a separate contract list.
                 let nominal_identity = CanonicalTypeIdentity::SourceNominal(nominal_origin.clone());
                 let nominal_type_id = intern_generated_canonical_type(
                     &nominal_identity,
@@ -879,73 +911,31 @@ impl GenericTemplateArtefact {
                             .register_canonical_identity(expected_identity, *type_id)?;
                     }
                 }
-                (generic_parameter_list_id, generic_parameter_type_ids)
-            } else if nested.receiver.is_some() {
-                let receiver_identity = nested.receiver_nominal_identity.as_ref().ok_or_else(|| {
-                    CompilerError::compiler_error(format!(
-                        "Materialised generic receiver template {:?} has no retained nominal identity",
-                        nested_path
-                    ))
-                })?;
-                let receiver_type_id = intern_generated_canonical_type(
-                    receiver_identity,
-                    &mut environment.type_environment,
-                    external_package_registry,
-                    self,
-                    string_table,
-                    path_fork,
-                )?;
-                let generic_parameter_list_id =
-                    match environment.type_environment.get(receiver_type_id) {
-                        Some(TypeDefinition::Struct(definition)) => definition.generic_parameters,
-                        Some(TypeDefinition::Choice(definition)) => definition.generic_parameters,
-                        _ => {
-                            return Err(CompilerError::compiler_error(
-                                "Private generic receiver owner is not a nominal type",
-                            ));
-                        }
-                    }
-                    .ok_or_else(|| {
-                        CompilerError::compiler_error(
-                            "Private generic receiver owner has no generic parameter list",
+                let registration =
+                    environment
+                        .type_environment
+                        .register_generic_parameter_contract(
+                            generic_parameter_list_id,
+                            nested.generic_parameters.iter().enumerate().map(
+                                |(slot, parameter)| {
+                                    (
+                                        TypeParameterId(slot as u32),
+                                        string_table.intern(&parameter.name),
+                                    )
+                                },
+                            ),
+                            &resolved_bounds_by_local,
                         )
-                    })?;
-                let generic_parameter_type_ids = environment
-                    .type_environment
-                    .generic_parameters(generic_parameter_list_id)
-                    .ok_or_else(|| {
-                        CompilerError::compiler_error(
-                            "Private generic receiver owner has a missing parameter list",
-                        )
-                    })?
-                    .parameters
-                    .iter()
-                    .map(|parameter| {
-                        environment
-                            .type_environment
-                            .type_id_for_generic_parameter(parameter.id)
-                            .ok_or_else(|| {
-                                CompilerError::compiler_error(
-                                    "Private generic receiver owner parameter has no type handle",
-                                )
-                            })
-                    })
-                    .collect::<Result<Vec<_>, CompilerError>>()?;
-                if generic_parameter_type_ids.len() != nested.generic_parameters.len() {
-                    return Err(CompilerError::compiler_error(
-                        "Private generic receiver template parameter count disagrees with its nominal owner",
-                    ));
-                }
-                self.restore_private_receiver_generic_parameter_bounds(
-                    nested,
-                    receiver_identity,
-                    generic_parameter_list_id,
-                    &mut environment.type_environment,
-                    &environment.lookups.trait_environment,
-                    string_table,
-                )?;
-                (generic_parameter_list_id, generic_parameter_type_ids)
+                        .ok_or_else(|| {
+                            CompilerError::compiler_error(
+                                "Materialised receiver contract disagrees with its parameter owner",
+                            )
+                        })?;
+                (registration.list_id, generic_parameter_type_ids)
             } else {
+                // Private methods retain their own declaration-local parameters, even when
+                // their receiver aligns with a nominal's slots. Reusing the nominal list would
+                // lose method parameter names and overwrite another declaration's bounds.
                 let registration =
                     environment
                         .type_environment
@@ -958,7 +948,7 @@ impl GenericTemplateArtefact {
                                     )
                                 },
                             ),
-                            &FxHashMap::default(),
+                            &resolved_bounds_by_local,
                         );
                 let generic_parameter_type_ids = (0..nested.generic_parameters.len())
                     .map(|slot| {
@@ -981,7 +971,6 @@ impl GenericTemplateArtefact {
                             })
                     })
                     .collect::<Result<Vec<_>, CompilerError>>()?;
-                let mut resolved_bounds_by_local = FxHashMap::default();
                 for (slot, parameter) in nested.generic_parameters.iter().enumerate() {
                     let local_id = TypeParameterId(slot as u32);
                     let parameter_id = registration
@@ -1007,41 +996,18 @@ impl GenericTemplateArtefact {
                             parameter_type_id,
                         )?;
                     }
-                    let bounds = parameter
-                            .bounds
-                            .iter()
-                            .map(|identity| {
-                                environment
-                                    .lookups
-                                    .trait_environment
-                                    .id_for_canonical_identity(identity)
-                                    .ok_or_else(|| {
-                                        CompilerError::compiler_error(
-                                            "Materialised generic bound is absent from its trait closure",
-                                        )
-                                    })
-                            })
-                            .collect::<Result<Vec<_>, CompilerError>>()?;
-                    resolved_bounds_by_local.insert(local_id, bounds);
                 }
-                environment
-                    .type_environment
-                    .update_generic_parameter_bounds(
-                        registration.list_id,
-                        &resolved_bounds_by_local,
-                        &registration.canonical_by_local,
-                    );
                 (registration.list_id, generic_parameter_type_ids)
             };
-            let (signature, function_type_id, _) = nested.signature.materialise(
+            let (signature, function_type_id, _, _) = nested.signature.materialise(
                 &nested_path,
                 &mut StableFunctionMaterialisationContext {
                     generic_parameter_type_ids: &generic_parameter_type_ids,
                     nominal_source: nested,
                     type_environment: &mut environment.type_environment,
+                    const_values: &mut *services.const_values,
                     path_fork,
                     external_package_registry,
-                    template_ir_store,
                     module_resources: Rc::clone(&module_resources),
                     string_table,
                 },
@@ -1109,13 +1075,10 @@ impl GenericTemplateArtefact {
                     lookups,
                     Declaration {
                         id: nested_path,
-                        value: Expression::new(
-                            ExpressionKind::NoValue,
-                            Default::default(),
-                            function_type_id,
-                            DataType::Function(Box::new(receiver), signature),
-                            ValueMode::ImmutableReference,
-                        ),
+                        type_id: function_type_id,
+                        diagnostic_type: DataType::Inferred,
+                        value_mode: ValueMode::ImmutableReference,
+                        value: DeclarationValue::Shell(DeclarationShell::Function { receiver }),
                         binding_span: None,
                         config_qualifier: None,
                     },
@@ -1130,18 +1093,126 @@ impl GenericTemplateArtefact {
                 "generated materialisation did not install its root generic body",
             ));
         }
+        // Callable signatures can intern private result/member types that were never spelled in
+        // this body's source visibility. Publish their canonical HIR shells only after signatures
+        // are restored; do not register source aliases or make these declarations name-visible.
+        self.publish_materialised_nominal_shells(environment, services, string_table, path_fork)?;
+        for nested in &context.artefacts {
+            if nested.declaration_identity != self.declaration_identity {
+                nested.publish_materialised_nominal_shells(
+                    environment,
+                    services,
+                    string_table,
+                    path_fork,
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    fn publish_materialised_nominal_shells(
+        &self,
+        environment: &mut AstModuleEnvironment,
+        services: &mut GeneratedValueMaterialisationServices<'_>,
+        string_table: &mut StringTable,
+        path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
+    ) -> Result<(), CompilerError> {
+        for identity in self
+            .nominals
+            .iter()
+            .map(|nominal| &nominal.identity)
+            .chain(self.nominal_blueprints.keys())
+        {
+            let Some(type_id) = environment
+                .type_environment
+                .type_id_for_canonical_identity(identity)
+            else {
+                continue;
+            };
+            // Match imported nominal projection: generic constructors use the lazy instance
+            // lane; concrete structs and choices need canonical shells for HIR lookup.
+            if environment
+                .type_environment
+                .generic_parameter_list_id_for_type(type_id)
+                .is_some()
+            {
+                continue;
+            }
+            let nominal_path = environment
+                .type_environment
+                .nominal_path(type_id)
+                .copied()
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "Materialised callable nominal has no generated nominal path",
+                    )
+                })?;
+            if matches!(
+                environment.type_environment.get(type_id),
+                Some(TypeDefinition::Choice(_))
+            ) {
+                if !environment
+                    .lookups
+                    .imported_choice_definitions
+                    .iter()
+                    .any(|definition| definition.nominal_path == nominal_path)
+                {
+                    Rc::make_mut(&mut environment.lookups)
+                        .imported_choice_definitions
+                        .push(crate::compiler_frontend::ast::AstChoiceDefinition { nominal_path });
+                }
+                continue;
+            }
+            if !matches!(
+                environment.type_environment.get(type_id),
+                Some(TypeDefinition::Struct(_))
+            ) {
+                continue;
+            }
+            if environment
+                .lookups
+                .imported_struct_definitions
+                .iter()
+                .any(|definition| definition.nominal_path == nominal_path)
+            {
+                continue;
+            }
+            if !environment
+                .lookups
+                .resolved_struct_fields_by_path
+                .contains_key(&nominal_path)
+                && let Some(blueprint) = self.nominal_blueprints.get(identity)
+                && let Some(fields) = materialised_struct_fields(
+                    type_id,
+                    &mut environment.type_environment,
+                    blueprint,
+                    self,
+                    services,
+                    string_table,
+                    path_fork,
+                )?
+            {
+                Rc::make_mut(
+                    &mut Rc::make_mut(&mut environment.lookups).resolved_struct_fields_by_path,
+                )
+                .insert(nominal_path, fields);
+            }
+            Rc::make_mut(&mut environment.lookups)
+                .imported_struct_definitions
+                .push(AstImportedStructDefinition { nominal_path });
+        }
         Ok(())
     }
 }
 
-fn materialised_receiver_key(
+pub(super) fn materialised_receiver_key(
     signature: &FunctionSignature,
     type_environment: &TypeEnvironment,
 ) -> Result<ReceiverKey, CompilerError> {
     let receiver_type_id = signature
         .parameters
         .first()
-        .map(|parameter| parameter.value.type_id)
+        .map(|parameter| parameter.type_id)
         .ok_or_else(|| {
             CompilerError::compiler_error("Receiver method has no receiver parameter")
         })?;
@@ -1173,7 +1244,7 @@ fn register_materialised_receiver_method(
         receiver_mutable: signature
             .parameters
             .first()
-            .is_some_and(|parameter| parameter.value.value_mode.is_mutable()),
+            .is_some_and(|parameter| parameter.value_mode.is_mutable()),
         signature,
     };
     let receiver_methods = Rc::make_mut(&mut lookups.receiver_methods);
@@ -1214,112 +1285,26 @@ pub(super) fn append_materialised_declaration(
         })
 }
 
-impl GenericTemplateArtefact {
-    /// Restore the declaration-site bounds shared by a private receiver and its nominal owner.
-    ///
-    /// WHAT: validates ordered names and canonical bound identities, then patches the generated
-    ///       nominal parameter handles with consumer-local `TraitId` values.
-    /// WHY: nominal reconstruction creates reusable local handles before the generated trait
-    ///       table is available. A private receiver template must not inherit an empty bound
-    ///       list, because bound dispatch selects both its method and generated evidence identity.
-    fn restore_private_receiver_generic_parameter_bounds(
-        &self,
-        nested: &GenericTemplateArtefact,
-        receiver_identity: &CanonicalTypeIdentity,
-        generic_parameter_list_id: GenericParameterListId,
-        type_environment: &mut TypeEnvironment,
-        trait_environment: &TraitEnvironment,
-        string_table: &StringTable,
-    ) -> Result<(), CompilerError> {
-        let nominal_blueprint =
-            self.nominal_blueprints
-                .get(receiver_identity)
-                .ok_or_else(|| {
-                    CompilerError::compiler_error(
-                        "Private generic receiver owner has no retained nominal blueprint",
-                    )
-                })?;
-        let nominal_parameters = &nominal_blueprint.generic_parameters;
-        let local_parameters = type_environment
-            .generic_parameters(generic_parameter_list_id)
-            .ok_or_else(|| {
-                CompilerError::compiler_error(
-                    "Private generic receiver owner has no reconstructed parameter list",
-                )
-            })?
-            .parameters
-            .clone();
-        if nominal_parameters.len() != nested.generic_parameters.len()
-            || nominal_parameters.len() != local_parameters.len()
-        {
-            return Err(CompilerError::compiler_error(
-                "Private generic receiver owner and method parameter lists disagree in arity",
-            ));
-        }
-
-        let mut bounds_by_local = FxHashMap::default();
-        let mut canonical_by_local = FxHashMap::default();
-        for (slot, ((nominal_parameter, receiver_parameter), local_parameter)) in nominal_parameters
-            .iter()
-            .zip(&nested.generic_parameters)
-            .zip(&local_parameters)
-            .enumerate()
-        {
-            if nominal_parameter.name != receiver_parameter.name
-                || string_table.resolve(local_parameter.name) != nominal_parameter.name
-                || nominal_parameter.bounds.as_ref() != receiver_parameter.bounds.as_ref()
-            {
-                return Err(CompilerError::compiler_error(
-                    "Private generic receiver owner and method parameter bounds disagree",
-                ));
-            }
-
-            let bounds = receiver_parameter
-                .bounds
-                .iter()
-                .map(|identity| {
-                    trait_environment
-                        .id_for_canonical_identity(identity)
-                        .ok_or_else(|| {
-                            CompilerError::compiler_error(
-                                "Private generic receiver bound is absent from the generated trait table",
-                            )
-                        })
-                })
-                .collect::<Result<Vec<_>, CompilerError>>()?;
-            let local_id = TypeParameterId(slot as u32);
-            canonical_by_local.insert(local_id, local_parameter.id);
-            bounds_by_local.insert(local_id, bounds);
-        }
-
-        type_environment.update_generic_parameter_bounds(
-            generic_parameter_list_id,
-            &bounds_by_local,
-            &canonical_by_local,
-        );
-        Ok(())
-    }
-}
-struct StableFunctionMaterialisationContext<'a, N: MaterialisationNominalSource> {
-    generic_parameter_type_ids: &'a [TypeId],
-    nominal_source: &'a N,
-    type_environment: &'a mut TypeEnvironment,
-    external_package_registry: &'a ExternalPackageRegistry,
-    template_ir_store:
-        &'a Rc<RefCell<crate::compiler_frontend::ast::templates::tir::TemplateIrStore>>,
-    module_resources: Rc<RefCell<ModuleResourceTable>>,
-    path_fork: &'a mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
-    string_table: &'a mut StringTable,
+pub(super) struct StableFunctionMaterialisationContext<'a, N: MaterialisationNominalSource> {
+    pub(super) generic_parameter_type_ids: &'a [TypeId],
+    pub(super) nominal_source: &'a N,
+    pub(super) type_environment: &'a mut TypeEnvironment,
+    pub(super) const_values:
+        &'a mut crate::compiler_frontend::ast::const_values::store::ConstValueStore,
+    pub(super) external_package_registry: &'a ExternalPackageRegistry,
+    pub(super) module_resources: Rc<RefCell<ModuleResourceTable>>,
+    pub(super) path_fork:
+        &'a mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
+    pub(super) string_table: &'a mut StringTable,
 }
 
 impl StableFunctionSignature {
-    fn materialise<N: MaterialisationNominalSource>(
+    pub(super) fn materialise<N: MaterialisationNominalSource>(
         &self,
         function_path: &PathId,
         context: &mut StableFunctionMaterialisationContext<'_, N>,
-    ) -> Result<(FunctionSignature, TypeId, Option<TypeId>), CompilerError> {
+    ) -> Result<(FunctionSignature, TypeId, Vec<TypeId>, Option<TypeId>), CompilerError> {
         let mut parameters = Vec::with_capacity(self.parameters.len());
-        let mut parameter_type_ids = Vec::with_capacity(self.parameters.len());
         for parameter in &self.parameters {
             let type_id = intern_materialisation_type_blueprint(
                 &parameter.parameter_type,
@@ -1340,46 +1325,42 @@ impl StableFunctionSignature {
                     )
                 })?;
             let parameter_span = parameter.span;
-            let mut value = if let Some(default) = parameter.folded_default.as_ref() {
+            let default = if let Some(default) = parameter.folded_default.as_ref() {
                 let mut materialiser = GeneratedFoldedValueMaterialiser {
                     type_environment: &mut *context.type_environment,
                     external_registry: context.external_package_registry,
                     nominal_source: context.nominal_source,
-                    template_ir_store: Rc::clone(context.template_ir_store),
                     module_resources: Rc::clone(&context.module_resources),
                     path_fork: context.path_fork,
                 };
-                materialize_public_folded_value(
+                let value_id = import_canonical_folded_value(
                     &mut materialiser,
                     default,
                     type_id,
+                    context.const_values,
                     context.string_table,
                     parameter_span,
-                )?
-            } else {
-                Expression::new(
-                    ExpressionKind::NoValue,
-                    parameter_span,
-                    type_id,
-                    diagnostic_type_spelling(type_id, context.type_environment),
-                    parameter.value_mode.clone(),
                 )
+                .map_err(const_store_error_into_compiler_error)?;
+                Some(value_id)
+            } else {
+                None
             };
-            value.value_mode = parameter.value_mode.clone();
-            parameters.push(Declaration {
+            parameters.push(FunctionParameter {
                 id: parameter_path,
-                value,
-                binding_span: None,
-                config_qualifier: None,
+                type_id,
+                diagnostic_type: diagnostic_type_spelling(type_id, context.type_environment),
+                value_mode: parameter.value_mode,
+                default,
+                binding_span: parameter_span,
             });
-            parameter_type_ids.push(type_id);
         }
-        let mut returns = Vec::with_capacity(self.returns.len());
-        let mut success_type_ids = Vec::new();
-        let mut error_return = None;
+        let mut returns =
+            Vec::with_capacity(self.returns.len() + usize::from(self.error_return.is_some()));
+        let mut success_type_ids = Vec::with_capacity(self.returns.len());
         for returned in &self.returns {
             let type_id = intern_materialisation_type_blueprint(
-                &returned.return_type,
+                returned,
                 context.generic_parameter_type_ids,
                 context.nominal_source,
                 context.type_environment,
@@ -1391,30 +1372,92 @@ impl StableFunctionSignature {
             returns.push(ReturnSlot {
                 value: diagnostic_type,
                 type_id: Some(type_id),
-                channel: returned.channel,
+                channel: ReturnChannel::Success,
             });
-            match returned.channel {
-                ReturnChannel::Success => success_type_ids.push(type_id),
-                ReturnChannel::Error => error_return = Some(type_id),
-            }
+            success_type_ids.push(type_id);
         }
-        let fallible_carrier_type_id = fallible_carrier_from_type_ids(
-            &success_type_ids,
-            error_return,
-            context.type_environment,
-        );
-        let function_type_id = context.type_environment.intern_function(FunctionTypeKey {
-            parameters: parameter_type_ids.into_boxed_slice(),
-            returns: success_type_ids.into_boxed_slice(),
-            error_return,
-        });
-        Ok((
-            FunctionSignature {
-                parameters,
-                returns,
+        let error_return = if let Some(error) = &self.error_return {
+            let type_id = intern_materialisation_type_blueprint(
+                error,
+                context.generic_parameter_type_ids,
+                context.nominal_source,
+                context.type_environment,
+                context.external_package_registry,
+                context.string_table,
+                context.path_fork,
+            )?;
+            returns.push(ReturnSlot {
+                value: diagnostic_type_spelling(type_id, context.type_environment),
+                type_id: Some(type_id),
+                channel: ReturnChannel::Error,
+            });
+            Some(type_id)
+        } else {
+            None
+        };
+        let signature = FunctionSignature {
+            parameters,
+            returns,
+        };
+        let function_type_id =
+            intern_resolved_function_signature(&signature, context.type_environment);
+        Ok((signature, function_type_id, success_type_ids, error_return))
+    }
+}
+
+impl super::stable_types::StableCallableBinding {
+    /// Reconstruct one concrete callable's canonical signature, including folded defaults.
+    pub(super) fn materialise_requester_contract<N: MaterialisationNominalSource>(
+        &self,
+        local_path: PathId,
+        environment: &mut AstModuleEnvironment,
+        services: &mut GeneratedValueMaterialisationServices<'_>,
+        nominal_source: &N,
+        string_table: &mut StringTable,
+        path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
+    ) -> Result<AstImportedFunctionContract, CompilerError> {
+        let (signature, function_type_id, returns, error_return) = self.signature.materialise(
+            &local_path,
+            &mut StableFunctionMaterialisationContext {
+                generic_parameter_type_ids: &[],
+                nominal_source,
+                type_environment: &mut environment.type_environment,
+                const_values: &mut *services.const_values,
+                external_package_registry: services.external_registry,
+                module_resources: Rc::clone(&services.module_resources),
+                path_fork,
+                string_table,
             },
-            function_type_id,
-            fallible_carrier_type_id,
-        ))
+        )?;
+        let lookups = Rc::make_mut(&mut environment.lookups);
+        if lookups.declaration_table.get_by_path(&local_path).is_none() {
+            append_materialised_declaration(
+                lookups,
+                Declaration {
+                    id: local_path,
+                    type_id: function_type_id,
+                    diagnostic_type: DataType::Inferred,
+                    value_mode: ValueMode::ImmutableReference,
+                    value: DeclarationValue::Shell(DeclarationShell::Function { receiver: None }),
+                    binding_span: None,
+                    config_qualifier: None,
+                },
+                path_fork,
+            )?;
+        }
+        Rc::make_mut(&mut lookups.resolved_function_signatures_by_path).insert(
+            local_path,
+            ResolvedFunctionSignature {
+                receiver: None,
+                signature,
+            },
+        );
+        Rc::make_mut(&mut lookups.declaration_semantics).register_materialised_function(local_path);
+        Ok(AstImportedFunctionContract {
+            target: self.target.materialise(local_path),
+            summary: self.summary.clone(),
+            returns,
+            error_return,
+        })
     }
 }

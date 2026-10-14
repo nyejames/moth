@@ -1,0 +1,16 @@
+entry = "."
+
+# The U64 key argument is compatible, so the static map get assignment target is
+# rejected at the assignment operator on line 3.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0044"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0044"
+reason = "invalid_assignment_target.map_get_target_not_writable"
+path = "input/@page.moth"
+line = 3
+column = 17

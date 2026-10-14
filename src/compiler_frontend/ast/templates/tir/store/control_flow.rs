@@ -56,6 +56,14 @@ impl TemplateIrStore {
                 Ok(Some(node_id))
             }
 
+            // A retained control-flow position owns the control-flow tree before body-root
+            // completion installs the `Loop`/`Conditional` node into it.
+            TemplateIrNodeKind::RetainedNumericIntake(role)
+                if role.completes_into_control_flow() =>
+            {
+                Ok(Some(node_id))
+            }
+
             TemplateIrNodeKind::Sequence { children } => {
                 for child in children {
                     if let Some(control_flow_node) =

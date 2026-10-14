@@ -16,6 +16,7 @@ use crate::compiler_frontend::compiler_messages::{
 use crate::compiler_frontend::source::{FrozenIdentityContext, SourceDatabase};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_tests::test_fs::assert_path_missing;
+use crate::compiler_tests::test_support::run_stack_budgeted_child;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 #[cfg(feature = "timers")]
 use crate::timing::{TimingMetric, start_benchmark_collection};
@@ -25,8 +26,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
 
-/// The builder every check test compiles under; its numeric profile is the standard
-/// `Int32`/`Float64` one these fixtures were authored against.
+/// The builder every check test compiles under.
 fn test_project_builder() -> ProjectBuilder {
     ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()))
 }
@@ -186,12 +186,12 @@ fn check_compiles_unselected_same_module_source_closure() {
     fs::write(source_root.join("@page.moth"), "value = 1\n").expect("should write page source");
     fs::write(
         source_root.join("orphan.moth"),
-        "@helper identity\nconsume |value Int| -> Int:\n    return identity(value)\n;\n",
+        "@helper identity\nconsume |value I32| -> I32:\n    return identity(value)\n;\n",
     )
     .expect("should write unselected consumer source");
     fs::write(
         source_root.join("helper.moth"),
-        "identity |value Int| -> Int:\n    return value\n;\n",
+        "identity |value I32| -> I32:\n    return value\n;\n",
     )
     .expect("should write unselected provider source");
 
@@ -312,7 +312,7 @@ fn check_retains_source_package_warning() {
     fs::write(src.join("@page.moth"), "value = 1\n").expect("should write project root");
     fs::write(
         package.join("+package.moth"),
-        "export:\n    run || -> Int:\n        value ~= \"hello\"\n        result ~= \"unset\"\n\n        if value is:\n            \"one\" => result = \"one\"\n            \"one\" => result = \"one\"\n            else => result = \"other\"\n        ;\n        return 1\n    ;\n;\n",
+        "export:\n    run || -> I32:\n        value ~= \"hello\"\n        result ~= \"unset\"\n\n        if value is:\n            \"one\" => result = \"one\"\n            \"one\" => result = \"one\"\n            else => result = \"other\"\n        ;\n        return 1\n    ;\n;\n",
     )
     .expect("should write warning package root");
 
@@ -590,7 +590,7 @@ if value is:
     // Missing mutable call access has a compiler-owned reason key and is rejected by the shared
     // frontend before backend lowering.
     let error_source = "\
-increment |value ~Int|:
+increment |value ~I32|:
     value += 1
 ;
 
@@ -773,51 +773,238 @@ const NESTED_CONDITIONAL_DEPTH: usize = 9;
 
 #[test]
 fn nested_conditionals_check_within_the_default_windows_main_thread_stack() {
-    if std::env::var_os(STACK_BUDGET_CHILD_ENV).is_some() {
-        check_nested_conditionals_on_budgeted_thread();
-        return;
-    }
-
-    // A native stack overflow aborts the whole process, so the budgeted check runs in a child
-    // copy of this test binary and an overflow becomes this test's failure.
-    let test_name = format!(
-        "{}::nested_conditionals_check_within_the_default_windows_main_thread_stack",
-        module_path!()
-            .split_once("::")
-            .expect("test module path should include the crate name")
-            .1
-    );
-    let output = std::process::Command::new(
-        std::env::current_exe().expect("test binary path should be available"),
-    )
-    .args([test_name.as_str(), "--exact", "--test-threads=1"])
-    .env(STACK_BUDGET_CHILD_ENV, "1")
-    .output()
-    .expect("should spawn the stack-budgeted child test");
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        output.status.success(),
-        "checking {NESTED_CONDITIONAL_DEPTH} nested conditionals must fit a \
-         {WINDOWS_MAIN_THREAD_STACK_BYTES}-byte stack ({}):\n{stdout}\n{stderr}",
-        output.status
-    );
-    // A filter that matched nothing would also exit successfully.
-    assert!(
-        stdout.contains("1 passed"),
-        "the child must run exactly the budgeted test:\n{stdout}"
+    run_stack_budgeted_check_test(
+        "nested_conditionals_check_within_the_default_windows_main_thread_stack",
+        || nested_conditional_source(NESTED_CONDITIONAL_DEPTH),
+        "nested conditionals",
     );
 }
 
-fn check_nested_conditionals_on_budgeted_thread() {
+/// Constant grouped origins at the depth the flat grouping stream must check within the Windows
+/// main-thread budget. The dev and release profiles both run these tests.
+const NESTED_NUMERIC_GROUP_DEPTH_512: usize = 512;
+const NESTED_NUMERIC_GROUP_DEPTH_2048: usize = 2048;
+
+#[test]
+fn nested_numeric_groups_512_check_within_the_default_windows_main_thread_stack() {
+    run_stack_budgeted_check_test(
+        "nested_numeric_groups_512_check_within_the_default_windows_main_thread_stack",
+        || nested_numeric_group_source(NESTED_NUMERIC_GROUP_DEPTH_512),
+        "512 nested constant numeric groups",
+    );
+}
+
+#[test]
+fn nested_numeric_groups_2048_check_within_the_default_windows_main_thread_stack() {
+    run_stack_budgeted_check_test(
+        "nested_numeric_groups_2048_check_within_the_default_windows_main_thread_stack",
+        || nested_numeric_group_source(NESTED_NUMERIC_GROUP_DEPTH_2048),
+        "2048 nested constant numeric groups",
+    );
+}
+
+/// Shallow sequential declarations exercise an exported const-record chain without nested
+/// parser syntax. This bounded source check also traverses the owned public projection.
+const CHAINED_CONST_RECORD_DEPTH: usize = 256;
+
+#[test]
+fn chained_const_records_check_within_the_default_windows_main_thread_stack() {
+    run_stack_budgeted_check_test(
+        "chained_const_records_check_within_the_default_windows_main_thread_stack",
+        || chained_const_record_source(CHAINED_CONST_RECORD_DEPTH),
+        "256 chained anonymous const records with an exported root",
+    );
+}
+
+/// Runtime-leaf chains keep their operands live until the walkers visit the whole tree.
+/// The depth is capped because borrow-state memory grows cubically, independently of stack use.
+const RUNTIME_LEAF_NUMERIC_CHAIN_DEPTH: usize = 256;
+
+#[test]
+fn runtime_leaf_grouped_numeric_chain_256_check_within_the_default_windows_main_thread_stack() {
+    run_stack_budgeted_check_test(
+        "runtime_leaf_grouped_numeric_chain_256_check_within_the_default_windows_main_thread_stack",
+        || runtime_leaf_grouped_source(RUNTIME_LEAF_NUMERIC_CHAIN_DEPTH),
+        "256 nested grouped operations over a parameter",
+    );
+}
+
+#[test]
+fn runtime_leaf_ungrouped_numeric_chain_256_check_within_the_default_windows_main_thread_stack() {
+    run_stack_budgeted_check_test(
+        "runtime_leaf_ungrouped_numeric_chain_256_check_within_the_default_windows_main_thread_stack",
+        || runtime_leaf_ungrouped_source(RUNTIME_LEAF_NUMERIC_CHAIN_DEPTH),
+        "256 ungrouped operations over a parameter",
+    );
+}
+
+/// A pending binding is typed by an independent U64 consumer before the chain reads it.
+#[test]
+fn pending_binding_leaf_numeric_chain_256_check_within_the_default_windows_main_thread_stack() {
+    run_stack_budgeted_check_test(
+        "pending_binding_leaf_numeric_chain_256_check_within_the_default_windows_main_thread_stack",
+        || pending_binding_leaf_grouped_source(RUNTIME_LEAF_NUMERIC_CHAIN_DEPTH),
+        "256 nested grouped operations over a pending binding",
+    );
+}
+
+/// Malformed deep groups must end in one diagnostic, never a native stack overflow.
+#[test]
+fn unclosed_numeric_groups_2048_reject_within_the_default_windows_main_thread_stack() {
+    run_stack_budgeted_rejection_test(
+        "unclosed_numeric_groups_2048_reject_within_the_default_windows_main_thread_stack",
+        || unclosed_numeric_group_source(NESTED_NUMERIC_GROUP_DEPTH_2048),
+        "MOTH-SYNTAX-0002",
+        "2048 unclosed numeric groups",
+    );
+}
+
+#[test]
+fn stray_close_after_numeric_groups_2048_reject_within_the_default_windows_main_thread_stack() {
+    run_stack_budgeted_rejection_test(
+        "stray_close_after_numeric_groups_2048_reject_within_the_default_windows_main_thread_stack",
+        || stray_close_numeric_group_source(NESTED_NUMERIC_GROUP_DEPTH_2048),
+        "MOTH-SYNTAX-0002",
+        "a stray close after 2048 balanced numeric groups",
+    );
+}
+
+#[test]
+fn dangling_operator_in_numeric_groups_2048_reject_within_the_default_windows_main_thread_stack() {
+    run_stack_budgeted_rejection_test(
+        "dangling_operator_in_numeric_groups_2048_reject_within_the_default_windows_main_thread_stack",
+        || dangling_operator_numeric_group_source(NESTED_NUMERIC_GROUP_DEPTH_2048),
+        "MOTH-SYNTAX-0024",
+        "a dangling operator inside 2048 numeric groups",
+    );
+}
+
+#[test]
+fn consecutive_operands_in_numeric_groups_2048_reject_within_the_default_windows_main_thread_stack()
+{
+    run_stack_budgeted_rejection_test(
+        "consecutive_operands_in_numeric_groups_2048_reject_within_the_default_windows_main_thread_stack",
+        || consecutive_operand_numeric_group_source(NESTED_NUMERIC_GROUP_DEPTH_2048),
+        "MOTH-SYNTAX-0023",
+        "consecutive operands inside 2048 numeric groups",
+    );
+}
+
+#[test]
+fn unknown_member_after_numeric_groups_2048_reject_within_the_default_windows_main_thread_stack() {
+    run_stack_budgeted_rejection_test(
+        "unknown_member_after_numeric_groups_2048_reject_within_the_default_windows_main_thread_stack",
+        || {
+            grouped_numeric_function(&format!(
+                "{}.missing",
+                grouped_numeric_expression("1", NESTED_NUMERIC_GROUP_DEPTH_2048)
+            ))
+        },
+        "MOTH-RULE-0048",
+        "an unknown member after 2048 numeric groups",
+    );
+}
+
+#[test]
+fn bang_after_numeric_groups_2048_reject_within_the_default_windows_main_thread_stack() {
+    run_stack_budgeted_rejection_test(
+        "bang_after_numeric_groups_2048_reject_within_the_default_windows_main_thread_stack",
+        || {
+            grouped_numeric_function(&format!(
+                "{}!",
+                grouped_numeric_expression("1", NESTED_NUMERIC_GROUP_DEPTH_2048)
+            ))
+        },
+        "MOTH-RULE-0051",
+        "a fallible propagation suffix after 2048 non-fallible numeric groups",
+    );
+}
+
+#[test]
+fn question_after_numeric_groups_2048_reject_within_the_default_windows_main_thread_stack() {
+    run_stack_budgeted_rejection_test(
+        "question_after_numeric_groups_2048_reject_within_the_default_windows_main_thread_stack",
+        || {
+            grouped_numeric_function(&format!(
+                "{}?",
+                grouped_numeric_expression("1", NESTED_NUMERIC_GROUP_DEPTH_2048)
+            ))
+        },
+        "MOTH-RULE-0051",
+        "an optional propagation suffix after 2048 non-optional numeric groups",
+    );
+}
+
+#[test]
+fn catch_inside_numeric_groups_2048_reject_within_the_default_windows_main_thread_stack() {
+    run_stack_budgeted_rejection_test(
+        "catch_inside_numeric_groups_2048_reject_within_the_default_windows_main_thread_stack",
+        || {
+            grouped_numeric_function(&format!(
+                "({} + 1 catch)",
+                grouped_numeric_expression("1", NESTED_NUMERIC_GROUP_DEPTH_2048 - 1)
+            ))
+        },
+        "MOTH-RULE-0051",
+        "catch after the last operand inside 2048 numeric groups",
+    );
+}
+
+fn run_stack_budgeted_check_test(
+    test_suffix: &str,
+    source: impl FnOnce() -> String,
+    description: &str,
+) {
+    if std::env::var_os(STACK_BUDGET_CHILD_ENV).is_some() {
+        let (error_codes, warning_count) = check_source_on_budgeted_thread(source());
+        assert!(
+            error_codes.is_empty(),
+            "{description} should check cleanly, found {error_codes:?}"
+        );
+        assert_eq!(warning_count, 0, "{description} should not warn");
+        return;
+    }
+
+    run_stack_budgeted_child(
+        module_path!(),
+        test_suffix,
+        STACK_BUDGET_CHILD_ENV,
+        &format!("checking {description} must fit a {WINDOWS_MAIN_THREAD_STACK_BYTES}-byte stack"),
+    );
+}
+
+/// Malformed input must end in exactly one diagnostic with `expected_code`.
+fn run_stack_budgeted_rejection_test(
+    test_suffix: &str,
+    source: impl FnOnce() -> String,
+    expected_code: &str,
+    description: &str,
+) {
+    if std::env::var_os(STACK_BUDGET_CHILD_ENV).is_some() {
+        let (error_codes, warning_count) = check_source_on_budgeted_thread(source());
+        assert_eq!(
+            error_codes,
+            [expected_code],
+            "{description} should reject with exactly one {expected_code} diagnostic"
+        );
+        assert_eq!(warning_count, 0, "{description} should not warn");
+        return;
+    }
+
+    run_stack_budgeted_child(
+        module_path!(),
+        test_suffix,
+        STACK_BUDGET_CHILD_ENV,
+        &format!("checking {description} must fit a {WINDOWS_MAIN_THREAD_STACK_BYTES}-byte stack"),
+    );
+}
+
+/// Runs the check on a thread with the Windows main-thread budget and returns each error code
+/// together with the warning count.
+fn check_source_on_budgeted_thread(source: String) -> (Vec<String>, usize) {
     let temp = tempfile::tempdir().expect("should create temp dir");
     let entry_file = temp.path().join("main.moth");
-    fs::write(
-        &entry_file,
-        nested_conditional_source(NESTED_CONDITIONAL_DEPTH),
-    )
-    .expect("should write source file");
+    fs::write(&entry_file, source).expect("should write source file");
 
     let worker = std::thread::Builder::new()
         .name("stack-budgeted-check".to_owned())
@@ -830,22 +1017,22 @@ fn check_nested_conditionals_on_budgeted_thread() {
                 &BuildConfigInputSet::new(),
                 &test_project_builder(),
             );
-            (
-                outcome.messages.error_count(),
-                outcome.messages.warning_count(),
-            )
+            let error_codes: Vec<String> = outcome
+                .messages
+                .error_diagnostics()
+                .map(|diagnostic| diagnostic.identity().code.to_owned())
+                .collect();
+            (error_codes, outcome.messages.warning_count())
         })
         .expect("should spawn the stack-budgeted check thread");
 
-    let (error_count, warning_count) = worker
+    worker
         .join()
-        .expect("stack-budgeted check thread should not panic");
-    assert_eq!(error_count, 0, "nested conditionals should check cleanly");
-    assert_eq!(warning_count, 0, "nested conditionals should not warn");
+        .expect("stack-budgeted check thread should not panic")
 }
 
 fn nested_conditional_source(depth: usize) -> String {
-    let mut source = String::from("nested |seed Int| -> Int:\n");
+    let mut source = String::from("nested |seed I32| -> I32:\n");
     for level in 1..=depth {
         source.push_str(&format!("{}if seed > 0:\n", "    ".repeat(level)));
     }
@@ -855,4 +1042,82 @@ fn nested_conditional_source(depth: usize) -> String {
     }
     source.push_str("    return seed\n;\n\nio.line([nested(1)])\n");
     source
+}
+
+/// Wraps `innermost` in `depth` numeric groups that each add one.
+fn grouped_numeric_expression(innermost: &str, depth: usize) -> String {
+    let mut expression = innermost.to_owned();
+    for _ in 0..depth {
+        expression = format!("({expression} + 1)");
+    }
+    expression
+}
+
+/// Chains `depth` anonymous const records through earlier-declaration references and exports the
+/// last row, so the public folded-value walk covers the whole chain while parsing stays shallow.
+fn chained_const_record_source(depth: usize) -> String {
+    let mut source = String::from("node_0 #= (leaf = \"payload\")\n");
+    let mut node = String::from("node_0");
+    for level in 1..depth {
+        node = format!("node_{level}");
+        source.push_str(&format!("{node} #= (child = node_{})\n", level - 1));
+    }
+    source.push_str("\nexport:\nroot #= (child = ");
+    source.push_str(&node);
+    source.push_str(")\n;\n");
+    source
+}
+
+fn grouped_numeric_function(expression: &str) -> String {
+    format!("grouped || -> U64:\n    value = {expression}\n    return value\n;\n")
+}
+
+fn nested_numeric_group_source(depth: usize) -> String {
+    grouped_numeric_function(&grouped_numeric_expression("1", depth))
+}
+
+/// A parameter leaf keeps every operation runtime, so the expression stays a binop tree until
+/// the walkers visit it.
+fn runtime_leaf_source(expression: &str) -> String {
+    format!(
+        "grouped |x U64| -> U64:\n    value = {expression}\n    return value\n;\n\nio.line([: [grouped(2)]])\n"
+    )
+}
+
+fn runtime_leaf_grouped_source(depth: usize) -> String {
+    runtime_leaf_source(&grouped_numeric_expression("x", depth))
+}
+
+fn runtime_leaf_ungrouped_source(depth: usize) -> String {
+    runtime_leaf_source(&format!("x{}", " + 1".repeat(depth)))
+}
+
+/// The binding stays pending until the independent `take_u64` consumer types it as `U64`.
+fn pending_binding_leaf_grouped_source(depth: usize) -> String {
+    let expression = grouped_numeric_expression("x", depth);
+    format!(
+        "take_u64 |value U64|:\n    io.line([: [value]])\n;\n\n\
+         grouped || -> U64:\n    x = 1\n    take_u64(x)\n    value = {expression}\n    return value\n;\n\n\
+         io.line([: [grouped()]])\n"
+    )
+}
+
+/// Opens `depth` groups that are never closed.
+fn unclosed_numeric_group_source(depth: usize) -> String {
+    grouped_numeric_function(&format!("{}1{}", "(".repeat(depth), " + 1".repeat(depth)))
+}
+
+/// Closes `depth` balanced groups and then closes once more.
+fn stray_close_numeric_group_source(depth: usize) -> String {
+    grouped_numeric_function(&format!("{})", grouped_numeric_expression("1", depth)))
+}
+
+/// Puts a dangling operator at the innermost group, then wraps it `depth` times.
+fn dangling_operator_numeric_group_source(depth: usize) -> String {
+    grouped_numeric_function(&grouped_numeric_expression("(1 + )", depth))
+}
+
+/// Puts two adjacent operands at the innermost group, then wraps it `depth` times.
+fn consecutive_operand_numeric_group_source(depth: usize) -> String {
+    grouped_numeric_function(&grouped_numeric_expression("(1 2)", depth))
 }

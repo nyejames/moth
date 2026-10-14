@@ -1,5 +1,7 @@
 use super::*;
+use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
 use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::ast::expressions::expression_store::ConstructorField;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::source::{LocalSpan, SourceId};
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -18,6 +20,8 @@ fn children_directive_argument_preserves_infrastructure_failure() {
 fn truncated_template_head_stream_returns_missing_closing_delimiter() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let scope = path_fork
         .try_intern_portable_path("main.moth/#const_template0", &mut string_table)
         .expect("test path fits");
@@ -57,6 +61,8 @@ fn truncated_template_head_stream_returns_missing_closing_delimiter() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -72,6 +78,8 @@ fn const_required_template_head_folds_const_record_instance_field() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let file_tokens = template_tokens_from_source(
         "[html_defaults.color]",
         &mut string_table,
@@ -115,34 +123,37 @@ fn const_required_template_head_folds_const_record_instance_field() {
         const_record: false,
     });
 
-    let field_value = Expression::string_slice(
-        string_table.intern("green"),
-        None,
-        ValueMode::ImmutableOwned,
-    );
-    let record_value = Expression::struct_instance(
-        struct_path,
-        vec![Declaration {
-            id: field_path,
-            value: field_value,
-            binding_span: None,
-            config_qualifier: None,
-        }],
-        None,
-        ValueMode::ImmutableOwned,
-        true,
-        None,
-        struct_type_id,
-    );
+    let field_value = expression_builder
+        .string_slice(
+            &mut const_values,
+            string_table.intern("green"),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("field string should construct")
+        .id();
+    let record_value = expression_builder
+        .struct_instance(
+            vec![ConstructorField {
+                name: field_path,
+                slot: 0,
+                value: expression_builder.own(field_value),
+            }],
+            struct_type_id,
+            None,
+            ValueMode::ImmutableOwned,
+            true,
+        )
+        .expect("const record should construct")
+        .id();
     let record_name = string_table.intern("html_defaults");
-    let declaration = Declaration {
-        id: path_fork
+    let declaration = make_test_variable(
+        path_fork
             .try_intern_child(scope, record_name)
             .expect("test path fits"),
-        value: record_value,
-        binding_span: None,
-        config_qualifier: None,
-    };
+        record_value,
+        &expression_builder,
+    );
     let context = constant_template_context(&scope, &[declaration], &path_fork);
     let mut compatibility_cache = TypeCompatibilityCache::new();
     let mut type_interner = AstTypeInterner::new(&mut type_environment, &mut compatibility_cache);
@@ -152,13 +163,21 @@ fn const_required_template_head_folds_const_record_instance_field() {
         source_path,
         &context,
         &mut type_interner,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
     )
     .expect("const-required template head should project const-record field values")
     .template;
-    let folded = fold_template_in_context(&template, &context, &mut string_table);
+    let folded = fold_template_in_context(
+        &template,
+        &context,
+        &mut string_table,
+        &mut expression_builder,
+        &mut const_values,
+    );
 
     assert_eq!(string_table.resolve(folded), "green");
 }
@@ -193,10 +212,14 @@ fn runtime_template_loop_rejects_insert_leaking_from_body() {
 
 #[test]
 fn runtime_template_if_allows_unresolved_slot_receiver() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let (template, context, _string_table) = parse_runtime_template_without_validation(
         "[if true:
             [$slot]
         ]",
+        &mut expression_builder,
+        &mut const_values,
     );
 
     let store = context.template_ir_store.borrow();
@@ -220,10 +243,14 @@ fn runtime_template_if_rejects_unresolved_insert() {
 
 #[test]
 fn const_required_template_if_allows_unresolved_slot_wrapper() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let (template, context, _string_table) = parse_const_required_template(
         "[if true:
             [$slot]
         ]",
+        &mut expression_builder,
+        &mut const_values,
     );
 
     let conditional = expect_conditional_node(&template, &context);
@@ -236,13 +263,23 @@ fn const_required_template_if_allows_unresolved_slot_wrapper() {
 
 #[test]
 fn const_required_template_if_folds_selected_body() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let (template, context, mut string_table) = parse_const_required_template(
         "[if true:
             Visible
         ]",
+        &mut expression_builder,
+        &mut const_values,
     );
 
-    let folded = fold_template_in_context(&template, &context, &mut string_table);
+    let folded = fold_template_in_context(
+        &template,
+        &context,
+        &mut string_table,
+        &mut expression_builder,
+        &mut const_values,
+    );
     assert_eq!(string_table.resolve(folded).trim(), "Visible");
 }
 
@@ -251,6 +288,8 @@ fn const_required_template_if_inlines_same_file_source_const_bool() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let file_tokens = template_tokens_from_source(
         "[if show_banner:
         Visible
@@ -261,13 +300,18 @@ fn const_required_template_if_inlines_same_file_source_const_bool() {
     );
     let source_path = file_tokens.source_path;
     let show_banner = string_table.intern("show_banner");
-    let declaration = Declaration {
-        id: path_fork
-            .try_intern_child(source_path, show_banner)
-            .expect("test path fits"),
-        value: Expression::bool(true, None, ValueMode::ImmutableOwned),
-        binding_span: None,
-        config_qualifier: None,
+    let declaration = {
+        let value = expression_builder
+            .bool(&mut const_values, true, None, ValueMode::ImmutableOwned)
+            .expect("bool literal should construct")
+            .id();
+        make_test_variable(
+            path_fork
+                .try_intern_child(source_path, show_banner)
+                .expect("test path fits"),
+            value,
+            &expression_builder,
+        )
     };
     let context = constant_template_context(&source_path, &[declaration], &path_fork);
     let canonical_owner = file_tokens
@@ -286,13 +330,21 @@ fn const_required_template_if_inlines_same_file_source_const_bool() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
     )
     .expect("const-required template if should inline source const bool")
     .template;
-    let folded = fold_template_in_context(&template, &context, &mut string_table);
+    let folded = fold_template_in_context(
+        &template,
+        &context,
+        &mut string_table,
+        &mut expression_builder,
+        &mut const_values,
+    );
     assert_eq!(string_table.resolve(folded).trim(), "Visible");
 }
 
@@ -301,6 +353,8 @@ fn const_required_template_if_inlines_imported_source_const_bool() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let file_tokens = template_tokens_from_source(
         "[if show_banner:
         Visible
@@ -317,11 +371,12 @@ fn const_required_template_if_inlines_imported_source_const_bool() {
     let imported_path = path_fork
         .try_intern_child(flags_scope, show_banner)
         .expect("test path fits");
-    let declaration = Declaration {
-        id: imported_path,
-        value: Expression::bool(true, None, ValueMode::ImmutableOwned),
-        binding_span: None,
-        config_qualifier: None,
+    let declaration = {
+        let value = expression_builder
+            .bool(&mut const_values, true, None, ValueMode::ImmutableOwned)
+            .expect("bool literal should construct")
+            .id();
+        make_test_variable(imported_path, value, &expression_builder)
     };
     let context =
         imported_const_template_context(&source_path, declaration, show_banner, &path_fork);
@@ -341,13 +396,21 @@ fn const_required_template_if_inlines_imported_source_const_bool() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
     )
     .expect("const-required template if should inline imported source const bool")
     .template;
-    let folded = fold_template_in_context(&template, &context, &mut string_table);
+    let folded = fold_template_in_context(
+        &template,
+        &context,
+        &mut string_table,
+        &mut expression_builder,
+        &mut const_values,
+    );
     assert_eq!(string_table.resolve(folded).trim(), "Visible");
 }
 
@@ -356,6 +419,8 @@ fn const_required_template_if_false_without_else_skips_shared_head_output() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let wrapper_scope = path_fork
         .try_intern_portable_path("main.moth/#const_template0", &mut string_table)
         .expect("test path fits");
@@ -383,6 +448,8 @@ fn const_required_template_if_false_without_else_skips_shared_head_output() {
         &mut card_tokens,
         card_source_path,
         &card_context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -390,13 +457,18 @@ fn const_required_template_if_false_without_else_skips_shared_head_output() {
     .expect("card wrapper should parse");
 
     let card_name = string_table.intern("card");
-    let declarations = vec![Declaration {
-        id: path_fork
-            .try_intern_child(wrapper_scope, card_name)
-            .expect("test path fits"),
-        value: Expression::template(card_template, ValueMode::ImmutableOwned),
-        binding_span: None,
-        config_qualifier: None,
+    let declarations = vec![{
+        let value = expression_builder
+            .template(card_template, ValueMode::ImmutableOwned)
+            .expect("card wrapper template should construct")
+            .id();
+        make_test_variable(
+            path_fork
+                .try_intern_child(wrapper_scope, card_name)
+                .expect("test path fits"),
+            value,
+            &expression_builder,
+        )
     }];
 
     let file_tokens = template_tokens_from_source(
@@ -428,6 +500,8 @@ fn const_required_template_if_false_without_else_skips_shared_head_output() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -435,95 +509,161 @@ fn const_required_template_if_false_without_else_skips_shared_head_output() {
     .expect("const-required template if should parse")
     .template;
 
-    let folded = fold_template_in_context(&template, &context, &mut string_table);
+    let folded = fold_template_in_context(
+        &template,
+        &context,
+        &mut string_table,
+        &mut expression_builder,
+        &mut const_values,
+    );
 
     assert_eq!(string_table.resolve(folded), "");
 }
 
 #[test]
 fn const_required_template_range_loop_folds_iteration_bindings() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let (template, context, mut string_table) = parse_const_required_template(
         "[loop 0 to & 3 |i, index|:
             [index]:[i];
         ]",
+        &mut expression_builder,
+        &mut const_values,
     );
 
     {
         assert_eq!(
-            classify_template_from_effective_tir(&template, &context.template_ir_store)
-                .expect("const classification should succeed"),
+            classify_template_from_effective_tir(
+                &template,
+                &context.template_ir_store,
+                &expression_builder,
+                &const_values
+            )
+            .expect("const classification should succeed"),
             TemplateConstValueKind::RenderableString
         );
     }
 
-    let folded = fold_template_in_context(&template, &context, &mut string_table);
+    let folded = fold_template_in_context(
+        &template,
+        &context,
+        &mut string_table,
+        &mut expression_builder,
+        &mut const_values,
+    );
 
     assert_eq!(string_table.resolve(folded), "0:0;1:1;2:2;3:3;");
 }
 
 #[test]
 fn const_required_template_range_loop_folds_expressions_with_iteration_bindings() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let (template, context, mut string_table) = parse_const_required_template(
         "[loop 0 to 2 |i|:
             [i + 1];
         ]",
+        &mut expression_builder,
+        &mut const_values,
     );
 
     {
         assert_eq!(
-            classify_template_from_effective_tir(&template, &context.template_ir_store)
-                .expect("const classification should succeed"),
+            classify_template_from_effective_tir(
+                &template,
+                &context.template_ir_store,
+                &expression_builder,
+                &const_values
+            )
+            .expect("const classification should succeed"),
             TemplateConstValueKind::RenderableString
         );
     }
 
-    let folded = fold_template_in_context(&template, &context, &mut string_table);
+    let folded = fold_template_in_context(
+        &template,
+        &context,
+        &mut string_table,
+        &mut expression_builder,
+        &mut const_values,
+    );
 
     assert_eq!(string_table.resolve(folded), "1;2;");
 }
 
 #[test]
 fn const_required_template_loop_allows_nested_if_to_use_iteration_binding() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let (template, context, mut string_table) = parse_const_required_template(
         "[loop 0 to 2 |i|:
             [if true:
                 [i]
             ]
         ]",
+        &mut expression_builder,
+        &mut const_values,
     );
 
     {
         assert_eq!(
-            classify_template_from_effective_tir(&template, &context.template_ir_store)
-                .expect("const classification should succeed"),
+            classify_template_from_effective_tir(
+                &template,
+                &context.template_ir_store,
+                &expression_builder,
+                &const_values
+            )
+            .expect("const classification should succeed"),
             TemplateConstValueKind::RenderableString
         );
     }
 
-    let folded = fold_template_in_context(&template, &context, &mut string_table);
+    let folded = fold_template_in_context(
+        &template,
+        &context,
+        &mut string_table,
+        &mut expression_builder,
+        &mut const_values,
+    );
 
     assert_eq!(string_table.resolve(folded), "01");
 }
 
 #[test]
 fn const_required_template_loop_allows_nested_if_condition_to_use_iteration_binding() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let (template, context, mut string_table) = parse_const_required_template(
         "[loop 0 to 3 |i|:
             [if i is 1:
                 [:T]
             ]
         ]",
+        &mut expression_builder,
+        &mut const_values,
     );
 
     {
         assert_eq!(
-            classify_template_from_effective_tir(&template, &context.template_ir_store)
-                .expect("const classification should succeed"),
+            classify_template_from_effective_tir(
+                &template,
+                &context.template_ir_store,
+                &expression_builder,
+                &const_values
+            )
+            .expect("const classification should succeed"),
             TemplateConstValueKind::RenderableString
         );
     }
 
-    let folded = fold_template_in_context(&template, &context, &mut string_table);
+    let folded = fold_template_in_context(
+        &template,
+        &context,
+        &mut string_table,
+        &mut expression_builder,
+        &mut const_values,
+    );
 
     assert_eq!(string_table.resolve(folded), "T");
 }
@@ -533,6 +673,8 @@ fn const_required_template_loop_body_if_can_use_source_const_condition() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let file_tokens = template_tokens_from_source(
         "[loop 0 to 2 |i|:
         [if show_item:
@@ -545,13 +687,18 @@ fn const_required_template_loop_body_if_can_use_source_const_condition() {
     );
     let source_path = file_tokens.source_path;
     let show_item = string_table.intern("show_item");
-    let declaration = Declaration {
-        id: path_fork
-            .try_intern_child(source_path, show_item)
-            .expect("test path fits"),
-        value: Expression::bool(true, None, ValueMode::ImmutableOwned),
-        binding_span: None,
-        config_qualifier: None,
+    let declaration = {
+        let value = expression_builder
+            .bool(&mut const_values, true, None, ValueMode::ImmutableOwned)
+            .expect("bool literal should construct")
+            .id();
+        make_test_variable(
+            path_fork
+                .try_intern_child(source_path, show_item)
+                .expect("test path fits"),
+            value,
+            &expression_builder,
+        )
     };
     let context = constant_template_context(&source_path, &[declaration], &path_fork);
     let canonical_owner = file_tokens
@@ -570,26 +717,44 @@ fn const_required_template_loop_body_if_can_use_source_const_condition() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
     )
     .expect("nested const-required template if should inline source const bool")
     .template;
-    let folded = fold_template_in_context(&template, &context, &mut string_table);
+    let folded = fold_template_in_context(
+        &template,
+        &context,
+        &mut string_table,
+        &mut expression_builder,
+        &mut const_values,
+    );
 
     assert_eq!(string_table.resolve(folded), "01");
 }
 
 #[test]
 fn const_required_template_collection_loop_folds_iteration_bindings() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let (template, context, mut string_table) = parse_const_required_template(
         "[loop {\"Ada\", \"Bo\"} |name, index|:
             [index]-[name];
         ]",
+        &mut expression_builder,
+        &mut const_values,
     );
 
-    let folded = fold_template_in_context(&template, &context, &mut string_table);
+    let folded = fold_template_in_context(
+        &template,
+        &context,
+        &mut string_table,
+        &mut expression_builder,
+        &mut const_values,
+    );
 
     assert_eq!(string_table.resolve(folded), "0-Ada;1-Bo;");
 }
@@ -599,6 +764,8 @@ fn const_required_template_zero_iteration_loop_skips_shared_head_output() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let wrapper_scope = path_fork
         .try_intern_portable_path("main.moth/#const_template0", &mut string_table)
         .expect("test path fits");
@@ -626,6 +793,8 @@ fn const_required_template_zero_iteration_loop_skips_shared_head_output() {
         &mut card_tokens,
         card_source_path,
         &card_context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -633,13 +802,18 @@ fn const_required_template_zero_iteration_loop_skips_shared_head_output() {
     .expect("card wrapper should parse");
 
     let card_name = string_table.intern("card");
-    let declarations = vec![Declaration {
-        id: path_fork
-            .try_intern_child(wrapper_scope, card_name)
-            .expect("test path fits"),
-        value: Expression::template(card_template, ValueMode::ImmutableOwned),
-        binding_span: None,
-        config_qualifier: None,
+    let declarations = vec![{
+        let value = expression_builder
+            .template(card_template, ValueMode::ImmutableOwned)
+            .expect("card wrapper template should construct")
+            .id();
+        make_test_variable(
+            path_fork
+                .try_intern_child(wrapper_scope, card_name)
+                .expect("test path fits"),
+            value,
+            &expression_builder,
+        )
     }];
 
     let file_tokens = template_tokens_from_source(
@@ -668,6 +842,8 @@ fn const_required_template_zero_iteration_loop_skips_shared_head_output() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -675,7 +851,13 @@ fn const_required_template_zero_iteration_loop_skips_shared_head_output() {
     .expect("const-required zero loop should parse")
     .template;
 
-    let folded = fold_template_in_context(&template, &context, &mut string_table);
+    let folded = fold_template_in_context(
+        &template,
+        &context,
+        &mut string_table,
+        &mut expression_builder,
+        &mut const_values,
+    );
 
     assert_eq!(string_table.resolve(folded), "");
 }
@@ -685,6 +867,8 @@ fn const_required_template_loop_wraps_aggregate_once() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let wrapper_scope = path_fork
         .try_intern_portable_path("main.moth/#const_template0", &mut string_table)
         .expect("test path fits");
@@ -712,19 +896,26 @@ fn const_required_template_loop_wraps_aggregate_once() {
         &mut card_tokens,
         card_source_path,
         &card_context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
     )
     .expect("card wrapper should parse");
     let card_name = string_table.intern("card");
-    let declarations = vec![Declaration {
-        id: path_fork
-            .try_intern_child(wrapper_scope, card_name)
-            .expect("test path fits"),
-        value: Expression::template(card_template, ValueMode::ImmutableOwned),
-        binding_span: None,
-        config_qualifier: None,
+    let declarations = vec![{
+        let value = expression_builder
+            .template(card_template, ValueMode::ImmutableOwned)
+            .expect("card wrapper template should construct")
+            .id();
+        make_test_variable(
+            path_fork
+                .try_intern_child(wrapper_scope, card_name)
+                .expect("test path fits"),
+            value,
+            &expression_builder,
+        )
     }];
 
     let file_tokens = template_tokens_from_source(
@@ -753,6 +944,8 @@ fn const_required_template_loop_wraps_aggregate_once() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -760,20 +953,36 @@ fn const_required_template_loop_wraps_aggregate_once() {
     .expect("const-required loop should parse")
     .template;
 
-    let folded = fold_template_in_context(&template, &context, &mut string_table);
+    let folded = fold_template_in_context(
+        &template,
+        &context,
+        &mut string_table,
+        &mut expression_builder,
+        &mut const_values,
+    );
 
     assert_eq!(string_table.resolve(folded), "<card>01</card>");
 }
 
 #[test]
 fn const_required_template_conditional_loop_false_folds_to_no_output() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let (template, context, mut string_table) = parse_const_required_template(
         "[loop false:
             Never
         ]",
+        &mut expression_builder,
+        &mut const_values,
     );
 
-    let folded = fold_template_in_context(&template, &context, &mut string_table);
+    let folded = fold_template_in_context(
+        &template,
+        &context,
+        &mut string_table,
+        &mut expression_builder,
+        &mut const_values,
+    );
 
     assert_eq!(string_table.resolve(folded), "");
 }
@@ -796,6 +1005,8 @@ fn const_required_template_conditional_loop_true_is_rejected() {
 fn const_required_template_conditional_loop_reports_runtime_condition() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut span_builder = ExtendedSpanBuilder::new();
     let file_tokens = template_tokens_from_source(
         "[loop keep_going:
@@ -817,13 +1028,10 @@ fn const_required_template_conditional_loop_reports_runtime_condition() {
             id: path_fork
                 .try_intern_child(source_path, keep_going)
                 .expect("test path fits"),
-            value: Expression::new(
-                ExpressionKind::NoValue,
-                None,
-                builtin_type_ids::BOOL,
-                DataType::Bool,
-                ValueMode::ImmutableOwned,
-            ),
+            type_id: builtin_type_ids::BOOL,
+            diagnostic_type: DataType::Bool,
+            value_mode: ValueMode::ImmutableOwned,
+            value: DeclarationValue::Absent,
             binding_span: None,
             config_qualifier: None,
         },
@@ -847,6 +1055,8 @@ fn const_required_template_conditional_loop_reports_runtime_condition() {
         source_path,
         &context,
         &mut type_interner,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -864,6 +1074,8 @@ fn const_required_template_conditional_loop_reports_runtime_condition() {
 fn const_required_template_loop_reports_non_const_collection_source() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut span_builder = ExtendedSpanBuilder::new();
     let file_tokens = template_tokens_from_source(
         "[loop items |item|:
@@ -887,13 +1099,10 @@ fn const_required_template_loop_reports_non_const_collection_source() {
             id: path_fork
                 .try_intern_child(source_path, items)
                 .expect("test path fits"),
-            value: Expression::new(
-                ExpressionKind::NoValue,
-                None,
-                collection_type_id,
-                DataType::collection(DataType::StringSlice),
-                ValueMode::ImmutableOwned,
-            ),
+            type_id: collection_type_id,
+            diagnostic_type: DataType::collection(DataType::StringSlice),
+            value_mode: ValueMode::ImmutableOwned,
+            value: DeclarationValue::Absent,
             binding_span: None,
             config_qualifier: None,
         },
@@ -917,6 +1126,8 @@ fn const_required_template_loop_reports_non_const_collection_source() {
         source_path,
         &context,
         &mut type_interner,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -934,6 +1145,8 @@ fn const_required_template_loop_reports_non_const_collection_source() {
 fn const_required_template_loop_reports_non_const_body() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut span_builder = ExtendedSpanBuilder::new();
     let file_tokens = template_tokens_from_source(
         "[loop 0 to 1 |i|:
@@ -955,13 +1168,10 @@ fn const_required_template_loop_reports_non_const_body() {
             id: path_fork
                 .try_intern_child(source_path, value)
                 .expect("test path fits"),
-            value: Expression::new(
-                ExpressionKind::NoValue,
-                None,
-                builtin_type_ids::STRING,
-                DataType::StringSlice,
-                ValueMode::ImmutableOwned,
-            ),
+            type_id: builtin_type_ids::STRING,
+            diagnostic_type: DataType::StringSlice,
+            value_mode: ValueMode::ImmutableOwned,
+            value: DeclarationValue::Absent,
             binding_span: None,
             config_qualifier: None,
         },
@@ -985,6 +1195,8 @@ fn const_required_template_loop_reports_non_const_body() {
         source_path,
         &context,
         &mut type_interner,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -1003,10 +1215,14 @@ fn const_required_template_if_prepares_a_foldable_view_from_body_tir_roots() {
     // Construction owns the single const preparation, so the outcome it carries is the contract.
     // Asserting `Foldable` rather than "parsing returned Ok" proves the selected body was read
     // through its module-local TIR root and classified, not merely accepted.
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let construction = const_required_construction(
         "[if true:
             Visible
         ]",
+        &mut expression_builder,
+        &mut const_values,
     );
 
     assert_eq!(
@@ -1018,10 +1234,14 @@ fn const_required_template_if_prepares_a_foldable_view_from_body_tir_roots() {
 
 #[test]
 fn const_required_template_loop_prepares_a_foldable_view_from_its_body_tir_root() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let construction = const_required_construction(
         "[loop 0 to 1 |i|:
             [i]
         ]",
+        &mut expression_builder,
+        &mut const_values,
     );
 
     assert_eq!(
@@ -1042,6 +1262,8 @@ fn const_required_construction_preparation_is_reused_by_folding() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut span_builder = ExtendedSpanBuilder::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let file_tokens = template_tokens_from_source(
         "[if true:
         Visible
@@ -1069,6 +1291,8 @@ fn const_required_construction_preparation_is_reused_by_folding() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -1080,7 +1304,11 @@ fn const_required_construction_preparation_is_reused_by_folding() {
         panic!("const-required test template should be foldable");
     }
 
-    let mut fold_context = context.new_tir_fold_context(&mut string_table);
+    let mut fold_context = context.new_tir_fold_context(
+        &mut string_table,
+        &mut expression_builder,
+        &mut const_values,
+    );
     let store = context.template_ir_store.borrow();
     let reference = template.tir_reference;
     let view = TirView::with_minimum_phase(
@@ -1106,13 +1334,21 @@ fn const_required_construction_preparation_is_reused_by_folding() {
 
 #[test]
 fn const_required_template_loop_reports_expansion_limit() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let (template, context, mut string_table) = parse_const_required_template(
         "[loop 0 to & 10000 |i|:
             [i]
         ]",
+        &mut expression_builder,
+        &mut const_values,
     );
 
-    let mut fold_context = context.new_tir_fold_context(&mut string_table);
+    let mut fold_context = context.new_tir_fold_context(
+        &mut string_table,
+        &mut expression_builder,
+        &mut const_values,
+    );
     let error = fold_template_with_fold_context(
         &template,
         &context.template_ir_store,
@@ -1132,15 +1368,23 @@ fn const_required_template_loop_reports_expansion_limit() {
 
 #[test]
 fn const_required_template_loop_uses_configured_expansion_limit() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let (template, context, mut string_table) = parse_const_required_template(
         "[loop 0 to & 10000 |i|:
             [if false:
                 hidden
             ]
         ]",
+        &mut expression_builder,
+        &mut const_values,
     );
 
-    let mut fold_context = context.new_tir_fold_context(&mut string_table);
+    let mut fold_context = context.new_tir_fold_context(
+        &mut string_table,
+        &mut expression_builder,
+        &mut const_values,
+    );
     fold_context.template_const_loop_iteration_limit = 10_001;
 
     let folded = fold_template_with_fold_context(
@@ -1159,6 +1403,8 @@ fn const_required_template_loop_uses_configured_expansion_limit() {
 fn const_required_template_option_capture_present_folds_then_branch() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let context_scope = path_fork
         .try_intern_portable_path("main.moth/#const_template0", &mut string_table)
         .expect("test path fits");
@@ -1171,15 +1417,23 @@ fn const_required_template_option_capture_present_folds_then_branch() {
     let capture_path = path_fork
         .try_intern_child(context_scope, capture_name)
         .expect("test path fits");
-    let present_value = Expression::string_slice(
-        string_table.intern("Priya"),
-        None,
-        ValueMode::ImmutableOwned,
-    );
-    let scrutinee = Expression::coerced(present_value, option_string_type_id);
+    let present_value = expression_builder
+        .string_slice(
+            &mut const_values,
+            string_table.intern("Priya"),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("string literal should construct")
+        .id();
+    let scrutinee = expression_builder
+        .coerced(expression_builder.own(present_value), option_string_type_id)
+        .expect("option coercion should construct")
+        .id();
 
     let template = const_required_option_capture_template_with_direct_tir(
         scrutinee,
+        &mut expression_builder,
         capture_name,
         capture_path,
         string_type_id,
@@ -1189,11 +1443,17 @@ fn const_required_template_option_capture_present_folds_then_branch() {
 
     {
         let store = context.template_ir_store.borrow();
-        prepare_const_required_view_directly(&template, &store)
+        prepare_const_required_view_directly(&template, &store, &expression_builder, &const_values)
             .expect("present const option capture should validate");
     }
 
-    let folded = fold_template_in_context(&template, &context, &mut string_table);
+    let folded = fold_template_in_context(
+        &template,
+        &context,
+        &mut string_table,
+        &mut expression_builder,
+        &mut const_values,
+    );
 
     assert_eq!(string_table.resolve(folded), "Hello Priya");
 }
@@ -1202,6 +1462,8 @@ fn const_required_template_option_capture_present_folds_then_branch() {
 fn const_required_template_option_capture_absent_has_structural_no_output() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let context_scope = path_fork
         .try_intern_portable_path("main.moth/#const_template0", &mut string_table)
         .expect("test path fits");
@@ -1213,15 +1475,19 @@ fn const_required_template_option_capture_absent_has_structural_no_output() {
     let capture_path = path_fork
         .try_intern_child(context_scope, capture_name)
         .expect("test path fits");
-    let scrutinee = Expression::option_none_with_type_id(
-        string_type_id,
-        DataType::StringSlice,
-        &mut type_environment,
-        None,
-    );
+    let scrutinee = expression_builder
+        .option_none_with_type_id(
+            &mut const_values,
+            string_type_id,
+            &mut type_environment,
+            None,
+        )
+        .expect("absent option should construct")
+        .id();
 
     let template = const_required_option_capture_template_with_direct_tir(
         scrutinee,
+        &mut expression_builder,
         capture_name,
         capture_path,
         string_type_id,
@@ -1231,11 +1497,17 @@ fn const_required_template_option_capture_absent_has_structural_no_output() {
 
     {
         let store = context.template_ir_store.borrow();
-        prepare_const_required_view_directly(&template, &store)
+        prepare_const_required_view_directly(&template, &store, &expression_builder, &const_values)
             .expect("absent const option capture should validate");
     }
 
-    let folded = fold_template_in_context(&template, &context, &mut string_table);
+    let folded = fold_template_in_context(
+        &template,
+        &context,
+        &mut string_table,
+        &mut expression_builder,
+        &mut const_values,
+    );
 
     assert_eq!(string_table.resolve(folded), "");
 }
@@ -1244,6 +1516,8 @@ fn const_required_template_option_capture_absent_has_structural_no_output() {
 fn const_required_template_option_capture_inlines_present_source_const() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut span_builder = ExtendedSpanBuilder::new();
     let file_tokens = template_tokens_from_source(
         "[if maybe_name is |name|:Hello [name]]",
@@ -1257,18 +1531,27 @@ fn const_required_template_option_capture_inlines_present_source_const() {
     let mut type_environment = TypeEnvironment::new();
     let string_type_id = type_environment.builtins().string;
     let option_string_type_id = type_environment.intern_option(string_type_id);
-    let present_value = Expression::string_slice(
-        string_table.intern("Priya"),
-        None,
-        ValueMode::ImmutableOwned,
-    );
-    let declaration = Declaration {
-        id: path_fork
-            .try_intern_child(source_path, maybe_name)
-            .expect("test path fits"),
-        value: Expression::coerced(present_value, option_string_type_id),
-        binding_span: None,
-        config_qualifier: None,
+    let present_value = expression_builder
+        .string_slice(
+            &mut const_values,
+            string_table.intern("Priya"),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("string literal should construct")
+        .id();
+    let declaration = {
+        let value = expression_builder
+            .coerced(expression_builder.own(present_value), option_string_type_id)
+            .expect("option coercion should construct")
+            .id();
+        make_test_variable(
+            path_fork
+                .try_intern_child(source_path, maybe_name)
+                .expect("test path fits"),
+            value,
+            &expression_builder,
+        )
     };
     let context = constant_template_context(&source_path, &[declaration], &path_fork);
     let mut compatibility_cache = TypeCompatibilityCache::new();
@@ -1290,13 +1573,21 @@ fn const_required_template_option_capture_inlines_present_source_const() {
         source_path,
         &context,
         &mut type_interner,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
     )
     .expect("const-required option capture should inline present source const")
     .template;
-    let folded = fold_template_in_context(&template, &context, &mut string_table);
+    let folded = fold_template_in_context(
+        &template,
+        &context,
+        &mut string_table,
+        &mut expression_builder,
+        &mut const_values,
+    );
 
     assert_eq!(string_table.resolve(folded), "Hello Priya");
 }
@@ -1305,6 +1596,8 @@ fn const_required_template_option_capture_inlines_present_source_const() {
 fn const_required_template_option_capture_reports_runtime_scrutinee_diagnostic() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut span_builder = ExtendedSpanBuilder::new();
     let file_tokens = template_tokens_from_source(
         "[if maybe_name is |name|: [name]]",
@@ -1322,13 +1615,10 @@ fn const_required_template_option_capture_reports_runtime_scrutinee_diagnostic()
         id: path_fork
             .try_intern_child(source_path, maybe_name)
             .expect("test path fits"),
-        value: Expression::new(
-            ExpressionKind::NoValue,
-            None,
-            maybe_name_type_id,
-            DataType::Option(Box::new(DataType::StringSlice)),
-            ValueMode::ImmutableOwned,
-        ),
+        type_id: maybe_name_type_id,
+        diagnostic_type: DataType::Option(Box::new(DataType::StringSlice)),
+        value_mode: ValueMode::ImmutableOwned,
+        value: DeclarationValue::Absent,
         binding_span: None,
         config_qualifier: None,
     };
@@ -1352,6 +1642,8 @@ fn const_required_template_option_capture_reports_runtime_scrutinee_diagnostic()
         source_path,
         &context,
         &mut type_interner,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -1369,6 +1661,8 @@ fn const_required_template_option_capture_reports_runtime_scrutinee_diagnostic()
 fn const_required_template_if_rejects_runtime_local_condition() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let mut span_builder = ExtendedSpanBuilder::new();
     let file_tokens = template_tokens_from_source(
         "[if show_banner: Visible]",
@@ -1384,13 +1678,10 @@ fn const_required_template_if_rejects_runtime_local_condition() {
             id: path_fork
                 .try_intern_child(source_path, show_banner)
                 .expect("test path fits"),
-            value: Expression::new(
-                ExpressionKind::NoValue,
-                None,
-                builtin_type_ids::BOOL,
-                DataType::Bool,
-                ValueMode::ImmutableOwned,
-            ),
+            type_id: builtin_type_ids::BOOL,
+            diagnostic_type: DataType::Bool,
+            value_mode: ValueMode::ImmutableOwned,
+            value: DeclarationValue::Absent,
             binding_span: None,
             config_qualifier: None,
         },
@@ -1413,6 +1704,8 @@ fn const_required_template_if_rejects_runtime_local_condition() {
         &mut token_stream,
         source_path,
         &context,
+        &mut expression_builder,
+        &mut const_values,
         vec![],
         &mut string_table,
         &mut path_fork,
@@ -1429,10 +1722,14 @@ fn const_required_template_if_rejects_runtime_local_condition() {
 #[test]
 fn const_required_template_if_validates_selector_through_tir_view_overlay() {
     let mut path_fork = PathInternerFork::empty();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let (mut template, context, mut string_table) = parse_const_required_template(
         "[if true:
             Visible
         ]",
+        &mut expression_builder,
+        &mut const_values,
     );
 
     let mut store = context.template_ir_store.borrow_mut();
@@ -1440,23 +1737,26 @@ fn const_required_template_if_validates_selector_through_tir_view_overlay() {
         .expect("parsed const-required conditional should have a selector site");
 
     let override_span = synthetic_source_span(99, 103);
-    let runtime_condition = Expression::reference_with_type_id(
-        path_fork
-            .try_intern_portable_path("runtime_condition", &mut string_table)
-            .expect("test path fits"),
-        DataType::Bool,
-        builtin_type_ids::BOOL,
-        Some(override_span),
-        ValueMode::ImmutableReference,
-        ConstRecordState::RuntimeValue,
-    );
+    let runtime_condition = expression_builder
+        .reference_with_type_id(
+            path_fork
+                .try_intern_portable_path("runtime_condition", &mut string_table)
+                .expect("test path fits"),
+            builtin_type_ids::BOOL,
+            Some(override_span),
+            ValueMode::ImmutableReference,
+            ConstRecordState::RuntimeValue,
+        )
+        .expect("runtime condition reference should construct")
+        .id();
 
     install_expression_overlay_on_template(&mut template, &mut store, site_id, runtime_condition);
 
     drop(store);
     let store = context.template_ir_store.borrow();
-    let error = prepare_const_required_view_directly(&template, &store)
-        .expect_err("TirView overlay should make the conditional selector non-const");
+    let error =
+        prepare_const_required_view_directly(&template, &store, &expression_builder, &const_values)
+            .expect_err("TirView overlay should make the conditional selector non-const");
     let TemplateError::Diagnostic(error) = error else {
         panic!("non-const conditional should remain a source diagnostic");
     };
@@ -1470,10 +1770,14 @@ fn const_required_template_if_validates_selector_through_tir_view_overlay() {
 
 #[test]
 fn const_required_template_loop_validates_header_through_tir_view_overlay() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let (mut template, context, _string_table) = parse_const_required_template(
         "[loop false:
             body
         ]",
+        &mut expression_builder,
+        &mut const_values,
     );
 
     let mut store = context.template_ir_store.borrow_mut();
@@ -1481,8 +1785,15 @@ fn const_required_template_loop_validates_header_through_tir_view_overlay() {
         .expect("parsed const-required conditional loop should have a header site");
 
     let override_span = synthetic_source_span(99, 103);
-    let const_true_condition =
-        Expression::bool(true, Some(override_span), ValueMode::ImmutableOwned);
+    let const_true_condition = expression_builder
+        .bool(
+            &mut const_values,
+            true,
+            Some(override_span),
+            ValueMode::ImmutableOwned,
+        )
+        .expect("const true condition should construct")
+        .id();
 
     install_expression_overlay_on_template(
         &mut template,
@@ -1493,8 +1804,9 @@ fn const_required_template_loop_validates_header_through_tir_view_overlay() {
 
     drop(store);
     let store = context.template_ir_store.borrow();
-    let error = prepare_const_required_view_directly(&template, &store)
-        .expect_err("TirView overlay should turn the conditional loop into const true");
+    let error =
+        prepare_const_required_view_directly(&template, &store, &expression_builder, &const_values)
+            .expect_err("TirView overlay should turn the conditional loop into const true");
     let TemplateError::Diagnostic(error) = error else {
         panic!("non-const loop should remain a source diagnostic");
     };
@@ -1511,7 +1823,13 @@ fn const_required_validation_reports_missing_effective_node_as_internal_error() 
     // A const-required template whose root node has been corrupted to reference
     // a non-existent node must propagate the missing-node error through the
     // internal-error lane instead of silently returning success.
-    let (mut template, context, _string_table) = parse_const_required_template("[if true: body]");
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let (mut template, context, _string_table) = parse_const_required_template(
+        "[if true: body]",
+        &mut expression_builder,
+        &mut const_values,
+    );
     let source_template_id = template.tir_reference.root;
 
     let malformed_template_id = {
@@ -1527,8 +1845,9 @@ fn const_required_validation_reports_missing_effective_node_as_internal_error() 
     template.tir_reference.root = malformed_template_id;
 
     let store = context.template_ir_store.borrow();
-    let error = prepare_const_required_view_directly(&template, &store)
-        .expect_err("missing root node should be an internal error, not a silent success");
+    let error =
+        prepare_const_required_view_directly(&template, &store, &expression_builder, &const_values)
+            .expect_err("missing root node should be an internal error, not a silent success");
 
     let TemplateError::Infrastructure(error) = error else {
         panic!("missing effective node should remain an infrastructure error");
@@ -1548,8 +1867,13 @@ fn const_required_validation_ignores_referenced_child_expression_overlay() {
     // runtime-only if imported. Structural transitions deliberately retain the
     // parent expression authority, so the referenced overlay is ignored and the
     // exact child view is a real cycle after the structural selector is checked.
-    let (valid_template, context, mut string_table) =
-        parse_const_required_template("[if true: body]");
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let (valid_template, context, mut string_table) = parse_const_required_template(
+        "[if true: body]",
+        &mut expression_builder,
+        &mut const_values,
+    );
 
     let valid_conditional_root = {
         let store_handle = context.template_ir_store();
@@ -1566,20 +1890,22 @@ fn const_required_validation_ignores_referenced_child_expression_overlay() {
         let site_id = find_first_conditional_selector_site_id(&valid_template, &store)
             .expect("child conditional should have a selector site");
 
-        let non_const_condition = Expression::reference_with_type_id(
-            path_fork
-                .try_intern_portable_path("runtime_condition", &mut string_table)
-                .expect("test path fits"),
-            DataType::Bool,
-            builtin_type_ids::BOOL,
-            None,
-            ValueMode::ImmutableReference,
-            ConstRecordState::RuntimeValue,
-        );
+        let non_const_condition = expression_builder
+            .reference_with_type_id(
+                path_fork
+                    .try_intern_portable_path("runtime_condition", &mut string_table)
+                    .expect("test path fits"),
+                builtin_type_ids::BOOL,
+                None,
+                ValueMode::ImmutableReference,
+                ConstRecordState::RuntimeValue,
+            )
+            .expect("runtime condition reference should construct")
+            .id();
 
         let overlay_id = store
             .allocate_expression_overlay(TirExpressionOverlay {
-                overrides: vec![(site_id, Box::new(non_const_condition))],
+                overrides: vec![(site_id, non_const_condition)],
             })
             .expect("test overlay allocation");
         TemplateViewContext {
@@ -1632,8 +1958,13 @@ fn const_required_validation_ignores_referenced_child_expression_overlay() {
     };
 
     let store = context.template_ir_store.borrow();
-    let error = prepare_const_required_view_directly(&recursive_template, &store)
-        .expect_err("exact-view child cycles must be CompilerError");
+    let error = prepare_const_required_view_directly(
+        &recursive_template,
+        &store,
+        &expression_builder,
+        &const_values,
+    )
+    .expect_err("exact-view child cycles must be CompilerError");
     let TemplateError::Infrastructure(error) = error else {
         panic!("exact-view child cycles must stay on the infrastructure lane, got {error:?}");
     };
@@ -1654,8 +1985,13 @@ fn const_required_validation_ignores_referenced_child_expression_overlay() {
 
 #[test]
 fn runtime_template_if_allows_unresolved_slot_through_tir_view() {
-    let (template, context, _string_table) =
-        parse_runtime_template_without_validation("[if true:\n            [$slot]\n        ]");
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let (template, context, _string_table) = parse_runtime_template_without_validation(
+        "[if true:\n            [$slot]\n        ]",
+        &mut expression_builder,
+        &mut const_values,
+    );
 
     let store = context.template_ir_store.borrow();
     validate_runtime_template_control_flow_slot_artifacts(&template, &store)
@@ -1664,8 +2000,12 @@ fn runtime_template_if_allows_unresolved_slot_through_tir_view() {
 
 #[test]
 fn runtime_template_if_rejects_unresolved_insert_through_tir_view() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
     let (template, context, _string_table) = parse_runtime_template_without_validation(
         "[if true:\n            [$insert(\"style\"): color: red;]\n        ]",
+        &mut expression_builder,
+        &mut const_values,
     );
 
     let store = context.template_ir_store.borrow();
@@ -1687,8 +2027,13 @@ fn runtime_template_if_rejects_unresolved_insert_through_tir_view() {
 
 #[test]
 fn runtime_template_if_allows_resolved_slot_through_tir_view_overlay() {
-    let (mut template, context, _string_table) =
-        parse_runtime_template_without_validation("[if true:\n            [$slot]\n        ]");
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let (mut template, context, _string_table) = parse_runtime_template_without_validation(
+        "[if true:\n            [$slot]\n        ]",
+        &mut expression_builder,
+        &mut const_values,
+    );
 
     let mut store = context.template_ir_store.borrow_mut();
     let (occurrence_id, key) = find_first_slot_occurrence_id(&template, &store)
@@ -1709,8 +2054,13 @@ fn runtime_template_if_allows_resolved_slot_through_tir_view_overlay() {
 
 #[test]
 fn runtime_validation_uses_nested_child_overlay_identity() {
-    let (mut child_template, context, _string_table) =
-        parse_runtime_template_without_validation("[if true:\n            [$slot]\n        ]");
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let (mut child_template, context, _string_table) = parse_runtime_template_without_validation(
+        "[if true:\n            [$slot]\n        ]",
+        &mut expression_builder,
+        &mut const_values,
+    );
 
     {
         let mut store = context.template_ir_store.borrow_mut();
@@ -1761,8 +2111,13 @@ fn runtime_validation_uses_nested_child_overlay_identity() {
 
 #[test]
 fn runtime_validation_reports_missing_root_node_as_internal_error() {
-    let (mut template, context, _string_table) =
-        parse_runtime_template_without_validation("[if true: body]");
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let (mut template, context, _string_table) = parse_runtime_template_without_validation(
+        "[if true: body]",
+        &mut expression_builder,
+        &mut const_values,
+    );
     let source_template_id = template.tir_reference.root;
 
     let malformed_template_id = {
@@ -1786,8 +2141,13 @@ fn runtime_validation_reports_missing_root_node_as_internal_error() {
 
 #[test]
 fn runtime_validation_reports_missing_view_context_as_internal_error() {
-    let (mut template, context, _string_table) =
-        parse_runtime_template_without_validation("[if true: body]");
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let (mut template, context, _string_table) = parse_runtime_template_without_validation(
+        "[if true: body]",
+        &mut expression_builder,
+        &mut const_values,
+    );
     template.tir_reference.context = TemplateViewContext {
         expression_overlay: Some(TirExpressionOverlayId::new(999)),
         ..TemplateViewContext::default()

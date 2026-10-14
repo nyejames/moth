@@ -44,13 +44,22 @@ STATUS: paused
 NEXT_SLICE: Phase 4.2, catch-recovery type context
 BLOCKERS: delivered compact diagnostic records, frozen type-display snapshots and failure-lane migration
 TRANSFERRED: pending 4.1c and 4.4 belong to the typed semantic expression and native result cutover
+NUMERIC_CATCH_HANDOFF: exact-receiver conflict/default-range, narrow-operation and authored safety-catch diagnostics are delivered with primary tests; consume their facts through the final schema without duplicating coverage
 RESUME_ACTION: reload routed authorities and current source, refresh producers/schema APIs and confirm the transferred capabilities are delivered before starting Phase 4.2
 ```
 
-The transfers below are pending implementation, not completed diagnostics. The typed semantic
-expression and native result cutover owns their implementation, coverage and source-visible
-messages because it removes the ambiguous result representation. This plan retains their design
-record and owns the remaining diagnostic improvements after the layout migration.
+The native-result transfers below remain pending implementation. Their implementation, coverage
+and source-visible messages belong to the typed semantic expression and native result cutover.
+This plan retains their design record and owns the remaining diagnostic improvements after the
+layout migration.
+
+Delivered numeric semantics supply deterministic conflicting-receiver diagnostics with both source
+locations, out-of-range default diagnostics, diagnostics for statically invalid selected-width
+operations and normal handler/fallback type diagnostics for authored safety catches. Preserve their
+classification, authored-order witnesses and primary source coverage. This plan consumes the
+resolved diagnostic facts through the final schema after the layout migration and owns only the
+remaining presentation and recovery-context improvements. Catch eligibility remains separate from
+actual failure effects, and an unreachable handler still receives ordinary type validation.
 
 ### Historical implementation and validation
 
@@ -617,115 +626,39 @@ source rule. These are ordinary invalid assignment targets, not compatibility di
 
 ## Phase 4: Error, option and value-flow diagnostics
 
-### 4.1 Replace the umbrella `NotResultExpression` path
+### 4.1 Fallible handling: delivered facts and remaining presentation
 
 **Original findings:** DIAG-025, DIAG-043, DIAG-044
 
-**Additional confirmed terminology gap:** incompatible custom error propagation still uses
-`TypeMismatchContext::ResultError`, which renders `Type mismatch in result error`. A direct
-`FirstError!` through `SecondError!` probe reaches this path. The source contract calls this the
-function's error return or error slot, never a Result error.
+**Delivered terminology and operand families:** `MOTH-RULE-0051` now renders `Invalid fallible
+handling`. `InvalidFallibleHandlingReason` distinguishes authored handlers and operand channels,
+replacing the umbrella `NotResultExpression` path. Error-type mismatches use
+`TypeMismatchContext::ErrorReturn`, and builtin calls use
+`InvalidBuiltinCallReason::UnhandledFallibleCall`. The discontinued bang-handler recognisers and
+their dedicated diagnostic reasons have been removed.
 
-**Additional confirmed descriptor gap:** the stable `MOTH-RULE-0051` title still renders
-`Invalid result handling` even when its message correctly names an unhandled `Error!` call. Keep
-the code but change the user-facing descriptor title to `Invalid fallible handling` when the
-operand matrix lands.
+The native-channel cutover also deleted `InvalidFallibleOperand`, its payload and reason family
+and `MOTH-TYPE-0004`. Unhandled error-returning operands use
+`InvalidFallibleHandlingReason::UnhandledErrorReturn` under `MOTH-RULE-0051`.
+The `result_operand_without_handler_in_operator` fixture expects that code and the
+`invalid_fallible_handling.unhandled_error_return` reason at `input/@page.moth:5:9`.
 
-**Additional confirmed operand-family gap:** `MOTH-TYPE-0004` still renders the descriptor title
-`Invalid result operand`, and its internal kind, payload and reason family repeat the same stale
-term even though the only production path is an unhandled fallible operand. The
-`OptionalValueNotInspected` reason has no compiler production site and exists only in renderer/model
-tests. Rename the diagnostic family outright to fallible-operand terminology, render a title such
-as `Unhandled fallible operand` and delete the dead optional reason rather than preserving an
-unused parallel path. Keep `MOTH-TYPE-0004`.
+**Phase 4.1c transfer, delivered in `7f87109d9`:** the typed semantic expression and native result
+cutover supplies one enclosing callable/entry contract fact for postfix `?` and `!`, including
+nested branches. Consumers don't guess from the immediate `ContextKind` or rebuild signatures.
+Postfix `?` requires exactly one compatible optional success slot. Its
+`invalid_fallible_handling.function_has_multiple_success_returns` reason carries the authored
+success-slot count, separately from a missing optional return. The selected entry contract has
+built-in `start` `Error!`, so compatible top-level `!` remains legal. An incompatible entry error
+uses `invalid_fallible_handling.entry_has_incompatible_error`, separately from a function without
+an error slot. Both reasons retain `MOTH-RULE-0051`.
 
-**Phase 4.1c transfer, pending implementation:** postfix `?` requires exactly one optional success
-return slot. The typed semantic expression and native result cutover owns the distinct
-multiple-success return-shape reason and its authored success-slot count. It also owns the narrow
-enclosing callable/entry contract fact used by `?` and `!` inside nested branches, without guessing
-from the immediate `ContextKind` or rebuilding the signature. The selected top-level `start`
-contract has built-in `Error!`, so compatible top-level `!` remains legal. Diagnose an incompatible
-entry error separately from a real function without a compatible error slot. Postfix `?` still
-requires a compatible single optional success slot. Do not implement a second boundary-fact owner
-when this diagnostics plan resumes.
-
-**Additional confirmed terminology gap:** `InvalidBuiltinCallReason::MustHandleFallibleResult`
-still names an internal Result despite rendering a fallible call, and cast diagnostics say
-`Error! result` and `result slot`. Rename the builtin reason to `UnhandledFallibleCall` without an
-alias. Tell authors to handle the fallible operand before casting and call multi-value outputs
-`success return slots`.
-
-The current `InvalidResultHandlingReason::NotResultExpression` hardcodes postfix `!` wording and calls the source carrier a Result even when the authored construct is `catch` or the operand is optional.
-
-#### Implementation
-
-Replace the umbrella reason with explicit source cases:
-
-```rust
-enum InvalidFallibleHandlingReason {
-    CatchOnNonFallible,
-    CatchOnOptional,
-    BangOnNonFallible,
-    BangOnOptional,
-    QuestionOnNonOptional,
-    QuestionOnFallible,
-    ErrorPropagationInIncompatibleEntry,
-    ErrorPropagationInNonFallibleFunction,
-    OptionPropagationAtTopLevel,
-    OptionPropagationInNonOptionalFunction,
-    OptionPropagationInMultipleSuccessFunction { success_count: usize },
-    // retain other structurally distinct catch and propagation cases
-}
-```
-
-Names may differ, but each branch must encode the authored handler, operand channel and propagation
-boundary. This is the semantic reason inventory, not an instruction to recreate an already
-delivered diagnostic family. Phase 4.1c's pending shape and boundary facts belong to the earlier
-native semantic cutover.
-
-Delete `RemovedBangFallbackSyntax` and `RemovedBangCatchHandlerSyntax`, their dedicated parser
-recognisers, unit tests and `result_removed_err_bang_syntax_rejected` fixture. Those paths exist
-only to identify discontinued handling syntax. The ordinary current grammar may reject the token
-sequence without a migration-specific reason. Do not carry either reason into the replacement
-matrix.
-
-Rename `TypeMismatchContext::ResultError` to `ErrorReturn` and render `error return`. Apply the
-same source-visible context to incompatible postfix `!` call propagation and `cast!` propagation.
-Keep the expected and found error types as semantic `TypeId`s and preserve `MOTH-TYPE-0001`.
-
-Render the `MOTH-RULE-0051` descriptor title as `Invalid fallible handling`. Internal reason-family
-identifiers must also change coherently in this slice: rename `InvalidResultHandlingReason`, its
-payload, constructor and kind to fallible-handling terminology without aliases or compatibility
-wrappers. AST expression and HIR type names outside the diagnostic family are not part of this
-mechanical rename. No renderer title or message may call the source feature result handling.
-
-#### Messages
-
-- `catch` on plain value:
-
-  > `catch` handles a fallible expression, including implicit numeric failure and a compatible typed error, but this expression has neither.
-
-- `catch` on optional:
-
-  > `catch` does not recover an optional value. Inspect the optional value with an `if ... is |present| ... else ...` expression.
-
-- `!` on optional:
-
-  > Postfix `!` propagates an `Error!` return, but this expression is optional. Use postfix `?` only inside a compatible optional-returning function, or inspect the option explicitly.
-
-- `?` on fallible call:
-
-  > Postfix `?` propagates absence from an optional value, but this call can return `Error!`. Recover with `catch`, or use `!` only inside a compatible `Error!` function.
-
-- top-level `!`:
-
-  > This `!` does not match `start`'s built-in `Error!` slot. Recover with `catch`, map the error, or call this from a function with a compatible error slot.
-
-- `!` in a real non-fallible function:
-
-  > This function does not declare a compatible error slot for this `!`. Add builtin `Error!` when that is the contract, or recover locally with `catch`. Implicit numeric failure in a private function is a separate propagation path and does not make an unrelated typed `!` legal.
-
-Keep the stable `MOTH-RULE-0051` family unless a branch belongs to an existing more precise code.
+**Remaining catch presentation scope:** refine eligibility and recovery guidance through the
+existing reason family. Plain-value rejection should explain the absence of compatible recoverable
+failure and authored safety-catch eligibility. Optional-value rejection should guide authors
+towards explicit inspection. Keep authored handler, operand channel and expression boundary clear
+without describing a source Result carrier. This scope adds no propagation-boundary owner or
+replacement reason matrix. Section 4.2 retains the catch-recovery type-context work.
 
 #### Reclassify invalid public carrier type spellings
 
@@ -763,7 +696,7 @@ unchanged.
 
 Message:
 
-> Type mismatch in catch recovery: expected `Int`, found `String`.
+> Type mismatch in catch recovery: expected `I32`, found `String`.
 
 Guidance may explain that each `then` value must match the corresponding success slot. Keep expected and found types as `TypeId`s.
 
@@ -786,30 +719,24 @@ Tests need:
 - valid value-producing match at a declaration receiver
 - exhaustive choice coverage or `else` so the fixture does not fail for an unrelated reason
 
-### 4.4 Single-target/multiple-result rejection transferred to native results
+### 4.4 Single-target/multiple-result rejection delivered through native results
 
 **Original finding:** DIAG-031
 
-**Disposition: transferred, pending implementation.** The typed semantic expression and native
-result cutover owns this correction for every declaration, assignment, return and produced-`then`
-receiver. The original finding came from an internal tuple that let two success slots appear to be
-one expression value. Native result shape removes that ambiguity and is the right place to enforce
-arity before coercion or lowering.
+**Disposition: transferred and delivered in `00e4ad555`.** The typed semantic expression and native
+result cutover enforces receiver arity before coercion or lowering through `InvalidValueReceiver`
+under `MOTH-RULE-0087`, without using `InvalidMultiBind` for source that has no multi-bind.
+The payload records receiver kind, target count, produced success-slot count and authored producer
+location. Guidance asks for one target per success slot without `_`, implicit discards, fabricated
+names or a source-tuple suggestion.
 
-The owning cutover must preserve these requirements:
+The delivered coverage includes declaration, assignment, return and nested value-producing
+receiver rejection, matching multi-bind and multi-result forwarding. Ordered production computes
+all right-hand results before writing existing assignment targets.
 
-- one factual value-receiver diagnostic family, without misusing `InvalidMultiBind` for source
-  that has no multi-bind
-- receiver kind, target count, produced success-slot count and authored producer location
-- guidance to receive one target per success slot, without `_`, implicit discards, fabricated names
-  or a suggestion that multiple results are a source tuple
-- negative declaration, assignment, return and nested value-producing receiver coverage at their
-  distinct semantic boundaries, plus accepted matching multi-bind and multi-result forwarding
-- all right-hand results computed before any existing assignment target is written
-
-This plan has no remaining implementation slice for DIAG-031. On reactivation, consume the
-delivered family and its primary tests through the compact diagnostic schema. Do not recreate the
-old tuple-based receiver check or duplicate its tests under a diagnostics-only owner.
+This plan has no remaining implementation slice for DIAG-031. Its compact diagnostic schema
+consumes the delivered family and primary tests rather than recreating tuple-based checks or
+duplicating coverage.
 
 ### 4.5 Use the same `then` diagnostic at top level and in functions
 
@@ -1045,26 +972,26 @@ Apply the same terminology to the non-optional-scrutinee, type-annotation and mi
 reasons. Internal AST `OptionPresentCapture` node names are outside this diagnostic wording slice
 and do not need a semantic refactor.
 
-### 5.6 Make scalar type-call diagnostics factual
+### 5.6 Keep scalar type-call diagnostics factual
 
-**Additional audit finding:** `InvalidBuiltinCallReason::ScalarConstructorRemoved`, several
-`*_constructor_removed` fixtures and the dead `InvalidCastReason::ScalarConstructorRemoved`
-encode history rather than the authored mistake. Unlike a discontinued compatibility-only parser
-path, the current expression parser must still handle a builtin type token followed by `(`.
+**Additional confirmed audit finding:** `InvalidBuiltinCallReason::ScalarConstructorRemoved`,
+several `*_constructor_removed` fixtures and the dead
+`InvalidCastReason::ScalarConstructorRemoved` encode historical type names rather than the current
+authored mistake. The accepted numeric inventory has no builtin `Int`, `Uint` or `Float`
+identities. Those spellings receive ordinary name or parse diagnostics, with no compatibility
+reason or alias. The parser still needs a factual diagnostic when an active exact scalar type is
+called as a function.
 
-- Replace the builtin-call reason with a factual type-as-call reason such as
-  `ScalarTypeCalledAsFunction`.
+- Use one factual type-as-call reason such as `ScalarTypeCalledAsFunction` for active scalar types.
 - Render:
 
-  > `Int` is a type, not a conversion function. Use `cast` at an explicit typed boundary.
+  > `I32` is a type, not a conversion function. Use `cast` at an explicit typed receiving boundary.
 
-- Carry the exact builtin type name already available at the emission site.
-- Remove the unused `InvalidCastReason::ScalarConstructorRemoved` variant and render branch.
-- Rename the focused fixtures and tests around current rejection, then remove redundant
-  per-scalar coverage where one table test or one primary integration case protects the same
-  parser contract.
-- Preserve positive `cast` coverage. Do not recognise a former scalar-constructor language
-  feature or describe anything as removed.
+- Carry the exact active builtin type name already available at the emission site.
+- Delete `InvalidCastReason::ScalarConstructorRemoved` and its render branch.
+- Rename focused fixtures and tests around the current rejection. Remove redundant per-scalar
+  coverage only when one table test or primary integration case protects the same parser contract.
+- Preserve positive `cast` coverage. Do not add a compatibility path for removed scalar names.
 
 ## Phase 6: Template and external-JavaScript diagnostics
 
@@ -1255,7 +1182,7 @@ Keep the found semantic `TypeId`.
 
 Message:
 
-> Collection loop source must be a collection, found `Int`. Use a collection after `loop`. For numeric iteration, use range syntax such as `loop 0 to 10 |i|:`.
+> Collection loop source must be a collection, found `I32`. Use a collection after `loop`. For numeric iteration, use range syntax such as `loop 0 to 10 |i|:`.
 
 Do not imply every non-collection source was intended as a range.
 
@@ -1309,10 +1236,10 @@ These items must not be implemented as originally proposed.
 |---|---|---|
 | DIAG-001 | Retained, rewritten | The original snippet used an immutable collection, so `~values.push(...)` alone was not a valid fix. |
 | DIAG-002 | Retained, rewritten | Generic construction uses `Box(...)` at a concrete receiving type, not `Box of T { ... }` or `~Box`. |
-| DIAG-006 | Removed | The snippet was not a const-required cast and bare `cast` with fallible evidence must first be handled with `cast!` or `catch`. The proposed literal-failure branch conflated evidence selection with const failure. |
+| DIAG-006 | Removed, historical rationale superseded | The original snippet was not a const-required cast. Its old handling rationale relied on the removed `cast!` spelling. Plain `cast` now uses ordinary implicit-failure delivery. Keep the rejection of the proposed literal-failure branch, which conflated evidence selection with const failure. |
 | DIAG-007 | Retained, reversed | The binding does need to be mutable. Field assignment is `p.x = ...`, not `~p.x = ...`. |
 | DIAG-017 | Removed as stale | Current rendering identifies `|`, not `/`. A broader parser-context change is not justified without a current reproducible failure. |
-| DIAG-019 | Removed as ambiguous | `MyList {Int}` is a parseable typed declaration missing an initializer. The compiler cannot know it was intended as a type alias. |
+| DIAG-019 | Removed as ambiguous, historical example | At the recorded checkpoint, `MyList {Int}` parsed as a typed declaration missing an initializer. Exact numeric types now replace that old spelling. The compiler still cannot infer that a missing initializer meant a type alias. |
 | DIAG-022 | Removed as incorrect | Direct external package exports support delimiter-free direct selections. A missing symbol may receive a close-name suggestion instead. |
 | DIAG-029 | Removed as incorrect | Raw strings intentionally preserve backslashes and newlines. |
 | DIAG-033 | Removed as ambiguous | Unknown type `A` does not prove that a generic `type A` declaration was intended. |

@@ -95,6 +95,12 @@ Why refuse donor-local indexes at the boundary? Because module-local numbering i
 
 Access classification stays separate from type identity. Mutability and exclusive access do not manufacture fake type shapes.
 
+Numeric identities retain exact width, signedness, precision or decimal scale.
+The fixed types comprise `I8`, `I16`, `I32`, `I64`, `U8`, `U16`, `U32`, `U64`,
+`F16`, `F32` and `F64`. `Byte` keeps a separate non-arithmetic octet identity,
+while `Dec` and `Dec0` share scale zero and `Dec1` through `Dec256` retain
+distinct scales. Targets and build profiles never select these identities.
+
 ## Receiving boundaries and coercion
 
 Expression evaluation finds an expression's **natural type** and stays strict. **Contextual coercion** applies only at explicit **receiving boundaries** owned by the frontend:
@@ -113,6 +119,40 @@ Expression evaluation finds an expression's **natural type** and stays strict. *
 Natural typing asks "what is this?" Contextual coercion asks "may this value enter that slot?" Explicit casts ask "please convert under compiler-owned rules." Those paths stay separate on purpose. Broad implicit conversion would hide bugs. Forbidding every conversion would drown source in noise.
 
 On the page, `visitor` as a `String` meets `greet`'s `name` parameter at a receiving boundary. The constant `"Priya"` met `visitor`'s declaration boundary earlier.
+
+## Construction-only numeric inference
+
+AST gathers numeric constraints across one runtime body, including nested
+blocks, branches, loops and handlers. The implicit root runtime body follows
+the same rule, and each concrete generic instance gets its own state. Copies
+connect an existing numeric origin and mutable writes constrain one binding
+type, not a new type per write.
+
+Exact receiving constraints outrank eligible local numeric peers, which outrank
+the `I32` whole-number and `F64` decimal/exponent defaults. All eligible uses
+participate before defaulting, regardless of source order. Conflicting exact
+receivers diagnose with both constraint locations. Literal size, trait evidence,
+failure effects and backend capabilities never choose a type.
+
+A receiver reaches unresolved literal arithmetic and raw leaves beside named
+operands, but never retypes a named operand or completed result. A known generic
+signature can connect an existing numeric origin through its parameter/result
+equality. The compiler does not inspect the callee body or add general later-use
+inference. A plain `cast` takes its target from an immediate concrete receiver
+and resolves its source independently.
+
+The compiler selects the destination before `moth-lexical` materialises retained
+spelling directly at the exact type, then selects operators and folds values.
+Equal fixed operand types preserve their eligible arithmetic domain:
+`I8 + I8 -> I8` and `F16 + F16 -> F16`. Each integer result checks its selected
+width and each `F16` operation rounds and checks finiteness before the next
+operation, even when a wider scratch carrier computes it.
+
+Numeric unknowns belong only to construction state, never placeholder `TypeId`s
+or durable expression recipes. Constants resolve at their declaration boundary.
+Completed AST, HIR and published interfaces carry concrete canonical types and
+values, with no pending numeric state. The canonical @../../../docs/numbers
+(Numbers) references own the complete inference and operator rules.
 
 ## Bodies, blocks and terminality
 

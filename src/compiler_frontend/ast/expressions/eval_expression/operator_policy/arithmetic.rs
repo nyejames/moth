@@ -1,15 +1,17 @@
 //! Arithmetic and non-comparison binary operator typing policy.
 //!
-//! WHAT: resolves arithmetic result types and the existing Int-only range operator.
+//! WHAT: resolves arithmetic result types and the range value operator.
 //! WHY: the canonical numeric policy owns promotion so AST typing, folding, and lowering use the
-//!      same domain; ranges remain a separate language operation.
+//!      same domain; ranges remain a separate language operation with their own selector.
 
 use super::diagnostics::invalid_operator_types;
 use crate::compiler_frontend::ast::expressions::eval_expression::typing_error::ExpressionTypingError;
-use crate::compiler_frontend::ast::expressions::expression::Operator;
+use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::datatypes::numeric_operators::binary_operation_domain;
+use crate::compiler_frontend::datatypes::numeric_operators::{
+    binary_operation_domain, range_iteration_domain,
+};
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::source::SourceSpan;
 
@@ -23,7 +25,13 @@ pub(super) fn resolve_arithmetic_operator_type(
     let builtins = type_environment.builtins();
 
     if matches!(op, Operator::Range) {
-        return if lhs == builtins.int && rhs == builtins.int {
+        // A range value keeps the endpoints' own exact identities and exposes the range
+        // identity as its result type; the shared range selector decides whether the pair
+        // forms a valid iteration domain, so no separate 32-bit endpoint floor exists here.
+        let domain = NumericScalar::from_type_id(lhs, type_environment)
+            .zip(NumericScalar::from_type_id(rhs, type_environment))
+            .and_then(|(start, end)| range_iteration_domain(start, end, None));
+        return if domain.is_some() {
             Ok(builtins.range)
         } else {
             invalid_operator_types(lhs, rhs, op, span)

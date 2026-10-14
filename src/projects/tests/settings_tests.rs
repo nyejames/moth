@@ -2,7 +2,6 @@
 
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::projects::settings::Config;
-use moth_lexical::numeric::profile::NumericProfile;
 
 #[test]
 fn frontend_options_use_the_configured_loop_limit() {
@@ -10,14 +9,14 @@ fn frontend_options_use_the_configured_loop_limit() {
         template_const_loop_iteration_limit: 42,
         ..Config::default()
     };
-    let options = config.frontend_options(NumericProfile::STANDARD);
+    let options = config.frontend_options();
 
     assert_eq!(options.template_const_loop_iteration_limit, 42);
 }
 
 #[test]
 fn frontend_options_fall_back_to_the_default_loop_limit() {
-    let options = Config::default().frontend_options(NumericProfile::STANDARD);
+    let options = Config::default().frontend_options();
 
     assert_eq!(
         options.template_const_loop_iteration_limit,

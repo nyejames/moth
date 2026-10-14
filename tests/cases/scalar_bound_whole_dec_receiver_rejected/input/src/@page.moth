@@ -1,0 +1,11 @@
+accept_dec2 |value Dec2| -> Dec2:
+    return value
+;
+
+-- A raw whole literal can materialise at the Dec2 receiver. Once bound, the
+-- unannotated whole origin remains integer-family and cannot change to Dec2.
+raw = accept_dec2(1)
+whole = 1
+accept_dec2(whole)
+
+[:unreachable]

@@ -20,4 +20,21 @@ failed_level U8 = copy failed.level
 ok_box ~= Bucket(level = 200)
 ok_result = safe_nudge(~ok_box, 50) catch then 0
 ok_level U8 = copy ok_box.level
-[: field writeback level=[failed_level] code=[failed_code] recovered=[failed_result] exact=[ok_result] exact-level=[ok_level]]
+mixed_nudge |box ~Bucket, step U16| -> U8:
+    box.level += step
+    return box.level
+;
+safe_mixed_nudge |box ~Bucket, step U16| -> U8, Error!:
+    return mixed_nudge(~box, step)
+;
+mixed_box ~= Bucket(level = 200)
+mixed_code ~U32 = 0
+mixed_result = safe_mixed_nudge(~mixed_box, 100) catch |mixed_err|:
+    mixed_code = mixed_err.code
+    then copy mixed_box.level
+;
+mixed_level U8 = copy mixed_box.level
+mixed_ok ~= Bucket(level = 200)
+mixed_exact = safe_mixed_nudge(~mixed_ok, 50) catch then 0
+mixed_exact_level U8 = copy mixed_ok.level
+[: field writeback level=[failed_level] code=[failed_code] recovered=[failed_result] exact=[ok_result] exact-level=[ok_level] mixed-level=[mixed_level] mixed-code=[mixed_code] mixed-recovered=[mixed_result] mixed-exact=[mixed_exact] mixed-exact-level=[mixed_exact_level]]

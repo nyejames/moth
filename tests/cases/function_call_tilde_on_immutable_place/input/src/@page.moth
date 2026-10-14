@@ -1,4 +1,4 @@
-mutate |value ~Int|:
+mutate |value ~I32|:
     value = 5
 ;
 

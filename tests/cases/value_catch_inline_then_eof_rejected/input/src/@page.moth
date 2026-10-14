@@ -1,4 +1,4 @@
-can_error || -> Int, Error!:
+can_error || -> I32, Error!:
     return 1
 ;
 

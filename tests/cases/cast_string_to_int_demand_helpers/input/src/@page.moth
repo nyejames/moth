@@ -1,8 +1,8 @@
-parse_int |text String| -> Int, Error!:
-    return cast! text
+parse_int |text String| -> I32, Error!:
+    return cast text
 ;
 
-value Int = parse_int("42") catch:
+value I32 = parse_int("42") catch:
     then -1
 ;
 

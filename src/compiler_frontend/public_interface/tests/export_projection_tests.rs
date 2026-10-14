@@ -289,7 +289,7 @@ export:\n\
     Button = | label String |\n\
     Status :: Ready,\n\
     ;\n\
-    Shape as Int\n\
+    Shape as I32\n\
     count #= 1\n\
     DISPLAYABLE must:\n\
         show |This| -> String\n\
@@ -515,12 +515,12 @@ fn private_declarations_and_implicit_start_are_excluded() {
     // `helper` and `Inner` are private; the implicit start function is always present for an
     // active module root. Only the public `public_fn` must be recorded.
     let source = "\
-helper |value Int| -> Int:\n\
+helper |value I32| -> I32:\n\
     return value\n\
 ;\n\
-Inner = | x Int |\n\
+Inner = | x I32 |\n\
 export:\n\
-    public_fn |x Int| -> Int:\n\
+    public_fn |x I32| -> I32:\n\
         return x\n\
     ;\n\
 ;\n";
@@ -941,14 +941,14 @@ fn public_source_nominal_origin_index_includes_imported_provider_origin() {
     // The active root is the entry file; the imported root is a normal module-root file compiled only to
     // validate its public declaration surface.
     let (active_output, _span_builder) = prepare_single_file_with_fork(
-        "export:\n    Local = | value Int |\n;\n",
+        "export:\n    Local = | value I32 |\n;\n",
         &active_path,
         &active_path,
         &mut string_table,
         &mut path_fork,
     );
     let (imported_output, _span_builder) = prepare_single_file_with_fork(
-        "export:\n    Imported = | value Int |\n;\n",
+        "export:\n    Imported = | value I32 |\n;\n",
         &imported_path,
         &active_path,
         &mut string_table,
@@ -1054,14 +1054,14 @@ fn public_source_nominal_origin_index_rejects_compilation_root_file_id() {
     let imported_path = PathBuf::from("src/@mod.moth");
 
     let (active_output, _span_builder) = prepare_single_file_with_fork(
-        "export:\n    Local = | value Int |\n;\n",
+        "export:\n    Local = | value I32 |\n;\n",
         &active_path,
         &active_path,
         &mut string_table,
         &mut path_fork,
     );
     let (imported_output, _span_builder) = prepare_single_file_with_fork(
-        "export:\n    Imported = | value Int |\n;\n",
+        "export:\n    Imported = | value I32 |\n;\n",
         &imported_path,
         &active_path,
         &mut string_table,
@@ -1139,7 +1139,7 @@ fn public_source_nominal_origin_index_skips_unowned_source_package_nominal() {
     let package_path = PathBuf::from("src/@pkg.moth");
 
     let (active_output, _span_builder) = prepare_single_file_with_fork(
-        "export:\n    Local = | value Int |\n;\n",
+        "export:\n    Local = | value I32 |\n;\n",
         &active_path,
         &active_path,
         &mut string_table,
@@ -1148,7 +1148,7 @@ fn public_source_nominal_origin_index_skips_unowned_source_package_nominal() {
     // A source-package module root not owned by the project graph: deliberately absent from the
     // origin map, so its table entry is None.
     let (package_output, _span_builder) = prepare_single_file_with_fork(
-        "export:\n    Pkg = | value Int |\n;\n",
+        "export:\n    Pkg = | value I32 |\n;\n",
         &package_path,
         &active_path,
         &mut string_table,
@@ -1252,7 +1252,7 @@ fn public_source_nominal_origin_index_includes_alias_targeted_normal_file_nomina
         &mut path_fork,
     );
     let (impl_output, _span_builder) = prepare_single_file_with_fork(
-        "Counter = | count Int |\n",
+        "Counter = | count I32 |\n",
         &impl_path,
         &active_path,
         &mut string_table,
@@ -1340,14 +1340,14 @@ fn public_source_nominal_origin_index_excludes_private_normal_file_nominal_witho
     // The active root exports `Local` publicly; `Counter` is a private struct in the normal file
     // with no public export targeting it.
     let (active_output, _span_builder) = prepare_single_file_with_fork(
-        "export:\n    Local = | value Int |\n;\n",
+        "export:\n    Local = | value I32 |\n;\n",
         &active_path,
         &active_path,
         &mut string_table,
         &mut path_fork,
     );
     let (impl_output, _span_builder) = prepare_single_file_with_fork(
-        "Counter = | count Int |\n",
+        "Counter = | count I32 |\n",
         &impl_path,
         &active_path,
         &mut string_table,

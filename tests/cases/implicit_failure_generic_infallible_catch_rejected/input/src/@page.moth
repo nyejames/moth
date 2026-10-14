@@ -1,7 +1,7 @@
 identity type T |value T| -> T:
     return value
 ;
-recover |value Int| -> Int:
+recover |value I32| -> I32:
     return identity(value) catch then 0
 ;
 

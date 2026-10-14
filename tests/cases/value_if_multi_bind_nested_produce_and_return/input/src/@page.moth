@@ -1,5 +1,5 @@
-get_values |ready Bool, use_fallback Bool| -> String, Int:
-    first, second Int = if ready:
+get_values |ready Bool, use_fallback Bool| -> String, I32:
+    first, second I32 = if ready:
         if use_fallback:
             then "fallback", 1
         else

@@ -7,7 +7,8 @@
 
 use super::lookup::ScopeDeclarationRef;
 use super::*;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValueStore};
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::build_config::BuildConfigValueOrigin;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::traits::definitions::TraitVisibility;
@@ -43,51 +44,47 @@ impl ScopeContext {
         })
     }
 
-    /// Return a visible, already-resolved module constant initializer by canonical path.
-    ///
-    /// WHAT: exposes only declarations confirmed in the scope's resolved-constant set and
-    ///       applies the same path visibility gate used by source reference lookup.
-    /// WHY: emission-time TIR folding precedes `ConstValueStore` construction, but its
-    ///      numeric range operands still need the existing Stage 3-resolved initializer.
-    pub(crate) fn resolved_module_constant_expression(&self, path: &PathId) -> Option<&Expression> {
+    /// Resolve a visible module constant's canonical content, never its executable occurrence.
+    pub(crate) fn resolved_module_constant_value(
+        &self,
+        path: &PathId,
+        const_values: &ConstValueStore,
+    ) -> Option<ConstValueId> {
         let declaration = self
             .shared
             .top_level_declarations
             .get_visible_resolved_by_path(path, self.visible_declaration_ids.as_deref())?;
-        self.is_explicit_compile_time_constant(declaration)
-            .then_some(&declaration.value)
+        if !self.is_explicit_compile_time_constant(declaration) {
+            return None;
+        }
+        const_values.value_for_path(path)
     }
 
-    /// Visit the visible explicit constant initializer for either a local or module declaration.
-    ///
-    /// WHAT: resolves the initializer by explicit-constant visibility and hands the borrowed
-    ///       value to `visit` once, cloning nothing.
-    /// WHY: the module table and the local arena already own every declaration, so consumers
-    ///       borrow during lookup instead of materialising an owned initializer (a full
-    ///       const-record clone is never needed for a membership check, and an eager clone
-    ///       would also copy ordinary runtime initializers that fail the explicit check).
-    pub(crate) fn with_explicit_constant_expression<T>(
+    /// Apply ordinary visibility and authored `#` provenance before reading folded content.
+    pub(crate) fn explicit_constant_value(
         &self,
         path: &PathId,
         path_fork: &PathInternerFork,
-        visit: impl FnOnce(&Expression) -> T,
-    ) -> Option<T> {
-        if let Some(expression) = self.resolved_module_constant_expression(path) {
-            return Some(visit(expression));
+        const_values: &ConstValueStore,
+    ) -> Option<ConstValueId> {
+        if let Some(value) = self.resolved_module_constant_value(path, const_values) {
+            return Some(value);
         }
 
         let name = path_fork.component(*path)?;
         let declaration = self.get_reference(&name)?;
-        match declaration {
-            // Body-local constants are arena-owned `Rc` handles, so the visit runs while the
-            // handle lives; module declarations already borrow from the immutable lookup table.
-            ScopeDeclarationRef::Local { declaration, .. } => (declaration.id == *path
-                && self.is_explicit_compile_time_constant(declaration.as_ref()))
-            .then(|| visit(&declaration.value)),
-            ScopeDeclarationRef::Shared(declaration) => (declaration.id == *path
-                && self.is_explicit_compile_time_constant(declaration))
-            .then(|| visit(&declaration.value)),
-        }
+        let is_explicit = match declaration {
+            ScopeDeclarationRef::Local { declaration, .. } => {
+                declaration.id == *path && self.is_explicit_compile_time_constant(&declaration)
+            }
+            ScopeDeclarationRef::Shared(declaration) => {
+                declaration.id == *path && self.is_explicit_compile_time_constant(declaration)
+            }
+            ScopeDeclarationRef::PendingNumeric { .. } => false,
+        };
+        is_explicit
+            .then(|| const_values.value_for_path(path))
+            .flatten()
     }
 
     /// Resolve retained source-`#Config` provenance from the complete map or bootstrap records.
@@ -126,11 +123,14 @@ impl ScopeContext {
     pub fn new_tir_fold_context<'b>(
         &'b self,
         string_table: &'b mut StringTable,
+        expression_builder: &'b mut AstExpressionBuilder,
+        const_values: &'b mut ConstValueStore,
     ) -> TirFoldContext<'b> {
         TirFoldContext {
             string_table,
+            expression_builder,
+            const_values,
             template_const_loop_iteration_limit: self.shared.template_const_loop_iteration_limit,
-            numeric_profile: self.shared.numeric_profile,
             bindings: Vec::new(),
             source_scope: Some(self),
         }

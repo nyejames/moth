@@ -14,8 +14,7 @@ use crate::compiler_frontend::ast::const_values::store::{
 };
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
-use crate::compiler_frontend::ast::expressions::expression_kind::ExpressionKind;
+use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::file_value_resolution::resolve_file_value;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{
@@ -98,7 +97,7 @@ fn markdown_file_value_folds_to_target_content_constant() {
 fn resource_file_value_folds_to_one_resource_piece_with_owner_relative_origin() {
     let owner_relative_path = portable_resource_path("vendor/drawing.js");
     let module_origin = test_module_origin();
-    let (expression, module_resources, _) = resolve_file_value_fixture(
+    let (expression, expressions, constants, module_resources, _) = resolve_file_value_fixture(
         "@vendor/drawing.js",
         PreparedFileReferenceClass::ResourceFile,
         ResolvedFileReferenceOutcome::Target(ResolvedFileReferenceTarget::ResourceSource {
@@ -108,7 +107,7 @@ fn resource_file_value_folds_to_one_resource_piece_with_owner_relative_origin() 
     )
     .expect("resource value should resolve");
 
-    let pieces = structural_string_pieces(expression);
+    let pieces = structural_string_pieces(expression, &expressions, &constants);
     let [ConstStringPiece::Resource(resource)] = pieces.as_slice() else {
         panic!("resource value should fold to exactly one Resource piece: {pieces:?}");
     };
@@ -125,7 +124,7 @@ fn resource_file_value_folds_to_one_resource_piece_with_owner_relative_origin() 
 
 #[test]
 fn bare_site_root_file_value_folds_to_one_site_root_piece() {
-    let (expression, module_resources, _) = resolve_file_value_fixture(
+    let (expression, expressions, constants, module_resources, _) = resolve_file_value_fixture(
         "@/",
         PreparedFileReferenceClass::SiteRoot,
         ResolvedFileReferenceOutcome::NoPhysicalTarget,
@@ -133,7 +132,7 @@ fn bare_site_root_file_value_folds_to_one_site_root_piece() {
     .expect("site root value should resolve");
 
     assert_eq!(
-        structural_string_pieces(expression),
+        structural_string_pieces(expression, &expressions, &constants),
         [ConstStringPiece::SiteRoot],
     );
     assert!(
@@ -280,7 +279,14 @@ fn resource_file_value_in_function_parameter_default_resolves_through_stage_zero
             })
         })
         .expect("function parameter default should be retained in the AST signature");
-    let ExpressionKind::StructuralString { pieces } = &parameter.value.kind else {
+    let default = parameter
+        .default
+        .expect("function parameter default should be retained in the AST signature");
+    let ConstValuePayload::String(ConstStringValue::Pieces(pieces)) = ast
+        .const_values
+        .payload(default)
+        .expect("function parameter default should be stored")
+    else {
         panic!("function parameter default should fold to a structural string");
     };
     assert!(
@@ -624,18 +630,21 @@ fn assert_file_value_reuses_content(
     );
 }
 
+/// The resolved expression, the builder it was appended into, and the stores that resolution
+/// read or wrote, as returned by the file-value fixture.
+type FileValueFixtureOutput = (
+    ExprId,
+    AstExpressionBuilder,
+    crate::compiler_frontend::ast::const_values::store::ConstValueStore,
+    Rc<RefCell<ModuleResourceTable>>,
+    StableModuleOriginIdentity,
+);
+
 fn resolve_file_value_fixture(
     source: &str,
     class: PreparedFileReferenceClass,
     outcome: ResolvedFileReferenceOutcome,
-) -> Result<
-    (
-        Expression,
-        Rc<RefCell<ModuleResourceTable>>,
-        StableModuleOriginIdentity,
-    ),
-    ExpressionParseError,
-> {
+) -> Result<FileValueFixtureOutput, ExpressionParseError> {
     let mut string_table = StringTable::new();
     let source_path_buf = PathBuf::from("@page.moth");
     let source_files = Arc::new(
@@ -730,35 +739,54 @@ fn resolve_file_value_fixture(
     cursor
         .set_position(path_token_index)
         .expect("file-value fixture path position must remain in canonical range");
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values =
+        crate::compiler_frontend::ast::const_values::store::ConstValueStore::default();
     let expression = resolve_file_value(
         path_syntax_id,
         &cursor,
         &context,
         &type_interner,
+        &mut expression_builder,
+        &mut const_values,
         &ValueMode::ImmutableOwned,
         &mut string_table,
         &mut path_fork,
     )?;
 
-    Ok((expression, module_resources, module_origin))
+    Ok((
+        expression.id(),
+        expression_builder,
+        const_values,
+        module_resources,
+        module_origin,
+    ))
 }
 
-fn structural_string_pieces(expression: Expression) -> Vec<ConstStringPiece> {
-    match expression.kind {
-        ExpressionKind::StructuralString { pieces } => pieces,
-        other => panic!("expected structural string, got {other:?}"),
-    }
+fn structural_string_pieces(
+    expression: ExprId,
+    expressions: &AstExpressionBuilder,
+    constants: &crate::compiler_frontend::ast::const_values::store::ConstValueStore,
+) -> Vec<ConstStringPiece> {
+    use crate::compiler_frontend::ast::expressions::expression_store::ExpressionOperationView;
+    let ExpressionOperationView::Constant(value) = expressions
+        .view(expression)
+        .expect("file-value expression belongs to builder")
+        .operation()
+    else {
+        panic!("expected structural string, got non-constant file value");
+    };
+    let ConstValuePayload::String(ConstStringValue::Pieces(pieces)) = constants
+        .payload(value)
+        .expect("file-value constant has content")
+    else {
+        panic!("expected structural string, got non-piece file value");
+    };
+    pieces.clone()
 }
 
 fn assert_invalid_expression_reason(
-    result: Result<
-        (
-            Expression,
-            Rc<RefCell<ModuleResourceTable>>,
-            StableModuleOriginIdentity,
-        ),
-        ExpressionParseError,
-    >,
+    result: Result<FileValueFixtureOutput, ExpressionParseError>,
     expected_reason: InvalidExpressionReason,
 ) {
     let error = result.expect_err("invalid file value should produce a diagnostic");
@@ -786,14 +814,7 @@ fn test_module_origin() -> StableModuleOriginIdentity {
 }
 
 fn assert_surfaced_stage0_boundary_diagnostic(
-    result: Result<
-        (
-            Expression,
-            Rc<RefCell<ModuleResourceTable>>,
-            StableModuleOriginIdentity,
-        ),
-        ExpressionParseError,
-    >,
+    result: Result<FileValueFixtureOutput, ExpressionParseError>,
     expected_reason: InvalidCompileTimePathReason,
 ) {
     let error = result.expect_err("a boundary-rejected file value must not resolve");

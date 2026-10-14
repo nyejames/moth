@@ -1,0 +1,7 @@
+read_length |values {U64}| -> I32:
+    return values.length()
+;
+values = {4_294_967_296}
+read_length(values)
+text = [:unhandled=[values.get(0)]]
+[:[text]]

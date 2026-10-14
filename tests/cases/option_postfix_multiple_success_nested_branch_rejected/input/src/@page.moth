@@ -1,0 +1,11 @@
+find_name || -> String?:
+    return "Priya"
+;
+
+display_pair |present Bool| -> String?, String?:
+    if present:
+        name = find_name()?
+        return name, "guest"
+    ;
+    return none, none
+;

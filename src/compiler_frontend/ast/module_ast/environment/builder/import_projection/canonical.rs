@@ -48,12 +48,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 let value_id = self.intern_imported_canonical_type(value)?;
                 self.type_environment.intern_map(key_id, value_id)
             }
-            CanonicalTypeIdentity::FallibleCarrier(carrier) => {
-                let success_id = self.intern_imported_canonical_type(carrier.success())?;
-                let error_id = self.intern_imported_canonical_type(carrier.error())?;
-                self.type_environment
-                    .intern_fallible_carrier(success_id, error_id)
-            }
             CanonicalTypeIdentity::SourceNominal(origin) => self
                 .imported_type_ids_by_origin
                 .get(origin)

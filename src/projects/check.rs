@@ -59,10 +59,10 @@ fn attach_source_database_if_missing(
 
 /// Run one `check` command with the builder the command arm selected.
 ///
-/// WHAT: executes frontend-only validation with the explicit inputs the command materialised,
+/// WHAT: executes frontend-only validation with the explicit inputs the command classified,
 ///       captures the single command duration, then renders the classified outcome.
-/// WHY:  the selected builder owns the numeric profile those inputs were materialised under, so
-///       the command arm hands it in rather than the check lane constructing a second builder.
+/// WHY:  the command arm owns builder selection, so it hands the builder in rather than the
+///       check lane constructing a second one.
 pub(crate) fn run_check(
     path: &str,
     options: CheckOptions,
@@ -173,7 +173,6 @@ fn execute_check(
         validated_directory_output_settings,
         mut project_source_files,
         build_config_inputs,
-        numeric_profile,
     } = match bootstrap_project_build(project_builder, valid_path, build_config_inputs) {
         Ok(bootstrap) => bootstrap,
         Err(messages) => {
@@ -187,7 +186,6 @@ fn execute_check(
     let messages = match compile_project_frontend_with_inputs(
         &mut config,
         BuildProfile::Dev,
-        numeric_profile,
         validated_directory_output_settings.as_ref(),
         &style_directives,
         &mut frontend_surface,

@@ -34,6 +34,7 @@ use crate::projects::settings::{
     TEMPLATE_CONST_LOOP_ITERATION_LIMIT_KEY,
 };
 use moth_lexical::identifier::is_identifier;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
@@ -304,7 +305,7 @@ fn apply_project_record_fields(
 
             ("license", ValidatedConfigValue::OptionNone) => config.license = None,
 
-            ("template_const_loop_iteration_limit", ValidatedConfigValue::Int(value)) => {
+            ("template_const_loop_iteration_limit", ValidatedConfigValue::FixedScalar(value)) => {
                 match validate_template_const_loop_iteration_limit(value, field.span, string_table)
                 {
                     Ok(limit) => config.template_const_loop_iteration_limit = limit,
@@ -508,8 +509,7 @@ struct ValueDiagnosticContext<'a> {
 #[derive(Debug, PartialEq, Eq)]
 enum ValidatedConfigValue {
     String(String),
-    Int(i64),
-    Float(crate::compiler_frontend::folded_value::FiniteFloat),
+    FixedScalar(FixedScalarValue),
     Bool(bool),
     Char(char),
     OptionNone,
@@ -602,16 +602,11 @@ fn validate_value_with_span(
             _ => ValueCheck::Mismatch,
         },
 
-        ConfigFieldShape::Int => match extract_int_value(value) {
-            Some(int_value) => ValueCheck::Valid(ValidatedConfigValue::Int(int_value)),
-
-            None => ValueCheck::Mismatch,
-        },
-
-        ConfigFieldShape::Float => match extract_float_value(value) {
-            Some(float_value) => ValueCheck::Valid(ValidatedConfigValue::Float(float_value)),
-
-            None => ValueCheck::Mismatch,
+        ConfigFieldShape::FixedScalar(expected) => match value {
+            PublicFoldedValue::FixedScalar(scalar) if scalar.scalar() == *expected => {
+                ValueCheck::Valid(ValidatedConfigValue::FixedScalar(*scalar))
+            }
+            _ => ValueCheck::Mismatch,
         },
 
         ConfigFieldShape::Bool => match extract_bool_value(value) {
@@ -903,13 +898,14 @@ fn shape_failure_reason(
 /// transducer.
 fn project_supported_metadata(value: &PublicFoldedValue) -> Option<PublicFoldedValue> {
     match value {
-        PublicFoldedValue::Int(value) => Some(PublicFoldedValue::Int(*value)),
-        PublicFoldedValue::Float(value) => Some(PublicFoldedValue::Float(value.clone())),
+        // Folded numeric metadata now carries its exact scalar width and precision, so every
+        // fixed scalar projects through unchanged instead of being reinterpreted at one width.
+        PublicFoldedValue::FixedScalar(value) => Some(PublicFoldedValue::FixedScalar(*value)),
         PublicFoldedValue::Bool(value) => Some(PublicFoldedValue::Bool(*value)),
         PublicFoldedValue::Char(value) => Some(PublicFoldedValue::Char(*value)),
         PublicFoldedValue::String(value) => Some(PublicFoldedValue::String(value.clone())),
         PublicFoldedValue::OptionNone => Some(PublicFoldedValue::OptionNone),
-        PublicFoldedValue::ConstTemplate(template) => concrete_template_string(template)
+        PublicFoldedValue::ConstTemplate { template, .. } => concrete_template_string(template)
             .map(|text| PublicFoldedValue::String(OwnedFoldedString::Text(text))),
         PublicFoldedValue::OptionSome(inner) => project_supported_metadata(inner)
             .map(|value| PublicFoldedValue::OptionSome(Box::new(value))),
@@ -931,9 +927,7 @@ fn project_supported_metadata(value: &PublicFoldedValue) -> Option<PublicFoldedV
             }
             Some(PublicFoldedValue::Record(converted))
         }
-        PublicFoldedValue::Uint(_)
-        | PublicFoldedValue::FixedScalar(_)
-        | PublicFoldedValue::Number(_)
+        PublicFoldedValue::Number(_)
         | PublicFoldedValue::Choice { .. }
         | PublicFoldedValue::Range { .. } => None,
     }
@@ -947,7 +941,7 @@ fn project_supported_metadata(value: &PublicFoldedValue) -> Option<PublicFoldedV
 fn extract_string_value(value: &PublicFoldedValue) -> Option<String> {
     match value {
         PublicFoldedValue::String(value) => value.clone().into_text(),
-        PublicFoldedValue::ConstTemplate(template) => concrete_template_string(template),
+        PublicFoldedValue::ConstTemplate { template, .. } => concrete_template_string(template),
         _ => None,
     }
 }
@@ -983,28 +977,6 @@ fn format_closed_string_set_expected(allowed: &[&str]) -> String {
     }
 }
 
-/// Extract an integer value.
-///
-/// WHY: numeric config keys must not accept floats, bools, or strings through coercion or
-/// stringification. The folded declaration boundary already resolved coercions to their
-/// inner value.
-fn extract_int_value(value: &PublicFoldedValue) -> Option<i64> {
-    match value {
-        PublicFoldedValue::Int(value) => Some(*value),
-        _ => None,
-    }
-}
-
-/// Extract a finite floating-point value without accepting integer promotion.
-fn extract_float_value(
-    value: &PublicFoldedValue,
-) -> Option<crate::compiler_frontend::folded_value::FiniteFloat> {
-    match value {
-        PublicFoldedValue::Float(value) => Some(value.clone()),
-        _ => None,
-    }
-}
-
 /// Extract a character value without accepting string coercion.
 fn extract_char_value(value: &PublicFoldedValue) -> Option<char> {
     match value {
@@ -1024,10 +996,15 @@ fn extract_bool_value(value: &PublicFoldedValue) -> Option<bool> {
 }
 
 fn validate_template_const_loop_iteration_limit(
-    value: i64,
+    value: FixedScalarValue,
     span: Option<SourceSpan>,
     string_table: &mut StringTable,
 ) -> Result<usize, Vec<CompilerDiagnostic>> {
+    // The project schema guarantees an exact I32 before applying the resource bound.
+    debug_assert_eq!(value.scalar(), FixedScalar::I32);
+    let value = value
+        .as_i64()
+        .expect("the validated loop limit is an I32 scalar");
     if value <= 0 {
         return Err(vec![config_diagnostic(
             Some(string_table.intern(TEMPLATE_CONST_LOOP_ITERATION_LIMIT_KEY)),
@@ -1039,9 +1016,7 @@ fn validate_template_const_loop_iteration_limit(
         )]);
     }
 
-    // The setting is a positive `Int` and the loop budget is a `usize` count. A configured value
-    // wider than this platform's `usize` is past the documented maximum rather than a distinct
-    // failure, so it reports the same oversized-setting diagnostic.
+    // The positive I32 setting becomes a physical loop budget only after schema validation.
     let limit = usize::try_from(value).unwrap_or(usize::MAX);
     if limit > MAX_TEMPLATE_CONST_LOOP_ITERATIONS {
         return Err(vec![config_diagnostic(

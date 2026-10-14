@@ -1,4 +1,4 @@
-TaskId as Int
+TaskId as I32
 
 Task = |
     id TaskId,

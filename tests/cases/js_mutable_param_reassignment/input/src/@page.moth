@@ -1,7 +1,7 @@
 -- Prove mutable param reassignment: the caller-visible result after mutation is
 -- rendered into the page, proving caller-observable semantics.
 
-increment |value ~Int| -> Int:
+increment |value ~I32| -> I32:
     value = value + 1
     return value
 ;

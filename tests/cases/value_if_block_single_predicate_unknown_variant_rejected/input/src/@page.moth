@@ -3,7 +3,7 @@ Status ::
     Waiting,
 ;
 
-score_for |status Status| -> Int:
+score_for |status Status| -> I32:
     score = if status is Unknown:
         then 1
     else

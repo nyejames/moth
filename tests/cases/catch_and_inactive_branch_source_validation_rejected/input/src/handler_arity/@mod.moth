@@ -1,0 +1,5 @@
+pair || -> I32, I32, Error!:
+    return 1, 2
+;
+
+left, right = pair() catch then 0

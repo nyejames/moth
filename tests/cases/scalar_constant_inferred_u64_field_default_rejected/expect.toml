@@ -1,0 +1,25 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-TYPE-0001"]
+message_contains = ["expected U64, found I32"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+path = "input/@page.moth"
+line = 6
+column = 16
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-TYPE-0001"]
+message_contains = ["expected U64, found I32"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-TYPE-0001"
+path = "input/@page.moth"
+line = 6
+column = 16

@@ -4,6 +4,6 @@
 @values later
 @values base
 
-total #Int = later + 1
+total #I32 = later + 1
 
 [:[total]]

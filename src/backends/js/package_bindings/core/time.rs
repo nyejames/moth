@@ -2,7 +2,7 @@
 //!
 //! WHAT: emits the non-inline helpers used by the typed time package.
 //! WHY: ISO parsing needs exact grammar validation and ISO rendering needs range checks;
-//!      both return Moth's internal fallible carrier shape instead of throwing host errors.
+//!      both return fallible JavaScript ABI envelopes instead of throwing host errors.
 
 use std::sync::LazyLock;
 

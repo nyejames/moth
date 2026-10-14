@@ -5,7 +5,7 @@ A visible name can't be declared again.
 
     if score > 0:
         -- Invalid: score already exists.
-        score Int = 20
+        score I32 = 20
     ;
 ]
 

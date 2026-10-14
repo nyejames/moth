@@ -2,4 +2,4 @@ Key ::
     Primary,
 ;
 
-bad {Key = Int} = {}
+bad {Key = I32} = {}

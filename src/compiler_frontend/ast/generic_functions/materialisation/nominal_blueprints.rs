@@ -1,13 +1,14 @@
 //! Stable nominal blueprints and generated-local nominal reconstruction.
 
-use super::preparation_freeze::ModuleMaterialisationPreparation;
+use super::preparation_freeze::{ModuleMaterialisationCapture, ModuleMaterialisationPreparation};
+use super::semantic_closure::collect_reachable_nominal_identities;
 use super::stable_types::{
     GeneratedFoldedValueMaterialiser, GeneratedValueMaterialisationServices,
     MaterialisationNominalOriginResolver, MaterialisationNominalSource,
+    const_store_error_into_compiler_error, import_canonical_folded_value,
 };
-use crate::compiler_frontend::ast::ast_nodes::Declaration;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-use crate::compiler_frontend::ast::module_ast::environment::builder::import_projection::values::materialize_public_folded_value;
+use crate::compiler_frontend::ast::ast_nodes::{Declaration, DeclarationShell, DeclarationValue};
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTraitIdentity, CanonicalTypeIdentity, CanonicalTypeProjectionContext,
     ExportedGenericParameterIdentity, ExternalOpaqueTypeIdentity, GenericDeclarationOrigin,
@@ -126,11 +127,6 @@ pub(super) enum MaterialisationTypeBlueprint {
         value: Box<MaterialisationTypeBlueprint>,
     },
     Option(Box<MaterialisationTypeBlueprint>),
-    FallibleCarrier {
-        success: Box<MaterialisationTypeBlueprint>,
-        error: Box<MaterialisationTypeBlueprint>,
-    },
-    Tuple(Box<[MaterialisationTypeBlueprint]>),
     GenericInstance {
         base: CanonicalTypeIdentity,
         arguments: Box<[MaterialisationTypeBlueprint]>,
@@ -178,13 +174,7 @@ impl MaterialisationTypeBlueprint {
     ) {
         match self {
             Self::Canonical(identity) => {
-                if matches!(
-                    identity,
-                    CanonicalTypeIdentity::SourceNominal(_)
-                        | CanonicalTypeIdentity::ModulePrivateNominal(_)
-                ) {
-                    identities.insert(identity.clone());
-                }
+                collect_reachable_nominal_identities(identity, identities);
             }
             Self::GenericParameter(_) => {}
             Self::Collection { element, .. } | Self::Option(element) => {
@@ -193,15 +183,6 @@ impl MaterialisationTypeBlueprint {
             Self::OrderedMap { key, value } => {
                 key.collect_nominal_identities(identities);
                 value.collect_nominal_identities(identities);
-            }
-            Self::FallibleCarrier { success, error } => {
-                success.collect_nominal_identities(identities);
-                error.collect_nominal_identities(identities);
-            }
-            Self::Tuple(elements) => {
-                for element in elements {
-                    element.collect_nominal_identities(identities);
-                }
             }
             Self::GenericInstance { base, arguments } => {
                 identities.insert(base.clone());
@@ -237,13 +218,13 @@ pub(super) fn materialised_nominal_declaration(
     };
     Ok(Declaration {
         id: local_path,
-        value: Expression::new(
-            ExpressionKind::NoValue,
-            None,
-            type_id,
-            diagnostic_type,
-            ValueMode::ImmutableReference,
-        ),
+        type_id,
+        value: DeclarationValue::Shell(match &diagnostic_type {
+            DataType::Struct { .. } => DeclarationShell::Struct,
+            _ => DeclarationShell::Choice,
+        }),
+        diagnostic_type,
+        value_mode: ValueMode::ImmutableReference,
         binding_span: None,
         config_qualifier: None,
     })
@@ -254,7 +235,7 @@ pub(super) fn materialised_struct_fields(
     type_environment: &mut TypeEnvironment,
     blueprint: &NominalMaterialisationBlueprint,
     nominal_source: &impl MaterialisationNominalSource,
-    services: &GeneratedValueMaterialisationServices<'_>,
+    services: &mut GeneratedValueMaterialisationServices<'_>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<Option<Vec<Declaration>>, CompilerError> {
@@ -292,42 +273,40 @@ pub(super) fn materialised_struct_fields(
             ));
         }
         let field_span = blueprint_field.span;
-        let mut value = if let Some(default) = blueprint_field.folded_default.as_ref() {
+        let value = if let Some(default) = blueprint_field.folded_default.as_ref() {
             let mut materialiser = GeneratedFoldedValueMaterialiser {
                 type_environment,
                 external_registry: services.external_registry,
                 nominal_source,
-                template_ir_store: Rc::clone(services.template_ir_store),
                 module_resources: Rc::clone(&services.module_resources),
                 path_fork,
             };
-            materialize_public_folded_value(
+            let value_id = import_canonical_folded_value(
                 &mut materialiser,
                 default,
                 field.type_id,
+                services.const_values,
                 string_table,
                 field_span,
-            )?
-        } else {
-            Expression::new(
-                ExpressionKind::NoValue,
-                field_span,
-                field.type_id,
-                diagnostic_type_spelling(field.type_id, type_environment),
-                ValueMode::ImmutableReference,
             )
+            .map_err(const_store_error_into_compiler_error)?;
+            DeclarationValue::Default(value_id)
+        } else {
+            DeclarationValue::Absent
         };
-        value.value_mode = ValueMode::ImmutableReference;
         declarations.push(Declaration {
             id: field.name,
+            type_id: field.type_id,
+            diagnostic_type: diagnostic_type_spelling(field.type_id, type_environment),
+            value_mode: ValueMode::ImmutableReference,
             value,
-            binding_span: None,
+            binding_span: field_span,
             config_qualifier: None,
         });
     }
     Ok(Some(declarations))
 }
-impl ModuleMaterialisationPreparation {
+impl ModuleMaterialisationCapture {
     /// Freeze every requester-visible nominal definition into owned, stable semantic data.
     ///
     /// Imported and local aliases can add several lookup paths for the same nominal. The
@@ -335,6 +314,7 @@ impl ModuleMaterialisationPreparation {
     /// deterministic identity order.
     pub(super) fn install_nominal_blueprints(
         &mut self,
+        const_values: &ConstValueStore,
         resources: &ModuleResourceTable,
         path_fork: &crate::compiler_frontend::symbols::path_interner::PathInternerFork,
     ) -> Result<(), CompilerError> {
@@ -354,7 +334,8 @@ impl ModuleMaterialisationPreparation {
 
         let mut blueprints = FxHashMap::default();
         for (identity, type_id) in nominal_type_ids {
-            let blueprint = self.nominal_blueprint(&identity, type_id, resources, path_fork)?;
+            let blueprint =
+                self.nominal_blueprint(const_values, &identity, type_id, resources, path_fork)?;
             blueprints.insert(identity, blueprint);
         }
         self.nominal_blueprints = blueprints;
@@ -363,6 +344,7 @@ impl ModuleMaterialisationPreparation {
 
     fn nominal_blueprint(
         &self,
+        const_values: &ConstValueStore,
         identity: &CanonicalTypeIdentity,
         type_id: TypeId,
         resources: &ModuleResourceTable,
@@ -472,6 +454,7 @@ impl ModuleMaterialisationPreparation {
         let definition = match self.type_environment.get(type_id) {
             Some(TypeDefinition::Struct(definition)) => NominalMaterialisationDefinition::Struct {
                 fields: self.nominal_field_blueprints(
+                    const_values,
                     &definition.fields,
                     &parameter_slots,
                     self.type_environment.nominal_path(type_id),
@@ -482,6 +465,7 @@ impl ModuleMaterialisationPreparation {
             },
             Some(TypeDefinition::Choice(definition)) => NominalMaterialisationDefinition::Choice {
                 variants: self.nominal_choice_blueprints(
+                    const_values,
                     &definition.variants,
                     &parameter_slots,
                     self.type_environment.nominal_path(type_id),
@@ -551,6 +535,7 @@ impl ModuleMaterialisationPreparation {
 
     fn nominal_field_blueprints(
         &self,
+        const_values: &ConstValueStore,
         fields: &[FieldDefinition],
         parameter_slots: &FxHashMap<GenericParameterId, usize>,
         nominal_path: Option<&PathId>,
@@ -568,21 +553,25 @@ impl ModuleMaterialisationPreparation {
                 })?;
                 let field_declaration =
                     nominal_path.and_then(|path| self.field_declaration(path, name, path_fork));
-                let folded_default = match field_declaration {
-                    Some(declaration)
-                        if !matches!(declaration.value.kind, ExpressionKind::NoValue) =>
-                    {
-                        Some(self.stable_folded_value_at_expression_path(
-                            &declaration.id,
-                            &declaration.value,
+                let folded_default = field_declaration
+                    .and_then(|declaration| {
+                        declaration
+                            .value
+                            .default()
+                            .map(|value_id| (declaration.id, value_id))
+                    })
+                    .map(|(path, value_id)| {
+                        self.stable_folded_value_at_default_path(
+                            const_values,
+                            &path,
+                            value_id,
                             resources,
                             path_fork,
-                        )?)
-                    }
-                    _ => None,
-                };
+                        )
+                    })
+                    .transpose()?;
                 let authored_span = field_declaration
-                    .map(|declaration| declaration.value.span)
+                    .map(|declaration| declaration.binding_span)
                     .unwrap_or(field.span);
                 Ok(NominalFieldBlueprint {
                     name: self.string_table.resolve(name).to_owned(),
@@ -597,6 +586,7 @@ impl ModuleMaterialisationPreparation {
 
     fn nominal_choice_blueprints(
         &self,
+        const_values: &ConstValueStore,
         variants: &[ChoiceVariantDefinition],
         parameter_slots: &FxHashMap<GenericParameterId, usize>,
         nominal_path: Option<&PathId>,
@@ -610,6 +600,7 @@ impl ModuleMaterialisationPreparation {
                     ChoiceVariantPayloadDefinition::Unit => Box::new([]),
                     ChoiceVariantPayloadDefinition::Record { fields } => self
                         .nominal_field_blueprints(
+                            const_values,
                             fields,
                             parameter_slots,
                             nominal_path,
@@ -768,27 +759,6 @@ impl ModuleMaterialisationPreparation {
                     *inner,
                 )?)))
             }
-            TypeConstructor::Builtin(BuiltinTypeConstructor::FallibleCarrier) => {
-                let [success, error] = arguments else {
-                    return Err(materialisation_type_arity_error(
-                        "fallible carrier",
-                        2,
-                        arguments.len(),
-                    ));
-                };
-                Ok(MaterialisationTypeBlueprint::FallibleCarrier {
-                    success: Box::new(project(*success)?),
-                    error: Box::new(project(*error)?),
-                })
-            }
-            TypeConstructor::Builtin(BuiltinTypeConstructor::Tuple) => {
-                Ok(MaterialisationTypeBlueprint::Tuple(
-                    arguments
-                        .iter()
-                        .map(|argument| project(*argument))
-                        .collect::<Result<Box<[_]>, _>>()?,
-                ))
-            }
         }
     }
 }
@@ -869,25 +839,6 @@ pub(super) fn intern_generated_canonical_type(
                 path_fork,
             )?;
             type_environment.intern_map(key, value)
-        }
-        CanonicalTypeIdentity::FallibleCarrier(carrier) => {
-            let success = intern_generated_canonical_type(
-                carrier.success(),
-                type_environment,
-                external_registry,
-                nominal_source,
-                string_table,
-                path_fork,
-            )?;
-            let error = intern_generated_canonical_type(
-                carrier.error(),
-                type_environment,
-                external_registry,
-                nominal_source,
-                string_table,
-                path_fork,
-            )?;
-            type_environment.intern_fallible_carrier(success, error)
         }
         CanonicalTypeIdentity::SourceNominal(_)
         | CanonicalTypeIdentity::ModulePrivateNominal(_) => intern_materialisation_nominal(
@@ -1060,44 +1011,6 @@ pub(super) fn intern_materialisation_type_blueprint(
             )?;
             Ok(type_environment.intern_option(inner))
         }
-        MaterialisationTypeBlueprint::FallibleCarrier { success, error } => {
-            let success = intern_materialisation_type_blueprint(
-                success,
-                generic_parameter_type_ids,
-                nominal_source,
-                type_environment,
-                external_registry,
-                string_table,
-                path_fork,
-            )?;
-            let error = intern_materialisation_type_blueprint(
-                error,
-                generic_parameter_type_ids,
-                nominal_source,
-                type_environment,
-                external_registry,
-                string_table,
-                path_fork,
-            )?;
-            Ok(type_environment.intern_fallible_carrier(success, error))
-        }
-        MaterialisationTypeBlueprint::Tuple(elements) => {
-            let elements = elements
-                .iter()
-                .map(|element| {
-                    intern_materialisation_type_blueprint(
-                        element,
-                        generic_parameter_type_ids,
-                        nominal_source,
-                        type_environment,
-                        external_registry,
-                        string_table,
-                        path_fork,
-                    )
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(type_environment.intern_tuple(elements))
-        }
         MaterialisationTypeBlueprint::GenericInstance { base, arguments } => {
             let base_type_id = intern_generated_canonical_type(
                 base,
@@ -1168,18 +1081,20 @@ fn materialisation_nominal_path(
         Ok(())
     };
     push_component("<materialised>")?;
+    // Type display and generic base names read the definition path's leaf. Keep the stable
+    // defining spelling last, with identity/category qualifiers confined to its parent path.
     match identity {
         CanonicalTypeIdentity::SourceNominal(origin) => {
             push_component("source")?;
             append_materialisation_module_origin(origin.module_origin(), &mut push_component)?;
-            push_component(origin.defining_name())?;
             push_component(origin_type_category_name(origin.category()))?;
+            push_component(origin.defining_name())?;
         }
         CanonicalTypeIdentity::ModulePrivateNominal(identity) => {
             push_component("private")?;
             append_materialisation_module_origin(identity.module_origin(), &mut push_component)?;
-            push_component(identity.defining_path())?;
             push_component(origin_type_category_name(identity.category()))?;
+            push_component(identity.defining_path())?;
         }
         _ => {
             return Err(CompilerError::compiler_error(
@@ -1426,22 +1341,45 @@ fn intern_materialisation_nominal<N: MaterialisationNominalSource>(
     Ok(type_id)
 }
 
+impl ModuleMaterialisationCapture {
+    pub(super) fn stable_type_identity(
+        &self,
+        type_id: TypeId,
+    ) -> Result<CanonicalTypeIdentity, CompilerError> {
+        stable_type_identity(
+            type_id,
+            &self.type_environment,
+            &self.external_package_registry,
+        )
+    }
+}
+
 impl ModuleMaterialisationPreparation {
     pub(super) fn stable_type_identity(
         &self,
         type_id: TypeId,
     ) -> Result<CanonicalTypeIdentity, CompilerError> {
-        let nominal_origins = MaterialisationNominalOriginResolver {
-            type_environment: &self.type_environment,
-        };
-        let generic_parameter_origins = FoldedValueGenericParameterResolver;
-        let projection_context = CanonicalTypeProjectionContext::new(
-            &nominal_origins,
-            &generic_parameter_origins,
+        stable_type_identity(
+            type_id,
+            &self.type_environment,
             &self.external_package_registry,
-        );
-        project_type_id_to_canonical_identity(type_id, &self.type_environment, &projection_context)
+        )
     }
+}
+
+fn stable_type_identity(
+    type_id: TypeId,
+    type_environment: &TypeEnvironment,
+    external_package_registry: &ExternalPackageRegistry,
+) -> Result<CanonicalTypeIdentity, CompilerError> {
+    let nominal_origins = MaterialisationNominalOriginResolver { type_environment };
+    let generic_parameter_origins = FoldedValueGenericParameterResolver;
+    let projection_context = CanonicalTypeProjectionContext::new(
+        &nominal_origins,
+        &generic_parameter_origins,
+        external_package_registry,
+    );
+    project_type_id_to_canonical_identity(type_id, type_environment, &projection_context)
 }
 #[cfg(test)]
 #[path = "../tests/blueprint_tests.rs"]

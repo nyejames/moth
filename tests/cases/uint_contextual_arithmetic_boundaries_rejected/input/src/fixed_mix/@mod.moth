@@ -1,4 +1,5 @@
-reject_fixed_mix |value Uint, narrow U8| -> String:
-    result = value + narrow
+reject_fixed_mix |value U32, narrow U8| -> String:
+    supported U32 = value + narrow
+    result F32 = value
     return [result]
 ;

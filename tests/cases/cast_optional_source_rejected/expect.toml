@@ -2,4 +2,9 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0083"]
-message_contains = ["does not automatically unwrap optional source values"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0083"
+reason = "invalid_cast.source_is_optional"
+path = "input/@page.moth"
+line = 2

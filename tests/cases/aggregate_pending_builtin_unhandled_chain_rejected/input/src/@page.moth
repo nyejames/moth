@@ -1,0 +1,6 @@
+-- A fallible builtin result cannot become the next chain receiver before handling.
+-- Nested raw collection elements retain their numeric leaves, so this exercises
+-- the retained receiver path rather than only a concrete builtin call.
+
+rows = {{1, 2}, {3}}
+value = rows.get(0).length()

@@ -7,7 +7,7 @@
 -- through one top-level runtime output event.
 
 Inner ::
-    A | value Int |,
+    A | value I32 |,
     B,
 ;
 
@@ -15,7 +15,7 @@ Outer ::
     First,
     Second,
     Word | text String |,
-    Count | numeric_value Int |,
+    Count | numeric_value I32 |,
     Wrapped | inner Inner |,
 ;
 

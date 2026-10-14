@@ -1,0 +1,43 @@
+-- Retained nested catch receiver completion.
+--
+-- A U64 return or assignment receiver owns a catch whose handler is a
+-- statement-shaped value block: an `if` with `then` arms closed by `;`. The
+-- fallible fragment `choose_u64(fail, pending) + 1` keeps its unannotated I32
+-- origin `pending` retained until the owning U64 receiver installs its raw
+-- fallback. The `zero` flag selects the raw literals 0 or 1, so an early I32
+-- default or a premature sweep of the nested handler changes the exact output.
+-- The success path returns 42 and never reaches the handler.
+
+choose_u64 |fail Bool, value I32| -> U64, Error!:
+    if fail:
+        return! Error("u64 nested catch failure")
+    ;
+    return 41
+;
+
+u64_return_handler_if |fail Bool, zero Bool| -> U64:
+    pending = 1
+    return choose_u64(fail, pending) + 1 catch:
+        if zero:
+            then 0
+        else
+            then 1
+        ;
+    ;
+;
+
+u64_assignment_handler_if |fail Bool, zero Bool| -> U64:
+    pending = 1
+    total ~U64 = 0
+    total = choose_u64(fail, pending) + 1 catch:
+        if zero:
+            then 0
+        else
+            then 1
+        ;
+    ;
+    return total
+;
+
+[:scalar nested catch return failure=[u64_return_handler_if(true, true)]/[u64_return_handler_if(true, false)] success=[u64_return_handler_if(false, true)]]
+[:scalar nested catch assignment failure=[u64_assignment_handler_if(true, true)]/[u64_assignment_handler_if(true, false)] success=[u64_assignment_handler_if(false, true)]]

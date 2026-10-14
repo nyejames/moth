@@ -12,11 +12,17 @@
 use super::directive_args::parse_optional_parenthesized_expression;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::const_values::store::{ConstStringValue, ConstValuePayload};
 use crate::compiler_frontend::ast::cursor::AstCursor;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    ExpressionOperationView, ExpressionView,
+};
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template_build_state::TemplateBuildState;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateDirectiveReason,
 };
@@ -27,6 +33,7 @@ use crate::compiler_frontend::style_directives::{
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use moth_lexical::numeric::fixed_scalar::{FixedScalarClass, FixedScalarValue};
 /// Typed result shared by handler-directive parsing helpers.
 type HandlerDirectiveResult<T> = Result<T, TemplateError>;
 
@@ -43,6 +50,8 @@ pub(super) fn apply_handler_style_directive(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     build_state: &mut TemplateBuildState,
     directive_name: &str,
     handler_spec: &StyleDirectiveHandlerSpec,
@@ -53,6 +62,8 @@ pub(super) fn apply_handler_style_directive(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         directive_name,
         handler_spec.argument_type,
         string_table,
@@ -102,10 +113,16 @@ fn apply_style_directive_effects(
 /// Parses the optional handler argument and validates whether this directive
 /// accepts one. Early exits keep the no-argument and invalid-argument cases
 /// explicit.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the directive name and argument type are separate inputs beside the parser borrows"
+)]
 fn parse_optional_handler_style_argument(
     token_stream: &mut AstCursor,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     directive_name: &str,
     argument_type: Option<StyleDirectiveArgumentType>,
     string_table: &mut StringTable,
@@ -119,6 +136,8 @@ fn parse_optional_handler_style_argument(
         token_stream,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         string_table,
         path_fork,
     )?
@@ -141,11 +160,17 @@ fn parse_optional_handler_style_argument(
         .into());
     };
 
-    let argument_span = expression.span;
+    let expression = expression_builder.view(expression)?;
+    let argument_span = expression.span();
 
     let argument_is_compile_time_constant = expression
-        .const_value_kind_with_template_classifier(&mut |template| {
-            classify_template_from_effective_tir(template, &context.template_ir_store)
+        .const_value_kind_with_template_classifier(const_values, &mut |template| {
+            classify_template_from_effective_tir(
+                template,
+                &context.template_ir_store,
+                expression_builder,
+                const_values,
+            )
         })?
         .is_compile_time_value();
 
@@ -163,6 +188,7 @@ fn parse_optional_handler_style_argument(
 
     let normalized = normalize_provided_style_argument_value(
         expression,
+        const_values,
         argument_type,
         directive_name,
         argument_span,
@@ -176,17 +202,28 @@ fn parse_optional_handler_style_argument(
 }
 
 fn normalize_provided_style_argument_value(
-    expression: Expression,
+    expression: ExpressionView<'_>,
+    const_values: &ConstValueStore,
     argument_type: StyleDirectiveArgumentType,
     directive_name: &str,
     argument_span: Option<SourceSpan>,
     string_table: &mut StringTable,
 ) -> HandlerDirectiveResult<StyleDirectiveArgumentValue> {
+    let payload = match expression.operation() {
+        ExpressionOperationView::Constant(value) => {
+            Some(const_values.payload(value).ok_or_else(|| {
+                CompilerError::compiler_error(
+                    "template expression references an absent constant value",
+                )
+            })?)
+        }
+        _ => None,
+    };
     match argument_type {
-        StyleDirectiveArgumentType::String => match expression.kind {
-            ExpressionKind::StringSlice(text) => Ok(StyleDirectiveArgumentValue::String(
-                string_table.resolve(text).to_owned(),
-            )),
+        StyleDirectiveArgumentType::String => match payload {
+            Some(ConstValuePayload::String(ConstStringValue::Text(text))) => Ok(
+                StyleDirectiveArgumentValue::String(string_table.resolve(*text).to_owned()),
+            ),
             _ => Err(with_argument_span(
                 CompilerDiagnostic::invalid_template_directive(
                     Some(string_table.intern(directive_name)),
@@ -198,10 +235,10 @@ fn normalize_provided_style_argument_value(
             .into()),
         },
 
-        StyleDirectiveArgumentType::Template => match expression.kind {
-            ExpressionKind::Template(template) => Ok(StyleDirectiveArgumentValue::Template(
-                Box::new(*template.to_owned()),
-            )),
+        StyleDirectiveArgumentType::Template => match expression.operation() {
+            ExpressionOperationView::Template(template) => Ok(
+                StyleDirectiveArgumentValue::Template(Box::new(template.clone())),
+            ),
             _ => Err(with_argument_span(
                 CompilerDiagnostic::invalid_template_directive(
                     Some(string_table.intern(directive_name)),
@@ -213,22 +250,27 @@ fn normalize_provided_style_argument_value(
             .into()),
         },
 
-        StyleDirectiveArgumentType::Number => match expression.kind {
-            ExpressionKind::Int(value) => Ok(StyleDirectiveArgumentValue::Number(value as f64)),
-            ExpressionKind::Float(value) => Ok(StyleDirectiveArgumentValue::Number(value)),
-            _ => Err(with_argument_span(
-                CompilerDiagnostic::invalid_template_directive(
-                    Some(string_table.intern(directive_name)),
-                    InvalidTemplateDirectiveReason::invalid_argument(),
+        StyleDirectiveArgumentType::Number => {
+            let number = match payload {
+                Some(ConstValuePayload::FixedScalar(value)) => style_argument_number(*value),
+                _ => None,
+            };
+            match number {
+                Some(number) => Ok(StyleDirectiveArgumentValue::Number(number)),
+                None => Err(with_argument_span(
+                    CompilerDiagnostic::invalid_template_directive(
+                        Some(string_table.intern(directive_name)),
+                        InvalidTemplateDirectiveReason::invalid_argument(),
+                        argument_span,
+                    ),
                     argument_span,
-                ),
-                argument_span,
-            )
-            .into()),
-        },
+                )
+                .into()),
+            }
+        }
 
-        StyleDirectiveArgumentType::Bool => match expression.kind {
-            ExpressionKind::Bool(value) => Ok(StyleDirectiveArgumentValue::Bool(value)),
+        StyleDirectiveArgumentType::Bool => match payload {
+            Some(ConstValuePayload::Bool(value)) => Ok(StyleDirectiveArgumentValue::Bool(*value)),
             _ => Err(with_argument_span(
                 CompilerDiagnostic::invalid_template_directive(
                     Some(string_table.intern(directive_name)),
@@ -239,6 +281,20 @@ fn normalize_provided_style_argument_value(
             )
             .into()),
         },
+    }
+}
+
+/// Converts one exact numeric style-directive argument into its `f64` styling value.
+///
+/// WHY: style directives historically accepted the convenience integer/float literals;
+///      they now accept the exact fixed integers and binary floats, while `Byte` and
+///      `Dec` stay outside the numeric styling vocabulary.
+fn style_argument_number(value: FixedScalarValue) -> Option<f64> {
+    match value.scalar().class() {
+        FixedScalarClass::SignedInteger => value.as_i64().map(|value| value as f64),
+        FixedScalarClass::UnsignedInteger => value.as_u64().map(|value| value as f64),
+        FixedScalarClass::BinaryFloat => value.as_f64(),
+        FixedScalarClass::Octet => None,
     }
 }
 

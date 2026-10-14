@@ -12,6 +12,7 @@ use crate::compiler_frontend::external_packages::{
 use crate::compiler_frontend::external_packages::{
     ExternalFunctionDef, ExternalFunctionLowerings, ExternalJsLowering, external_success_returns,
 };
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry) {
     let package_id = registry
@@ -33,7 +34,9 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                         access_kind: ExternalAccessKind::Shared,
                     },
                     crate::compiler_frontend::external_packages::ExternalParameter {
-                        language_type: ExternalSignatureType::NativeInt,
+                        language_type: ExternalSignatureType::Abi(ExternalAbiType::Fixed(
+                            FixedScalar::I32,
+                        )),
                         access_kind: ExternalAccessKind::Shared,
                     },
                 ],
@@ -64,7 +67,9 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                         access_kind: ExternalAccessKind::Mutable,
                     },
                     crate::compiler_frontend::external_packages::ExternalParameter {
-                        language_type: ExternalSignatureType::NativeInt,
+                        language_type: ExternalSignatureType::Abi(ExternalAbiType::Fixed(
+                            FixedScalar::I32,
+                        )),
                         access_kind: ExternalAccessKind::Shared,
                     },
                     crate::compiler_frontend::external_packages::ExternalParameter {
@@ -161,7 +166,9 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                         access_kind: ExternalAccessKind::Mutable,
                     },
                     crate::compiler_frontend::external_packages::ExternalParameter {
-                        language_type: ExternalSignatureType::NativeInt,
+                        language_type: ExternalSignatureType::Abi(ExternalAbiType::Fixed(
+                            FixedScalar::I32,
+                        )),
                         access_kind: ExternalAccessKind::Shared,
                     },
                 ],
@@ -193,7 +200,7 @@ pub fn register_core_collections_package(registry: &mut ExternalPackageRegistry)
                     },
                 ],
                 returns: external_success_returns(
-                    ExternalSignatureType::NativeInt,
+                    ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::I32)),
                     ExternalReturnAlias::Fresh,
                 ),
                 error_return_type: None,

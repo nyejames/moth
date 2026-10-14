@@ -1,0 +1,5 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0024"]
+message_contains = ["Missing left-hand operand for operator '+'"]

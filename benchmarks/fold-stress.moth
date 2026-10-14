@@ -3,7 +3,7 @@
 -- - Large arithmetic expression trees
 -- - Nested constant references
 -- - Chained constant dependencies
--- - Mixed Int and Float arithmetic
+-- - Mixed I32 and F64 arithmetic
 -- - Compile-time template interpolation with constants
 -- - Const record (struct instance) creation
 
@@ -37,7 +37,7 @@ deep5 #= (((2 * 3) + (4 * 5)) * ((6 * 7) + (8 * 9)))
 
 -- Large expression trees
 tree1 #= 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9 + 10 + 11 + 12 + 13 + 14 + 15 + 16 + 17 + 18 + 19 + 20
-tree2 #= 1.0 * 2 * 3 * 4 * 5 * 6 * 7 * 8 * 9 * 10 * 11 * 12 * 13 * 14 * 15
+tree2 #= 1.0 * 2.0 * 3.0 * 4.0 * 5.0 * 6.0 * 7.0 * 8.0 * 9.0 * 10.0 * 11.0 * 12.0 * 13.0 * 14.0 * 15.0
 tree3 #= (1 * 2) + (3 * 4) + (5 * 6) + (7 * 8) + (9 * 10) + (11 * 12) + (13 * 14) + (15 * 16)
 tree4 #= (1 + 2) * (3 + 4) * (5 + 6) * (7 + 8) * (9 + 10) * (11 + 12) * (13 + 14)
 tree5 #= ((1 + 2 + 3) * (4 + 5 + 6)) + ((7 + 8 + 9) * (10 + 11 + 12))
@@ -48,10 +48,14 @@ step2 #= step1 + 200
 step3 #= step2 * 3
 step4 #= step3 - 150
 step5 #= step4 / 5
-step6 #= step5 + step1
-step7 #= step6 * step2
-step8 #= step7 - step3
-step9 #= step8 / step4
+step1_float #F64 = cast step1
+step2_float #F64 = cast step2
+step3_float #F64 = cast step3
+step4_float #F64 = cast step4
+step6 #= step5 + step1_float
+step7 #= step6 * step2_float
+step8 #= step7 - step3_float
+step9 #= step8 / step4_float
 step10 #= step9 + step5
 
 -- Nested constant references
@@ -71,18 +75,23 @@ final_a #= compound_a + compound_b + compound_c
 final_b #= (compound_a * 2) + (compound_b * 3) + (compound_c * 4)
 final_c #= final_a + final_b + base_alpha + base_beta + base_gamma
 
--- Float arithmetic
+-- F64 arithmetic
 f1 #= 1.0 + 2.0 + 3.0 + 4.0 + 5.0
 f2 #= 10.5 * 20.5 * 30.5
 f3 #= 100.0 / 3.0 + 200.0 / 7.0
 f4 #= (1.5 + 2.5) * (3.5 + 4.5) * (5.5 + 6.5)
 f5 #= ((10.0 * 10.0) + (20.0 * 20.0)) / 2.0
 
--- Mixed Int/Float arithmetic
-mix_int_float1 #= 10 + 20.5
-mix_int_float2 #= 100 * 2.5
-mix_int_float3 #= (10 + 20) * 3.5
-mix_int_float4 #= ((1 + 2 + 3) * 10.0) + ((4 + 5 + 6) * 20.0)
+-- Mixed I32/F64 arithmetic
+mix_whole1 #F64 = cast 10
+mix_whole2 #F64 = cast 100
+mix_whole3 #F64 = cast (10 + 20)
+mix_whole4_left #F64 = cast (1 + 2 + 3)
+mix_whole4_right #F64 = cast (4 + 5 + 6)
+mix_int_float1 #= mix_whole1 + 20.5
+mix_int_float2 #= mix_whole2 * 2.5
+mix_int_float3 #= mix_whole3 * 3.5
+mix_int_float4 #= (mix_whole4_left * 10.0) + (mix_whole4_right * 20.0)
 mix_int_float5 #= (100 / 3) + (100.0 / 3.0)
 
 -- Integer division
@@ -137,14 +146,22 @@ sum_cubes #= sum_1_to_100 * sum_1_to_100
 -- Digest chains
 digest_layer1_a #= a1 + a2 + a3 + a4 + a5
 digest_layer1_b #= m1 + m2 + m3 + m4 + m5
-digest_layer1_c #= mix1 + mix2 + mix3 + mix4 + mix5
+mix1_float #F64 = cast mix1
+mix2_float #F64 = cast mix2
+mix4_float #F64 = cast mix4
+digest_layer1_c #= mix1_float + mix2_float + mix3 + mix4_float + mix5
 
 digest_layer2_a #= digest_layer1_a * 3
 digest_layer2_b #= digest_layer1_b * 5
-digest_layer2_c #= digest_layer1_c * 7
+digest_layer2_c #= digest_layer1_c * 7.0
 
-digest_layer3 #= digest_layer2_a + digest_layer2_b + digest_layer2_c
-super_digest #= digest_layer3 + final_a + final_b + final_c
+digest_layer2_a_float #F64 = cast digest_layer2_a
+digest_layer2_b_float #F64 = cast digest_layer2_b
+digest_layer3 #= digest_layer2_a_float + digest_layer2_b_float + digest_layer2_c
+final_a_float #F64 = cast final_a
+final_b_float #F64 = cast final_b
+final_c_float #F64 = cast final_c
+super_digest #= digest_layer3 + final_a_float + final_b_float + final_c_float
 
 -- Template interpolation with constants
 title_text #= "Constant Folding Stress Test"
@@ -158,26 +175,26 @@ fact_line #= [: Fact 10: [fact10]]
 digest_line #= [: Super digest: [super_digest]]
 
 -- Const record creation
-Point = | x Int, y Int |
+Point = | x I32, y I32 |
 origin #= Point(0, 0)
 point_a #= Point(100, 200)
 point_b #= Point(a1, a2)
 
 RetrySettings = |
-    max_retries Int,
-    timeout_ms Int,
-    cache_size Int,
+    max_retries I32,
+    timeout_ms I32,
+    cache_size I32,
 |
 default_config #= RetrySettings(3, 5000, 1000)
 custom_config #= RetrySettings(fact5, fact6 * 100, fact7 * 10)
 
-Range = | min Int, max Int |
+Range = | min I32, max I32 |
 range_1 #= Range(0, 100)
 range_2 #= Range(a1, m1)
 range_3 #= Range(fib5, fib10)
 
 -- Nested const records
-Box = | width Int, height Int |
+Box = | width I32, height I32 |
 box1 #= Box(100, 200)
 box2 #= Box(a1 * 2, a2 * 3)
 

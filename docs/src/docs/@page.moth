@@ -65,4 +65,5 @@ page_head #= theme_head
     ## Future design drafts
 
     - @./async (Async)
+    - @./lappet (Lappet native runtime and package infrastructure)
 ]

@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "named_forward_shared left=4294967296 right=1 first=4294967295 second=4294967297 total=8589934592"

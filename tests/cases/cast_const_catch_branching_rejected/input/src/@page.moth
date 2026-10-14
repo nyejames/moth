@@ -1,4 +1,4 @@
-value #Int = cast "bad" catch:
+value #I32 = cast "bad" catch:
     if false:
         then 1
     else

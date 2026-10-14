@@ -4,4 +4,4 @@ identity type T |value T| -> T:
     return value
 ;
 
-value Int = identity(cast "1")
+value I32 = identity(cast "1")

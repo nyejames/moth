@@ -119,7 +119,6 @@ pub(super) fn append_template_result_to_buffer(
 /// WHY: the folded child remains an owned output value while wrapper structure
 ///      is read from the immutable TIR store. Slot injection therefore needs no
 ///      temporary TIR nodes or second wrapper representation.
-#[allow(clippy::too_many_arguments)]
 pub(super) fn fold_conditional_child_wrappers_around_emission(
     wrapper_references: &[TemplateWrapperReference],
     emission: TemplateEmission,
@@ -249,7 +248,6 @@ fn fold_tir_wrapper_around_child_output(
 ///       owned structural string value and projection through the shared reducer.
 /// WHY: wrapper output must preserve resource and site-root boundaries instead of
 ///      flattening the child value back to ordinary text.
-#[allow(clippy::too_many_arguments)]
 fn fold_tir_wrapper_with_input(
     wrapper_template_id: TemplateIrId,
     wrapper_template: &TemplateIr,

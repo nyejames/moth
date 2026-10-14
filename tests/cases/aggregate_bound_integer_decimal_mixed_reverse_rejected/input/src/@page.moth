@@ -1,0 +1,8 @@
+-- Named integer elements keep their integer family beside raw decimal elements.
+
+mixed_reverse ||:
+    count = 1
+    mixed = {2.5, count}
+;
+
+[:bound_integer_decimal_mixed_reverse_rejected]

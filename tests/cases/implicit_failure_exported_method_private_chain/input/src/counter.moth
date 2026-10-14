@@ -1,13 +1,13 @@
-Counter = | value Int |
+Counter = | value I32 |
 
-multiply |left Int, right Int| -> Int:
+multiply |left I32, right I32| -> I32:
     return left * right
 ;
 
-first |left Int, right Int| -> Int:
+first |left I32, right I32| -> I32:
     return multiply(left, right)
 ;
 
-scaled |this Counter, factor Int| -> Int:
+scaled |this Counter, factor I32| -> I32:
     return first(this.value, factor)
 ;

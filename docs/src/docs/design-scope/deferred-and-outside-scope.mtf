@@ -28,7 +28,34 @@ deferred-feature diagnostic. A roadmap plan owns sequencing, not semantics.
 - an extensionless resource escape syntax
 - managed plain Markdown resource links and images
 - resource transforms and content-addressed output names
-- implicit built-in numeric failure, complete-expression `catch` and the built-in `Error!` entry boundary described at @../errors (Errors)
+
+### Numeric and generic extensions
+
+The @../numbers (Numbers), @../casts (Casts) and @../errors (Errors) references
+own exact numeric semantics, bounded numeric-origin inference and recovery.
+Their @../progress (implementation and target coverage) remains separate from
+accepted language design.
+
+Later generic and package work owns explicit compiler-defined closed numeric
+capability bounds for every visibility and forwarding an already concrete
+expected type into an immediately nested generic call. These extensions don't
+add body-inferred capability bounds, operator overloading, unrestricted
+result-only inference or conditional generic error signatures. Their
+arithmetic contracts must account for integer real division and decimal scale
+exceptions from @../numbers/#operators (Operators).
+
+Type-parametric Core bindings and file-backed JS/WAT packages remain later
+package work. @../packages/core/math (Core Math) owns its current F64 API and
+the boundary with future precisions, generic helpers, constant evaluation and
+Wasm lowerings. Wrapping F64 with casts doesn't provide native F32 Math.
+
+This handoff adds no broader collection inference or arbitrary compile-time
+source-function execution. Their existing design-scope boundaries still apply.
+Further Wasm conversion, error, decimal and Math capabilities remain separate
+work. The progress matrix and roadmap track their implementation without
+reopening delivered numeric contracts. An optional LSP advisory for a
+proven-infallible safety catch remains future tooling work, not a default
+compiler warning.
 
 ### MON syntax and format boundaries
 
@@ -78,7 +105,7 @@ Current open questions include:
   agreed future source-block spelling is `$checked:` but whose proof-tier
   semantics, placement and soundness evidence remain open
 - `Dec` and `DecN` range domains
-- lossy `Float`/`Dec` conversion helpers and explicit rounded `Dec` scale changes
+- lossy binary-float/`Dec` conversion helpers and explicit rounded `Dec` scale changes
 - source-level bitwise integer operations
 - speculative `Byte` buffer and text-encoding APIs
 - grouped `if:` handlers, rewind and richer effects

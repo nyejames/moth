@@ -31,9 +31,6 @@ use crate::compiler_frontend::source::SourceSpan;
 /// view without re-running AST slot routing.
 #[derive(Clone, Debug)]
 pub(crate) struct TemplateSlotPlan {
-    /// Exact source span for invariant reporting at the AST/HIR handoff.
-    pub(crate) span: Option<SourceSpan>,
-
     /// TIR-rendered contribution source plans, one per runtime contribution.
     pub(crate) contribution_sources: Vec<TemplateSlotContributionSourcePlan>,
 
@@ -70,29 +67,28 @@ pub(crate) struct TemplateSlotSitePlan {
     pub(crate) span: Option<SourceSpan>,
 }
 
-pub(crate) fn runtime_slot_plan_roots(
-    store: &TemplateIrStore,
+/// Borrowed render roots of one runtime slot plan, in traversal order.
+///
+/// WHAT: reports every contribution-source render root followed by every slot-site render root
+///       as one iterator borrowing the plan's own storage.
+/// WHY: readers that must visit the plan's roots (pending-intake detection, overlay collection
+///      and TIR mutation walks) should not allocate a fresh root vector per read when the plan
+///      already owns the roots.
+pub(crate) fn runtime_slot_plan_roots<'store>(
+    store: &'store TemplateIrStore,
     slot_plan_id: TemplateSlotPlanId,
-) -> Result<(Vec<TemplateIrNodeId>, Vec<TemplateIrNodeId>), CompilerError> {
+) -> Result<impl Iterator<Item = TemplateIrNodeId> + 'store, CompilerError> {
     let slot_plan = store.get_slot_plan(slot_plan_id).ok_or_else(|| {
         CompilerError::compiler_error(
             "TIR runtime slot-plan root lookup referenced a missing slot plan.",
         )
     })?;
 
-    let contribution_roots = slot_plan
+    Ok(slot_plan
         .contribution_sources
         .iter()
         .map(|source| source.render_root)
-        .collect();
-
-    let site_render_roots = slot_plan
-        .slot_sites
-        .iter()
-        .map(|site| site.render_root)
-        .collect();
-
-    Ok((contribution_roots, site_render_roots))
+        .chain(slot_plan.slot_sites.iter().map(|site| site.render_root)))
 }
 
 pub(super) fn convert_runtime_slot_site(
@@ -277,6 +273,8 @@ pub(crate) fn convert_tir_tree_to_active_slot_plan(
         | TemplateIrNodeKind::InsertContribution { .. }
         | TemplateIrNodeKind::RuntimeSlotSite { .. }
         | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => false,
+        // A retained position has no children to convert and keeps its authored position.
+        TemplateIrNodeKind::RetainedNumericIntake(_) => false,
     };
 
     Ok(converted)

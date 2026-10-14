@@ -1,62 +1,62 @@
 @core/math atan2
 
-format_float |value Float| -> String:
+format_float |value F64| -> String:
     return cast value
 ;
 
-echo_float |value Float| -> Float:
+echo_float |value F64| -> F64:
     return value
 ;
 
-echo_optional_float |value Float?| -> Float?:
+echo_optional_float |value F64?| -> F64?:
     return value
 ;
 
-matches_negative_decimal |value Float| -> Bool:
+matches_negative_decimal |value F64| -> Bool:
     if value is:
         -1.5 => return true
         else => return false
     ;
 ;
 
-matches_negative_exponent |value Float| -> Bool:
+matches_negative_exponent |value F64| -> Bool:
     if value is:
         -15e-1 => return true
         else => return false
     ;
 ;
 
-matches_negative_threshold |value Float| -> Bool:
+matches_negative_threshold |value F64| -> Bool:
     if value is:
         >= -1.5 => return true
         else => return false
     ;
 ;
 
-matches_optional_negative_decimal |value Float?| -> Bool:
+matches_optional_negative_decimal |value F64?| -> Bool:
     if value is:
         -1.5 => return true
         else => return false
     ;
 ;
 
-return_large_float || -> Float:
+return_large_float || -> F64:
     return 18_446_744_073_709_551_615
 ;
-float_add_assign || -> Float:
-    value ~Float = 1.0
+float_add_assign || -> F64:
+    value ~F64 = 1.0
     value += 18_446_744_073_709_551_615
     return value
 ;
 
 Box = |
-    value Float,
+    value F64,
 |
 
-large_whole Float = 18_446_744_073_709_551_615
-same_value Float = 18_446_744_073_709_551_615.0
-expected_optional Float? = same_value
-maybe Float? = 18_446_744_073_709_551_615
+large_whole F64 = 18_446_744_073_709_551_615
+same_value F64 = 18_446_744_073_709_551_615.0
+expected_optional F64? = same_value
+maybe F64? = 18_446_744_073_709_551_615
 parameter_value = echo_float(18_446_744_073_709_551_615)
 optional_parameter_value = echo_optional_float(18_446_744_073_709_551_615)
 box = Box(value = 18_446_744_073_709_551_615)
@@ -66,7 +66,7 @@ peer_sum = peer + 18_446_744_073_709_551_615
 large_compound_value = float_add_assign()
 large_compound_match = large_compound_value is 18_446_744_073_709_551_615.0
 
-profile_value Float = 16_777_217
+profile_value F64 = 16_777_217
 single_value F32 = 16_777_217
 double_value F64 = 16_777_217
 single_control = single_value is 16_777_216
@@ -82,8 +82,8 @@ positive_relational_control = matches_negative_threshold(2.0)
 optional_negative_pattern_match = matches_optional_negative_decimal(echo_optional_float(-1.5))
 optional_positive_pattern_control = matches_optional_negative_decimal(echo_optional_float(1.5))
 
-negative_zero Float = -0
-positive_zero Float = 0
+negative_zero F64 = -0
+positive_zero F64 = 0
 negative_zero_atan2_is_negative = atan2(negative_zero, -1.0) < 0.0
 positive_zero_atan2_is_negative = atan2(positive_zero, -1.0) < 0.0
 large_match = large_whole is same_value

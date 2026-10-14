@@ -1,10 +1,9 @@
 entry = "."
-numeric_profile = "Int32/Float64"
 
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = " span= 301 Int operation overflowed walked=-1 loop= 301 Int operation overflowed exact=3"
+rendered_output_exact = " span= 301 Integer operation overflowed walked=-1 loop= 301 Integer operation overflowed exact=3"
 
 [backends.html_wasm]
 mode = "failure"

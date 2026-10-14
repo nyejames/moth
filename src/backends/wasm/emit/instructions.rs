@@ -76,7 +76,11 @@ pub(crate) fn emit_statement(
             function.instruction(&Instruction::LocalGet(local_index(*src, context)?));
             function.instruction(&Instruction::LocalSet(local_index(*dst, context)?));
         }
-        WasmLirStmt::Call { dst, callee, args } => {
+        WasmLirStmt::Call {
+            results,
+            callee,
+            args,
+        } => {
             for arg in args {
                 function.instruction(&Instruction::LocalGet(local_index(*arg, context)?));
             }
@@ -107,7 +111,8 @@ pub(crate) fn emit_statement(
             };
             function.instruction(&Instruction::Call(callee_index));
 
-            if let Some(dst) = dst {
+            // Wasm pushes ordered results, so consume the stack from the final slot backwards.
+            for dst in results.iter().rev() {
                 function.instruction(&Instruction::LocalSet(local_index(*dst, context)?));
             }
         }
@@ -662,8 +667,8 @@ pub(crate) fn emit_terminator(
             // Re-enter the loop with the newly selected target block.
             function.instruction(&Instruction::Br(1));
         }
-        WasmLirTerminator::Return { value } => {
-            if let Some(value) = value {
+        WasmLirTerminator::Return { values } => {
+            for value in values {
                 function.instruction(&Instruction::LocalGet(local_index(*value, context)?));
             }
             function.instruction(&Instruction::Return);

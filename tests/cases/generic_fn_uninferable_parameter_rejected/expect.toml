@@ -2,4 +2,4 @@
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0057"]
-message_contains = ["Add a type annotation to the receiving declaration, for example `value Int = ...`."]
+message_contains = ["Cannot infer type argument(s) for generic function 'empty_values': T.", "Add an immediate receiving-site type annotation or pass arguments that fix the type."]

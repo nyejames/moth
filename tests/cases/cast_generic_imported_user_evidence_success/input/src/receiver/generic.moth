@@ -1,0 +1,14 @@
+Note = |
+    text String,
+|
+
+to_string |this Note| -> String:
+    return [:neighbour([this.text])]
+;
+
+show_ticket type T is CASTABLE_TO_STRING |item T| -> String:
+    note Note = Note("note")
+    neighbour_text String = note.to_string()
+    selected_text String = cast item
+    return [:[selected_text]|[neighbour_text]]
+;

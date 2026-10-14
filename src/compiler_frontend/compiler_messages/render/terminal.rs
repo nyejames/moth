@@ -190,7 +190,13 @@ fn format_label_messages_with_context_from_root_impl(
                 } else {
                     format!("{label_line}:{label_col}")
                 };
-                format!("{style_name}: {location} - {message}")
+                // A location-only label carries an empty message, so the separator is omitted
+                // rather than trailing the location.
+                if message.is_empty() {
+                    format!("{style_name}: {location}")
+                } else {
+                    format!("{style_name}: {location} - {message}")
+                }
             }
             _ => continue,
         };

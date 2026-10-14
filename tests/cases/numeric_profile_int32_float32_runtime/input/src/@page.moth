@@ -1,41 +1,42 @@
-format_float |value Float| -> String:
+format_float |value F32| -> String:
     return cast value
 ;
 
-compare |integer Int, float_value Float| -> Bool:
-    return integer is float_value
+compare |integer I32, float_value F32| -> Bool:
+    converted F32 = cast integer
+    return converted is float_value
 ;
 
-add |left Float, right Float| -> Float, Error!:
+add |left F32, right F32| -> F32, Error!:
     return left + right
 ;
 
-int_to_float |value Int| -> Float:
+int_to_float |value I32| -> F32:
     return cast value
 ;
 
-float_to_int |value Float| -> Int, Error!:
-    return cast! value
+float_to_int |value F32| -> I32, Error!:
+    return cast value
 ;
 
-increment |value Int| -> Int, Error!:
+increment |value I32| -> I32, Error!:
     return value + 1
 ;
-assign_divide_int |target ~Int| -> Int, Error!:
+assign_divide_int |target ~I32| -> I32, Error!:
     target /= 1
     return target
 ;
-assign_integer_divide_int |target ~Int| -> Int, Error!:
+assign_integer_divide_int |target ~I32| -> I32, Error!:
     target //= 1
     return target
 ;
-parse_profile_float |text String| -> Float, Error!:
-    return cast! text
+parse_profile_float |text String| -> F32, Error!:
+    return cast text
 ;
-divide_profile_float |left Float, right Float| -> Float, Error!:
+divide_profile_float |left F32, right F32| -> F32, Error!:
     return left / right
 ;
-capture_profile_divide |left Float, right Float| -> U32:
+capture_profile_divide |left F32, right F32| -> U32:
     code ~U32 = 0
     ignored = divide_profile_float(left, right) catch |err|:
         code = err.code
@@ -44,7 +45,9 @@ capture_profile_divide |left Float, right Float| -> U32:
     return code
 ;
 
-same_folded #Bool = 16777217 is 16777216.0
+folded_integer #I32 = 16777217
+folded_float #F32 = cast folded_integer
+same_folded #Bool = folded_float is 16777216.0
 same_runtime = compare(16777217, 16777216.0)
 
 rounded_float_text = format_float(int_to_float(16777217))
@@ -81,9 +84,9 @@ profile_negative_zero_equal = profile_negative_zero is profile_positive_zero
 profile_negative_zero_text = format_float(profile_negative_zero)
 profile_zero_division_error = capture_profile_divide(1.0, profile_negative_zero)
 
-tie_one #Float = 17.0078125
-tie_two #Float = 241.640625
-tie_three #Float = 234.453125
+tie_one #F32 = 17.0078125
+tie_two #F32 = 241.640625
+tie_three #F32 = 234.453125
 tie_one_folded #String = cast tie_one
 tie_two_folded #String = cast tie_two
 tie_three_folded #String = cast tie_three
@@ -92,8 +95,8 @@ tie_one_runtime = format_float(tie_one)
 tie_two_runtime = format_float(tie_two)
 tie_three_runtime = format_float(tie_three)
 
-non_tie_one #Float = 0.1
-non_tie_two #Float = 3.25
+non_tie_one #F32 = 0.1
+non_tie_two #F32 = 3.25
 non_tie_one_folded #String = cast non_tie_one
 non_tie_two_folded #String = cast non_tie_two
 non_tie_one_runtime = format_float(non_tie_one)

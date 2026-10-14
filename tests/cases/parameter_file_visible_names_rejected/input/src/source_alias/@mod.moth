@@ -1,0 +1,5 @@
+parameter_binding |AccountId I32| -> I32:
+    return AccountId
+;
+
+AccountId as I32

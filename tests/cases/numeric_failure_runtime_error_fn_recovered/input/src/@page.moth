@@ -1,8 +1,8 @@
-overflow_int |value Int| -> Int, Error!:
+overflow_int |value I32| -> I32, Error!:
     return value + 1
 ;
 
-divide_float |numerator Float, denominator Float| -> Float, Error!:
+divide_float |numerator F64, denominator F64| -> F64, Error!:
     return numerator / denominator
 ;
 

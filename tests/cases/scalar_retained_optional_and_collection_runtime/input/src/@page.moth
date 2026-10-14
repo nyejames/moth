@@ -1,0 +1,165 @@
+-- Retained optional and collection result contract.
+--
+-- Each consumer below reads a retained fragment whose numeric origin is still
+-- pending (an unannotated local) while the fragment's own declared result shape
+-- already fixes the consumer:
+--
+-- 1. `(reader.find_meter(pending)?).amount` keeps the receiver call, its
+--    authored `?` and the projected field as one operand chain. The present exit
+--    yields the meter amount and the absent exit returns `none` from the
+--    enclosing optional function.
+-- 2. `loop (group_amounts(pending))` iterates the retained call's declared
+--    `{U64}` result, so the loop binding is U64 and the sum is 15.
+-- 3. `loop (make_batch(pending)).values` projects the retained call result's
+--    known `{U64}` field before iterating, so the loop binding is U64 and the
+--    sum is 19.
+-- 4. `loop maybe_amounts(pending)?` unwraps the retained optional call, and the
+--    known inner `{U64}` metadata serves the loop item type; the present sum is
+--    8 and the absent exit returns `none`.
+-- 5. The root `batch` binding's initializer is itself a retained call, so its
+--    known `Batch` shape resolves `batch.values` for the root template loop's
+--    item sequence.
+-- 6. `(reader.read(pending))! + 1` keeps the authored arithmetic after the
+--    retained operand's `!`: the success path yields 2 and the typed error is
+--    recovered at the call site.
+--
+-- Every `?` consumer keeps the operand's own optional shape in its enclosing
+-- success slot, because an absent `?` answers `none` against that slot's
+-- optional return type. Each consumer also lives in its own authored scope with
+-- its own pending argument origin, so no retained source is shared across
+-- completions and no loop binding shadows a visible name.
+
+receive_u64 |value U64| -> String:
+    return cast value
+;
+
+Reader = |
+    meter U64,
+    step U64,
+|
+
+Meter = |
+    amount U64,
+|
+
+Batch = |
+    values {U64},
+|
+
+find_meter |this Reader, id I32| -> Meter?:
+    if id is 0:
+        return none
+    ;
+    return Meter(amount = this.meter)
+;
+
+read |this Reader, id I32| -> U64, Error!:
+    if id is 0:
+        return! Error("missing meter")
+    ;
+    return this.step
+;
+
+-- Rebuilds the projected amount as a meter so the retained chain can stay the
+-- argument of the returned expression while the slot keeps `Meter?`.
+meter_with_amount |amount U64| -> Meter:
+    return Meter(amount = amount)
+;
+
+meter_present |reader Reader| -> Meter?:
+    pending = 1
+    return meter_with_amount((reader.find_meter(pending)?).amount)
+;
+
+meter_absent |reader Reader| -> Meter?:
+    pending = 0
+    return meter_with_amount((reader.find_meter(pending)?).amount)
+;
+
+group_amounts |seed I32| -> {U64}:
+    return {1, 2, 3, 4, 5}
+;
+
+grouped_sum || -> U64:
+    pending = 1
+    total ~= 0
+    loop (group_amounts(pending)) |amount|:
+        total = total + amount
+    ;
+    return total
+;
+
+make_batch |seed I32| -> Batch:
+    values {U64} = {4, 6, 9}
+    return Batch(values = values)
+;
+
+projected_sum || -> U64:
+    pending = 1
+    total ~= 0
+    loop (make_batch(pending)).values |amount|:
+        total = total + amount
+    ;
+    return total
+;
+
+maybe_amounts |seed I32| -> {U64}?:
+    if seed is 0:
+        return none
+    ;
+    amounts {U64} = {2, 6}
+    return amounts
+;
+
+-- Carries the loop's sum out in the collection shape the `?` operand fixes.
+totals_of |value U64| -> {U64}:
+    return {value}
+;
+
+optional_sum || -> {U64}?:
+    pending = 1
+    total ~= 0
+    loop maybe_amounts(pending)? |amount|:
+        total = total + amount
+    ;
+    return totals_of(total)
+;
+
+optional_absent || -> {U64}?:
+    pending = 0
+    total ~= 0
+    loop maybe_amounts(pending)? |amount|:
+        total = total + amount
+    ;
+    return totals_of(total)
+;
+
+bang_total |reader Reader| -> U64, Error!:
+    pending = 1
+    return (reader.read(pending))! + 1
+;
+
+reader = Reader(meter = 7, step = 1)
+
+present_text = if meter_present(reader) is |found_present_meter| then receive_u64(found_present_meter.amount) else "none"
+absent_text = if meter_absent(reader) is |found_absent_meter| then receive_u64(found_absent_meter.amount) else "none"
+grouped_text = receive_u64(grouped_sum())
+projected_text = receive_u64(projected_sum())
+
+optional_total ~= 0
+if optional_sum() is |found_totals|:
+    loop found_totals |optional_value|:
+        optional_total = optional_total + optional_value
+    ;
+;
+optional_text = receive_u64(optional_total)
+optional_absent_missing = optional_absent() is none
+optional_absent_text = if optional_absent_missing then "none" else "present"
+
+bang_value = bang_total(reader) catch then 0
+bang_text = receive_u64(bang_value)
+
+pending_batch = 1
+batch = make_batch(pending_batch)
+
+[:scalar retained optional present=[present_text] absent=[absent_text] grouped=[grouped_text] projected=[projected_text] optional=[optional_text]/[optional_absent_text] bang=[bang_text] items=[loop batch.values |item_value, item_index|:[item_index]=[receive_u64(item_value)];]]

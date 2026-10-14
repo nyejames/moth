@@ -1,2 +1,2 @@
-Shared = |value Int|
+Shared = |value I32|
 Alias as Shared

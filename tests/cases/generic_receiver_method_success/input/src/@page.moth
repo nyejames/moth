@@ -3,7 +3,7 @@ Box type A = |
 |
 
 combine type A |this Box of A
-, first Int, second Int| -> Int:
+, first I32, second I32| -> I32:
     return first + second
 ;
 

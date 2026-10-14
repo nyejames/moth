@@ -6,20 +6,24 @@ fixed_f16_start #F16 = 0.5
 fixed_f16_end #F16 = 1.5
 fixed_f16_step #F16 = 0.5
 fixed_f16_equal #F16 = 1.0
+profile_i64_start #I64 = 1
+profile_i64_end #I64 = 3
+profile_f32_equal #F32 = 2.0
+profile_f32_step #F32 = 0.0000000000000001
 
-#[loop 1 to 3 |i|:
+#[loop profile_i64_start to profile_i64_end |i|:
     excl-[i];
 ]
 
-#[loop 1 to & 3 |i|:
+#[loop profile_i64_start to & profile_i64_end |i|:
     incl-[i];
 ]
 
-#[loop 2.0 to 2.0 by 0.0000000000000001 |i|:
+#[loop profile_f32_equal to profile_f32_equal by profile_f32_step |i|:
     float-exclusive-equal-[i];
 ]
 
-#[loop 2.0 to & 2.0 by 0.0000000000000001 |i|:
+#[loop profile_f32_equal to & profile_f32_equal by profile_f32_step |i|:
     float-inclusive-equal-[i];
 ]
 

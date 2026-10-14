@@ -9,6 +9,7 @@ use super::*;
 use crate::compiler_frontend::canonical_type_identity::CanonicalBuiltinType;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 fn authored_span() -> SourceSpan {
     SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start())
@@ -35,9 +36,11 @@ fn field() -> NominalFieldBlueprint {
     NominalFieldBlueprint {
         name: "value".to_owned(),
         field_type: MaterialisationTypeBlueprint::Canonical(CanonicalTypeIdentity::Builtin(
-            CanonicalBuiltinType::Int,
+            CanonicalBuiltinType::FixedScalar(FixedScalar::I32),
         )),
-        folded_default: Some(PublicFoldedValue::Int(7)),
+        folded_default: Some(PublicFoldedValue::FixedScalar(
+            FixedScalarValue::signed(FixedScalar::I32, 7).expect("7 fits I32"),
+        )),
         span: Some(authored_span()),
     }
 }
@@ -108,7 +111,9 @@ fn nominal_blueprint_agreement_ignores_provenance_but_checks_identity() {
     else {
         unreachable!();
     };
-    fields[0].folded_default = Some(PublicFoldedValue::Int(8));
+    fields[0].folded_default = Some(PublicFoldedValue::FixedScalar(
+        FixedScalarValue::signed(FixedScalar::I32, 8).expect("8 fits I32"),
+    ));
     assert!(source != different_default);
 
     let mut different_const_record = source.clone();

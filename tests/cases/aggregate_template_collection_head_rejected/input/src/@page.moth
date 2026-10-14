@@ -1,0 +1,10 @@
+read_length |values {{U64}}| -> I32:
+    return values.length()
+;
+render || -> String, Error!:
+    grid = {{4_294_967_296}}
+    read_length(grid)
+    return [:bad=[grid.get(0)!]]
+;
+text = render() catch then "failed"
+[:[text]]

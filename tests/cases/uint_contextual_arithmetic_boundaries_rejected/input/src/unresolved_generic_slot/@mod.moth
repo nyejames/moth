@@ -2,6 +2,8 @@ identity type T |value T| -> T:
     return value
 ;
 reject_unresolved_generic_slot || -> String:
-    result Uint = identity(1 + 2)
+    supported U32 = identity(1 + 2)
+    concrete #I32 = 1
+    result U32 = identity(concrete)
     return [result]
 ;

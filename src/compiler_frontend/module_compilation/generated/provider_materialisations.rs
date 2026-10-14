@@ -157,7 +157,9 @@ pub(crate) enum DeclaringMaterialisation<'a> {
         /// must re-intern its retained paths by spelling into the requester fork.
         rebase_required: bool,
     },
-    Preparing(&'a ModuleMaterialisationPreparation),
+    /// The transaction retains complete declaring modules for requester-owned evidence methods.
+    /// Selection may use its own module or an original caller module carried through sidecars.
+    Prepared(&'a ModuleMaterialisationPreparation),
 }
 
 /// Resolve the declaring template for one generated request.
@@ -175,7 +177,7 @@ pub(crate) fn declaring_materialisation<'a>(
     }
 
     requester_context
-        .template_for_identity(identity)
+        .declaring_context_for_identity(identity)
         .is_some()
-        .then_some(DeclaringMaterialisation::Preparing(requester_context))
+        .then_some(DeclaringMaterialisation::Prepared(requester_context))
 }

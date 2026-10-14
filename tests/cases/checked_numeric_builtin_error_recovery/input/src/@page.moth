@@ -1,9 +1,9 @@
-overflow_int || -> Int, Error!:
+overflow_int || -> I32, Error!:
     x = 2147483647
     return x + 1
 ;
 
-nonfinite_float || -> Float, Error!:
+nonfinite_float || -> F64, Error!:
     x = 1e200
     return x * 1e200
 ;

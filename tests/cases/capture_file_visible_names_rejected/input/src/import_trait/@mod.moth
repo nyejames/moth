@@ -1,0 +1,5 @@
+@types ACTIVE as LOCAL_ACTIVE
+
+capture_binding |maybe I32?| -> I32:
+    return if maybe is |LOCAL_ACTIVE| then LOCAL_ACTIVE else 0
+;

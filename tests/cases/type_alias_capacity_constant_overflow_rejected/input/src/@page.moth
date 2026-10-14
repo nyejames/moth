@@ -1,4 +1,4 @@
-capacity #Int = 2
+capacity #I32 = 2
 
 Names as {capacity String}
 MoreNames as Names

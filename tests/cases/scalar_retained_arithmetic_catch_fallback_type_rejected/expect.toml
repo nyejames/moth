@@ -1,0 +1,18 @@
+entry = "."
+
+# The provisional handler accepts the String fallback before the fragment's I32
+# slot is known, so this case owns the completion-time receiving check. The
+# expected contract is the ordinary authored type diagnostic the completed
+# catch already reports for the same mismatch; the specific reason key is left
+# to parent observation, and the code is asserted alone rather than guessing
+# message wording.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-TYPE-0001"]
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-TYPE-0001"]

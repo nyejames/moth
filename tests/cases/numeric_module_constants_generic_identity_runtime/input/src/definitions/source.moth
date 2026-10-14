@@ -1,0 +1,9 @@
+limit #U64 = 18_446_744_073_709_551_615
+Box type T = |value T|
+identity type T |value T| -> T:
+    return value
+;
+direct_box || -> Box of U64:
+    value = identity(limit)
+    return Box(value)
+;

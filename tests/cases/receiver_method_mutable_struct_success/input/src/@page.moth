@@ -1,5 +1,5 @@
 Counter = |
-    count Int,
+    count I32,
 |
 
 increment |this ~Counter|:

@@ -15,10 +15,11 @@ use super::ids::ExternalTypeId;
 /// Backend-agnostic ABI values that currently cross the host boundary.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ExternalAbiType {
-    /// Fixed-width foreign scalar such as `I32`, `U32`, `F32` or `F64`.
+    /// Fixed foreign scalar carrying its exact `FixedScalar` identity, such as `I32`, `U32`,
+    /// `F32` or `F64`.
     ///
     /// The canonical `FixedScalar` identity keeps one owner for width, range and precision, so
-    /// the slot is profile-independent and shares its `TypeId` with source-authored spellings.
+    /// the slot shares its `TypeId` with source-authored spellings of the same scalar.
     /// Each backend adapter decides which scalars it can carry and rejects the rest.
     Fixed(FixedScalar),
     Bool,
@@ -68,18 +69,12 @@ impl ExternalAbiType {
 /// Frontend-visible type used by external function signatures.
 ///
 /// WHAT: separates the backend ABI category from the Moth language type expected
-///       at call sites. `Abi(...)` always describes a fixed foreign representation,
-///       while native Moth `Int`/`Uint`/`Float` use their profile-selected semantic identities.
-///       Provider-owned opaque types use `External(...)`, and reusable language-level
+///       at call sites. `Abi(...)` always describes a fixed foreign representation whose
+///       Moth type is the exact `FixedScalar` identity it names, for example `I32`, `U32` or
+///       `F64`. Provider-owned opaque types use `External(...)`, and reusable language-level
 ///       content policies such as string content use dedicated variants.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ExternalSignatureType {
-    /// Profile-selected Moth `Int` semantic type.
-    NativeInt,
-    /// Profile-selected Moth `Uint` semantic type, following the selected `Int` width.
-    NativeUint,
-    /// Profile-selected Moth `Float` semantic type.
-    NativeFloat,
     /// Fixed foreign representation and its corresponding Moth type.
     Abi(ExternalAbiType),
     BuiltinError,
@@ -104,9 +99,6 @@ pub enum ExternalSignatureType {
 impl ExternalSignatureType {
     pub(crate) fn to_datatype(&self) -> Option<DataType> {
         match self {
-            Self::NativeInt => Some(DataType::Int),
-            Self::NativeUint => Some(DataType::Uint),
-            Self::NativeFloat => Some(DataType::Float),
             Self::Abi(abi_type) => abi_type.to_datatype(),
             // The builtin Error type is nominal and registered per module, so the caller
             // supplies its resolved spelling at the AST boundary.
@@ -126,9 +118,6 @@ impl ExternalSignatureType {
         builtin_error_type_id: crate::compiler_frontend::datatypes::ids::TypeId,
     ) -> Option<crate::compiler_frontend::datatypes::ids::TypeId> {
         match self {
-            Self::NativeInt => Some(type_environment.builtins().int),
-            Self::NativeUint => Some(type_environment.builtins().uint),
-            Self::NativeFloat => Some(type_environment.builtins().float),
             Self::Abi(abi_type) => abi_type.to_type_id(type_environment),
             Self::BuiltinError => Some(builtin_error_type_id),
             Self::External(type_id) => Some(type_environment.intern_external(*type_id)),
@@ -154,9 +143,6 @@ impl ExternalSignatureType {
         type_environment: &mut crate::compiler_frontend::datatypes::environment::TypeEnvironment,
     ) -> Option<crate::compiler_frontend::datatypes::ids::TypeId> {
         match self {
-            Self::NativeInt => Some(type_environment.builtins().int),
-            Self::NativeUint => Some(type_environment.builtins().uint),
-            Self::NativeFloat => Some(type_environment.builtins().float),
             Self::Abi(abi_type) => abi_type.to_type_id(type_environment),
             // BuiltinError is not expected in parameter position; treat as unknown.
             Self::BuiltinError => None,

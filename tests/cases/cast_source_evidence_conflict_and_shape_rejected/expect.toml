@@ -1,0 +1,20 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0073", "MOTH-RULE-0083"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0073"
+reason = "invalid_trait_conformance.incompatible_trait_evidence"
+path = "input/dual/@mod.moth"
+line = 12
+column = 12
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0083"
+reason = "invalid_cast.no_evidence"
+path = "input/method_shape/@mod.moth"
+line = 7
+column = 18

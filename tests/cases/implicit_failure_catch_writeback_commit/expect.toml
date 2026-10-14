@@ -1,10 +1,9 @@
 entry = "."
-numeric_profile = "Int32/Float64"
 
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = " writeback commit old=240 code=242 recovered=7 failed=7 exact=250 committed=250 reborrowed=9"
+rendered_output_exact = " writeback commit old=240 code=301 recovered=7 failed=7 exact=250 committed=250 reborrowed=9"
 
 [backends.html_wasm]
 mode = "failure"
@@ -13,4 +12,7 @@ diagnostic_codes = ["MOTH-RULE-0064"]
 
 [[backends.html_wasm.diagnostic_assertions]]
 code = "MOTH-RULE-0064"
-reason = "unsupported_backend_feature.runtime_casts"
+reason = "unsupported_backend_feature.checked_numeric_operations"
+path = "input/@page.moth"
+line = 3
+column = 5

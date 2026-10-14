@@ -1,4 +1,4 @@
 INT_MARKER must:
 ;
 
-Int must INT_MARKER
+I32 must INT_MARKER

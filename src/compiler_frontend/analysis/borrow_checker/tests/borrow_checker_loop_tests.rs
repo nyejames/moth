@@ -28,8 +28,13 @@ use crate::compiler_frontend::tests::type_id_fixture_support::lower_ast;
 
 fn borrow_check_source(source: &str) {
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
     run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("source should pass borrow checking");
 }
@@ -37,14 +42,19 @@ fn borrow_check_source(source: &str) {
 #[test]
 fn collection_loop_mutation_of_iterable_reports_shared_mutable_conflict() {
     let source = r#"
-items ~{Int} = {1, 2, 3}
+items ~{I32} = {1, 2, 3}
 loop items |item|:
 ~items.push(4)
 ;
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
 
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("mutating a collection while iterating it should fail");
@@ -54,18 +64,23 @@ loop items |item|:
 #[test]
 fn collection_loop_mutable_helper_call_on_iterable_reports_shared_mutable_conflict() {
     let source = r#"
-mutate |values ~{Int}|:
+mutate |values ~{I32}|:
 ~values.push(4)
 ;
-items ~{Int} = {1, 2, 3}
+items ~{I32} = {1, 2, 3}
 loop items |item|:
 mutate(~items)
 ;
 after = items.length()
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
 
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("a mutable helper call on the active iterable should fail");
@@ -75,15 +90,20 @@ after = items.length()
 #[test]
 fn collection_loop_mutation_through_iterable_alias_reports_shared_mutable_conflict() {
     let source = r#"
-items ~{Int} = {1, 2, 3}
+items ~{I32} = {1, 2, 3}
 alias ~= items
 loop items |item|:
 ~alias.push(4)
 ;
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
 
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("mutating an alias of the active iterable should fail");
@@ -93,8 +113,8 @@ loop items |item|:
 #[test]
 fn nested_collection_loop_mutation_of_outer_iterable_reports_shared_mutable_conflict() {
     let source = r#"
-outer ~{Int} = {1, 2, 3}
-inner ~{Int} = {4, 5, 6}
+outer ~{I32} = {1, 2, 3}
+inner ~{I32} = {4, 5, 6}
 loop outer |outer_item|:
 loop inner |inner_item|:
     ~outer.push(7)
@@ -102,8 +122,13 @@ loop inner |inner_item|:
 ;
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
 
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("the outer iterable must stay protected inside a nested loop");
@@ -113,8 +138,8 @@ loop inner |inner_item|:
 #[test]
 fn nested_collection_loop_mutation_of_inner_iterable_reports_shared_mutable_conflict() {
     let source = r#"
-outer ~{Int} = {1, 2, 3}
-inner ~{Int} = {4, 5, 6}
+outer ~{I32} = {1, 2, 3}
+inner ~{I32} = {4, 5, 6}
 loop outer |outer_item|:
 loop inner |inner_item|:
     ~inner.push(7)
@@ -122,8 +147,13 @@ loop inner |inner_item|:
 ;
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
 
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("the inner iterable must stay protected inside a nested loop");
@@ -134,7 +164,7 @@ loop inner |inner_item|:
 fn collection_loop_mutation_after_exit_is_valid() {
     borrow_check_source(
         r#"
-items ~{Int} = {1, 2, 3}
+items ~{I32} = {1, 2, 3}
 loop items |item|:
 ;
 ~items.push(4)
@@ -146,8 +176,8 @@ loop items |item|:
 fn collection_loop_mutation_of_unrelated_root_is_valid() {
     borrow_check_source(
         r#"
-items ~{Int} = {1, 2, 3}
-other ~{Int} = {4, 5}
+items ~{I32} = {1, 2, 3}
+other ~{I32} = {4, 5}
 loop items |item|:
 ~other.push(6)
 ;
@@ -171,8 +201,13 @@ return [: [output]</section>]
 ;
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
     let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("an independent output accumulator should not conflict with the iterable");
 
@@ -241,8 +276,13 @@ return [: [output]</section>]
 ;
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
     let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("a projected collection source should keep its carrier root live");
 
@@ -295,7 +335,7 @@ return [: [output]</section>]
 fn collection_loop_mutation_of_source_copy_is_valid() {
     borrow_check_source(
         r#"
-items ~{Int} = {1, 2, 3}
+items ~{I32} = {1, 2, 3}
 copied = copy items
 loop copied |item|:
 ~items.push(4)
@@ -310,8 +350,8 @@ fn loop_body_rebinding_its_alias_allows_source_mutation() {
     // mutation is dead on every path, including the one that arrives over the back-edge.
     borrow_check_source(
         r#"
-accumulate |keys {String}| -> {String = Int}, Error!:
-totals ~{String = Int} = {}
+accumulate |keys {String}| -> {String = I32}, Error!:
+totals ~{String = I32} = {}
 loop keys |key|:
     current = totals.get(key) catch then 0
     next = current + 1
@@ -325,8 +365,8 @@ return totals
 
 #[test]
 fn loop_definition_replaces_a_carried_alias_with_fresh_slot() {
-    let source = r#"probe || -> Int:
-left ~{Int} = {1}
+    let source = r#"probe || -> I32:
+left ~{I32} = {1}
 writer ~= left
 again ~= true
 loop again:
@@ -337,9 +377,9 @@ again = false
 return 0
 ;"#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let (mut hir, type_environment) =
-        lower_ast(ast, &mut string_table, &mut path_fork).expect("fixture source should lower");
     let registry = default_external_package_registry(&mut string_table);
+    let (mut hir, type_environment) = lower_ast(ast, &mut string_table, &mut path_fork, &registry)
+        .expect("fixture source should lower");
     let local_named = |name| {
         hir.blocks
             .iter()
@@ -416,7 +456,7 @@ return 0
     *target = HirWriteTarget::DefineLocal(writer);
     *value = rvalue;
 
-    validate_hir_module(&hir, &type_environment)
+    validate_hir_module(&hir, &type_environment, &registry)
         .expect("loop re-entry definition should preserve HIR invariants");
     let report = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
         .expect("re-entry should retire the stale alias before the new value is installed");
@@ -471,8 +511,13 @@ first = shared.get(0) catch then "missing"
 ;
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
 
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("an alias read on every iteration should block mutating its source");
@@ -482,7 +527,7 @@ first = shared.get(0) catch then "missing"
 #[test]
 fn branch_join_future_use_preserves_alias_conflict_after_linear_expiry() {
     let source = r#"
-items ~{Int} = {1, 2, 3}
+items ~{I32} = {1, 2, 3}
 alias = items
 outer ~= true
 inner ~= true
@@ -498,8 +543,13 @@ else
 value = alias
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
 
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("CFG future use through a branch join should preserve the alias conflict");
@@ -530,7 +580,7 @@ fn projected_assignment_rooted_in_compiler_temp_uses_linear_expiry() {
 fn projected_assignment_branch_fixture() -> (HirModule, StringTable, LocalId, PathInternerFork) {
     let source = r#"
 Point = |
-    value Int,
+    value I32,
 |
 point ~= Point(1)
 alias = point
@@ -548,7 +598,8 @@ else
 value = alias.value
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
+    let registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(ast, &mut string_table, &mut path_fork, &registry);
     let point_local = hir
         .blocks
         .iter()

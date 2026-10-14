@@ -29,7 +29,6 @@ fn suite_with_case(role: Option<CaseRole>, contract: Option<&str>) -> TestSuiteS
             tags: vec!["integration".to_owned()],
             contract: contract.map(str::to_owned),
             role,
-            numeric_profile: Default::default(),
             backend_id: BackendId::Html,
             entry_path: PathBuf::from("input/@page.moth"),
             flags: Vec::new(),

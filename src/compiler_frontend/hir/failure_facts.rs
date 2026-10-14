@@ -8,11 +8,14 @@ use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::CallTarget;
 use crate::compiler_frontend::source::SourceSpan;
+use crate::compiler_frontend::traits::evidence::environment::InfallibleCastEvidenceContract;
 
 #[derive(Debug, Clone)]
 pub(crate) struct HirFunctionFailureFacts {
     pub(crate) span: Option<SourceSpan>,
     pub(crate) boundary: HirBuiltinFailureBoundary,
+    /// Source evidence promises no escaping failure, independently of ordinary private inference.
+    pub(crate) infallible_cast_evidence: Option<InfallibleCastEvidenceContract>,
     pub(crate) contributors: Vec<HirBuiltinFailureContributor>,
     /// Deferred assertion-message checks are not escaping function producers.
     pub(crate) assertion_message_calls: Vec<HirBuiltinFailureContributor>,
@@ -51,6 +54,7 @@ pub(crate) struct HirBuiltinFailureContributor {
 #[derive(Debug, Clone)]
 pub(crate) enum HirBuiltinFailureSource {
     NumericOperation,
+    AuthoredCastConversion,
     /// Checked compound-assignment write-back with its canonical target type.
     ///
     /// WHAT: mirrors the AST write-back contributor through projection so the
@@ -67,7 +71,10 @@ pub(crate) enum HirBuiltinFailureSource {
 impl HirBuiltinFailureContributor {
     pub(crate) fn witness_site(&self) -> FailureWitnessSite {
         match self.source {
-            HirBuiltinFailureSource::NumericOperation => FailureWitnessSite::Arithmetic(self.span),
+            HirBuiltinFailureSource::NumericOperation
+            | HirBuiltinFailureSource::AuthoredCastConversion => {
+                FailureWitnessSite::Arithmetic(self.span)
+            }
             HirBuiltinFailureSource::CompoundWriteBack {
                 arithmetic_span, ..
             } => FailureWitnessSite::WriteBack(arithmetic_span),

@@ -9,7 +9,7 @@
 
 use std::collections::{HashSet, hash_map::Entry};
 
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::templates::template_control_flow::TemplateLoopHeader;
 use crate::compiler_frontend::ast::templates::tir::ids::ExpressionSiteId;
 use crate::compiler_frontend::ast::templates::tir::node::{
@@ -28,7 +28,7 @@ use crate::compiler_frontend::ast::templates::tir::{
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-/// Collects cloned structural expression payloads reachable from a template.
+/// Collects committed structural expression IDs reachable from a template.
 ///
 /// WHAT: traverses template structure below `template_id`, including runtime
 ///       slot-plan roots owned by that template, records dynamic-expression
@@ -42,8 +42,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 pub(crate) fn collect_tir_expression_overlay_payloads<'store>(
     store: &'store TemplateIrStore,
     template_id: TemplateIrId,
-) -> Result<Vec<(ExpressionSiteId, Expression)>, CompilerError> {
-    let mut collector = ExpressionOverlayPayloadCollector::<'store>::new(None);
+) -> Result<Vec<(ExpressionSiteId, ExprId)>, CompilerError> {
+    let mut collector = ExpressionOverlayPayloadCollector::<'store>::new(None, None);
     collector.collect_template(store, template_id)?;
     Ok(collector.into_payloads())
 }
@@ -54,8 +54,10 @@ pub(crate) fn collect_tir_expression_overlay_payloads<'store>(
 /// root, phase and context triple independently from the view authority.
 pub(crate) fn collect_effective_tir_expression_overlay_payloads<'store>(
     root_view: &TirView<'store>,
-) -> Result<Vec<(ExpressionSiteId, Expression)>, CompilerError> {
-    let mut collector = ExpressionOverlayPayloadCollector::new(Some(root_view.clone()));
+    expressions: &'store AstExpressionBuilder,
+) -> Result<Vec<(ExpressionSiteId, ExprId)>, CompilerError> {
+    let mut collector =
+        ExpressionOverlayPayloadCollector::new(Some(root_view.clone()), Some(expressions));
     collector.collect_template(root_view.store(), root_view.root_ref())?;
     Ok(collector.into_payloads())
 }
@@ -65,7 +67,7 @@ pub(crate) fn collect_effective_tir_expression_overlay_payloads<'store>(
 pub(crate) fn replace_expression_overlay_entries(
     store: &mut TemplateIrStore,
     base: TemplateViewContext,
-    replacements: impl IntoIterator<Item = (ExpressionSiteId, Box<Expression>)>,
+    replacements: impl IntoIterator<Item = (ExpressionSiteId, ExprId)>,
 ) -> Result<TemplateViewContext, CompilerError> {
     let mut replacement_entries = Vec::new();
     let mut replacement_site_ids = FxHashSet::default();
@@ -89,7 +91,7 @@ pub(crate) fn replace_expression_overlay_entries(
             .overrides
             .iter()
             .filter(|(site_id, _)| !replacement_site_ids.contains(site_id))
-            .map(|(site_id, expression)| (*site_id, expression.clone()))
+            .map(|(site_id, expression)| (*site_id, *expression))
             .collect()
     } else {
         Vec::new()
@@ -142,11 +144,11 @@ impl ExpressionOverlayAuthority {
         let _ = self.layers.pop();
     }
 
-    fn expression_for_site<'store>(
+    fn expression_for_site(
         &self,
-        store: &'store TemplateIrStore,
+        store: &TemplateIrStore,
         site_id: ExpressionSiteId,
-    ) -> Result<Option<(&'store Expression, usize)>, CompilerError> {
+    ) -> Result<Option<(ExprId, usize)>, CompilerError> {
         for (layer_index, overlay_id) in self.layers.iter().copied().enumerate() {
             let overlay = store.expression_overlay(overlay_id).ok_or_else(|| {
                 CompilerError::compiler_error(format!(
@@ -174,7 +176,8 @@ struct ExpressionOverlayPayloadCollector<'store> {
     // restored after each named transition and is never retained by a caller.
     effective_view: Option<TirView<'store>>,
     authority: ExpressionOverlayAuthority,
-    payloads: FxHashMap<ExpressionSiteId, (Expression, Option<usize>)>,
+    expressions: Option<&'store AstExpressionBuilder>,
+    payloads: FxHashMap<ExpressionSiteId, (ExprId, Option<usize>)>,
     active_nodes: HashSet<(TemplateIrNodeId, Option<TirViewIdentity>)>,
     completed_nodes: HashSet<(TemplateIrNodeId, Option<TirViewIdentity>)>,
     active_templates: HashSet<ExpressionOverlayTemplateTraversalKey>,
@@ -184,8 +187,12 @@ struct ExpressionOverlayPayloadCollector<'store> {
 }
 
 impl<'store> ExpressionOverlayPayloadCollector<'store> {
-    fn new(effective_view: Option<TirView<'store>>) -> Self {
+    fn new(
+        effective_view: Option<TirView<'store>>,
+        expressions: Option<&'store AstExpressionBuilder>,
+    ) -> Self {
         Self {
+            expressions,
             effective_view,
             authority: ExpressionOverlayAuthority::default(),
             payloads: FxHashMap::default(),
@@ -198,7 +205,7 @@ impl<'store> ExpressionOverlayPayloadCollector<'store> {
         }
     }
 
-    fn into_payloads(self) -> Vec<(ExpressionSiteId, Expression)> {
+    fn into_payloads(self) -> Vec<(ExpressionSiteId, ExprId)> {
         let mut payloads: Vec<_> = self
             .payloads
             .into_iter()
@@ -212,27 +219,28 @@ impl<'store> ExpressionOverlayPayloadCollector<'store> {
         &self,
         store: &'store TemplateIrStore,
         site_id: ExpressionSiteId,
-        structural_expression: &Expression,
-    ) -> Result<(Expression, Option<usize>), CompilerError> {
+        structural_expression: ExprId,
+    ) -> Result<(ExprId, Option<usize>), CompilerError> {
         if let Some(view) = &self.effective_view
-            && let Some(expression) = view.effective_expression_for_site(site_id)?
+            && let Some(expressions) = self.expressions
+            && let Some(expression) = view.effective_expression_for_site(expressions, site_id)?
         {
-            return Ok((expression.clone(), Some(0)));
+            return Ok((expression.id(), Some(0)));
         }
 
         if let Some((expression, precedence)) =
             self.authority.expression_for_site(store, site_id)?
         {
-            return Ok((expression.clone(), Some(precedence)));
+            return Ok((expression, Some(precedence)));
         }
 
-        Ok((structural_expression.clone(), None))
+        Ok((structural_expression, None))
     }
 
     fn record_payload(
         &mut self,
         site_id: ExpressionSiteId,
-        expression: Expression,
+        expression: ExprId,
         precedence: Option<usize>,
     ) {
         match self.payloads.entry(site_id) {
@@ -312,14 +320,10 @@ impl<'store> ExpressionOverlayPayloadCollector<'store> {
             ));
         }
 
-        let (contribution_roots, site_render_roots) = runtime_slot_plan_roots(store, slot_plan_id)?;
+        let roots = runtime_slot_plan_roots(store, slot_plan_id)?;
 
         let result = self.collect_node(store, wrapper_root).and_then(|()| {
-            for root in contribution_roots {
-                self.collect_node(store, root)?;
-            }
-
-            for root in site_render_roots {
+            for root in roots {
                 self.collect_node(store, root)?;
             }
 
@@ -385,7 +389,7 @@ impl<'store> ExpressionOverlayPayloadCollector<'store> {
                 ..
             } => {
                 let (expression, precedence) =
-                    self.effective_expression(store, *site_id, expression)?;
+                    self.effective_expression(store, *site_id, *expression)?;
                 self.record_payload(*site_id, expression, precedence);
                 Ok(())
             }
@@ -437,6 +441,9 @@ impl<'store> ExpressionOverlayPayloadCollector<'store> {
             | TemplateIrNodeKind::AggregateOutput
             | TemplateIrNodeKind::RuntimeSlotSite { .. }
             | TemplateIrNodeKind::RuntimeSlotContributionSource { .. } => Ok(()),
+            // A retained position contributes no expression payload: its value is installed by
+            // body-root completion, and every overlay reader runs on the completed tree.
+            TemplateIrNodeKind::RetainedNumericIntake(_) => Ok(()),
         }
     }
 
@@ -452,7 +459,7 @@ impl<'store> ExpressionOverlayPayloadCollector<'store> {
                 TemplateLoopHeaderExpressionSites::Conditional { condition: site_id },
             ) => {
                 let (expression, precedence) =
-                    self.effective_expression(store, *site_id, condition)?;
+                    self.effective_expression(store, *site_id, *condition)?;
                 self.record_payload(*site_id, expression, precedence);
             }
 
@@ -461,17 +468,16 @@ impl<'store> ExpressionOverlayPayloadCollector<'store> {
                 TemplateLoopHeaderExpressionSites::Range { start, end, step },
             ) => {
                 let (expression, precedence) =
-                    self.effective_expression(store, *start, &range.start)?;
+                    self.effective_expression(store, *start, range.start)?;
                 self.record_payload(*start, expression, precedence);
 
-                let (expression, precedence) =
-                    self.effective_expression(store, *end, &range.end)?;
+                let (expression, precedence) = self.effective_expression(store, *end, range.end)?;
                 self.record_payload(*end, expression, precedence);
 
                 match (step, &range.step) {
                     (Some(step_site_id), Some(step_expression)) => {
                         let (expression, precedence) =
-                            self.effective_expression(store, *step_site_id, step_expression)?;
+                            self.effective_expression(store, *step_site_id, *step_expression)?;
                         self.record_payload(*step_site_id, expression, precedence);
                     }
                     (None, None) => {}
@@ -488,7 +494,7 @@ impl<'store> ExpressionOverlayPayloadCollector<'store> {
                 TemplateLoopHeaderExpressionSites::Collection { iterable: site_id },
             ) => {
                 let (expression, precedence) =
-                    self.effective_expression(store, *site_id, iterable)?;
+                    self.effective_expression(store, *site_id, *iterable)?;
                 self.record_payload(*site_id, expression, precedence);
             }
 

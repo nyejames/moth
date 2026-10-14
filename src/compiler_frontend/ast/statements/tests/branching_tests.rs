@@ -5,24 +5,23 @@
 
 use super::*;
 use crate::compiler_frontend::ast::ast_nodes::MatchExhaustiveness;
+use crate::compiler_frontend::ast::const_values::store::{ConstValuePayload, ConstValueStore};
 use crate::compiler_frontend::ast::cursor::AstCursor;
-use crate::compiler_frontend::ast::expressions::expression::{
-    Expression, ExpressionKind, Operator,
-};
-use crate::compiler_frontend::ast::expressions::expression_rpn::{
-    ExpressionRpn, ExpressionRpnItem,
+use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExpressionOperationView, ExpressionView,
 };
 use crate::compiler_frontend::ast::statements::if_headers::{IfHeaderShape, classify_if_header};
 use crate::compiler_frontend::ast::statements::match_exhaustiveness::MatchArmCoverageTracker;
 use crate::compiler_frontend::ast::statements::match_patterns::{
-    MatchPattern, RelationalPatternOp,
+    MatchPattern, PatternValue, PatternValueKind, RelationalPatternOp,
 };
 use crate::compiler_frontend::compiler_messages::{
     ChoiceVariantSeparatorGap, CommonSyntaxMistakeReason, DiagnosticKind, DiagnosticPayload,
     InvalidControlFlowStatementReason, InvalidMatchArmReason, InvalidMatchPatternReason,
     NonExhaustiveMatchReason, RuleDiagnosticKind, SyntaxDiagnosticKind, TypeMismatchContext,
 };
-use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::tests::ast_fixture_support::start_function_body;
 use crate::compiler_frontend::tests::parse_support::{
@@ -30,6 +29,39 @@ use crate::compiler_frontend::tests::parse_support::{
 };
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+
+#[test]
+fn rejects_non_single_conditions_scrutinees_and_assertion_arguments() {
+    let producers = "pair || -> Bool, Bool:\nreturn true, false\n;\nempty ||:\nreturn\n;\n";
+    for (statement, produced_count) in [
+        ("if pair():\n;\n", 2),
+        ("if empty():\n;\n", 0),
+        ("if pair() is:\nelse =>\n;\n", 2),
+        ("if empty() is:\nelse =>\n;\n", 0),
+        ("assert(pair())\n", 2),
+        ("assert(empty())\n", 0),
+    ] {
+        let source = format!("{producers}{statement}");
+        let diagnostic = parse_single_file_ast_diagnostic(&source);
+        assert!(matches!(
+            &diagnostic.payload,
+            DiagnosticPayload::InvalidValueReceiver {
+                target_count: 1,
+                produced_count: actual,
+                ..
+            } if *actual == produced_count
+        ));
+    }
+}
+
+/// One exact `I32` scalar value for match fixtures.
+///
+/// WHY: an unconstrained whole literal defaults to `I32`, so completed patterns and scrutinees
+///      carry the exact `I32` identity.
+fn i32_value(value: i64) -> FixedScalarValue {
+    FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32")
+}
 
 #[test]
 fn parses_if_else_statements() {
@@ -43,7 +75,15 @@ fn parses_if_else_statements() {
         panic!("expected if statement in start body");
     };
 
-    assert_eq!(condition.diagnostic_type, DataType::Bool);
+    assert_eq!(
+        ast.expressions
+            .view(*condition)
+            .expect("condition belongs to AST")
+            .value_type_id()
+            .expect("condition is single-valued"),
+        builtin_type_ids::BOOL,
+        "if condition should keep Bool type identity"
+    );
     assert_eq!(then_block.len(), 1);
     assert_eq!(metadata.then_scope, then_block[0].scope);
     assert_eq!(
@@ -109,28 +149,70 @@ fn rejects_missing_if_conditions_at_the_first_boundary() {
     }
 }
 
-fn runtime_operator_sequence(expression: &Expression) -> Vec<Operator> {
-    fn collect_operators_from_rpn(rpn: &ExpressionRpn, out: &mut Vec<Operator>) {
-        for item in &rpn.items {
-            match item {
-                ExpressionRpnItem::Operator { operator, .. } => out.push(operator.to_owned()),
-                ExpressionRpnItem::Operand(Expression {
-                    kind: ExpressionKind::Runtime(inner_rpn),
-                    ..
-                }) => collect_operators_from_rpn(inner_rpn, out),
-                _ => {}
-            }
-        }
-    }
+fn literal_scalar_of(
+    pattern: &MatchPattern,
+    ast: &crate::compiler_frontend::ast::Ast,
+) -> moth_lexical::numeric::fixed_scalar::FixedScalarValue {
+    let MatchPattern::Literal(value) = pattern else {
+        panic!("expected literal pattern, got {pattern:?}");
+    };
+    let PatternValueKind::Constant(id) = value.kind else {
+        panic!("expected folded literal pattern");
+    };
+    let ConstValuePayload::FixedScalar(scalar) = ast
+        .const_values
+        .payload(id)
+        .expect("pattern constant belongs to AST")
+    else {
+        panic!("expected fixed-scalar literal pattern");
+    };
+    *scalar
+}
 
-    match &expression.kind {
-        ExpressionKind::Runtime(rpn) => {
-            let mut operators = Vec::new();
-            collect_operators_from_rpn(rpn, &mut operators);
-            operators
+fn guard_is_bool_true(
+    guard: Option<crate::compiler_frontend::ast::expressions::expression_store::ExprId>,
+    ast: &crate::compiler_frontend::ast::Ast,
+) -> bool {
+    let Some(guard) = guard else {
+        return false;
+    };
+    let view = ast.expressions.view(guard).expect("guard belongs to AST");
+    matches!(
+        view.operation(),
+        ExpressionOperationView::Constant(id)
+            if matches!(ast.const_values.payload(id), Some(ConstValuePayload::Bool(true)))
+    )
+}
+
+fn runtime_operator_sequence(
+    condition: crate::compiler_frontend::ast::expressions::expression_store::ExprId,
+    ast: &crate::compiler_frontend::ast::Ast,
+) -> Vec<Operator> {
+    // Post-order matches the RPN order the operator sequences were written against: operands
+    // first, then the operator that consumes them.
+    fn collect_operators(view: ExpressionView<'_>, out: &mut Vec<Operator>) {
+        view.visit_children(|child| collect_operators(child, out));
+        match view.operation() {
+            ExpressionOperationView::NumericBinary { facts, .. }
+            | ExpressionOperationView::Compare { facts, .. } => out.push(facts.operator),
+            ExpressionOperationView::NumericUnary { facts, .. } => out.push(facts.operator),
+            ExpressionOperationView::LogicalNot { .. } => out.push(Operator::Not),
+            ExpressionOperationView::LogicalBinary { operation, .. } => {
+                out.push(match operation {
+                    crate::compiler_frontend::ast::expressions::expression_store::LogicalOperator::And => Operator::And,
+                    crate::compiler_frontend::ast::expressions::expression_store::LogicalOperator::Or => Operator::Or,
+                });
+            }
+            _ => {}
         }
-        _ => vec![],
     }
+    let view = ast
+        .expressions
+        .view(condition)
+        .expect("condition belongs to AST");
+    let mut operators = Vec::new();
+    collect_operators(view, &mut operators);
+    operators
 }
 
 #[test]
@@ -207,7 +289,7 @@ fn precedence_not_binds_tighter_than_and_in_if_conditions() {
     };
 
     assert_eq!(
-        runtime_operator_sequence(condition),
+        runtime_operator_sequence(*condition, &ast),
         vec![Operator::Not, Operator::And]
     );
 }
@@ -224,7 +306,7 @@ fn precedence_and_binds_tighter_than_or_in_if_conditions() {
     };
 
     assert_eq!(
-        runtime_operator_sequence(condition),
+        runtime_operator_sequence(*condition, &ast),
         vec![Operator::And, Operator::Or]
     );
 }
@@ -241,7 +323,7 @@ fn parenthesized_grouping_overrides_default_logical_precedence() {
     };
 
     assert_eq!(
-        runtime_operator_sequence(condition),
+        runtime_operator_sequence(*condition, &ast),
         vec![Operator::Or, Operator::And]
     );
 }
@@ -258,7 +340,7 @@ fn comparisons_bind_tighter_than_and_in_if_conditions() {
     };
 
     assert_eq!(
-        runtime_operator_sequence(condition),
+        runtime_operator_sequence(*condition, &ast),
         vec![Operator::LessThan, Operator::LessThan, Operator::And]
     );
 }
@@ -274,7 +356,7 @@ fn parenthesized_comparison_can_be_negated_in_if_conditions() {
     };
 
     assert_eq!(
-        runtime_operator_sequence(condition),
+        runtime_operator_sequence(*condition, &ast),
         vec![Operator::LessThan, Operator::Not]
     );
 }
@@ -291,7 +373,7 @@ fn equality_and_or_precedence_stays_deterministic_in_if_conditions() {
     };
 
     assert_eq!(
-        runtime_operator_sequence(condition),
+        runtime_operator_sequence(*condition, &ast),
         vec![Operator::Equality, Operator::Equality, Operator::Or]
     );
 }
@@ -318,22 +400,19 @@ fn parses_match_statements_with_else_arm() {
         panic!("expected match statement in start body");
     };
 
-    assert_eq!(scrutinee.diagnostic_type, DataType::Int);
+    assert_eq!(
+        ast.type_environment.fixed_scalar(
+            ast.expressions
+                .view(*scrutinee)
+                .expect("scrutinee belongs to AST")
+                .value_type_id()
+                .expect("scrutinee is single-valued")
+        ),
+        Some(FixedScalar::I32)
+    );
     assert_eq!(arms.len(), 2);
-    assert!(matches!(
-        arms[0].pattern,
-        MatchPattern::Literal(Expression {
-            kind: ExpressionKind::Int(0),
-            ..
-        })
-    ));
-    assert!(matches!(
-        arms[1].pattern,
-        MatchPattern::Literal(Expression {
-            kind: ExpressionKind::Int(42),
-            ..
-        })
-    ));
+    assert_eq!(literal_scalar_of(&arms[0].pattern, &ast), i32_value(0));
+    assert_eq!(literal_scalar_of(&arms[1].pattern, &ast), i32_value(42));
     assert_eq!(
         else_block.as_ref().map(Vec::len),
         Some(1),
@@ -362,10 +441,7 @@ fn parses_match_arm_with_boolean_guard() {
 
     assert_eq!(arms.len(), 1);
     assert!(
-        matches!(
-            arms[0].guard.as_ref().map(|guard| &guard.kind),
-            Some(&ExpressionKind::Bool(true))
-        ),
+        guard_is_bool_true(arms[0].guard, &ast),
         "guard should parse as a Bool expression attached to the arm"
     );
     assert!(
@@ -388,45 +464,51 @@ fn parses_negative_match_arm_with_multiline_boolean_guard() {
     };
 
     assert_eq!(arms.len(), 2);
-    assert!(matches!(
-        arms[1].pattern,
-        MatchPattern::Literal(Expression {
-            kind: ExpressionKind::Int(-42),
-            ..
-        })
-    ));
-    assert!(matches!(
-        arms[1].guard.as_ref().map(|guard| &guard.kind),
-        Some(&ExpressionKind::Bool(true))
-    ));
+    assert_eq!(literal_scalar_of(&arms[1].pattern, &ast), i32_value(-42));
+    assert!(
+        guard_is_bool_true(arms[1].guard, &ast),
+        "negative arm guard should parse as a Bool expression"
+    );
 }
 
 #[test]
 fn guarded_literal_coverage_only_tracks_unguarded_duplicates() {
-    let literal = MatchPattern::Literal(Expression::int(2, None, ValueMode::ImmutableOwned));
-    let guard = Expression::bool(true, None, ValueMode::ImmutableOwned);
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let literal_id = expressions
+        .fixed_scalar(
+            &mut constants,
+            i32_value(2),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture literal fits store");
+    let literal = MatchPattern::Literal(
+        PatternValue::from_expression(expressions.view_owned(literal_id).expect("fixture literal"))
+            .expect("literal pattern value"),
+    );
 
     let mut guarded_then_unguarded = MatchArmCoverageTracker::default();
     assert!(
         !guarded_then_unguarded
-            .record_arm(&literal, Some(&guard), None)
+            .record_arm(&literal, true, None, &constants)
             .unreachable
     );
     assert!(
         !guarded_then_unguarded
-            .record_arm(&literal, None, None)
+            .record_arm(&literal, false, None, &constants)
             .unreachable
     );
 
     let mut unguarded_then_duplicate = MatchArmCoverageTracker::default();
     assert!(
         !unguarded_then_duplicate
-            .record_arm(&literal, None, None)
+            .record_arm(&literal, false, None, &constants)
             .unreachable
     );
     assert!(
         unguarded_then_duplicate
-            .record_arm(&literal, Some(&guard), None)
+            .record_arm(&literal, true, None, &constants)
             .unreachable
     );
 }
@@ -473,8 +555,16 @@ fn parses_choice_match_arms_with_bare_and_qualified_variants() {
         panic!("expected match statement in start body");
     };
 
+    let scrutinee_type = ast
+        .expressions
+        .view(*scrutinee)
+        .expect("scrutinee belongs to AST")
+        .value_type_id()
+        .expect("scrutinee is single-valued");
     assert!(
-        matches!(scrutinee.diagnostic_type, DataType::Choices { .. }),
+        ast.type_environment
+            .choice_definition_for(scrutinee_type)
+            .is_some(),
         "choice match scrutinee should preserve choice type identity"
     );
     assert_eq!(arms.len(), 2);
@@ -648,7 +738,7 @@ fn rejects_guarded_choice_match_without_else() {
 #[test]
 fn parses_option_present_capture_statement_condition() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
-        "value Int? = 42\nif value is |amount|:\n    io.line([: [amount]])\n;\n",
+        "value I32? = 42\nif value is |amount|:\n    io.line([: [amount]])\n;\n",
     );
 
     let body = start_function_body(&ast, &path_fork, &string_table);
@@ -663,9 +753,15 @@ fn parses_option_present_capture_statement_condition() {
     };
 
     assert_eq!(
-        ast.type_environment.option_inner_type(scrutinee.type_id),
-        Some(ast.type_environment.builtins().int),
-        "scrutinee should keep semantic Int? identity even when its diagnostic spelling is inferred"
+        ast.type_environment.option_inner_type(
+            ast.expressions
+                .view(*scrutinee)
+                .expect("scrutinee belongs to AST")
+                .value_type_id()
+                .expect("scrutinee is single-valued")
+        ),
+        Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
+        "scrutinee should keep semantic I32? identity even when its diagnostic spelling is inferred"
     );
     assert_eq!(arms.len(), 1);
     assert!(
@@ -683,7 +779,7 @@ fn parses_option_present_capture_statement_condition() {
 #[test]
 fn parses_option_match_present_capture_guard_and_none_patterns() {
     let (ast, path_fork, string_table) = parse_single_file_ast(
-        "value Int? = 42\n\
+        "value I32? = 42\n\
      if value is:\n\
          |positive| if positive > 0 => io.line([: [positive]])\n\
          |fallback| => io.line([: [fallback]])\n\
@@ -993,7 +1089,7 @@ fn routes_missing_inline_else_at_assignment_boundary_through_value_if_missing_el
     // The assignment receiver keeps a real newline before the next statement,
     // so the absent `else` must be routed through the structured reason.
     assert_inline_control_flow_reason(
-        "choose |condition Bool| -> Int:\n    result ~= 0\n    result = if condition then 10\n    return result\n;\nvalue = choose(false)\n",
+        "choose |condition Bool| -> I32:\n    result ~= 0\n    result = if condition then 10\n    return result\n;\nvalue = choose(false)\n",
         InvalidControlFlowStatementReason::ValueIfMissingElse,
     );
 }
@@ -1003,7 +1099,7 @@ fn routes_missing_inline_else_at_return_boundary_through_value_if_missing_else()
     // The return receiver keeps a real newline before the block close, so the
     // absent `else` must be routed through the structured reason.
     assert_inline_control_flow_reason(
-        "choose |condition Bool| -> Int:\n    return if condition then 10\n;\nvalue = choose(false)\n",
+        "choose |condition Bool| -> I32:\n    return if condition then 10\n;\nvalue = choose(false)\n",
         InvalidControlFlowStatementReason::ValueIfMissingElse,
     );
 }
@@ -1013,11 +1109,11 @@ fn preserves_inline_multiline_when_newline_precedes_an_authored_else() {
     // A real newline before an authored `else` stays the multiline inline form
     // at both assignment and return receivers, not a missing-`else` diagnostic.
     assert_inline_control_flow_reason(
-        "choose |condition Bool| -> Int:\n    result ~= 0\n    result = if condition then 10\nelse 0\n    return result\n;\nvalue = choose(false)\n",
+        "choose |condition Bool| -> I32:\n    result ~= 0\n    result = if condition then 10\nelse 0\n    return result\n;\nvalue = choose(false)\n",
         InvalidControlFlowStatementReason::InlineValueIfMultiline,
     );
     assert_inline_control_flow_reason(
-        "choose |condition Bool| -> Int:\n    return if condition then 10\nelse 0\n;\nvalue = choose(false)\n",
+        "choose |condition Bool| -> I32:\n    return if condition then 10\nelse 0\n;\nvalue = choose(false)\n",
         InvalidControlFlowStatementReason::InlineValueIfMultiline,
     );
     assert_inline_control_flow_reason(
@@ -1040,7 +1136,7 @@ fn multiline_option_literal_predicate_stays_inline_value_if_multiline() {
 #[test]
 fn ignores_else_owned_by_a_later_statement() {
     assert_inline_control_flow_reason(
-        "choose |condition Bool| -> Int:\n    result ~= 0\n    result = if condition then 10\n    if condition:\n        result = 1\n    else\n        result = 2\n    ;\n    return result\n;\nvalue = choose(false)\n",
+        "choose |condition Bool| -> I32:\n    result ~= 0\n    result = if condition then 10\n    if condition:\n        result = 1\n    else\n        result = 2\n    ;\n    return result\n;\nvalue = choose(false)\n",
         InvalidControlFlowStatementReason::ValueIfMissingElse,
     );
 }

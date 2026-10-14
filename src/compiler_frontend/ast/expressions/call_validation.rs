@@ -6,7 +6,7 @@
 //! same final argument policy even though they build different AST nodes afterward. Named and
 //! positional syntax is owned by `call_arguments` and is not reconstructed here.
 
-use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValueStore};
 use crate::compiler_frontend::ast::expressions::call_argument::{
     CallAccessMode, CallArgument, CallPassingMode, ParameterSlot,
     order_call_arguments_by_retained_slot,
@@ -14,16 +14,19 @@ use crate::compiler_frontend::ast::expressions::call_argument::{
 use crate::compiler_frontend::ast::expressions::constructor_views::{
     ConstructorField, ConstructorFieldAccessMode,
 };
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, ExpressionConstructionFailure, ExpressionOperationView,
+    ExpressionView, OwnedExpr,
+};
+use crate::compiler_frontend::ast::numeric_known_shape::KnownShapeId;
+use crate::compiler_frontend::ast::statements::functions::FunctionParameter;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidCallShapeReason, TypeMismatchContext,
+    CompilerDiagnostic, InvalidCallShapeReason, TypeMismatchContext, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
-use moth_lexical::numeric::profile::FloatPrecision;
 
 use crate::compiler_frontend::external_packages::{
     ExternalAccessKind, ExternalFunctionDef, ExternalParameter,
@@ -51,6 +54,15 @@ impl From<CompilerDiagnostic> for CallValidationError {
 impl From<CompilerError> for CallValidationError {
     fn from(error: CompilerError) -> Self {
         CallValidationError::Infrastructure(Box::new(error))
+    }
+}
+
+impl From<ExpressionConstructionFailure> for CallValidationError {
+    fn from(error: ExpressionConstructionFailure) -> Self {
+        match error {
+            ExpressionConstructionFailure::Diagnostic(diagnostic) => Self::Diagnostic(diagnostic),
+            ExpressionConstructionFailure::Invariant(error) => error.into(),
+        }
     }
 }
 
@@ -134,23 +146,49 @@ impl<'a> CallDiagnosticContext<'a> {
     }
 }
 
+#[derive(Debug, Clone)]
 pub(crate) enum ExpectedAccessMode {
     Shared,
     Mutable,
 }
 
+#[derive(Debug, Clone)]
 pub(crate) enum ExpectedParameterType {
     Known(TypeId),
+    /// Construction-only numeric slot shape under a retained collection or map descriptor.
+    /// WHY: its canonical TypeId is decided at body-root completion, so it is materialised to
+    /// `Known` before any validation. It never reaches a completed call, signature, or HIR.
+    ConstructionShape(KnownShapeId),
+    /// Generic template parameter whose concrete type inference chooses later. Only parse-side
+    /// retention reads it; completed calls validate the instantiated signature.
+    GenericParameter(TypeId),
     UnknownExternal,
 }
 
+/// Default content a call fills for an omitted parameter.
+///
+/// WHAT: `Folded` is canonical constant content. `Authored` is a struct-field default expression
+/// that the strict struct pass has not folded yet.
+/// WHY: a struct default can name a module constant that is not yet published when the struct
+/// shell is built. Whether a default exists is the declaration's fact; fold state only chooses the
+/// representation.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum ParameterDefault {
+    /// Canonical folded default; each omitting call receives a constant occurrence of it.
+    Folded(ConstValueId),
+    /// Authored default expression. Each omitting call shares it; the enclosing constant folds it
+    /// in its own context.
+    Authored(ExprId),
+}
+
+#[derive(Debug, Clone)]
 pub(crate) struct ParameterExpectation {
     pub name: Option<StringId>,
     /// Canonical type for the parameter, or `UnknownExternal` when the external
     /// package does not expose a resolved frontend type.
     pub expected_type: ExpectedParameterType,
     pub access_mode: ExpectedAccessMode,
-    pub default_value: Option<Expression>,
+    pub default_value: Option<ParameterDefault>,
 }
 
 enum CallTypeValidation<'a> {
@@ -159,47 +197,60 @@ enum CallTypeValidation<'a> {
 }
 
 pub(crate) struct CallArgumentResolutionContext<'a> {
+    pub(crate) expression_builder: &'a mut AstExpressionBuilder,
+    pub(crate) const_values: &'a mut ConstValueStore,
     pub(crate) string_table: &'a mut StringTable,
     pub(crate) type_environment: &'a TypeEnvironment,
     pub(crate) compatibility_cache: &'a mut TypeCompatibilityCache,
     pub(crate) path_fork: &'a PathInternerFork,
-    /// Boundary precision for contextual `Int -> Float` argument coercion.
-    pub(crate) float_precision: FloatPrecision,
 }
 
 struct CallArgumentPolicyContext<'a> {
+    expression_builder: &'a mut AstExpressionBuilder,
+    const_values: &'a mut ConstValueStore,
     string_table: &'a mut StringTable,
     type_environment: &'a TypeEnvironment,
     type_validation: CallTypeValidation<'a>,
     path_fork: &'a PathInternerFork,
-    float_precision: FloatPrecision,
 }
 
 /// Builds one expectation per user-defined parameter declaration.
 pub(crate) fn expectations_from_user_parameters(
-    parameters: &[Declaration],
+    parameters: &[FunctionParameter],
     path_fork: &PathInternerFork,
 ) -> Vec<ParameterExpectation> {
     parameters
         .iter()
         .map(|parameter| ParameterExpectation {
             name: path_fork.component(parameter.id),
-            expected_type: ExpectedParameterType::Known(parameter.value.type_id),
-            access_mode: if parameter.value.value_mode.is_mutable() {
+            expected_type: ExpectedParameterType::Known(parameter.type_id),
+            access_mode: if parameter.value_mode.is_mutable() {
                 ExpectedAccessMode::Mutable
             } else {
                 ExpectedAccessMode::Shared
             },
-            default_value: match parameter.value.kind {
-                ExpressionKind::NoValue => None,
-                _ => {
-                    #[cfg(feature = "benchmark_counters")]
-                    increment_frontend_counter(FrontendCounter::CensusParameterDefaultViewClones);
-                    Some(parameter.value.clone())
-                }
-            },
+            default_value: parameter.default.map(ParameterDefault::Folded),
         })
         .collect()
+}
+
+/// Builds one expectation per generic template parameter declaration.
+///
+/// WHAT: a declared type that mentions a generic parameter becomes a `GenericParameter`
+///       expectation whose concrete type inference chooses later; other declared types stay `Known`.
+/// WHY: parse-side numeric retention must never treat the template's bare `T` as a concrete slot type.
+pub(crate) fn generic_template_expectations(
+    parameters: &[FunctionParameter],
+    path_fork: &PathInternerFork,
+    type_environment: &TypeEnvironment,
+) -> Vec<ParameterExpectation> {
+    let mut expectations = expectations_from_user_parameters(parameters, path_fork);
+    for (expectation, parameter) in expectations.iter_mut().zip(parameters) {
+        if type_environment.contains_generic_parameter(parameter.type_id) {
+            expectation.expected_type = ExpectedParameterType::GenericParameter(parameter.type_id);
+        }
+    }
+    expectations
 }
 
 /// Maps a single external parameter into the frontend's `ParameterExpectation`.
@@ -260,14 +311,14 @@ pub(crate) fn expectations_from_constructor_fields(
                 if field.default_value.is_some() {
                     increment_frontend_counter(FrontendCounter::CensusParameterDefaultViewClones);
                 }
-                field.default_value.clone()
+                field.default_value
             },
         })
         .collect()
 }
 
 pub(crate) fn expectations_from_receiver_method_signature(
-    parameters_excluding_receiver: &[Declaration],
+    parameters_excluding_receiver: &[FunctionParameter],
     path_fork: &PathInternerFork,
 ) -> Vec<ParameterExpectation> {
     expectations_from_user_parameters(parameters_excluding_receiver, path_fork)
@@ -280,22 +331,23 @@ pub(crate) fn expectations_from_receiver_method_signature(
 /// WHY: once one caller changes final argument policy, every other call-shaped consumer inherits
 pub(crate) fn resolve_call_arguments(
     diagnostics: CallDiagnosticContext<'_>,
-    args: &[CallArgument],
+    args: &[CallArgument<OwnedExpr>],
     expectations: &[ParameterExpectation],
     span: Option<SourceSpan>,
     context: CallArgumentResolutionContext<'_>,
-) -> Result<Vec<CallArgument>, CallValidationError> {
+) -> Result<Vec<CallArgument<OwnedExpr>>, CallValidationError> {
     resolve_call_arguments_with_type_policy(
         diagnostics,
         args,
         expectations,
         span,
         CallArgumentPolicyContext {
+            expression_builder: context.expression_builder,
+            const_values: context.const_values,
             string_table: context.string_table,
             type_environment: context.type_environment,
             type_validation: CallTypeValidation::Validate(context.compatibility_cache),
             path_fork: context.path_fork,
-            float_precision: context.float_precision,
         },
     )
 }
@@ -311,40 +363,52 @@ pub(crate) fn resolve_call_arguments(
 /// its own type evidence.
 #[allow(
     clippy::too_many_arguments,
-    reason = "shape validation keeps diagnostics, arguments, expectations, span, mutable string state, type environment, path fork and boundary Float precision as separate borrows"
+    reason = "call shape validation keeps diagnostics, arguments, expectations, span, expression builder, const store, string table, type environment, and path fork as separate borrows"
 )]
 pub(crate) fn resolve_call_arguments_shape_and_access(
     diagnostics: CallDiagnosticContext<'_>,
-    args: &[CallArgument],
+    args: &[CallArgument<OwnedExpr>],
     expectations: &[ParameterExpectation],
     span: Option<SourceSpan>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     type_environment: &TypeEnvironment,
     path_fork: &PathInternerFork,
-    float_precision: FloatPrecision,
-) -> Result<Vec<CallArgument>, CallValidationError> {
+) -> Result<Vec<CallArgument<OwnedExpr>>, CallValidationError> {
     resolve_call_arguments_with_type_policy(
         diagnostics,
         args,
         expectations,
         span,
         CallArgumentPolicyContext {
+            expression_builder,
+            const_values,
             string_table,
             type_environment,
             type_validation: CallTypeValidation::Skip,
             path_fork,
-            float_precision,
         },
     )
 }
 
+fn call_value_receiver(kind: CallSurfaceKind) -> ValueReceiverContext {
+    match kind {
+        CallSurfaceKind::StructConstructor | CallSurfaceKind::ChoiceConstructor => {
+            ValueReceiverContext::ConstructorArgument
+        }
+        CallSurfaceKind::Assertion => ValueReceiverContext::AssertionArgument,
+        _ => ValueReceiverContext::FunctionArgument,
+    }
+}
+
 fn resolve_call_arguments_with_type_policy(
     diagnostics: CallDiagnosticContext<'_>,
-    args: &[CallArgument],
+    args: &[CallArgument<OwnedExpr>],
     expectations: &[ParameterExpectation],
     span: Option<SourceSpan>,
     context: CallArgumentPolicyContext<'_>,
-) -> Result<Vec<CallArgument>, CallValidationError> {
+) -> Result<Vec<CallArgument<OwnedExpr>>, CallValidationError> {
     #[cfg(feature = "benchmark_counters")]
     increment_frontend_counter(match diagnostics.kind {
         CallSurfaceKind::Function => FrontendCounter::CensusCallFunctionEntries,
@@ -356,11 +420,12 @@ fn resolve_call_arguments_with_type_policy(
         CallSurfaceKind::Assertion => FrontendCounter::CensusCallAssertionEntries,
     });
     let CallArgumentPolicyContext {
+        expression_builder,
+        const_values,
         string_table,
         type_environment,
         mut type_validation,
         path_fork,
-        float_precision,
     } = context;
 
     // Validation flow order is intentionally fixed:
@@ -375,15 +440,36 @@ fn resolve_call_arguments_with_type_policy(
     // ------------------------
     for (slot, expectation) in expectations.iter().enumerate() {
         if resolved[slot].is_none() {
-            if let Some(default_value) = &expectation.default_value {
+            if let Some(default_value) = expectation.default_value {
                 #[cfg(feature = "benchmark_counters")]
                 increment_frontend_counter(FrontendCounter::CensusDefaultApplicationClones);
-                let defaulted = default_value.clone();
-                debug_assert!(
-                    type_environment.get(defaulted.type_id).is_some(),
-                    "default argument expression carried orphan TypeId({}) not registered in the active TypeEnvironment",
-                    defaulted.type_id.0,
-                );
+                let defaulted = match default_value {
+                    ParameterDefault::Folded(default_value) => {
+                        // Canonical parameter defaults are content metadata; occurrence facts are projected
+                        // from that content onto the call site.
+                        let metadata = const_values
+                            .metadata(default_value)
+                            .ok_or_else(|| {
+                                CompilerError::compiler_error(
+                                    "default argument constant ID outside owner",
+                                )
+                            })?
+                            .clone();
+                        expression_builder.constant(
+                            default_value,
+                            metadata.type_id,
+                            span,
+                            metadata.value_mode,
+                        )?
+                    }
+                    // Authored struct-field defaults are spliced as the authored expression. Only the
+                    // strict struct pass folds them and rejects any that stay unfolded, so a runtime
+                    // call never sees this variant.
+                    ParameterDefault::Authored(expression) => expression_builder.own(expression),
+                };
+                expression_builder
+                    .view_owned(defaulted)?
+                    .require_single(call_value_receiver(diagnostics.kind))?;
                 resolved[slot] = Some(
                     CallArgument::positional(defaulted, CallAccessMode::Shared, span)
                         .with_parameter_slot(ParameterSlot::new(slot)),
@@ -436,10 +522,14 @@ fn resolve_call_arguments_with_type_policy(
             );
             return Err(CompilerError::compiler_error(message).into());
         };
+        let actual_type_id = expression_builder
+            .view_owned(argument.value)?
+            .require_single(call_value_receiver(diagnostics.kind))?;
 
         let passing_mode = classify_call_passing_mode(
             &diagnostics,
             &argument,
+            expression_builder,
             expectation,
             slot,
             string_table,
@@ -450,17 +540,32 @@ fn resolve_call_arguments_with_type_policy(
 
         let expected_type_id = match expectation.expected_type {
             ExpectedParameterType::Known(type_id) => type_id,
+            ExpectedParameterType::ConstructionShape(_) => {
+                // WHY: construction-only shapes are materialised at body-root completion before
+                // completed call validation; reaching here is a compiler ordering bug.
+                return Err(CompilerError::compiler_error(
+                    "Construction-only numeric shape reached completed call validation.",
+                )
+                .into());
+            }
+            ExpectedParameterType::GenericParameter(_) => {
+                // WHY: a generic template expectation only drives parse-side retention; completed
+                // calls validate against the instantiated signature, never the template parameter.
+                return Err(CompilerError::compiler_error(
+                    "Generic parameter expectation reached completed call validation.",
+                )
+                .into());
+            }
             ExpectedParameterType::UnknownExternal => {
                 // Unknown external types skip compatibility checking.
                 ordered.push(normalized_argument);
                 continue;
             }
         };
-        let actual_type_id = normalized_argument.value.type_id;
 
         if let CallTypeValidation::Validate(compatibility_cache) = &mut type_validation
             && !is_call_argument_type_compatible(
-                expectation,
+                expected_type_id,
                 actual_type_id,
                 passing_mode,
                 type_environment,
@@ -490,8 +595,8 @@ fn resolve_call_arguments_with_type_policy(
             normalized_argument.value,
             expected_type_id,
             type_environment,
-            float_precision,
-        );
+            expression_builder,
+        )?;
 
         ordered.push(normalized_argument);
     }
@@ -501,14 +606,16 @@ fn resolve_call_arguments_with_type_policy(
 
 fn classify_call_passing_mode(
     diagnostics: &CallDiagnosticContext<'_>,
-    argument: &CallArgument,
+    argument: &CallArgument<OwnedExpr>,
+    expression_builder: &AstExpressionBuilder,
     expectation: &ParameterExpectation,
     slot_index: usize,
     string_table: &mut StringTable,
     path_fork: &PathInternerFork,
 ) -> Result<CallPassingMode, CallValidationError> {
     let callee_name = Some(string_table.intern(diagnostics.callee_name));
-    let source_state = classify_argument_source_state(&argument.value, path_fork);
+    let source_state =
+        classify_argument_source_state(expression_builder.view_owned(argument.value)?, path_fork);
     match (argument.access_mode, &expectation.access_mode) {
         // Shared argument passed to a shared parameter: no restriction.
         (CallAccessMode::Shared, ExpectedAccessMode::Shared) => Ok(CallPassingMode::Shared),
@@ -594,26 +701,19 @@ fn classify_call_passing_mode(
 ///
 /// WHAT: prefers the authored marker span, falling back to the value expression span.
 /// WHY: when `~` was authored, the marker is the call-site source the author must change.
-fn authored_marker_span(argument: &CallArgument) -> Option<SourceSpan> {
+fn authored_marker_span(argument: &CallArgument<OwnedExpr>) -> Option<SourceSpan> {
     argument.marker_span.or(argument.span)
 }
 
 fn is_call_argument_type_compatible(
-    expectation: &ParameterExpectation,
+    expected_type_id: TypeId,
     actual_type_id: TypeId,
     passing_mode: CallPassingMode,
     type_environment: &TypeEnvironment,
     compatibility_cache: &mut TypeCompatibilityCache,
 ) -> bool {
-    let expected_type_id = match expectation.expected_type {
-        ExpectedParameterType::Known(type_id) => type_id,
-        ExpectedParameterType::UnknownExternal => {
-            // Unknown expected type (e.g. external Handle/Void): skip compatibility check.
-            return true;
-        }
-    };
-    // Known-type cache-call attempts include exact identity. UnknownExternal
-    // returns above; this is deliberately not the cache lookup/miss metric.
+    // Known-type cache-call attempts include exact identity. Unknown external
+    // slots never reach here; this is deliberately not the cache lookup/miss metric.
     #[cfg(feature = "benchmark_counters")]
     increment_frontend_counter(FrontendCounter::CensusCallKnownTypeCompatibilityAttempts);
 
@@ -657,38 +757,21 @@ enum CallArgumentSourceState {
 /// WHY: shared and authored-`~` mutable-parameter branches share one classification, so the
 ///      call boundary traverses the argument exactly once instead of once per fact.
 fn classify_argument_source_state(
-    expression: &Expression,
+    expression: ExpressionView<'_>,
     path_fork: &PathInternerFork,
 ) -> CallArgumentSourceState {
-    match &expression.kind {
-        ExpressionKind::Reference(path) => {
-            let binding_name = path_fork.component(*path);
-            if expression.value_mode.is_mutable() {
+    match expression.operation() {
+        ExpressionOperationView::Reference(path) => {
+            let binding_name = path_fork.component(path);
+            if expression.value_mode().is_mutable() {
                 CallArgumentSourceState::MutablePlace
             } else {
                 CallArgumentSourceState::ImmutablePlace { binding_name }
             }
         }
-        ExpressionKind::FieldAccess { base, .. } => classify_argument_source_state(base, path_fork),
-        ExpressionKind::Runtime(rpn) if rpn.items.len() == 1 => match rpn.items.first() {
-            Some(ExpressionRpnItem::Operand(inner)) => {
-                classify_argument_source_state(inner, path_fork)
-            }
-            Some(ExpressionRpnItem::Operator { .. }) => CallArgumentSourceState::Fresh,
-            // Pending syntax never survives evaluation; flag it in debug builds so the invalid
-            // boundary is visible instead of silently classifying it as a fresh value.
-            Some(
-                ExpressionRpnItem::PendingNumericLiteral { .. }
-                | ExpressionRpnItem::PendingGroup { .. },
-            ) => {
-                debug_assert!(
-                    false,
-                    "pending expression syntax reached call-argument classification"
-                );
-                CallArgumentSourceState::Fresh
-            }
-            None => CallArgumentSourceState::Fresh,
-        },
+        ExpressionOperationView::FieldAccess { base, .. } => {
+            classify_argument_source_state(base, path_fork)
+        }
         _ => CallArgumentSourceState::Fresh,
     }
 }

@@ -2,7 +2,7 @@
 
 spacing_sum #= base_spacing + double_spacing
 
-scale_spacing |factor Int| -> Int:
+scale_spacing |factor I32| -> I32:
     return spacing_sum * factor
 ;
 

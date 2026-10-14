@@ -1,0 +1,14 @@
+-- A field write through an immutable Packet root is rejected while its
+-- numeric leaf is still pending. The later U64 read keeps the receiver pending.
+
+Packet type T = |value T|
+
+read_u64 |value U64| -> String:
+    return cast value
+;
+
+packet = Packet(1)
+packet.value = 4294967301
+packet_text = read_u64(packet.value)
+
+[:generic_constructed_numeric_immutable_field_root_rejected [packet_text]]

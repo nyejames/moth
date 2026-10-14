@@ -1,31 +1,35 @@
-parse_int |text String| -> Int, Error!:
-    return cast! text
+parse_int |text String| -> I32, Error!:
+    return cast text
 ;
 
-parse_float |text String| -> Float, Error!:
-    return cast! text
+parse_float |text String| -> F64, Error!:
+    return cast text
 ;
 
 parse_bool |text String| -> Bool, Error!:
-    return cast! text
+    return cast text
 ;
 
 parse_char |text String| -> Char, Error!:
-    return cast! text
+    return cast text
 ;
 
-float_to_int |value Float| -> Int, Error!:
-    return cast! value
+float_to_int |value F64| -> I32, Error!:
+    return cast value
 ;
 
-int_to_char |value Int| -> Char, Error!:
-    return cast! value
+int_to_char |value I32| -> Char, Error!:
+    return cast value
+;
+parse_private |text String| -> I32:
+    return cast text
 ;
 
-i Int = parse_int("42") catch:
+
+i I32 = parse_int("42") catch:
     then -1
 ;
-f Float = parse_float("3.5") catch:
+f F64 = parse_float("3.5") catch:
     then 0.0
 ;
 b Bool = parse_bool("true") catch:
@@ -34,11 +38,14 @@ b Bool = parse_bool("true") catch:
 c Char = parse_char("X") catch:
     then ' '
 ;
-fi Int = float_to_int(-7.8) catch:
+fi I32 = float_to_int(-7.8) catch:
     then 0
 ;
 ic Char = int_to_char(90) catch:
     then ' '
+
 ;
+private_invalid = parse_private("not an integer") catch then -1
+assert(private_invalid is -1)
 
 [: runtime fallible casts: [i]|[f]|[b]|[c]|[fi]|[ic]]

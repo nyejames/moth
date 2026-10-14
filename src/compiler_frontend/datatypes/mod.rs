@@ -8,7 +8,7 @@
 //! - `ids.rs` — compact type identifiers and canonical keys.
 //! - `environment.rs` — `TypeEnvironment` owns all type definitions and interning.
 //! - `definitions.rs` — type definition shapes stored in the environment.
-//! - `numeric_scalar.rs` — the canonical numeric scalar vocabulary (`Int`, `Uint`, `Float`, fixed).
+//! - `numeric_scalar.rs` — the canonical numeric scalar vocabulary (fixed scalars and exact `Dec`).
 //! - `number.rs` — compiler-owned `Dec` coefficients, arithmetic and conversions; shared scale
 //!   identity and normalized-text facts live in `moth_lexical`.
 //! - `parsed.rs` — parsed type syntax before resolution (no semantic identity).
@@ -27,7 +27,6 @@ pub mod datatype;
 pub mod definitions;
 pub mod display;
 pub mod environment;
-pub mod fallible_carrier;
 pub mod generic_bindings;
 pub mod generic_identity_bridge;
 pub mod generic_parameters;
@@ -43,7 +42,6 @@ pub mod queries;
 pub use datatype::DataType;
 pub(crate) use datatype::diagnostic_type_spelling;
 
-pub use environment::TypeEnvironment;
 pub use ids::*;
 
 use crate::compiler_frontend::external_packages::ExternalTypeId;
@@ -54,9 +52,6 @@ use crate::compiler_frontend::symbols::path_interner::PathId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BuiltinScalarReceiver {
-    Int,
-    Uint,
-    Float,
     Bool,
     String,
     Char,

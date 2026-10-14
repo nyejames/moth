@@ -2,6 +2,6 @@ identity type T |value T| -> T:
     return value
 ;
 
-value Int = identity(42)
+value I32 = identity(42)
 
 io.line([: [value]])

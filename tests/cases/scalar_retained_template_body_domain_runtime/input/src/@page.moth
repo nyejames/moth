@@ -1,0 +1,18 @@
+identity |value I32| -> I32:
+    return value
+;
+
+render_outer || -> String:
+    outer_limit = 2
+    outer_content = [:[loop 0 to identity(outer_limit) |outer_item|:[:outer-[outer_item]]]]
+    inner_content = render_inner()
+    return [:outer=[outer_content]|inner=[inner_content]]
+;
+
+render_inner || -> String:
+    inner_limit = 3
+    return [:[loop 0 to identity(inner_limit) |inner_item|:[:inner-[inner_item]]]]
+;
+
+rendered = render_outer()
+[:[rendered]]

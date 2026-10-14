@@ -27,35 +27,27 @@ use super::super::store::TemplateIrStore;
 use super::super::summary::TemplateIrSummary;
 use super::super::view::{TemplateTirPhase, TirView};
 use super::builder::TemplateIrBuilder;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::templates::template::SlotKey;
 use crate::compiler_frontend::ast::templates::template::{
     Style, TemplateSegmentOrigin, TemplateType,
 };
-use crate::compiler_frontend::datatypes::DataType;
-use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
-use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 // -------------------------
 //  Test helpers
 // -------------------------
 
-fn bool_expression() -> Expression {
-    Expression {
-        kind: ExpressionKind::Bool(true),
-        type_id: builtin_type_ids::BOOL,
-        failure_facts: Default::default(),
-        diagnostic_type: DataType::Bool,
-        function_receiver: None,
-        value_mode: ValueMode::ImmutableOwned,
-        span: None,
-        const_record_state: ConstRecordState::RuntimeValue,
-        contains_regular_division: false,
-        synthetic_interface_provenance: SyntheticInterfaceProvenance::empty(),
-    }
+fn bool_expression(
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+) -> ExprId {
+    expressions
+        .bool(const_values, true, None, ValueMode::ImmutableOwned)
+        .expect("test bool should construct")
+        .id()
 }
 
 /// Builds a template whose root is a single `DynamicExpression` node.
@@ -64,10 +56,15 @@ fn bool_expression() -> Expression {
 ///       `TemplateIrNodeId` and query the view for effective expressions.
 fn build_template_with_dynamic_expression(
     store: &mut super::super::store::TemplateIrStore,
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
 ) -> (TemplateIrId, TemplateIrNodeId) {
     let mut builder = TemplateIrBuilder::new(store);
-    let root =
-        builder.push_dynamic_expression_node(bool_expression(), TemplateSegmentOrigin::Body, None);
+    let root = builder.push_dynamic_expression_node(
+        bool_expression(expressions, const_values),
+        TemplateSegmentOrigin::Body,
+        None,
+    );
     let template_id = builder.finish_template(
         root,
         Style::default(),
@@ -215,14 +212,20 @@ fn dynamic_expression_site_id(
 #[test]
 fn effective_expression_for_site_resolves_override_and_none_cases() {
     let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
 
-    let (template_id, root_node) = build_template_with_dynamic_expression(&mut store);
+    let (template_id, root_node) =
+        build_template_with_dynamic_expression(&mut store, &mut expressions, &mut const_values);
     let site_id = dynamic_expression_site_id(&store, root_node);
 
     // Override present: the site covered by the overlay resolves.
     let present_overlay_id = store
         .allocate_expression_overlay(TirExpressionOverlay {
-            overrides: vec![(site_id, Box::new(bool_expression()))],
+            overrides: vec![(
+                site_id,
+                bool_expression(&mut expressions, &mut const_values),
+            )],
         })
         .expect("test overlay allocation");
     let present_view = TirView::new(
@@ -238,7 +241,7 @@ fn effective_expression_for_site_resolves_override_and_none_cases() {
     .expect("view should construct");
     assert!(
         present_view
-            .effective_expression_for_site(site_id)
+            .effective_expression_for_site(&expressions, site_id)
             .expect("expression lookup should succeed")
             .is_some(),
         "override should be present for the covered site"
@@ -254,7 +257,7 @@ fn effective_expression_for_site_resolves_override_and_none_cases() {
     .expect("view should construct");
     assert!(
         none_view
-            .effective_expression_for_site(site_id)
+            .effective_expression_for_site(&expressions, site_id)
             .expect("expression lookup should succeed")
             .is_none(),
         "no override should exist without an expression overlay"
@@ -265,7 +268,10 @@ fn effective_expression_for_site_resolves_override_and_none_cases() {
     assert_ne!(other_site, site_id);
     let uncovered_overlay_id = store
         .allocate_expression_overlay(TirExpressionOverlay {
-            overrides: vec![(other_site, Box::new(bool_expression()))],
+            overrides: vec![(
+                other_site,
+                bool_expression(&mut expressions, &mut const_values),
+            )],
         })
         .expect("test overlay allocation");
     let uncovered_view = TirView::new(
@@ -281,7 +287,7 @@ fn effective_expression_for_site_resolves_override_and_none_cases() {
     .expect("view should construct");
     assert!(
         uncovered_view
-            .effective_expression_for_site(site_id)
+            .effective_expression_for_site(&expressions, site_id)
             .expect("expression lookup should succeed")
             .is_none(),
         "no override should exist for an uncovered site"
@@ -291,14 +297,19 @@ fn effective_expression_for_site_resolves_override_and_none_cases() {
 #[test]
 fn effective_expression_for_node_resolves_override_and_none_cases() {
     let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
 
     // Override present: a DynamicExpression node with a matching site override.
     let (expression_template_id, expression_root) =
-        build_template_with_dynamic_expression(&mut store);
+        build_template_with_dynamic_expression(&mut store, &mut expressions, &mut const_values);
     let expression_site = dynamic_expression_site_id(&store, expression_root);
     let expression_overlay_id = store
         .allocate_expression_overlay(TirExpressionOverlay {
-            overrides: vec![(expression_site, Box::new(bool_expression()))],
+            overrides: vec![(
+                expression_site,
+                bool_expression(&mut expressions, &mut const_values),
+            )],
         })
         .expect("test overlay allocation");
     let expression_view = TirView::new(
@@ -314,7 +325,7 @@ fn effective_expression_for_node_resolves_override_and_none_cases() {
     .expect("view should construct");
     assert!(
         expression_view
-            .effective_expression_for_node(expression_root)
+            .effective_expression_for_node(&expressions, expression_root)
             .expect("expression lookup should succeed")
             .is_some(),
         "override should be present for the dynamic expression node"
@@ -331,7 +342,10 @@ fn effective_expression_for_node_resolves_override_and_none_cases() {
     let unused_site = store.next_expression_site_id();
     let unused_overlay_id = store
         .allocate_expression_overlay(TirExpressionOverlay {
-            overrides: vec![(unused_site, Box::new(bool_expression()))],
+            overrides: vec![(
+                unused_site,
+                bool_expression(&mut expressions, &mut const_values),
+            )],
         })
         .expect("test overlay allocation");
     let text_view = TirView::new(
@@ -347,7 +361,7 @@ fn effective_expression_for_node_resolves_override_and_none_cases() {
     .expect("view should construct");
     assert!(
         text_view
-            .effective_expression_for_node(text_root)
+            .effective_expression_for_node(&expressions, text_root)
             .expect("expression lookup should succeed")
             .is_none(),
         "no override for a non-DynamicExpression node"
@@ -1174,11 +1188,13 @@ fn build_template_with_child_template(
 /// `DynamicExpression` node with a caller-provided source span.
 fn build_template_with_dynamic_expression_at(
     store: &mut super::super::store::TemplateIrStore,
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     expression_span: SourceSpan,
 ) -> (TemplateIrId, ExpressionSiteId) {
     let mut builder = TemplateIrBuilder::new(store);
     let expr_node = builder.push_dynamic_expression_node(
-        bool_expression_with_span(expression_span),
+        bool_expression_with_span(expressions, const_values, expression_span),
         TemplateSegmentOrigin::Body,
         Some(expression_span),
     );
@@ -1203,24 +1219,22 @@ fn build_template_with_dynamic_expression_at(
 }
 
 /// A bool expression that carries a specific source span.
-fn bool_expression_with_span(span: SourceSpan) -> Expression {
-    Expression {
-        kind: ExpressionKind::Bool(true),
-        type_id: builtin_type_ids::BOOL,
-        failure_facts: Default::default(),
-        diagnostic_type: DataType::Bool,
-        function_receiver: None,
-        value_mode: ValueMode::ImmutableOwned,
-        span: Some(span),
-        const_record_state: ConstRecordState::RuntimeValue,
-        contains_regular_division: false,
-        synthetic_interface_provenance: SyntheticInterfaceProvenance::empty(),
-    }
+fn bool_expression_with_span(
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    span: SourceSpan,
+) -> ExprId {
+    expressions
+        .bool(const_values, true, Some(span), ValueMode::ImmutableOwned)
+        .expect("test bool should construct")
+        .id()
 }
 
 /// Builds a template whose root is a conditional with a `Bool` selector.
 fn build_template_with_conditional(
     store: &mut super::super::store::TemplateIrStore,
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     conditional_span: SourceSpan,
 ) -> (TemplateIrId, ExpressionSiteId) {
     use crate::compiler_frontend::ast::templates::template_control_flow::TemplateBranchSelector;
@@ -1229,7 +1243,11 @@ fn build_template_with_conditional(
 
     let conditional_body = builder.push_sequence_node(vec![], None);
     let root = builder.push_conditional_node(
-        TemplateBranchSelector::Bool(bool_expression_with_span(conditional_span)),
+        TemplateBranchSelector::Bool(bool_expression_with_span(
+            expressions,
+            const_values,
+            conditional_span,
+        )),
         conditional_body,
         Some(conditional_span),
     );
@@ -1258,6 +1276,8 @@ fn build_template_with_conditional(
 /// so tests can verify exact loop-header expression-site span recovery.
 fn build_template_with_conditional_loop(
     store: &mut super::super::store::TemplateIrStore,
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     loop_span: SourceSpan,
 ) -> (TemplateIrId, ExpressionSiteId) {
     use crate::compiler_frontend::ast::templates::template_control_flow::TemplateLoopHeader;
@@ -1266,7 +1286,7 @@ fn build_template_with_conditional_loop(
     let body = builder.push_sequence_node(vec![], None);
     let root = builder.push_loop_node(
         TemplateLoopHeader::Conditional {
-            condition: Box::new(bool_expression_with_span(loop_span)),
+            condition: bool_expression_with_span(expressions, const_values, loop_span),
         },
         body,
         None,
@@ -1356,10 +1376,16 @@ fn source_span_for_child_template_occurrence_resolves_present_and_missing() {
 #[test]
 fn source_span_for_expression_site_resolves_each_node_kind_and_missing() {
     let mut store = TemplateIrStore::new();
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
 
     // DynamicExpression site: span recovered from the expression node.
-    let (dynamic_template_id, dynamic_site_id) =
-        build_template_with_dynamic_expression_at(&mut store, span_at(11, 30));
+    let (dynamic_template_id, dynamic_site_id) = build_template_with_dynamic_expression_at(
+        &mut store,
+        &mut expressions,
+        &mut const_values,
+        span_at(11, 30),
+    );
     let dynamic_view = TirView::new(
         &store,
         dynamic_template_id,
@@ -1384,8 +1410,12 @@ fn source_span_for_expression_site_resolves_each_node_kind_and_missing() {
     );
 
     // Conditional selector site: span recovered from the conditional node.
-    let (conditional_template_id, conditional_site_id) =
-        build_template_with_conditional(&mut store, span_at(15, 23));
+    let (conditional_template_id, conditional_site_id) = build_template_with_conditional(
+        &mut store,
+        &mut expressions,
+        &mut const_values,
+        span_at(15, 23),
+    );
     let conditional_view = TirView::new(
         &store,
         conditional_template_id,
@@ -1400,8 +1430,12 @@ fn source_span_for_expression_site_resolves_each_node_kind_and_missing() {
     );
 
     // Loop header site: span recovered from the conditional loop node.
-    let (loop_template_id, loop_site_id) =
-        build_template_with_conditional_loop(&mut store, span_at(21, 25));
+    let (loop_template_id, loop_site_id) = build_template_with_conditional_loop(
+        &mut store,
+        &mut expressions,
+        &mut const_values,
+        span_at(21, 25),
+    );
     let loop_view = TirView::new(
         &store,
         loop_template_id,

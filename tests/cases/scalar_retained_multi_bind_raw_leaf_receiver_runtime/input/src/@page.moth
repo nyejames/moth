@@ -1,0 +1,56 @@
+-- Raw literal leaves beside a named I32 operand take the I64 width of an
+-- immediate multi-bind receiver. The receiver reaches only the raw leaves: `base`
+-- stays I32, so `render_i32(base)` still accepts it.
+--
+-- `immediate_slots` annotates both receiving slots, so its value-producing `if`
+-- is the control for the same arithmetic at a known I64 receiver. Both dynamic
+-- branches run for each form. The second slot stays a concrete String beside the
+-- numeric slot, and the large raw leaf sits above the I32 range, so only the I64
+-- receiver can type it.
+--
+-- `known_first` forms author `then wide, "ready"` before the Forward branch, where
+-- `wide` is a named `I64` holding 0. `forward_first` forms author the Forward branch
+-- first, so each Bool choice reaches the opposite branch of its known-first twin.
+--
+-- Unannotated slots take no receiver from a later consumer for their named-operand
+-- Forward producers; their natural result is validated instead, and the rejection
+-- fixtures pin that boundary.
+
+render_i32 |value I32| -> String:
+    return cast value
+;
+
+render_i64 |value I64| -> String:
+    return cast value
+;
+
+immediate_slots |base I32, ready Bool| -> String:
+    total I64, label String = if ready:
+        then base + 1, "ready"
+    else
+        then base + 4_294_967_296, "waiting"
+    ;
+    return [:total=[render_i64(total)] label=[label] base=[render_i32(base)]]
+;
+
+immediate_known_first_slots |base I32, ready Bool| -> String:
+    wide I64 = 0
+    total I64, label String = if ready:
+        then wide, "ready"
+    else
+        then base + 4_294_967_296, "waiting"
+    ;
+    return [:total=[render_i64(total)] label=[label] base=[render_i32(base)]]
+;
+
+immediate_forward_first_slots |base I32, ready Bool| -> String:
+    wide I64 = 0
+    total I64, label String = if ready:
+        then base + 4_294_967_296, "waiting"
+    else
+        then wide, "ready"
+    ;
+    return [:total=[render_i64(total)] label=[label] base=[render_i32(base)]]
+;
+
+[:immediate_ready=[immediate_slots(10, true)] immediate_waiting=[immediate_slots(10, false)] immediate_known_first_ready=[immediate_known_first_slots(10, true)] immediate_known_first_waiting=[immediate_known_first_slots(10, false)] immediate_forward_first_ready=[immediate_forward_first_slots(10, true)] immediate_forward_first_waiting=[immediate_forward_first_slots(10, false)]]

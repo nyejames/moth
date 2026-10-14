@@ -27,31 +27,31 @@ render_hashmap_contract || -> String:
     ;
 
     map_key_source String = "One"
-    duplicate {String = Int} = {runtime_duplicate_key(map_key_source) = 1, runtime_duplicate_key(map_key_source) = 2}
+    duplicate {String = I32} = {runtime_duplicate_key(map_key_source) = 1, runtime_duplicate_key(map_key_source) = 2}
     duplicate_length = duplicate.length
     duplicate_value = duplicate.get("One") catch:
         then 0
     ;
 
-    template_lookup {String = Int} = {runtime_duplicate_key(map_key_source) = 2}
+    template_lookup {String = I32} = {runtime_duplicate_key(map_key_source) = 2}
     template_key_contains = template_lookup.contains(runtime_duplicate_key(map_key_source))
     template_key_before_set = template_lookup.get(runtime_duplicate_key(map_key_source)) catch:
         then 0
     ;
 
-    template_map ~{String = Int} = {runtime_duplicate_key(map_key_source) = 2}
+    template_map ~{String = I32} = {runtime_duplicate_key(map_key_source) = 2}
     ~template_map.set(runtime_duplicate_key(map_key_source), 3) catch:
     ;
     template_key_after_set = template_map.get("One") catch:
         then 0
     ;
-    template_remove_map ~{String = Int} = {runtime_duplicate_key(map_key_source) = 3}
+    template_remove_map ~{String = I32} = {runtime_duplicate_key(map_key_source) = 3}
     template_key_removed = ~template_remove_map.remove(runtime_duplicate_key(map_key_source)) catch:
         then 0
     ;
     template_key_length_after_remove = template_remove_map.length
 
-    narrow ~{I8 = Int} = {-128 = 8, 127 = 127}
+    narrow ~{I8 = I32} = {-128 = 8, 127 = 127}
     i8_initial_length = narrow.length
     i8_min_value = narrow.get(-128) catch:
         then 0
@@ -79,7 +79,7 @@ render_hashmap_contract || -> String:
     assert(i8_removed_value is 8)
     i8_length_after_remove = narrow.length
 
-    high_i64 ~{I64 = Int} = {-9223372036854775808 = 64, 9223372036854775806 = 66, 9223372036854775807 = 67}
+    high_i64 ~{I64 = I32} = {-9223372036854775808 = 64, 9223372036854775806 = 66, 9223372036854775807 = 67}
     i64_initial_length = high_i64.length
     i64_min_value = high_i64.get(-9223372036854775808) catch:
         then 0
@@ -108,7 +108,7 @@ render_hashmap_contract || -> String:
     i64_length_after_remove = high_i64.length
     i64_min_after_remove = high_i64.contains(-9223372036854775808)
 
-    high_u64 ~{U64 = Int} = {18446744073709551614 = 14, 18446744073709551615 = 15}
+    high_u64 ~{U64 = I32} = {18446744073709551614 = 14, 18446744073709551615 = 15}
     u64_initial_length = high_u64.length
     u64_neighbor_value = high_u64.get(18446744073709551614) catch:
         then 0
@@ -133,7 +133,7 @@ render_hashmap_contract || -> String:
     u64_length_after_remove = high_u64.length
     u64_neighbor_after_remove = high_u64.contains(18446744073709551614)
 
-    octets ~{Byte = Int} = {0 = 100, 255 = 255}
+    octets ~{Byte = I32} = {0 = 100, 255 = 255}
     byte_initial_length = octets.length
     byte_zero_value = octets.get(0) catch:
         then 0

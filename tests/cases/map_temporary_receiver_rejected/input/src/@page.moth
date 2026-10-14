@@ -1,4 +1,4 @@
-make_scores || -> {String = Int}:
+make_scores || -> {String = I32}:
     return {"Priya" = 10}
 ;
 

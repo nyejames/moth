@@ -9,18 +9,18 @@ use super::non_constant_initializer_fold_refusal;
 use crate::compiler_frontend::ast::const_eval::{
     ConstantFoldError, ConstantFoldOutcome, constant_fold,
 };
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, Operator};
-use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticPayload,
+    AstCapacityResource, CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticPayload,
 };
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
-use moth_lexical::numeric::profile::NumericProfile;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 fn evaluation_diagnostic(reason: CompileTimeEvaluationErrorReason) -> CompilerDiagnostic {
-    CompilerDiagnostic::compile_time_evaluation_error(reason, None, None, None)
+    CompilerDiagnostic::compile_time_evaluation_error(reason, None, None)
 }
 
 fn diagnostic_reason(error: ExpressionParseError) -> CompileTimeEvaluationErrorReason {
@@ -34,44 +34,44 @@ fn diagnostic_reason(error: ExpressionParseError) -> CompileTimeEvaluationErrorR
 }
 
 #[test]
-fn escaped_pending_fold_stays_on_the_infrastructure_lane() {
+fn foreign_constant_content_stays_on_the_infrastructure_lane() {
     let mut string_table = StringTable::new();
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut issuing_values = ConstValueStore::default();
+    let root = expression_builder
+        .fixed_scalar(
+            &mut issuing_values,
+            FixedScalarValue::signed(FixedScalar::I32, 2).expect("2 fits I32"),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("literal fits")
+        .id();
+    let mut foreign_values = ConstValueStore::default();
     let fold = constant_fold(
-        vec![
-            ExpressionRpnItem::Operand(Expression::int(
-                2,
-                Default::default(),
-                ValueMode::ImmutableOwned,
-            )),
-            ExpressionRpnItem::PendingGroup {
-                nodes: Vec::new(),
-                span: None,
-            },
-            ExpressionRpnItem::Operator {
-                operator: Operator::Add,
-                span: None,
-            },
-        ],
+        root,
+        &mut expression_builder,
+        &mut foreign_values,
         &mut string_table,
-        NumericProfile::STANDARD,
         None,
     );
 
     match non_constant_initializer_fold_refusal(fold) {
-        Err(ExpressionParseError::Infrastructure(error)) => assert!(
-            error
-                .msg
-                .contains("evaluate_expression must resolve it first"),
-            "unexpected invariant message: {error:?}"
-        ),
+        Err(ExpressionParseError::Infrastructure(_)) => {}
         other => panic!("fold infrastructure error must survive the header: {other:?}"),
     }
 }
 
 #[test]
 fn text_unavailable_fold_keeps_its_precise_diagnostic() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let root = expression_builder.reference_with_type_id(crate::compiler_frontend::symbols::path_interner::PathId::ROOT,
+    crate::compiler_frontend::datatypes::ids::builtin_type_ids::STRING,
+    None,
+    ValueMode::ImmutableOwned,
+    crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,).expect("reference fits").id();
     let fold = Ok(ConstantFoldOutcome::TextUnavailable {
-        items: Vec::new(),
+        root,
         diagnostic: evaluation_diagnostic(
             CompileTimeEvaluationErrorReason::StructuralStringRequiresFinalText,
         ),
@@ -87,7 +87,13 @@ fn text_unavailable_fold_keeps_its_precise_diagnostic() {
 
 #[test]
 fn ordinary_non_constant_folds_defer_to_the_not_foldable_refusal() {
-    let not_constant = Ok(ConstantFoldOutcome::NotConstant(Vec::new()));
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let root = expression_builder.reference_with_type_id(crate::compiler_frontend::symbols::path_interner::PathId::ROOT,
+    crate::compiler_frontend::datatypes::ids::builtin_type_ids::STRING,
+    None,
+    ValueMode::ImmutableOwned,
+    crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,).expect("reference fits").id();
+    let not_constant = Ok(ConstantFoldOutcome::NotConstant(root));
     let source_diagnostic = Err(ConstantFoldError::Diagnostic(evaluation_diagnostic(
         CompileTimeEvaluationErrorReason::DivideByZero,
     )));
@@ -98,4 +104,16 @@ fn ordinary_non_constant_folds_defer_to_the_not_foldable_refusal() {
             "the header reports ConstantInitializerNotFoldable for ordinary refusals"
         );
     }
+}
+
+#[test]
+fn builder_capacity_failure_propagates_instead_of_refusing() {
+    let capacity =
+        CompilerDiagnostic::compiler_capacity_exceeded(AstCapacityResource::ExpressionRows, None);
+    let refusal =
+        non_constant_initializer_fold_refusal(Err(ConstantFoldError::Diagnostic(capacity)));
+    let Err(ExpressionParseError::Diagnostic(diagnostic)) = refusal else {
+        panic!("expected the capacity diagnostic to propagate");
+    };
+    assert!(diagnostic.is_compiler_capacity_exceeded());
 }

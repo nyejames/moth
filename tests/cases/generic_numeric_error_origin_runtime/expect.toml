@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "generic_numeric_error default=1 shared=4294967307 independent=value=9 error=4294967308 full=18446744073709551615 method=4294967340 propagated_method=4294967342 chained_bang=4294967345"

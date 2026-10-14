@@ -1,13 +1,13 @@
--- Validates that Int expressions can be contextually promoted to Float
--- at explicit Float declaration sites.
+-- Raw whole literals and literal expressions take the immediate F64 receiver.
+-- This is contextual literal typing, not an implicit conversion from a bound I32.
 
--- Constant int literal should promote
-literal Float = 1
+-- A whole literal takes the receiving domain.
+literal F64 = 1
 
--- Constant int expression should promote
-expr Float = 1 + 1
+-- A literal expression takes the receiving domain.
+expr F64 = 1 + 1
 
--- Negated int literal should promote
-neg Float = -5
+-- A negated whole literal takes the receiving domain.
+neg F64 = -5
 
 io.line("float declarations from int passed")

@@ -1,4 +1,4 @@
-configured_maximum #Config of Int = 2147483647
+configured_maximum #Config of I32 = 2147483647
 
 export:
     counts #= (maximum = configured_maximum)

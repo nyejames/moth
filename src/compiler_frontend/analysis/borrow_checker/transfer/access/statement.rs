@@ -9,6 +9,7 @@ use crate::compiler_frontend::hir::expressions::HirMapOp;
 use crate::compiler_frontend::hir::ids::HirValueId;
 use crate::compiler_frontend::hir::numeric::HirNumericOperands;
 use crate::compiler_frontend::hir::statements::HirWriteTarget;
+use crate::compiler_frontend::hir::terminators::HirFallibleOperation;
 use crate::compiler_frontend::public_call_summary::FunctionReturnAliasSummary;
 use crate::compiler_frontend::source::SourceSpan;
 
@@ -96,7 +97,7 @@ pub(crate) fn transfer_statement(
         HirStatementKind::Call {
             target,
             args,
-            result,
+            results,
         } => {
             let location = context.diagnostics.statement_error_span(statement);
             let semantics = resolve_call_semantics(context, target, args.len(), location)?;
@@ -123,8 +124,9 @@ pub(crate) fn transfer_statement(
                     value_fact_buffer,
                 },
                 &call_args,
-                *result,
+                results.iter().copied(),
                 semantics.return_alias,
+                false,
             )?;
         }
 
@@ -163,31 +165,9 @@ pub(crate) fn transfer_statement(
                     value_fact_buffer,
                 },
                 &call_args,
-                *result,
+                result.iter().copied(),
                 map_result_alias(*op),
-            )?;
-        }
-
-        HirStatementKind::CastOp { source, result, .. } => {
-            let location = context.diagnostics.statement_error_span(statement);
-            transfer_call_arguments_and_result(
-                &mut CallTransferContext {
-                    context,
-                    layout,
-                    state,
-                    block_id,
-                    current_order: statement_order,
-                    tracker: &mut tracker,
-                    location,
-                    stats,
-                    value_fact_buffer,
-                },
-                &[CallArgumentTransfer {
-                    argument: *source,
-                    effect: ArgEffect::SharedBorrow,
-                }],
-                *result,
-                FunctionReturnAliasSummary::Fresh,
+                false,
             )?;
         }
 
@@ -210,8 +190,9 @@ pub(crate) fn transfer_statement(
                     argument: *source,
                     effect: ArgEffect::SharedBorrow,
                 }],
-                Some(*result),
+                std::iter::once(*result),
                 FunctionReturnAliasSummary::Fresh,
+                false,
             )?;
         }
 
@@ -241,8 +222,9 @@ pub(crate) fn transfer_statement(
                     value_fact_buffer,
                 },
                 &call_args,
-                Some(*result),
+                std::iter::once(*result),
                 FunctionReturnAliasSummary::Fresh,
+                false,
             )?;
         }
 
@@ -261,8 +243,9 @@ pub(crate) fn transfer_statement(
                     value_fact_buffer,
                 },
                 &[],
-                Some(*result),
+                std::iter::once(*result),
                 FunctionReturnAliasSummary::Fresh,
+                false,
             )?;
         }
 
@@ -312,14 +295,16 @@ pub(crate) fn transfer_statement(
             transfer_call_result_alias(
                 &mut result_transfer,
                 Some(*candidate_result),
-                FunctionReturnAliasSummary::Fresh,
+                &FunctionReturnAliasSummary::Fresh,
                 &[],
+                false,
             )?;
             transfer_call_result_alias(
                 &mut result_transfer,
                 Some(*in_range_result),
-                FunctionReturnAliasSummary::Fresh,
+                &FunctionReturnAliasSummary::Fresh,
                 &[],
+                false,
             )?;
         }
 
@@ -416,19 +401,6 @@ pub(crate) fn transfer_statement(
                 &mut aggregate_context,
             )?;
         }
-        HirStatementKind::CastOp { source, .. } => {
-            transfer_aggregate_expression_ownership(
-                layout,
-                state,
-                *source,
-                block_id,
-                statement_order,
-                context
-                    .diagnostics
-                    .value_error_span(*source, context.diagnostics.statement_error_span(statement)),
-                &mut aggregate_context,
-            )?;
-        }
         HirStatementKind::FormatFloat { source, .. }
         | HirStatementKind::ValidateFloat { source, .. } => {
             transfer_aggregate_expression_ownership(
@@ -454,29 +426,138 @@ pub(crate) fn transfer_statement(
     stats.statement_facts.push((statement.id, statement_fact));
     Ok(())
 }
+/// Evaluate operation inputs before the outgoing edge retires the previous destinations.
+pub(super) fn transfer_invoke(
+    input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
+    terminator: &HirTerminator,
+) -> Result<(), BorrowCheckError> {
+    let HirTerminator::Invoke {
+        operation,
+        success_results,
+        ..
+    } = terminator
+    else {
+        return Err(input.context.diagnostics.internal_error(
+            "Non-Invoke terminator reached operation transfer",
+            input.location,
+        ));
+    };
+    let context = input.context;
+    let results = success_results
+        .iter()
+        .copied()
+        .map(HirLocalDestination::Define);
+    match operation {
+        HirFallibleOperation::Call { target, args } => {
+            let semantics = resolve_call_semantics(context, target, args.len(), input.location)?;
+            let arguments = context
+                .expressions
+                .values(*args)
+                .iter()
+                .zip(semantics.arg_effects)
+                .map(|(argument, effect)| CallArgumentTransfer {
+                    argument: *argument,
+                    effect,
+                })
+                .collect::<Vec<_>>();
+            transfer_call_arguments_and_result(
+                input,
+                &arguments,
+                results,
+                semantics.return_alias,
+                true,
+            )
+        }
+        HirFallibleOperation::MapOp { op, receiver, args } => {
+            let mut arguments = Vec::with_capacity(args.len() + 1);
+            arguments.push(CallArgumentTransfer {
+                argument: *receiver,
+                effect: if op.requires_mutable_receiver() {
+                    ArgEffect::MutableBorrow
+                } else {
+                    ArgEffect::SharedBorrow
+                },
+            });
+            for (index, argument) in context.expressions.values(*args).iter().enumerate() {
+                arguments.push(CallArgumentTransfer {
+                    argument: *argument,
+                    effect: map_argument_effect(*op, index),
+                });
+            }
+            transfer_call_arguments_and_result(
+                input,
+                &arguments,
+                results,
+                map_result_alias(*op),
+                true,
+            )
+        }
+        _ => {
+            // Builtin operations have at most two operands; keep their transfer inputs inline.
+            let mut operands = operation.operands(context.expressions);
+            let Some(first) = operands.next() else {
+                return transfer_call_arguments_and_result(
+                    input,
+                    &[],
+                    results,
+                    FunctionReturnAliasSummary::Fresh,
+                    true,
+                );
+            };
+            let first = CallArgumentTransfer {
+                argument: first,
+                effect: ArgEffect::SharedBorrow,
+            };
+            if let Some(second) = operands.next() {
+                transfer_call_arguments_and_result(
+                    input,
+                    &[
+                        first,
+                        CallArgumentTransfer {
+                            argument: second,
+                            effect: ArgEffect::SharedBorrow,
+                        },
+                    ],
+                    results,
+                    FunctionReturnAliasSummary::Fresh,
+                    true,
+                )
+            } else {
+                transfer_call_arguments_and_result(
+                    input,
+                    &[first],
+                    results,
+                    FunctionReturnAliasSummary::Fresh,
+                    true,
+                )
+            }
+        }
+    }
+}
 
 struct CallArgumentTransfer {
     argument: HirValueId,
     effect: ArgEffect,
 }
 
-struct CallTransferContext<'a, 'module, 'state, 'tracker, 'stats, 'facts> {
-    context: &'a BorrowTransferContext<'module>,
-    layout: &'a FunctionLayout,
-    state: &'state mut BorrowState,
-    block_id: BlockId,
-    current_order: i32,
-    tracker: &'tracker mut StatementAccessTracker,
-    location: Option<SourceSpan>,
-    stats: &'stats mut BlockTransferStats,
-    value_fact_buffer: &'facts mut ValueFactBuffer,
+pub(super) struct CallTransferContext<'a, 'module, 'state, 'tracker, 'stats, 'facts> {
+    pub(super) context: &'a BorrowTransferContext<'module>,
+    pub(super) layout: &'a FunctionLayout,
+    pub(super) state: &'state mut BorrowState,
+    pub(super) block_id: BlockId,
+    pub(super) current_order: i32,
+    pub(super) tracker: &'tracker mut StatementAccessTracker,
+    pub(super) location: Option<SourceSpan>,
+    pub(super) stats: &'stats mut BlockTransferStats,
+    pub(super) value_fact_buffer: &'facts mut ValueFactBuffer,
 }
 
 fn transfer_call_arguments_and_result(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
     args: &[CallArgumentTransfer],
-    result: Option<HirLocalDestination>,
+    results: impl Iterator<Item = HirLocalDestination> + Clone,
     return_alias: FunctionReturnAliasSummary,
+    edge_local: bool,
 ) -> Result<(), BorrowCheckError> {
     if args.iter().any(|arg| {
         matches!(
@@ -514,7 +595,7 @@ fn transfer_call_arguments_and_result(
             arg.effect,
             arg_index,
             &arg_roots,
-            result.is_some(),
+            results.clone().next().is_some(),
             &return_alias,
         );
         if matches!(
@@ -554,7 +635,32 @@ fn transfer_call_arguments_and_result(
         transfer_call_argument_access(input, arg.argument, effect, argument_location)?;
     }
 
-    transfer_call_result_alias(input, result, return_alias, &arg_roots)
+    for result in results.clone() {
+        transfer_call_result_alias(input, Some(result), &return_alias, &arg_roots, edge_local)?;
+    }
+    if results.clone().nth(1).is_some() {
+        // Native positions are not proof of independent graphs, even for fresh results.
+        let mut result_roots = RootSet::empty(input.layout.local_count());
+        for result in results.clone() {
+            if let Some(index) = input.layout.index_of(result.local()) {
+                result_roots.insert(index);
+            }
+        }
+        if edge_local {
+            for (_, local) in &mut input.stats.invoke_results {
+                local.value_roots.union_with(&result_roots);
+            }
+        } else {
+            for result in results {
+                if let Some(index) = input.layout.index_of(result.local()) {
+                    let mut local = input.state.local_state(index).clone();
+                    local.value_roots.union_with(&result_roots);
+                    input.state.update_local_state(index, local);
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn record_call_argument_reads(
@@ -567,7 +673,7 @@ fn record_call_argument_reads(
     if matches!(
         effect,
         ArgEffect::MutableBorrow | ArgEffect::MayConsumeShared | ArgEffect::MayConsumeMutable
-    ) && let Some(place) = transparent_place_from_expression(input.context.expressions, argument)
+    ) && let Some(place) = direct_place_from_expression(input.context.expressions, argument)
     {
         let mut read_env = SharedReadEnv {
             context: input.context,
@@ -864,7 +970,7 @@ fn call_argument_actor_index(
     argument: HirValueId,
 ) -> Option<usize> {
     // Allocation roots identify the reached value; the actor is the binding the argument reads.
-    transparent_place_from_expression(input.context.expressions, argument)
+    direct_place_from_expression(input.context.expressions, argument)
         .and_then(|place| input.layout.index_of(place.root))
 }
 
@@ -897,8 +1003,9 @@ fn check_call_shared_borrow(
 fn transfer_call_result_alias(
     input: &mut CallTransferContext<'_, '_, '_, '_, '_, '_>,
     result: Option<HirLocalDestination>,
-    return_alias: FunctionReturnAliasSummary,
+    return_alias: &FunctionReturnAliasSummary,
     arg_roots: &[RootSet],
+    edge_local: bool,
 ) -> Result<(), BorrowCheckError> {
     let Some(destination) = result else {
         return Ok(());
@@ -917,7 +1024,7 @@ fn transfer_call_result_alias(
 
     let alias_roots = match return_alias {
         FunctionReturnAliasSummary::Fresh => None,
-        FunctionReturnAliasSummary::AliasParams(ref arg_indices) => {
+        FunctionReturnAliasSummary::AliasParams(arg_indices) => {
             let mut roots = RootSet::empty(input.layout.local_count());
             for arg_index in arg_indices {
                 let Some(arg_root_set) = arg_roots.get(*arg_index) else {
@@ -947,6 +1054,13 @@ fn transfer_call_result_alias(
         }
         _ => LocalState::slot(input.layout.local_count()),
     };
+    if edge_local {
+        input
+            .stats
+            .invoke_results
+            .push((result_local, new_local_state));
+        return Ok(());
+    }
 
     if matches!(destination, HirLocalDestination::Update(_)) {
         let previous_state = input.state.local_state(local_index).clone();

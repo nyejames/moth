@@ -1,4 +1,4 @@
 append || -> Error!:
-    values ~{Int} = {}
+    values ~{I32} = {}
     ~values.push(1)!
 ;

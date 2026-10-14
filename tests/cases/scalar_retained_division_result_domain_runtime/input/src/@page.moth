@@ -1,0 +1,40 @@
+-- Retained division result-domain boundaries.
+--
+-- Whole-integer real division fixes its own completed F64 result, so a later
+-- exact F64 receiver must accept transparent grouping, chaining and further
+-- whole arithmetic instead of retyping the fragment: `(1 / 2)` is 0.5,
+-- `1 / 2 / 3` is 0.16666666666666666 and `1 / 2 + 1` is 1.5. Rejecting the
+-- grouped fragment at the Whole/F64 family gate fails this fixture.
+--
+-- A decimal-family division stays receiver-driven: the same spelling completes
+-- at the receiver's own precision instead of the early F64 default. `1.0 / 2.0`
+-- is exact at F32, while `1.0 / 3.0` rounds to the distinct F32 value
+-- 0.3333333432674408 and F16 value 0.333251953125. An early F64 completion
+-- either rejects those receivers or prints 0.3333333333333333.
+--
+-- The F16/F32 receivers widen their received value to F64 for deterministic
+-- canonical text; the widening is exact and does not re-round the completion.
+
+receive_f64 |value F64| -> String:
+    return cast value
+;
+
+receive_f32 |value F32| -> String:
+    widened F64 = cast value
+    return cast widened
+;
+
+receive_f16 |value F16| -> String:
+    widened F64 = cast value
+    return cast widened
+;
+
+grouped = (1 / 2)
+chained = 1 / 2 / 3
+added = 1 / 2 + 1
+
+halves = 1.0 / 2.0
+thirds_f32 = 1.0 / 3.0
+thirds_f16 = 1.0 / 3.0
+
+[:scalar retained division grouped=[receive_f64(grouped)] chained=[receive_f64(chained)] added=[receive_f64(added)] halves=[receive_f32(halves)] f32=[receive_f32(thirds_f32)] f16=[receive_f16(thirds_f16)]]

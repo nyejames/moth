@@ -39,7 +39,11 @@ pub(crate) struct PublicCallParameterSummary {
     pub transfer_effect: PublicCallTransferEffect,
 }
 
-/// User-function return alias metadata consumed by call transfer.
+/// Conservative return-root alias evidence across all success slots.
+///
+/// Native result positions do not identify allocations. Applying this union to separate
+/// destinations must not establish distinct origins or disjoint storage. `Fresh` only excludes
+/// parameter-root aliases; it does not prove that results are independent of one another.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum FunctionReturnAliasSummary {
     Fresh,
@@ -54,6 +58,7 @@ pub(crate) enum FunctionReturnAliasSummary {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PublicCallSummary {
     pub parameters: Vec<PublicCallParameterSummary>,
+    /// Preliminary root union, not final per-slot lifetime or retained-edge provenance.
     pub return_alias: FunctionReturnAliasSummary,
     /// Whether unhandled implicit builtin failure escapes the function boundary.
     /// Signature-only `false` is the initial convergence value, not proof of infallibility.

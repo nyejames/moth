@@ -1,6 +1,6 @@
 render_forward || -> String:
     items ~{capacity String} = {}
-    capacity #Int = 4
+    capacity #I32 = 4
     return ""
 ;
 

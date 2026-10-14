@@ -1,0 +1,13 @@
+entry = "."
+
+# HTML-only by design: this fixture asserts exact runtime values through the
+# retained value-block/catch completion path. Observing the same code on Wasm
+# would require pinning the Wasm disposition of a syntax-eligible catch whose
+# protected operation is proven infallible and whose handler is validated then
+# pruned; no existing contract establishes that disposition, so only the backend
+# this fixture can assert is declared rather than guessing a diagnostic.
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "scalar pending body drain branch=7/9 protected=200"

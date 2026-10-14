@@ -1,4 +1,4 @@
-choose |condition Bool| -> Int:
+choose |condition Bool| -> I32:
     result = if condition:
         then 30
     else

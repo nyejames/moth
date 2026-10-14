@@ -20,7 +20,7 @@ use crate::compiler_frontend::compiler_messages::{
     PremergeDiagnosticBatch, PremergeFailure,
 };
 use crate::compiler_frontend::declaration_syntax::build_config_contract::{
-    SourceBuildConfigContract, SourceConfigDefault, build_input_type_name,
+    SourceBuildConfigContract, build_input_type_name,
 };
 use crate::compiler_frontend::folded_value::{OwnedFoldedString, PublicFoldedValue};
 use crate::compiler_frontend::project_globals::{
@@ -33,133 +33,86 @@ use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
 use crate::projects::settings::{Config, ProjectMetadataField};
-use moth_lexical::numeric::profile::NumericProfile;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 use rustc_hash::FxHashSet;
 use std::hash::{Hash, Hasher};
 
 use super::module_inventory;
 use super::prepared_module::PreparedModule;
-use crate::compiler_frontend::module_compilation::PreparedModuleInput;
 
 /// Convert one prepared module's retained source contract shells into global-table facts.
 ///
 /// The module table is forked from the boundary table. Merging its delta here makes every
 /// diagnostic location usable by the boundary string table before semantic compilation later
-/// performs the same merge for the complete module result. A numeric default is materialised here,
-/// at the boundary numeric profile, because header syntax is prepared before a profile exists.
+/// performs the same merge for the complete module result. Each default already sits at its
+/// declared scalar, so this conversion needs no numeric context.
 pub(super) fn source_contract_facts_from_prepared(
     prepared: &PreparedModule,
     string_table: &mut StringTable,
     string_table_base_len: usize,
-    numeric_profile: NumericProfile,
-) -> Result<Vec<BuildConfigContractFact>, PremergeFailure> {
+) -> Vec<BuildConfigContractFact> {
     let contracts = prepared.semantic.source_build_config_contracts();
     if contracts.is_empty() {
-        return Ok(Vec::new());
+        return Vec::new();
     }
 
     string_table.merge_delta_from(&prepared.semantic.string_table, string_table_base_len);
-    source_contract_facts_from_contracts(contracts, numeric_profile, string_table)
+    source_contract_facts_from_contracts(contracts)
 }
 
 /// Collect canonical source contracts in deterministic compile-wave and source order.
 pub(super) fn source_contract_facts_from_module_waves(
     module_waves: &[Vec<module_inventory::ModuleCompilationJob>],
     string_table: &mut StringTable,
-    numeric_profile: NumericProfile,
-) -> Result<Vec<BuildConfigContractFact>, PremergeFailure> {
+) -> Vec<BuildConfigContractFact> {
     module_waves
         .iter()
         .flat_map(|wave| wave.iter())
-        .map(|job| {
+        .flat_map(|job| {
             source_contract_facts_from_prepared(
                 &job.prepared,
                 string_table,
                 job.string_table_base_len,
-                numeric_profile,
             )
         })
-        .collect::<Result<Vec<_>, _>>()
-        .map(|facts| facts.into_iter().flatten().collect())
+        .collect()
 }
 
 /// Collect transient source contracts in owner/source order for check mode.
 pub(super) fn source_contract_facts_from_check_only_jobs(
     check_only_jobs: &[module_inventory::CheckOnlyModuleCompilationJob],
     string_table: &mut StringTable,
-    numeric_profile: NumericProfile,
-) -> Result<Vec<BuildConfigContractFact>, PremergeFailure> {
+) -> Vec<BuildConfigContractFact> {
     check_only_jobs
         .iter()
-        .map(|job| {
+        .flat_map(|job| {
             source_contract_facts_from_prepared(
                 &job.prepared,
                 string_table,
                 job.string_table_base_len,
-                numeric_profile,
             )
         })
-        .collect::<Result<Vec<_>, _>>()
-        .map(|facts| facts.into_iter().flatten().collect())
-}
-
-/// Materialise one retained `#Config` default under the boundary numeric profile.
-///
-/// WHAT: no declaration default returns `None`; a materialised default returns its primitive; a
-///       retained numeric default materialises at the profile's `Int` width or `Float` precision,
-///       and a value outside that profile becomes the existing number-literal diagnostic at the
-///       literal's authored span.
-/// WHY:  the boundary is the first place a numeric profile exists together with the authored
-///       spelling, so this is where an `Int` default is range-checked and a binary `Float` default
-///       rounds once to the profile precision instead of being rounded from a widened value.
-fn materialize_source_default(
-    default: Option<&SourceConfigDefault>,
-    numeric_profile: NumericProfile,
-    string_table: &mut StringTable,
-) -> Result<Option<PrimitiveBuildValue>, PremergeFailure> {
-    let Some(default) = default else {
-        return Ok(None);
-    };
-
-    default
-        .materialize(numeric_profile)
-        .map(Some)
-        .map_err(|error| {
-            PremergeFailure::Diagnosed(PremergeDiagnosticBatch::from_diagnostic(
-                CompilerDiagnostic::invalid_number_literal(
-                    string_table.intern(&error.text),
-                    error.reason,
-                    Some(error.span),
-                ),
-                std::mem::take(string_table),
-            ))
-        })
+        .collect()
 }
 
 /// Convert retained source contract shells into boundary facts.
 ///
-/// Shared by the boundary and check-only fact lanes so a retained numeric default is materialised
-/// by the same code wherever its contract was collected.
+/// Shared by the boundary and check-only fact lanes so every source contract becomes the same fact
+/// wherever it was collected.
 fn source_contract_facts_from_contracts(
     contracts: &[SourceBuildConfigContract],
-    numeric_profile: NumericProfile,
-    string_table: &mut StringTable,
-) -> Result<Vec<BuildConfigContractFact>, PremergeFailure> {
+) -> Vec<BuildConfigContractFact> {
     contracts
         .iter()
         .map(|contract| {
-            Ok(BuildConfigContractFact::new(
+            BuildConfigContractFact::new(
                 contract.name.clone(),
                 contract.value_type,
                 contract.required,
-                materialize_source_default(
-                    contract.default.as_ref(),
-                    numeric_profile,
-                    string_table,
-                )?,
+                contract.default.clone(),
                 Some(contract.span),
-            ))
+            )
         })
         .collect()
 }
@@ -167,24 +120,11 @@ fn source_contract_facts_from_contracts(
 /// Copy one prepared module's source contracts for an isolated check-only resolution.
 ///
 /// Canonical modules consume the boundary map directly; only a transient check-only unit needs
-/// its own source facts when building its private resolution view. The module's own fork table is
-/// the one its diagnostics must carry, so the accessor splits the module's header syntax and table
-/// borrows rather than borrowing the whole prepared module twice.
+/// its own source facts when building its private resolution view.
 pub(super) fn source_contract_facts_for_current_module(
-    prepared: &mut PreparedModule,
-    numeric_profile: NumericProfile,
-) -> Result<Vec<BuildConfigContractFact>, PremergeFailure> {
-    let PreparedModuleInput {
-        prepared_header_syntax,
-        string_table,
-        ..
-    } = &mut prepared.semantic;
-
-    source_contract_facts_from_contracts(
-        &prepared_header_syntax.source_build_config_contracts,
-        numeric_profile,
-        string_table,
-    )
+    prepared: &PreparedModule,
+) -> Vec<BuildConfigContractFact> {
+    source_contract_facts_from_contracts(prepared.semantic.source_build_config_contracts())
 }
 
 /// Return the names that are known to one boundary's canonical or declaration-owned input
@@ -289,7 +229,6 @@ pub(super) enum EffectiveProjectFieldKind {
 pub(super) fn effective_project_fields(
     config: &Config,
     string_table: &mut StringTable,
-    numeric_profile: NumericProfile,
 ) -> Result<Vec<EffectiveProjectField>, CompilerError> {
     if !config.project_config_loaded {
         return Ok(Vec::new());
@@ -330,7 +269,6 @@ pub(super) fn effective_project_fields(
             true,
             Some(PrimitiveBuildValue::String(config.project_name.clone())),
             config.setting_span("name"),
-            numeric_profile,
         )?,
     )?;
 
@@ -349,7 +287,6 @@ pub(super) fn effective_project_fields(
             true,
             Some(PrimitiveBuildValue::String(entry_root.to_owned())),
             config.setting_span("entry_root"),
-            numeric_profile,
         )?,
     )?;
 
@@ -364,7 +301,6 @@ pub(super) fn effective_project_fields(
                 false,
                 config.version.clone().map(PrimitiveBuildValue::String),
                 config.setting_span("version"),
-                numeric_profile,
             )?,
         )?;
     }
@@ -378,7 +314,6 @@ pub(super) fn effective_project_fields(
                 false,
                 config.author.clone().map(PrimitiveBuildValue::String),
                 config.setting_span("author"),
-                numeric_profile,
             )?,
         )?;
     }
@@ -392,7 +327,6 @@ pub(super) fn effective_project_fields(
                 false,
                 config.license.clone().map(PrimitiveBuildValue::String),
                 config.setting_span("license"),
-                numeric_profile,
             )?,
         )?;
     }
@@ -401,10 +335,12 @@ pub(super) fn effective_project_fields(
         .setting_spans
         .contains_key("template_const_loop_iteration_limit")
     {
-        let loop_limit =
-            i64::try_from(config.template_const_loop_iteration_limit).map_err(|_| {
+        let loop_limit = i64::try_from(config.template_const_loop_iteration_limit)
+            .ok()
+            .and_then(|limit| FixedScalarValue::signed(FixedScalar::I32, limit))
+            .ok_or_else(|| {
                 CompilerError::compiler_error(
-                    "configured template loop limit cannot be represented as a build Int",
+                    "configured template loop limit cannot be represented as a build I32",
                 )
             })?;
         add_fixed(
@@ -412,11 +348,10 @@ pub(super) fn effective_project_fields(
             &mut seen_names,
             effective_fixed_project_field(
                 "template_const_loop_iteration_limit",
-                BuildInputType::Primitive(PrimitiveBuildInputType::Int),
+                BuildInputType::Primitive(PrimitiveBuildInputType::Fixed(FixedScalar::I32)),
                 true,
-                Some(PrimitiveBuildValue::Int(loop_limit)),
+                Some(PrimitiveBuildValue::Fixed(loop_limit)),
                 config.setting_span("template_const_loop_iteration_limit"),
-                numeric_profile,
             )?,
         )?;
     }
@@ -483,16 +418,10 @@ fn effective_fixed_project_field(
     required: bool,
     primitive_value: Option<PrimitiveBuildValue>,
     span: Option<SourceSpan>,
-    numeric_profile: NumericProfile,
 ) -> Result<EffectiveProjectField, CompilerError> {
     let build_name = BuildInputName::new(name).expect("compiler-owned project field name is valid");
     let value = public_folded_value_for_build_input(build_input_type, primitive_value.as_ref())?;
-    let fingerprint = build_config_fingerprint(
-        name,
-        build_input_type,
-        primitive_value.as_ref(),
-        numeric_profile,
-    );
+    let fingerprint = build_config_fingerprint(name, build_input_type, primitive_value.as_ref());
     Ok(EffectiveProjectField {
         name: build_name.as_str().to_owned(),
         type_identity: canonical_type_identity_for_build_input(build_input_type),
@@ -632,18 +561,26 @@ pub(super) fn build_project_globals_interface(
     .map(Some)
 }
 
+/// Project one exact fixed scalar onto its build-input value.
+///
+/// Scalars outside the build-input domain return `None` so the caller keeps the field as ordinary
+/// metadata instead of inventing a carrier.
+fn primitive_value_for_fixed_scalar(value: FixedScalarValue) -> Option<PrimitiveBuildValue> {
+    PrimitiveBuildInputType::from_fixed_scalar(value.scalar())
+        .map(|_| PrimitiveBuildValue::Fixed(value))
+}
+
 fn fixed_build_value_from_metadata(
     field: &ProjectMetadataField,
 ) -> Option<(BuildInputType, Option<PrimitiveBuildValue>)> {
     match &field.value {
-        PublicFoldedValue::Int(value) => Some((
-            BuildInputType::Primitive(PrimitiveBuildInputType::Int),
-            Some(PrimitiveBuildValue::Int(*value)),
-        )),
-        PublicFoldedValue::Float(value) => Some((
-            BuildInputType::Primitive(PrimitiveBuildInputType::Float),
-            Some(PrimitiveBuildValue::Float(value.clone())),
-        )),
+        PublicFoldedValue::FixedScalar(value) => {
+            let primitive = primitive_value_for_fixed_scalar(*value)?;
+            Some((
+                BuildInputType::Primitive(primitive.primitive_type()),
+                Some(primitive),
+            ))
+        }
         PublicFoldedValue::Bool(value) => Some((
             BuildInputType::Primitive(PrimitiveBuildInputType::Bool),
             Some(PrimitiveBuildValue::Bool(*value)),
@@ -667,10 +604,8 @@ fn fixed_build_value_from_metadata(
             BuildInputType::Optional(canonical_option_primitive(&field.type_identity)?),
             None,
         )),
-        PublicFoldedValue::Uint(_)
-        | PublicFoldedValue::FixedScalar(_)
-        | PublicFoldedValue::Number(_)
-        | PublicFoldedValue::ConstTemplate(_)
+        PublicFoldedValue::Number(_)
+        | PublicFoldedValue::ConstTemplate { .. }
         | PublicFoldedValue::Collection(_)
         | PublicFoldedValue::Record(_)
         | PublicFoldedValue::Choice { .. }
@@ -680,17 +615,14 @@ fn fixed_build_value_from_metadata(
 
 fn primitive_build_value_from_metadata(value: &PublicFoldedValue) -> Option<PrimitiveBuildValue> {
     match value {
-        PublicFoldedValue::Int(value) => Some(PrimitiveBuildValue::Int(*value)),
-        PublicFoldedValue::Float(value) => Some(PrimitiveBuildValue::Float(value.clone())),
+        PublicFoldedValue::FixedScalar(value) => primitive_value_for_fixed_scalar(*value),
         PublicFoldedValue::Bool(value) => Some(PrimitiveBuildValue::Bool(*value)),
         PublicFoldedValue::Char(value) => Some(PrimitiveBuildValue::Char(*value)),
         PublicFoldedValue::String(value) => {
             Some(PrimitiveBuildValue::String(value.clone().into_text()?))
         }
-        PublicFoldedValue::Uint(_)
-        | PublicFoldedValue::FixedScalar(_)
-        | PublicFoldedValue::Number(_)
-        | PublicFoldedValue::ConstTemplate(_)
+        PublicFoldedValue::Number(_)
+        | PublicFoldedValue::ConstTemplate { .. }
         | PublicFoldedValue::Collection(_)
         | PublicFoldedValue::Record(_)
         | PublicFoldedValue::Choice { .. }
@@ -710,11 +642,8 @@ fn canonical_option_primitive(
         CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::String) => {
             Some(PrimitiveBuildInputType::String)
         }
-        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int) => {
-            Some(PrimitiveBuildInputType::Int)
-        }
-        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Float) => {
-            Some(PrimitiveBuildInputType::Float)
+        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::FixedScalar(scalar)) => {
+            PrimitiveBuildInputType::from_fixed_scalar(*scalar)
         }
         CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Bool) => {
             Some(PrimitiveBuildInputType::Bool)
@@ -729,8 +658,7 @@ fn canonical_option_primitive(
 fn canonical_type_identity_for_build_input(value_type: BuildInputType) -> CanonicalTypeIdentity {
     let primitive = match value_type.primitive() {
         PrimitiveBuildInputType::String => CanonicalBuiltinType::String,
-        PrimitiveBuildInputType::Int => CanonicalBuiltinType::Int,
-        PrimitiveBuildInputType::Float => CanonicalBuiltinType::Float,
+        PrimitiveBuildInputType::Fixed(scalar) => CanonicalBuiltinType::FixedScalar(scalar),
         PrimitiveBuildInputType::Bool => CanonicalBuiltinType::Bool,
         PrimitiveBuildInputType::Char => CanonicalBuiltinType::Char,
     };
@@ -766,8 +694,7 @@ fn public_folded_value_for_build_input(
         PrimitiveBuildValue::String(value) => {
             PublicFoldedValue::String(OwnedFoldedString::Text(value.clone()))
         }
-        PrimitiveBuildValue::Int(value) => PublicFoldedValue::Int(*value),
-        PrimitiveBuildValue::Float(value) => PublicFoldedValue::Float(value.clone()),
+        PrimitiveBuildValue::Fixed(value) => PublicFoldedValue::FixedScalar(*value),
         PrimitiveBuildValue::Bool(value) => PublicFoldedValue::Bool(*value),
         PrimitiveBuildValue::Char(value) => PublicFoldedValue::Char(*value),
     };
@@ -867,18 +794,36 @@ pub(super) fn build_config_resolution_failure(
             error.name().as_str()
         )));
     }
-    if let BuildConfigResolutionError::NumericProfileViolation {
+    if let BuildConfigResolutionError::NumericLiteralOutOfRange {
         contract,
         text,
         reason,
+        value_location,
     } = error
     {
-        // A typed value that does not satisfy the boundary numeric profile - a command or
-        // project-config value supplied before the profile was known, or a programmatic input -
-        // reports the same number-literal diagnostic an authored literal of that width uses.
+        // A supplied value outside its contract's exact scalar reports the existing number-literal
+        // reason. A command value has no source span, so it keeps its argument position.
         let literal = string_table.intern(&text);
+        let diagnostic = match value_location {
+            Some(BuildConfigValueLocation::Command(location)) => {
+                let key = string_table.intern(contract.name().as_str());
+                CompilerDiagnostic::invalid_config_reason(
+                    Some(key),
+                    InvalidConfigReason::ConfigInputOutOfRange {
+                        literal,
+                        reason,
+                        provided_argument_index: Some(location.argument_index()),
+                    },
+                    contract.span(),
+                )
+            }
+            Some(BuildConfigValueLocation::Source(span)) => {
+                CompilerDiagnostic::invalid_number_literal(literal, reason, Some(span))
+            }
+            None => CompilerDiagnostic::invalid_number_literal(literal, reason, contract.span()),
+        };
         return PremergeFailure::Diagnosed(PremergeDiagnosticBatch::from_diagnostic(
-            CompilerDiagnostic::invalid_number_literal(literal, reason, contract.span()),
+            diagnostic,
             std::mem::take(string_table),
         ));
     }
@@ -967,10 +912,6 @@ pub(super) fn build_config_resolution_failure(
         std::mem::take(string_table),
     ))
 }
-#[allow(
-    clippy::too_many_arguments,
-    reason = "boundary resolution keeps source, fixed-project and direct-project facts, explicit inputs, builder globals, the boundary numeric profile, and fallback-span/mutable string-table state as separate inputs"
-)]
 pub(super) fn resolve_boundary_build_config(
     source_facts: &[BuildConfigContractFact],
     fixed_project_facts: &[BuildConfigContractFact],
@@ -979,7 +920,6 @@ pub(super) fn resolve_boundary_build_config(
     builder_globals: &BuilderConfigGlobalSet,
     fallback_span: Option<SourceSpan>,
     string_table: &mut StringTable,
-    numeric_profile: NumericProfile,
 ) -> Result<ResolvedBuildConfigMap, PremergeFailure> {
     resolve_build_config_values(
         source_facts,
@@ -987,7 +927,6 @@ pub(super) fn resolve_boundary_build_config(
         direct_project_facts,
         explicit_inputs,
         builder_globals,
-        numeric_profile,
     )
     .map_err(|error| build_config_resolution_failure(error, fallback_span, string_table))
 }

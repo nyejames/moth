@@ -1,0 +1,12 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0051"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0051"
+reason = "invalid_fallible_handling.entry_has_incompatible_error"
+path = "input/@page.moth"
+line = 9

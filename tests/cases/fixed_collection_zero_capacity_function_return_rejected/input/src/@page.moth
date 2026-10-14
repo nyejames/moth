@@ -1,4 +1,4 @@
-make || -> {0 Int}:
+make || -> {0 I32}:
     return {}
 ;
 

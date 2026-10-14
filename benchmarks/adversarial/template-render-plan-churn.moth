@@ -68,7 +68,7 @@ replay_box #= [:
 replay_content #= [$insert("body"): repeated]
 
 -- Runtime template construction.
-build_lines |count Int| -> String:
+build_lines |count I32| -> String:
     output ~= [: <div class="lines">]
     loop 0 to count |i|:
         output = [: [output]<div class="line">line [i]</div>]
@@ -77,7 +77,7 @@ build_lines |count Int| -> String:
     return output
 ;
 
-build_rows |count Int| -> String:
+build_rows |count I32| -> String:
     output ~= ""
     loop 0 to count |i|:
         row = [row_template, i, i * 2, i * 3: fallback]

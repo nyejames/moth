@@ -1,8 +1,8 @@
 -- A loop body that redefines its map alias before mutating the map. The alias reaching the
 -- mutation is dead on every path, including the one that arrives over the back-edge.
 
-accumulate |keys {String}| -> {String = Int}, Error!:
-    totals ~{String = Int} = {}
+accumulate |keys {String}| -> {String = I32}, Error!:
+    totals ~{String = I32} = {}
     loop keys |key|:
         current = totals.get(key) catch then 0
         next = current + 1

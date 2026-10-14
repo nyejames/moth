@@ -1,0 +1,18 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "generic_constructed_numeric_retention_runtime packet=4294967297 tagged=4294967300 label=fallback box=4294967302 choice=4294967298 nested=4294967302 map=18446744073709551615 floating=4294967303 whole=9"
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0058"]
+message_contains = ["__moth_collection_get"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0058"
+path = "input/@page.moth"
+line = 20
+column = 27

@@ -4,16 +4,21 @@
 //! WHY: scope boundaries drive many lifetime rules, so regressions here tend to cascade widely.
 
 use crate::compiler_frontend::ast::ast_nodes::{MatchExhaustiveness, NodeKind};
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::{AstExpressionBuilder, ExprId};
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
-use crate::compiler_frontend::ast::statements::match_patterns::{MatchArm, MatchPattern};
+use crate::compiler_frontend::ast::statements::match_patterns::{
+    MatchArm, MatchPattern, PatternValue,
+};
 use crate::compiler_frontend::compiler_messages::BorrowDiagnosticKind;
 use crate::compiler_frontend::datatypes::DataType;
-use crate::compiler_frontend::datatypes::builtin_type_ids::{BOOL, INT};
+use crate::compiler_frontend::datatypes::builtin_type_ids;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::ids::HirNodeId;
 use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::statements::{HirStatement, HirStatementKind};
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
     assignment_target, function_node, make_test_variable, node, reference_expr_with_datatype,
@@ -24,11 +29,28 @@ use crate::compiler_frontend::tests::borrow_fixture_support::{
 };
 use crate::compiler_frontend::tests::external_package_support::default_external_package_registry;
 use crate::compiler_frontend::tests::hir_fixture_support::{entry_and_start, lower_hir};
-use crate::compiler_frontend::tests::type_id_fixture_support::{
-    build_ast_with_registered_types, runtime_expr, runtime_operand_item,
-};
+use crate::compiler_frontend::tests::type_id_fixture_support::build_ast_with_registered_types;
 
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+
+fn i32_expression(
+    builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    value: i64,
+    span: Option<SourceSpan>,
+    mode: ValueMode,
+) -> ExprId {
+    builder
+        .fixed_scalar(
+            const_values,
+            FixedScalarValue::signed(FixedScalar::I32, value).expect("I32 literal in range"),
+            span,
+            mode,
+        )
+        .expect("fixture scalar fits store")
+        .id()
+}
 
 #[test]
 fn if_branch_local_alias_does_not_escape_merge() {
@@ -36,9 +58,13 @@ fn if_branch_local_alias_does_not_escape_merge() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let type_environment = TypeEnvironment::new();
 
     let x = symbol("x", &mut path_fork, &mut string_table);
     let y = symbol("y", &mut path_fork, &mut string_table);
+    let flag = symbol("flag", &mut path_fork, &mut string_table);
 
     let start_fn = function_node(
         start_name,
@@ -50,31 +76,53 @@ fn if_branch_local_alias_does_not_escape_merge() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
+                    i32_expression(
+                        &mut builder,
+                        &mut const_values,
+                        1,
+                        test_source_location(1),
+                        ValueMode::MutableOwned,
+                    ),
+                    &builder,
+                )),
+                test_source_location(1),
+            ),
+            node(
+                NodeKind::VariableDeclaration(make_test_variable(
+                    flag,
+                    builder
+                        .bool(
+                            &mut const_values,
+                            true,
+                            test_source_location(1),
+                            ValueMode::ImmutableOwned,
+                        )
+                        .expect("fixture flag fits store")
+                        .id(),
+                    &builder,
                 )),
                 test_source_location(1),
             ),
             node(
                 NodeKind::If(
-                    runtime_expr(
-                        vec![runtime_operand_item(Expression::bool(
-                            true,
-                            test_source_location(2),
-                            ValueMode::ImmutableOwned,
-                        ))],
-                        BOOL,
+                    reference_expr_with_datatype(
+                        &mut builder,
+                        flag,
+                        DataType::Bool,
+                        builtin_type_ids::BOOL,
                         test_source_location(2),
-                        ValueMode::ImmutableOwned,
                     ),
                     vec![node(
                         NodeKind::VariableDeclaration(make_test_variable(
                             y,
                             reference_expr_with_datatype(
+                                &mut builder,
                                 x,
-                                DataType::Int,
-                                INT,
+                                DataType::FixedScalar(FixedScalar::I32),
+                                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                 test_source_location(3),
                             ),
+                            &builder,
                         )),
                         test_source_location(3),
                     )],
@@ -85,8 +133,20 @@ fn if_branch_local_alias_does_not_escape_merge() {
             ),
             node(
                 NodeKind::Assignment {
-                    target: assignment_target(x, DataType::Int, INT, test_source_location(4)),
-                    value: Expression::int(2, test_source_location(4), ValueMode::ImmutableOwned),
+                    target: assignment_target(
+                        &mut builder,
+                        x,
+                        DataType::FixedScalar(FixedScalar::I32),
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                        test_source_location(4),
+                    ),
+                    value: i32_expression(
+                        &mut builder,
+                        &mut const_values,
+                        2,
+                        test_source_location(4),
+                        ValueMode::ImmutableOwned,
+                    ),
                 },
                 test_source_location(4),
             ),
@@ -95,9 +155,16 @@ fn if_branch_local_alias_does_not_escape_merge() {
     );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(vec![start_fn], entry_path),
+        build_ast_with_registered_types(
+            vec![start_fn],
+            entry_path,
+            builder,
+            const_values,
+            type_environment,
+        ),
         &mut string_table,
         &mut path_fork,
+        &external_package_registry,
     );
     run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("branch-local alias should not be visible after merge");
@@ -109,17 +176,37 @@ fn match_arm_local_alias_does_not_escape_merge() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let type_environment = TypeEnvironment::new();
 
     let x = symbol("x", &mut path_fork, &mut string_table);
     let y = symbol("y", &mut path_fork, &mut string_table);
 
     let arm = MatchArm {
-        pattern: MatchPattern::Literal(Expression::int(1, None, ValueMode::ImmutableOwned)),
+        pattern: MatchPattern::Literal({
+            let value = i32_expression(
+                &mut builder,
+                &mut const_values,
+                1,
+                None,
+                ValueMode::ImmutableOwned,
+            );
+            PatternValue::from_expression(builder.view(value).expect("fixture pattern value"))
+                .expect("single-valued fixture pattern")
+        }),
         guard: None,
         body: vec![node(
             NodeKind::VariableDeclaration(make_test_variable(
                 y,
-                reference_expr_with_datatype(x, DataType::Int, INT, test_source_location(4)),
+                reference_expr_with_datatype(
+                    &mut builder,
+                    x,
+                    DataType::FixedScalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                    test_source_location(4),
+                ),
+                &builder,
             )),
             test_source_location(4),
         )],
@@ -135,13 +222,22 @@ fn match_arm_local_alias_does_not_escape_merge() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
+                    i32_expression(
+                        &mut builder,
+                        &mut const_values,
+                        1,
+                        test_source_location(1),
+                        ValueMode::MutableOwned,
+                    ),
+                    &builder,
                 )),
                 test_source_location(1),
             ),
             node(
                 NodeKind::Match {
-                    scrutinee: Expression::int(
+                    scrutinee: i32_expression(
+                        &mut builder,
+                        &mut const_values,
                         1,
                         test_source_location(2),
                         ValueMode::ImmutableOwned,
@@ -154,8 +250,20 @@ fn match_arm_local_alias_does_not_escape_merge() {
             ),
             node(
                 NodeKind::Assignment {
-                    target: assignment_target(x, DataType::Int, INT, test_source_location(5)),
-                    value: Expression::int(2, test_source_location(5), ValueMode::ImmutableOwned),
+                    target: assignment_target(
+                        &mut builder,
+                        x,
+                        DataType::FixedScalar(FixedScalar::I32),
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                        test_source_location(5),
+                    ),
+                    value: i32_expression(
+                        &mut builder,
+                        &mut const_values,
+                        2,
+                        test_source_location(5),
+                        ValueMode::ImmutableOwned,
+                    ),
                 },
                 test_source_location(5),
             ),
@@ -164,9 +272,16 @@ fn match_arm_local_alias_does_not_escape_merge() {
     );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(vec![start_fn], entry_path),
+        build_ast_with_registered_types(
+            vec![start_fn],
+            entry_path,
+            builder,
+            const_values,
+            type_environment,
+        ),
         &mut string_table,
         &mut path_fork,
+        &external_package_registry,
     );
     run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("match-arm local alias should not be visible after merge");
@@ -178,6 +293,9 @@ fn while_body_local_alias_does_not_escape_exit() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let type_environment = TypeEnvironment::new();
 
     let x = symbol("x", &mut path_fork, &mut string_table);
     let y = symbol("y", &mut path_fork, &mut string_table);
@@ -192,22 +310,39 @@ fn while_body_local_alias_does_not_escape_exit() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
+                    i32_expression(
+                        &mut builder,
+                        &mut const_values,
+                        1,
+                        test_source_location(1),
+                        ValueMode::MutableOwned,
+                    ),
+                    &builder,
                 )),
                 test_source_location(1),
             ),
             node(
                 NodeKind::WhileLoop(
-                    Expression::bool(false, test_source_location(2), ValueMode::ImmutableOwned),
+                    builder
+                        .bool(
+                            &mut const_values,
+                            false,
+                            test_source_location(2),
+                            ValueMode::ImmutableOwned,
+                        )
+                        .expect("fixture loop condition fits store")
+                        .id(),
                     vec![node(
                         NodeKind::VariableDeclaration(make_test_variable(
                             y,
                             reference_expr_with_datatype(
+                                &mut builder,
                                 x,
-                                DataType::Int,
-                                INT,
+                                DataType::FixedScalar(FixedScalar::I32),
+                                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                 test_source_location(3),
                             ),
+                            &builder,
                         )),
                         test_source_location(3),
                     )],
@@ -216,8 +351,20 @@ fn while_body_local_alias_does_not_escape_exit() {
             ),
             node(
                 NodeKind::Assignment {
-                    target: assignment_target(x, DataType::Int, INT, test_source_location(4)),
-                    value: Expression::int(2, test_source_location(4), ValueMode::ImmutableOwned),
+                    target: assignment_target(
+                        &mut builder,
+                        x,
+                        DataType::FixedScalar(FixedScalar::I32),
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                        test_source_location(4),
+                    ),
+                    value: i32_expression(
+                        &mut builder,
+                        &mut const_values,
+                        2,
+                        test_source_location(4),
+                        ValueMode::ImmutableOwned,
+                    ),
                 },
                 test_source_location(4),
             ),
@@ -226,9 +373,16 @@ fn while_body_local_alias_does_not_escape_exit() {
     );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(vec![start_fn], entry_path),
+        build_ast_with_registered_types(
+            vec![start_fn],
+            entry_path,
+            builder,
+            const_values,
+            type_environment,
+        ),
         &mut string_table,
         &mut path_fork,
+        &external_package_registry,
     );
     run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("while-body local alias should not be visible in exit block");
@@ -240,9 +394,13 @@ fn dead_local_access_reports_borrow_error() {
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let mut builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let type_environment = TypeEnvironment::new();
 
     let x = symbol("x", &mut path_fork, &mut string_table);
     let y = symbol("y", &mut path_fork, &mut string_table);
+    let flag = symbol("flag", &mut path_fork, &mut string_table);
 
     let start_fn = function_node(
         start_name,
@@ -254,31 +412,53 @@ fn dead_local_access_reports_borrow_error() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
+                    i32_expression(
+                        &mut builder,
+                        &mut const_values,
+                        1,
+                        test_source_location(1),
+                        ValueMode::MutableOwned,
+                    ),
+                    &builder,
+                )),
+                test_source_location(1),
+            ),
+            node(
+                NodeKind::VariableDeclaration(make_test_variable(
+                    flag,
+                    builder
+                        .bool(
+                            &mut const_values,
+                            true,
+                            test_source_location(1),
+                            ValueMode::ImmutableOwned,
+                        )
+                        .expect("fixture flag fits store")
+                        .id(),
+                    &builder,
                 )),
                 test_source_location(1),
             ),
             node(
                 NodeKind::If(
-                    runtime_expr(
-                        vec![runtime_operand_item(Expression::bool(
-                            true,
-                            test_source_location(2),
-                            ValueMode::ImmutableOwned,
-                        ))],
-                        BOOL,
+                    reference_expr_with_datatype(
+                        &mut builder,
+                        flag,
+                        DataType::Bool,
+                        builtin_type_ids::BOOL,
                         test_source_location(2),
-                        ValueMode::ImmutableOwned,
                     ),
                     vec![node(
                         NodeKind::VariableDeclaration(make_test_variable(
                             y,
                             reference_expr_with_datatype(
+                                &mut builder,
                                 x,
-                                DataType::Int,
-                                INT,
+                                DataType::FixedScalar(FixedScalar::I32),
+                                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                 test_source_location(3),
                             ),
+                            &builder,
                         )),
                         test_source_location(3),
                     )],
@@ -289,8 +469,20 @@ fn dead_local_access_reports_borrow_error() {
             ),
             node(
                 NodeKind::Assignment {
-                    target: assignment_target(x, DataType::Int, INT, test_source_location(4)),
-                    value: Expression::int(2, test_source_location(4), ValueMode::ImmutableOwned),
+                    target: assignment_target(
+                        &mut builder,
+                        x,
+                        DataType::FixedScalar(FixedScalar::I32),
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                        test_source_location(4),
+                    ),
+                    value: i32_expression(
+                        &mut builder,
+                        &mut const_values,
+                        2,
+                        test_source_location(4),
+                        ValueMode::ImmutableOwned,
+                    ),
                 },
                 test_source_location(4),
             ),
@@ -299,9 +491,16 @@ fn dead_local_access_reports_borrow_error() {
     );
 
     let mut hir = lower_hir(
-        build_ast_with_registered_types(vec![start_fn], entry_path),
+        build_ast_with_registered_types(
+            vec![start_fn],
+            entry_path,
+            builder,
+            const_values,
+            type_environment,
+        ),
         &mut string_table,
         &mut path_fork,
+        &external_package_registry,
     );
 
     let start = &hir.functions[hir

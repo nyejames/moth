@@ -271,7 +271,7 @@ pub(crate) fn build_receiver_method_catalog(
             .signature
             .parameters
             .first()
-            .is_some_and(|parameter| parameter.value.value_mode.is_mutable());
+            .is_some_and(|parameter| parameter.value_mode.is_mutable());
 
         let entry = ReceiverMethodEntry {
             function_path: header.declaration_path,

@@ -1,0 +1,8 @@
+val #= Box()
+
+Box = |
+    x I32 = 1,
+    y I32 = 2,
+|
+
+[:struct_default_pending_constructor x=[val.x] y=[val.y]]

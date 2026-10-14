@@ -18,15 +18,15 @@ export function loadF32() {
 export function overflowF32() {
     return { ok: true, value: 3.5e38 };
 }
-/** @moth.sig identity_int |value Int| -> Int */
+/** @moth.sig identity_int |value I64| -> I64 */
 export function identityInt(value) {
     return value;
 }
-/** @moth.sig identity_uint |value Uint| -> Uint */
+/** @moth.sig identity_uint |value U64| -> U64 */
 export function identityUint(value) {
     return value;
 }
-/** @moth.sig identity_float |value Float| -> Float */
+/** @moth.sig identity_float |value F32| -> F32 */
 export function identityFloat(value) {
     return value;
 }

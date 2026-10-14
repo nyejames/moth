@@ -1,10 +1,9 @@
 entry = "."
-numeric_profile = "Int32/Float64"
 
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = " overflowed=0 oreport= 301 Int operation overflowed narrowed=0 nreport= 242 U32 -> U8 source 300 is out of U8 range exact=30"
+rendered_output_exact = " overflowed=0 oreport= 301 Integer operation overflowed narrowed=0 nreport= 242 U32 -> U8 source 300 is out of U8 range exact=30"
 
 [backends.html_wasm]
 mode = "failure"

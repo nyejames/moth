@@ -1,0 +1,15 @@
+-- A retained single-result arithmetic catch at a multi-bind receiver is
+-- ordinary source misuse. The receiving boundary must report the structured
+-- RhsNotMultiValue shape diagnostic (MOTH-RULE-0045) at the authored fragment,
+-- never a compiler invariant failure, and must not widen the narrower Phase 4
+-- multi-bind lane to accept one protected value for two targets.
+--
+-- `pending` stays unannotated so the origin is genuinely pending and the catch
+-- fragment is retained rather than a concrete equivalent.
+
+failing |value I32| -> I32, Error!:
+    return! Error("single result")
+;
+
+pending = 1
+left, right = 10 + failing(pending) catch then 0

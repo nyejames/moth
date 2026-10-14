@@ -1,4 +1,4 @@
-render_float |value Float| -> String:
+render_float |value F64| -> String:
     return [:[value]]
 ;
 

@@ -14,7 +14,7 @@ UserProfile = |
 
 Session = |
     token String,
-    expires_at Int,
+    expires_at I32,
     permission PermissionLevel,
 |
 
@@ -26,17 +26,17 @@ Settings = |
 
 Product = |
     name String,
-    price Float,
+    price F64,
     category String,
 |
 
 ProductCategory = |
     label String,
-    sort_order Int,
+    sort_order I32,
 |
 
 InventoryItem = |
     sku String,
-    quantity Int,
+    quantity I32,
     warehouse String,
 |

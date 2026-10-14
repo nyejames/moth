@@ -1,0 +1,20 @@
+-- A rejected member occurrence's argument region must be consumed through the shared
+-- call-argument owner without inventing a member signature: the named argument
+-- `value = render_count(count)` is authored syntax, and the nested real call still
+-- registers `count`'s exact U64 receiver before the delayed ordinary diagnostic.
+--
+-- No member signature exists for the `value` label to name, so the occurrence must stay
+-- the ordinary unknown-member diagnostic rather than a call-shape or naming diagnostic.
+-- The nested call's U64 parameter is the only receiver witness for `count`.
+--
+-- The whole `4_294_967_296` does not fit I32, so the diagnostic must report the resolved
+-- U64 receiver rather than the literal's range or the defaulted receiver.
+
+render_count |value U64| -> String:
+    return cast value
+;
+
+count = 4_294_967_296
+result = count.unsupported(value = render_count(count))
+
+[:unreachable]

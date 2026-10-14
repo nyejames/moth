@@ -1,5 +1,5 @@
 render_literal || -> String:
-    items {4 Int} = {1, 2}
+    items {4 I32} = {1, 2}
     value = items.get(1) catch:
         then 0
     ;

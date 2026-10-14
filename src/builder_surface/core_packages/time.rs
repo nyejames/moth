@@ -16,6 +16,7 @@ use crate::compiler_frontend::external_packages::{
     ExternalJsLowering, ExternalPackageId, ExternalParameter, ExternalReturnSlot,
     ExternalSignatureType, ExternalTypeId, ExternalTypeSpec,
 };
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 /// One registered `@core/time` function.
 ///
@@ -60,7 +61,7 @@ pub fn register_core_time_package(registry: &mut ExternalPackageRegistry) {
     let duration_type = ExternalSignatureType::External(duration_id);
     let time_mark_type = ExternalSignatureType::External(time_mark_id);
     let timestamp_type = ExternalSignatureType::External(timestamp_id);
-    let native_float_type = ExternalSignatureType::NativeFloat;
+    let f64_type = ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::F64));
     let string_type = ExternalSignatureType::Abi(ExternalAbiType::Utf8Str);
     let bool_type = ExternalSignatureType::Abi(ExternalAbiType::Bool);
     let error_type = ExternalSignatureType::BuiltinError;
@@ -106,14 +107,14 @@ pub fn register_core_time_package(registry: &mut ExternalPackageRegistry) {
         // Duration construction
         TimeFunctionSpec {
             name: "duration_from_seconds",
-            parameters: &[&native_float_type],
+            parameters: &[&f64_type],
             return_type: &duration_type,
             error_return_type: None,
             js_lowering: TimeJsLowering::Inline("(#0 * 1000.0)"),
         },
         TimeFunctionSpec {
             name: "duration_from_milliseconds",
-            parameters: &[&native_float_type],
+            parameters: &[&f64_type],
             return_type: &duration_type,
             error_return_type: None,
             js_lowering: TimeJsLowering::Inline("#0"),
@@ -121,14 +122,14 @@ pub fn register_core_time_package(registry: &mut ExternalPackageRegistry) {
         // Timestamp construction
         TimeFunctionSpec {
             name: "timestamp_from_unix_seconds",
-            parameters: &[&native_float_type],
+            parameters: &[&f64_type],
             return_type: &timestamp_type,
             error_return_type: None,
             js_lowering: TimeJsLowering::Inline("(#0 * 1000.0)"),
         },
         TimeFunctionSpec {
             name: "timestamp_from_unix_milliseconds",
-            parameters: &[&native_float_type],
+            parameters: &[&f64_type],
             return_type: &timestamp_type,
             error_return_type: None,
             js_lowering: TimeJsLowering::Inline("#0"),
@@ -144,14 +145,14 @@ pub fn register_core_time_package(registry: &mut ExternalPackageRegistry) {
         TimeFunctionSpec {
             name: "as_seconds",
             parameters: &[&duration_type],
-            return_type: &native_float_type,
+            return_type: &f64_type,
             error_return_type: None,
             js_lowering: TimeJsLowering::Inline("(#0 / 1000.0)"),
         },
         TimeFunctionSpec {
             name: "as_milliseconds",
             parameters: &[&duration_type],
-            return_type: &native_float_type,
+            return_type: &f64_type,
             error_return_type: None,
             js_lowering: TimeJsLowering::Inline("#0"),
         },
@@ -192,7 +193,7 @@ pub fn register_core_time_package(registry: &mut ExternalPackageRegistry) {
         },
         TimeFunctionSpec {
             name: "duration_scale",
-            parameters: &[&duration_type, &native_float_type],
+            parameters: &[&duration_type, &f64_type],
             return_type: &duration_type,
             error_return_type: None,
             js_lowering: TimeJsLowering::Inline("(#0 * #1)"),
@@ -201,14 +202,14 @@ pub fn register_core_time_package(registry: &mut ExternalPackageRegistry) {
         TimeFunctionSpec {
             name: "unix_seconds",
             parameters: &[&timestamp_type],
-            return_type: &native_float_type,
+            return_type: &f64_type,
             error_return_type: None,
             js_lowering: TimeJsLowering::Inline("(#0 / 1000.0)"),
         },
         TimeFunctionSpec {
             name: "unix_milliseconds",
             parameters: &[&timestamp_type],
-            return_type: &native_float_type,
+            return_type: &f64_type,
             error_return_type: None,
             js_lowering: TimeJsLowering::Inline("#0"),
         },

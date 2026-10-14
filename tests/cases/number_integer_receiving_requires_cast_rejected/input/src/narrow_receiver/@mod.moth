@@ -1,0 +1,3 @@
+cannot_receive_narrow_sum |left U8, right U8| -> U32:
+    return left + right
+;

@@ -7,7 +7,9 @@
 //! guarantee before trait bounds exist.
 
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::function_body_to_ast;
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
 use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
@@ -31,6 +33,8 @@ pub(crate) struct GenericFunctionBodyValidationInput<'a, 'environment> {
     pub(crate) template: &'a GenericFunctionTemplate,
     pub(crate) context: ScopeContext,
     pub(crate) type_interner: &'a mut AstTypeInterner<'environment>,
+    pub(crate) expression_builder: &'a mut AstExpressionBuilder,
+    pub(crate) const_values: &'a mut ConstValueStore,
     pub(crate) warnings: &'a mut Vec<CompilerDiagnostic>,
     pub(crate) string_table: &'a mut StringTable,
     pub(crate) path_fork: &'a mut PathInternerFork,
@@ -48,6 +52,8 @@ pub(crate) fn validate_generic_function_body(
         template,
         mut context,
         type_interner,
+        expression_builder,
+        const_values,
         warnings,
         string_table,
         path_fork,
@@ -64,12 +70,17 @@ pub(crate) fn validate_generic_function_body(
     };
     let parse_owner = body.parse_owner()?;
     let (mut body_cursor, _) = parse_owner.cursor()?;
+    // The validation context is built as an independent root by the caller, so its body must
+    // complete before this pass can inspect typed nodes.
     function_body_to_ast(
         &mut body_cursor,
         context,
         type_interner,
+        expression_builder,
+        const_values,
         warnings,
         string_table,
         path_fork,
-    )
+    )?
+    .expect_complete_nodes("a generic function template body")
 }

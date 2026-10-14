@@ -1,14 +1,14 @@
-first |value Int, ready Bool| -> Int:
+first |value I32, ready Bool| -> I32:
     if ready:
         return second(value, ready)
     ;
     return value * 2
 ;
-second |value Int, ready Bool| -> Int:
+second |value I32, ready Bool| -> I32:
     return first(value, ready)
 ;
 export:
-    boundary |value Int, ready Bool| -> Int:
+    boundary |value I32, ready Bool| -> I32:
         return first(value, ready)
     ;
 ;

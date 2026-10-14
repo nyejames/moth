@@ -5,9 +5,9 @@ use super::run_build_command_with_output_plan;
 #[cfg(feature = "timers")]
 use super::run_build_command_with_output_plan_for_tests;
 use super::{
-    Command, CommandInputArgument, build_warnings_messages, compact_whitespace, get_command,
-    help_build_flag_entries, integration_run_status, is_standalone_version_request,
-    materialise_command_inputs, run_build_command,
+    Command, CommandInputArgument, build_warnings_messages, command_input_set, compact_whitespace,
+    get_command, help_build_flag_entries, integration_run_status, is_standalone_version_request,
+    run_build_command,
 };
 use crate::build_system::BuildProfile;
 use crate::build_system::build::{BuildResult, FileKind, OutputFile, Project, ProjectBuilder};
@@ -19,13 +19,13 @@ use crate::compiler_frontend::analysis::borrow_checker::{
     BoracleDump, BoracleExperiment, BoracleReferenceRuleSet, BoracleRuleSelection,
 };
 use crate::compiler_frontend::build_config::{
-    BuildCommandLocation, BuildConfigInputSet, BuildConfigValueLocation, BuildInputName,
+    BuildCommandLocation, BuildConfigInputSet, BuildConfigInputValue, BuildConfigValueLocation,
+    BuildInputName, BuildInputType, ContractValueError, PrimitiveBuildInputType,
     PrimitiveBuildValue,
 };
 #[cfg(feature = "timers")]
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, NamingConvention};
-use crate::compiler_frontend::folded_value::FiniteFloat;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_tests::integration_test_runner::{
     BackendId, IntegrationRunSummary, TestRunnerOptions,
@@ -39,7 +39,8 @@ use crate::projects::html_project::new_html_project::NewHtmlProjectOptions;
 use crate::projects::settings::Config;
 #[cfg(feature = "timers")]
 use crate::timing::start_benchmark_collection;
-use moth_lexical::numeric::profile::NumericProfile;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
+use moth_lexical::numeric::parse::NumberLiteralErrorReason;
 #[cfg(feature = "boracle")]
 use std::collections::BTreeSet;
 use std::fs;
@@ -49,8 +50,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 #[cfg(feature = "timers")]
 use std::time::Duration;
 
-/// The builder every command test compiles under; its numeric profile is the standard
-/// `Int32`/`Float64` one these fixtures were authored against.
+/// The builder every command test compiles under.
 fn test_project_builder() -> ProjectBuilder {
     ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()))
 }
@@ -154,15 +154,14 @@ fn build_command_executes_with_typed_config_input() {
     else {
         panic!("build command expected");
     };
-    let inputs = materialise_command_inputs(&inputs, NumericProfile::STANDARD)
-        .expect("the parsed build input should materialise under the standard profile");
+    let inputs = command_input_set(&inputs).expect("the parsed build input should classify");
     let enabled = BuildInputName::new("enabled").expect("test input name should validate");
     assert_eq!(
         inputs
             .get(&enabled)
             .expect("build should retain enabled")
             .value(),
-        &PrimitiveBuildValue::Bool(true),
+        &BuildConfigInputValue::Typed(PrimitiveBuildValue::Bool(true)),
         "build should retain the typed Bool value"
     );
 
@@ -193,15 +192,14 @@ fn check_command_executes_with_typed_config_input() {
     else {
         panic!("check command expected");
     };
-    let inputs = materialise_command_inputs(&inputs, NumericProfile::STANDARD)
-        .expect("the parsed check input should materialise under the standard profile");
+    let inputs = command_input_set(&inputs).expect("the parsed check input should classify");
     let enabled = BuildInputName::new("enabled").expect("test input name should validate");
     assert_eq!(
         inputs
             .get(&enabled)
             .expect("check should retain enabled")
             .value(),
-        &PrimitiveBuildValue::Bool(true),
+        &BuildConfigInputValue::Typed(PrimitiveBuildValue::Bool(true)),
         "check should retain the typed Bool value"
     );
 
@@ -1340,40 +1338,62 @@ fn command_inputs(command: &Command) -> &[CommandInputArgument] {
     }
 }
 
-/// Materialise one parsed command's retained `--input` arguments under the standard profile.
-///
-/// The command layer defers profile-dependent materialisation until it owns the selected
-/// builder, so a test that wants typed values materialises the retained arguments itself.
-fn materialise_inputs(command: &Command) -> BuildConfigInputSet {
-    materialise_command_inputs(command_inputs(command), NumericProfile::STANDARD)
-        .expect("retained command inputs should materialise under the standard profile")
+/// Classify one parsed command's retained `--input` arguments into the shared input set.
+fn input_set(command: &Command) -> BuildConfigInputSet {
+    command_input_set(command_inputs(command)).expect("retained command inputs should classify")
 }
 
-fn single_input(argument: &str) -> (BuildInputName, PrimitiveBuildValue) {
+/// Look up the value a command retained under `name`, cloned out of its input set.
+fn retained_value(command: &Command, name: &str) -> BuildConfigInputValue {
+    let name = BuildInputName::new(name).expect("test input name should validate");
+    let inputs = input_set(command);
+    inputs
+        .get(&name)
+        .unwrap_or_else(|| panic!("command should retain {name:?}"))
+        .value()
+        .clone()
+}
+
+fn single_input(argument: &str) -> (BuildInputName, BuildConfigInputValue) {
     let (name_text, value_text) = argument.split_once('=').expect("test argument has '='");
     (
         BuildInputName::new(name_text).expect("test input name should validate"),
-        PrimitiveBuildValue::from_command_text(value_text, NumericProfile::STANDARD)
-            .expect("test input value should infer"),
+        BuildConfigInputValue::from_command_text(value_text)
+            .expect("test input value should classify"),
     )
 }
 
-fn cli_float(value: f64) -> PrimitiveBuildValue {
-    PrimitiveBuildValue::Float(FiniteFloat::new(value).expect("test float should be finite"))
+fn contract_of(scalar: FixedScalar) -> BuildInputType {
+    BuildInputType::Primitive(PrimitiveBuildInputType::Fixed(scalar))
 }
 
-/// Every command variant shares one parser and one materialisation path: the same argument text
-/// produces the same typed value with the same command location on build, check and dev, and no
-/// project config, source contract or build-system state exists in this test.
+fn fixed_signed(scalar: FixedScalar, value: i64) -> PrimitiveBuildValue {
+    PrimitiveBuildValue::Fixed(
+        FixedScalarValue::signed(scalar, value).expect("test integer should fit its scalar"),
+    )
+}
+
+fn fixed_unsigned(scalar: FixedScalar, value: u64) -> PrimitiveBuildValue {
+    PrimitiveBuildValue::Fixed(
+        FixedScalarValue::unsigned(scalar, value).expect("test integer should fit its scalar"),
+    )
+}
+
+fn fixed_binary(scalar: FixedScalar, value: f64) -> PrimitiveBuildValue {
+    PrimitiveBuildValue::Fixed(
+        FixedScalarValue::binary_float(scalar, value)
+            .expect("test float should be exact at its scalar"),
+    )
+}
+
+/// Every command variant shares one parser and one classification path: the same argument text
+/// classifies to the same typed value with the same command location on build, check and dev,
+/// and no project config, source contract or build-system state exists in this test.
 #[test]
-fn every_command_materialises_primitive_values_from_one_parser() {
+fn every_command_classifies_typed_values_from_one_parser() {
     let cases: &[(&str, PrimitiveBuildValue)] = &[
         ("analytics=true", PrimitiveBuildValue::Bool(true)),
         ("channel=false", PrimitiveBuildValue::Bool(false)),
-        ("retries=4", PrimitiveBuildValue::Int(4)),
-        ("offset=-3", PrimitiveBuildValue::Int(-3)),
-        ("ratio=0.75", cli_float(0.75)),
-        ("scale=1e-2", cli_float(1e-2)),
         ("separator=':'", PrimitiveBuildValue::Char(':')),
         (
             "label=\"true\"",
@@ -1410,12 +1430,86 @@ fn every_command_materialises_primitive_values_from_one_parser() {
         for (argument, expected_value) in cases {
             let command = get_command(&args(&[command_name, ".", "--input", argument]))
                 .unwrap_or_else(|error| panic!("{command_name} should parse {argument}: {error}"));
-            let inputs = materialise_inputs(&command);
             let (name, _) = single_input(argument);
+            let inputs = input_set(&command);
             let entry = inputs
                 .get(&name)
                 .unwrap_or_else(|| panic!("{command_name} should retain {argument}"));
-            assert_eq!(entry.value(), expected_value, "{command_name} {argument}");
+            assert_eq!(
+                entry.value(),
+                &BuildConfigInputValue::Typed(expected_value.clone()),
+                "{command_name} {argument}"
+            );
+            assert_eq!(
+                entry.location(),
+                &BuildConfigValueLocation::Command(BuildCommandLocation::new(2)),
+                "{command_name} {argument} should carry its --input argument position"
+            );
+        }
+    }
+}
+
+/// Numeric command text stays deferred until its receiving contract is known, so each numeric
+/// argument materialises at the exact scalar that receives it, on build, check and dev alike.
+#[test]
+fn every_command_materialises_numeric_values_at_their_receiving_contract() {
+    let cases = [
+        (
+            "retries=4",
+            FixedScalar::I32,
+            fixed_signed(FixedScalar::I32, 4),
+        ),
+        (
+            "offset=-3",
+            FixedScalar::I32,
+            fixed_signed(FixedScalar::I32, -3),
+        ),
+        (
+            "ratio=0.75",
+            FixedScalar::F64,
+            fixed_binary(FixedScalar::F64, 0.75),
+        ),
+        (
+            "scale=1e-2",
+            FixedScalar::F64,
+            fixed_binary(FixedScalar::F64, 1e-2),
+        ),
+        (
+            "whole=18446744073709551615",
+            FixedScalar::U64,
+            fixed_unsigned(FixedScalar::U64, u64::MAX),
+        ),
+        (
+            "single=1",
+            FixedScalar::F32,
+            fixed_binary(FixedScalar::F32, 1.0),
+        ),
+        (
+            "midpoint=1.00048828125",
+            FixedScalar::F16,
+            fixed_binary(FixedScalar::F16, 1.0),
+        ),
+        (
+            "above=1.0004882812500000000001",
+            FixedScalar::F16,
+            fixed_binary(FixedScalar::F16, 1.0009765625),
+        ),
+    ];
+
+    for command_name in ["build", "check", "dev"] {
+        for (argument, scalar, expected_value) in &cases {
+            let command = get_command(&args(&[command_name, ".", "--input", argument]))
+                .unwrap_or_else(|error| panic!("{command_name} should parse {argument}: {error}"));
+            let (name, _) = single_input(argument);
+            let inputs = input_set(&command);
+            let entry = inputs
+                .get(&name)
+                .unwrap_or_else(|| panic!("{command_name} should retain {argument}"));
+            assert_eq!(
+                entry.value().materialise_for(contract_of(*scalar)),
+                Ok(expected_value.clone()),
+                "{command_name} {argument}"
+            );
             assert_eq!(
                 entry.location(),
                 &BuildConfigValueLocation::Command(BuildCommandLocation::new(2)),
@@ -1465,10 +1559,9 @@ fn every_command_rejects_incomplete_quoted_input_suffixes() {
     for command_name in ["build", "check", "dev"] {
         for (argument, name, expected_reason) in cases {
             let command = get_command(&args(&[command_name, ".", "--input", argument]))
-                .expect("the argument shape parses; only materialisation inspects the value");
-            let error =
-                materialise_command_inputs(command_inputs(&command), NumericProfile::STANDARD)
-                    .expect_err("a quote-leading value with a suffix must be rejected");
+                .expect("the argument shape parses; only classification inspects the value");
+            let error = command_input_set(command_inputs(&command))
+                .expect_err("a quote-leading value with a suffix must be rejected");
             assert!(
                 error.contains(&format!("Invalid value for --input '{name}'")),
                 "{command_name} {argument:?}: {error}"
@@ -1488,13 +1581,15 @@ fn every_command_splits_at_the_first_equals_and_preserves_the_remainder() {
         let command = get_command(&args(&[command_name, ".", "--input", argument]))
             .expect("command should parse the URL input");
         let (name, _) = single_input(argument);
-        let entry = materialise_inputs(&command)
+        let entry = input_set(&command)
             .get(&name)
             .cloned()
             .expect("URL input should be retained");
         assert_eq!(
             entry.value(),
-            &PrimitiveBuildValue::String(String::from("https://example.com/?a=1&b=2")),
+            &BuildConfigInputValue::Typed(PrimitiveBuildValue::String(String::from(
+                "https://example.com/?a=1&b=2",
+            ))),
             "{command_name} must keep every later '=' inside the value"
         );
     }
@@ -1511,46 +1606,9 @@ fn every_command_rejects_duplicate_input_names_deterministically() {
             "--input",
             "retries=9",
         ]))
-        .expect("the argument shape parses; duplicates are decided when values materialise");
-        let error = materialise_command_inputs(command_inputs(&command), NumericProfile::STANDARD)
+        .expect("the argument shape parses; duplicates are decided when the input set is built");
+        let error = command_input_set(command_inputs(&command))
             .expect_err("duplicate input names must be rejected");
-        assert!(
-            error.contains("Duplicate --input name 'retries'"),
-            "{command_name}: {error}"
-        );
-        assert!(
-            error.contains("argument position 2"),
-            "{command_name}: the earlier argument position must be reported: {error}"
-        );
-    }
-}
-
-/// Materialisation is deferred until the command owns the builder, so value diagnostics and
-/// duplicate rejection must still surface with their text and the earlier argument position.
-#[test]
-fn deferred_command_input_diagnostics_keep_their_text_and_positions() {
-    for command_name in ["build", "check", "dev"] {
-        let command = get_command(&args(&[command_name, ".", "--input", "retries=2147483648"]))
-            .expect("the argument shape parses; the value is rejected when it materialises");
-        let error = materialise_command_inputs(command_inputs(&command), NumericProfile::STANDARD)
-            .expect_err("Int overflow must reject during materialisation");
-        assert!(
-            error.contains("Invalid value for --input 'retries'"),
-            "{command_name}: {error}"
-        );
-        assert!(error.contains("2147483648"), "{command_name}: {error}");
-
-        let command = get_command(&args(&[
-            command_name,
-            ".",
-            "--input",
-            "retries=4",
-            "--input",
-            "retries=9",
-        ]))
-        .expect("duplicate names are decided when values materialise");
-        let error = materialise_command_inputs(command_inputs(&command), NumericProfile::STANDARD)
-            .expect_err("a repeated name must reject");
         assert!(
             error.contains("Duplicate --input name 'retries'"),
             "{command_name}: {error}"
@@ -1604,29 +1662,75 @@ fn input_flag_requires_a_value_argument_with_name_equals_separator() {
 
 #[test]
 fn command_inputs_surface_the_compiler_owned_rejections() {
+    // Numeric range and finiteness belong to the receiving contract, so these arguments classify
+    // as numbers and are rejected only when they materialise at their scalar.
     let command = get_command(&args(&["build", ".", "--input", "retries=2147483648"]))
-        .expect("the argument shape parses; the value is rejected when it materialises");
-    let overflow = materialise_command_inputs(command_inputs(&command), NumericProfile::STANDARD)
-        .expect_err("Int overflow must be a diagnostic, not String fallback");
-    assert!(
-        overflow.contains("whole-number value '2147483648' is outside the Int range"),
-        "{overflow}"
+        .expect("the argument shape parses; the value is range-checked by its contract");
+    assert_eq!(
+        retained_value(&command, "retries").materialise_for(contract_of(FixedScalar::I32)),
+        Err(ContractValueError::LiteralOutOfRange {
+            text: String::from("2147483648"),
+            reason: NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I32),
+        })
     );
 
     let command = get_command(&args(&["check", ".", "--input", "ratio=1e400"]))
-        .expect("the argument shape parses; the value is rejected when it materialises");
-    let non_finite = materialise_command_inputs(command_inputs(&command), NumericProfile::STANDARD)
-        .expect_err("non-finite exponent values must reject");
-    assert!(
-        non_finite.contains("float value '1e400' is not finite"),
-        "{non_finite}"
+        .expect("the argument shape parses; the value is range-checked by its contract");
+    assert_eq!(
+        retained_value(&command, "ratio").materialise_for(contract_of(FixedScalar::F64)),
+        Err(ContractValueError::LiteralOutOfRange {
+            text: String::from("1e400"),
+            reason: NumberLiteralErrorReason::NonFiniteFixedFloat(FixedScalar::F64),
+        })
     );
 
+    let decimal = get_command(&args(&["build", ".", "--input", "whole=1.0"]))
+        .expect("decimal spelling stays deferred");
+    assert_eq!(
+        retained_value(&decimal, "whole").materialise_for(contract_of(FixedScalar::I32)),
+        Err(ContractValueError::TypeMismatch {
+            provided: PrimitiveBuildInputType::Fixed(FixedScalar::F64),
+        }),
+    );
+
+    for (argument, name, scalar, text, reason) in [
+        (
+            "negative=-1",
+            "negative",
+            FixedScalar::U64,
+            "-1",
+            NumberLiteralErrorReason::NegativeUnsignedLiteral(FixedScalar::U64),
+        ),
+        (
+            "half=65520.0",
+            "half",
+            FixedScalar::F16,
+            "65520.0",
+            NumberLiteralErrorReason::NonFiniteFixedFloat(FixedScalar::F16),
+        ),
+    ] {
+        let command = get_command(&args(&["build", ".", "--input", argument]))
+            .expect("numeric text remains deferred");
+        let inputs = input_set(&command);
+        let name = BuildInputName::new(name).expect("the name is valid");
+        let entry = inputs.get(&name).expect("the input is retained");
+        assert_eq!(
+            entry.location(),
+            &BuildConfigValueLocation::Command(BuildCommandLocation::new(2)),
+        );
+        assert_eq!(
+            entry.value().materialise_for(contract_of(scalar)),
+            Err(ContractValueError::LiteralOutOfRange {
+                text: String::from(text),
+                reason,
+            }),
+        );
+    }
+
     let command = get_command(&args(&["dev", ".", "--input", "label=\"abc"]))
-        .expect("the argument shape parses; the value is rejected when it materialises");
-    let unterminated =
-        materialise_command_inputs(command_inputs(&command), NumericProfile::STANDARD)
-            .expect_err("an unterminated String quote must be rejected");
+        .expect("the argument shape parses; the value is rejected when it classifies");
+    let unterminated = command_input_set(command_inputs(&command))
+        .expect_err("an unterminated String quote must be rejected");
     assert!(
         unterminated.contains("Invalid value for --input 'label'"),
         "{unterminated}"
@@ -1641,13 +1745,43 @@ fn command_inputs_surface_the_compiler_owned_rejections() {
     );
 
     let command = get_command(&args(&["build", ".", "--input", "separator=':'x"]))
-        .expect("the argument shape parses; the value is rejected when it materialises");
-    let bad_char = materialise_command_inputs(command_inputs(&command), NumericProfile::STANDARD)
+        .expect("the argument shape parses; the value is rejected when it classifies");
+    let bad_char = command_input_set(command_inputs(&command))
         .expect_err("trailing text after a Char literal must be rejected");
     assert!(
         bad_char.contains("not a complete Moth Char literal"),
         "{bad_char}"
     );
+}
+
+/// A classified numeric value has no width of its own: the receiving contract alone decides
+/// whether it fits, so one argument is accepted by a wide scalar and rejected by a narrow one.
+#[test]
+fn command_numeric_values_fit_only_the_scalar_that_receives_them() {
+    for command_name in ["build", "check", "dev"] {
+        let command = get_command(&args(&[command_name, ".", "--input", "count=4294967296"]))
+            .expect("the argument shape parses; the value is checked by its contract");
+        let count = retained_value(&command, "count");
+
+        assert_eq!(
+            count.materialise_for(contract_of(FixedScalar::U64)),
+            Ok(fixed_unsigned(FixedScalar::U64, 4_294_967_296)),
+            "{command_name}: U64 must accept 4294967296"
+        );
+        assert_eq!(
+            count.materialise_for(contract_of(FixedScalar::I64)),
+            Ok(fixed_signed(FixedScalar::I64, 4_294_967_296)),
+            "{command_name}: I64 must accept 4294967296"
+        );
+        assert_eq!(
+            count.materialise_for(contract_of(FixedScalar::I32)),
+            Err(ContractValueError::LiteralOutOfRange {
+                text: String::from("4294967296"),
+                reason: NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I32),
+            }),
+            "{command_name}: I32 must reject 4294967296"
+        );
+    }
 }
 
 #[test]
@@ -1672,7 +1806,7 @@ fn parsed_inputs_stay_on_the_programmatic_command_options() {
 
     let (name, value) = single_input("retries=4");
     assert_eq!(
-        materialise_inputs(&dev)
+        input_set(&dev)
             .get(&name)
             .expect("dev retains retries")
             .value(),
@@ -1689,7 +1823,7 @@ fn unknown_input_names_remain_in_the_set_for_later_contract_validation() {
     let command = get_command(&args(&["build", ".", "--input", argument]))
         .expect("unknown input names parse and stay in the set");
     let (name, value) = single_input(argument);
-    let entry = materialise_inputs(&command)
+    let entry = input_set(&command)
         .get(&name)
         .cloned()
         .expect("unknown name must remain in the set");

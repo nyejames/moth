@@ -1,8 +1,8 @@
 Wrapper = |
-    value Int,
+    value I32,
 |
 
-unwrap |this Wrapper| -> Int:
+unwrap |this Wrapper| -> I32:
     return this.value
 ;
 

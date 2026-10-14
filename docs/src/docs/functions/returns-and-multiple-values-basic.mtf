@@ -1,7 +1,7 @@
 Use `return` to send a value back to the caller.
 
 [codeblock, $code("moth"):
-    double |value Int| -> Int:
+    double |value I32| -> I32:
         return value * 2
     ;
 ]
@@ -9,7 +9,7 @@ Use `return` to send a value back to the caller.
 A function can return more than one success value:
 
 [codeblock, $code("moth"):
-    pair || -> String, Int:
+    pair || -> String, I32:
         return "Priya", 2
     ;
 

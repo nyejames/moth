@@ -1,3 +1,5 @@
-narrow |value Uint| -> Int:
-    return cast value
+export:
+    narrow |value U32| -> I32:
+        return cast value
+    ;
 ;

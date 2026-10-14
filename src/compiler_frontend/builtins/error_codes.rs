@@ -35,11 +35,11 @@ pub enum BuiltinErrorCode {
     IntOverflow = 301,
     /// Checked exponent operations use this when an exponent is unsupported by the operation.
     InvalidExponent = 302,
-    /// Checked Float operations use this when arithmetic produces a non-finite value.
+    /// Checked binary-float operations use this when arithmetic produces a non-finite value.
     FloatNonFinite = 303,
-    /// External/backend Float boundary validation uses this for non-finite incoming values.
+    /// External/backend binary-float boundary validation uses this for non-finite incoming values.
     FloatBoundaryNonFinite = 304,
-    /// Defensive Float formatting checks use this when an internal finite-Float invariant fails.
+    /// Defensive binary-float formatting checks use this when an internal finite-value invariant fails.
     FloatFormatInvariant = 305,
     /// A dynamic range step must be non-zero before the first iteration.
     InvalidRangeStep = 306,
@@ -60,11 +60,18 @@ pub enum BuiltinErrorCode {
 }
 
 impl BuiltinErrorCode {
-    /// The single closed classification of failures inferred for checked arithmetic and ranges.
+    /// The closed union of builtin failures with ordinary implicit delivery.
     ///
-    /// Boundary validation and defensive formatting invariants are not implicit failures.
-    /// Their delivery remains governed by separately declared API contracts.
+    /// Keep the operation/range and cast-policy sets aligned with their failure-code owners.
+    /// External boundary validation and formatting invariants remain outside implicit failure;
+    /// their delivery follows their declared API contracts. Host/collection codes and custom
+    /// errors also remain outside this classification.
     pub(crate) fn is_implicit_failure(self) -> bool {
+        self.is_implicit_numeric_or_range_failure() || self.is_implicit_cast_failure()
+    }
+
+    /// Failure codes produced by checked arithmetic and dynamic ranges.
+    pub(crate) fn is_implicit_numeric_or_range_failure(self) -> bool {
         matches!(
             self,
             Self::DivideByZero
@@ -73,6 +80,28 @@ impl BuiltinErrorCode {
                 | Self::FloatNonFinite
                 | Self::InvalidRangeStep
                 | Self::RangeStepNoProgress
+        )
+    }
+
+    /// Failure codes emitted by supported fallible builtin cast policies.
+    pub(crate) fn is_implicit_cast_failure(self) -> bool {
+        matches!(
+            self,
+            Self::IntParseInvalidFormat
+                | Self::IntParseOutOfRange
+                | Self::FloatParseInvalidFormat
+                | Self::FloatParseOutOfRange
+                | Self::StringParseBoolInvalidFormat
+                | Self::StringParseCharInvalidFormat
+                | Self::FloatCastToIntInvalidValue
+                | Self::FloatCastToIntOutOfRange
+                | Self::IntCastOutOfRange
+                | Self::FloatCastNonFinite
+                | Self::IntCastToCharInvalidCodepoint
+                | Self::NumberParseInvalidFormat
+                | Self::NumberParseInexactScale
+                | Self::NumberCastInexact
+                | Self::NumberParseCapacity
         )
     }
 
@@ -94,18 +123,28 @@ impl BuiltinErrorCode {
             }
             BuiltinErrorCode::MapExpectedOrderedMap => "Map operation expects an ordered map",
             BuiltinErrorCode::MapKeyNotFound => "Map key not found",
-            BuiltinErrorCode::IntParseInvalidFormat => "Cannot parse Int from text",
-            BuiltinErrorCode::IntParseOutOfRange => "Int value is out of supported range",
-            BuiltinErrorCode::FloatParseInvalidFormat => "Cannot parse Float from text",
-            BuiltinErrorCode::FloatParseOutOfRange => "Float value is out of supported range",
+            BuiltinErrorCode::IntParseInvalidFormat => "Cannot parse integer from text",
+            BuiltinErrorCode::IntParseOutOfRange => "Parsed integer is out of the target range",
+            BuiltinErrorCode::FloatParseInvalidFormat => {
+                "Cannot parse floating-point value from text"
+            }
+            BuiltinErrorCode::FloatParseOutOfRange => {
+                "Parsed floating-point value is out of the target range"
+            }
             BuiltinErrorCode::StringParseBoolInvalidFormat => "Cannot parse Bool from text",
             BuiltinErrorCode::StringParseCharInvalidFormat => "Cannot parse Char from text",
-            BuiltinErrorCode::FloatCastToIntInvalidValue => "Float value cannot be cast to Int",
-            BuiltinErrorCode::FloatCastToIntOutOfRange => "Float value is out of Int range",
+            BuiltinErrorCode::FloatCastToIntInvalidValue => {
+                "Floating-point value cannot be cast to an integer"
+            }
+            BuiltinErrorCode::FloatCastToIntOutOfRange => {
+                "Floating-point value is out of the target integer range"
+            }
             BuiltinErrorCode::IntCastOutOfRange => "Integer value is out of the target range",
-            BuiltinErrorCode::FloatCastNonFinite => "Float conversion produced a non-finite value",
+            BuiltinErrorCode::FloatCastNonFinite => {
+                "Floating-point conversion produced a non-finite value"
+            }
             BuiltinErrorCode::IntCastToCharInvalidCodepoint => {
-                "Int value is not a valid Unicode scalar"
+                "Integer value is not a valid Unicode scalar"
             }
             BuiltinErrorCode::NumberParseInvalidFormat => "Cannot parse Dec from text",
             BuiltinErrorCode::NumberParseInexactScale => {
@@ -117,14 +156,16 @@ impl BuiltinErrorCode {
             BuiltinErrorCode::NumberParseCapacity => {
                 "the Dec value exceeds host representation capacity"
             }
-            BuiltinErrorCode::IntOverflow => "Int operation overflowed",
+            BuiltinErrorCode::IntOverflow => "Integer operation overflowed",
             BuiltinErrorCode::DivideByZero => "Division by zero",
             BuiltinErrorCode::InvalidExponent => "Invalid exponent",
-            BuiltinErrorCode::FloatNonFinite => "Float operation produced a non-finite value",
-            BuiltinErrorCode::FloatBoundaryNonFinite => {
-                "External Float boundary produced a non-finite value"
+            BuiltinErrorCode::FloatNonFinite => {
+                "Floating-point operation produced a non-finite value"
             }
-            BuiltinErrorCode::FloatFormatInvariant => "Float formatting invariant failed",
+            BuiltinErrorCode::FloatBoundaryNonFinite => {
+                "External floating-point boundary produced a non-finite value"
+            }
+            BuiltinErrorCode::FloatFormatInvariant => "Floating-point formatting invariant failed",
             BuiltinErrorCode::InvalidRangeStep => "Loop step cannot be zero",
             BuiltinErrorCode::RangeStepNoProgress => "Floating-point range step made no progress",
             BuiltinErrorCode::TimeInvalidTimestampText => "Cannot parse Timestamp from text",

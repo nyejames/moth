@@ -6,7 +6,9 @@
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidFallibleHandlingReason,
 };
@@ -54,6 +56,7 @@ pub(super) fn validate_catch_fallible_handler_conflict(
     context: &ScopeContext,
     handler_name: StringId,
     span: Option<SourceSpan>,
+    string_table: &StringTable,
 ) -> Result<(), ExpressionParseError> {
     if context.get_reference(&handler_name).is_some() {
         return Err(CompilerDiagnostic::invalid_fallible_handling(
@@ -63,22 +66,36 @@ pub(super) fn validate_catch_fallible_handler_conflict(
         .into());
     }
 
+    if let Some(diagnostic) =
+        context.check_body_binding_visibility(handler_name, span, string_table)
+    {
+        return Err(diagnostic.into());
+    }
+
     Ok(())
 }
 
 /// Validates that a catch handler body cannot fall through when a value is required.
 ///
 /// WHAT: rejects handler bodies that can simply fall through when the call expression must
-/// still produce success values for the surrounding statement/expression.
+/// still produce success values for the surrounding statement/expression. `None` marks a
+/// contract that only resolves at completion: the requirement is unknown, never zero success
+/// values, so the body is revalidated against the resolved site instead of here.
 /// WHY: without fallback values, a fallthrough path would leave the handled call with no value
-/// continuation to merge back into.
+/// continuation to merge back into; a provisional site has no such decision to make yet.
 pub(super) fn validate_catch_fallible_handler_value_requirement(
     value_required: bool,
-    success_result_type_ids: &[TypeId],
+    success_result_type_ids: Option<&[TypeId]>,
     handler_body: &[AstNode],
+    expression_builder: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
     span: Option<SourceSpan>,
 ) -> Result<(), ExpressionParseError> {
-    let body_exits = analyze_branch_exits(handler_body);
+    let Some(success_result_type_ids) = success_result_type_ids else {
+        return Ok(());
+    };
+
+    let body_exits = analyze_branch_exits(handler_body, expression_builder, const_values);
 
     if value_required && !success_result_type_ids.is_empty() && body_exits.can_fall_through {
         return Err(CompilerDiagnostic::invalid_fallible_handling(

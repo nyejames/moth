@@ -1,10 +1,11 @@
--- Task 5A: typed Uint bounds do not mix with an Int step; the operator
--- table has no Uint/Int promotion so the header rejects the step.
+-- U64 bounds and an I64 step have no shared exact integer domain.
+-- The range header rejects this incompatible step.
 
 probe ||:
-    lo Uint = 0
-    hi Uint = 10
-    loop lo to & hi by 1 |i|:
+    lo U64 = 0
+    hi U64 = 10
+    step I64 = 1
+    loop lo to & hi by step |i|:
         io.line([: [i]])
     ;
 ;

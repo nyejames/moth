@@ -1,15 +1,15 @@
--- Task 4: Uint arithmetic through a builtin Error! edge recovers in HTML-JS
+-- Task 4: U32 arithmetic through a builtin Error! edge recovers in HTML-JS
 -- but stays outside the Wasm capability boundary, which rejects reachable
 -- recoverable numeric failure with a structured diagnostic before lowering.
 
-add_guarded |a Uint, b Uint| -> Uint, Error!:
+add_guarded |a U32, b U32| -> U32, Error!:
     return a + b
 ;
 
-top Uint = add_guarded(4294967295, 0) catch:
+top U32 = add_guarded(4294967295, 0) catch:
     then 0
 ;
-just_above Uint = add_guarded(2147483648, 1) catch:
+just_above U32 = add_guarded(2147483648, 1) catch:
     then 0
 ;
 top_text String = cast top

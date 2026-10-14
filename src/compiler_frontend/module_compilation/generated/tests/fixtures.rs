@@ -9,7 +9,6 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::functions::HirFunction;
 use crate::compiler_frontend::hir::ids::{BlockId, FunctionId};
@@ -34,6 +33,7 @@ use crate::compiler_frontend::semantic_identity::{
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use rustc_hash::FxHashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -100,7 +100,9 @@ pub(crate) fn generated_identity(name: &str) -> GeneratedFunctionIdentity {
             name.to_owned(),
             None,
         )),
-        Box::new([CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)]),
+        Box::new([CanonicalTypeIdentity::Builtin(
+            CanonicalBuiltinType::FixedScalar(FixedScalar::I32),
+        )]),
         Box::new([]),
     )
 }
@@ -149,7 +151,8 @@ pub(crate) fn test_sidecar(
         id: FunctionId(0),
         entry: BlockId(0),
         params: Vec::new(),
-        return_type: TypeId(0),
+        returns: Box::new([]),
+        error_return: None,
     });
     module
         .executable

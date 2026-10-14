@@ -1,4 +1,6 @@
-reject_cast_operand || -> String:
-    result Uint = cast (1 + 2)
-    return [result]
+export:
+    reject_cast_operand |value I32| -> String:
+        result U32 = cast value
+        return [result]
+    ;
 ;

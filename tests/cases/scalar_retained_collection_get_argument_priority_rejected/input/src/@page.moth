@@ -1,0 +1,9 @@
+-- The unannotated `seed` retains the known-result call. The ready String
+-- argument must receive the ordinary type diagnostic before the get assignment
+-- target guard.
+make_items |seed U64| -> {I32}:
+    return {1, 2, 3}
+;
+
+seed = 1
+make_items(seed).get("bad") = 0

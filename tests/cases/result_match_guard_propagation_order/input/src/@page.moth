@@ -8,7 +8,7 @@ guard_fail || -> Bool, Error!:
     return! Error("guard failed")
 ;
 
-compute |subject Int| -> String, Error!:
+compute |subject I32| -> String, Error!:
     result ~= "unset"
 
     if subject is:

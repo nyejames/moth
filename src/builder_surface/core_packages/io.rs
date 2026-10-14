@@ -12,6 +12,7 @@ use crate::compiler_frontend::external_packages::{
     ExternalReturnSlot, ExternalSignatureType, ExternalSymbolPath, ExternalTypeDef,
     IO_INPUT_EXTERNAL_TYPE_ID, external_success_returns,
 };
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 struct IoConsoleFunctionSpec {
     id: ExternalFunctionId,
@@ -133,7 +134,7 @@ fn io_input_functions() -> Vec<IoInputFunctionSpec> {
             path: "pointer_x",
             parameters: input_handle_param(),
             returns: external_success_returns(
-                ExternalSignatureType::NativeFloat,
+                ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::F64)),
                 ExternalReturnAlias::Fresh,
             ),
             error_return_type: None,
@@ -143,7 +144,7 @@ fn io_input_functions() -> Vec<IoInputFunctionSpec> {
             path: "pointer_y",
             parameters: input_handle_param(),
             returns: external_success_returns(
-                ExternalSignatureType::NativeFloat,
+                ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::F64)),
                 ExternalReturnAlias::Fresh,
             ),
             error_return_type: None,

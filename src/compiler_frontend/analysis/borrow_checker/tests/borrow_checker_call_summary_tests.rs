@@ -3,16 +3,22 @@
 //! WHAT: verifies how call return aliases and host-call access summaries affect borrow facts.
 //! WHY: call boundaries are where alias metadata is easiest to get wrong and hardest to debug.
 
+use crate::compiler_frontend::analysis::borrow_checker::problem::{
+    CallResultProvenance, CallResultUnknownReason, OriginKind, from_hir,
+};
 use crate::compiler_frontend::analysis::borrow_checker::{LocalMode, OptionalTransferStatus};
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::call_argument::{
     CallAccessMode, CallArgument, CallPassingMode,
 };
 use crate::compiler_frontend::ast::expressions::expression::{
-    Expression, FallibleExpressionHandling, HandledFallibleHostFunctionCallInput, Operator,
+    FallibleExpressionHandling, HandledFallibleHostFunctionCallInput,
 };
-use crate::compiler_frontend::ast::expressions::expression_rpn::{
-    ExpressionRpn, ExpressionRpnItem,
+use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
+use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, OwnedExpr,
 };
 use crate::compiler_frontend::ast::statements::functions::{
     FunctionSignature, ReturnChannel, ReturnSlot,
@@ -29,8 +35,8 @@ use crate::compiler_frontend::external_packages::test_support::{
     TestExternalReturnType as ExternalReturnType,
 };
 use crate::compiler_frontend::external_packages::{
-    ExternalAbiType as RegistryAbiType, ExternalFunctionDef, ExternalFunctionId,
-    ExternalFunctionLowerings, ExternalReturnSlot, ExternalSignatureType,
+    CallTarget, ExternalAbiType as RegistryAbiType, ExternalFunctionDef, ExternalFunctionId,
+    ExternalFunctionLowerings, ExternalHirReturnAlias, ExternalReturnSlot, ExternalSignatureType,
 };
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_builder::lower_ast;
@@ -58,7 +64,7 @@ use crate::compiler_frontend::tests::external_package_support::{
 use crate::compiler_frontend::tests::hir_fixture_support::{entry_and_start, lower_hir};
 use crate::compiler_frontend::tests::parse_support::parse_single_file_ast;
 use crate::compiler_frontend::tests::type_id_fixture_support::build_ast_with_registered_types;
-use moth_lexical::numeric::fixed_scalar::FixedScalar;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 use crate::compiler_frontend::value_mode::ValueMode;
 use std::sync::Arc;
@@ -68,36 +74,59 @@ use crate::compiler_frontend::public_call_summary::{
     PublicCallTransferEffect,
 };
 
+fn i32_expression(
+    builder: &mut AstExpressionBuilder,
+    constants: &mut ConstValueStore,
+    value: i64,
+    span: Option<SourceSpan>,
+    mode: ValueMode,
+) -> ExprId {
+    builder
+        .fixed_scalar(
+            constants,
+            FixedScalarValue::signed(FixedScalar::I32, value).expect("I32 literal in range"),
+            span,
+            mode,
+        )
+        .expect("valid I32 fixture")
+        .id()
+}
+
 fn function_call_node(
+    builder: &mut AstExpressionBuilder,
     name: PathId,
-    args: Vec<CallArgument>,
+    args: Vec<CallArgument<OwnedExpr>>,
     result_type_ids: Vec<TypeId>,
     span: Option<SourceSpan>,
 ) -> NodeKind {
-    NodeKind::ExpressionStatement(Expression::function_call_with_arguments(
-        name,
-        args,
-        result_type_ids,
-        span,
-    ))
+    NodeKind::ExpressionStatement(
+        builder
+            .function_call_with_typed_arguments(name, args, result_type_ids, span)
+            .expect("valid function call fixture")
+            .id(),
+    )
 }
 
 fn host_function_call_node(
+    builder: &mut AstExpressionBuilder,
     id: ExternalFunctionId,
-    args: Vec<CallArgument>,
+    args: Vec<CallArgument<OwnedExpr>>,
     result_type_ids: Vec<TypeId>,
     span: Option<SourceSpan>,
 ) -> NodeKind {
-    NodeKind::ExpressionStatement(Expression::host_function_call_with_arguments(
-        id,
-        args,
-        result_type_ids,
-        span,
-    ))
+    NodeKind::ExpressionStatement(
+        builder
+            .host_function_call_with_typed_arguments(id, args, result_type_ids, false, span)
+            .expect("valid host call fixture")
+            .id(),
+    )
 }
 
 #[test]
 fn public_call_summaries_cover_zero_parameter_and_parameter_effects() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
@@ -119,22 +148,22 @@ fn public_call_summaries_cover_zero_parameter_and_parameter_effects() {
             parameters: vec![
                 param_with_datatype(
                     shared_parameter,
-                    DataType::Int,
-                    builtin_type_ids::INT,
+                    DataType::FixedScalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     false,
                     test_source_location(1),
                 ),
                 param_with_datatype(
                     mutable_parameter,
-                    DataType::Int,
-                    builtin_type_ids::INT,
+                    DataType::FixedScalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     true,
                     test_source_location(1),
                 ),
                 param_with_datatype(
                     untouched_mutable_parameter,
-                    DataType::Int,
-                    builtin_type_ids::INT,
+                    DataType::FixedScalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     true,
                     test_source_location(1),
                 ),
@@ -144,12 +173,19 @@ fn public_call_summaries_cover_zero_parameter_and_parameter_effects() {
         vec![node(
             NodeKind::Assignment {
                 target: assignment_target(
+                    &mut expression_builder,
                     mutable_parameter,
-                    DataType::Int,
-                    builtin_type_ids::INT,
+                    DataType::FixedScalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     test_source_location(2),
                 ),
-                value: Expression::int(2, test_source_location(2), ValueMode::ImmutableOwned),
+                value: i32_expression(
+                    &mut expression_builder,
+                    &mut const_values,
+                    2,
+                    test_source_location(2),
+                    ValueMode::ImmutableOwned,
+                ),
             },
             test_source_location(2),
         )],
@@ -167,9 +203,16 @@ fn public_call_summaries_cover_zero_parameter_and_parameter_effects() {
     );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(vec![target, start], entry_path),
+        build_ast_with_registered_types(
+            vec![target, start],
+            entry_path,
+            expression_builder,
+            const_values,
+            types,
+        ),
         &mut string_table,
         &mut path_fork,
+        &external_package_registry,
     );
     let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("public call summary construction should succeed");
@@ -254,6 +297,9 @@ fn public_call_summaries_cover_zero_parameter_and_parameter_effects() {
 
 #[test]
 fn incomplete_public_call_summary_metadata_uses_infrastructure_lane() {
+    let expression_builder = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
+    let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
@@ -269,9 +315,16 @@ fn incomplete_public_call_summary_metadata_uses_infrastructure_lane() {
     );
 
     let mut hir = lower_hir(
-        build_ast_with_registered_types(vec![start], entry_path),
+        build_ast_with_registered_types(
+            vec![start],
+            entry_path,
+            expression_builder,
+            const_values,
+            types,
+        ),
         &mut string_table,
         &mut path_fork,
+        &external_package_registry,
     );
     hir.functions[0].params.push(LocalId(999_999));
 
@@ -286,6 +339,9 @@ fn incomplete_public_call_summary_metadata_uses_infrastructure_lane() {
 
 #[test]
 fn public_call_summary_keeps_mutable_but_unwritten_call_path_read_only() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
+    let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
@@ -300,8 +356,8 @@ fn public_call_summary_keeps_mutable_but_unwritten_call_path_read_only() {
         FunctionSignature {
             parameters: vec![param_with_datatype(
                 symbol("input", &mut path_fork, &mut string_table),
-                DataType::Int,
-                builtin_type_ids::INT,
+                DataType::FixedScalar(FixedScalar::I32),
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 true,
                 test_source_location(1),
             )],
@@ -315,29 +371,37 @@ fn public_call_summary_keeps_mutable_but_unwritten_call_path_read_only() {
         FunctionSignature {
             parameters: vec![param_with_datatype(
                 parameter_name,
-                DataType::Int,
-                builtin_type_ids::INT,
+                DataType::FixedScalar(FixedScalar::I32),
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 true,
                 test_source_location(2),
             )],
             returns: vec![],
         },
         vec![node(
-            function_call_node(
-                mutator_name,
-                vec![CallArgument::positional(
-                    reference_expr_with_datatype(
-                        parameter_name,
-                        DataType::Int,
-                        builtin_type_ids::INT,
-                        test_source_location(3),
-                    ),
+            {
+                let arguments = vec![CallArgument::positional(
+                    {
+                        let value = reference_expr_with_datatype(
+                            &mut expression_builder,
+                            parameter_name,
+                            DataType::FixedScalar(FixedScalar::I32),
+                            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                            test_source_location(3),
+                        );
+                        expression_builder.own(value)
+                    },
                     CallAccessMode::Mutable,
                     test_source_location(3),
-                )],
-                vec![],
-                test_source_location(3),
-            ),
+                )];
+                function_call_node(
+                    &mut expression_builder,
+                    mutator_name,
+                    arguments,
+                    vec![],
+                    test_source_location(3),
+                )
+            },
             test_source_location(3),
         )],
         None,
@@ -353,9 +417,16 @@ fn public_call_summary_keeps_mutable_but_unwritten_call_path_read_only() {
     );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(vec![mutator, wrapper, start], entry_path),
+        build_ast_with_registered_types(
+            vec![mutator, wrapper, start],
+            entry_path,
+            expression_builder,
+            const_values,
+            types,
+        ),
         &mut string_table,
         &mut path_fork,
+        &external_package_registry,
     );
     let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("mutable parameter call path should validate");
@@ -382,16 +453,21 @@ fn public_call_summary_keeps_mutable_but_unwritten_call_path_read_only() {
 
 #[test]
 fn public_call_summary_tracks_mixed_argument_access_by_position() {
-    let source = r#"mutator |shared Int, mutable ~Int|:
+    let source = r#"mutator |shared I32, mutable ~I32|:
 ;
 
-wrapper |shared Int, mutable ~Int|:
+wrapper |shared I32, mutable ~I32|:
 mutator(shared, ~mutable)
 ;"#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let entry_path = ast.entry_path;
-    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
     let wrapper_name = path_fork
         .try_intern_child(entry_path, string_table.intern("wrapper"))
         .expect("test path fits");
@@ -428,8 +504,8 @@ fn local_call_mutation_summary_in_order(
     callee_body: &str,
     callee_declared_first: bool,
 ) -> (PublicCallMutationEffect, PublicCallMutationEffect) {
-    let callee = format!("mutator |input ~Int|:\n{callee_body}\n;\n");
-    let wrapper = "wrapper |value ~Int|:\n    mutator(~value)\n;\n";
+    let callee = format!("mutator |input ~I32|:\n{callee_body}\n;\n");
+    let wrapper = "wrapper |value ~I32|:\n    mutator(~value)\n;\n";
     let source = if callee_declared_first {
         format!("{callee}\n{wrapper}")
     } else {
@@ -437,8 +513,13 @@ fn local_call_mutation_summary_in_order(
     };
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(&source);
     let entry_path = ast.entry_path;
-    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
     let mutator_name = path_fork
         .try_intern_child(entry_path, string_table.intern("mutator"))
         .expect("test path fits");
@@ -514,8 +595,13 @@ fn public_call_summary_map_set_only_writes_receiver_parameter() {
 ;"#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let entry_path = ast.entry_path;
-    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
     let mutate_name = path_fork
         .try_intern_child(entry_path, string_table.intern("mutate"))
         .expect("test path fits");
@@ -554,6 +640,9 @@ fn public_call_summary_map_set_only_writes_receiver_parameter() {
 
 #[test]
 fn immutable_shared_parameter_optional_transfer_remains_legal() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
@@ -566,8 +655,8 @@ fn immutable_shared_parameter_optional_transfer_remains_legal() {
         FunctionSignature {
             parameters: vec![param_with_datatype(
                 symbol("input", &mut path_fork, &mut string_table),
-                DataType::Int,
-                builtin_type_ids::INT,
+                DataType::FixedScalar(FixedScalar::I32),
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 false,
                 test_source_location(1),
             )],
@@ -586,26 +675,41 @@ fn immutable_shared_parameter_optional_transfer_remains_legal() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     value_name,
-                    Expression::int(1, test_source_location(2), ValueMode::ImmutableOwned),
+                    i32_expression(
+                        &mut expression_builder,
+                        &mut const_values,
+                        1,
+                        test_source_location(2),
+                        ValueMode::ImmutableOwned,
+                    ),
+                    &expression_builder,
                 )),
                 test_source_location(2),
             ),
             node(
-                function_call_node(
-                    reader_name,
-                    vec![CallArgument::positional(
-                        reference_expr_with_datatype(
-                            value_name,
-                            DataType::Int,
-                            builtin_type_ids::INT,
-                            test_source_location(3),
-                        ),
+                {
+                    let arguments = vec![CallArgument::positional(
+                        {
+                            let value = reference_expr_with_datatype(
+                                &mut expression_builder,
+                                value_name,
+                                DataType::FixedScalar(FixedScalar::I32),
+                                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                                test_source_location(3),
+                            );
+                            expression_builder.own(value)
+                        },
                         CallAccessMode::Shared,
                         test_source_location(3),
-                    )],
-                    vec![],
-                    test_source_location(3),
-                ),
+                    )];
+                    function_call_node(
+                        &mut expression_builder,
+                        reader_name,
+                        arguments,
+                        vec![],
+                        test_source_location(3),
+                    )
+                },
                 test_source_location(3),
             ),
         ],
@@ -613,9 +717,16 @@ fn immutable_shared_parameter_optional_transfer_remains_legal() {
     );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(vec![reader, start], entry_path),
+        build_ast_with_registered_types(
+            vec![reader, start],
+            entry_path,
+            expression_builder,
+            const_values,
+            types,
+        ),
         &mut string_table,
         &mut path_fork,
+        &external_package_registry,
     );
     run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("optional transfer of an immutable shared parameter should fall back to borrowing");
@@ -637,8 +748,13 @@ sentinel = 0
 ;
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
     let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("path-dependent optional transfer should fall back to borrowing");
 
@@ -717,8 +833,13 @@ inspect(source)
 ;
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
     let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("an unused alias must not make a final shared call invalid");
 
@@ -766,6 +887,9 @@ inspect(source)
 
 #[test]
 fn user_function_returning_param_alias_allows_caller_rebinding() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
@@ -781,22 +905,23 @@ fn user_function_returning_param_alias_allows_caller_rebinding() {
         FunctionSignature {
             parameters: vec![param_with_datatype(
                 p,
-                DataType::Int,
-                builtin_type_ids::INT,
+                DataType::FixedScalar(FixedScalar::I32),
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 false,
                 test_source_location(1),
             )],
             returns: vec![ReturnSlot {
-                value: DataType::Int,
-                type_id: Some(builtin_type_ids::INT),
+                value: DataType::FixedScalar(FixedScalar::I32),
+                type_id: Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
                 channel: ReturnChannel::Success,
             }],
         },
         vec![node(
             NodeKind::Return(vec![reference_expr_with_datatype(
+                &mut expression_builder,
                 p,
-                DataType::Int,
-                builtin_type_ids::INT,
+                DataType::FixedScalar(FixedScalar::I32),
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 test_source_location(2),
             )]),
             test_source_location(2),
@@ -814,36 +939,66 @@ fn user_function_returning_param_alias_allows_caller_rebinding() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                    i32_expression(
+                        &mut expression_builder,
+                        &mut const_values,
+                        1,
+                        test_source_location(10),
+                        ValueMode::MutableOwned,
+                    ),
+                    &expression_builder,
                 )),
                 test_source_location(10),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     y,
-                    Expression::function_call(
-                        alias_fn,
-                        vec![reference_expr_with_datatype(
+                    {
+                        let arguments: Vec<_> = vec![reference_expr_with_datatype(
+                            &mut expression_builder,
                             x,
-                            DataType::Int,
-                            builtin_type_ids::INT,
+                            DataType::FixedScalar(FixedScalar::I32),
+                            builtin_type_ids::fixed_scalar(FixedScalar::I32),
                             test_source_location(11),
-                        )],
-                        vec![builtin_type_ids::INT],
-                        test_source_location(11),
-                    ),
+                        )]
+                        .into_iter()
+                        .map(|value| {
+                            CallArgument::positional(
+                                expression_builder.own(value),
+                                CallAccessMode::Shared,
+                                None,
+                            )
+                        })
+                        .collect();
+                        expression_builder.function_call_with_typed_arguments(
+                            alias_fn,
+                            arguments,
+                            vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
+                            test_source_location(11),
+                        )
+                    }
+                    .expect("valid call fixture")
+                    .id(),
+                    &expression_builder,
                 )),
                 test_source_location(11),
             ),
             node(
                 NodeKind::Assignment {
                     target: assignment_target(
+                        &mut expression_builder,
                         x,
-                        DataType::Int,
-                        builtin_type_ids::INT,
+                        DataType::FixedScalar(FixedScalar::I32),
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         test_source_location(12),
                     ),
-                    value: Expression::int(2, test_source_location(12), ValueMode::ImmutableOwned),
+                    value: i32_expression(
+                        &mut expression_builder,
+                        &mut const_values,
+                        2,
+                        test_source_location(12),
+                        ValueMode::ImmutableOwned,
+                    ),
                 },
                 test_source_location(12),
             ),
@@ -852,9 +1007,16 @@ fn user_function_returning_param_alias_allows_caller_rebinding() {
     );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(vec![callee, caller], entry_path),
+        build_ast_with_registered_types(
+            vec![callee, caller],
+            entry_path,
+            expression_builder,
+            const_values,
+            types,
+        ),
         &mut string_table,
         &mut path_fork,
+        &external_package_registry,
     );
     run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("reassigning the source binding should detach it from the returned alias");
@@ -863,7 +1025,7 @@ fn user_function_returning_param_alias_allows_caller_rebinding() {
 #[test]
 fn slot_backed_alias_result_rebinding_to_another_alias_detaches_old_root() {
     let source = r#"Point = |
-x Int,
+x I32,
 |
 
 identity |value Point| -> Point:
@@ -879,8 +1041,13 @@ returned = other_returned
 original.x = 4
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
 
     run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("slot-backed result rebinding should detach its previous allocation root");
@@ -888,6 +1055,9 @@ original.x = 4
 
 #[test]
 fn fallible_alias_return_propagation_validates_success_alias_metadata() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
@@ -935,6 +1105,7 @@ fn fallible_alias_return_propagation_validates_success_alias_metadata() {
         },
         vec![node(
             NodeKind::Return(vec![reference_expr_with_datatype(
+                &mut expression_builder,
                 source_unused,
                 DataType::StringSlice,
                 builtin_type_ids::STRING,
@@ -945,35 +1116,46 @@ fn fallible_alias_return_propagation_validates_success_alias_metadata() {
         None,
     );
 
-    let mut expression_types = TypeEnvironment::new();
-    let propagated_call = Expression::handled_fallible_function_call_with_typed_arguments(
-        source_fn,
-        vec![
+    let propagated_call = {
+        let arguments = vec![
             CallArgument::positional(
-                Expression::string_slice(
-                    string_table.intern("unused"),
-                    test_source_location(30),
-                    ValueMode::ImmutableOwned,
-                ),
+                expression_builder
+                    .string_slice(
+                        &mut const_values,
+                        string_table.intern("unused"),
+                        test_source_location(30),
+                        ValueMode::ImmutableOwned,
+                    )
+                    .expect("valid expression fixture"),
                 CallAccessMode::Shared,
                 test_source_location(30),
             ),
             CallArgument::positional(
-                reference_expr_with_datatype(
-                    forward_param,
-                    DataType::StringSlice,
-                    builtin_type_ids::STRING,
-                    test_source_location(30),
-                ),
+                {
+                    let value = reference_expr_with_datatype(
+                        &mut expression_builder,
+                        forward_param,
+                        DataType::StringSlice,
+                        builtin_type_ids::STRING,
+                        test_source_location(30),
+                    );
+                    expression_builder.own(value)
+                },
                 CallAccessMode::Shared,
                 test_source_location(30),
             ),
-        ],
-        vec![builtin_type_ids::STRING],
-        FallibleExpressionHandling::Propagate,
-        &mut expression_types,
-        None,
-    );
+        ];
+        expression_builder.handled_fallible_function_call_with_typed_arguments(
+            source_fn,
+            arguments,
+            vec![builtin_type_ids::STRING],
+            builtin_type_ids::STRING,
+            FallibleExpressionHandling::Propagate,
+            None,
+        )
+    }
+    .expect("valid handled call fixture")
+    .id();
 
     let forward = function_node(
         forward_fn,
@@ -1016,9 +1198,16 @@ fn fallible_alias_return_propagation_validates_success_alias_metadata() {
     );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(vec![source, forward, start], entry_path),
+        build_ast_with_registered_types(
+            vec![source, forward, start],
+            entry_path,
+            expression_builder,
+            const_values,
+            types,
+        ),
         &mut string_table,
         &mut path_fork,
+        &external_package_registry,
     );
     let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("fallible alias forwarding should validate declared success alias metadata");
@@ -1054,6 +1243,9 @@ fn fallible_alias_return_propagation_validates_success_alias_metadata() {
 
 #[test]
 fn fresh_user_return_does_not_alias_caller_roots() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
@@ -1070,15 +1262,17 @@ fn fresh_user_return_does_not_alias_caller_roots() {
         FunctionSignature {
             parameters: vec![param_with_datatype(
                 p,
-                DataType::Int,
-                builtin_type_ids::INT,
+                DataType::FixedScalar(FixedScalar::I32),
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 false,
                 test_source_location(1),
             )],
-            returns: fresh_success_returns(vec![builtin_type_ids::INT]),
+            returns: fresh_success_returns(vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)]),
         },
         vec![node(
-            NodeKind::Return(vec![Expression::int(
+            NodeKind::Return(vec![i32_expression(
+                &mut expression_builder,
+                &mut const_values,
                 42,
                 test_source_location(2),
                 ValueMode::ImmutableOwned,
@@ -1098,36 +1292,66 @@ fn fresh_user_return_does_not_alias_caller_roots() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                    i32_expression(
+                        &mut expression_builder,
+                        &mut const_values,
+                        1,
+                        test_source_location(10),
+                        ValueMode::MutableOwned,
+                    ),
+                    &expression_builder,
                 )),
                 test_source_location(10),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     y,
-                    Expression::function_call(
-                        fresh_fn,
-                        vec![reference_expr_with_datatype(
+                    {
+                        let arguments: Vec<_> = vec![reference_expr_with_datatype(
+                            &mut expression_builder,
                             x,
-                            DataType::Int,
-                            builtin_type_ids::INT,
+                            DataType::FixedScalar(FixedScalar::I32),
+                            builtin_type_ids::fixed_scalar(FixedScalar::I32),
                             test_source_location(11),
-                        )],
-                        vec![builtin_type_ids::INT],
-                        test_source_location(11),
-                    ),
+                        )]
+                        .into_iter()
+                        .map(|value| {
+                            CallArgument::positional(
+                                expression_builder.own(value),
+                                CallAccessMode::Shared,
+                                None,
+                            )
+                        })
+                        .collect();
+                        expression_builder.function_call_with_typed_arguments(
+                            fresh_fn,
+                            arguments,
+                            vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
+                            test_source_location(11),
+                        )
+                    }
+                    .expect("valid call fixture")
+                    .id(),
+                    &expression_builder,
                 )),
                 test_source_location(11),
             ),
             node(
                 NodeKind::Assignment {
                     target: assignment_target(
+                        &mut expression_builder,
                         x,
-                        DataType::Int,
-                        builtin_type_ids::INT,
+                        DataType::FixedScalar(FixedScalar::I32),
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         test_source_location(12),
                     ),
-                    value: Expression::int(2, test_source_location(12), ValueMode::ImmutableOwned),
+                    value: i32_expression(
+                        &mut expression_builder,
+                        &mut const_values,
+                        2,
+                        test_source_location(12),
+                        ValueMode::ImmutableOwned,
+                    ),
                 },
                 test_source_location(12),
             ),
@@ -1136,9 +1360,16 @@ fn fresh_user_return_does_not_alias_caller_roots() {
     );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(vec![callee, caller], entry_path),
+        build_ast_with_registered_types(
+            vec![callee, caller],
+            entry_path,
+            expression_builder,
+            const_values,
+            types,
+        ),
         &mut string_table,
         &mut path_fork,
+        &external_package_registry,
     );
     let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("fresh callee returns should not alias caller roots");
@@ -1165,6 +1396,9 @@ fn fresh_user_return_does_not_alias_caller_roots() {
 
 #[test]
 fn multi_return_fallible_external_retains_unknown_alias_summary() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let const_values = ConstValueStore::default();
+    let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
@@ -1183,39 +1417,50 @@ fn multi_return_fallible_external_retains_unknown_alias_summary() {
             lowerings: ExternalFunctionLowerings::default(),
         })
         .expect("fallible external fixture registration should succeed");
+    assert_eq!(
+        external_package_registry
+            .get_function_by_id(external_id)
+            .expect("registered external definition")
+            .hir_return_alias(),
+        ExternalHirReturnAlias::Unknown,
+    );
 
     let imprecise_return_name = symbol("imprecise_return", &mut path_fork, &mut string_table);
-    let mut expression_types = TypeEnvironment::new();
-    let fallible_external_call =
-        Expression::handled_fallible_host_function_call_with_typed_arguments(
-            HandledFallibleHostFunctionCallInput {
-                id: external_id,
-                args: vec![],
-                result_type_ids: vec![builtin_type_ids::INT, builtin_type_ids::INT],
-                error_type_id: builtin_type_ids::INT,
-                handling: FallibleExpressionHandling::Propagate,
-                span: None,
-            },
-            &mut expression_types,
-        );
+    let fallible_external_call = {
+        let arguments = HandledFallibleHostFunctionCallInput {
+            id: external_id,
+            args: vec![],
+            result_type_ids: vec![
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            ],
+            requires_external_float_validation: false,
+            error_type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            handling: FallibleExpressionHandling::Propagate,
+            span: None,
+        };
+        expression_builder.handled_fallible_host_function_call_with_typed_arguments(arguments)
+    }
+    .expect("valid handled host call fixture")
+    .id();
     let imprecise_return = function_node(
         imprecise_return_name,
         FunctionSignature {
             parameters: vec![],
             returns: vec![
                 ReturnSlot {
-                    value: DataType::Int,
-                    type_id: Some(builtin_type_ids::INT),
+                    value: DataType::FixedScalar(FixedScalar::I32),
+                    type_id: Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
-                    value: DataType::Int,
-                    type_id: Some(builtin_type_ids::INT),
+                    value: DataType::FixedScalar(FixedScalar::I32),
+                    type_id: Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
-                    value: DataType::Int,
-                    type_id: Some(builtin_type_ids::INT),
+                    value: DataType::FixedScalar(FixedScalar::I32),
+                    type_id: Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
                     channel: ReturnChannel::Error,
                 },
             ],
@@ -1231,33 +1476,40 @@ fn multi_return_fallible_external_retains_unknown_alias_summary() {
         &mut path_fork,
         &mut string_table,
     );
-    let mut forward_expression_types = TypeEnvironment::new();
-    let forwarded_call = Expression::handled_fallible_function_call_with_typed_arguments(
-        imprecise_return_name,
-        vec![],
-        vec![builtin_type_ids::INT, builtin_type_ids::INT],
-        FallibleExpressionHandling::Propagate,
-        &mut forward_expression_types,
-        None,
-    );
+    let forwarded_call = {
+        let arguments = vec![];
+        expression_builder.handled_fallible_function_call_with_typed_arguments(
+            imprecise_return_name,
+            arguments,
+            vec![
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            ],
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            FallibleExpressionHandling::Propagate,
+            None,
+        )
+    }
+    .expect("valid handled call fixture")
+    .id();
     let forward = function_node(
         forward_name,
         FunctionSignature {
             parameters: vec![],
             returns: vec![
                 ReturnSlot {
-                    value: DataType::Int,
-                    type_id: Some(builtin_type_ids::INT),
+                    value: DataType::FixedScalar(FixedScalar::I32),
+                    type_id: Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
-                    value: DataType::Int,
-                    type_id: Some(builtin_type_ids::INT),
+                    value: DataType::FixedScalar(FixedScalar::I32),
+                    type_id: Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
-                    value: DataType::Int,
-                    type_id: Some(builtin_type_ids::INT),
+                    value: DataType::FixedScalar(FixedScalar::I32),
+                    type_id: Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
                     channel: ReturnChannel::Error,
                 },
             ],
@@ -1279,9 +1531,16 @@ fn multi_return_fallible_external_retains_unknown_alias_summary() {
     );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(vec![imprecise_return, forward, start], entry_path),
+        build_ast_with_registered_types(
+            vec![imprecise_return, forward, start],
+            entry_path,
+            expression_builder,
+            const_values,
+            types,
+        ),
         &mut string_table,
         &mut path_fork,
+        &external_package_registry,
     );
     let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("fallible external return should validate");
@@ -1312,6 +1571,30 @@ fn multi_return_fallible_external_retains_unknown_alias_summary() {
                 .get(&function_id)
                 .expect("forwarded imprecise function should have a retained call summary");
             assert_eq!(summary.return_alias, FunctionReturnAliasSummary::Unknown);
+            let function = hir
+                .functions
+                .iter()
+                .find(|function| function.id == function_id)
+                .expect("summary function should be present");
+            let problem = from_hir(
+                &hir,
+                function,
+                Some(&analysis.public_call_summaries),
+                Some(&external_package_registry),
+            )
+            .expect("external and wrapper provenance should normalize");
+            let expected_reason = if *function_name == imprecise_return_name {
+                CallResultUnknownReason::OpaqueExternal
+            } else {
+                CallResultUnknownReason::SummaryUnknown
+            };
+            assert!(problem.origins().iter().any(|origin| matches!(
+                &origin.kind,
+                OriginKind::CallResult {
+                    provenance: CallResultProvenance::Unknown(reason),
+                    ..
+                } if *reason == expected_reason
+            )));
         }
     }
 }
@@ -1319,14 +1602,19 @@ fn multi_return_fallible_external_retains_unknown_alias_summary() {
 #[test]
 fn checked_numeric_return_local_retains_fresh_alias_summary() {
     let source = r#"
-increment |input Int| -> Int, Error!:
+increment |input I32| -> I32, Error!:
 return input + 1
 ;
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let entry_path = ast.entry_path;
-    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
     let increment_name = path_fork
         .try_intern_child(entry_path, string_table.intern("increment"))
         .expect("test path fits");
@@ -1361,8 +1649,13 @@ return ~scores.remove("key")!
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let entry_path = ast.entry_path;
-    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
     let remove_value_name = path_fork
         .try_intern_child(entry_path, string_table.intern("remove_value"))
         .expect("test path fits");
@@ -1392,7 +1685,7 @@ return ~scores.remove("key")!
 fn multi_return_alias_summary_conservatively_unions_returned_elements() {
     let source = r#"
 Point = |
-x Int,
+x I32,
 |
 
 pair |left Point, right Point| -> Point, Point:
@@ -1408,8 +1701,13 @@ return value, copy value
 ;
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
     let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("multi-return alias summaries should validate");
 
@@ -1453,13 +1751,18 @@ return value, copy value
 #[test]
 fn recursive_return_summary_stays_unknown() {
     let source = r#"
-recursive |value Int| -> Int:
+recursive |value I32| -> I32:
 return recursive(value)
 ;
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
     let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("recursive summary cycle should remain a valid conservative analysis");
     let recursive_id = hir
@@ -1490,6 +1793,9 @@ return recursive(value)
 
 #[test]
 fn inferred_alias_return_from_parameter_reference_allows_caller_rebinding() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
@@ -1506,31 +1812,34 @@ fn inferred_alias_return_from_parameter_reference_allows_caller_rebinding() {
         FunctionSignature {
             parameters: vec![param_with_datatype(
                 p,
-                DataType::Int,
-                builtin_type_ids::INT,
+                DataType::FixedScalar(FixedScalar::I32),
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 false,
                 test_source_location(1),
             )],
-            returns: fresh_success_returns(vec![builtin_type_ids::INT]),
+            returns: fresh_success_returns(vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)]),
         },
         vec![
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     q,
                     reference_expr_with_datatype(
+                        &mut expression_builder,
                         p,
-                        DataType::Int,
-                        builtin_type_ids::INT,
+                        DataType::FixedScalar(FixedScalar::I32),
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         test_source_location(2),
                     ),
+                    &expression_builder,
                 )),
                 test_source_location(2),
             ),
             node(
                 NodeKind::Return(vec![reference_expr_with_datatype(
+                    &mut expression_builder,
                     q,
-                    DataType::Int,
-                    builtin_type_ids::INT,
+                    DataType::FixedScalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     test_source_location(3),
                 )]),
                 test_source_location(3),
@@ -1549,36 +1858,66 @@ fn inferred_alias_return_from_parameter_reference_allows_caller_rebinding() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                    i32_expression(
+                        &mut expression_builder,
+                        &mut const_values,
+                        1,
+                        test_source_location(10),
+                        ValueMode::MutableOwned,
+                    ),
+                    &expression_builder,
                 )),
                 test_source_location(10),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     y,
-                    Expression::function_call(
-                        unknown_fn,
-                        vec![reference_expr_with_datatype(
+                    {
+                        let arguments: Vec<_> = vec![reference_expr_with_datatype(
+                            &mut expression_builder,
                             x,
-                            DataType::Int,
-                            builtin_type_ids::INT,
+                            DataType::FixedScalar(FixedScalar::I32),
+                            builtin_type_ids::fixed_scalar(FixedScalar::I32),
                             test_source_location(11),
-                        )],
-                        vec![builtin_type_ids::INT],
-                        test_source_location(11),
-                    ),
+                        )]
+                        .into_iter()
+                        .map(|value| {
+                            CallArgument::positional(
+                                expression_builder.own(value),
+                                CallAccessMode::Shared,
+                                None,
+                            )
+                        })
+                        .collect();
+                        expression_builder.function_call_with_typed_arguments(
+                            unknown_fn,
+                            arguments,
+                            vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
+                            test_source_location(11),
+                        )
+                    }
+                    .expect("valid call fixture")
+                    .id(),
+                    &expression_builder,
                 )),
                 test_source_location(11),
             ),
             node(
                 NodeKind::Assignment {
                     target: assignment_target(
+                        &mut expression_builder,
                         x,
-                        DataType::Int,
-                        builtin_type_ids::INT,
+                        DataType::FixedScalar(FixedScalar::I32),
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         test_source_location(12),
                     ),
-                    value: Expression::int(2, test_source_location(12), ValueMode::ImmutableOwned),
+                    value: i32_expression(
+                        &mut expression_builder,
+                        &mut const_values,
+                        2,
+                        test_source_location(12),
+                        ValueMode::ImmutableOwned,
+                    ),
                 },
                 test_source_location(12),
             ),
@@ -1587,9 +1926,16 @@ fn inferred_alias_return_from_parameter_reference_allows_caller_rebinding() {
     );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(vec![callee, caller], entry_path),
+        build_ast_with_registered_types(
+            vec![callee, caller],
+            entry_path,
+            expression_builder,
+            const_values,
+            types,
+        ),
         &mut string_table,
         &mut path_fork,
+        &external_package_registry,
     );
     run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("reassigning the source binding should preserve the returned allocation alias");
@@ -1597,6 +1943,9 @@ fn inferred_alias_return_from_parameter_reference_allows_caller_rebinding() {
 
 #[test]
 fn mutable_user_argument_is_accepted_without_false_shared_conflict() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
@@ -1611,8 +1960,8 @@ fn mutable_user_argument_is_accepted_without_false_shared_conflict() {
         FunctionSignature {
             parameters: vec![param_with_datatype(
                 p,
-                DataType::Int,
-                builtin_type_ids::INT,
+                DataType::FixedScalar(FixedScalar::I32),
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 true,
                 test_source_location(1),
             )],
@@ -1632,26 +1981,41 @@ fn mutable_user_argument_is_accepted_without_false_shared_conflict() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                    i32_expression(
+                        &mut expression_builder,
+                        &mut const_values,
+                        1,
+                        test_source_location(10),
+                        ValueMode::MutableOwned,
+                    ),
+                    &expression_builder,
                 )),
                 test_source_location(10),
             ),
             node(
-                function_call_node(
-                    mut_sink,
-                    vec![CallArgument::positional(
-                        reference_expr_with_datatype(
-                            x,
-                            DataType::Int,
-                            builtin_type_ids::INT,
-                            test_source_location(11),
-                        ),
+                {
+                    let arguments = vec![CallArgument::positional(
+                        {
+                            let value = reference_expr_with_datatype(
+                                &mut expression_builder,
+                                x,
+                                DataType::FixedScalar(FixedScalar::I32),
+                                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                                test_source_location(11),
+                            );
+                            expression_builder.own(value)
+                        },
                         CallAccessMode::Shared,
                         test_source_location(11),
-                    )],
-                    vec![],
-                    test_source_location(11),
-                ),
+                    )];
+                    function_call_node(
+                        &mut expression_builder,
+                        mut_sink,
+                        arguments,
+                        vec![],
+                        test_source_location(11),
+                    )
+                },
                 test_source_location(11),
             ),
         ],
@@ -1659,9 +2023,16 @@ fn mutable_user_argument_is_accepted_without_false_shared_conflict() {
     );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(vec![callee, caller], entry_path),
+        build_ast_with_registered_types(
+            vec![callee, caller],
+            entry_path,
+            expression_builder,
+            const_values,
+            types,
+        ),
         &mut string_table,
         &mut path_fork,
+        &external_package_registry,
     );
     run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("single mutable argument call should be accepted");
@@ -1670,11 +2041,11 @@ fn mutable_user_argument_is_accepted_without_false_shared_conflict() {
 #[test]
 fn mutable_call_uses_rvalue_backed_binding_as_its_access_actor() {
     let source = r#"
-make_values || -> {Int}:
+make_values || -> {I32}:
 return {1}
 ;
 
-mutate |values ~{Int}|:
+mutate |values ~{I32}|:
 ~values.push(2)
 ;
 
@@ -1682,8 +2053,13 @@ items ~= make_values()
 mutate(~items)
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
 
     run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("a mutable borrow through its own RValue-backed binding should pass");
@@ -1703,14 +2079,22 @@ value = 4.00
 replace(produce(2.00))
 "#;
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
-    let hir = lower_hir(ast, &mut string_table, &mut path_fork);
     let external_package_registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &external_package_registry,
+    );
     run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("a checked Decimal result is a value-backed fresh mutable argument");
 }
 
 #[test]
 fn mutable_user_call_with_fresh_mutable_arg_does_not_alias_existing_place_argument() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
@@ -1727,15 +2111,15 @@ fn mutable_user_call_with_fresh_mutable_arg_does_not_alias_existing_place_argume
             parameters: vec![
                 param_with_datatype(
                     a,
-                    DataType::Int,
-                    builtin_type_ids::INT,
+                    DataType::FixedScalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     true,
                     test_source_location(1),
                 ),
                 param_with_datatype(
                     b,
-                    DataType::Int,
-                    builtin_type_ids::INT,
+                    DataType::FixedScalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     true,
                     test_source_location(1),
                 ),
@@ -1756,34 +2140,58 @@ fn mutable_user_call_with_fresh_mutable_arg_does_not_alias_existing_place_argume
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                    i32_expression(
+                        &mut expression_builder,
+                        &mut const_values,
+                        1,
+                        test_source_location(10),
+                        ValueMode::MutableOwned,
+                    ),
+                    &expression_builder,
                 )),
                 test_source_location(10),
             ),
             node(
-                function_call_node(
-                    mut2,
-                    vec![
+                {
+                    let arguments = vec![
                         CallArgument::positional(
-                            reference_expr_with_datatype(
-                                x,
-                                DataType::Int,
-                                builtin_type_ids::INT,
-                                test_source_location(11),
-                            ),
+                            {
+                                let value = reference_expr_with_datatype(
+                                    &mut expression_builder,
+                                    x,
+                                    DataType::FixedScalar(FixedScalar::I32),
+                                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                                    test_source_location(11),
+                                );
+                                expression_builder.own(value)
+                            },
                             CallAccessMode::Shared,
                             test_source_location(11),
                         ),
                         CallArgument::positional(
-                            Expression::int(2, test_source_location(11), ValueMode::ImmutableOwned),
+                            {
+                                let value = i32_expression(
+                                    &mut expression_builder,
+                                    &mut const_values,
+                                    2,
+                                    test_source_location(11),
+                                    ValueMode::ImmutableOwned,
+                                );
+                                expression_builder.own(value)
+                            },
                             CallAccessMode::Shared,
                             test_source_location(11),
                         )
                         .with_passing_mode(CallPassingMode::FreshMutableValue),
-                    ],
-                    vec![],
-                    test_source_location(11),
-                ),
+                    ];
+                    function_call_node(
+                        &mut expression_builder,
+                        mut2,
+                        arguments,
+                        vec![],
+                        test_source_location(11),
+                    )
+                },
                 test_source_location(11),
             ),
         ],
@@ -1791,9 +2199,16 @@ fn mutable_user_call_with_fresh_mutable_arg_does_not_alias_existing_place_argume
     );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(vec![callee, caller], entry_path),
+        build_ast_with_registered_types(
+            vec![callee, caller],
+            entry_path,
+            expression_builder,
+            const_values,
+            types,
+        ),
         &mut string_table,
         &mut path_fork,
+        &external_package_registry,
     );
     run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table).expect(
     "fresh mutable call args should be treated as independent locals, not aliases of other args",
@@ -1802,6 +2217,9 @@ fn mutable_user_call_with_fresh_mutable_arg_does_not_alias_existing_place_argume
 
 #[test]
 fn host_mutable_parameter_requires_mutable_access() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
@@ -1825,26 +2243,41 @@ fn host_mutable_parameter_requires_mutable_access() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(1), ValueMode::ImmutableOwned),
+                    i32_expression(
+                        &mut expression_builder,
+                        &mut const_values,
+                        1,
+                        test_source_location(1),
+                        ValueMode::ImmutableOwned,
+                    ),
+                    &expression_builder,
                 )),
                 test_source_location(1),
             ),
             node(
-                host_function_call_node(
-                    host_fn,
-                    vec![CallArgument::positional(
-                        reference_expr_with_datatype(
-                            x,
-                            DataType::Int,
-                            builtin_type_ids::INT,
-                            test_source_location(2),
-                        ),
+                {
+                    let arguments = vec![CallArgument::positional(
+                        {
+                            let value = reference_expr_with_datatype(
+                                &mut expression_builder,
+                                x,
+                                DataType::FixedScalar(FixedScalar::I32),
+                                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                                test_source_location(2),
+                            );
+                            expression_builder.own(value)
+                        },
                         CallAccessMode::Shared,
                         test_source_location(2),
-                    )],
-                    vec![],
-                    test_source_location(2),
-                ),
+                    )];
+                    host_function_call_node(
+                        &mut expression_builder,
+                        host_fn,
+                        arguments,
+                        vec![],
+                        test_source_location(2),
+                    )
+                },
                 test_source_location(2),
             ),
         ],
@@ -1852,9 +2285,16 @@ fn host_mutable_parameter_requires_mutable_access() {
     );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(vec![start], entry_path),
+        build_ast_with_registered_types(
+            vec![start],
+            entry_path,
+            expression_builder,
+            const_values,
+            types,
+        ),
         &mut string_table,
         &mut path_fork,
+        &external_package_registry,
     );
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("mutable host parameter should enforce mutable access");
@@ -1863,6 +2303,9 @@ fn host_mutable_parameter_requires_mutable_access() {
 
 #[test]
 fn host_mutable_parameter_accepts_mutable_local_argument() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
@@ -1886,26 +2329,41 @@ fn host_mutable_parameter_accepts_mutable_local_argument() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(1), ValueMode::MutableOwned),
+                    i32_expression(
+                        &mut expression_builder,
+                        &mut const_values,
+                        1,
+                        test_source_location(1),
+                        ValueMode::MutableOwned,
+                    ),
+                    &expression_builder,
                 )),
                 test_source_location(1),
             ),
             node(
-                host_function_call_node(
-                    host_fn,
-                    vec![CallArgument::positional(
-                        reference_expr_with_datatype(
-                            x,
-                            DataType::Int,
-                            builtin_type_ids::INT,
-                            test_source_location(2),
-                        ),
+                {
+                    let arguments = vec![CallArgument::positional(
+                        {
+                            let value = reference_expr_with_datatype(
+                                &mut expression_builder,
+                                x,
+                                DataType::FixedScalar(FixedScalar::I32),
+                                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                                test_source_location(2),
+                            );
+                            expression_builder.own(value)
+                        },
                         CallAccessMode::Shared,
                         test_source_location(2),
-                    )],
-                    vec![],
-                    test_source_location(2),
-                ),
+                    )];
+                    host_function_call_node(
+                        &mut expression_builder,
+                        host_fn,
+                        arguments,
+                        vec![],
+                        test_source_location(2),
+                    )
+                },
                 test_source_location(2),
             ),
         ],
@@ -1913,9 +2371,16 @@ fn host_mutable_parameter_accepts_mutable_local_argument() {
     );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(vec![start], entry_path),
+        build_ast_with_registered_types(
+            vec![start],
+            entry_path,
+            expression_builder,
+            const_values,
+            types,
+        ),
         &mut string_table,
         &mut path_fork,
+        &external_package_registry,
     );
     run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("mutable host parameter should accept mutable local argument");
@@ -1923,6 +2388,9 @@ fn host_mutable_parameter_accepts_mutable_local_argument() {
 
 #[test]
 fn host_shared_parameter_is_shared_only() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
@@ -1946,26 +2414,41 @@ fn host_shared_parameter_is_shared_only() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(1), ValueMode::ImmutableOwned),
+                    i32_expression(
+                        &mut expression_builder,
+                        &mut const_values,
+                        1,
+                        test_source_location(1),
+                        ValueMode::ImmutableOwned,
+                    ),
+                    &expression_builder,
                 )),
                 test_source_location(1),
             ),
             node(
-                host_function_call_node(
-                    host_fn,
-                    vec![CallArgument::positional(
-                        reference_expr_with_datatype(
-                            x,
-                            DataType::Int,
-                            builtin_type_ids::INT,
-                            test_source_location(2),
-                        ),
+                {
+                    let arguments = vec![CallArgument::positional(
+                        {
+                            let value = reference_expr_with_datatype(
+                                &mut expression_builder,
+                                x,
+                                DataType::FixedScalar(FixedScalar::I32),
+                                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                                test_source_location(2),
+                            );
+                            expression_builder.own(value)
+                        },
                         CallAccessMode::Shared,
                         test_source_location(2),
-                    )],
-                    vec![],
-                    test_source_location(2),
-                ),
+                    )];
+                    host_function_call_node(
+                        &mut expression_builder,
+                        host_fn,
+                        arguments,
+                        vec![],
+                        test_source_location(2),
+                    )
+                },
                 test_source_location(2),
             ),
         ],
@@ -1973,9 +2456,16 @@ fn host_shared_parameter_is_shared_only() {
     );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(vec![start], entry_path),
+        build_ast_with_registered_types(
+            vec![start],
+            entry_path,
+            expression_builder,
+            const_values,
+            types,
+        ),
         &mut string_table,
         &mut path_fork,
+        &external_package_registry,
     );
     run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("shared host parameter should not force mutable access");
@@ -1983,6 +2473,9 @@ fn host_shared_parameter_is_shared_only() {
 
 #[test]
 fn two_mutable_args_to_same_root_are_rejected() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
@@ -2000,15 +2493,15 @@ fn two_mutable_args_to_same_root_are_rejected() {
             parameters: vec![
                 param_with_datatype(
                     a,
-                    DataType::Int,
-                    builtin_type_ids::INT,
+                    DataType::FixedScalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     true,
                     test_source_location(1),
                 ),
                 param_with_datatype(
                     b,
-                    DataType::Int,
-                    builtin_type_ids::INT,
+                    DataType::FixedScalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     true,
                     test_source_location(1),
                 ),
@@ -2029,49 +2522,70 @@ fn two_mutable_args_to_same_root_are_rejected() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                    i32_expression(
+                        &mut expression_builder,
+                        &mut const_values,
+                        1,
+                        test_source_location(10),
+                        ValueMode::MutableOwned,
+                    ),
+                    &expression_builder,
                 )),
                 test_source_location(10),
             ),
             node(
-                function_call_node(
-                    mut2,
-                    vec![
+                {
+                    let arguments = vec![
                         CallArgument::positional(
-                            reference_expr_with_datatype(
-                                x,
-                                DataType::Int,
-                                builtin_type_ids::INT,
-                                test_source_location(11),
-                            ),
+                            {
+                                let value = reference_expr_with_datatype(
+                                    &mut expression_builder,
+                                    x,
+                                    DataType::FixedScalar(FixedScalar::I32),
+                                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                                    test_source_location(11),
+                                );
+                                expression_builder.own(value)
+                            },
                             CallAccessMode::Shared,
                             test_source_location(11),
                         ),
                         CallArgument::positional(
-                            reference_expr_with_datatype(
-                                x,
-                                DataType::Int,
-                                builtin_type_ids::INT,
-                                test_source_location(11),
-                            ),
+                            {
+                                let value = reference_expr_with_datatype(
+                                    &mut expression_builder,
+                                    x,
+                                    DataType::FixedScalar(FixedScalar::I32),
+                                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                                    test_source_location(11),
+                                );
+                                expression_builder.own(value)
+                            },
                             CallAccessMode::Shared,
                             test_source_location(11),
                         ),
-                    ],
-                    vec![],
-                    test_source_location(11),
-                ),
+                    ];
+                    function_call_node(
+                        &mut expression_builder,
+                        mut2,
+                        arguments,
+                        vec![],
+                        test_source_location(11),
+                    )
+                },
                 test_source_location(11),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     y,
                     reference_expr_with_datatype(
+                        &mut expression_builder,
                         x,
-                        DataType::Int,
-                        builtin_type_ids::INT,
+                        DataType::FixedScalar(FixedScalar::I32),
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         test_source_location(12),
                     ),
+                    &expression_builder,
                 )),
                 test_source_location(12),
             ),
@@ -2080,9 +2594,16 @@ fn two_mutable_args_to_same_root_are_rejected() {
     );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(vec![callee, caller], entry_path),
+        build_ast_with_registered_types(
+            vec![callee, caller],
+            entry_path,
+            expression_builder,
+            const_values,
+            types,
+        ),
         &mut string_table,
         &mut path_fork,
+        &external_package_registry,
     );
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("two mutable args to the same root should fail");
@@ -2091,6 +2612,9 @@ fn two_mutable_args_to_same_root_are_rejected() {
 
 #[test]
 fn shared_then_mutable_args_to_same_root_are_rejected() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
@@ -2107,15 +2631,15 @@ fn shared_then_mutable_args_to_same_root_are_rejected() {
             parameters: vec![
                 param_with_datatype(
                     read,
-                    DataType::Int,
-                    builtin_type_ids::INT,
+                    DataType::FixedScalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     false,
                     test_source_location(1),
                 ),
                 param_with_datatype(
                     mutate,
-                    DataType::Int,
-                    builtin_type_ids::INT,
+                    DataType::FixedScalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     true,
                     test_source_location(1),
                 ),
@@ -2136,38 +2660,57 @@ fn shared_then_mutable_args_to_same_root_are_rejected() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                    i32_expression(
+                        &mut expression_builder,
+                        &mut const_values,
+                        1,
+                        test_source_location(10),
+                        ValueMode::MutableOwned,
+                    ),
+                    &expression_builder,
                 )),
                 test_source_location(10),
             ),
             node(
-                function_call_node(
-                    read_then_mut,
-                    vec![
+                {
+                    let arguments = vec![
                         CallArgument::positional(
-                            reference_expr_with_datatype(
-                                x,
-                                DataType::Int,
-                                builtin_type_ids::INT,
-                                test_source_location(11),
-                            ),
+                            {
+                                let value = reference_expr_with_datatype(
+                                    &mut expression_builder,
+                                    x,
+                                    DataType::FixedScalar(FixedScalar::I32),
+                                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                                    test_source_location(11),
+                                );
+                                expression_builder.own(value)
+                            },
                             CallAccessMode::Shared,
                             test_source_location(11),
                         ),
                         CallArgument::positional(
-                            reference_expr_with_datatype(
-                                x,
-                                DataType::Int,
-                                builtin_type_ids::INT,
-                                test_source_location(11),
-                            ),
+                            {
+                                let value = reference_expr_with_datatype(
+                                    &mut expression_builder,
+                                    x,
+                                    DataType::FixedScalar(FixedScalar::I32),
+                                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                                    test_source_location(11),
+                                );
+                                expression_builder.own(value)
+                            },
                             CallAccessMode::Shared,
                             test_source_location(11),
                         ),
-                    ],
-                    vec![],
-                    test_source_location(11),
-                ),
+                    ];
+                    function_call_node(
+                        &mut expression_builder,
+                        read_then_mut,
+                        arguments,
+                        vec![],
+                        test_source_location(11),
+                    )
+                },
                 test_source_location(11),
             ),
         ],
@@ -2175,9 +2718,16 @@ fn shared_then_mutable_args_to_same_root_are_rejected() {
     );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(vec![callee, caller], entry_path),
+        build_ast_with_registered_types(
+            vec![callee, caller],
+            entry_path,
+            expression_builder,
+            const_values,
+            types,
+        ),
         &mut string_table,
         &mut path_fork,
+        &external_package_registry,
     );
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("shared then mutable access to same root in a call must fail");
@@ -2198,6 +2748,9 @@ fn shared_then_mutable_args_to_same_root_are_rejected() {
 
 #[test]
 fn external_alias_args_result_stays_slot_backed_after_rebinding() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
@@ -2207,26 +2760,36 @@ fn external_alias_args_result_stays_slot_backed_after_rebinding() {
         "alias_arg_result",
         vec![ExternalAccessKind::Shared],
         ExternalReturnAlias::AliasArgs(vec![0]),
-        ExternalReturnType::NativeInt,
+        ExternalReturnType::Fixed(FixedScalar::I32),
     );
     let original = symbol("original", &mut path_fork, &mut string_table);
     let returned = symbol("returned", &mut path_fork, &mut string_table);
 
-    let returned_call = Expression::host_function_call_with_arguments(
-        host_alias,
-        vec![CallArgument::positional(
-            reference_expr_with_datatype(
-                original,
-                DataType::Int,
-                builtin_type_ids::INT,
-                test_source_location(11),
-            ),
+    let returned_call = {
+        let arguments = vec![CallArgument::positional(
+            {
+                let value = reference_expr_with_datatype(
+                    &mut expression_builder,
+                    original,
+                    DataType::FixedScalar(FixedScalar::I32),
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                    test_source_location(11),
+                );
+                expression_builder.own(value)
+            },
             CallAccessMode::Shared,
             test_source_location(11),
-        )],
-        vec![builtin_type_ids::INT],
-        None,
-    );
+        )];
+        expression_builder.host_function_call_with_typed_arguments(
+            host_alias,
+            arguments,
+            vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
+            false,
+            None,
+        )
+    }
+    .expect("valid call fixture")
+    .id();
 
     let start = function_node(
         start_name,
@@ -2238,35 +2801,60 @@ fn external_alias_args_result_stays_slot_backed_after_rebinding() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     original,
-                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                    i32_expression(
+                        &mut expression_builder,
+                        &mut const_values,
+                        1,
+                        test_source_location(10),
+                        ValueMode::MutableOwned,
+                    ),
+                    &expression_builder,
                 )),
                 test_source_location(10),
             ),
             node(
-                NodeKind::VariableDeclaration(make_test_variable(returned, returned_call)),
+                NodeKind::VariableDeclaration(make_test_variable(
+                    returned,
+                    returned_call,
+                    &expression_builder,
+                )),
                 test_source_location(11),
             ),
             node(
                 NodeKind::Assignment {
                     target: assignment_target(
+                        &mut expression_builder,
                         returned,
-                        DataType::Int,
-                        builtin_type_ids::INT,
+                        DataType::FixedScalar(FixedScalar::I32),
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         test_source_location(12),
                     ),
-                    value: Expression::int(2, test_source_location(12), ValueMode::ImmutableOwned),
+                    value: i32_expression(
+                        &mut expression_builder,
+                        &mut const_values,
+                        2,
+                        test_source_location(12),
+                        ValueMode::ImmutableOwned,
+                    ),
                 },
                 test_source_location(12),
             ),
             node(
                 NodeKind::Assignment {
                     target: assignment_target(
+                        &mut expression_builder,
                         original,
-                        DataType::Int,
-                        builtin_type_ids::INT,
+                        DataType::FixedScalar(FixedScalar::I32),
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         test_source_location(13),
                     ),
-                    value: Expression::int(3, test_source_location(13), ValueMode::ImmutableOwned),
+                    value: i32_expression(
+                        &mut expression_builder,
+                        &mut const_values,
+                        3,
+                        test_source_location(13),
+                        ValueMode::ImmutableOwned,
+                    ),
                 },
                 test_source_location(13),
             ),
@@ -2275,9 +2863,16 @@ fn external_alias_args_result_stays_slot_backed_after_rebinding() {
     );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(vec![start], entry_path),
+        build_ast_with_registered_types(
+            vec![start],
+            entry_path,
+            expression_builder,
+            const_values,
+            types,
+        ),
         &mut string_table,
         &mut path_fork,
+        &external_package_registry,
     );
     let report = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("external AliasArgs result should remain rebindable as a caller slot");
@@ -2356,9 +2951,12 @@ fn external_alias_args_result_stays_slot_backed_after_rebinding() {
                 matches!(
                     &statement.kind,
                     HirStatementKind::Call {
-                        result: Some(HirLocalDestination::Define(result_local)),
+                        results,
                         ..
-                    } if *result_local == call_result_local
+                    } if matches!(
+                        results.as_slice(),
+                        [HirLocalDestination::Define(result_local)] if *result_local == call_result_local
+                    )
                 )
             }),
         "the internal call result is a defined compiler temporary"
@@ -2437,6 +3035,9 @@ fn external_alias_args_result_stays_slot_backed_after_rebinding() {
 
 #[test]
 fn unresolved_or_mismatched_host_signature_errors() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
@@ -2445,6 +3046,13 @@ fn unresolved_or_mismatched_host_signature_errors() {
         &mut external_package_registry,
         "one_arg",
         vec![ExternalAccessKind::Shared],
+        ExternalReturnAlias::Fresh,
+        ExternalReturnType::Void,
+    );
+    let no_args = register_external_function(
+        &mut external_package_registry,
+        "no_args",
+        vec![],
         ExternalReturnAlias::Fresh,
         ExternalReturnType::Void,
     );
@@ -2459,7 +3067,16 @@ fn unresolved_or_mismatched_host_signature_errors() {
             returns: vec![],
         },
         vec![node(
-            host_function_call_node(missing_host, vec![], vec![], test_source_location(1)),
+            {
+                let arguments = vec![];
+                host_function_call_node(
+                    &mut expression_builder,
+                    no_args,
+                    arguments,
+                    vec![],
+                    test_source_location(1),
+                )
+            },
             test_source_location(1),
         )],
         None,
@@ -2472,29 +3089,97 @@ fn unresolved_or_mismatched_host_signature_errors() {
             returns: vec![],
         },
         vec![node(
-            host_function_call_node(one_arg, vec![], vec![], test_source_location(2)),
+            {
+                let arguments = vec![CallArgument::positional(
+                    {
+                        let value = i32_expression(
+                            &mut expression_builder,
+                            &mut const_values,
+                            1,
+                            test_source_location(2),
+                            ValueMode::ImmutableOwned,
+                        );
+                        expression_builder.own(value)
+                    },
+                    CallAccessMode::Shared,
+                    test_source_location(2),
+                )];
+                host_function_call_node(
+                    &mut expression_builder,
+                    one_arg,
+                    arguments,
+                    vec![],
+                    test_source_location(2),
+                )
+            },
             test_source_location(2),
         )],
         None,
     );
 
-    let hir = lower_hir(
-        build_ast_with_registered_types(vec![start_missing, start_mismatch], entry_path),
+    let mut hir = lower_hir(
+        build_ast_with_registered_types(
+            vec![start_missing, start_mismatch],
+            entry_path,
+            expression_builder,
+            const_values,
+            types,
+        ),
         &mut string_table,
         &mut path_fork,
+        &external_package_registry,
     );
 
-    let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
-        .expect_err("missing host or mismatched signature should fail");
-    assert_infrastructure_error_contains(
-        &error,
-        ErrorType::Compiler,
-        &["host call target", "argument count mismatch"],
-    );
+    // Start with validated HIR, then corrupt one contract at a time to test
+    // the borrow checker's trusted-metadata boundary rather than lowering.
+    for missing_target in [true, false] {
+        let call = hir
+            .blocks
+            .iter_mut()
+            .flat_map(|block| &mut block.statements)
+            .find(|statement| {
+                matches!(
+                    &statement.kind,
+                    HirStatementKind::Call { target: CallTarget::External(target), .. }
+                        if *target == if missing_target { no_args } else { one_arg }
+                )
+            })
+            .expect("the validated host call must be present");
+        let HirStatementKind::Call { target, args, .. } = &mut call.kind else {
+            unreachable!("the selected statement is a host call");
+        };
+        let original_target = CallTarget::External(if missing_target { no_args } else { one_arg });
+        if missing_target {
+            *target = CallTarget::External(missing_host);
+        } else {
+            *args = crate::compiler_frontend::hir::expression_store::HirValueRange::empty();
+        }
+        let call_id = call.id;
+        let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
+            .expect_err("missing host or mismatched signature should fail");
+        let expected_message = if missing_target {
+            "host call target"
+        } else {
+            "argument count mismatch"
+        };
+        assert_infrastructure_error_contains(&error, ErrorType::Compiler, &[expected_message]);
+        let call = hir
+            .blocks
+            .iter_mut()
+            .flat_map(|block| &mut block.statements)
+            .find(|statement| statement.id == call_id)
+            .expect("the corrupted call must remain present");
+        if let HirStatementKind::Call { target, .. } = &mut call.kind {
+            *target = original_target;
+        }
+    }
 }
 
 #[test]
 fn mutable_user_parameter_rejects_immutable_argument_reused_after_call() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
@@ -2510,8 +3195,8 @@ fn mutable_user_parameter_rejects_immutable_argument_reused_after_call() {
         FunctionSignature {
             parameters: vec![param_with_datatype(
                 p,
-                DataType::Int,
-                builtin_type_ids::INT,
+                DataType::FixedScalar(FixedScalar::I32),
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 true,
                 test_source_location(1),
             )],
@@ -2531,37 +3216,54 @@ fn mutable_user_parameter_rejects_immutable_argument_reused_after_call() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(10), ValueMode::ImmutableOwned),
+                    i32_expression(
+                        &mut expression_builder,
+                        &mut const_values,
+                        1,
+                        test_source_location(10),
+                        ValueMode::ImmutableOwned,
+                    ),
+                    &expression_builder,
                 )),
                 test_source_location(10),
             ),
             node(
-                function_call_node(
-                    mut_user,
-                    vec![CallArgument::positional(
-                        reference_expr_with_datatype(
-                            x,
-                            DataType::Int,
-                            builtin_type_ids::INT,
-                            test_source_location(11),
-                        ),
+                {
+                    let arguments = vec![CallArgument::positional(
+                        {
+                            let value = reference_expr_with_datatype(
+                                &mut expression_builder,
+                                x,
+                                DataType::FixedScalar(FixedScalar::I32),
+                                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                                test_source_location(11),
+                            );
+                            expression_builder.own(value)
+                        },
                         CallAccessMode::Shared,
                         test_source_location(11),
-                    )],
-                    vec![],
-                    test_source_location(11),
-                ),
+                    )];
+                    function_call_node(
+                        &mut expression_builder,
+                        mut_user,
+                        arguments,
+                        vec![],
+                        test_source_location(11),
+                    )
+                },
                 test_source_location(11),
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     y,
                     reference_expr_with_datatype(
+                        &mut expression_builder,
                         x,
-                        DataType::Int,
-                        builtin_type_ids::INT,
+                        DataType::FixedScalar(FixedScalar::I32),
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         test_source_location(12),
                     ),
+                    &expression_builder,
                 )),
                 test_source_location(12),
             ),
@@ -2570,9 +3272,16 @@ fn mutable_user_parameter_rejects_immutable_argument_reused_after_call() {
     );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(vec![callee, caller], entry_path),
+        build_ast_with_registered_types(
+            vec![callee, caller],
+            entry_path,
+            expression_builder,
+            const_values,
+            types,
+        ),
         &mut string_table,
         &mut path_fork,
+        &external_package_registry,
     );
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("immutable argument passed to mutable user param and reused must fail");
@@ -2581,6 +3290,9 @@ fn mutable_user_parameter_rejects_immutable_argument_reused_after_call() {
 
 #[test]
 fn out_of_range_return_alias_metadata_is_reported_at_call_site() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
@@ -2590,7 +3302,7 @@ fn out_of_range_return_alias_metadata_is_reported_at_call_site() {
         "bad_alias_host",
         vec![ExternalAccessKind::Shared],
         ExternalReturnAlias::AliasArgs(vec![1]),
-        ExternalReturnType::NativeInt,
+        ExternalReturnType::Fixed(FixedScalar::I32),
     );
     let x = symbol("x", &mut path_fork, &mut string_table);
 
@@ -2604,26 +3316,41 @@ fn out_of_range_return_alias_metadata_is_reported_at_call_site() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                    i32_expression(
+                        &mut expression_builder,
+                        &mut const_values,
+                        1,
+                        test_source_location(10),
+                        ValueMode::MutableOwned,
+                    ),
+                    &expression_builder,
                 )),
                 test_source_location(10),
             ),
             node(
-                host_function_call_node(
-                    bad_alias_host,
-                    vec![CallArgument::positional(
-                        reference_expr_with_datatype(
-                            x,
-                            DataType::Int,
-                            builtin_type_ids::INT,
-                            test_source_location(11),
-                        ),
+                {
+                    let arguments = vec![CallArgument::positional(
+                        {
+                            let value = reference_expr_with_datatype(
+                                &mut expression_builder,
+                                x,
+                                DataType::FixedScalar(FixedScalar::I32),
+                                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                                test_source_location(11),
+                            );
+                            expression_builder.own(value)
+                        },
                         CallAccessMode::Shared,
                         test_source_location(11),
-                    )],
-                    vec![],
-                    test_source_location(11),
-                ),
+                    )];
+                    host_function_call_node(
+                        &mut expression_builder,
+                        bad_alias_host,
+                        arguments,
+                        vec![builtin_type_ids::fixed_scalar(FixedScalar::I32)],
+                        test_source_location(11),
+                    )
+                },
                 test_source_location(11),
             ),
         ],
@@ -2631,9 +3358,16 @@ fn out_of_range_return_alias_metadata_is_reported_at_call_site() {
     );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(vec![start], entry_path),
+        build_ast_with_registered_types(
+            vec![start],
+            entry_path,
+            expression_builder,
+            const_values,
+            types,
+        ),
         &mut string_table,
         &mut path_fork,
+        &external_package_registry,
     );
 
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
@@ -2647,6 +3381,9 @@ fn out_of_range_return_alias_metadata_is_reported_at_call_site() {
 
 #[test]
 fn same_line_mutable_call_then_reuse_uses_order_keys() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
@@ -2662,8 +3399,8 @@ fn same_line_mutable_call_then_reuse_uses_order_keys() {
         FunctionSignature {
             parameters: vec![param_with_datatype(
                 p,
-                DataType::Int,
-                builtin_type_ids::INT,
+                DataType::FixedScalar(FixedScalar::I32),
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 true,
                 test_source_location(1),
             )],
@@ -2686,37 +3423,54 @@ fn same_line_mutable_call_then_reuse_uses_order_keys() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     x,
-                    Expression::int(1, test_source_location(10), ValueMode::MutableOwned),
+                    i32_expression(
+                        &mut expression_builder,
+                        &mut const_values,
+                        1,
+                        test_source_location(10),
+                        ValueMode::MutableOwned,
+                    ),
+                    &expression_builder,
                 )),
                 test_source_location(10),
             ),
             node(
-                function_call_node(
-                    mut_user,
-                    vec![CallArgument::positional(
-                        reference_expr_with_datatype(
-                            x,
-                            DataType::Int,
-                            builtin_type_ids::INT,
-                            same_line,
-                        ),
+                {
+                    let arguments = vec![CallArgument::positional(
+                        {
+                            let value = reference_expr_with_datatype(
+                                &mut expression_builder,
+                                x,
+                                DataType::FixedScalar(FixedScalar::I32),
+                                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                                same_line,
+                            );
+                            expression_builder.own(value)
+                        },
                         CallAccessMode::Shared,
                         same_line,
-                    )],
-                    vec![],
-                    same_line,
-                ),
+                    )];
+                    function_call_node(
+                        &mut expression_builder,
+                        mut_user,
+                        arguments,
+                        vec![],
+                        same_line,
+                    )
+                },
                 same_line,
             ),
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     y,
                     reference_expr_with_datatype(
+                        &mut expression_builder,
                         x,
-                        DataType::Int,
-                        builtin_type_ids::INT,
+                        DataType::FixedScalar(FixedScalar::I32),
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         same_line,
                     ),
+                    &expression_builder,
                 )),
                 same_line,
             ),
@@ -2725,9 +3479,16 @@ fn same_line_mutable_call_then_reuse_uses_order_keys() {
     );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(vec![callee, caller], entry_path),
+        build_ast_with_registered_types(
+            vec![callee, caller],
+            entry_path,
+            expression_builder,
+            const_values,
+            types,
+        ),
         &mut string_table,
         &mut path_fork,
+        &external_package_registry,
     );
     run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table).expect(
         "same-line mutable call + later reuse should borrow (not move) when ordered by statement",
@@ -2736,6 +3497,9 @@ fn same_line_mutable_call_then_reuse_uses_order_keys() {
 
 #[test]
 fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving() {
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let types = TypeEnvironment::new();
     let mut path_fork = crate::compiler_frontend::symbols::path_interner::PathInternerFork::empty();
     let mut string_table = StringTable::new();
     let (entry_path, start_name) = entry_and_start(&mut path_fork, &mut string_table);
@@ -2749,101 +3513,86 @@ fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving
     let param_calls = symbol("param_calls", &mut path_fork, &mut string_table);
 
     let rhs_function = function_node(
-    rhs_name,
-    FunctionSignature {
-        parameters: vec![param_with_datatype(
-            param_calls,
-            DataType::Int,
-            builtin_type_ids::INT,
-            true,
-            test_source_location(1),
-        )],
-        returns: fresh_success_returns(vec![builtin_type_ids::BOOL]),
-    },
-    vec![
-        node(
-            NodeKind::Assignment {
-                target: assignment_target(
-                    param_calls,
-                    DataType::Int,
-                    builtin_type_ids::INT,
-                    test_source_location(2),
-                ),
-                value: Expression::runtime(
-                    ExpressionRpn {
-                        items: vec![
-                            ExpressionRpnItem::Operand(Expression::reference_with_type_id(
-                                param_calls,
-                                DataType::Int,
-                                builtin_type_ids::INT,
-                                test_source_location(2),
-                                ValueMode::MutableOwned,
-                                crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
-                            )),
-                            ExpressionRpnItem::Operand(Expression::int(
-                                1,
-                                test_source_location(2),
-                                ValueMode::ImmutableOwned,
-                            )),
+        rhs_name,
+        FunctionSignature {
+            parameters: vec![param_with_datatype(
+                param_calls,
+                DataType::FixedScalar(FixedScalar::I32),
+                builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                true,
+                test_source_location(1),
+            )],
+            returns: fresh_success_returns(vec![builtin_type_ids::BOOL]),
+        },
+        vec![
+            node(
+                NodeKind::Assignment {
+                    target: assignment_target(
+                        &mut expression_builder,
+                        param_calls,
+                        DataType::FixedScalar(FixedScalar::I32),
+                        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                        test_source_location(2),
+                    ),
+                    value: {
+                        let items = vec![
+                            ExpressionRpnItem::Operand(expression_builder.reference_with_type_id(param_calls, builtin_type_ids::fixed_scalar(FixedScalar::I32), test_source_location(2), ValueMode::MutableOwned, crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue).expect("valid expression fixture").id()),
+                            ExpressionRpnItem::Operand(i32_expression(&mut expression_builder, &mut const_values, 1, test_source_location(2), ValueMode::ImmutableOwned)),
                             ExpressionRpnItem::Operator {
                                 operator: Operator::Add,
                                 span: None,
                             },
-                        ],
+                        ];
+                        crate::compiler_frontend::tests::type_id_fixture_support::runtime_expr(
+                            &mut expression_builder,
+                            &mut const_values,
+                            items,
+                            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                            test_source_location(2),
+                            ValueMode::MutableOwned,
+                            &types,
+                        )
                     },
-                    DataType::Int,
-                    test_source_location(2),
-                    ValueMode::MutableOwned,
-                ),
-            },
-            test_source_location(2),
-        ),
-        node(
-            NodeKind::Return(vec![Expression::bool(
-                true,
+                },
+                test_source_location(2),
+            ),
+            node(
+                NodeKind::Return(vec![
+                    expression_builder
+                        .bool(
+                            &mut const_values,
+                            true,
+                            test_source_location(3),
+                            ValueMode::ImmutableOwned,
+                        )
+                        .expect("valid expression fixture")
+                        .id(),
+                ]),
                 test_source_location(3),
-                ValueMode::ImmutableOwned,
-            )]),
-            test_source_location(3),
-        ),
-    ],
-    None,
-);
-
-    let short_circuit_value = Expression::runtime(
-    ExpressionRpn {
-        items: vec![
-            ExpressionRpnItem::Operand(Expression::reference_with_type_id(
-                lhs,
-                DataType::Bool,
-                builtin_type_ids::BOOL,
-                test_source_location(11),
-                ValueMode::ImmutableOwned,
-                crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
-            )),
-            ExpressionRpnItem::Operand(Expression::function_call(
-                rhs_name,
-                vec![Expression::reference_with_type_id(
-                    calls,
-                    DataType::Int,
-                    builtin_type_ids::INT,
-                    test_source_location(11),
-                    ValueMode::MutableOwned,
-                    crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
-                )],
-                vec![builtin_type_ids::BOOL],
-                test_source_location(11),
-            )),
-            ExpressionRpnItem::Operator {
-                operator: Operator::And,
-                span: None,
-            },
+            ),
         ],
-    },
-    DataType::Bool,
-    None,
-    ValueMode::ImmutableOwned,
-);
+        None,
+    );
+
+    let short_circuit_value = {
+        let items = vec![
+        ExpressionRpnItem::Operand(expression_builder.reference_with_type_id(lhs, builtin_type_ids::BOOL, test_source_location(11), ValueMode::ImmutableOwned, crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue).expect("valid expression fixture").id()),
+        ExpressionRpnItem::Operand({ let arguments: Vec<_> = vec![expression_builder.reference_with_type_id(calls, builtin_type_ids::fixed_scalar(FixedScalar::I32), test_source_location(11), ValueMode::MutableOwned, crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue).expect("valid expression fixture").id()].into_iter().map(|value| CallArgument::positional(expression_builder.own(value), CallAccessMode::Shared, None)).collect(); expression_builder.function_call_with_typed_arguments(rhs_name, arguments, vec![builtin_type_ids::BOOL], test_source_location(11)) }.expect("valid call fixture").id()),
+        ExpressionRpnItem::Operator {
+            operator: Operator::And,
+            span: None,
+        },
+    ];
+        crate::compiler_frontend::tests::type_id_fixture_support::runtime_expr(
+            &mut expression_builder,
+            &mut const_values,
+            items,
+            builtin_type_ids::BOOL,
+            None,
+            ValueMode::ImmutableOwned,
+            &types,
+        )
+    };
 
     let start_function = function_node(
     start_name,
@@ -2853,39 +3602,19 @@ fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving
     },
     vec![
         node(
-            NodeKind::VariableDeclaration(make_test_variable(
-                lhs,
-                Expression::bool(
-                    false,
-                    test_source_location(10),
-                    ValueMode::ImmutableOwned,
-                ),
-            )),
+            NodeKind::VariableDeclaration(make_test_variable(lhs, expression_builder.bool(&mut const_values, false, test_source_location(10), ValueMode::ImmutableOwned).expect("valid expression fixture").id(), &expression_builder)),
             test_source_location(10),
         ),
         node(
-            NodeKind::VariableDeclaration(make_test_variable(
-                calls,
-                Expression::int(0, test_source_location(10), ValueMode::MutableOwned),
-            )),
+            NodeKind::VariableDeclaration(make_test_variable(calls, i32_expression(&mut expression_builder, &mut const_values, 0, test_source_location(10), ValueMode::MutableOwned), &expression_builder)),
             test_source_location(10),
         ),
         node(
-            NodeKind::VariableDeclaration(make_test_variable(value, short_circuit_value)),
+            NodeKind::VariableDeclaration(make_test_variable(value, short_circuit_value, &expression_builder)),
             test_source_location(11),
         ),
         node(
-            NodeKind::VariableDeclaration(make_test_variable(
-                sink,
-                Expression::reference_with_type_id(
-                    calls,
-                    DataType::Int,
-                    builtin_type_ids::INT,
-                    test_source_location(12),
-                    ValueMode::ImmutableReference,
-                    crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue,
-                ),
-            )),
+            NodeKind::VariableDeclaration(make_test_variable(sink, expression_builder.reference_with_type_id(calls, builtin_type_ids::fixed_scalar(FixedScalar::I32), test_source_location(12), ValueMode::ImmutableReference, crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState::RuntimeValue).expect("valid expression fixture").id(), &expression_builder)),
             test_source_location(12),
         ),
     ],
@@ -2893,9 +3622,16 @@ fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving
 );
 
     let hir = lower_hir(
-        build_ast_with_registered_types(vec![rhs_function, start_function], entry_path),
+        build_ast_with_registered_types(
+            vec![rhs_function, start_function],
+            entry_path,
+            expression_builder,
+            const_values,
+            types,
+        ),
         &mut string_table,
         &mut path_fork,
+        &external_package_registry,
     );
     run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect("rhs-only mutable short-circuit call with later merge use should stay borrowed");
@@ -2903,23 +3639,24 @@ fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving
 
 #[test]
 fn catch_private_call_return_alias_unions_success_and_parameter_derived_handler() {
-    let source = "load |value String, trigger Int| -> String:\n\
+    let source = "load |value String, trigger I32| -> String:\n\
                   numeric_result = trigger + 2147483647\n\
                   return value\n;\n\
-                  recover |fallback String, success String, trigger Int| -> String:\n\
+                  recover |fallback String, success String, trigger I32| -> String:\n\
                   return load(success, trigger) catch:\n\
                       return fallback\n\
                   ;\n;\n";
     let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
     let entry_path = ast.entry_path;
-    let (mut hir, mut type_environment) = lower_ast(ast, &mut string_table, &mut path_fork)
-        .expect("a direct private catch must lower");
     let registry = default_external_package_registry(&mut string_table);
+    let (mut hir, mut type_environment) =
+        lower_ast(ast, &mut string_table, &mut path_fork, &registry)
+            .expect("a direct private catch must lower");
     let mut initial = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
         .expect("the pre-installation HIR must be legal");
     infer_builtin_failure_summaries(&hir, &mut initial)
         .expect("the private producer must infer its escaping failure");
-    install_private_failure_lanes(&mut hir, &initial, &mut type_environment)
+    install_private_failure_lanes(&mut hir, &initial, &mut type_environment, &registry)
         .expect("the inferred call must install a real handler edge");
     assert!(hir.catch_protected_calls.is_empty());
     let report = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
@@ -2943,12 +3680,7 @@ fn catch_private_call_return_alias_unions_success_and_parameter_derived_handler(
     let return_facts = hir
         .blocks
         .iter()
-        .filter(|block| {
-            matches!(
-                block.terminator,
-                HirTerminator::Return(_) | HirTerminator::ReturnSuccess(_)
-            )
-        })
+        .filter(|block| matches!(block.terminator, HirTerminator::Return(_)))
         .map(|block| &report.analysis.terminator_facts[&block.id])
         .collect::<Vec<_>>();
     assert!(
@@ -2963,4 +3695,75 @@ fn catch_private_call_return_alias_unions_success_and_parameter_derived_handler(
             .any(|fact| fact.shared_roots.contains(&recover.params[1])),
         "the success return must retain the successful call's parameter provenance"
     );
+}
+
+#[test]
+fn catch_join_preserves_fresh_scalar_results_and_reference_parameter_union() {
+    let source = r#"
+fresh_numeric |value ~I32| -> I32:
+    return value + 1 catch then 0
+;
+
+fresh_cast |value ~I32| -> U8:
+    return cast value catch then 0
+;
+
+maybe_reference |value String, trigger I32| -> String, Error!:
+    if trigger is 0:
+        return! Error("missing")
+    ;
+    return value
+;
+
+retained_reference |value ~String, fallback String, trigger I32| -> String:
+    return maybe_reference(value, trigger) catch then fallback
+;
+"#;
+    let (ast, mut path_fork, mut string_table) = parse_single_file_ast(source);
+    let registry = default_external_package_registry(&mut string_table);
+    let hir = lower_hir(ast, &mut string_table, &mut path_fork, &registry);
+    let report = run_borrow_checker(&hir, &registry, &path_fork, &string_table)
+        .expect("catch joins must preserve native success provenance");
+
+    for (name, expected_alias) in [
+        ("fresh_numeric", FunctionReturnAliasSummary::Fresh),
+        ("fresh_cast", FunctionReturnAliasSummary::Fresh),
+        (
+            "retained_reference",
+            FunctionReturnAliasSummary::AliasParams(vec![0, 1]),
+        ),
+    ] {
+        let function = hir
+            .functions
+            .iter()
+            .find(|function| {
+                hir.side_table
+                    .function_name_path(function.id)
+                    .and_then(|path| path_fork.component(path))
+                    .is_some_and(|component| string_table.resolve(component) == name)
+            })
+            .expect("each catch fixture must lower to a function");
+        let summary = &report.analysis.public_call_summaries[&function.id];
+        assert_eq!(summary.return_alias, expected_alias, "{name}");
+        assert_eq!(
+            summary.parameters[0].access,
+            PublicCallParameterAccess::Mutable,
+            "{name} must preserve its authored mutable parameter contract"
+        );
+        assert_eq!(
+            summary.parameters[0].mutation,
+            PublicCallMutationEffect::NoWrite,
+            "{name} only reads its mutable parameter"
+        );
+        if name == "retained_reference" {
+            assert_eq!(
+                summary.parameters[1].access,
+                PublicCallParameterAccess::Shared
+            );
+            assert_eq!(
+                summary.parameters[1].mutation,
+                PublicCallMutationEffect::NoWrite
+            );
+        }
+    }
 }

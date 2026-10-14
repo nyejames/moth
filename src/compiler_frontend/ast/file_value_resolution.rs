@@ -7,11 +7,14 @@
 //! captured `OwnedFoldedString` and lower it through the shared owned-value inverse projection.
 //! In either lane, resource and site-root rows remain structural strings.
 
-use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
+use crate::compiler_frontend::ast::const_values::store::{
+    ConstStringPiece, ConstStringValue, ConstValuePayload, ConstValueStore,
+};
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::Expression;
-use crate::compiler_frontend::ast::expressions::expression_kind::ExpressionKind;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExpressionOp, OwnedExpr,
+};
 use crate::compiler_frontend::ast::field_access::reference_expression_from_declaration;
 use crate::compiler_frontend::ast::module_ast::environment::builder::import_projection::values::materialize_owned_folded_string;
 use crate::compiler_frontend::ast::module_ast::scope_context::{
@@ -20,7 +23,6 @@ use crate::compiler_frontend::ast::module_ast::scope_context::{
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidExpressionReason};
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::headers::synthetic_content_header::content_constant_path;
 use crate::compiler_frontend::paths::file_references::PreparedFileReferenceClass;
@@ -36,15 +38,21 @@ use crate::compiler_frontend::value_mode::ValueMode;
 /// Resolution is driven by the immutable view supplied by semantic orchestration. It covers
 /// ordinary module rows and frozen persistent-generic rows, so this function never reopens source
 /// tables or calls a filesystem path resolver.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "file-value resolution takes the path syntax, token stream, scope, interner, builders, value mode, string table, and path fork from the parser call site"
+)]
 pub(crate) fn resolve_file_value(
     path_syntax: PathSyntaxId,
     token_stream: &AstCursor,
     context: &ScopeContext,
     type_interner: &AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     value_mode: &ValueMode,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<Expression, ExpressionParseError> {
+) -> Result<OwnedExpr, ExpressionParseError> {
     let token_span = token_stream.current_span();
     let span = Some(token_span);
     token_stream
@@ -86,9 +94,13 @@ pub(crate) fn resolve_file_value(
             .into())
         }
         PreparedFileReferenceClass::SiteRoot => match resolved.outcome {
-            Stage0ResolvedFileReferenceOutcome::NoPhysicalTarget => {
-                structural_string(vec![ConstStringPiece::SiteRoot], span, value_mode)
-            }
+            Stage0ResolvedFileReferenceOutcome::NoPhysicalTarget => structural_string(
+                expression_builder,
+                const_values,
+                vec![ConstStringPiece::SiteRoot],
+                span,
+                value_mode,
+            ),
             Stage0ResolvedFileReferenceOutcome::Diagnostic(diagnostic) => {
                 Err(diagnostic.clone().into())
             }
@@ -106,19 +118,24 @@ pub(crate) fn resolve_file_value(
                 value,
             } => {
                 if let Some(value) = value {
-                    let kind = materialize_owned_folded_string(value, string_table, |origin| {
+                    let value = materialize_owned_folded_string(value, string_table, |origin| {
                         Ok(services
                             .module_resources
                             .borrow_mut()
                             .intern_origin(origin.clone(), span))
                     })?;
-                    return Ok(Expression::new(
-                        kind,
+                    let value = const_values.insert_resolved(
+                        builtin_type_ids::STRING, ConstValuePayload::String(value), span,
+                    ).map_err(|error| match error {
+                        crate::compiler_frontend::ast::const_values::store::ConstValueStoreError::Diagnostic(error) => ExpressionParseError::from(error),
+                        crate::compiler_frontend::ast::const_values::store::ConstValueStoreError::Infrastructure(error) => ExpressionParseError::from(*error),
+                    })?;
+                    return Ok(expression_builder.append_expression(
+                        ExpressionOp::Constant(value),
                         span,
                         builtin_type_ids::STRING,
-                        DataType::StringSlice,
-                        value_mode.clone(),
-                    ));
+                        *value_mode,
+                    )?);
                 }
 
                 let logical_path = logical_path.as_ref().ok_or_else(|| {
@@ -137,12 +154,15 @@ pub(crate) fn resolve_file_value(
                             content_path
                         ))
                     })?;
-                Ok(reference_expression_from_declaration(
+                reference_expression_from_declaration(
                     declaration,
                     context,
                     type_interner,
+                    expression_builder,
+                    const_values,
+                    string_table,
                     span,
-                ))
+                )
             }
             _ => Err(CompilerError::compiler_error(
                 "content file reference did not resolve to a content target",
@@ -171,7 +191,13 @@ pub(crate) fn resolve_file_value(
                     Some(source) => resources.intern_origin_with_source(origin, *source, span),
                     None => resources.intern_origin(origin, span),
                 };
-                structural_string(vec![ConstStringPiece::Resource(resource)], span, value_mode)
+                structural_string(
+                    expression_builder,
+                    const_values,
+                    vec![ConstStringPiece::Resource(resource)],
+                    span,
+                    value_mode,
+                )
             }
             _ => Err(CompilerError::compiler_error(
                 "resource file reference did not resolve to a resource target",
@@ -181,16 +207,23 @@ pub(crate) fn resolve_file_value(
     }
 }
 
-fn structural_string(
+pub(crate) fn structural_string(
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     pieces: Vec<ConstStringPiece>,
     span: Option<SourceSpan>,
     value_mode: &ValueMode,
-) -> Result<Expression, ExpressionParseError> {
-    Ok(Expression::new(
-        ExpressionKind::StructuralString { pieces },
+) -> Result<OwnedExpr, ExpressionParseError> {
+    let value = const_values.insert_resolved(
+        builtin_type_ids::STRING, ConstValuePayload::String(ConstStringValue::Pieces(pieces)), span,
+    ).map_err(|error| match error {
+        crate::compiler_frontend::ast::const_values::store::ConstValueStoreError::Diagnostic(error) => ExpressionParseError::from(error),
+        crate::compiler_frontend::ast::const_values::store::ConstValueStoreError::Infrastructure(error) => ExpressionParseError::from(*error),
+    })?;
+    Ok(expression_builder.append_expression(
+        ExpressionOp::Constant(value),
         span,
         builtin_type_ids::STRING,
-        DataType::StringSlice,
-        value_mode.clone(),
-    ))
+        *value_mode,
+    )?)
 }

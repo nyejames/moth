@@ -1,4 +1,4 @@
-cannot_receive_number |received Dec0| -> Int:
-    value Int = received
+cannot_receive_number |received Dec0| -> I32:
+    value I32 = received
     return value
 ;

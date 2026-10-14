@@ -178,7 +178,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     .path_fork
                     .try_intern_child(requirement_path, name)
                     .expect("imported trait parameter path table exhausted"),
-                value_mode: parameter.value_mode.clone(),
+                value_mode: parameter.value_mode,
                 type_id,
                 span: None,
             });

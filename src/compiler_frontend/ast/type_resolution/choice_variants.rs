@@ -31,16 +31,16 @@ pub(crate) fn resolve_choice_variant_payload_types(
                 for field in fields {
                     let mut resolved_field = field.to_owned();
 
-                    resolved_field.value.diagnostic_type = resolve_named_signature_type(
-                        &field.value.diagnostic_type,
-                        field.value.span,
+                    resolved_field.diagnostic_type = resolve_named_signature_type(
+                        &field.diagnostic_type,
+                        field.binding_span,
                         type_resolution_context,
                         string_table,
                     )?;
-                    resolved_field.value.type_id = resolve_diagnostic_type_to_type_id_checked(
-                        &resolved_field.value.diagnostic_type,
+                    resolved_field.type_id = resolve_diagnostic_type_to_type_id_checked(
+                        &resolved_field.diagnostic_type,
                         type_resolution_context.type_environment,
-                        resolved_field.value.span,
+                        resolved_field.binding_span,
                     )?;
 
                     resolved_fields.push(resolved_field);

@@ -21,7 +21,6 @@ use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
     ModuleRootRole, StableModuleOriginIdentity, StablePackageIdentity,
 };
-use moth_lexical::numeric::profile::NumericProfile;
 use std::path::PathBuf;
 
 /// Assemble one success-only project compilation from bare test modules.
@@ -72,7 +71,6 @@ pub(crate) fn project_compilation_from_test_modules_with_resources(
         project,
         CompletedSourcePackageRegistry::new(),
         resource_inputs,
-        NumericProfile::STANDARD,
     )
 }
 

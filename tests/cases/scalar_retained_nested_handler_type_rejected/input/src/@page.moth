@@ -1,0 +1,29 @@
+-- A nested handler path on a retained whole arithmetic fragment.
+--
+-- The protected `failing(pending) + 10` is retained through its unannotated
+-- argument, so the catch's I32 success slot is still provisional while the
+-- handler body parses. The nested runtime `if` keeps both branches as live
+-- validation paths, and its `then` groups belong to the catch's own slot
+-- rather than an unrelated nested receiver. Completion must validate every
+-- nested group against the resolved I32 slot: the I32 branch passes, and the
+-- concrete String fallback reports the ordinary authored type diagnostic
+-- (MOTH-TYPE-0001) instead of reaching HIR as a mismatched write into the I32
+-- result local.
+--
+-- `pending` stays unannotated so the origin is genuinely pending and the catch
+-- fragment is retained rather than a concrete equivalent.
+
+failing |value I32| -> I32, Error!:
+    return! Error("nested handler")
+;
+
+nested_handler |flag Bool, fallback I32| -> I32:
+    pending = 1
+    return failing(pending) + 10 catch:
+        if flag:
+            then fallback
+        else
+            then "wrong"
+        ;
+    ;
+;

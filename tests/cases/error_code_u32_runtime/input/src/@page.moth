@@ -81,7 +81,7 @@ from_text_message = from_text.message
 text_back String = cast from_text
 
 -- Core-produced code observed through a U32 addition.
-core_probe || -> Int, Error!:
+core_probe || -> I32, Error!:
     edge = timestamp_from_unix_milliseconds(253402300800000.0)
     iso = to_iso_string(edge)!
     return 0
@@ -95,8 +95,8 @@ core_probe_value = core_probe() catch |core_err|:
 core_code_plus_one = core_parse_code + 1
 
 -- Backend-generated cast code observed through a U32 addition.
-cast_probe |value F64| -> Int, Error!:
-    return cast! value
+cast_probe |value F64| -> I32, Error!:
+    return cast value
 ;
 
 backend_cast_code ~U32 = 0

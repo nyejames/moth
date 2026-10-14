@@ -1,4 +1,4 @@
-reject_unary_minus |value Uint| -> String:
+reject_unary_minus |value U32| -> String:
     result = -value
     return [result]
 ;

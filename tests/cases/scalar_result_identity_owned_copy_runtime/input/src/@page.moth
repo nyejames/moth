@@ -1,0 +1,46 @@
+-- Published result identity and authored copy mode.
+--
+-- A completed binding must publish the type its own operation computed, not the
+-- literal destination its recipe evaluated at: `same` is the Bool result of
+-- `1 is 2` and `ratio` is the F64 result of integer real division. Passing each
+-- binding through an exact Bool/F64 parameter receiver is the consumer-visible
+-- check: a raw-leaf destination type (I32) published in their place makes the
+-- receiver reject the fixture at compile time instead of asserting type counts.
+--
+-- Immediate annotated receivers materialise a raw whole literal in their own
+-- domain: F32, Dec2 and Byte stay legal where the author wrote them. The Byte
+-- value reaches output through the existing Byte-to-U8 conversion, because Byte
+-- itself is not renderable.
+--
+-- An authored owned copy keeps the target's mutable marker while staying
+-- independent of the immutable source: `target = 2` is accepted and `source`
+-- still renders 1.
+
+bool_echo |flag Bool| -> Bool:
+    return flag
+;
+
+f64_echo |value F64| -> F64:
+    return value
+;
+
+i32_echo |value I32| -> I32:
+    return value
+;
+
+same = 1 is 2
+same_value = bool_echo(same)
+
+ratio = 1 / 2
+ratio_value = f64_echo(ratio)
+
+whole F32 = 1
+money Dec2 = 1
+raw Byte = 255
+raw_number U8 = cast raw
+
+source = 1
+target ~= copy source
+target = 2
+
+[:scalar result identity same=[same_value] ratio=[ratio_value] whole=[whole] money=[money] raw=[raw_number] source=[i32_echo(source)] target=[i32_echo(target)]]

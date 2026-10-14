@@ -580,8 +580,8 @@ mod enabled {
                 source_tokens_sequence_store_capacity_bytes: totals.sequence_store_capacity_bytes,
                 transient_construction_buffer_bytes: ledger.transient_construction_buffer_bytes,
                 transient_construction_peak_bytes: ledger.transient_construction_peak_bytes,
-                // R4 removed the production FileTokens adapter. Keep this explicit field stable so
-                // the probe can prove that the cutover did not reintroduce an adapter allocation.
+                // Production has no FileTokens adapter. Keep this explicit field stable so
+                // the probe can prove that no adapter allocation is reintroduced.
                 cutover_adapter_bytes: 0,
                 donor_identity_string_tables: ledger.donor_identity_string_tables,
                 donor_identity_string_storage_bytes: ledger.donor_identity_string_storage_bytes,

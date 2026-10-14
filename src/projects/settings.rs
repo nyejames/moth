@@ -16,7 +16,6 @@ use crate::compiler_frontend::module_compilation::{
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-use moth_lexical::numeric::profile::NumericProfile;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -166,11 +165,9 @@ impl Config {
     /// Project the settings the compiler frontend consumes.
     ///
     /// WHY: the frontend must not read this configuration container. The project tool owns the
-    ///      translation, so only the template loop ceiling and the caller's boundary numeric
-    ///      profile cross the boundary; the profile is selected by the builder, not by config.
-    pub(crate) fn frontend_options(&self, numeric_profile: NumericProfile) -> FrontendOptions {
+    ///      translation, so only the template loop ceiling crosses the boundary.
+    pub(crate) fn frontend_options(&self) -> FrontendOptions {
         FrontendOptions {
-            numeric_profile,
             template_const_loop_iteration_limit: self.template_const_loop_iteration_limit,
         }
     }

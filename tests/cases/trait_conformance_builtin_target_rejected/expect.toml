@@ -4,4 +4,4 @@ entry = "."
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-RULE-0073"]
-message_contains = ["Builtin type 'Int' cannot declare user-authored trait conformance"]
+message_contains = ["Builtin type 'I32' cannot declare user-authored trait conformance"]

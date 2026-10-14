@@ -8,6 +8,8 @@
 
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
 use crate::compiler_frontend::ast::const_values::store::ConstStringValue;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::templates::doc_fragments;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
@@ -16,7 +18,6 @@ use crate::compiler_frontend::headers::parse_file_headers::TopLevelConstFragment
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
-use moth_lexical::numeric::profile::NumericProfile;
 
 use rustc_hash::FxHashMap;
 use std::cell::RefCell;
@@ -114,16 +115,18 @@ pub(crate) fn collect_const_top_level_fragments(
 /// Extracts documentation fragments from comment templates and removes the comments from the AST.
 pub(crate) fn collect_and_strip_comment_templates(
     ast_nodes: &mut [AstNode],
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     template_const_loop_iteration_limit: usize,
-    numeric_profile: NumericProfile,
     template_ir_store: Rc<RefCell<TemplateIrStore>>,
 ) -> Result<Vec<AstDocFragment>, TemplateError> {
     doc_fragments::collect_and_strip_comment_templates(
         ast_nodes,
+        expression_builder,
+        const_values,
         string_table,
         template_const_loop_iteration_limit,
-        numeric_profile,
         template_ir_store,
     )
 }

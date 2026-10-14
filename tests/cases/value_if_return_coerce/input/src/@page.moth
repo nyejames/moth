@@ -1,4 +1,4 @@
-get_float |condition Bool| -> Float:
+get_float |condition Bool| -> F64:
     return if condition then 1 else 2
 ;
 

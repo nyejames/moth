@@ -1,8 +1,8 @@
-double |value Int| -> Int:
+double |value I32| -> I32:
     return value + 2147483647
 ;
 
-take_opt |value Int?| -> Int:
+take_opt |value I32?| -> I32:
     return if value is |inner| then inner else -99
 ;
 

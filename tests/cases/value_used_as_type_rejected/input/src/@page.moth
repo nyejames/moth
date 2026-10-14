@@ -1,4 +1,4 @@
-foo || -> Int:
+foo || -> I32:
     x = 1
     y = x::Something
     return y

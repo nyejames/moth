@@ -9,7 +9,7 @@ use super::environment::TopLevelDeclarationTable;
 use super::scope_context::{ContextKind, ScopeContext};
 use super::*;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
+use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::type_resolution::validate_no_recursive_runtime_structs;
 use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, InvalidDeclarationReason};
@@ -20,6 +20,7 @@ use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use rustc_hash::FxHashMap;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -73,7 +74,7 @@ fn lookup_receiver_method_prefers_exact_source_file_before_catalog_fallback() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let method_name = string_table.intern("reset");
-    let receiver = ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Int);
+    let receiver = ReceiverKey::BuiltinScalar(BuiltinScalarReceiver::Char);
     let key = (receiver.to_owned(), method_name);
     let local_source = interned_path(&["src", "@page.moth"], &mut string_table, &mut path_fork);
     let package_source = interned_path(&["lib", "shared.moth"], &mut string_table, &mut path_fork);
@@ -225,13 +226,10 @@ fn recursive_runtime_struct_cycles_are_rejected() {
         struct_a.to_owned(),
         vec![Declaration {
             id: struct_a_field_b,
-            value: Expression::new(
-                ExpressionKind::NoValue,
-                None,
-                builtin_type_ids::NONE,
-                DataType::runtime_struct(struct_b.to_owned(), builtin_type_ids::NONE),
-                ValueMode::ImmutableOwned,
-            ),
+            type_id: builtin_type_ids::NONE,
+            diagnostic_type: DataType::runtime_struct(struct_b.to_owned(), builtin_type_ids::NONE),
+            value_mode: ValueMode::ImmutableOwned,
+            value: DeclarationValue::Absent,
             binding_span: None,
             config_qualifier: None,
         }],
@@ -240,13 +238,10 @@ fn recursive_runtime_struct_cycles_are_rejected() {
         struct_b.to_owned(),
         vec![Declaration {
             id: struct_b_field_a,
-            value: Expression::new(
-                ExpressionKind::NoValue,
-                None,
-                builtin_type_ids::NONE,
-                DataType::runtime_struct(struct_a, builtin_type_ids::NONE),
-                ValueMode::ImmutableOwned,
-            ),
+            type_id: builtin_type_ids::NONE,
+            diagnostic_type: DataType::runtime_struct(struct_a, builtin_type_ids::NONE),
+            value_mode: ValueMode::ImmutableOwned,
+            value: DeclarationValue::Absent,
             binding_span: None,
             config_qualifier: None,
         }],
@@ -283,13 +278,10 @@ fn non_recursive_runtime_structs_are_allowed() {
         struct_a,
         vec![Declaration {
             id: field_ax,
-            value: Expression::new(
-                ExpressionKind::NoValue,
-                None,
-                builtin_type_ids::INT,
-                DataType::Int,
-                ValueMode::ImmutableOwned,
-            ),
+            type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+            value_mode: ValueMode::ImmutableOwned,
+            value: DeclarationValue::Absent,
             binding_span: None,
             config_qualifier: None,
         }],

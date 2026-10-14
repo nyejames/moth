@@ -1,0 +1,9 @@
+entry = "."
+
+# HTML-only by design: the pending optional-element collection requires the JS backend, and
+# this fixture asserts exact runtime output for the retained builtin postfix path.
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "aggregate optional present=4294967296 absent=none"

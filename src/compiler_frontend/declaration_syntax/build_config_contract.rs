@@ -7,7 +7,8 @@
 
 use super::{DeclarationCursor, cursor_current_span};
 use crate::compiler_frontend::build_config::{
-    BuildInputName, BuildInputType, PrimitiveBuildInputType, PrimitiveBuildValue,
+    BuildInputName, BuildInputType, ContractValueError, DeferredNumericLiteral,
+    PrimitiveBuildInputType, PrimitiveBuildValue,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
@@ -18,16 +19,13 @@ use crate::compiler_frontend::declaration_syntax::type_syntax::{
     TypeAnnotationContext, parse_type_annotation_cursor,
 };
 use crate::compiler_frontend::headers::HeaderParseFailure;
-use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, SourceSpan};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{
     SourceTokens, TokenCursor, TokenIndex, TokenRef, TokenTag,
 };
-use moth_lexical::numeric::grammar::{NumericLiteralKind, NumericLiteralSign};
-use moth_lexical::numeric::parse::NumberLiteralErrorReason;
-use moth_lexical::numeric::parse::{materialize_normalized_float, materialize_normalized_int};
-use moth_lexical::numeric::profile::NumericProfile;
+use moth_lexical::numeric::grammar::NumericLiteralSign;
+
 /// Syntax metadata retained for a declaration carrying `#Config of T`.
 ///
 /// The declaration's semantic type remains the parsed contract type. This value only preserves
@@ -48,143 +46,16 @@ impl BuildConfigQualifierSyntax {
 /// One normalized source-owned `#Config` declaration shell.
 ///
 /// The shell is collected while header syntax is prepared, before provider interfaces or AST
-/// expression resolution exist. Its default is therefore either one materialised primitive, one
-/// retained numeric spelling whose value only materialises under a boundary profile, or the
-/// absence marker represented by `None`; no expression tree or provider identity is retained here.
+/// expression resolution exist. Its default is either one value already materialised at the
+/// declared contract type, or the absence marker represented by `None`; no expression tree or
+/// provider identity is retained here.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct SourceBuildConfigContract {
     pub(crate) name: BuildInputName,
     pub(crate) value_type: BuildInputType,
     pub(crate) required: bool,
-    pub(crate) default: Option<SourceConfigDefault>,
+    pub(crate) default: Option<PrimitiveBuildValue>,
     pub(crate) span: SourceSpan,
-}
-
-/// One `#Config` default retained from its single source-token parse.
-///
-/// WHAT: a materialised primitive for every default whose value is profile-independent, and the
-///       retained numeric spelling for a whole-number, decimal-point or exponent literal.
-/// WHY:  the header path has no boundary numeric profile, and a binary Float default must
-///       materialise directly at the destination precision: materialising at one precision and
-///       rounding to another is not the same value. Retaining the parsed spelling keeps exactly one
-///       materialisation, in the boundary fact built where the profile is known. String payloads
-///       are owned text rather than retained string-table ids because boundary facts outlive the
-///       module table they were collected from.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum SourceConfigDefault {
-    /// A default whose value does not depend on the boundary numeric profile.
-    Value(PrimitiveBuildValue),
-    /// A numeric literal default retained unmaterialised until the boundary profile is known.
-    Numeric {
-        /// Authored spelling, reported by materialisation diagnostics exactly as the author typed
-        /// it, including separators and an attached sign.
-        source_text: String,
-        /// Unsigned, separator-free digits the numeric materialisers consume.
-        normalized_text: String,
-        /// Whether the authored literal carried an attached negative sign.
-        sign: NumericLiteralSign,
-        /// Lexical shape selecting the `Int` or `Float` materialisation.
-        kind: NumericLiteralKind,
-        /// Authored span of the literal, underlining its materialisation diagnostic.
-        span: SourceSpan,
-    },
-}
-
-/// A retained source default that could not materialise under one boundary numeric profile.
-///
-/// WHAT: the authored literal spelling and span with the existing number-literal reason code.
-/// WHY:  materialisation happens where the profile is known, so the failure must reach the
-///       diagnostic lane that owns the authored source span and spelling instead of being reported
-///       at parse time.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct SourceConfigDefaultError {
-    pub(crate) text: String,
-    pub(crate) span: SourceSpan,
-    pub(crate) reason: NumberLiteralErrorReason,
-}
-
-impl SourceConfigDefault {
-    /// Retain one parsed source numeric literal as a contract's profile-dependent default.
-    pub(crate) fn retained_numeric(
-        token: &NumericLiteralToken,
-        span: SourceSpan,
-        string_table: &StringTable,
-    ) -> Self {
-        Self::Numeric {
-            source_text: string_table.resolve(token.source_text).to_owned(),
-            normalized_text: string_table.resolve(token.normalized_text).to_owned(),
-            sign: token.sign,
-            kind: token.kind,
-            span,
-        }
-    }
-
-    /// The contract primitive this default provides, known without materialising it.
-    ///
-    /// The lexical kind decides the primitive: a whole-number literal provides `Int` and a
-    /// decimal-point or exponent literal provides `Float`, exactly as their materialised values do.
-    pub(crate) fn primitive_type(&self) -> PrimitiveBuildInputType {
-        match self {
-            Self::Value(value) => value.primitive_type(),
-            Self::Numeric { kind, .. } => match kind {
-                NumericLiteralKind::WholeNumber => PrimitiveBuildInputType::Int,
-                NumericLiteralKind::DecimalPoint | NumericLiteralKind::Exponent => {
-                    PrimitiveBuildInputType::Float
-                }
-            },
-        }
-    }
-
-    /// Materialise this default under one boundary numeric profile.
-    ///
-    /// WHAT: a materialised default returns itself; a numeric default materialises from its
-    ///       normalized digits directly at the profile's `Int` width or `Float` precision.
-    /// WHY:  this is the single materialisation of a numeric default and it happens at the
-    ///       destination width, so `Int` range and `Float` finiteness are decided by the profile
-    ///       that owns them.
-    pub(crate) fn materialize(
-        &self,
-        numeric_profile: NumericProfile,
-    ) -> Result<PrimitiveBuildValue, SourceConfigDefaultError> {
-        match self {
-            Self::Value(value) => Ok(value.clone()),
-            Self::Numeric {
-                source_text,
-                normalized_text,
-                sign,
-                kind,
-                span,
-            } => {
-                let negative = matches!(sign, NumericLiteralSign::Negative);
-                let materialised = match kind {
-                    NumericLiteralKind::WholeNumber => materialize_normalized_int(
-                        normalized_text,
-                        negative,
-                        numeric_profile.int_width,
-                    )
-                    .map(PrimitiveBuildValue::Int),
-
-                    NumericLiteralKind::DecimalPoint | NumericLiteralKind::Exponent => {
-                        materialize_normalized_float(
-                            normalized_text,
-                            negative,
-                            numeric_profile.float_precision,
-                        )
-                        .and_then(|number| {
-                            PrimitiveBuildValue::float(number)
-                                .map_err(|_| NumberLiteralErrorReason::NonFiniteFloat)
-                        })
-                    }
-                };
-
-                materialised.map_err(|reason| SourceConfigDefaultError {
-                    text: source_text.clone(),
-                    span: *span,
-                    reason,
-                })
-            }
-        }
-    }
 }
 
 /// Convert one parsed type annotation into the build-input contract vocabulary.
@@ -195,17 +66,17 @@ impl SourceConfigDefault {
 pub(crate) fn build_input_type_from_parsed(parsed: &ParsedTypeRef) -> Option<BuildInputType> {
     let primitive = match parsed {
         ParsedTypeRef::BuiltinString { .. } => PrimitiveBuildInputType::String,
-        ParsedTypeRef::BuiltinInt { .. } => PrimitiveBuildInputType::Int,
-        // `Uint` stays outside the build-input domain; `#Config of Uint` keeps the
-        // existing unsupported-contract rejection.
-        ParsedTypeRef::BuiltinFloat { .. } => PrimitiveBuildInputType::Float,
+        ParsedTypeRef::BuiltinFixedScalar { scalar, .. } => {
+            PrimitiveBuildInputType::from_fixed_scalar(*scalar)?
+        }
         ParsedTypeRef::BuiltinBool { .. } => PrimitiveBuildInputType::Bool,
         ParsedTypeRef::BuiltinChar { .. } => PrimitiveBuildInputType::Char,
         ParsedTypeRef::Optional { inner, .. } => {
             let primitive = match inner.as_ref() {
                 ParsedTypeRef::BuiltinString { .. } => PrimitiveBuildInputType::String,
-                ParsedTypeRef::BuiltinInt { .. } => PrimitiveBuildInputType::Int,
-                ParsedTypeRef::BuiltinFloat { .. } => PrimitiveBuildInputType::Float,
+                ParsedTypeRef::BuiltinFixedScalar { scalar, .. } => {
+                    PrimitiveBuildInputType::from_fixed_scalar(*scalar)?
+                }
                 ParsedTypeRef::BuiltinBool { .. } => PrimitiveBuildInputType::Bool,
                 ParsedTypeRef::BuiltinChar { .. } => PrimitiveBuildInputType::Char,
                 _ => return None,
@@ -233,9 +104,6 @@ pub(crate) fn parsed_type_span(parsed: &ParsedTypeRef) -> Option<SourceSpan> {
         ParsedTypeRef::Named { span, .. }
         | ParsedTypeRef::Qualified { span, .. }
         | ParsedTypeRef::BuiltinBool { span, .. }
-        | ParsedTypeRef::BuiltinInt { span, .. }
-        | ParsedTypeRef::BuiltinUint { span, .. }
-        | ParsedTypeRef::BuiltinFloat { span, .. }
         | ParsedTypeRef::BuiltinString { span, .. }
         | ParsedTypeRef::BuiltinChar { span, .. }
         | ParsedTypeRef::BuiltinFixedScalar { span, .. }
@@ -311,12 +179,10 @@ pub(crate) fn normalize_source_build_config_contract_from_token(
                                 "source config string token is missing its payload",
                             ))
                         })?;
-                    validate_source_default_primitive(
+                    accept_source_default(
                         name,
                         value_type,
-                        SourceConfigDefault::Value(PrimitiveBuildValue::String(
-                            spelling.to_owned(),
-                        )),
+                        PrimitiveBuildValue::String(spelling.to_owned()).accept_for(value_type),
                         span,
                         string_table,
                     )
@@ -328,10 +194,10 @@ pub(crate) fn normalize_source_build_config_contract_from_token(
                             "source config bool token has a malformed payload",
                         ))
                     })?;
-                    validate_source_default_primitive(
+                    accept_source_default(
                         name,
                         value_type,
-                        SourceConfigDefault::Value(PrimitiveBuildValue::Bool(value)),
+                        PrimitiveBuildValue::Bool(value).accept_for(value_type),
                         span,
                         string_table,
                     )
@@ -343,10 +209,10 @@ pub(crate) fn normalize_source_build_config_contract_from_token(
                             "source config char token has a malformed payload",
                         ))
                     })?;
-                    validate_source_default_primitive(
+                    accept_source_default(
                         name,
                         value_type,
-                        SourceConfigDefault::Value(PrimitiveBuildValue::Char(value)),
+                        PrimitiveBuildValue::Char(value).accept_for(value_type),
                         span,
                         string_table,
                     )
@@ -368,19 +234,19 @@ pub(crate) fn normalize_source_build_config_contract_from_token(
                                 "source config numeric token is missing its payload",
                             ))
                         })?;
-                    // A numeric default stays unmaterialised: header syntax has no boundary numeric
-                    // profile, and materialising at one precision and rounding to another is not the
-                    // same value. The boundary fact materialises this spelling once, at the profile,
-                    // where an out-of-range or non-finite result becomes a number-literal diagnostic.
-                    let retained = SourceConfigDefault::retained_numeric(
-                        numeric,
-                        token.source_span(),
-                        string_table,
+                    // A numeric default materialises here, at the declared contract's exact scalar.
+                    // The literal kind decides which scalar families it can initialise, and digits
+                    // outside that scalar's range are reported at the literal span.
+                    let literal = DeferredNumericLiteral::new(
+                        string_table.resolve(numeric.source_text).to_owned(),
+                        string_table.resolve(numeric.normalized_text).to_owned(),
+                        matches!(numeric.sign, NumericLiteralSign::Negative),
+                        numeric.kind,
                     );
-                    validate_source_default_primitive(
+                    accept_source_default(
                         name,
                         value_type,
-                        retained,
+                        literal.materialise_for(value_type),
                         span,
                         string_table,
                     )
@@ -441,24 +307,35 @@ pub(crate) fn normalize_source_build_config_contract_non_primitive(
     ))
 }
 
-fn validate_source_default_primitive(
+/// Accept one header default at its declared contract, or report why that contract rejects it.
+fn accept_source_default(
     name: StringId,
     value_type: BuildInputType,
-    value: SourceConfigDefault,
+    value: Result<PrimitiveBuildValue, ContractValueError>,
     span: Option<SourceSpan>,
     string_table: &mut StringTable,
-) -> Result<(bool, Option<SourceConfigDefault>), CompilerDiagnostic> {
-    let provided = value.primitive_type();
-    if !value_type.accepts_primitive(provided) {
-        return Err(source_default_type_mismatch(
-            name,
-            value_type,
-            provided.name(),
-            span,
-            string_table,
-        ));
+) -> Result<(bool, Option<PrimitiveBuildValue>), CompilerDiagnostic> {
+    value
+        .map(|value| (false, Some(value)))
+        .map_err(|error| source_default_failure(name, value_type, error, span, string_table))
+}
+
+/// Map one contract rejection of a header default onto its user diagnostic.
+fn source_default_failure(
+    name: StringId,
+    value_type: BuildInputType,
+    error: ContractValueError,
+    span: Option<SourceSpan>,
+    string_table: &mut StringTable,
+) -> CompilerDiagnostic {
+    match error {
+        ContractValueError::TypeMismatch { provided } => {
+            source_default_type_mismatch(name, value_type, provided.name(), span, string_table)
+        }
+        ContractValueError::LiteralOutOfRange { text, reason } => {
+            CompilerDiagnostic::invalid_number_literal(string_table.intern(&text), reason, span)
+        }
     }
-    Ok((false, Some(value)))
 }
 
 fn source_default_type_mismatch(

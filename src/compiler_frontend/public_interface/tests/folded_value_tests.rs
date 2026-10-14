@@ -18,18 +18,23 @@ use super::test_support::{
     struct_origin,
 };
 use crate::compiler_frontend::ast::AstPublicInterfaceProjectionInput;
-use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::const_values::store::{
-    ConstStringPiece, ConstStringValue, ConstValueStore,
+    ConstStringPiece, ConstStringValue, ConstValueMetadata, ConstValuePayload, ConstValueStore,
+    ConstValueStoreError,
 };
 use crate::compiler_frontend::ast::expressions::expression::{
-    ChoiceConstructInput, Expression, ExpressionKind,
+    ChoiceConstructInput, CollectionExpressionType, ConstRecordState,
+};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ConstructorField, OwnedExpr,
 };
 use crate::compiler_frontend::ast::{
     ResolvedPublicTypeRoot, ResolvedPublicTypeRootKind, ResolvedPublicTypeRootTable,
 };
+use crate::compiler_frontend::canonical_type_identity::{
+    CanonicalBuiltinType, CanonicalTypeIdentity,
+};
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
 };
@@ -38,7 +43,7 @@ use crate::compiler_frontend::datatypes::ids::NominalTypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::folded_value::{
-    FiniteFloat, OwnedFoldedString, PublicFoldedValue, owned_folded_string_from_const_string,
+    OwnedFoldedString, PublicFoldedValue, owned_folded_string_from_const_string,
 };
 use crate::compiler_frontend::paths::module_resources::ModuleResourceTable;
 use crate::compiler_frontend::paths::resource_identity::{
@@ -64,6 +69,53 @@ use std::rc::Rc;
 //  Shared helpers
 // ---------------------------------------------------------------------------
 
+/// Typed expression builder and constant store for one fixture. Literal rows and the constant
+/// ids they ingest into resolve against this one store, so both must share it.
+struct ConstFixture {
+    builder: AstExpressionBuilder,
+    constants: ConstValueStore,
+}
+
+impl ConstFixture {
+    fn new() -> Self {
+        Self {
+            builder: AstExpressionBuilder::new().unwrap(),
+            constants: ConstValueStore::default(),
+        }
+    }
+
+    /// Ingest one expression into the store as a constant value, without binding it.
+    fn ingest_expr(
+        &mut self,
+        value: OwnedExpr,
+        env: &TypeEnvironment,
+    ) -> Result<crate::compiler_frontend::ast::const_values::ConstValueId, ConstValueStoreError>
+    {
+        let view = self
+            .builder
+            .view_owned(value)
+            .expect("fixture expression is a bound row");
+        self.constants.ingest_view(view, env, &mut |_| {
+            Err(CompilerError::compiler_error("folded-value fixtures contain no templates").into())
+        })
+    }
+
+    /// Ingest one module-constant initializer and bind it to its exact defining path.
+    fn bind_module_constant(
+        &mut self,
+        defining_path: PathId,
+        value: OwnedExpr,
+        env: &TypeEnvironment,
+    ) {
+        let id = self
+            .ingest_expr(value, env)
+            .expect("fixture initializer folds to a constant value");
+        self.constants
+            .bind_module_constant(defining_path, id)
+            .expect("fixture defining path binds once");
+    }
+}
+
 fn constant_root(
     name: &str,
     type_id: crate::compiler_frontend::datatypes::ids::TypeId,
@@ -87,6 +139,18 @@ fn constant_binding(name: &str) -> ExportBinding {
     )
 }
 
+/// One materialised `I32` fixture value; panics when the fixture literal is out of range.
+fn i32_value(value: i64) -> FixedScalarValue {
+    FixedScalarValue::signed(FixedScalar::I32, value).expect("I32 literal in range")
+}
+
+/// One materialised `F64` fixture value; panics when the fixture literal is not exactly
+/// representable at `F64`.
+fn f64_value(value: f64) -> FixedScalarValue {
+    FixedScalarValue::binary_float(FixedScalar::F64, value)
+        .expect("F64 fixture literal is exactly representable")
+}
+
 /// Run the draft builder over constant-only roots and bindings, returning the projected
 /// declaration records. This is the test entry point for the folded-value projection: the
 /// builder folds each public constant root's value by exact defining path during the
@@ -94,7 +158,7 @@ fn constant_binding(name: &str) -> ExportBinding {
 fn build_constant_records(
     roots: Vec<ResolvedPublicTypeRoot>,
     bindings: Vec<ExportBinding>,
-    module_constants: &[Declaration],
+    constants: &ConstValueStore,
     nominal_origins: &FxHashMap<PathId, OriginTypeId>,
     env: &TypeEnvironment,
     string_table: &StringTable,
@@ -113,7 +177,6 @@ fn build_constant_records(
         trait_evidence_environment: Some(Rc::new(TraitEvidenceEnvironment::new())),
     };
     let registry = ExternalPackageRegistry::new();
-    let const_values = ConstValueStore::from_test_declarations(module_constants.to_vec(), env)?;
     PublicInterfaceDraftBuilder::new(PublicInterfaceDraftBuilderInput {
         path_fork,
         export_seed,
@@ -124,7 +187,7 @@ fn build_constant_records(
         external_registry: &registry,
         string_table,
         generic_function_templates: &FxHashMap::default(),
-        const_values: &const_values,
+        const_values: constants,
         module_resources: None,
     })
     .build()
@@ -136,27 +199,32 @@ fn build_constant_records(
 // ---------------------------------------------------------------------------
 
 #[test]
-fn constant_record_owns_scalar_int_folded_value() {
+fn constant_record_owns_scalar_i32_folded_value() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
+    let mut fixture = ConstFixture::new();
 
     let value_path = path_fork
         .try_intern_portable_path("value", &mut string_table)
         .expect("test path fits");
-    let module_constants = vec![Declaration {
-        id: value_path,
-        value: Expression::int(42, None, ValueMode::ImmutableOwned),
-        binding_span: None,
-        config_qualifier: None,
-    }];
+    let value = fixture
+        .builder
+        .fixed_scalar(
+            &mut fixture.constants,
+            i32_value(42),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture literal builds");
+    fixture.bind_module_constant(value_path, value, &env);
 
     let root = constant_root("value", int_id, &mut string_table, &mut path_fork);
     let records = build_constant_records(
         vec![root],
         vec![constant_binding("value")],
-        &module_constants,
+        &fixture.constants,
         &FxHashMap::default(),
         &env,
         &string_table,
@@ -168,31 +236,39 @@ fn constant_record_owns_scalar_int_folded_value() {
     let PublicDeclarationSemantics::Constant(semantics) = &records[0].semantics else {
         panic!("expected constant semantics");
     };
-    assert_eq!(semantics.folded_value, PublicFoldedValue::Int(42));
+    assert_eq!(
+        semantics.folded_value,
+        PublicFoldedValue::FixedScalar(i32_value(42))
+    );
 }
 
 #[test]
-fn constant_record_owns_scalar_uint_folded_value_above_i64_max() {
+fn constant_record_owns_scalar_u64_folded_value_above_i64_max() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
-    let uint_id = env.builtins().uint;
+    let uint_id = builtin_type_ids::fixed_scalar(FixedScalar::U64);
+    let mut fixture = ConstFixture::new();
 
     let value_path = path_fork
         .try_intern_portable_path("value", &mut string_table)
         .expect("test path fits");
-    let module_constants = vec![Declaration {
-        id: value_path,
-        value: Expression::uint(u64::MAX, None, ValueMode::ImmutableOwned),
-        binding_span: None,
-        config_qualifier: None,
-    }];
+    let value = fixture
+        .builder
+        .fixed_scalar(
+            &mut fixture.constants,
+            FixedScalarValue::unsigned(FixedScalar::U64, u64::MAX).expect("U64::MAX fits U64"),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture literal builds");
+    fixture.bind_module_constant(value_path, value, &env);
 
     let root = constant_root("value", uint_id, &mut string_table, &mut path_fork);
     let records = build_constant_records(
         vec![root],
         vec![constant_binding("value")],
-        &module_constants,
+        &fixture.constants,
         &FxHashMap::default(),
         &env,
         &string_table,
@@ -206,7 +282,12 @@ fn constant_record_owns_scalar_uint_folded_value_above_i64_max() {
     };
     // A value above `i64::MAX` survives the `ConstValueStore -> PublicFoldedValue`
     // projection with its exact u64 payload, never truncated to a signed carrier.
-    assert_eq!(semantics.folded_value, PublicFoldedValue::Uint(u64::MAX));
+    assert_eq!(
+        semantics.folded_value,
+        PublicFoldedValue::FixedScalar(
+            FixedScalarValue::unsigned(FixedScalar::U64, u64::MAX).expect("U64::MAX fits U64")
+        )
+    );
 }
 
 #[test]
@@ -214,6 +295,7 @@ fn fixed_scalar_constants_project_with_exact_bits_and_scalar_identity() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
+    let mut fixture = ConstFixture::new();
 
     let u64_max =
         FixedScalarValue::unsigned(FixedScalar::U64, u64::MAX).expect("U64::MAX fits U64");
@@ -230,17 +312,21 @@ fn fixed_scalar_constants_project_with_exact_bits_and_scalar_identity() {
         ("u16_five", u16_five),
         ("byte_five", byte_five),
     ];
-    let module_constants = declarations
-        .iter()
-        .map(|(name, value)| Declaration {
-            id: path_fork
-                .try_intern_portable_path(name, &mut string_table)
-                .expect("test path fits"),
-            value: Expression::fixed_scalar(*value, None, ValueMode::ImmutableOwned),
-            binding_span: None,
-            config_qualifier: None,
-        })
-        .collect::<Vec<_>>();
+    for (name, value) in &declarations {
+        let expr = fixture
+            .builder
+            .fixed_scalar(
+                &mut fixture.constants,
+                *value,
+                None,
+                ValueMode::ImmutableOwned,
+            )
+            .expect("fixture literal builds");
+        let path = path_fork
+            .try_intern_portable_path(name, &mut string_table)
+            .expect("test path fits");
+        fixture.bind_module_constant(path, expr, &env);
+    }
     let roots = declarations
         .iter()
         .map(|(name, value)| {
@@ -260,7 +346,7 @@ fn fixed_scalar_constants_project_with_exact_bits_and_scalar_identity() {
     let records = build_constant_records(
         roots,
         bindings,
-        &module_constants,
+        &fixture.constants,
         &FxHashMap::default(),
         &env,
         &string_table,
@@ -273,6 +359,11 @@ fn fixed_scalar_constants_project_with_exact_bits_and_scalar_identity() {
         let PublicDeclarationSemantics::Constant(semantics) = &record.semantics else {
             panic!("expected constant semantics for {name}");
         };
+        assert_eq!(
+            semantics.type_identity,
+            CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::FixedScalar(expected.scalar())),
+            "projection must publish the exact canonical {name} type, not a donor-local ID",
+        );
         assert_eq!(
             semantics.folded_value,
             PublicFoldedValue::FixedScalar(*expected),
@@ -304,6 +395,9 @@ fn public_constant_record_retains_project_context_provenance() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
+    let mut fixture = ConstFixture::new();
+
     let value_path = path_fork
         .try_intern_portable_path("project_value", &mut string_table)
         .expect("test path fits");
@@ -312,25 +406,34 @@ fn public_constant_record_retains_project_context_provenance() {
         "project",
         "project_value",
     );
-    let module_constants = vec![Declaration {
-        id: value_path,
-        value: Expression::int(7, None, ValueMode::ImmutableOwned)
-            .with_synthetic_interface_provenance(SyntheticInterfaceProvenance::single(
-                member.clone(),
-            )),
-        binding_span: None,
-        config_qualifier: None,
-    }];
+    // Provenance rides on the stored constant's metadata. A decorated literal row does not
+    // carry it into ingestion, so the provenanced constant is inserted directly.
+    let value = fixture
+        .constants
+        .insert_value(
+            ConstValueMetadata {
+                synthetic_interface_provenance: SyntheticInterfaceProvenance::single(
+                    member.clone(),
+                ),
+                ..ConstValueMetadata::resolved(int_id, None, ValueMode::ImmutableOwned)
+            },
+            ConstValuePayload::FixedScalar(i32_value(7)),
+        )
+        .expect("fixture provenance constant inserts");
+    fixture
+        .constants
+        .bind_module_constant(value_path, value)
+        .expect("fixture defining path binds once");
 
     let records = build_constant_records(
         vec![constant_root(
             "project_value",
-            env.builtins().int,
+            int_id,
             &mut string_table,
             &mut path_fork,
         )],
         vec![constant_binding("project_value")],
-        &module_constants,
+        &fixture.constants,
         &FxHashMap::default(),
         &env,
         &string_table,
@@ -352,6 +455,7 @@ fn constant_record_owns_scalar_bool_and_char_folded_values() {
     let env = TypeEnvironment::new();
     let bool_id = env.builtins().bool;
     let char_id = env.builtins().char;
+    let mut fixture = ConstFixture::new();
 
     let bool_path = path_fork
         .try_intern_portable_path("flag", &mut string_table)
@@ -359,26 +463,28 @@ fn constant_record_owns_scalar_bool_and_char_folded_values() {
     let char_path = path_fork
         .try_intern_portable_path("letter", &mut string_table)
         .expect("test path fits");
-    let bool_decl = Declaration {
-        id: bool_path,
-        value: Expression::bool(true, None, ValueMode::ImmutableOwned),
-        binding_span: None,
-        config_qualifier: None,
-    };
-    let char_decl = Declaration {
-        id: char_path,
-        value: Expression::char('A', None, ValueMode::ImmutableOwned),
-        binding_span: None,
-        config_qualifier: None,
-    };
-    let module_constants = vec![bool_decl, char_decl];
+    let bool_expr = fixture
+        .builder
+        .bool(
+            &mut fixture.constants,
+            true,
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture literal builds");
+    let char_expr = fixture
+        .builder
+        .char(&mut fixture.constants, 'A', None, ValueMode::ImmutableOwned)
+        .expect("fixture literal builds");
+    fixture.bind_module_constant(bool_path, bool_expr, &env);
+    fixture.bind_module_constant(char_path, char_expr, &env);
 
     let bool_root = constant_root("flag", bool_id, &mut string_table, &mut path_fork);
     let char_root = constant_root("letter", char_id, &mut string_table, &mut path_fork);
     let records = build_constant_records(
         vec![bool_root, char_root],
         vec![constant_binding("flag"), constant_binding("letter")],
-        &module_constants,
+        &fixture.constants,
         &FxHashMap::default(),
         &env,
         &string_table,
@@ -399,27 +505,32 @@ fn constant_record_owns_scalar_bool_and_char_folded_values() {
 }
 
 #[test]
-fn constant_record_owns_scalar_float_folded_value() {
+fn constant_record_owns_scalar_f64_folded_value() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
-    let float_id = env.builtins().float;
+    let float_id = builtin_type_ids::fixed_scalar(FixedScalar::F64);
+    let mut fixture = ConstFixture::new();
 
     let value_path = path_fork
         .try_intern_portable_path("pi", &mut string_table)
         .expect("test path fits");
-    let module_constants = vec![Declaration {
-        id: value_path,
-        value: Expression::float(3.5, None, ValueMode::ImmutableOwned),
-        binding_span: None,
-        config_qualifier: None,
-    }];
+    let value = fixture
+        .builder
+        .fixed_scalar(
+            &mut fixture.constants,
+            f64_value(3.5),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture literal builds");
+    fixture.bind_module_constant(value_path, value, &env);
 
     let root = constant_root("pi", float_id, &mut string_table, &mut path_fork);
     let records = build_constant_records(
         vec![root],
         vec![constant_binding("pi")],
-        &module_constants,
+        &fixture.constants,
         &FxHashMap::default(),
         &env,
         &string_table,
@@ -432,7 +543,7 @@ fn constant_record_owns_scalar_float_folded_value() {
     };
     assert_eq!(
         semantics.folded_value,
-        PublicFoldedValue::Float(FiniteFloat::new(3.5).unwrap())
+        PublicFoldedValue::FixedScalar(f64_value(3.5))
     );
 }
 
@@ -441,23 +552,28 @@ fn constant_record_preserves_negative_zero_exact_bits() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
-    let float_id = env.builtins().float;
+    let float_id = builtin_type_ids::fixed_scalar(FixedScalar::F64);
+    let mut fixture = ConstFixture::new();
 
     let value_path = path_fork
         .try_intern_portable_path("zero", &mut string_table)
         .expect("test path fits");
-    let module_constants = vec![Declaration {
-        id: value_path,
-        value: Expression::float(-0.0, None, ValueMode::ImmutableOwned),
-        binding_span: None,
-        config_qualifier: None,
-    }];
+    let value = fixture
+        .builder
+        .fixed_scalar(
+            &mut fixture.constants,
+            f64_value(-0.0),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture literal builds");
+    fixture.bind_module_constant(value_path, value, &env);
 
     let root = constant_root("zero", float_id, &mut string_table, &mut path_fork);
     let records = build_constant_records(
         vec![root],
         vec![constant_binding("zero")],
-        &module_constants,
+        &fixture.constants,
         &FxHashMap::default(),
         &env,
         &string_table,
@@ -472,50 +588,13 @@ fn constant_record_preserves_negative_zero_exact_bits() {
     // treats -0.0 == 0.0, so exact-bit identity must distinguish them.
     assert_ne!(
         semantics.folded_value,
-        PublicFoldedValue::Float(FiniteFloat::new(0.0).unwrap()),
+        PublicFoldedValue::FixedScalar(f64_value(0.0)),
         "negative zero must remain distinct from positive zero in folded-value identity"
     );
     assert_eq!(
         semantics.folded_value,
-        PublicFoldedValue::Float(FiniteFloat::new(-0.0).unwrap()),
+        PublicFoldedValue::FixedScalar(f64_value(-0.0)),
         "negative zero must survive folded-value projection with exact bits"
-    );
-}
-
-#[test]
-fn join_rejects_non_finite_float_value_as_internal_invariant() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let env = TypeEnvironment::new();
-    let float_id = env.builtins().float;
-
-    let value_path = path_fork
-        .try_intern_portable_path("bad", &mut string_table)
-        .expect("test path fits");
-    let module_constants = vec![Declaration {
-        id: value_path,
-        // The AST constructor accepts any f64; projection must reject non-finite input.
-        value: Expression::float(f64::NAN, None, ValueMode::ImmutableOwned),
-        binding_span: None,
-        config_qualifier: None,
-    }];
-
-    let root = constant_root("bad", float_id, &mut string_table, &mut path_fork);
-    let result = build_constant_records(
-        vec![root],
-        vec![constant_binding("bad")],
-        &module_constants,
-        &FxHashMap::default(),
-        &env,
-        &string_table,
-        &path_fork,
-    );
-
-    assert!(result.is_err());
-    let message = result.unwrap_err().msg.clone();
-    assert!(
-        message.contains("non-finite"),
-        "expected a non-finite-float diagnostic, got: {message}"
     );
 }
 
@@ -525,23 +604,28 @@ fn constant_record_owns_folded_template_string_value() {
     let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
     let string_id = env.builtins().string;
+    let mut fixture = ConstFixture::new();
 
     let folded_text = string_table.intern("Hello, Moth!");
     let value_path = path_fork
         .try_intern_portable_path("heading", &mut string_table)
         .expect("test path fits");
-    let module_constants = vec![Declaration {
-        id: value_path,
-        value: Expression::string_slice(folded_text, None, ValueMode::ImmutableOwned),
-        binding_span: None,
-        config_qualifier: None,
-    }];
+    let value = fixture
+        .builder
+        .string_slice(
+            &mut fixture.constants,
+            folded_text,
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture literal builds");
+    fixture.bind_module_constant(value_path, value, &env);
 
     let root = constant_root("heading", string_id, &mut string_table, &mut path_fork);
     let records = build_constant_records(
         vec![root],
         vec![constant_binding("heading")],
-        &module_constants,
+        &fixture.constants,
         &FxHashMap::default(),
         &env,
         &string_table,
@@ -563,6 +647,7 @@ fn constant_record_owns_const_record_with_ordered_field_names_and_values() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
+    let mut fixture = ConstFixture::new();
 
     let title_path = path_fork
         .try_intern_portable_path("title", &mut string_table)
@@ -570,11 +655,8 @@ fn constant_record_owns_const_record_with_ordered_field_names_and_values() {
     let year_path = path_fork
         .try_intern_portable_path("year", &mut string_table)
         .expect("test path fits");
-    let struct_path = path_fork
-        .try_intern_portable_path("Defaults", &mut string_table)
-        .expect("test path fits");
     let string_id = env.builtins().string;
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let (_, struct_type_id) = register_struct(
         &mut env,
         &mut string_table,
@@ -596,44 +678,50 @@ fn constant_record_owns_const_record_with_ordered_field_names_and_values() {
     );
 
     let title_text = string_table.intern("Moth");
-    let fields = vec![
-        Declaration {
-            id: path_fork
-                .try_intern_portable_path("title", &mut string_table)
-                .expect("test path fits"),
-            value: Expression::string_slice(title_text, None, ValueMode::ImmutableOwned),
-            binding_span: None,
-            config_qualifier: None,
-        },
-        Declaration {
-            id: path_fork
-                .try_intern_portable_path("year", &mut string_table)
-                .expect("test path fits"),
-            value: Expression::int(2026, None, ValueMode::ImmutableOwned),
-            binding_span: None,
-            config_qualifier: None,
-        },
-    ];
-
-    let struct_instance = Expression::struct_instance(
-        struct_path,
-        fields,
-        None,
-        ValueMode::ImmutableOwned,
-        true,
-        None,
-        struct_type_id,
-    );
+    let title_expr = fixture
+        .builder
+        .string_slice(
+            &mut fixture.constants,
+            title_text,
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture literal builds");
+    let year_expr = fixture
+        .builder
+        .fixed_scalar(
+            &mut fixture.constants,
+            i32_value(2026),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture literal builds");
+    let defaults_expr = fixture
+        .builder
+        .struct_instance(
+            vec![
+                ConstructorField {
+                    name: title_path,
+                    slot: 0,
+                    value: title_expr,
+                },
+                ConstructorField {
+                    name: year_path,
+                    slot: 1,
+                    value: year_expr,
+                },
+            ],
+            struct_type_id,
+            None,
+            ValueMode::ImmutableOwned,
+            true,
+        )
+        .expect("fixture struct builds");
 
     let value_path = path_fork
         .try_intern_portable_path("defaults", &mut string_table)
         .expect("test path fits");
-    let module_constants = vec![Declaration {
-        id: value_path,
-        value: struct_instance,
-        binding_span: None,
-        config_qualifier: None,
-    }];
+    fixture.bind_module_constant(value_path, defaults_expr, &env);
 
     let struct_origin = struct_origin("Defaults");
     let nominal_origins = nominal_origins_map(
@@ -651,7 +739,7 @@ fn constant_record_owns_const_record_with_ordered_field_names_and_values() {
     let records = build_constant_records(
         vec![root],
         vec![constant_binding("defaults")],
-        &module_constants,
+        &fixture.constants,
         &nominal_origins,
         &env,
         &string_table,
@@ -672,7 +760,10 @@ fn constant_record_owns_const_record_with_ordered_field_names_and_values() {
         PublicFoldedValue::String(OwnedFoldedString::Text("Moth".to_owned()))
     );
     assert_eq!(fields[1].name, "year");
-    assert_eq!(fields[1].value, PublicFoldedValue::Int(2026));
+    assert_eq!(
+        fields[1].value,
+        PublicFoldedValue::FixedScalar(i32_value(2026))
+    );
 }
 
 #[test]
@@ -680,6 +771,7 @@ fn constant_record_owns_recursive_const_record_fields() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
+    let mut fixture = ConstFixture::new();
 
     let inner_field_path = path_fork
         .try_intern_portable_path("inner", &mut string_table)
@@ -687,14 +779,8 @@ fn constant_record_owns_recursive_const_record_fields() {
     let depth_path = path_fork
         .try_intern_portable_path("depth", &mut string_table)
         .expect("test path fits");
-    let outer_path = path_fork
-        .try_intern_portable_path("Outer", &mut string_table)
-        .expect("test path fits");
-    let inner_path = path_fork
-        .try_intern_portable_path("Inner", &mut string_table)
-        .expect("test path fits");
     let none_id = env.builtins().none;
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let (_, outer_type_id) = register_struct(
         &mut env,
         &mut string_table,
@@ -720,51 +806,48 @@ fn constant_record_owns_recursive_const_record_fields() {
         &mut path_fork,
     );
 
-    let inner_fields = vec![Declaration {
-        id: path_fork
-            .try_intern_portable_path("depth", &mut string_table)
-            .expect("test path fits"),
-        value: Expression::int(7, None, ValueMode::ImmutableOwned),
-        binding_span: None,
-        config_qualifier: None,
-    }];
-    let inner_instance = Expression::struct_instance(
-        inner_path,
-        inner_fields,
-        None,
-        ValueMode::ImmutableOwned,
-        true,
-        None,
-        inner_type_id,
-    );
-
-    let outer_fields = vec![Declaration {
-        id: path_fork
-            .try_intern_portable_path("inner", &mut string_table)
-            .expect("test path fits"),
-        value: inner_instance,
-        binding_span: None,
-        config_qualifier: None,
-    }];
-    let outer_instance = Expression::struct_instance(
-        outer_path,
-        outer_fields,
-        None,
-        ValueMode::ImmutableOwned,
-        true,
-        None,
-        outer_type_id,
-    );
+    let depth_expr = fixture
+        .builder
+        .fixed_scalar(
+            &mut fixture.constants,
+            i32_value(7),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture literal builds");
+    let inner_instance = fixture
+        .builder
+        .struct_instance(
+            vec![ConstructorField {
+                name: depth_path,
+                slot: 0,
+                value: depth_expr,
+            }],
+            inner_type_id,
+            None,
+            ValueMode::ImmutableOwned,
+            true,
+        )
+        .expect("fixture struct builds");
+    let outer_instance = fixture
+        .builder
+        .struct_instance(
+            vec![ConstructorField {
+                name: inner_field_path,
+                slot: 0,
+                value: inner_instance,
+            }],
+            outer_type_id,
+            None,
+            ValueMode::ImmutableOwned,
+            true,
+        )
+        .expect("fixture struct builds");
 
     let value_path = path_fork
         .try_intern_portable_path("nested", &mut string_table)
         .expect("test path fits");
-    let module_constants = vec![Declaration {
-        id: value_path,
-        value: outer_instance,
-        binding_span: None,
-        config_qualifier: None,
-    }];
+    fixture.bind_module_constant(value_path, outer_instance, &env);
 
     // Both nested nominals resolve to source origins: the outer constant's own type and the
     // nested field's identity both project through the same canonical projection owner.
@@ -783,7 +866,7 @@ fn constant_record_owns_recursive_const_record_fields() {
     let records = build_constant_records(
         vec![root],
         vec![constant_binding("nested")],
-        &module_constants,
+        &fixture.constants,
         &nominal_origins,
         &env,
         &string_table,
@@ -804,7 +887,10 @@ fn constant_record_owns_recursive_const_record_fields() {
     };
     assert_eq!(inner_fields.len(), 1);
     assert_eq!(inner_fields[0].name, "depth");
-    assert_eq!(inner_fields[0].value, PublicFoldedValue::Int(7));
+    assert_eq!(
+        inner_fields[0].value,
+        PublicFoldedValue::FixedScalar(i32_value(7))
+    );
 }
 
 #[test]
@@ -812,6 +898,7 @@ fn constant_record_owns_choice_with_stable_variant_name() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
+    let mut fixture = ConstFixture::new();
 
     let choice_path = path_fork
         .try_intern_portable_path("Status", &mut string_table)
@@ -837,25 +924,21 @@ fn constant_record_owns_choice_with_stable_variant_name() {
         generic_parameters: None,
     });
 
-    let choice_expr = Expression::choice_construct(ChoiceConstructInput {
-        nominal_path: choice_path,
-        tag: 1,
-        fields: vec![],
-        diagnostic_type: DataType::Inferred,
-        type_id: choice_type_id,
-        span: None,
-        value_mode: ValueMode::ImmutableOwned,
-    });
+    let choice_expr = fixture
+        .builder
+        .choice_construct(ChoiceConstructInput {
+            tag: 1,
+            fields: vec![],
+            type_id: choice_type_id,
+            span: None,
+            value_mode: ValueMode::ImmutableOwned,
+        })
+        .expect("fixture choice builds");
 
     let value_path = path_fork
         .try_intern_portable_path("state", &mut string_table)
         .expect("test path fits");
-    let module_constants = vec![Declaration {
-        id: value_path,
-        value: choice_expr,
-        binding_span: None,
-        config_qualifier: None,
-    }];
+    fixture.bind_module_constant(value_path, choice_expr, &env);
 
     let choice_origin = choice_origin("Status");
     let nominal_origins = nominal_origins_map(
@@ -868,7 +951,7 @@ fn constant_record_owns_choice_with_stable_variant_name() {
     let records = build_constant_records(
         vec![root],
         vec![constant_binding("state")],
-        &module_constants,
+        &fixture.constants,
         &nominal_origins,
         &env,
         &string_table,
@@ -896,30 +979,43 @@ fn constant_record_owns_collection_of_folded_values() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
+    let mut fixture = ConstFixture::new();
 
-    let items = vec![
-        Expression::int(10, None, ValueMode::ImmutableOwned),
-        Expression::int(20, None, ValueMode::ImmutableOwned),
-        Expression::int(30, None, ValueMode::ImmutableOwned),
-    ];
-    let collection_type_id = env.intern_collection(env.builtins().int, None);
-    let collection_expr = Expression::new(
-        ExpressionKind::Collection(items),
-        None,
-        collection_type_id,
-        DataType::Inferred,
-        ValueMode::ImmutableOwned,
-    );
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
+    let items = [10, 20, 30]
+        .into_iter()
+        .map(|value| {
+            fixture
+                .builder
+                .fixed_scalar(
+                    &mut fixture.constants,
+                    i32_value(value),
+                    None,
+                    ValueMode::ImmutableOwned,
+                )
+                .expect("fixture literal builds")
+        })
+        .collect::<Vec<_>>();
+    let collection_type_id = env.intern_collection(int_id, None);
+    let collection_expr = fixture
+        .builder
+        .collection_with_type_id(
+            items,
+            CollectionExpressionType {
+                element_type_id: int_id,
+                fixed_capacity: None,
+                collection_type_id: Some(collection_type_id),
+            },
+            &mut env,
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture collection builds");
 
     let value_path = path_fork
         .try_intern_portable_path("scores", &mut string_table)
         .expect("test path fits");
-    let module_constants = vec![Declaration {
-        id: value_path,
-        value: collection_expr,
-        binding_span: None,
-        config_qualifier: None,
-    }];
+    fixture.bind_module_constant(value_path, collection_expr, &env);
 
     let root = constant_root(
         "scores",
@@ -930,7 +1026,7 @@ fn constant_record_owns_collection_of_folded_values() {
     let records = build_constant_records(
         vec![root],
         vec![constant_binding("scores")],
-        &module_constants,
+        &fixture.constants,
         &FxHashMap::default(),
         &env,
         &string_table,
@@ -945,9 +1041,9 @@ fn constant_record_owns_collection_of_folded_values() {
         panic!("expected a folded collection");
     };
     assert_eq!(values.len(), 3);
-    assert_eq!(values[0], PublicFoldedValue::Int(10));
-    assert_eq!(values[1], PublicFoldedValue::Int(20));
-    assert_eq!(values[2], PublicFoldedValue::Int(30));
+    assert_eq!(values[0], PublicFoldedValue::FixedScalar(i32_value(10)));
+    assert_eq!(values[1], PublicFoldedValue::FixedScalar(i32_value(20)));
+    assert_eq!(values[2], PublicFoldedValue::FixedScalar(i32_value(30)));
 }
 
 // ---------------------------------------------------------------------------
@@ -959,22 +1055,29 @@ fn constant_record_owns_option_some_value() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
+    let mut fixture = ConstFixture::new();
 
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let option_type_id = env.intern_option(int_id);
 
-    let inner = Expression::int(42, None, ValueMode::ImmutableOwned);
-    let coerced = Expression::coerced(inner, option_type_id);
+    let inner = fixture
+        .builder
+        .fixed_scalar(
+            &mut fixture.constants,
+            i32_value(42),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture literal builds");
+    let coerced = fixture
+        .builder
+        .coerced(inner, option_type_id)
+        .expect("fixture coercion builds");
 
     let value_path = path_fork
         .try_intern_portable_path("maybe_value", &mut string_table)
         .expect("test path fits");
-    let module_constants = vec![Declaration {
-        id: value_path,
-        value: coerced,
-        binding_span: None,
-        config_qualifier: None,
-    }];
+    fixture.bind_module_constant(value_path, coerced, &env);
 
     let root = constant_root(
         "maybe_value",
@@ -985,7 +1088,7 @@ fn constant_record_owns_option_some_value() {
     let records = build_constant_records(
         vec![root],
         vec![constant_binding("maybe_value")],
-        &module_constants,
+        &fixture.constants,
         &FxHashMap::default(),
         &env,
         &string_table,
@@ -1002,7 +1105,10 @@ fn constant_record_owns_option_some_value() {
             semantics.folded_value
         );
     };
-    assert_eq!(inner.as_ref(), &PublicFoldedValue::Int(42));
+    assert_eq!(
+        inner.as_ref(),
+        &PublicFoldedValue::FixedScalar(i32_value(42))
+    );
 }
 
 #[test]
@@ -1010,24 +1116,34 @@ fn constant_record_owns_nested_option_some_value() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
+    let mut fixture = ConstFixture::new();
 
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let inner_option_id = env.intern_option(int_id);
     let outer_option_id = env.intern_option(inner_option_id);
 
-    let inner = Expression::int(7, None, ValueMode::ImmutableOwned);
-    let inner_option = Expression::coerced(inner, inner_option_id);
-    let outer_option = Expression::coerced(inner_option, outer_option_id);
+    let inner = fixture
+        .builder
+        .fixed_scalar(
+            &mut fixture.constants,
+            i32_value(7),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture literal builds");
+    let inner_option = fixture
+        .builder
+        .coerced(inner, inner_option_id)
+        .expect("fixture coercion builds");
+    let outer_option = fixture
+        .builder
+        .coerced(inner_option, outer_option_id)
+        .expect("fixture coercion builds");
 
     let value_path = path_fork
         .try_intern_portable_path("doubly_maybe", &mut string_table)
         .expect("test path fits");
-    let module_constants = vec![Declaration {
-        id: value_path,
-        value: outer_option,
-        binding_span: None,
-        config_qualifier: None,
-    }];
+    fixture.bind_module_constant(value_path, outer_option, &env);
 
     let root = constant_root(
         "doubly_maybe",
@@ -1038,7 +1154,7 @@ fn constant_record_owns_nested_option_some_value() {
     let records = build_constant_records(
         vec![root],
         vec![constant_binding("doubly_maybe")],
-        &module_constants,
+        &fixture.constants,
         &FxHashMap::default(),
         &env,
         &string_table,
@@ -1058,7 +1174,10 @@ fn constant_record_owns_nested_option_some_value() {
     let PublicFoldedValue::OptionSome(inner) = outer.as_ref() else {
         panic!("expected a folded inner OptionSome, got {:?}", outer);
     };
-    assert_eq!(inner.as_ref(), &PublicFoldedValue::Int(7));
+    assert_eq!(
+        inner.as_ref(),
+        &PublicFoldedValue::FixedScalar(i32_value(7))
+    );
 }
 
 #[test]
@@ -1066,30 +1185,29 @@ fn constant_record_projects_option_none_value() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
+    let mut fixture = ConstFixture::new();
 
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let option_type_id = env.intern_option(int_id);
 
-    // `none` for `Int?`. The const classifier currently rejects a standalone `none` as a
+    // `none` for `I32?`. The const classifier currently rejects a standalone `none` as a
     // module constant initializer, so this exercises the projection arm directly through the
     // builder boundary rather than the full parser path.
-    let none_expr = Expression::option_none_with_type_id(int_id, DataType::Int, &mut env, None);
+    let none_expr = fixture
+        .builder
+        .option_none_with_type_id(&mut fixture.constants, int_id, &mut env, None)
+        .expect("fixture none builds");
 
     let value_path = path_fork
         .try_intern_portable_path("absent", &mut string_table)
         .expect("test path fits");
-    let module_constants = vec![Declaration {
-        id: value_path,
-        value: none_expr,
-        binding_span: None,
-        config_qualifier: None,
-    }];
+    fixture.bind_module_constant(value_path, none_expr, &env);
 
     let root = constant_root("absent", option_type_id, &mut string_table, &mut path_fork);
     let records = build_constant_records(
         vec![root],
         vec![constant_binding("absent")],
-        &module_constants,
+        &fixture.constants,
         &FxHashMap::default(),
         &env,
         &string_table,
@@ -1112,7 +1230,8 @@ fn join_allows_two_module_constants_sharing_a_leaf_name_with_distinct_paths() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
+    let mut fixture = ConstFixture::new();
 
     // Two module constants whose last path component is the same leaf name "value" but
     // whose exact defining paths differ in the parent component. The public constant root
@@ -1130,20 +1249,27 @@ fn join_allows_two_module_constants_sharing_a_leaf_name_with_distinct_paths() {
     private_path = path_fork
         .try_intern_child(private_path, string_table.intern("value"))
         .expect("test path fits");
-    let module_constants = vec![
-        Declaration {
-            id: public_path,
-            value: Expression::int(1, None, ValueMode::ImmutableOwned),
-            binding_span: None,
-            config_qualifier: None,
-        },
-        Declaration {
-            id: private_path,
-            value: Expression::int(2, None, ValueMode::ImmutableOwned),
-            binding_span: None,
-            config_qualifier: None,
-        },
-    ];
+
+    let public_expr = fixture
+        .builder
+        .fixed_scalar(
+            &mut fixture.constants,
+            i32_value(1),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture literal builds");
+    fixture.bind_module_constant(public_path, public_expr, &env);
+    let private_expr = fixture
+        .builder
+        .fixed_scalar(
+            &mut fixture.constants,
+            i32_value(2),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture literal builds");
+    fixture.bind_module_constant(private_path, private_expr, &env);
 
     let root = ResolvedPublicTypeRoot {
         path: public_path,
@@ -1152,7 +1278,7 @@ fn join_allows_two_module_constants_sharing_a_leaf_name_with_distinct_paths() {
     let records = build_constant_records(
         vec![root],
         vec![constant_binding("value")],
-        &module_constants,
+        &fixture.constants,
         &FxHashMap::default(),
         &env,
         &string_table,
@@ -1164,7 +1290,10 @@ fn join_allows_two_module_constants_sharing_a_leaf_name_with_distinct_paths() {
         panic!("expected constant semantics");
     };
     // The root selects the exact public path, so the value is 1, not 2.
-    assert_eq!(semantics.folded_value, PublicFoldedValue::Int(1));
+    assert_eq!(
+        semantics.folded_value,
+        PublicFoldedValue::FixedScalar(i32_value(1))
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1176,7 +1305,7 @@ fn join_rejects_constant_binding_without_matching_module_constant() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     // A constant root whose defining path has no matching finalized module constant
     // declaration: the folded value cannot be projected.
@@ -1184,7 +1313,7 @@ fn join_rejects_constant_binding_without_matching_module_constant() {
     let result = build_constant_records(
         vec![root],
         vec![constant_binding("missing")],
-        &[],
+        &ConstValueStore::default(),
         &FxHashMap::default(),
         &env,
         &string_table,
@@ -1200,51 +1329,51 @@ fn join_rejects_constant_binding_without_matching_module_constant() {
 }
 
 #[test]
-fn join_rejects_duplicate_module_constant_defining_paths() {
+fn const_store_rejects_duplicate_module_constant_defining_paths() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
-    let int_id = env.builtins().int;
+    let mut fixture = ConstFixture::new();
 
     // Two module constant declarations with the exact same defining path: a silent overwrite
-    // must not happen.
+    // must not happen. The store rejects the second binding at the bind site, before any
+    // projection can observe it.
     let dup_path = path_fork
         .try_intern_portable_path("dup", &mut string_table)
         .expect("test path fits");
-    let decl = Declaration {
-        id: dup_path,
-        value: Expression::int(1, None, ValueMode::ImmutableOwned),
-        binding_span: None,
-        config_qualifier: None,
-    };
-    let duplicate_path = path_fork
-        .try_intern_portable_path("dup", &mut string_table)
-        .expect("test path fits");
-    let duplicate = Declaration {
-        id: duplicate_path,
-        value: Expression::int(2, None, ValueMode::ImmutableOwned),
-        binding_span: None,
-        config_qualifier: None,
-    };
-    let module_constants = vec![decl, duplicate];
+    let first = fixture
+        .builder
+        .fixed_scalar(
+            &mut fixture.constants,
+            i32_value(1),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture literal builds");
+    fixture.bind_module_constant(dup_path, first, &env);
 
-    let root = constant_root("dup", int_id, &mut string_table, &mut path_fork);
-    let result = build_constant_records(
-        vec![root],
-        vec![constant_binding("dup")],
-        &module_constants,
-        &FxHashMap::default(),
-        &env,
-        &string_table,
-        &path_fork,
-    );
+    let second = fixture
+        .builder
+        .fixed_scalar(
+            &mut fixture.constants,
+            i32_value(2),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture literal builds");
+    let second_id = fixture
+        .ingest_expr(second, &env)
+        .expect("fixture initializer folds to a constant value");
+    let result = fixture.constants.bind_module_constant(dup_path, second_id);
 
-    assert!(result.is_err());
-    let message = result.unwrap_err().msg.clone();
-    assert!(
-        message.contains("two finalized module constants share the defining path"),
-        "expected a duplicate-path diagnostic, got: {message}"
-    );
+    match result {
+        Err(ConstValueStoreError::Infrastructure(error)) => assert!(
+            error.msg.contains("Duplicate constant path binding."),
+            "expected a duplicate-path diagnostic, got: {}",
+            error.msg
+        ),
+        other => panic!("expected a duplicate-path infrastructure error, got {other:?}"),
+    }
 }
 
 #[test]
@@ -1252,7 +1381,7 @@ fn join_rejects_extra_constant_root_without_export_binding() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     // A public constant root whose name has no export binding: an unconsumed public fact must
     // fail deterministically rather than leak silently.
@@ -1260,7 +1389,7 @@ fn join_rejects_extra_constant_root_without_export_binding() {
     let result = build_constant_records(
         vec![orphan_root],
         vec![],
-        &[],
+        &ConstValueStore::default(),
         &FxHashMap::default(),
         &env,
         &string_table,
@@ -1276,51 +1405,39 @@ fn join_rejects_extra_constant_root_without_export_binding() {
 }
 
 #[test]
-fn join_rejects_unsupported_expression_shape_in_folded_value() {
+fn ingest_rejects_unbound_reference_in_module_constant() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
+    let mut fixture = ConstFixture::new();
 
-    let reference_expr = Expression::new(
-        ExpressionKind::Reference(
-            path_fork
-                .try_intern_portable_path("other_constant", &mut string_table)
-                .expect("test path fits"),
-        ),
-        None,
-        int_id,
-        DataType::Int,
-        ValueMode::ImmutableOwned,
-    );
-
-    let value_path = path_fork
-        .try_intern_portable_path("bad", &mut string_table)
+    // A reference to a constant with no folded binding cannot become a stored constant value.
+    // The store rejects it at ingestion, so projection never observes an unsupported shape.
+    let other_path = path_fork
+        .try_intern_portable_path("other_constant", &mut string_table)
         .expect("test path fits");
-    let module_constants = vec![Declaration {
-        id: value_path,
-        value: reference_expr,
-        binding_span: None,
-        config_qualifier: None,
-    }];
-
-    let root = constant_root("bad", int_id, &mut string_table, &mut path_fork);
-    let result = build_constant_records(
-        vec![root],
-        vec![constant_binding("bad")],
-        &module_constants,
-        &FxHashMap::default(),
-        &env,
-        &string_table,
-        &path_fork,
-    );
-
-    assert!(result.is_err());
-    let message = result.unwrap_err().msg.clone();
-    assert!(
-        message.contains("reached ConstValueStore without a folded value"),
-        "expected an unsupported-shape diagnostic, got: {message}"
-    );
+    let reference_expr = fixture
+        .builder
+        .reference_with_type_id(
+            other_path,
+            int_id,
+            None,
+            ValueMode::ImmutableOwned,
+            ConstRecordState::RuntimeValue,
+        )
+        .expect("fixture reference builds");
+    match fixture.ingest_expr(reference_expr, &env) {
+        Ok(_) => panic!("an unbound reference must not ingest as a constant value"),
+        Err(ConstValueStoreError::Infrastructure(error)) => assert!(
+            error
+                .msg
+                .contains("Constant reference has no folded binding."),
+            "expected an unbound-reference diagnostic, got: {}",
+            error.msg
+        ),
+        Err(other) => panic!("expected an unbound-reference infrastructure error, got {other:?}"),
+    }
 }
 
 #[test]
@@ -1382,75 +1499,89 @@ fn text_is_available_for_a_piece_list_that_carries_only_text() {
 
 #[test]
 fn folded_record_fields_carry_type_identity_from_field_metadata() {
-    use crate::compiler_frontend::canonical_type_identity::{
-        CanonicalBuiltinType, CanonicalTypeIdentity,
-    };
-
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
+    let mut fixture = ConstFixture::new();
 
     // A nested anonymous const record uses the compile-time-only marker type.
     let marker = env.anonymous_const_record_type();
 
-    let enabled_fields = vec![Declaration {
-        id: path_fork
-            .try_intern_portable_path("enabled", &mut string_table)
-            .expect("test path fits"),
-        value: Expression::bool(true, None, ValueMode::ImmutableOwned),
-        binding_span: None,
-        config_qualifier: None,
-    }];
-    let nested_record = Expression::new(
-        ExpressionKind::StructInstance(enabled_fields),
-        None,
-        marker,
-        DataType::None,
-        ValueMode::ImmutableOwned,
-    );
+    let enabled_path = path_fork
+        .try_intern_portable_path("enabled", &mut string_table)
+        .expect("test path fits");
+    let enabled_expr = fixture
+        .builder
+        .bool(
+            &mut fixture.constants,
+            true,
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture literal builds");
+    let nested_record = fixture
+        .builder
+        .struct_instance(
+            vec![ConstructorField {
+                name: enabled_path,
+                slot: 0,
+                value: enabled_expr,
+            }],
+            marker,
+            None,
+            ValueMode::ImmutableOwned,
+            true,
+        )
+        .expect("fixture struct builds");
 
-    let fields = vec![
-        Declaration {
-            id: path_fork
-                .try_intern_portable_path("year", &mut string_table)
-                .expect("test path fits"),
-            value: Expression::int(2026, None, ValueMode::ImmutableOwned),
-            binding_span: None,
-            config_qualifier: None,
-        },
-        Declaration {
-            id: path_fork
-                .try_intern_portable_path("flags", &mut string_table)
-                .expect("test path fits"),
-            value: nested_record,
-            binding_span: None,
-            config_qualifier: None,
-        },
-    ];
-    let record = Expression::new(
-        ExpressionKind::StructInstance(fields),
-        None,
-        marker,
-        DataType::None,
-        ValueMode::ImmutableOwned,
-    );
+    let year_path = path_fork
+        .try_intern_portable_path("year", &mut string_table)
+        .expect("test path fits");
+    let flags_path = path_fork
+        .try_intern_portable_path("flags", &mut string_table)
+        .expect("test path fits");
+    let year_expr = fixture
+        .builder
+        .fixed_scalar(
+            &mut fixture.constants,
+            i32_value(2026),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("fixture literal builds");
+    let record = fixture
+        .builder
+        .struct_instance(
+            vec![
+                ConstructorField {
+                    name: year_path,
+                    slot: 0,
+                    value: year_expr,
+                },
+                ConstructorField {
+                    name: flags_path,
+                    slot: 1,
+                    value: nested_record,
+                },
+            ],
+            marker,
+            None,
+            ValueMode::ImmutableOwned,
+            true,
+        )
+        .expect("fixture struct builds");
 
     let value_path = path_fork
         .try_intern_portable_path("meta", &mut string_table)
         .expect("test path fits");
-    let module_constants = vec![Declaration {
-        id: value_path,
-        value: record,
-        binding_span: None,
-        config_qualifier: None,
-    }];
+    fixture.bind_module_constant(value_path, record, &env);
 
     let nominal_origins = nominal_origins_map(vec![], &mut string_table, &mut path_fork);
     let root = constant_root("meta", marker, &mut string_table, &mut path_fork);
     let records = build_constant_records(
         vec![root],
         vec![constant_binding("meta")],
-        &module_constants,
+        &fixture.constants,
         &nominal_origins,
         &env,
         &string_table,
@@ -1478,7 +1609,7 @@ fn folded_record_fields_carry_type_identity_from_field_metadata() {
     assert_eq!(folded_fields[0].name, "year");
     assert_eq!(
         folded_fields[0].type_identity,
-        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)
+        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::FixedScalar(FixedScalar::I32))
     );
 
     // The nested anonymous record field projects to the payload-free marker identity.

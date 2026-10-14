@@ -1,0 +1,16 @@
+-- Two exact receivers constrain one unresolved numeric origin. The conflict
+-- is a deterministic type diagnostic naming both receiver sites, not a
+-- first-use winner and not an inserted conversion.
+receive_u32 |value U32| -> String:
+    return cast value
+;
+
+receive_i64 |value I64| -> String:
+    return cast value
+;
+
+value = 1
+first = receive_u32(value)
+second = receive_i64(value)
+
+[:unreachable]

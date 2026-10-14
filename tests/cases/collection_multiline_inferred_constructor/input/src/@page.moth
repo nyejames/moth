@@ -1,6 +1,6 @@
 Entry = |
     name String,
-    count Int,
+    count I32,
 |
 
 render_multiline_collection || -> String:

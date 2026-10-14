@@ -14,7 +14,8 @@ use crate::compiler_frontend::ast::templates::tir::ids::{
     TemplateSlotPlanId,
 };
 use crate::compiler_frontend::ast::templates::tir::node::{
-    TemplateIrNode, TemplateIrNodeKind, TemplateLoopHeaderExpressionSites,
+    RetainedControlFlowRenderUnit, RetainedNumericIntakeRole, TemplateIrNode, TemplateIrNodeKind,
+    TemplateLoopHeaderExpressionSites,
 };
 use crate::compiler_frontend::ast::templates::tir::slot_plan::convert_runtime_slot_site;
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
@@ -126,6 +127,9 @@ fn copy_tir_node_with_active_slot_plan(
                 },
                 span,
             ));
+            store
+                .replicate_pending_numeric_intakes_for_copied_node(source_node_id, node_id)
+                .map_err(TemplateError::from)?;
             Ok(node_id)
         }
 
@@ -280,6 +284,9 @@ fn copy_tir_node_with_active_slot_plan(
                 },
                 span,
             ));
+            store
+                .replicate_pending_numeric_intakes_for_copied_node(source_node_id, node_id)
+                .map_err(TemplateError::from)?;
             Ok(node_id)
         }
 
@@ -322,6 +329,9 @@ fn copy_tir_node_with_active_slot_plan(
                 },
                 span,
             ));
+            store
+                .replicate_pending_numeric_intakes_for_copied_node(source_node_id, node_id)
+                .map_err(TemplateError::from)?;
             Ok(node_id)
         }
 
@@ -332,7 +342,190 @@ fn copy_tir_node_with_active_slot_plan(
             ));
             Ok(node_id)
         }
+
+        // A copied retained position is its own document-order splice: the copy re-mints every
+        // expression site the position owns, copies the subtree its role names, and registers its
+        // own intake under the same body domain.
+        TemplateIrNodeKind::RetainedNumericIntake(role) => {
+            let copied_role = match role {
+                RetainedNumericIntakeRole::HeadExpression { expression_site } => {
+                    copy_state.record_dynamic_expression();
+
+                    let copied_site = remap_expression_site_id(store);
+                    identity_remap
+                        .expression_sites
+                        .insert(expression_site, copied_site);
+
+                    RetainedNumericIntakeRole::HeadExpression {
+                        expression_site: copied_site,
+                    }
+                }
+
+                RetainedNumericIntakeRole::ConditionalLoopCondition {
+                    header_sites,
+                    body,
+                    render_unit,
+                } => {
+                    copy_state.record_control_flow();
+                    let (copied_body, copied_render_unit) = copy_retained_control_flow_body(
+                        body,
+                        render_unit,
+                        active_slot_plan,
+                        store,
+                        copy_state,
+                        identity_remap,
+                    )?;
+
+                    RetainedNumericIntakeRole::ConditionalLoopCondition {
+                        header_sites: remap_loop_header_expression_sites(
+                            store,
+                            header_sites,
+                            identity_remap,
+                        ),
+                        body: copied_body,
+                        render_unit: copied_render_unit,
+                    }
+                }
+
+                RetainedNumericIntakeRole::LoopRange {
+                    header_sites,
+                    body,
+                    render_unit,
+                } => {
+                    copy_state.record_control_flow();
+                    let (copied_body, copied_render_unit) = copy_retained_control_flow_body(
+                        body,
+                        render_unit,
+                        active_slot_plan,
+                        store,
+                        copy_state,
+                        identity_remap,
+                    )?;
+
+                    // The copy's own range-header row and operand records register in the
+                    // replication call below, so the copy completes into its own concrete loop.
+                    RetainedNumericIntakeRole::LoopRange {
+                        header_sites: remap_loop_header_expression_sites(
+                            store,
+                            header_sites,
+                            identity_remap,
+                        ),
+                        body: copied_body,
+                        render_unit: copied_render_unit,
+                    }
+                }
+
+                RetainedNumericIntakeRole::LoopCollection {
+                    header_sites,
+                    body,
+                    render_unit,
+                } => {
+                    copy_state.record_control_flow();
+                    let (copied_body, copied_render_unit) = copy_retained_control_flow_body(
+                        body,
+                        render_unit,
+                        active_slot_plan,
+                        store,
+                        copy_state,
+                        identity_remap,
+                    )?;
+
+                    // The copy's own binding row registers in the replication call below, so the
+                    // copy completes into its own concrete loop.
+                    RetainedNumericIntakeRole::LoopCollection {
+                        header_sites: remap_loop_header_expression_sites(
+                            store,
+                            header_sites,
+                            identity_remap,
+                        ),
+                        body: copied_body,
+                        render_unit: copied_render_unit,
+                    }
+                }
+
+                RetainedNumericIntakeRole::ConditionalSelector {
+                    selector_site_id,
+                    body,
+                    kind,
+                    render_unit,
+                } => {
+                    copy_state.record_control_flow();
+                    let (copied_body, copied_render_unit) = copy_retained_control_flow_body(
+                        body,
+                        render_unit,
+                        active_slot_plan,
+                        store,
+                        copy_state,
+                        identity_remap,
+                    )?;
+
+                    // The copy's own selector row (pattern) and fragment record register in the
+                    // replication call below, so the copy completes into its own conditional.
+                    let copied_selector_site = remap_expression_site_id(store);
+                    identity_remap
+                        .expression_sites
+                        .insert(selector_site_id, copied_selector_site);
+
+                    RetainedNumericIntakeRole::ConditionalSelector {
+                        selector_site_id: copied_selector_site,
+                        body: copied_body,
+                        kind,
+                        render_unit: copied_render_unit,
+                    }
+                }
+            };
+
+            let node_id = store.push_node(TemplateIrNode::new(
+                TemplateIrNodeKind::RetainedNumericIntake(copied_role),
+                span,
+            ));
+            store
+                .replicate_pending_numeric_intakes_for_copied_node(source_node_id, node_id)
+                .map_err(TemplateError::from)?;
+            Ok(node_id)
+        }
     }
+}
+
+/// Copies a retained control-flow body and its optional prepared loop wrapper.
+fn copy_retained_control_flow_body(
+    body: TemplateIrNodeId,
+    render_unit: Option<RetainedControlFlowRenderUnit>,
+    active_slot_plan: Option<TemplateSlotPlanId>,
+    store: &mut TemplateIrStore,
+    copy_state: &mut TirCopyState,
+    identity_remap: &mut TirCopyIdentityRemap,
+) -> Result<(TemplateIrNodeId, Option<RetainedControlFlowRenderUnit>), TemplateError> {
+    copy_state.enter_depth();
+    let copied_body = copy_tir_node_with_active_slot_plan(
+        body,
+        active_slot_plan,
+        store,
+        copy_state,
+        identity_remap,
+    )?;
+
+    let copied_render_unit = match render_unit {
+        Some(RetainedControlFlowRenderUnit::Conditional) => {
+            Some(RetainedControlFlowRenderUnit::Conditional)
+        }
+        Some(RetainedControlFlowRenderUnit::Loop { aggregate_wrapper }) => {
+            let copied_aggregate_wrapper = copy_tir_node_with_active_slot_plan(
+                aggregate_wrapper,
+                active_slot_plan,
+                store,
+                copy_state,
+                identity_remap,
+            )?;
+            Some(RetainedControlFlowRenderUnit::Loop {
+                aggregate_wrapper: copied_aggregate_wrapper,
+            })
+        }
+        None => None,
+    };
+    copy_state.exit_depth();
+
+    Ok((copied_body, copied_render_unit))
 }
 
 /// Deep-copies one template entry and its root subtree, applying the active
@@ -489,7 +682,7 @@ fn remap_expression_overlay(
             identity_remap
                 .expression_sites
                 .get(site_id)
-                .map(|copied_site_id| (*copied_site_id, expression.clone()))
+                .map(|copied_site_id| (*copied_site_id, *expression))
         })
         .collect();
 

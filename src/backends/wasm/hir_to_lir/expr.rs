@@ -23,7 +23,7 @@ use crate::compiler_frontend::hir::operators::HirBinOp;
 use crate::compiler_frontend::hir::places::HirPlace;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarClass};
 use moth_lexical::numeric::precision::BinaryFloatPrecision;
-use moth_lexical::numeric::profile::{FloatPrecision, IntWidth};
+
 /// Result of lowering a single HIR expression into LIR statements and a destination local.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ExprLoweringOutput {
@@ -44,59 +44,6 @@ pub(crate) fn lower_expression(
     // This matcher is intentionally partial while Wasm support is experimental. Unsupported HIR
     // expression kinds return structured LIR transformation errors instead of panicking.
     match &expression.kind {
-        HirExpressionKind::Int(value) => {
-            let abi = lower_type_to_abi(context.module_context, expression.ty);
-            let dst = context.alloc_temp(abi);
-            match abi {
-                WasmAbiType::I32 => {
-                    let value = i32::try_from(*value).map_err(|_| {
-                        lir_transformation_error(format!(
-                            "Wasm lowering received Int value {value} outside the selected I32 profile"
-                        ))
-                    })?;
-                    statements.push(WasmLirStmt::ConstI32 { dst, value });
-                }
-                WasmAbiType::I64 => statements.push(WasmLirStmt::ConstI64 { dst, value: *value }),
-                other => {
-                    return Err(lir_transformation_error(format!(
-                        "Wasm lowering expected an integer carrier for Int, found {other:?}"
-                    )));
-                }
-            }
-            Ok(ExprLoweringOutput {
-                value: dst,
-                prefer_move: false,
-            })
-        }
-        HirExpressionKind::Uint(value) => {
-            let abi = lower_type_to_abi(context.module_context, expression.ty);
-            let dst = context.alloc_temp(abi);
-            match abi {
-                WasmAbiType::I32 => {
-                    let value = u32::try_from(*value)
-                        .map(|value| value as i32)
-                        .map_err(|_| {
-                            lir_transformation_error(format!(
-                                "Wasm lowering received Uint value {value} outside the selected I32 profile"
-                            ))
-                        })?;
-                    statements.push(WasmLirStmt::ConstI32 { dst, value });
-                }
-                WasmAbiType::I64 => statements.push(WasmLirStmt::ConstI64 {
-                    dst,
-                    value: *value as i64,
-                }),
-                other => {
-                    return Err(lir_transformation_error(format!(
-                        "Wasm lowering expected an integer carrier for Uint, found {other:?}"
-                    )));
-                }
-            }
-            Ok(ExprLoweringOutput {
-                value: dst,
-                prefer_move: false,
-            })
-        }
         HirExpressionKind::FixedScalar(value) => {
             let scalar = value.scalar();
             let abi = lower_type_to_abi(context.module_context, expression.ty);
@@ -196,40 +143,7 @@ pub(crate) fn lower_expression(
                         prefer_move: false,
                     })
                 }
-                #[cfg(test)]
-                crate::compiler_frontend::hir::expressions::HirVariantCarrier::Fallible => {
-                    let dst = context.alloc_temp(WasmAbiType::I64);
-                    statements.push(WasmLirStmt::ConstI64 {
-                        dst,
-                        value: *variant_index as i64,
-                    });
-                    Ok(ExprLoweringOutput {
-                        value: dst,
-                        prefer_move: false,
-                    })
-                }
             }
-        }
-        // HIR has already rounded `Float` to the boundary profile precision.
-        HirExpressionKind::Float(value) => {
-            let abi = lower_type_to_abi(context.module_context, expression.ty);
-            let dst = context.alloc_temp(abi);
-            match abi {
-                WasmAbiType::F32 => statements.push(WasmLirStmt::ConstF32 {
-                    dst,
-                    value: *value as f32,
-                }),
-                WasmAbiType::F64 => statements.push(WasmLirStmt::ConstF64 { dst, value: *value }),
-                other => {
-                    return Err(lir_transformation_error(format!(
-                        "Wasm lowering expected a float carrier for Float, found {other:?}"
-                    )));
-                }
-            }
-            Ok(ExprLoweringOutput {
-                value: dst,
-                prefer_move: false,
-            })
         }
         HirExpressionKind::Bool(value) => {
             let dst = context.alloc_temp(WasmAbiType::I32);
@@ -356,10 +270,6 @@ pub(crate) fn lower_expression(
         )),
         HirExpressionKind::StructConstruct { .. }
         | HirExpressionKind::Range { .. }
-        | HirExpressionKind::TupleConstruct { .. }
-        | HirExpressionKind::TupleGet { .. }
-        | HirExpressionKind::FallibleUnwrapSuccess { .. }
-        | HirExpressionKind::FallibleUnwrapError { .. }
         | HirExpressionKind::VariantPayloadGet { .. } => Err(lir_transformation_error(
             "Wasm lowering does not yet support this HIR expression",
         )),
@@ -381,12 +291,11 @@ fn lower_infallible_numeric_conversion(
             "Wasm lowering does not support Dec conversion casts",
         ));
     }
-    let profile = context.module_context.request.numeric_profile;
     let type_environment = context.module_context.type_environment;
     if source_domain == target_domain
         || expression_type(context, source_expression) != source_domain.type_id(type_environment)
         || expression_type(context, target_expression) != target_domain.type_id(type_environment)
-        || numeric_conversion_fallibility(source_domain, target_domain, profile)
+        || numeric_conversion_fallibility(source_domain, target_domain)
             != BuiltinCastFallibility::Infallible
     {
         return Err(lir_transformation_error(
@@ -394,8 +303,8 @@ fn lower_infallible_numeric_conversion(
         ));
     }
 
-    let source_precision = source_domain.binary_float_precision(profile);
-    let target_precision = target_domain.binary_float_precision(profile);
+    let source_precision = source_domain.binary_float_precision();
+    let target_precision = target_domain.binary_float_precision();
 
     let source_abi = expression_abi(context, source_expression);
     let target_abi = expression_abi(context, target_expression);
@@ -408,7 +317,7 @@ fn lower_infallible_numeric_conversion(
     }
 
     if source_domain.is_integer() && target_domain.is_integer() {
-        let Some((source_minimum, _)) = source_domain.integer_range(profile) else {
+        let Some((source_minimum, _)) = source_domain.integer_range() else {
             return Err(lir_transformation_error(
                 "Wasm integer conversion source has no canonical integer range",
             ));
@@ -429,7 +338,7 @@ fn lower_infallible_numeric_conversion(
     }
 
     if source_domain.is_integer() {
-        let Some((source_minimum, _)) = source_domain.integer_range(profile) else {
+        let Some((source_minimum, _)) = source_domain.integer_range() else {
             return Err(lir_transformation_error(
                 "Wasm integer conversion source has no canonical integer range",
             ));
@@ -510,16 +419,13 @@ fn lower_infallible_numeric_to_string(
     }
 
     let type_environment = context.module_context.type_environment;
-    let profile = context.module_context.request.numeric_profile;
     let float_precision = match source_domain {
         NumericScalar::Fixed(FixedScalar::F16 | FixedScalar::F32 | FixedScalar::F64) => {
-            source_domain.binary_float_precision(profile)
+            source_domain.binary_float_precision()
         }
         _ => None,
     };
-    let source_minimum = source_domain
-        .integer_range(profile)
-        .map(|(minimum, _)| minimum);
+    let source_minimum = source_domain.integer_range().map(|(minimum, _)| minimum);
     if (!source_domain.is_integer() && float_precision.is_none())
         || (source_domain.is_integer() && source_minimum.is_none())
         || expression_type(context, source_expression) != source_domain.type_id(type_environment)
@@ -882,25 +788,12 @@ fn scalar_comparison_types(
                     "Wasm lowering does not support Dec comparisons",
                 ));
             }
-            if matches!(
-                (lhs, rhs),
-                (NumericScalar::Int, NumericScalar::Float)
-                    | (NumericScalar::Float, NumericScalar::Int)
-            ) {
-                return Err(lir_transformation_error(
-                    "Wasm lowering received a mixed Int/Float comparison without its HIR conversion",
-                ));
-            }
             if !comparison_supported(lhs, rhs) {
                 return Err(lir_transformation_error(format!(
                     "Wasm lowering received unsupported scalar comparison {lhs:?} {op:?} {rhs:?}"
                 )));
             }
-            let profile = context.module_context.request.numeric_profile;
-            Ok(Some((
-                comparison_type(lhs, profile),
-                comparison_type(rhs, profile),
-            )))
+            Ok(Some((comparison_type(lhs), comparison_type(rhs))))
         }
         (None, None)
             if environment.fixed_scalar(lhs_type) == Some(FixedScalar::Byte)
@@ -918,23 +811,8 @@ fn scalar_comparison_types(
     }
 }
 
-fn comparison_type(
-    scalar: NumericScalar,
-    profile: moth_lexical::numeric::profile::NumericProfile,
-) -> WasmScalarComparisonType {
+fn comparison_type(scalar: NumericScalar) -> WasmScalarComparisonType {
     match scalar {
-        NumericScalar::Int => WasmScalarComparisonType::SignedInteger(match profile.int_width {
-            IntWidth::Bits32 => 32,
-            IntWidth::Bits64 => 64,
-        }),
-        NumericScalar::Uint => WasmScalarComparisonType::UnsignedInteger(match profile.int_width {
-            IntWidth::Bits32 => 32,
-            IntWidth::Bits64 => 64,
-        }),
-        NumericScalar::Float => WasmScalarComparisonType::Float(match profile.float_precision {
-            FloatPrecision::Bits32 => 32,
-            FloatPrecision::Bits64 => 64,
-        }),
         // Canonical F16 values use exact F32 carriers, which preserve their comparison semantics.
         NumericScalar::Fixed(FixedScalar::F16) => WasmScalarComparisonType::Float(32),
         NumericScalar::Fixed(scalar) => match scalar.class() {
@@ -1004,20 +882,30 @@ fn lower_string_concat_expression(
             _ => {
                 let lowered = lower_expression(context, chunk_id, statements)?;
                 let abi = expression_abi(context, chunk_id);
-                let chunk_handle = if chunk.ty
-                    == context.module_context.type_environment.builtins().int
-                {
+                let integer_chunk =
+                    NumericScalar::from_type_id(chunk.ty, context.module_context.type_environment)
+                        .filter(|scalar| scalar.is_integer());
+                let chunk_handle = if let Some(integer) = integer_chunk {
                     if !matches!(abi, WasmAbiType::I32 | WasmAbiType::I64) {
                         return Err(lir_transformation_error(format!(
-                            "Wasm lowering expected an Int carrier for string concatenation, found {abi:?}"
+                            "Wasm lowering expected an integer carrier for string concatenation, found {abi:?}"
                         )));
                     }
                     let converted =
                         context.alloc_local(None, WasmAbiType::Handle, WasmLocalRole::ValueHandle);
-                    statements.push(WasmLirStmt::StringFromI64 {
-                        dst: converted,
-                        value: lowered.value,
-                    });
+                    // The chunk's own exact domain owns the text form: signed integers keep
+                    // their sign, unsigned integers format their complete positive range.
+                    let statement = match integer.integer_range() {
+                        Some((minimum, _)) if minimum < 0 => WasmLirStmt::StringFromI64 {
+                            dst: converted,
+                            value: lowered.value,
+                        },
+                        _ => WasmLirStmt::StringFromU64 {
+                            dst: converted,
+                            value: lowered.value,
+                        },
+                    };
+                    statements.push(statement);
                     converted
                 } else {
                     match abi {

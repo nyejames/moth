@@ -7,7 +7,7 @@
 backing and no prelude alias.
 
 Canonical source semantics belong to `docs/src/docs/packages/core/time/time.mtf` and the canonical
-`Float`, `Error` and external-binding references. That reference now states the package's semantic
+numeric, `Error` and external-binding references. That reference now states the package's semantic
 contract, so this living plan records implementation strategy, the inherited defects the slice
 exposed but does not own, and coverage ownership. It cannot accept public API or semantics.
 
@@ -23,6 +23,13 @@ native result-slot/Core const-eval checkpoints land. Data-layout Phase 3 closeou
 `4cfd9d492` is accepted.
 NEXT_ACTION: none required; a Wasm lowering set is the next candidate and needs its own accepted decision
 ```
+
+The delivered numeric migration gives default numeric parameters/accessors F64 contracts.
+Historical Float evidence below retains its checkpoint meaning, not a supported type identity.
+Preserve opaque time domains, units, arithmetic range/exactness and code 304 at the read boundary.
+Shared external validation uses resolved F64 without package-specific guards.
+Safety-catch eligibility alone cannot make a fatal integrity guard recoverable.
+This cutover adds no Wasm lowering.
 
 ## Current surface
 
@@ -85,12 +92,11 @@ recovers its instant while a parsed instant need not reproduce its original text
 
 ### Finite-result boundary
 
-The shared boundary `__moth_float_validate` (builtin code 304) is applied by the single-Float success
-gate in HIR, so it fires on exactly four Time functions: `as_seconds`, `as_milliseconds`,
-`unix_seconds`, `unix_milliseconds`. Opaque-returning functions and every `Float` *argument* bypass
-it. That is why duration arithmetic overflow is contractually observable at the read rather than at
-the arithmetic: `duration_scale` can produce a host infinity, and the boundary rejects it when the
-duration is read.
+The shared boundary `__moth_float_validate` (builtin code 304) consumes resolved F64 success
+results for `as_seconds`, `as_milliseconds`, `unix_seconds` and `unix_milliseconds`.
+Opaque-returning functions bypass that result check. Duration arithmetic overflow
+remains observable at the read rather than at the arithmetic: `duration_scale`
+can produce a host infinity, and the boundary rejects it when the duration is read.
 
 ### No operator surface
 
@@ -107,7 +113,7 @@ registration hook for an operator, so all five arithmetic functions are named fu
 - Operators cannot be overloaded and no registration hook exists for one, so every arithmetic
   addition is a named function over handles rather than a syntax change.
 - The finite-result boundary is a shared language rule applied at one gate, not a package feature.
-  Extending validity to `Float` *arguments* would be a boundary decision, not a Time helper edit.
+  Extending validity to `F64` *arguments* would be a boundary decision, not a Time helper edit.
 - Binding error codes belong to the compiler-owned enum. A package-local code cannot be kept stable
   and cannot carry a `default_message`.
 - Host behaviour is not a contract. The grammar, the field rules, the truncation rule and the window
@@ -128,7 +134,7 @@ all delivered and covered.
 | # | Defect | Owner | Evidence |
 |---|---|---|---|
 | 1 | Two `catch` handlers in one function that use the same binder name fail with `MOTH-INFRA-0001` "Local 'err' is already declared in this function scope", an internal-invariant lane for legal source. The canonical catch reference makes the binding visible only inside the handler and the shadowing reference permits reuse across disjoint scopes, so sibling handlers should be free to share a name. The AST interns the binder against the parent statement scope before the handler child frame exists, and HIR allocates it with `allocate_named_local` without `with_temporary_local_bindings`, so the name also leaks for the rest of the function. Every multi-handler case in the tree avoids the shape by using distinct names, so nothing owns it. | `src/compiler_frontend/ast/statements/fallible_handling/catch_handler.rs` for the path identity, `src/compiler_frontend/hir/hir_expression/fallible/catch.rs` for the unscoped local | `catch_handler.rs:186-191`, `catch.rs:178-186`, `hir_builder.rs:795-803`; the scoped pattern already exists in `match_captures.rs:240-244` |
-| 2 | The shared `Float` boundary traps outside a fallible context, so a non-finite external result ends the program rather than returning `Error!`. That is the language-wide rule, not a Time behaviour, and the contract now states it explicitly instead of promising that nothing aborts. | the numeric boundary lane in HIR and the JS runtime | `hir_expression/numeric.rs`, `src/backends/js/runtime/numeric.rs` |
+| 2 | The shared exact F64 boundary uses a fatal integrity guard without a compatible builtin Error! route. A non-finite external result then ends the invocation rather than returning Error. Authored safety-catch eligibility changes neither route. Preserve the earlier Float-boundary observation as historical evidence of this language-wide ownership, not a package-local failure contract. | the numeric boundary lane in HIR and the JS runtime | `hir_expression/numeric.rs`, `src/backends/js/runtime/numeric.rs` |
 
 ### Canonical facts with no test owner
 
@@ -153,7 +159,7 @@ Candidates only. Nothing here is accepted API.
    the same contract instead of duplicating unspecified behaviour. It needs a target decision first.
 2. **Duration range rules.** `abs` of the most negative representable value is still unstated, and so
    is whether the arithmetic functions should saturate instead of leaving a quantity outside the
-   finite `Float` range for the read boundary to reject. The reference already states where exact
+   finite F64 range for the read boundary to reject. The reference already states where exact
    arithmetic ends and what `abs`, `clamp` and `is_negative` do with a quantity outside that range,
    so what remains is the saturation decision.
 
@@ -200,7 +206,7 @@ Primary owners:
 | Emission of the parse helper | `tests/cases/core_time_timestamp_parse_success`, the only case that pins it |
 | Rendering rejection outside the window, including the fractional edge that proves the check precedes truncation | `tests/cases/core_time_to_iso_string_out_of_range_rejected` |
 | Arithmetic values, argument order and composition | `tests/cases/core_time_duration_arithmetic_success` |
-| Arithmetic overflow: the scaled duration stays an ordinary opaque value on an infallible path, `clamp` recovers an infinite quantity into finite bounds, a quantity that is not a number survives `clamp` and `abs`, and code 304 arrives only where a still non-finite quantity is read as a `Float` | `tests/cases/core_time_duration_overflow_at_float_boundary` |
+| Arithmetic overflow: the scaled duration stays an ordinary opaque value on an infallible path, `clamp` recovers an infinite quantity into finite bounds, a quantity that is not a number survives `clamp` and `abs`, and code 304 arrives only where a still non-finite quantity is read as an `F64` | `tests/cases/core_time_duration_overflow_at_float_boundary` |
 | Namespace clause, alias selection | `tests/cases/core_time_namespace_binding_success`, `tests/cases/core_time_direct_selection_alias_success` |
 | Arity, wrong-type, removed-name, opaque-field and receiver-call rejection | `tests/cases/core_time_arity_error`, `core_time_wrong_argument_type_rejected`, `core_time_old_api_rejected`, `core_time_opaque_field_access_rejected`, `core_time_raw_method_call_rejected`, `core_time_namespace_raw_method_call_rejected` |
 | Unreachable JS-only call in an HTML-Wasm build | `tests/cases/core_time_unused_wasm_wrapper_success` |

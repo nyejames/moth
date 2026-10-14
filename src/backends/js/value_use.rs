@@ -43,8 +43,7 @@ pub(crate) enum JsValueUse {
 impl<'hir> JsEmitter<'hir> {
     /// Lower a HIR expression according to the consumption context.
     ///
-    /// WHAT: selects the correct lowering for `Load`, `Copy`, and recursive contexts
-    /// (such as tuple returns) based on how the resulting JS value will be used.
+    /// WHAT: selects the correct lowering for `Load` and `Copy` based on value consumption.
     pub(crate) fn lower_expression_for_use(
         &mut self,
         expression_id: HirValueId,
@@ -82,15 +81,6 @@ impl<'hir> JsEmitter<'hir> {
                 "__moth_clone_value(__moth_read({}))",
                 self.lower_place(place)?
             )),
-            HirExpressionKind::TupleConstruct { elements } => {
-                let lowered = hir
-                    .expressions
-                    .values(*elements)
-                    .iter()
-                    .map(|element| self.lower_moth_return_value(*element))
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok(format!("[{}]", lowered.join(", ")))
-            }
             _ => self.lower_expr(expression_id),
         }
     }

@@ -8,14 +8,19 @@
 use super::types::BranchExitSummary;
 use super::{ProducedValues, analyze_branch_exits};
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, MatchExhaustiveness, NodeKind};
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
-use crate::compiler_frontend::ast::statements::match_patterns::{MatchArm, MatchPattern};
+use crate::compiler_frontend::ast::const_values::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, ExpressionOperationView, ExpressionView,
+};
+use crate::compiler_frontend::ast::statements::match_patterns::{
+    MatchArm, MatchPattern, PatternValue,
+};
 use crate::compiler_frontend::ast::statements::value_production::completeness::validate_closed_branch_pair;
 use crate::compiler_frontend::ast::statements::value_production::types::{
     ValueBlock, ValueIfBlock,
 };
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, InvalidControlFlowStatementReason, TypeMismatchContext,
+    CompilerDiagnostic, DiagnosticPayload, InvalidControlFlowStatementReason, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::tests::ast_fixture_support::{
@@ -25,72 +30,110 @@ use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
-fn then_value(_line: i32) -> AstNode {
+/// Builder plus constant store for value-production fixtures.
+///
+/// WHY: literals need the constant store, and expression constructors need the builder.
+struct TestExpressions {
+    builder: AstExpressionBuilder,
+    constants: ConstValueStore,
+}
+
+impl TestExpressions {
+    fn new() -> Self {
+        Self {
+            builder: AstExpressionBuilder::new().unwrap(),
+            constants: ConstValueStore::default(),
+        }
+    }
+
+    /// One exact `I32` literal expression for value-production fixtures.
+    ///
+    /// WHY: an unconstrained whole literal defaults to `I32`, so fixtures model the completed
+    ///      expression their authored source produces.
+    fn int(&mut self, value: i64) -> ExprId {
+        self.builder
+            .fixed_scalar(
+                &mut self.constants,
+                FixedScalarValue::signed(FixedScalar::I32, value).expect("test literal fits I32"),
+                None,
+                ValueMode::ImmutableOwned,
+            )
+            .expect("fixture I32 literal")
+            .id()
+    }
+
+    fn bool(&mut self, value: bool) -> ExprId {
+        self.builder
+            .bool(&mut self.constants, value, None, ValueMode::ImmutableOwned)
+            .expect("fixture bool")
+            .id()
+    }
+
+    fn view(&self, id: ExprId) -> ExpressionView<'_> {
+        self.builder.view(id).expect("fixture expression view")
+    }
+}
+
+fn then_value(fx: &mut TestExpressions, _line: i32) -> AstNode {
+    let value = fx.int(1);
     node(
         NodeKind::ThenValue(ProducedValues {
-            expressions: vec![Expression::int(1, None, ValueMode::ImmutableOwned)],
+            expressions: vec![value],
             span: None,
         }),
         None,
     )
 }
 
-fn return_value(line: i32) -> AstNode {
-    node(
-        NodeKind::Return(vec![Expression::int(
-            i64::from(line),
-            None,
-            ValueMode::ImmutableOwned,
-        )]),
-        None,
-    )
+fn return_value(fx: &mut TestExpressions, line: i32) -> AstNode {
+    let value = fx.int(i64::from(line));
+    node(NodeKind::Return(vec![value]), None)
 }
 
-fn expression_statement(line: i32) -> AstNode {
-    node(
-        NodeKind::ExpressionStatement(Expression::int(
-            i64::from(line),
-            None,
-            ValueMode::ImmutableOwned,
-        )),
-        None,
-    )
+fn expression_statement(fx: &mut TestExpressions, line: i32) -> AstNode {
+    let value = fx.int(i64::from(line));
+    node(NodeKind::ExpressionStatement(value), None)
 }
 
-fn assert_statement(condition: Expression, _line: i32) -> AstNode {
-    node(
-        NodeKind::Assert {
-            condition,
-            message: Box::new(Expression::bool(true, None, ValueMode::ImmutableOwned)),
-        },
-        None,
-    )
+fn assert_statement(fx: &mut TestExpressions, condition: bool, _line: i32) -> AstNode {
+    let condition = fx.bool(condition);
+    let message = fx.bool(true);
+    node(NodeKind::Assert { condition, message }, None)
 }
 
-fn bool_if(then_body: Vec<AstNode>, else_body: Option<Vec<AstNode>>, _line: i32) -> AstNode {
+fn bool_if(
+    fx: &mut TestExpressions,
+    then_body: Vec<AstNode>,
+    else_body: Option<Vec<AstNode>>,
+    _line: i32,
+) -> AstNode {
     let branch_metadata = test_if_branch_metadata(else_body.is_some());
+    let condition = fx.bool(true);
     node(
-        NodeKind::If(
-            Expression::bool(true, None, ValueMode::ImmutableOwned),
-            then_body,
-            else_body,
-            branch_metadata,
-        ),
+        NodeKind::If(condition, then_body, else_body, branch_metadata),
         None,
     )
 }
 
-fn literal_match(arm_body: Vec<AstNode>, default: Option<Vec<AstNode>>, line: i32) -> AstNode {
+fn literal_match(
+    fx: &mut TestExpressions,
+    arm_body: Vec<AstNode>,
+    default: Option<Vec<AstNode>>,
+    line: i32,
+) -> AstNode {
+    let scrutinee = fx.int(i64::from(line));
+    let pattern_expression = fx.int(i64::from(line));
+    let pattern = MatchPattern::Literal(
+        PatternValue::from_expression(fx.view(pattern_expression))
+            .expect("fixture literal pattern"),
+    );
     node(
         NodeKind::Match {
-            scrutinee: Expression::int(i64::from(line), None, ValueMode::ImmutableOwned),
+            scrutinee,
             arms: vec![MatchArm {
-                pattern: MatchPattern::Literal(Expression::int(
-                    i64::from(line),
-                    None,
-                    ValueMode::ImmutableOwned,
-                )),
+                pattern,
                 guard: None,
                 body: arm_body,
             }],
@@ -103,11 +146,11 @@ fn literal_match(arm_body: Vec<AstNode>, default: Option<Vec<AstNode>>, line: i3
 
 #[test]
 fn branch_exits_report_direct_value_production() {
-    let summary = analyze_branch_exits(&[
-        expression_statement(1),
-        then_value(2),
-        expression_statement(3),
-    ]);
+    let mut fx = TestExpressions::new();
+    let first = expression_statement(&mut fx, 1);
+    let second = then_value(&mut fx, 2);
+    let third = expression_statement(&mut fx, 3);
+    let summary = analyze_branch_exits(&[first, second, third], &fx.builder, &fx.constants);
 
     assert_eq!(
         summary,
@@ -118,24 +161,34 @@ fn branch_exits_report_direct_value_production() {
 
 #[test]
 fn branch_exits_report_direct_termination() {
-    let summary = analyze_branch_exits(&[expression_statement(1), return_value(2), then_value(3)]);
+    let mut fx = TestExpressions::new();
+    let first = expression_statement(&mut fx, 1);
+    let second = return_value(&mut fx, 2);
+    let third = then_value(&mut fx, 3);
+    let summary = analyze_branch_exits(&[first, second, third], &fx.builder, &fx.constants);
 
     assert_eq!(summary, BranchExitSummary::TERMINATES);
 }
 
 #[test]
 fn branch_exits_report_true_fallthrough() {
-    let summary = analyze_branch_exits(&[expression_statement(1), expression_statement(2)]);
+    let mut fx = TestExpressions::new();
+    let first = expression_statement(&mut fx, 1);
+    let second = expression_statement(&mut fx, 2);
+    let summary = analyze_branch_exits(&[first, second], &fx.builder, &fx.constants);
 
     assert_eq!(summary, BranchExitSummary::FALLS_THROUGH);
 }
 
 #[test]
 fn branch_exits_union_mixed_produce_and_terminate_alternatives() {
-    let mixed_if = bool_if(vec![then_value(2)], Some(vec![return_value(3)]), 1);
+    let mut fx = TestExpressions::new();
+    let then_body = vec![then_value(&mut fx, 2)];
+    let else_body = vec![return_value(&mut fx, 3)];
+    let mixed_if = bool_if(&mut fx, then_body, Some(else_body), 1);
 
     assert_eq!(
-        analyze_branch_exits(&[mixed_if]),
+        analyze_branch_exits(&[mixed_if], &fx.builder, &fx.constants),
         BranchExitSummary {
             can_fall_through: false,
             produces_value: true,
@@ -146,10 +199,13 @@ fn branch_exits_union_mixed_produce_and_terminate_alternatives() {
 
 #[test]
 fn branch_exits_union_produce_and_fallthrough_alternatives() {
-    let mixed_if = bool_if(vec![then_value(2)], Some(vec![expression_statement(3)]), 1);
+    let mut fx = TestExpressions::new();
+    let then_body = vec![then_value(&mut fx, 2)];
+    let else_body = vec![expression_statement(&mut fx, 3)];
+    let mixed_if = bool_if(&mut fx, then_body, Some(else_body), 1);
 
     assert_eq!(
-        analyze_branch_exits(&[mixed_if]),
+        analyze_branch_exits(&[mixed_if], &fx.builder, &fx.constants),
         BranchExitSummary {
             can_fall_through: true,
             produces_value: true,
@@ -160,14 +216,13 @@ fn branch_exits_union_produce_and_fallthrough_alternatives() {
 
 #[test]
 fn branch_exits_union_terminate_and_fallthrough_alternatives() {
-    let mixed_if = bool_if(
-        vec![return_value(2)],
-        Some(vec![expression_statement(3)]),
-        1,
-    );
+    let mut fx = TestExpressions::new();
+    let then_body = vec![return_value(&mut fx, 2)];
+    let else_body = vec![expression_statement(&mut fx, 3)];
+    let mixed_if = bool_if(&mut fx, then_body, Some(else_body), 1);
 
     assert_eq!(
-        analyze_branch_exits(&[mixed_if]),
+        analyze_branch_exits(&[mixed_if], &fx.builder, &fx.constants),
         BranchExitSummary {
             can_fall_through: true,
             produces_value: false,
@@ -178,18 +233,16 @@ fn branch_exits_union_terminate_and_fallthrough_alternatives() {
 
 #[test]
 fn branch_exits_compose_nested_if_and_match() {
-    let nested = bool_if(
-        vec![literal_match(
-            vec![then_value(3)],
-            Some(vec![return_value(4)]),
-            2,
-        )],
-        Some(vec![then_value(5)]),
-        1,
-    );
+    let mut fx = TestExpressions::new();
+    let arm_body = vec![then_value(&mut fx, 3)];
+    let match_default = Some(vec![return_value(&mut fx, 4)]);
+    let inner_match = literal_match(&mut fx, arm_body, match_default, 2);
+    let outer_then = vec![inner_match];
+    let outer_else = Some(vec![then_value(&mut fx, 5)]);
+    let nested = bool_if(&mut fx, outer_then, outer_else, 1);
 
     assert_eq!(
-        analyze_branch_exits(&[nested]),
+        analyze_branch_exits(&[nested], &fx.builder, &fx.constants),
         BranchExitSummary {
             can_fall_through: false,
             produces_value: true,
@@ -200,8 +253,11 @@ fn branch_exits_compose_nested_if_and_match() {
 
 #[test]
 fn branch_exits_sequence_statements_after_partial_fallthrough() {
-    let partial_if = bool_if(vec![then_value(2)], None, 1);
-    let summary = analyze_branch_exits(&[partial_if, then_value(3)]);
+    let mut fx = TestExpressions::new();
+    let then_body = vec![then_value(&mut fx, 2)];
+    let partial_if = bool_if(&mut fx, then_body, None, 1);
+    let following = then_value(&mut fx, 3);
+    let summary = analyze_branch_exits(&[partial_if, following], &fx.builder, &fx.constants);
 
     assert_eq!(
         summary,
@@ -215,8 +271,12 @@ fn branch_exits_sequence_statements_after_partial_fallthrough() {
 
 #[test]
 fn branch_exits_ignore_statements_after_every_path_has_exited() {
-    let closed_if = bool_if(vec![then_value(2)], Some(vec![return_value(3)]), 1);
-    let summary = analyze_branch_exits(&[closed_if, expression_statement(4)]);
+    let mut fx = TestExpressions::new();
+    let then_body = vec![then_value(&mut fx, 2)];
+    let else_body = vec![return_value(&mut fx, 3)];
+    let closed_if = bool_if(&mut fx, then_body, Some(else_body), 1);
+    let following = expression_statement(&mut fx, 4);
+    let summary = analyze_branch_exits(&[closed_if, following], &fx.builder, &fx.constants);
 
     assert_eq!(
         summary,
@@ -230,27 +290,32 @@ fn branch_exits_ignore_statements_after_every_path_has_exited() {
 
 #[test]
 fn branch_exits_recurse_into_lexical_scopes() {
-    let scoped = node(
-        NodeKind::LexicalScope {
-            body: vec![then_value(2)],
-        },
-        None,
-    );
+    let mut fx = TestExpressions::new();
+    let body = vec![then_value(&mut fx, 2)];
+    let scoped = node(NodeKind::LexicalScope { body }, None);
 
-    assert_eq!(analyze_branch_exits(&[scoped]), BranchExitSummary::PRODUCES);
+    assert_eq!(
+        analyze_branch_exits(&[scoped], &fx.builder, &fx.constants),
+        BranchExitSummary::PRODUCES
+    );
 }
 
 #[test]
 fn branch_exits_require_both_if_paths_to_exit() {
-    let producing_if = bool_if(vec![then_value(2)], Some(vec![then_value(3)]), 1);
-    let fallthrough_if = bool_if(vec![then_value(5)], Some(vec![expression_statement(6)]), 4);
+    let mut fx = TestExpressions::new();
+    let producing_then = vec![then_value(&mut fx, 2)];
+    let producing_else = vec![then_value(&mut fx, 3)];
+    let producing_if = bool_if(&mut fx, producing_then, Some(producing_else), 1);
+    let fallthrough_then = vec![then_value(&mut fx, 5)];
+    let fallthrough_else = vec![expression_statement(&mut fx, 6)];
+    let fallthrough_if = bool_if(&mut fx, fallthrough_then, Some(fallthrough_else), 4);
 
     assert_eq!(
-        analyze_branch_exits(&[producing_if]),
+        analyze_branch_exits(&[producing_if], &fx.builder, &fx.constants),
         BranchExitSummary::PRODUCES
     );
     assert_eq!(
-        analyze_branch_exits(&[fallthrough_if]),
+        analyze_branch_exits(&[fallthrough_if], &fx.builder, &fx.constants),
         BranchExitSummary {
             can_fall_through: true,
             produces_value: true,
@@ -261,15 +326,20 @@ fn branch_exits_require_both_if_paths_to_exit() {
 
 #[test]
 fn branch_exits_combine_match_arms_and_default() {
-    let producing_match = literal_match(vec![then_value(3)], Some(vec![then_value(4)]), 1);
-    let mixed_match = literal_match(vec![then_value(7)], Some(vec![return_value(8)]), 5);
+    let mut fx = TestExpressions::new();
+    let producing_arm = vec![then_value(&mut fx, 3)];
+    let producing_default = Some(vec![then_value(&mut fx, 4)]);
+    let producing_match = literal_match(&mut fx, producing_arm, producing_default, 1);
+    let mixed_arm = vec![then_value(&mut fx, 7)];
+    let mixed_default = Some(vec![return_value(&mut fx, 8)]);
+    let mixed_match = literal_match(&mut fx, mixed_arm, mixed_default, 5);
 
     assert_eq!(
-        analyze_branch_exits(&[producing_match]),
+        analyze_branch_exits(&[producing_match], &fx.builder, &fx.constants),
         BranchExitSummary::PRODUCES
     );
     assert_eq!(
-        analyze_branch_exits(&[mixed_match]),
+        analyze_branch_exits(&[mixed_match], &fx.builder, &fx.constants),
         BranchExitSummary {
             can_fall_through: false,
             produces_value: true,
@@ -281,54 +351,40 @@ fn branch_exits_combine_match_arms_and_default() {
 
 #[test]
 fn branch_exits_report_assert_false_as_terminal() {
-    let summary = analyze_branch_exits(&[
-        expression_statement(1),
-        assert_statement(Expression::bool(false, None, ValueMode::ImmutableOwned), 2),
-        then_value(3),
-    ]);
+    let mut fx = TestExpressions::new();
+    let first = expression_statement(&mut fx, 1);
+    let assertion = assert_statement(&mut fx, false, 2);
+    let third = then_value(&mut fx, 3);
+    let summary = analyze_branch_exits(&[first, assertion, third], &fx.builder, &fx.constants);
 
     assert_eq!(summary, BranchExitSummary::TERMINATES);
 }
 
 #[test]
 fn branch_exits_do_not_treat_passing_assert_as_terminal() {
-    let summary = analyze_branch_exits(&[assert_statement(
-        Expression::bool(true, None, ValueMode::ImmutableOwned),
-        1,
-    )]);
+    let mut fx = TestExpressions::new();
+    let assertion = assert_statement(&mut fx, true, 1);
+    let summary = analyze_branch_exits(&[assertion], &fx.builder, &fx.constants);
 
     assert_eq!(summary, BranchExitSummary::FALLS_THROUGH);
 }
 
 #[test]
 fn branch_exits_combine_assert_false_branches_as_terminal() {
-    let terminating_if = bool_if(
-        vec![assert_statement(
-            Expression::bool(false, None, ValueMode::ImmutableOwned),
-            2,
-        )],
-        Some(vec![assert_statement(
-            Expression::bool(false, None, ValueMode::ImmutableOwned),
-            3,
-        )]),
-        1,
-    );
+    let mut fx = TestExpressions::new();
+    let terminating_then = vec![assert_statement(&mut fx, false, 2)];
+    let terminating_else = Some(vec![assert_statement(&mut fx, false, 3)]);
+    let terminating_if = bool_if(&mut fx, terminating_then, terminating_else, 1);
 
-    let partial_if = bool_if(
-        vec![assert_statement(
-            Expression::bool(false, None, ValueMode::ImmutableOwned),
-            5,
-        )],
-        None,
-        4,
-    );
+    let partial_then = vec![assert_statement(&mut fx, false, 5)];
+    let partial_if = bool_if(&mut fx, partial_then, None, 4);
 
     assert_eq!(
-        analyze_branch_exits(&[terminating_if]),
+        analyze_branch_exits(&[terminating_if], &fx.builder, &fx.constants),
         BranchExitSummary::TERMINATES
     );
     assert_eq!(
-        analyze_branch_exits(&[partial_if]),
+        analyze_branch_exits(&[partial_if], &fx.builder, &fx.constants),
         BranchExitSummary {
             can_fall_through: true,
             produces_value: false,
@@ -347,25 +403,93 @@ fn inferred_block_value_if_stores_non_empty_result_type_ids() {
     let NodeKind::VariableDeclaration(declaration) = &body[0].kind else {
         panic!("expected inferred value-if declaration");
     };
-    let ExpressionKind::ValueBlock { block } = &declaration.value.kind else {
+    let initializer = ast
+        .expressions
+        .view(
+            declaration
+                .value
+                .initializer()
+                .expect("fixture initializer"),
+        )
+        .expect("fixture initializer view");
+    let ExpressionOperationView::ValueBlock(block) = initializer.operation() else {
         panic!("expected value block expression");
     };
     let ValueBlock::If(ValueIfBlock {
         result_type_ids, ..
-    }) = block.as_ref()
+    }) = block
     else {
         panic!("expected value if block");
     };
 
     assert_eq!(result_type_ids.as_slice(), [builtin_type_ids::STRING]);
-    assert_eq!(declaration.value.type_id, builtin_type_ids::STRING);
+    assert_eq!(declaration.type_id, builtin_type_ids::STRING);
+    assert_eq!(initializer.success_types(), [builtin_type_ids::STRING]);
+}
+
+#[test]
+fn mixed_multi_bind_value_block_preserves_ordered_success_shape() {
+    let (ast, path_fork, string_table) = parse_single_file_ast(
+        "choose |ready Bool| -> String, I32:\n    first, second I32 = if ready:\n        then \"ready\", 1\n    else\n        then \"waiting\", 2\n    ;\n    return first, second\n;\n",
+    );
+    let body = function_body_by_name(&ast, &path_fork, &string_table, "choose");
+    let NodeKind::MultiBind { value, .. } = &body[0].kind else {
+        panic!("expected multi-bind");
+    };
+    assert_eq!(
+        ast.expressions
+            .view(*value)
+            .expect("multi-bind value view")
+            .success_types(),
+        [
+            builtin_type_ids::STRING,
+            builtin_type_ids::fixed_scalar(FixedScalar::I32)
+        ],
+    );
+}
+
+#[test]
+fn inferred_then_rejects_zero_and_multiple_success_producers() {
+    for (producer, produced_count) in [("empty()", 0), ("pair()", 2)] {
+        let source = format!(
+            "empty ||:\n;\npair || -> String, I32:\n    return \"name\", 1\n;\nchoose |ready Bool| -> String:\n    label = if ready:\n        then {producer}\n    else\n        then \"fallback\"\n    ;\n    return label\n;\n"
+        );
+        let diagnostic = parse_single_file_ast_diagnostic(&source);
+        assert!(matches!(
+            diagnostic.payload,
+            DiagnosticPayload::InvalidValueReceiver {
+                receiver: ValueReceiverContext::Then,
+                target_count: 1,
+                produced_count: count,
+            } if count == produced_count
+        ));
+        assert_eq!(diagnostic.identity().code, "MOTH-RULE-0087");
+    }
+}
+
+#[test]
+fn inferred_nested_then_rejects_multiple_success_producer() {
+    let diagnostic = parse_single_file_ast_diagnostic(
+        "pair || -> String, I32:\n    return \"name\", 1\n;\nchoose |ready Bool, nested Bool| -> String:\n    label = if ready:\n        if nested:\n            then \"first\"\n        else\n            then pair()\n        ;\n    else\n        then \"fallback\"\n    ;\n    return label\n;\n",
+    );
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::InvalidValueReceiver {
+            receiver: ValueReceiverContext::Then,
+            target_count: 1,
+            produced_count: 2,
+        }
+    ));
 }
 
 #[test]
 fn shared_validator_rejects_all_terminating_value_if() {
+    let mut fx = TestExpressions::new();
+    let first = return_value(&mut fx, 1);
+    let second = return_value(&mut fx, 2);
     let error = validate_closed_branch_pair(
-        analyze_branch_exits(&[return_value(1)]),
-        analyze_branch_exits(&[return_value(2)]),
+        analyze_branch_exits(&[first], &fx.builder, &fx.constants),
+        analyze_branch_exits(&[second], &fx.builder, &fx.constants),
         None,
     )
     .expect_err("a value-if whose every path terminates has no value to provide");
@@ -390,26 +514,43 @@ fn inferred_block_value_if_rejects_later_nested_produced_type_conflict() {
         "choose |ready Bool, use_fallback Bool| -> String:\n    label = if ready:\n        if use_fallback:\n            then \"fallback\"\n        else\n            then 1\n        ;\n    else\n        then \"waiting\"\n    ;\n    return label\n;\n",
     );
 
-    let DiagnosticPayload::TypeMismatch { context, .. } = &diagnostic.payload else {
-        panic!(
-            "expected type mismatch from a later nested ThenValue, got {:?}",
-            diagnostic.payload
-        );
-    };
-    assert_eq!(*context, TypeMismatchContext::Declaration);
+    assert_string_then_i32_producer_conflict(&diagnostic, "a later nested ThenValue");
 }
 
 #[test]
 fn inferred_multi_bind_rejects_later_nested_produced_type_conflict() {
     let diagnostic = parse_single_file_ast_diagnostic(
-        "choose |ready Bool, use_fallback Bool| -> String, Int:\n    first, second Int = if ready:\n        if use_fallback:\n            then \"fallback\", 1\n        else\n            then 2, 1\n        ;\n    else\n        then \"waiting\", 2\n    ;\n    return first, second\n;\n",
+        "choose |ready Bool, use_fallback Bool| -> String, I32:\n    first, second I32 = if ready:\n        if use_fallback:\n            then \"fallback\", 1\n        else\n            then 2, 1\n        ;\n    else\n        then \"waiting\", 2\n    ;\n    return first, second\n;\n",
     );
 
-    let DiagnosticPayload::TypeMismatch { context, .. } = &diagnostic.payload else {
+    assert_string_then_i32_producer_conflict(&diagnostic, "a later nested multi-bind ThenValue");
+}
+
+/// Asserts that a nested producer conflict is rejected as the stable `String`-then-`I32` mismatch.
+///
+/// WHAT: checks the structured payload (expected `String` from the first produced value, found
+///       `I32` from the later nested producer) and the stable `MOTH-TYPE-0001` code.
+/// WHY: the receiving context is incidental to the rejection, so the contract is the
+///      consumer-visible types and code rather than the context label.
+fn assert_string_then_i32_producer_conflict(diagnostic: &CompilerDiagnostic, site: &str) {
+    let DiagnosticPayload::TypeMismatch {
+        expected, found, ..
+    } = &diagnostic.payload
+    else {
         panic!(
-            "expected type mismatch from a later nested multi-bind ThenValue, got {:?}",
+            "expected type mismatch from {site}, got {:?}",
             diagnostic.payload
         );
     };
-    assert_eq!(*context, TypeMismatchContext::Assignment);
+    assert_eq!(
+        *expected,
+        builtin_type_ids::STRING,
+        "the first produced String fixes the receiving type"
+    );
+    assert_eq!(
+        *found,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+        "the later nested I32 producer is the conflicting found type"
+    );
+    assert_eq!(diagnostic.identity().code, "MOTH-TYPE-0001");
 }

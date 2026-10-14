@@ -1,0 +1,12 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0073"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0073"
+reason = "invalid_trait_conformance.inferred_failure_in_infallible_cast"
+path = "input/@page.moth"
+line = 11

@@ -1,7 +1,7 @@
 //! Supporting expression type contracts shared by AST parsing, folding, and HIR lowering.
 //!
 //! WHAT: stores small semantic enums that describe constant classification,
-//! fallible-expression handling, compiler built-in casts, and temporary fallible carrier variants.
+//! fallible-expression handling and compiler built-in casts.
 //! WHY: these contracts are used across expression construction and lowering,
 //! but they are not the expression value shape itself.
 
@@ -38,8 +38,8 @@ pub enum ConstValueKind {
 
     /// Aggregate value whose fields or elements are all compile-time constants.
     ///
-    /// Covers struct instances, choice constructors, collections, ranges, and
-    /// fallible carriers when every sub-expression is itself constant.
+    /// Covers struct instances, choice constructors, collections and ranges when every
+    /// sub-expression is itself constant.
     Composite,
 
     /// Template that can be fully rendered to a constant string at compile time.
@@ -96,33 +96,22 @@ pub(crate) enum ResolvedCastEvidence {
     },
 }
 
-/// Handling form recorded on a resolved cast.
-#[derive(Clone, Debug)]
+/// Delivery context for a resolved cast; pair fallibility is selected independently.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CastHandling {
-    /// Plain `cast expression` — requires infallible evidence.
-    Infallible,
+    /// A plain source cast. Failures use the ordinary implicit delivery path.
+    Implicit,
 
-    /// `cast! expression` — propagates cast failure through the error-return slot.
-    Propagate,
-
-    /// `cast expression catch:` / `cast expression catch |err|:` — local recovery.
-    ///
-    /// WHAT: records only that the cast recovers locally. The handler body is owned by
-    /// `ValueCatchBlock` so expression variants stay bodyless.
+    /// Local recovery in the selected expression's catch context.
     Recover,
 
-    /// Compiler-inserted checked conversion at a compound-assignment store.
-    ///
-    /// WHAT: converts the promoted arithmetic result back to the destination numeric scalar.
-    /// WHY: failure follows the enclosing function's numeric failure mode (builtin `Error!`
-    ///      returns it, otherwise it traps); this is not a user-visible `cast!` expression.
+    /// Compiler-inserted conversion at a compound-assignment store.
     StoreConversion,
 }
 
-/// Bodyless fallible handling stored by expression variants.
+/// Bodyless handling retained in the expression store's handling records.
 ///
-/// WHAT: expression nodes need to know whether they propagate or recover, but recovery handler
-/// bodies are statement fragments and therefore live on `ValueCatchBlock`.
+/// Recovery statement bodies belong to `ValueCatchBlock`, not individual operation rows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FallibleExpressionHandling {
     /// The `!` operator: propagate the error upward to the caller.
@@ -160,12 +149,4 @@ pub enum FallibleHandling {
 #[derive(Clone, Debug)]
 pub struct CatchErrorBinding {
     pub error_binding: PathId,
-}
-
-/// Success or error variant for fallible carrier construction.
-#[cfg(test)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum FallibleCarrierVariant {
-    Success,
-    Error,
 }

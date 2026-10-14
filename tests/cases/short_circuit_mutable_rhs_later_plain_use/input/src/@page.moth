@@ -1,6 +1,6 @@
 -- Regression: mutable RHS short-circuit call with later plain local reuse.
 
-rhs_plain |calls ~Int| -> Bool:
+rhs_plain |calls ~I32| -> Bool:
     calls = calls + 1
     return true
 ;

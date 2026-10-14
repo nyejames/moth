@@ -1,7 +1,9 @@
 use super::*;
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
-use crate::compiler_frontend::ast::const_values::store::{ConstStringPiece, ConstStringValue};
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::const_values::store::{
+    ConstStringPiece, ConstStringValue, ConstValueStore,
+};
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ReturnSlot};
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::styles::markdown::markdown_formatter;
@@ -35,7 +37,6 @@ use crate::compiler_frontend::tests::parse_support::{
 };
 use crate::compiler_frontend::value_mode::ValueMode;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
-use moth_lexical::numeric::profile::NumericProfile;
 use rustc_hash::FxHashMap;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -63,12 +64,17 @@ fn start_function_node(
     }
 }
 
-fn push_start_runtime_fragment_node(template: Template, scope: PathId) -> AstNode {
+fn push_start_runtime_fragment_node(
+    expression_builder: &mut AstExpressionBuilder,
+    template: Template,
+    scope: PathId,
+) -> AstNode {
+    let value = expression_builder
+        .template(template, ValueMode::ImmutableOwned)
+        .expect("test template should lower to an expression")
+        .id();
     AstNode {
-        kind: NodeKind::PushStartRuntimeFragment(Expression::template(
-            template,
-            ValueMode::ImmutableOwned,
-        )),
+        kind: NodeKind::PushStartRuntimeFragment(value),
         span: None,
         scope,
     }
@@ -76,14 +82,17 @@ fn push_start_runtime_fragment_node(template: Template, scope: PathId) -> AstNod
 
 fn collect_and_strip_comment_templates_for_tests_with_store(
     ast_nodes: &mut [AstNode],
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     template_ir_store: Rc<RefCell<TemplateIrStore>>,
 ) -> Result<Vec<AstDocFragment>, TemplateError> {
     collect_and_strip_comment_templates(
         ast_nodes,
+        expression_builder,
+        const_values,
         string_table,
         DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
-        NumericProfile::STANDARD,
         template_ir_store,
     )
 }
@@ -219,6 +228,8 @@ fn collects_top_level_doc_fragments_in_source_order() {
 fn formatted_doc_template_with_direct_tir(
     text: &str,
     string_table: &mut StringTable,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
 ) -> (Template, Rc<RefCell<TemplateIrStore>>) {
     let text_id = string_table.intern(text);
     let byte_len = text.len();
@@ -257,6 +268,8 @@ fn formatted_doc_template_with_direct_tir(
 
     let formatter_result = format_tir_template(
         &mut store_handle.borrow_mut(),
+        expression_builder,
+        const_values,
         parsed_template_id,
         TemplateTirPhase::Parsed,
         context,
@@ -294,18 +307,30 @@ fn doc_fragment_folding_reads_directly_constructed_formatted_tir_root() {
         .expect("test path fits");
     let entry_scope = entry_dir.to_owned();
 
-    let (doc_template, store) =
-        formatted_doc_template_with_direct_tir("doc body", &mut string_table);
+    let mut expression_builder = AstExpressionBuilder::new().unwrap();
+    let mut const_values = ConstValueStore::default();
+    let (doc_template, store) = formatted_doc_template_with_direct_tir(
+        "doc body",
+        &mut string_table,
+        &mut expression_builder,
+        &mut const_values,
+    );
 
     let mut ast_nodes = vec![start_function_node(
         &entry_dir,
-        vec![push_start_runtime_fragment_node(doc_template, entry_scope)],
+        vec![push_start_runtime_fragment_node(
+            &mut expression_builder,
+            doc_template,
+            entry_scope,
+        )],
         &mut string_table,
         &mut path_fork,
     )];
 
     let doc_fragments = collect_and_strip_comment_templates_for_tests_with_store(
         &mut ast_nodes,
+        &mut expression_builder,
+        &mut const_values,
         &mut string_table,
         store,
     )

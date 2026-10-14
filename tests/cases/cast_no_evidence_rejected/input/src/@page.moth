@@ -1,2 +1,2 @@
 flag = true
-value Int = cast flag
+value I32 = cast flag

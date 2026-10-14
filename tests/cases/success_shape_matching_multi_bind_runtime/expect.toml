@@ -1,0 +1,10 @@
+entry = "."
+
+# HTML owns runtime ordering and once-only producer evaluation.
+# No HTML-Wasm block: this case does not expand its existing multi-result support.
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_contains_in_order = ["before-bind calls=0","inferred-bind first=10 second=20 calls=1","typed-bind first=10 second=20 calls=2","after-assignment first=20 second=10 calls=3"]
+rendered_output_contains_exactly_once = ["before-bind calls=0","inferred-bind first=10 second=20 calls=1","typed-bind first=10 second=20 calls=2","after-assignment first=20 second=10 calls=3"]

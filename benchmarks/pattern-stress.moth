@@ -44,29 +44,29 @@ Result ::
 
 Optional ::
     NoneVariant,
-    Some | value Int |,
+    Some | value I32 |,
 ;
 
 Message ::
     Text | content String |,
-    Number | value Int |,
+    Number | value I32 |,
     Flag | active Bool |,
-    Pair | first Int, second Int |,
-    Triple | a Int, b Int, c Int |,
+    Pair | first I32, second I32 |,
+    Triple | a I32, b I32, c I32 |,
 ;
 
 HttpResponse ::
-    Success | code Int, body String |,
+    Success | code I32, body String |,
     Redirect | url String |,
-    ClientError | code Int, message String |,
-    ServerError | code Int, message String |,
+    ClientError | code I32, message String |,
+    ServerError | code I32, message String |,
 ;
 
 Event ::
-    Click | x Int, y Int |,
+    Click | x I32, y I32 |,
     KeyPress | key String, ctrl Bool, shift Bool, alt Bool |,
-    Scroll | delta Float |,
-    Resize | width Int, height Int |,
+    Scroll | delta F64 |,
+    Resize | width I32, height I32 |,
 ;
 
 -- Exhaustive match on choice without else
@@ -81,7 +81,7 @@ handle_status |status Status| -> String:
     ;
 ;
 
-handle_priority |priority Priority| -> Int:
+handle_priority |priority Priority| -> I32:
     if priority is:
         Low => return 1
         Medium => return 2
@@ -115,7 +115,7 @@ handle_status_else |status Status| -> String:
 ;
 
 -- Guard expressions
-classify_number |value Int| -> String:
+classify_number |value I32| -> String:
     if value is:
         0 => return "zero"
         1 => return "one"
@@ -128,7 +128,7 @@ classify_number |value Int| -> String:
     ;
 ;
 
-classify_with_guards |value Int, enabled Bool| -> String:
+classify_with_guards |value I32, enabled Bool| -> String:
     if value is:
         0 if enabled => return "zero-enabled"
         0 => return "zero-disabled"
@@ -140,7 +140,7 @@ classify_with_guards |value Int, enabled Bool| -> String:
     ;
 ;
 
-check_range |value Int| -> String:
+check_range |value I32| -> String:
     if value is:
         < 0 => return "below-zero"
         0 => return "zero"
@@ -196,7 +196,7 @@ handle_event |event Event| -> String:
 ;
 
 -- Relational patterns
-compare_to_ten |value Int| -> String:
+compare_to_ten |value I32| -> String:
     if value is:
         < 10 => return "less than ten"
         10 => return "exactly ten"
@@ -205,7 +205,7 @@ compare_to_ten |value Int| -> String:
     ;
 ;
 
-grade_score |score Int| -> String:
+grade_score |score I32| -> String:
     if score is:
         < 0 => return "invalid"
         < 60 => return "F"
@@ -218,7 +218,7 @@ grade_score |score Int| -> String:
     ;
 ;
 
-categorize_code |value Int| -> String:
+categorize_code |value I32| -> String:
     if value is:
         < 10 => return "before-ten"
         < 20 => return "ten-to-nineteen"
@@ -229,7 +229,7 @@ categorize_code |value Int| -> String:
 ;
 
 -- Nested match expressions
-nested_match |outer Int, inner Int| -> String:
+nested_match |outer I32, inner I32| -> String:
     if outer is:
         < 5 =>
             if inner is:
@@ -252,7 +252,7 @@ nested_match |outer Int, inner Int| -> String:
 ;
 
 -- Large match (20+ arms)
-large_match |value Int| -> String:
+large_match |value I32| -> String:
     if value is:
         0 => return "zero"
         1 => return "one"
@@ -325,7 +325,7 @@ process_all |status Status, priority Priority, result Result| -> String:
 ;
 
 -- Option present-value capture
-capture_whole |value Int?| -> String:
+capture_whole |value I32?| -> String:
     if value is:
         |captured| if captured < 0 => return [: Negative: [captured]]
         |captured| => return [: Non-negative: [captured]]

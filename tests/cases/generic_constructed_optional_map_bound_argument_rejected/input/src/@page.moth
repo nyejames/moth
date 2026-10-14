@@ -1,0 +1,5 @@
+-- A typed String-keyed U64 map bound name passed into a generic MapSlot optional-entry field.
+MapSlot type T = |values {String = T?}|
+values {String = U64} = {"value" = 1}
+origin = MapSlot(values)
+[:bound-map-optional-entry-rejected]

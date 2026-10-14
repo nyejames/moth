@@ -1,21 +1,21 @@
-UserId as Int
+UserId as I32
 TicketId as I64
 
 render || -> String:
-    by_name ~{String = Int} = {"Priya" = 1}
-    by_id ~{Int = String} = {7 = "seven"}
+    by_name ~{String = I32} = {"Priya" = 1}
+    by_id ~{I32 = String} = {7 = "seven"}
     by_flag ~{Bool = String} = {true = "yes"}
     by_letter ~{Char = String} = {'a' = "letter"}
     by_alias ~{UserId = String} = {42 = "answer"}
-    by_i8 {I8 = Int} = {127 = 11}
-    by_i16 {I16 = Int} = {32767 = 12}
-    by_i32 {I32 = Int} = {2147483647 = 13}
-    by_i64 {I64 = Int} = {9223372036854775807 = 14}
-    by_u8 {U8 = Int} = {255 = 15}
-    by_u16 {U16 = Int} = {65535 = 16}
-    by_u32 {U32 = Int} = {4294967295 = 17}
-    by_u64 {U64 = Int} = {18446744073709551615 = 18}
-    by_byte {Byte = Int} = {255 = 19}
+    by_i8 {I8 = I32} = {127 = 11}
+    by_i16 {I16 = I32} = {32767 = 12}
+    by_i32 {I32 = I32} = {2147483647 = 13}
+    by_i64 {I64 = I32} = {9223372036854775807 = 14}
+    by_u8 {U8 = I32} = {255 = 15}
+    by_u16 {U16 = I32} = {65535 = 16}
+    by_u32 {U32 = I32} = {4294967295 = 17}
+    by_u64 {U64 = I32} = {18446744073709551615 = 18}
+    by_byte {Byte = I32} = {255 = 19}
     by_ticket {TicketId = String} = {9223372036854775807 = "latest"}
     i8_value = by_i8.get(127) catch:
         then 0

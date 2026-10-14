@@ -1,4 +1,4 @@
-sum |alpha Int, beta Int, gamma Int| -> Int:
+sum |alpha I32, beta I32, gamma I32| -> I32:
     return alpha + beta + gamma
 ;
 

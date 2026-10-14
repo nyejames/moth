@@ -1,0 +1,12 @@
+bounded_identity type T is CASTABLE_TO_F16 |value T| -> T:
+    return value
+;
+
+read_u64 |value U64| -> String:
+    return cast value
+;
+
+origin = bounded_identity(4294967296)
+text = read_u64(origin)
+
+[:[text]]

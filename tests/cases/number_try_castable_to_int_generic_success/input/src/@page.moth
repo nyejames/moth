@@ -1,16 +1,68 @@
-@helpers to_int
+@helpers try_to_i32, recovered_to_i32
+@source_evidence Label, DomainError, label_from_text, label_to_i32, mapped_label_to_i32
+@generic_nominal Box
 
-number_to_int |value Dec2| -> Int, Error!:
-    return to_int(value)!
+number_to_i32 |value Dec2| -> I32, Error!:
+    return try_to_i32(value)!
 ;
 
-converted = number_to_int(123.00) catch:
+converted = number_to_i32(123.00) catch:
     then -1
 ;
 fractional_error_code ~U32 = 0
-fractional = number_to_int(1.25) catch |fractional_error|:
+fractional = number_to_i32(1.25) catch |fractional_error|:
     fractional_error_code = fractional_error.code
     then -1
 ;
+assert(converted is 123)
+assert(fractional is -1)
+assert(fractional_error_code is 262)
 
-[:generic Dec TRY_CASTABLE_TO_INT [converted]/[fractional]/[fractional_error_code]]
+safe_decimal Dec2 = 123.00
+fractional_decimal Dec2 = 1.25
+recovered_value = recovered_to_i32(safe_decimal)
+recovered_fractional = recovered_to_i32(fractional_decimal)
+assert(recovered_value is 123)
+assert(recovered_fractional is -7)
+
+source_text ~String = "not an integer"
+forwarded_label Label = label_from_text(source_text)
+forwarded_error_code ~U32 = 0
+forwarded_result = label_to_i32(forwarded_label) catch |cast_error|:
+    forwarded_error_code = cast_error.code
+    then -1
+;
+assert(forwarded_result is -1)
+assert(forwarded_error_code is 200)
+recovered_label = recovered_to_i32(forwarded_label)
+assert(recovered_label is -7)
+recovered_boxed_label = recovered_to_i32(Box(forwarded_label))
+assert(recovered_boxed_label is -7)
+
+recovered_boxed_text = recovered_to_i32(Box(source_text))
+recovered_boxed_number = recovered_to_i32(Box("42"))
+assert(recovered_boxed_text is -7)
+assert(recovered_boxed_number is 42)
+recovered_nested_label = recovered_to_i32(Box(Box(forwarded_label)))
+recovered_nested_number = recovered_to_i32(Box(Box("42")))
+assert(recovered_nested_label is -7)
+assert(recovered_nested_number is 42)
+boxed_number_text String = cast recovered_boxed_number
+boxed_value_text String = cast recovered_boxed_text
+
+mapped_label Label = label_from_text(source_text)
+mapped_error_code ~U32 = 0
+mapped_result = mapped_label_to_i32(mapped_label, ~mapped_error_code) catch |domain_error|:
+    if domain_error is DomainError::Invalid:
+        then -2
+    else
+        then -3
+    ;
+;
+assert(mapped_result is -2)
+assert(mapped_error_code is 200)
+converted_text String = cast converted
+fractional_text String = cast fractional
+fractional_error_code_text String = cast fractional_error_code
+[:generic Dec TRY_CASTABLE_TO_I32 [converted_text]/[fractional_text]/[fractional_error_code_text]/[boxed_number_text]/[boxed_value_text]]
+

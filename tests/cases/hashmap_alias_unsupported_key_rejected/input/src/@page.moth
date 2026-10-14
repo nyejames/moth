@@ -1,7 +1,7 @@
 User = |
-    id Int,
+    id I32,
 |
 
 UserKey as User
 
-bad {UserKey = Int} = {}
+bad {UserKey = I32} = {}

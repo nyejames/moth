@@ -38,6 +38,7 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalCoreTraitIdentity, CanonicalTraitIdentity, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -50,6 +51,7 @@ use crate::compiler_frontend::traits::environment::{CoreTraitKind, TraitEnvironm
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 use crate::compiler_frontend::traits::ids::TraitId;
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 use rustc_hash::FxHashMap;
 
@@ -201,7 +203,7 @@ fn projects_trait_with_ordered_requirements_immutable_and_mutable_receivers() {
     let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let bool_id = env.builtins().bool;
 
     let requirements = vec![
@@ -366,7 +368,7 @@ fn projects_ordinary_builtin_and_source_nominal_types_as_concrete() {
     let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let (_, widget_id) = register_struct(
         &mut env,
         &mut string_table,
@@ -424,7 +426,7 @@ fn projects_ordinary_builtin_and_source_nominal_types_as_concrete() {
     assert_eq!(
         requirement.parameters[0].type_identity,
         TraitSurfaceTypeIdentity::Concrete(Box::new(CanonicalTypeIdentity::Builtin(
-            CanonicalBuiltinType::Int
+            CanonicalBuiltinType::FixedScalar(FixedScalar::I32),
         )))
     );
     assert!(matches!(
@@ -439,7 +441,7 @@ fn retains_value_mode_and_return_channel_facts() {
     let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
     let bool_id = env.builtins().bool;
 
     let requirements = vec![requirement(
@@ -789,7 +791,7 @@ fn rejects_trait_root_with_builtin_this_type() {
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let env = TypeEnvironment::new();
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     // A builtin int TypeId is not a GenericParameter named "This".
     let root = trait_root("Shape", int_id, vec![], &mut string_table, &mut path_fork);
@@ -1242,7 +1244,7 @@ fn builder_carries_incompatibilities_on_trait_record() {
     let mut path_fork = PathInternerFork::empty();
     let mut env = TypeEnvironment::new();
     let this_id = this_type(&mut env, &mut string_table);
-    let int_id = env.builtins().int;
+    let int_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     // Build a minimal draft where the only trait (Shape) carries one public incompatibility
     // with another source trait (Mark). The builder must surface the canonical incompatibility

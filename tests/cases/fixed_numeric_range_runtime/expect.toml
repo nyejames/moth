@@ -1,4 +1,3 @@
-numeric_profile = "Int32/Float64"
 
 [backends.html]
 mode = "success"
@@ -16,5 +15,5 @@ diagnostic_codes = ["MOTH-RULE-0064"]
 code = "MOTH-RULE-0064"
 reason = "unsupported_backend_feature.recoverable_numeric_failure"
 path = "input/@page.moth"
-line = 7
+line = 25
 column = 1

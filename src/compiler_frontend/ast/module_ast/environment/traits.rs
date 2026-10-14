@@ -14,7 +14,7 @@ use crate::compiler_frontend::ast::statements::functions::{
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::type_resolution::resolve_function_signature;
 use crate::compiler_frontend::builtins::casts::evidence::{
-    builtin_evidence_rows_for_profile, type_id_for_builtin_target,
+    builtin_evidence_rows, type_id_for_builtin_target,
 };
 use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastFallibility, BuiltinCastTarget,
@@ -162,7 +162,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     ///      then records a `CoreTraitKind::Castable` classifier so the AST
     ///      environment builder can map trait ids to their builtin target
     ///      and fallibility during evidence registration.
-    /// WHY: `cast` requires all twelve `CASTABLE_TO_*` and `TRY_CASTABLE_TO_*`
+    /// WHY: `cast` requires all thirty `CASTABLE_TO_*` and `TRY_CASTABLE_TO_*`
     ///      trait names to resolve without dependency clauses; sharing one registration
     ///      path with `DISPLAYABLE` keeps the trait environment table-driven
     ///      and prevents drift between the catalogue, the trait definitions,
@@ -231,13 +231,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
     /// Registers the automatic incompatibility pairs for core cast traits.
     ///
-    /// WHAT: after all twelve core cast traits are registered, groups their
-    ///      `TraitId`s by builtin target and records each infallible/fallible
-    ///      pair as incompatible in the trait environment.
-    /// WHY: the core cast trait table is the single source of truth for both
-    ///      the trait names and their targets; deriving the six pairs from the
-    ///      table avoids a parallel hand-written list and keeps the catalogue
-    ///      consistent.
+    /// WHAT: after all thirty core cast traits are registered, groups their `TraitId`s by
+    ///      builtin target and records each infallible/fallible pair as incompatible.
+    /// WHY: the trait table is the single source of truth; deriving the fifteen pairs from
+    ///      these rows avoids a parallel hand-written list and keeps registration consistent.
     fn register_core_cast_trait_incompatibility_pairs(trait_environment: &mut TraitEnvironment) {
         #[derive(Default)]
         struct CoreCastTraitPair {
@@ -272,10 +269,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     /// Registers the compiler-owned builtin evidence rows for every core
     /// cast trait row.
     ///
-    /// WHAT: walks the profile's trait-target builtin evidence rows and inserts one
-    ///      `TraitEvidenceDefinition` with `TraitEvidenceKind::Builtin` for
-    ///      every (source, target) row. Rejects rows whose trait id is
-    ///      missing because registration order was somehow violated.
+    /// WHAT: walks builtin evidence rows for registered cast targets and inserts
+    ///      one `TraitEvidenceDefinition` with `TraitEvidenceKind::Builtin` for each supported
+    ///      (source, target) pair. Missing trait metadata indicates an ordering invariant failure.
     /// WHY: builtin evidence must satisfy static generic-bound checks via `builtin_for`.
     pub(in crate::compiler_frontend::ast) fn register_builtin_cast_evidence(
         trait_environment: &TraitEnvironment,
@@ -283,13 +279,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         type_environment: &crate::compiler_frontend::datatypes::environment::TypeEnvironment,
         string_table: &mut StringTable,
         path_fork: &mut PathInternerFork,
-        numeric_profile: moth_lexical::numeric::profile::NumericProfile,
     ) -> Result<(), CompilerMessages> {
         use crate::compiler_frontend::traits::evidence::environment::{
             TraitEvidenceDefinition, TraitEvidenceKind,
         };
 
-        for row in builtin_evidence_rows_for_profile(numeric_profile) {
+        for row in builtin_evidence_rows() {
             let source = row.source;
             let Some(trait_kind) =
                 core_cast_trait_for_target_and_fallibility(row.target, row.fallibility)
@@ -464,11 +459,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         )?;
 
         let path_fork = self.path_fork as *const PathInternerFork;
-        let mut type_resolution_context = self.type_resolution_context_for(
-            &visibility,
-            header.tokens.source(),
-            generic_parameter_scope,
-        );
+        let mut type_resolution_context =
+            self.type_resolution_context_for(&visibility, generic_parameter_scope);
         let resolved_signature = resolve_function_signature(
             &header.declaration_path,
             &unresolved_signature,
@@ -490,7 +482,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             ));
         };
 
-        let receiver = if first_parameter.value.value_mode.is_mutable() {
+        let receiver = if first_parameter.value_mode.is_mutable() {
             TraitReceiverRequirement::Mutable { this_type }
         } else {
             TraitReceiverRequirement::Immutable { this_type }
@@ -506,9 +498,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         for parameter in resolved_signature.signature.parameters.iter().skip(1) {
             parameters.push(requirement_parameter_from_type(
                 parameter.id,
-                parameter.value.value_mode.clone(),
-                parameter.value.type_id,
-                parameter.value.span,
+                parameter.value_mode,
+                parameter.type_id,
+                parameter.binding_span,
             ));
         }
 
@@ -595,6 +587,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             &source_owner,
             &signature_context,
             &mut type_interner,
+            &mut self.context.expression_builder,
+            &mut self.context.const_values,
             string_table,
             SignatureTypeFallbackPolicy::StrictCapacity,
             self.path_fork,

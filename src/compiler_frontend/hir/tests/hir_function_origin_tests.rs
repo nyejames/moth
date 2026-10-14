@@ -8,7 +8,11 @@
 //! remain after Phase 1.
 
 use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::functions::{
     FunctionOriginSeed, HirFunctionOrigin, HirFunctionOriginLookup,
 };
@@ -78,6 +82,9 @@ fn classifies_entry_start_and_normal_functions() {
             function_node(normal_fn, None),
         ],
         entry_path,
+        AstExpressionBuilder::new().unwrap(),
+        ConstValueStore::default(),
+        TypeEnvironment::new(),
     );
 
     let lowering = HirBuilder::new(
@@ -87,7 +94,7 @@ fn classifies_entry_start_and_normal_functions() {
         crate::compiler_frontend::hir::functions::HirFunctionOriginLookup::default(),
         Default::default(),
     )
-    .build_hir_module(ast)
+    .build_hir_module(ast, &ExternalPackageRegistry::new())
     .expect("HIR lowering should succeed");
     let module = lowering.hir_module;
 
@@ -138,6 +145,9 @@ fn lowers_exact_stable_origin_to_local_function_id() {
             function_node(normal_fn, None),
         ],
         entry_path,
+        AstExpressionBuilder::new().unwrap(),
+        ConstValueStore::default(),
+        TypeEnvironment::new(),
     );
 
     let lookup = HirFunctionOriginLookup::from_seeds(vec![FunctionOriginSeed {
@@ -152,7 +162,7 @@ fn lowers_exact_stable_origin_to_local_function_id() {
         lookup,
         Default::default(),
     )
-    .build_hir_module(ast)
+    .build_hir_module(ast, &ExternalPackageRegistry::new())
     .expect("HIR lowering should retain the stable origin mapping")
     .hir_module;
 
@@ -219,6 +229,9 @@ fn rejects_unused_concrete_origin_seed() {
             function_node(normal_fn, None),
         ],
         entry_path,
+        AstExpressionBuilder::new().unwrap(),
+        ConstValueStore::default(),
+        TypeEnvironment::new(),
     );
 
     // One seed matches the lowered helper, the other points at a declaration path that no
@@ -243,7 +256,7 @@ fn rejects_unused_concrete_origin_seed() {
         lookup,
         Default::default(),
     )
-    .build_hir_module(ast);
+    .build_hir_module(ast, &ExternalPackageRegistry::new());
 
     assert!(
         result.is_err(),
@@ -279,6 +292,9 @@ fn hir_validation_rejects_two_origins_for_one_local_function() {
             function_node(normal_fn, None),
         ],
         entry_path,
+        AstExpressionBuilder::new().unwrap(),
+        ConstValueStore::default(),
+        TypeEnvironment::new(),
     );
 
     let lookup = HirFunctionOriginLookup::from_seeds(vec![FunctionOriginSeed {
@@ -294,7 +310,7 @@ fn hir_validation_rejects_two_origins_for_one_local_function() {
         lookup,
         Default::default(),
     )
-    .build_hir_module(ast)
+    .build_hir_module(ast, &ExternalPackageRegistry::new())
     .expect("valid lowering should succeed");
     let mut module = lowering.hir_module;
     let type_environment = lowering.type_environment;
@@ -313,8 +329,13 @@ fn hir_validation_rejects_two_origins_for_one_local_function() {
         .function_ids_by_origin
         .insert(second_origin, local_function_id);
 
-    let error = validate_module_for_tests(&module, &string_table, &type_environment)
-        .expect_err("two origins mapped to one local function must fail HIR validation");
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("two origins mapped to one local function must fail HIR validation");
 
     let message = error.msg;
     assert!(

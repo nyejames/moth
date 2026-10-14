@@ -1,11 +1,11 @@
 Counter = |
-    count Int,
+    count I32,
 |
 
 make_counter_impl || -> Counter:
     return Counter(41)
 ;
 
-tick |this Counter| -> Int:
+tick |this Counter| -> I32:
     return this.count + 1 catch then 0
 ;

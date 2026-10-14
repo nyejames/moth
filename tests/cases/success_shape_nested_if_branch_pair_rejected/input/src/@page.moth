@@ -1,0 +1,15 @@
+pair || -> I32, I32:
+    return 10, 20
+;
+
+
+
+value I32 = if true:
+    if false:
+        then pair()
+    else
+        then 30
+    ;
+else
+    then 40
+;

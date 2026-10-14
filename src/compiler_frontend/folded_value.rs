@@ -1,24 +1,19 @@
 //! The one owned, backend-neutral folded-value vocabulary and converter shared by public
 //! interface projection and the runtime-template handoff.
 //!
-//! WHAT: owns [`PublicFoldedValue`], [`PublicFoldedField`], [`FiniteFloat`], the shared owned
-//! string vocabulary and the single recursive [`convert_expression_to_folded_value`] converter
-//! that translates a finalized, normalized compile-time expression into an owned stable value
-//! with no donor-local identity. The converter is shared by the constant folded-value join (R2b)
-//! and the parameter/field default projection (R2c) so there is exactly one recursive value
-//! vocabulary and one conversion path.
+//! WHAT: owns [`PublicFoldedValue`], [`PublicFoldedField`], the shared owned
+//! string vocabulary and [`convert_const_value_to_folded_value_with_provenance`], which maps
+//! the constant store through its iterative postorder visitor into an owned stable value with
+//! no donor-local identity. Public constants and parameter/field defaults share this conversion.
+//! The owned output vocabulary remains recursively structured.
 //!
 //! WHY: public interfaces and runtime template handoffs both outlive donor-local AST and TIR
 //! storage. Keeping their portable string representation here prevents a second parallel piece
 //! enum or duplicate conversion implementation at either boundary.
 
-use std::hash::{Hash, Hasher};
-
-use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::const_values::store::{
     ConstStringPiece, ConstStringValue, ConstValueId, ConstValueStore, ConstValueVisit,
 };
-use crate::compiler_frontend::ast::expressions::expression::{Expression, ExpressionKind};
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTypeIdentity, CanonicalTypeProjectionContext, ExportedGenericParameterIdentity,
     GenericParameterOriginResolver, project_type_id_to_canonical_identity,
@@ -156,56 +151,6 @@ fn owned_folded_string_from_pieces(
     Ok(OwnedFoldedString::Pieces(public_pieces))
 }
 
-/// A finite `f64` folded value with an equivalence relation consistent with Moth
-/// semantics.
-///
-/// WHAT: a narrow validated wrapper that rejects non-finite input (`NaN`, `+inf`, `-inf`) at
-/// construction and preserves the input value's exact IEEE-754 bits, including the sign of
-/// zero. Finiteness makes the manual `PartialEq` a total equivalence relation, so `Eq` is sound.
-/// WHY: the language authority defines `Float` as finite `f64`, supports ordinary `Float`
-/// equality and ordering, and normalizes `-0.0` to `0` only at the `Float -> String` formatting
-/// boundary. It does not declare both IEEE zero signs globally identical. Constant arithmetic,
-/// `String -> Float` parsing and `@core/math` helpers such as `atan2` can observe signed zero,
-/// so folded public values must retain exact finite bits. The numeric formatter remains the sole
-/// normalizer; this wrapper never normalizes.
-#[derive(Clone, Debug)]
-pub(crate) struct FiniteFloat(f64);
-
-impl FiniteFloat {
-    /// Construct a finite float, rejecting non-finite input and preserving exact bits.
-    pub(crate) fn new(value: f64) -> Result<Self, CompilerError> {
-        if !value.is_finite() {
-            return Err(CompilerError::compiler_error(format!(
-                "public-interface draft folded-value projection: a non-finite Float value ({}) reached \
-             conversion; the AST must not materialize non-finite constants, so this is an \
-             internal invariant violation",
-                value
-            )));
-        }
-        Ok(Self(value))
-    }
-
-    pub(crate) fn value(&self) -> f64 {
-        self.0
-    }
-}
-
-impl PartialEq for FiniteFloat {
-    /// Exact-bit equality: two finite floats are equal only when their IEEE-754 bit patterns
-    /// match, so `-0.0` and `0.0` are distinct.
-    fn eq(&self, other: &Self) -> bool {
-        self.0.to_bits() == other.0.to_bits()
-    }
-}
-
-impl Eq for FiniteFloat {}
-
-impl Hash for FiniteFloat {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.to_bits().hash(state);
-    }
-}
-
 /// The owned, backend-neutral, recursive folded value for one directly exported constant or
 /// retained default.
 ///
@@ -227,15 +172,11 @@ impl Hash for FiniteFloat {
 /// payloads, collection elements and option payloads all project through the same conversion.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum PublicFoldedValue {
-    Int(i64),
-    /// One profile-sized unsigned integer value; follows the selected `Int` width.
-    Uint(u64),
     /// An exact decimal coefficient paired with its canonical scale.
     ///
     /// `NumberValue` shares immutable coefficient storage, so cloning this owned interface value
     /// increments the backing reference count without copying arbitrary-precision limbs.
     Number(NumberValue),
-    Float(FiniteFloat),
     /// One materialised fixed-width scalar or `Byte` value with exact-bit identity.
     ///
     /// WHY: `FixedScalarValue` is `Copy` with exact-bit `Eq`/`Hash`, so `U64` maxima,
@@ -247,8 +188,12 @@ pub(crate) enum PublicFoldedValue {
     /// resources or the site root cannot yet be rendered.
     String(OwnedFoldedString),
     /// A provider-folded template transducer that still contains unresolved composition slots.
-    /// No donor-local TIR identity crosses this owned value.
-    ConstTemplate(PublicConstTemplate),
+    /// No donor-local TIR identity crosses this owned value. `folded` is the exporter's folded
+    /// string when the template was foldable; `None` only when the exporter could not fold it.
+    ConstTemplate {
+        template: PublicConstTemplate,
+        folded: Option<OwnedFoldedString>,
+    },
     /// An ordered homogeneous collection of folded values.
     Collection(Vec<PublicFoldedValue>),
     /// A const record: ordered owned field names with recursively owned field values.
@@ -311,15 +256,12 @@ impl PublicFoldedValue {
                 end.visit_type_identities(visitor);
             }
             Self::OptionSome(value) => value.visit_type_identities(visitor),
-            Self::Int(_)
-            | Self::Uint(_)
-            | Self::Number(_)
-            | Self::Float(_)
+            Self::Number(_)
             | Self::FixedScalar(_)
             | Self::Bool(_)
             | Self::Char(_)
             | Self::String(_)
-            | Self::ConstTemplate(_)
+            | Self::ConstTemplate { .. }
             | Self::OptionNone => {}
         }
     }
@@ -425,137 +367,29 @@ fn project_number_value(
     Ok(PublicFoldedValue::Number(value.clone()))
 }
 
-/// Convert one finalized and normalized AST compile-time expression to an owned
-/// [`PublicFoldedValue`].
+/// Own one module-store string for the public interface.
 ///
-/// WHAT: recursively walks the expression kind, resolving donor-local `StringId`s to owned
-/// `String`s, donor-local choice tag indexes to stable variant names through the type
-/// environment, and donor-local `TypeId`s to [`CanonicalTypeIdentity`] through the canonical
-/// type projection. Every leaf is an owned stable value with no donor-local identity.
-///
-/// A shape that cannot legally reach a normalized exported constant or retained default returns
-/// a deterministic `CompilerError` naming the invariant instead of silently omitting the value.
-pub(crate) fn convert_expression_to_folded_value(
-    expression: &Expression,
-    context: &FoldedValueProjectionContext<'_>,
-) -> Result<PublicFoldedValue, CompilerError> {
-    let type_environment = context.type_environment;
-    let string_table = context.string_table;
-    let projection_context = context.projection_context;
-    increment_frontend_counter(FrontendCounter::PublicFoldedValueConversions);
-
-    match &expression.kind {
-        ExpressionKind::Int(value) => Ok(PublicFoldedValue::Int(*value)),
-        ExpressionKind::Uint(value) => Ok(PublicFoldedValue::Uint(*value)),
-        ExpressionKind::Float(value) => Ok(PublicFoldedValue::Float(FiniteFloat::new(*value)?)),
-        ExpressionKind::Number(value) => {
-            project_number_value(value, expression.type_id, type_environment)
-        }
-        ExpressionKind::FixedScalar(value) => Ok(PublicFoldedValue::FixedScalar(*value)),
-        ExpressionKind::Bool(value) => Ok(PublicFoldedValue::Bool(*value)),
-        ExpressionKind::Char(value) => Ok(PublicFoldedValue::Char(*value)),
-        ExpressionKind::StringSlice(string_id) => Ok(PublicFoldedValue::String(
-            OwnedFoldedString::Text(string_table.resolve(*string_id).to_owned()),
+/// WHAT: text is copied directly. Structural pieces need the donor module's resource table so
+/// their resource identities become stable origins; the caller supplies `None` only when no
+/// resource table exists, which is an error for structural strings.
+pub(crate) fn owned_folded_string_from_store_string(
+    value: &ConstStringValue,
+    resources: Option<&ModuleResourceTable>,
+    string_table: &StringTable,
+) -> Result<OwnedFoldedString, CompilerError> {
+    match value {
+        ConstStringValue::Text(text) => Ok(OwnedFoldedString::Text(
+            string_table.resolve(*text).to_owned(),
         )),
-
-        ExpressionKind::StructuralString { pieces } => {
-            let resources = context.resources.ok_or_else(|| {
+        ConstStringValue::Pieces(_) => {
+            let resources = resources.ok_or_else(|| {
                 CompilerError::compiler_error(
-                    "public-interface folded expression projection: a structural string reached \
+                    "public-interface folded store projection: a structural string reached \
                      a projection context without its module resource table",
                 )
             })?;
-            Ok(PublicFoldedValue::String(owned_folded_string_from_pieces(
-                pieces,
-                resources,
-                string_table,
-            )?))
+            owned_folded_string_from_const_string(value, resources, string_table)
         }
-
-        ExpressionKind::Collection(items) => {
-            let mut folded_items = Vec::with_capacity(items.len());
-            for item in items {
-                folded_items.push(convert_expression_to_folded_value(item, context)?);
-            }
-            Ok(PublicFoldedValue::Collection(folded_items))
-        }
-
-        ExpressionKind::StructInstance(fields) => {
-            let folded_fields = convert_declaration_fields_to_folded_fields(fields, context)?;
-            Ok(PublicFoldedValue::Record(folded_fields))
-        }
-
-        ExpressionKind::ChoiceConstruct { tag, fields, .. } => {
-            let type_identity = project_type_id_to_canonical_identity(
-                expression.type_id,
-                type_environment,
-                projection_context,
-            )?;
-
-            let variant_name = resolve_choice_variant_name(
-                expression.type_id,
-                *tag,
-                type_environment,
-                string_table,
-            )?;
-
-            let folded_fields = convert_declaration_fields_to_folded_fields(fields, context)?;
-
-            Ok(PublicFoldedValue::Choice {
-                type_identity: Box::new(type_identity),
-                variant_name,
-                fields: folded_fields,
-            })
-        }
-
-        ExpressionKind::Range(start, end) => {
-            let folded_start = convert_expression_to_folded_value(start, context)?;
-            let folded_end = convert_expression_to_folded_value(end, context)?;
-            Ok(PublicFoldedValue::Range {
-                start: Box::new(folded_start),
-                end: Box::new(folded_end),
-            })
-        }
-
-        ExpressionKind::Coerced { value, to_type } => {
-            let inner_type_id = value.type_id;
-            if type_environment.option_inner_type(*to_type) != Some(inner_type_id) {
-                return Err(CompilerError::compiler_error(format!(
-                    "public-interface draft folded-value projection: a Coerced expression with \
-                     target TypeId({}) and inner TypeId({}) is not an option-present wrap of the \
-                     inner type; only `T -> T?` coercion can legally reach this boundary",
-                    to_type.0, inner_type_id.0
-                )));
-            }
-            let folded_value = convert_expression_to_folded_value(value, context)?;
-            Ok(PublicFoldedValue::OptionSome(Box::new(folded_value)))
-        }
-
-        ExpressionKind::OptionNone => Ok(PublicFoldedValue::OptionNone),
-
-        ExpressionKind::Template(_) => Err(CompilerError::compiler_error(
-            "public-interface draft folded-value projection: a Template expression reached \
-             conversion; template values must be folded before public folded-value projection",
-        )),
-
-        ExpressionKind::Reference(_) => Err(CompilerError::compiler_error(
-            "public-interface draft folded-value projection: a Reference expression reached \
-             conversion; constant references are resolved and inlined by the established \
-             function-signature and struct-default owners before finalization, so an unresolved \
-             reference in an exported constant or a retained default is an internal invariant \
-             violation",
-        )),
-
-        // Every remaining variant is not a folded value shape and must not reach a normalized
-        // exported constant or retained default. Report the exact kind name so the invariant is
-        // clear.
-        kind => Err(CompilerError::compiler_error(format!(
-            "public-interface draft folded-value projection: expression kind {:?} is not a \
-             supported normalized constant value shape; only scalars, collections, const \
-             records, choices, ranges and option-present wraps can legally reach this \
-             boundary",
-            kind
-        ))),
     }
 }
 
@@ -590,36 +424,22 @@ pub(crate) fn convert_const_value_to_folded_value_with_provenance(
     let projection_context = context.projection_context;
     let mut provenance = SyntheticInterfaceProvenance::empty();
 
+    let owned_string = |value: &ConstStringValue| {
+        owned_folded_string_from_store_string(value, context.resources, string_table)
+    };
+
     let value = const_values.fold_value(value_id, &mut |metadata, visit| {
         provenance.merge(&metadata.synthetic_interface_provenance);
         increment_frontend_counter(FrontendCounter::PublicFoldedValueConversions);
 
         match visit {
-            ConstValueVisit::Int(value) => Ok(PublicFoldedValue::Int(value)),
-            ConstValueVisit::Uint(value) => Ok(PublicFoldedValue::Uint(value)),
-            ConstValueVisit::Float(value) => Ok(PublicFoldedValue::Float(FiniteFloat::new(value)?)),
             ConstValueVisit::Number(value) => {
                 project_number_value(value, metadata.type_id, type_environment)
             }
             ConstValueVisit::FixedScalar(value) => Ok(PublicFoldedValue::FixedScalar(value)),
             ConstValueVisit::Bool(value) => Ok(PublicFoldedValue::Bool(value)),
             ConstValueVisit::Char(value) => Ok(PublicFoldedValue::Char(value)),
-            ConstValueVisit::String(value) => match value {
-                ConstStringValue::Text(text) => Ok(PublicFoldedValue::String(
-                    OwnedFoldedString::Text(string_table.resolve(*text).to_owned()),
-                )),
-                ConstStringValue::Pieces(_) => {
-                    let resources = context.resources.ok_or_else(|| {
-                        CompilerError::compiler_error(
-                            "public-interface folded store projection: a structural string reached \
-                             a projection context without its module resource table",
-                        )
-                    })?;
-                    Ok(PublicFoldedValue::String(
-                        owned_folded_string_from_const_string(value, resources, string_table)?,
-                    ))
-                }
-            },
+            ConstValueVisit::String(value) => Ok(PublicFoldedValue::String(owned_string(value)?)),
             ConstValueVisit::Collection(values) => Ok(PublicFoldedValue::Collection(values)),
             ConstValueVisit::Record(fields) => Ok(PublicFoldedValue::Record(
                 fields
@@ -698,53 +518,14 @@ pub(crate) fn convert_const_value_to_folded_value_with_provenance(
                 Ok(PublicFoldedValue::OptionSome(Box::new(value)))
             }
             ConstValueVisit::OptionNone => Ok(PublicFoldedValue::OptionNone),
-            ConstValueVisit::Template { template, .. } => {
-                Ok(PublicFoldedValue::ConstTemplate(template.clone()))
-            }
+            ConstValueVisit::Template { template, folded } => Ok(PublicFoldedValue::ConstTemplate {
+                template: template.clone(),
+                folded: folded.map(owned_string).transpose()?,
+            }),
         }
     })?;
 
     Ok((value, provenance))
-}
-
-/// Convert a slice of [`Declaration`] fields to owned [`PublicFoldedField`] values.
-///
-/// WHAT: resolves each field name from the declaration path's last component through the
-/// string table and recursively converts each field value. Preserves authored field order.
-pub(crate) fn convert_declaration_fields_to_folded_fields(
-    fields: &[Declaration],
-    context: &FoldedValueProjectionContext<'_>,
-) -> Result<Vec<PublicFoldedField>, CompilerError> {
-    let string_table = context.string_table;
-    let mut folded_fields = Vec::with_capacity(fields.len());
-    for field in fields {
-        let name = context
-            .path_fork
-            .component(field.id)
-            .map(|name| string_table.resolve(name))
-            .ok_or_else(|| {
-                CompilerError::compiler_error(
-                    "public-interface draft folded-value projection: a const-record or choice \
-             payload field declaration has no resolvable field name; the path is empty",
-                )
-            })?
-            .to_owned();
-
-        let type_identity = project_type_id_to_canonical_identity(
-            field.value.type_id,
-            context.type_environment,
-            context.projection_context,
-        )?;
-
-        let value = convert_expression_to_folded_value(&field.value, context)?;
-
-        folded_fields.push(PublicFoldedField {
-            name,
-            type_identity,
-            value,
-        });
-    }
-    Ok(folded_fields)
 }
 
 /// Resolve a choice variant's stable name from the donor-local tag index.

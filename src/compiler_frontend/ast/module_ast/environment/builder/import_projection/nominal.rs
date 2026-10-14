@@ -95,10 +95,6 @@ fn collect_canonical_type_origins(
         CanonicalTypeIdentity::Option(inner) => {
             collect_canonical_type_origins(inner, origins);
         }
-        CanonicalTypeIdentity::FallibleCarrier(carrier) => {
-            collect_canonical_type_origins(carrier.success(), origins);
-            collect_canonical_type_origins(carrier.error(), origins);
-        }
         CanonicalTypeIdentity::GenericInstance { base, arguments } => {
             origins.insert(base.clone());
             for argument in arguments.iter() {
@@ -137,15 +133,12 @@ fn collect_folded_type_origins(value: &PublicFoldedValue, origins: &mut FxHashSe
             collect_folded_type_origins(end, origins);
         }
         PublicFoldedValue::OptionSome(value) => collect_folded_type_origins(value, origins),
-        PublicFoldedValue::Int(_)
-        | PublicFoldedValue::Uint(_)
-        | PublicFoldedValue::Number(_)
-        | PublicFoldedValue::Float(_)
+        PublicFoldedValue::Number(_)
         | PublicFoldedValue::FixedScalar(_)
         | PublicFoldedValue::Bool(_)
         | PublicFoldedValue::Char(_)
         | PublicFoldedValue::String(_)
-        | PublicFoldedValue::ConstTemplate(_)
+        | PublicFoldedValue::ConstTemplate { .. }
         | PublicFoldedValue::OptionNone => {}
     }
 }
@@ -311,13 +304,14 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 .append_for_construction(
                     Declaration {
                         id: local_path,
-                        value: Expression::new(
-                            ExpressionKind::NoValue,
-                            None,
-                            type_id,
-                            diagnostic_type,
-                            ValueMode::ImmutableReference,
-                        ),
+                        type_id,
+                        diagnostic_type,
+                        value_mode: ValueMode::ImmutableReference,
+                        value: DeclarationValue::Shell(match &record.semantics {
+                            PublicDeclarationSemantics::Struct(_) => DeclarationShell::Struct,
+                            PublicDeclarationSemantics::Choice(_) => DeclarationShell::Choice,
+                            _ => unreachable!("only nominal declarations reach shell projection"),
+                        }),
                         binding_span: None,
                         config_qualifier: None,
                     },
@@ -482,19 +476,18 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 span: None,
             });
             let default_value = match &field.folded_default {
-                Some(value) => {
-                    self.project_imported_folded_value(value, field_type_id, string_table)?
-                }
-                None => Expression::new(
-                    ExpressionKind::NoValue,
-                    None,
+                Some(value) => DeclarationValue::Default(self.project_imported_folded_value(
+                    value,
                     field_type_id,
-                    diagnostic_type_spelling(field_type_id, &self.type_environment),
-                    ValueMode::ImmutableReference,
-                ),
+                    string_table,
+                )?),
+                None => DeclarationValue::Absent,
             };
             field_declarations.push(Declaration {
                 id: field_path,
+                type_id: field_type_id,
+                diagnostic_type: diagnostic_type_spelling(field_type_id, &self.type_environment),
+                value_mode: ValueMode::ImmutableReference,
                 value: default_value,
                 binding_span: None,
                 config_qualifier: None,

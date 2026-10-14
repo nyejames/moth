@@ -1,0 +1,25 @@
+entry = "."
+
+# The result receiver must not constrain `count`: with no independent receiver
+# the origin keeps the default I32, so the delayed unknown-member diagnostic
+# reports the defaulted receiver rather than the U64 result annotation.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0048"]
+message_contains = ["'I32'"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0048"
+reason = "invalid_field_access.unknown_member"
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0048"]
+message_contains = ["'I32'"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0048"
+reason = "invalid_field_access.unknown_member"

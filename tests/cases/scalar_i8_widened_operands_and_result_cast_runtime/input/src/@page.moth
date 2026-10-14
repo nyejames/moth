@@ -1,0 +1,25 @@
+-- Convert the operands before the operation to request I32 arithmetic;
+-- widening the concrete I8 result of the operation is a separate boundary.
+-- A result cast cannot repair an earlier narrow failure: grow_via_i8 adds in
+-- I8 and 120 + 10 fails there before the I32 result cast runs.
+widen_add |left I8, right I8| -> I32:
+    wide_left I32 = cast left
+    wide_right I32 = cast right
+    return wide_left + wide_right
+;
+
+grow_via_i8 |left I8, right I8| -> I32, Error!:
+    return cast (left + right)
+;
+
+widened = widen_add(100, 100)
+widened_text String = cast widened
+
+repair_code ~U32 = 0
+repaired = grow_via_i8(120, 10) catch |repair_error|:
+    repair_code = repair_error.code
+    then 0
+;
+repaired_text String = cast repaired
+
+[:scalar i8 widening widened=[widened_text] repair=[repair_code]/[repaired_text]]

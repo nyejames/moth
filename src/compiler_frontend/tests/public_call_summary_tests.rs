@@ -105,6 +105,7 @@ fn return_aliases_widen_from_fresh_to_supersets_or_unknown() {
         PublicCallSummaryTransition::Widened
     );
     assert!(validate_public_call_summary_transition(&unknown, &aliases_parameter).is_err());
+    assert!(validate_public_call_summary_transition(&unknown, &fresh).is_err());
 }
 
 #[test]

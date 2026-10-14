@@ -2,7 +2,7 @@
 
 Theme = |
     name String,
-    spacing Int,
+    spacing I32,
 |
 
 default_theme #= Theme(app_title, double_spacing)

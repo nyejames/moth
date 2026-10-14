@@ -13,7 +13,9 @@
 use crate::compiler_frontend::ast::ast_nodes::{
     AstNode, LoopBindings, RangeEndKind, RangeLoopSpec,
 };
-use crate::compiler_frontend::ast::expressions::expression::Expression;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    ExpressionStore, ExpressionView,
+};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
@@ -97,23 +99,27 @@ struct RangeLoopRuntime {
     types: RangeLoopTypes,
 }
 
+/// Whether this range-loop domain steps through the dedicated binary-float candidate path.
+///
+/// WHAT: every exact binary-float domain (`F16`/`F32`/`F64`) uses endpoint/non-progress candidate
+///       stepping.
+/// WHY: candidate stepping must finish at the selected precision, so an `F16` counter keeps its
+///      exact domain instead of an F32 floor or an ordinary numeric-add overflow check.
 fn uses_float_range_candidate(domain: NumericScalar) -> bool {
-    matches!(
-        domain,
-        NumericScalar::Float | NumericScalar::Fixed(FixedScalar::F32 | FixedScalar::F64)
-    )
+    domain.is_binary_float()
 }
 
 impl<'a> HirBuilder<'a> {
     pub(super) fn lower_while_statement_impl(
         &mut self,
-        condition: &Expression,
+        expressions: &ExpressionStore,
+        condition: ExpressionView<'_>,
         body: &[AstNode],
         span_ref: &Option<SourceSpan>,
         span: Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
         self.lower_while_with_body_emitter(condition, span_ref, span, |builder| {
-            builder.lower_statement_sequence(body)
+            builder.lower_statement_sequence(expressions, body)
         })
     }
 
@@ -125,7 +131,7 @@ impl<'a> HirBuilder<'a> {
     /// loop lowering path in the template HIR code.
     pub(crate) fn lower_while_with_body_emitter(
         &mut self,
-        condition: &Expression,
+        condition: ExpressionView<'_>,
         span_ref: &Option<SourceSpan>,
         span: Option<SourceSpan>,
         emit_body: impl FnOnce(&mut HirBuilder<'_>) -> Result<(), HirConstructionFailure>,
@@ -182,6 +188,7 @@ impl<'a> HirBuilder<'a> {
 
     pub(super) fn lower_range_loop_statement_impl(
         &mut self,
+        expressions: &ExpressionStore,
         bindings: &LoopBindings,
         range: &RangeLoopSpec,
         body: &[AstNode],
@@ -189,24 +196,28 @@ impl<'a> HirBuilder<'a> {
         span: Option<SourceSpan>,
     ) -> Result<(), HirConstructionFailure> {
         self.lower_range_loop_with_body_emitter_and_span(
+            expressions,
             bindings,
             range,
             span_ref,
             span,
-            |builder| builder.lower_statement_sequence(body),
+            |builder| builder.lower_statement_sequence(expressions, body),
         )
     }
 
     pub(crate) fn lower_range_loop_with_body_emitter(
         &mut self,
+        anchor: ExpressionView<'_>,
         bindings: &LoopBindings,
         range: &RangeLoopSpec,
         span_ref: &Option<SourceSpan>,
         mut emit_body: impl FnMut(&mut HirBuilder<'_>) -> Result<(), HirConstructionFailure>,
     ) -> Result<(), HirConstructionFailure> {
+        let expressions = anchor.store();
         // Template loops are generated scaffolding: headers stay spanless. Statement
         // loops use the span-aware entry below with the authored `for` span.
         self.lower_range_loop_with_body_emitter_and_span(
+            expressions,
             bindings,
             range,
             span_ref,
@@ -217,6 +228,7 @@ impl<'a> HirBuilder<'a> {
 
     fn lower_range_loop_with_body_emitter_and_span(
         &mut self,
+        expressions: &ExpressionStore,
         bindings: &LoopBindings,
         range: &RangeLoopSpec,
         span_ref: &Option<SourceSpan>,
@@ -227,7 +239,7 @@ impl<'a> HirBuilder<'a> {
         // zero-step guard -> magnitude normalization -> bounds-safe candidate update.
         let parent_region = self.current_region_or_error(span_ref)?;
         let blocks = self.create_range_loop_blocks(parent_region, span_ref)?;
-        let types = self.resolve_range_loop_types(bindings, range, span_ref)?;
+        let types = self.resolve_range_loop_types(expressions, bindings, range, span_ref)?;
         let locals = self.allocate_range_loop_locals(types)?;
         let runtime = RangeLoopRuntime {
             blocks,
@@ -235,15 +247,19 @@ impl<'a> HirBuilder<'a> {
             types,
         };
 
-        self.initialize_range_loop_state(range, runtime, span_ref)?;
+        self.initialize_range_loop_state(expressions, range, runtime, span_ref)?;
 
         // Dynamic `by` expressions still need a runtime zero check before entering the loop.
         self.emit_jump_from_current_block(runtime.blocks.step_zero_check, span_ref, "for.enter")?;
 
-        let step_span = range.step.as_ref().and_then(|step| step.span);
+        let step_span = range
+            .step
+            .map(|id| expressions.view(id))
+            .transpose()?
+            .and_then(|step| step.span());
         self.emit_range_loop_zero_step_guard(runtime, &step_span)?;
         self.emit_range_loop_step_magnitude_normalization(runtime, span_ref)?;
-        self.emit_range_loop_header_checks(range, runtime, span_ref, span)?;
+        self.emit_range_loop_header_checks(expressions, range, runtime, span_ref, span)?;
         let step_block_is_reachable =
             self.lower_range_loop_body_with_emitter(bindings, runtime, span_ref, &mut emit_body)?;
         if step_block_is_reachable {
@@ -370,11 +386,12 @@ impl<'a> HirBuilder<'a> {
 
     fn resolve_range_loop_types(
         &mut self,
+        expressions: &ExpressionStore,
         bindings: &LoopBindings,
         range: &RangeLoopSpec,
         span_ref: &Option<SourceSpan>,
     ) -> Result<RangeLoopTypes, HirConstructionFailure> {
-        let binding = self.range_iteration_type(bindings, range, span_ref)?;
+        let binding = self.range_iteration_type(expressions, bindings, range, span_ref)?;
         let domain = NumericScalar::from_type_id(binding, &self.type_environment);
 
         let Some(domain) = domain else {
@@ -394,7 +411,9 @@ impl<'a> HirBuilder<'a> {
             binding,
             domain,
             bool_type: builtin_type_ids::BOOL,
-            int_type: builtin_type_ids::INT,
+            // The automatically supplied iteration index uses the language's exact I32
+            // positional-index identity; it never follows the range counter's domain.
+            int_type: builtin_type_ids::fixed_scalar(FixedScalar::I32),
         })
     }
 
@@ -463,6 +482,7 @@ impl<'a> HirBuilder<'a> {
 
     fn initialize_range_loop_state(
         &mut self,
+        expressions: &ExpressionStore,
         range: &RangeLoopSpec,
         runtime: RangeLoopRuntime,
         span_ref: &Option<SourceSpan>,
@@ -473,7 +493,8 @@ impl<'a> HirBuilder<'a> {
         // Only the header bounds checks below carry the authored `for` span.
         let RangeLoopRuntime { locals, types, .. } = runtime;
 
-        let lowered_start = self.lower_expression_value_to_current_block(&range.start)?;
+        let lowered_start =
+            self.lower_expression_value_to_current_block(expressions.view(range.start)?)?;
         let lowered_start = self.snapshot_range_loop_operand(lowered_start)?;
         let lowered_start =
             self.convert_numeric_operand_to_domain(lowered_start, types.domain, span_ref)?;
@@ -485,7 +506,8 @@ impl<'a> HirBuilder<'a> {
             span_ref,
         )?;
 
-        let lowered_end = self.lower_expression_value_to_current_block(&range.end)?;
+        let lowered_end =
+            self.lower_expression_value_to_current_block(expressions.view(range.end)?)?;
         let lowered_end = self.snapshot_range_loop_operand(lowered_end)?;
         let lowered_end =
             self.convert_numeric_operand_to_domain(lowered_end, types.domain, span_ref)?;
@@ -499,7 +521,8 @@ impl<'a> HirBuilder<'a> {
 
         // `by` is optional for integer ranges; its unit default belongs to the selected domain.
         if let Some(step_expression) = &range.step {
-            let lowered_step = self.lower_expression_value_to_current_block(step_expression)?;
+            let lowered_step =
+                self.lower_expression_value_to_current_block(expressions.view(*step_expression)?)?;
             let lowered_step = self.snapshot_range_loop_operand(lowered_step)?;
             let lowered_step =
                 self.convert_numeric_operand_to_domain(lowered_step, types.domain, span_ref)?;
@@ -526,7 +549,10 @@ impl<'a> HirBuilder<'a> {
         let pre_header_region = self.current_region_or_error(span_ref)?;
         let zero_index = self.make_expression(
             span_ref,
-            HirExpressionKind::Int(0),
+            HirExpressionKind::FixedScalar(
+                FixedScalarValue::signed(FixedScalar::I32, 0)
+                    .expect("zero is representable in I32"),
+            ),
             types.int_type,
             ValueKind::Const,
             pre_header_region,
@@ -696,6 +722,7 @@ impl<'a> HirBuilder<'a> {
 
     fn emit_range_loop_header_checks(
         &mut self,
+        expressions: &ExpressionStore,
         range: &RangeLoopSpec,
         runtime: RangeLoopRuntime,
         span_ref: &Option<SourceSpan>,
@@ -779,7 +806,7 @@ impl<'a> HirBuilder<'a> {
                 else_block: blocks.exit,
             },
             span_ref,
-            span.or(range.end.span),
+            span.or(expressions.view(range.end)?.span()),
         )?;
         self.log_control_flow_edge(blocks.header_ascending, blocks.body, "for.asc.true");
         self.log_control_flow_edge(blocks.header_ascending, blocks.exit, "for.asc.false");
@@ -825,7 +852,7 @@ impl<'a> HirBuilder<'a> {
                 else_block: blocks.exit,
             },
             span_ref,
-            span.or(range.end.span),
+            span.or(expressions.view(range.end)?.span()),
         )?;
         self.log_control_flow_edge(blocks.header_descending, blocks.body, "for.desc.true");
         self.log_control_flow_edge(blocks.header_descending, blocks.exit, "for.desc.false");
@@ -970,7 +997,9 @@ impl<'a> HirBuilder<'a> {
         )?;
         let index_delta = self.make_expression(
             span_ref,
-            HirExpressionKind::Int(1),
+            HirExpressionKind::FixedScalar(
+                FixedScalarValue::signed(FixedScalar::I32, 1).expect("one is representable in I32"),
+            ),
             types.int_type,
             ValueKind::Const,
             commit_region,
@@ -979,7 +1008,7 @@ impl<'a> HirBuilder<'a> {
             HirLocalDestination::Update(locals.iteration_index),
             HirNumericOp {
                 operator: NumericOperator::Add,
-                domain: NumericScalar::Int,
+                domain: NumericScalar::Fixed(FixedScalar::I32),
             },
             index_current,
             index_delta,
@@ -1142,7 +1171,7 @@ impl<'a> HirBuilder<'a> {
         )?;
         let in_range_result = locals.candidate_in_range.ok_or_else(|| {
             CompilerError::compiler_error(
-                "Float range candidate lowering is missing its Bool result local",
+                "Binary-float range candidate lowering is missing its Bool result local",
             )
         })?;
 
@@ -1232,9 +1261,10 @@ impl<'a> HirBuilder<'a> {
 
         self.set_current_block(block, span_ref)?;
         let region = self.current_region_or_error(span_ref)?;
-        let crosses_zero = if matches!(types.domain, NumericScalar::Fixed(scalar) if scalar.class() == FixedScalarClass::UnsignedInteger)
-            || matches!(types.domain, NumericScalar::Uint)
-        {
+        let crosses_zero = if matches!(
+            types.domain,
+            NumericScalar::Fixed(scalar) if scalar.class() == FixedScalarClass::UnsignedInteger
+        ) {
             self.make_expression(
                 span_ref,
                 HirExpressionKind::Bool(false),
@@ -1491,9 +1521,6 @@ impl<'a> HirBuilder<'a> {
         region: RegionId,
     ) -> Result<HirValueId, HirConstructionFailure> {
         let kind = match types.domain {
-            NumericScalar::Int => HirExpressionKind::Int(0),
-            NumericScalar::Uint => HirExpressionKind::Uint(0),
-            NumericScalar::Float => HirExpressionKind::Float(0.0),
             NumericScalar::Fixed(scalar) => {
                 let zero = match scalar.class() {
                     FixedScalarClass::SignedInteger => FixedScalarValue::signed(scalar, 0),
@@ -1518,9 +1545,6 @@ impl<'a> HirBuilder<'a> {
         region: RegionId,
     ) -> Result<HirValueId, HirConstructionFailure> {
         let kind = match types.domain {
-            NumericScalar::Int => HirExpressionKind::Int(1),
-            NumericScalar::Uint => HirExpressionKind::Uint(1),
-            NumericScalar::Float => HirExpressionKind::Float(1.0),
             NumericScalar::Fixed(scalar) => {
                 let one = match scalar.class() {
                     FixedScalarClass::SignedInteger => FixedScalarValue::signed(scalar, 1),
@@ -1540,8 +1564,9 @@ impl<'a> HirBuilder<'a> {
 
     pub(super) fn lower_collection_loop_statement_impl(
         &mut self,
+        expressions: &ExpressionStore,
         bindings: &LoopBindings,
-        iterable: &Expression,
+        iterable: ExpressionView<'_>,
         body: &[AstNode],
         span_ref: &Option<SourceSpan>,
         span: Option<SourceSpan>,
@@ -1551,14 +1576,14 @@ impl<'a> HirBuilder<'a> {
             iterable,
             span_ref,
             span,
-            |builder| builder.lower_statement_sequence(body),
+            |builder| builder.lower_statement_sequence(expressions, body),
         )
     }
 
     pub(crate) fn lower_collection_loop_with_body_emitter(
         &mut self,
         bindings: &LoopBindings,
-        iterable: &Expression,
+        iterable: ExpressionView<'_>,
         span_ref: &Option<SourceSpan>,
         mut emit_body: impl FnMut(&mut HirBuilder<'_>) -> Result<(), HirConstructionFailure>,
     ) -> Result<(), HirConstructionFailure> {
@@ -1576,7 +1601,7 @@ impl<'a> HirBuilder<'a> {
     fn lower_collection_loop_with_body_emitter_and_span(
         &mut self,
         bindings: &LoopBindings,
-        iterable: &Expression,
+        iterable: ExpressionView<'_>,
         span_ref: &Option<SourceSpan>,
         span: Option<SourceSpan>,
         mut emit_body: impl FnMut(&mut HirBuilder<'_>) -> Result<(), HirConstructionFailure>,
@@ -1595,7 +1620,8 @@ impl<'a> HirBuilder<'a> {
         let (iterable_type, element_type) = self.collection_iteration_types(iterable, span_ref)?;
 
         let bool_ty = builtin_type_ids::BOOL;
-        let int_ty: TypeId = builtin_type_ids::INT;
+        // Collection lengths and positional indices use the language's exact I32 identity.
+        let int_ty: TypeId = builtin_type_ids::fixed_scalar(FixedScalar::I32);
         let iterable_local = self.allocate_temp_local(iterable_type, None)?;
         let length_local = self.allocate_temp_local(int_ty, None)?;
         let iteration_index_local = self.allocate_temp_local(int_ty, None)?;
@@ -1612,7 +1638,10 @@ impl<'a> HirBuilder<'a> {
         let pre_header_region = self.current_region_or_error(span_ref)?;
         let zero_index = self.make_expression(
             span_ref,
-            HirExpressionKind::Int(0),
+            HirExpressionKind::FixedScalar(
+                FixedScalarValue::signed(FixedScalar::I32, 0)
+                    .expect("zero is representable in I32"),
+            ),
             int_ty,
             ValueKind::Const,
             pre_header_region,
@@ -1640,7 +1669,7 @@ impl<'a> HirBuilder<'a> {
             HirStatementKind::Call {
                 target: CallTarget::External(ExternalFunctionId::CollectionLength),
                 args: length_args,
-                result: Some(HirLocalDestination::Define(length_local)),
+                results: vec![HirLocalDestination::Define(length_local)],
             },
             span_ref,
         )?;
@@ -1685,7 +1714,7 @@ impl<'a> HirBuilder<'a> {
                 else_block: exit_block,
             },
             span_ref,
-            span.or(iterable.span),
+            span.or(iterable.span()),
         )?;
         self.log_control_flow_edge(header_block, body_block, "loop.collection.true");
         self.log_control_flow_edge(header_block, exit_block, "loop.collection.false");
@@ -1773,7 +1802,9 @@ impl<'a> HirBuilder<'a> {
         )?;
         let step_delta = self.make_expression(
             span_ref,
-            HirExpressionKind::Int(1),
+            HirExpressionKind::FixedScalar(
+                FixedScalarValue::signed(FixedScalar::I32, 1).expect("one is representable in I32"),
+            ),
             int_ty,
             ValueKind::Const,
             step_region,
@@ -1782,7 +1813,7 @@ impl<'a> HirBuilder<'a> {
             HirLocalDestination::Update(iteration_index_local),
             HirNumericOp {
                 operator: NumericOperator::Add,
-                domain: NumericScalar::Int,
+                domain: NumericScalar::Fixed(FixedScalar::I32),
             },
             step_current,
             step_delta,
@@ -1853,20 +1884,22 @@ impl<'a> HirBuilder<'a> {
 
     fn range_iteration_type(
         &mut self,
+        expressions: &ExpressionStore,
         bindings: &LoopBindings,
         range: &RangeLoopSpec,
         span_ref: &Option<SourceSpan>,
     ) -> Result<TypeId, HirConstructionFailure> {
         if let Some(item_binding) = &bindings.item {
-            return self.lower_type_id(item_binding.value.type_id, span_ref);
+            return self.lower_type_id(item_binding.type_id, span_ref);
         }
 
-        let start_ty = self.lower_type_id(range.start.type_id, span_ref)?;
-        let end_ty = self.lower_type_id(range.end.type_id, span_ref)?;
+        let start_ty =
+            self.lower_type_id(expressions.view(range.start)?.value_type_id()?, span_ref)?;
+        let end_ty = self.lower_type_id(expressions.view(range.end)?.value_type_id()?, span_ref)?;
         let step_ty = range
             .step
             .as_ref()
-            .map(|step| self.lower_type_id(step.type_id, span_ref))
+            .map(|step| self.lower_type_id(expressions.view(*step)?.value_type_id()?, span_ref))
             .transpose()?;
 
         let Some(start_domain) = NumericScalar::from_type_id(start_ty, &self.type_environment)
@@ -1908,12 +1941,12 @@ impl<'a> HirBuilder<'a> {
 
     fn collection_iteration_types(
         &mut self,
-        iterable: &Expression,
+        iterable: ExpressionView<'_>,
         span_ref: &Option<SourceSpan>,
     ) -> Result<(TypeId, TypeId), HirConstructionFailure> {
         // Frontend type resolution canonicalizes reference wrappers, so collection loops
         // accept either direct collections or shared references to collections uniformly.
-        let iterable_type = self.lower_type_id(iterable.type_id, span_ref)?;
+        let iterable_type = self.lower_type_id(iterable.value_type_id()?, span_ref)?;
         let element = match self.type_environment.collection_element_type(iterable_type) {
             Some(element) => element,
             None => {

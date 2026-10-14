@@ -1,6 +1,6 @@
 Cfg = |
-    a Int = 1,
-    b Int = 2,
+    a I32 = 1,
+    b I32 = 2,
 |
 
 c = Cfg()

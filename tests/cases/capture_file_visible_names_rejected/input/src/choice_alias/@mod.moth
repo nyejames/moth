@@ -1,0 +1,11 @@
+Response ::
+    Ready |amount I32|,
+;
+
+capture_binding |subject Response| -> I32:
+    return if subject is:
+        Ready(amount as AccountId) => then AccountId
+    ;
+;
+
+AccountId as I32

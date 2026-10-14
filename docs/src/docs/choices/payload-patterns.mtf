@@ -24,7 +24,7 @@ no whitespace, line break or comment may appear on either side of `::`.
 [codeblock, $code("moth"):
     Response ::
         Pending |
-            retry_count Int,
+            retry_count I32,
             message String,
         |,
         Complete,

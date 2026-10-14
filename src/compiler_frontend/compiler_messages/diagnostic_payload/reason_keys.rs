@@ -238,8 +238,21 @@ macro_rules! define_reasoned_diagnostic_registry {
             Rule::InvalidReceiverDeclaration => {
                 payload: InvalidReceiverDeclaration;
                 fields: { reason: InvalidReceiverDeclarationReason }
-                bindings: {}
-                remap: {}
+                bindings: { reason }
+                remap: {
+                    if let InvalidReceiverDeclarationReason::GenericReceiverType {
+                        function_name,
+                        type_name,
+                    }
+                    | InvalidReceiverDeclarationReason::UnsupportedType {
+                        function_name,
+                        type_name,
+                    } = reason
+                    {
+                        *function_name = remap.get(*function_name);
+                        *type_name = remap.get(*type_name);
+                    }
+                }
                 descriptor: { "MOTH-RULE-0041", "Invalid receiver declaration", Error }
             },
             Rule::InvalidControlFlowStatement => {
@@ -442,7 +455,6 @@ macro_rules! define_reasoned_diagnostic_registry {
                 fields: {
                     reason: CompileTimeEvaluationErrorReason,
                     operation: Option<StringId>,
-                    numeric_profile: Option<NumericProfile>
                 }
                 bindings: { operation }
                 remap: {
@@ -451,17 +463,6 @@ macro_rules! define_reasoned_diagnostic_registry {
                     }
                 }
                 descriptor: { "MOTH-RULE-0053", "Compile-time evaluation error", Error }
-            },
-            Type::InvalidFallibleOperand => {
-                payload: InvalidFallibleOperand;
-                fields: {
-                    reason: InvalidFallibleOperandReason,
-                    category: UnsupportedOperatorCategory,
-                    operand_type: TypeId
-                }
-                bindings: {}
-                remap: {}
-                descriptor: { "MOTH-TYPE-0004", "Unhandled fallible operand", Error }
             },
             Type::IncompatibleChoiceComparison => {
                 payload: IncompatibleChoiceComparison;
@@ -800,6 +801,7 @@ define_stable_reason_keys! {
         &InvalidConfigReason::ConfigContractConflict { .. } => "invalid_config.config_contract_conflict",
         &InvalidConfigReason::UnknownBuildConfigInput { .. } => "invalid_config.unknown_build_config_input",
         &InvalidConfigReason::ConfigInputTypeMismatch { .. } => "invalid_config.config_input_type_mismatch",
+        &InvalidConfigReason::ConfigInputOutOfRange { .. } => "invalid_config.config_input_out_of_range",
         &InvalidConfigReason::MissingConfigInput => "invalid_config.missing_config_input",
         &InvalidConfigReason::UnknownKey { .. } => "invalid_config.unknown_key",
         &InvalidConfigReason::UnknownRecordField { .. } => "invalid_config.unknown_record_field",
@@ -872,12 +874,8 @@ define_stable_reason_keys! {
     &NumberLiteralErrorReason::MissingExponentDigits => "invalid_number_literal.missing_exponent_digits",
     &NumberLiteralErrorReason::InvalidExponentSignPlacement => "invalid_number_literal.invalid_exponent_sign_placement",
     &NumberLiteralErrorReason::InvalidSeparatorPlacement => "invalid_number_literal.invalid_separator_placement",
-    &NumberLiteralErrorReason::OutsideIntRange => "invalid_number_literal.outside_int_range",
-    &NumberLiteralErrorReason::OutsideUintRange(_) => "invalid_number_literal.outside_uint_range",
-    &NumberLiteralErrorReason::NegativeUintLiteral(_) => "invalid_number_literal.negative_uint_literal",
     &NumberLiteralErrorReason::OutsideFixedScalarRange(_) => "invalid_number_literal.outside_fixed_scalar_range",
     &NumberLiteralErrorReason::NegativeUnsignedLiteral(_) => "invalid_number_literal.negative_unsigned_literal",
-    &NumberLiteralErrorReason::NonFiniteFloat => "invalid_number_literal.non_finite_float",
     &NumberLiteralErrorReason::InexactNumberScale(_) => "invalid_number_literal.inexact_number_scale",
     &NumberLiteralErrorReason::ParseOverflow => "invalid_number_literal.parse_overflow",
     },
@@ -1163,6 +1161,7 @@ define_stable_reason_keys! {
 
     InvalidDeclarationReason => {
     &InvalidDeclarationReason::ReservedBuiltinName => "invalid_declaration.reserved_builtin_name",
+    &InvalidDeclarationReason::DeclarationRequiresModuleTopLevel => "invalid_declaration.declaration_requires_module_top_level",
     &InvalidDeclarationReason::ConstantCannotBeMutable => "invalid_declaration.constant_cannot_be_mutable",
     &InvalidDeclarationReason::ExternalTypeLiteralConstruction => "invalid_declaration.external_type_literal_construction",
     &InvalidDeclarationReason::ParameterizedGenericTypeAlias => "invalid_declaration.parameterized_generic_type_alias",
@@ -1208,6 +1207,7 @@ define_stable_reason_keys! {
     &InvalidTraitConformanceReason::ReturnCountMismatch { .. } => "invalid_trait_conformance.return_count_mismatch",
     &InvalidTraitConformanceReason::ReturnTypeMismatch { .. } => "invalid_trait_conformance.return_type_mismatch",
     &InvalidTraitConformanceReason::ReturnChannelMismatch { .. } => "invalid_trait_conformance.return_channel_mismatch",
+    &InvalidTraitConformanceReason::InferredFailureInInfallibleCast { .. } => "invalid_trait_conformance.inferred_failure_in_infallible_cast",
     },
 
     InvalidAssignmentTargetReason => {
@@ -1262,21 +1262,15 @@ define_stable_reason_keys! {
     &InvalidCastReason::TargetIsGenericParameter => "invalid_cast.target_is_generic_parameter",
     &InvalidCastReason::SameSourceAndTarget => "invalid_cast.same_source_and_target",
     &InvalidCastReason::SourceIsOptional => "invalid_cast.source_is_optional",
-    &InvalidCastReason::OperandIsFallible => "invalid_cast.operand_is_fallible",
     &InvalidCastReason::OperandArityMismatch => "invalid_cast.operand_arity_mismatch",
     &InvalidCastReason::TargetArityMismatch => "invalid_cast.target_arity_mismatch",
-    &InvalidCastReason::FallibleEvidenceRequiresHandling => "invalid_cast.fallible_evidence_requires_handling",
-    &InvalidCastReason::InfallibleEvidenceCannotUseFallibleForm => "invalid_cast.infallible_evidence_cannot_use_fallible_form",
-    &InvalidCastReason::PropagationRequiresErrorReturn => "invalid_cast.propagation_requires_error_return",
-    &InvalidCastReason::PropagationAndRecoveryConflict => "invalid_cast.propagation_and_recovery_conflict",
-    &InvalidCastReason::BangMustAttachToCast => "invalid_cast.bang_must_attach_to_cast",
+    &InvalidCastReason::CastPropagationRemoved => "invalid_cast.cast_propagation_removed",
     &InvalidCastReason::ScalarConstructorRemoved => "invalid_cast.scalar_constructor_removed",
     &InvalidCastReason::NoEvidence => "invalid_cast.no_evidence",
     &InvalidCastReason::BuiltinEvidenceNotConstFoldable => "invalid_cast.builtin_evidence_not_const_foldable",
     &InvalidCastReason::UserDefinedEvidenceNotConstFoldable => "invalid_cast.user_defined_evidence_not_const_foldable",
     &InvalidCastReason::GenericBoundEvidenceNotConstFoldable => "invalid_cast.generic_bound_evidence_not_const_foldable",
     &InvalidCastReason::BuiltinCastFailedInConst => "invalid_cast.builtin_cast_failed_in_const",
-    &InvalidCastReason::CatchHandlerNotConstFoldable => "invalid_cast.catch_handler_not_const_foldable",
     },
 
     InvalidReceiverCallReason => {
@@ -1362,8 +1356,10 @@ define_stable_reason_keys! {
     &InvalidFallibleHandlingReason::BangOnNonFallible => "invalid_fallible_handling.bang_on_non_fallible",
     &InvalidFallibleHandlingReason::BangOnOptional => "invalid_fallible_handling.bang_on_optional",
     &InvalidFallibleHandlingReason::FunctionHasNoErrorSlot => "invalid_fallible_handling.function_has_no_error_slot",
+    &InvalidFallibleHandlingReason::EntryHasIncompatibleError { .. } => "invalid_fallible_handling.entry_has_incompatible_error",
     &InvalidFallibleHandlingReason::NotOptionExpression => "invalid_fallible_handling.not_option_expression",
     &InvalidFallibleHandlingReason::FunctionHasNoOptionalReturn => "invalid_fallible_handling.function_has_no_optional_return",
+    &InvalidFallibleHandlingReason::FunctionHasMultipleSuccessReturns { .. } => "invalid_fallible_handling.function_has_multiple_success_returns",
     &InvalidFallibleHandlingReason::OptionPropagationReturnTypeMismatch => "invalid_fallible_handling.option_propagation_return_type_mismatch",
     &InvalidFallibleHandlingReason::OptionPropagationCatchConflict => "invalid_fallible_handling.option_propagation_catch_conflict",
     &InvalidFallibleHandlingReason::ExplicitPropagationCatchConflict => "invalid_fallible_handling.explicit_propagation_catch_conflict",
@@ -1399,7 +1395,6 @@ define_stable_reason_keys! {
     &CompileTimeEvaluationErrorReason::DivideByZero => "compile_time_evaluation_error.divide_by_zero",
     &CompileTimeEvaluationErrorReason::InvalidExponent => "compile_time_evaluation_error.invalid_exponent",
     &CompileTimeEvaluationErrorReason::InvalidOperatorForType => "compile_time_evaluation_error.invalid_operator_for_type",
-    &CompileTimeEvaluationErrorReason::IntegerDivisionOnlyIntInt => "compile_time_evaluation_error.integer_division_only_int_int",
     &CompileTimeEvaluationErrorReason::ConstantSelfReference => "compile_time_evaluation_error.constant_self_reference",
     &CompileTimeEvaluationErrorReason::ConstantNotVisible => "compile_time_evaluation_error.constant_not_visible",
     &CompileTimeEvaluationErrorReason::NonConstantReferenceInConstant => "compile_time_evaluation_error.non_constant_reference_in_constant",
@@ -1414,9 +1409,6 @@ define_stable_reason_keys! {
     &CompileTimeEvaluationErrorReason::StructuralStringRequiresFinalText => "compile_time_evaluation_error.structural_string_requires_final_text",
     },
 
-    InvalidFallibleOperandReason => {
-    &InvalidFallibleOperandReason::FallibleValueNotHandled => "invalid_fallible_operand.fallible_value_not_handled",
-    },
 
     IncompatibleChoiceComparisonReason => {
     &IncompatibleChoiceComparisonReason::DifferentChoiceTypes => "incompatible_choice_comparison.different_choice_types",

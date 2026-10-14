@@ -5,8 +5,10 @@
 //! WHY: body parsing needs to decide whether a visible source declaration is callable,
 //! constructible, or value-like without inspecting diagnostic-only `DataType` spelling.
 
-use crate::compiler_frontend::ast::ast_nodes::Declaration;
+use crate::compiler_frontend::ast::ast_nodes::{Declaration, DeclarationShell, DeclarationValue};
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::module_ast::environment::TopLevelDeclarationTable;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
@@ -53,6 +55,8 @@ impl DeclarationSemanticTable {
         nominal_type_ids_by_path: &FxHashMap<PathId, TypeId>,
         type_environment: &TypeEnvironment,
         template_ir_store: &Rc<RefCell<TemplateIrStore>>,
+        expression_builder: &AstExpressionBuilder,
+        const_values: &ConstValueStore,
     ) -> Result<Self, TemplateError> {
         let mut by_path = FxHashMap::default();
 
@@ -63,6 +67,8 @@ impl DeclarationSemanticTable {
                 nominal_type_ids_by_path,
                 type_environment,
                 template_ir_store,
+                expression_builder,
+                const_values,
             )?;
             by_path.insert(declaration.id, kind);
         }
@@ -99,7 +105,24 @@ fn classify_declaration(
     nominal_type_ids_by_path: &FxHashMap<PathId, TypeId>,
     type_environment: &TypeEnvironment,
     template_ir_store: &Rc<RefCell<TemplateIrStore>>,
+    expression_builder: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
 ) -> Result<DeclarationSemanticKind, TemplateError> {
+    match &declaration.value {
+        DeclarationValue::Shell(shell) => {
+            return Ok(match shell {
+                DeclarationShell::Function { .. } => DeclarationSemanticKind::Function,
+                DeclarationShell::Struct => DeclarationSemanticKind::Struct,
+                DeclarationShell::Choice => DeclarationSemanticKind::Choice,
+                DeclarationShell::TypeAlias => DeclarationSemanticKind::Value,
+            });
+        }
+        DeclarationValue::PendingConstant => return Ok(DeclarationSemanticKind::Constant),
+        DeclarationValue::StructDefinition(_) => return Ok(DeclarationSemanticKind::Value),
+        DeclarationValue::Default(_) => return Ok(DeclarationSemanticKind::Constant),
+        DeclarationValue::Absent | DeclarationValue::Initializer(_) => {}
+    }
+
     if resolved_function_signatures_by_path.contains_key(&declaration.id) {
         return Ok(DeclarationSemanticKind::Function);
     }
@@ -112,10 +135,20 @@ fn classify_declaration(
         });
     }
 
-    let value_is_compile_time_constant = declaration
-        .value
-        .const_value_kind_with_template_classifier(&mut |template| {
-            classify_template_from_effective_tir(template, template_ir_store)
+    let Some(initializer) = declaration.value.initializer() else {
+        return Ok(DeclarationSemanticKind::Value);
+    };
+    let initializer = expression_builder
+        .view(initializer)
+        .map_err(TemplateError::from)?;
+    let value_is_compile_time_constant = initializer
+        .const_value_kind_with_template_classifier(const_values, &mut |template| {
+            classify_template_from_effective_tir(
+                template,
+                template_ir_store,
+                expression_builder,
+                const_values,
+            )
         })?
         .is_compile_time_value();
 

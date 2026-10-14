@@ -23,10 +23,15 @@ pub(crate) mod types;
 pub(crate) use completeness::analyze_branch_exits;
 pub(crate) use multi_bind::try_parse_multi_bind_value_block;
 pub(crate) use parse_values::{
-    ProducedValuesParseInput, is_missing_produced_value_boundary, parse_produced_values_typed,
+    complete_retained_then_value, is_missing_produced_value_boundary,
+    parse_retained_produced_values,
 };
 pub(crate) use receiver::try_parse_value_block_at_receiver;
-pub(crate) use types::{ActiveValueProductionTarget, ProducedValues, ValueReceiverKind};
+pub(crate) use receiver::{DeferredValueBlock, complete_deferred_value_block};
+pub(crate) use types::{
+    ActiveValueProductionTarget, ProducedValues, ThenValueContinuation, ThenValueSlot,
+    ValueReceiverKind,
+};
 
 #[cfg(test)]
 #[path = "../tests/value_production_tests.rs"]

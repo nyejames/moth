@@ -91,7 +91,7 @@ impl<'a> FileReferenceResolver<'a> {
     /// canonical target is an infrastructure invariant failure and returns `CompilerError`.
     #[allow(
         clippy::too_many_arguments,
-        reason = "resolution keeps consumer module identity, path syntax, the reference, source database, and mutable string/path/discovered-source state as separate borrows"
+        reason = "resolution keeps mutable resolver, consumer module identity, path syntax, the reference, source database, mutable string/discovered-source state and shared path fork as separate inputs"
     )]
     pub(crate) fn resolve(
         &mut self,

@@ -12,6 +12,7 @@
 //! - `aggregate`: shared aggregate wrapping after a loop or child emitted output.
 //! - `slot_application`: AST-planned runtime slots lowered through slot accumulators.
 
+use crate::compiler_frontend::ast::expressions::expression_store::ExpressionView;
 use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff,
 };
@@ -36,15 +37,16 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn lower_runtime_template_expression_from_owned_handoff(
         &mut self,
         handoff: &OwnedRuntimeTemplateHandoff,
+        anchor: ExpressionView<'_>,
         span_ref: &Option<SourceSpan>,
     ) -> Result<LoweredExpression, HirConstructionFailure> {
         match &handoff.body {
             OwnedRuntimeTemplateBody::RuntimeSlotApplication(handoff) => {
-                self.lower_runtime_slot_application_template_expression(handoff, span_ref)
+                self.lower_runtime_slot_application_template_expression(handoff, anchor, span_ref)
             }
 
             OwnedRuntimeTemplateBody::Render(node) => {
-                self.lower_runtime_template_render_expression(node, span_ref)
+                self.lower_runtime_template_render_expression(node, anchor, span_ref)
             }
         }
     }
@@ -57,8 +59,9 @@ impl<'a> HirBuilder<'a> {
     pub(crate) fn lower_runtime_slot_application_expression_from_owned_handoff(
         &mut self,
         handoff: &OwnedRuntimeSlotApplicationHandoff,
+        anchor: ExpressionView<'_>,
         span_ref: &Option<SourceSpan>,
     ) -> Result<LoweredExpression, HirConstructionFailure> {
-        self.lower_runtime_slot_application_template_expression(handoff, span_ref)
+        self.lower_runtime_slot_application_template_expression(handoff, anchor, span_ref)
     }
 }

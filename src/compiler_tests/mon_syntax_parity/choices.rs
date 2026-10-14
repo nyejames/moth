@@ -20,15 +20,15 @@ fn theme_variants() -> Vec<Variant> {
         Variant::payload(
             "Pair",
             vec![
-                Field::required("first", SchemaType::Int),
-                Field::required("second", SchemaType::Int),
+                Field::required("first", SchemaType::I32),
+                Field::required("second", SchemaType::I32),
             ],
         ),
     ]
 }
 
 fn theme_declaration() -> &'static str {
-    "Theme ::\n    Ready,\n    Pair | first Int, second Int |,\n;\n"
+    "Theme ::\n    Ready,\n    Pair | first I32, second I32 |,\n;\n"
 }
 
 fn theme_schema() -> Schema {
@@ -72,8 +72,8 @@ fn choice_fixtures() -> Vec<ParityFixture> {
                 qualifier: Some("Theme".into()),
                 variant: "Pair".into(),
                 fields: vec![
-                    ("first".into(), Value::Int(1)),
-                    ("second".into(), Value::Int(2)),
+                    ("first".into(), Value::I32(1)),
+                    ("second".into(), Value::I32(2)),
                 ],
             },
         )])),
@@ -85,8 +85,8 @@ fn choice_fixtures() -> Vec<ParityFixture> {
             qualifier: Some("Theme".into()),
             variant: "Pair".into(),
             fields: vec![
-                ("first".into(), Value::Int(1)),
-                ("second".into(), Value::Int(2)),
+                ("first".into(), Value::I32(1)),
+                ("second".into(), Value::I32(2)),
             ],
         },
     )]);

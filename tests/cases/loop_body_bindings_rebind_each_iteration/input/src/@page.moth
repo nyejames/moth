@@ -1,7 +1,7 @@
 -- Every loop iteration creates new body bindings. A binder or body-local alias must bind
 -- the current iteration's value, never write through an alias bound by an earlier one.
 
-Unit = | id Int, team Int |
+Unit = | id I32, team I32 |
 
 numbers = {1, 2, 3}
 number_sum ~= 0

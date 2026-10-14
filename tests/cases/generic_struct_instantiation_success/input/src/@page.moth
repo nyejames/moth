@@ -7,9 +7,9 @@ Pair type Left, Right = |
     right Right,
 |
 
-number_box Box of Int = Box(42)
+number_box Box of I32 = Box(42)
 text_box Box of String = Box("hello")
-pair Pair of String, Int = Pair("count", 3)
+pair Pair of String, I32 = Pair("count", 3)
 
 io.line([: [number_box.value]])
 io.line([: [text_box.value]])

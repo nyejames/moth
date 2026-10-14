@@ -1,0 +1,8 @@
+entry = "."
+
+# Direct and bound forward results stay F16; a raw sibling receives F16 instead of defaulting to F64.
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "forward_f16_collection left=2048 right=1 result=2048 peer=0.5 named=2048"

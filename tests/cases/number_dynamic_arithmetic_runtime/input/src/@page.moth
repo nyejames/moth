@@ -37,19 +37,19 @@ increment_large |value Dec0| -> Dec0:
 multiply_then_add |value Dec1, factor Dec1, addend Dec1| -> Dec1:
     return value * factor + addend
 ;
-power_tenths |value Dec1, exponent Int| -> Dec1:
+power_tenths |value Dec1, exponent I32| -> Dec1:
     return value ^ exponent
 ;
 power_chain |value Dec1| -> Dec1:
     return (value * value) * value
 ;
 
-add_float |value Float, increment Float| -> Float:
+add_float |value F64, increment F64| -> F64:
     return value + increment
 ;
 
-number_to_int |value Dec0| -> Int, Error!:
-    return cast! value
+number_to_int |value Dec0| -> I32, Error!:
+    return cast value
 ;
 
 zero_sum = add_zero(100, 25)

@@ -1,0 +1,26 @@
+entry = "."
+
+# The rejected member's argument region carries a named argument, with no member
+# signature to validate it against; the nested real call's U64 parameter must still
+# register `count`'s receiver, so the delayed diagnostic stays the ordinary unknown-member
+# error with the resolved U64 receiver rather than a call-shape or naming diagnostic.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0048"]
+message_contains = ["'U64'"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0048"
+reason = "invalid_field_access.unknown_member"
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0048"]
+message_contains = ["'U64'"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0048"
+reason = "invalid_field_access.unknown_member"

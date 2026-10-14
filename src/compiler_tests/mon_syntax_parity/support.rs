@@ -16,11 +16,11 @@
 //! Decimal source expectations name an exact coefficient and scale; they never derive one by
 //! converting MON's display text through the compiler's decimal materialiser.
 //!
-//! Fixtures default to `NumericProfile::STANDARD`. `with_profile` sets the compiler parse profile
-//! and MON schema profile together. The matcher compares field names and order, nominal
-//! identities, numeric identity and exact payloads. It reads folded `data` constants and typed
-//! start-body expressions where source-only forms such as maps are not retained in the
-//! folded-value store.
+//! Fixtures declare exact receiver widths, so source typing and MON schema preparation read the
+//! same explicit scalar identities. The matcher compares field names
+//! and order, nominal identities, numeric identity and exact payloads. It reads folded `data`
+//! constants and typed start-body expressions where source-only forms such as maps are not
+//! retained in the folded-value store.
 
 use crate::compiler_frontend::compiler_messages::{
     CommonSyntaxMistakeReason, CompileTimeEvaluationErrorReason, DiagnosticPayload,
@@ -30,9 +30,9 @@ use crate::compiler_frontend::compiler_messages::{
     TypeMismatchContext,
 };
 use crate::compiler_frontend::source::ExtendedSpanBuilder;
-use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_build_result_with_profile;
+use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_build_result;
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
-use crate::mon::{MonErrorCode, NumericProfile, PathSegment, Schema, Span, Value, decode_document};
+use crate::mon::{MonErrorCode, PathSegment, Schema, Span, Value, decode_document};
 use moth_lexical::numeric::parse::NumberLiteralErrorReason;
 
 use super::gaps::{ParityDifference, parity_difference};
@@ -48,7 +48,6 @@ pub(super) struct ParityFixture {
     moth_declarations: String,
     source_override: Option<String>,
     schema: Schema,
-    profile: NumericProfile,
     source_identity_expectations: Vec<SourceIdentityExpectation>,
     source_optional_paths: Vec<String>,
     expected_source: SourceExpectation,
@@ -126,7 +125,7 @@ pub(super) enum MonExpectation {
     },
 }
 
-/// Build a fixture with the delivered STANDARD profile on both parser boundaries.
+/// Build a fixture whose exact schema widths are shared by both parser boundaries.
 pub(super) fn fixture(
     name: impl Into<String>,
     literal: impl Into<String>,
@@ -140,8 +139,7 @@ pub(super) fn fixture(
         literal: literal.into(),
         moth_declarations: moth_declarations.into(),
         source_override: None,
-        schema: schema.with_profile(NumericProfile::STANDARD),
-        profile: NumericProfile::STANDARD,
+        schema,
         source_identity_expectations: Vec::new(),
         source_optional_paths: Vec::new(),
         expected_source,
@@ -151,13 +149,6 @@ pub(super) fn fixture(
 }
 
 impl ParityFixture {
-    /// Select the same numeric contract for source typing and MON schema preparation.
-    pub(super) fn with_profile(mut self, profile: NumericProfile) -> Self {
-        self.profile = profile;
-        self.schema = self.schema.with_profile(profile);
-        self
-    }
-
     pub(super) fn with_source_override(mut self, source: impl Into<String>) -> Self {
         self.source_override = Some(source.into());
         self
@@ -436,8 +427,7 @@ pub(super) fn mon_numeric_error(
 /// Compare decoded MON values without letting derived `f64` equality erase signed zero.
 pub(super) fn assert_mon_value_matches(expected: &Value, actual: &Value, case: &str, path: &str) {
     match (expected, actual) {
-        (Value::Float(expected_float), Value::Float(actual_float))
-        | (Value::F16(expected_float), Value::F16(actual_float))
+        (Value::F16(expected_float), Value::F16(actual_float))
         | (Value::F32(expected_float), Value::F32(actual_float))
         | (Value::F64(expected_float), Value::F64(actual_float)) => {
             if expected_float.to_bits() != actual_float.to_bits() {
@@ -548,7 +538,7 @@ pub(super) fn assert_fixture(fixture: ParityFixture) {
             fixture.moth_declarations, fixture.literal
         )
     });
-    let source_result = parse_single_file_ast_build_result_with_profile(&source, fixture.profile);
+    let source_result = parse_single_file_ast_build_result(&source);
     let source_accepted = match source_result {
         Ok((build_result, path_fork, string_table)) => {
             let expected_value = match &fixture.expected_source {

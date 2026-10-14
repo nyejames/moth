@@ -7,11 +7,12 @@
 
 use super::*;
 use super::{FoldedValueMaterialiser, materialize_public_folded_value};
-use crate::compiler_frontend::ast::const_values::store::{ConstStringPiece, ConstValueStore};
-use crate::compiler_frontend::ast::expressions::expression::Expression;
-use crate::compiler_frontend::ast::expressions::expression::ExpressionKind;
+use crate::compiler_frontend::ast::ast_nodes::DeclarationShell;
+use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
+use crate::compiler_frontend::ast::const_values::store::{
+    ConstStringPiece, ConstStringValue, ConstValuePayload, ConstValueStore,
+};
 use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
-use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::ast::{
     AstPublicInterfaceProjectionInput, ResolvedPublicTypeRoot, ResolvedPublicTypeRootKind,
     ResolvedPublicTypeRootTable,
@@ -20,6 +21,7 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity, intern_canonical_builtin,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::definitions::{FieldDefinition, StructTypeDefinition};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId, builtin_type_ids};
@@ -49,7 +51,6 @@ use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
 use crate::compiler_frontend::value_mode::ValueMode;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
-use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
 
@@ -80,10 +81,11 @@ fn imported_constant_uses_the_next_table_id_and_publishes_it() {
                 metadata_record(1, &trait_path, OrderedSemanticDeclarationKind::Trait),
             ],
             vec![
-                declaration(
-                    &start_path,
-                    DataType::Function(Box::new(None), Default::default()),
-                ),
+                Declaration {
+                    value: DeclarationValue::Shell(DeclarationShell::Function { receiver: None }),
+                    value_mode: ValueMode::ImmutableReference,
+                    ..declaration(&start_path, DataType::Inferred)
+                },
                 declaration(&builtin_path, DataType::Inferred),
             ],
             &path_fork,
@@ -95,7 +97,18 @@ fn imported_constant_uses_the_next_table_id_and_publishes_it() {
     let declaration_id = append_projected_constant(
         &mut declaration_table,
         &mut resolved_constants,
-        declaration(&imported_path, DataType::Bool),
+        {
+            let mut constants = ConstValueStore::default();
+            let folded = constants
+                .insert_resolved(builtin_type_ids::BOOL, ConstValuePayload::Bool(true), None)
+                .expect("fixture bool fits store");
+            constants
+                .bind_module_constant(imported_path, folded)
+                .expect("fixture bool binds");
+            let mut declaration = declaration(&imported_path, DataType::Bool);
+            declaration.value = DeclarationValue::Default(folded);
+            declaration
+        },
         &path_fork,
     )
     .expect("imported constant should append through the production owner");
@@ -114,7 +127,6 @@ fn imported_constant_uses_the_next_table_id_and_publishes_it() {
 struct ConsumerFoldedValueMaterialiser {
     type_environment: TypeEnvironment,
     module_resources: ModuleResourceTable,
-    template_ir_store: Rc<RefCell<TemplateIrStore>>,
     path_fork: PathInternerFork,
 }
 
@@ -123,7 +135,6 @@ impl ConsumerFoldedValueMaterialiser {
         Self {
             type_environment: TypeEnvironment::new(),
             module_resources: ModuleResourceTable::new(),
-            template_ir_store: Rc::new(RefCell::new(TemplateIrStore::new())),
             path_fork: PathInternerFork::empty(),
         }
     }
@@ -172,9 +183,6 @@ impl FoldedValueMaterialiser for ConsumerFoldedValueMaterialiser {
     fn path_fork(&mut self) -> &mut PathInternerFork {
         &mut self.path_fork
     }
-    fn template_ir_store(&self) -> Rc<RefCell<TemplateIrStore>> {
-        Rc::clone(&self.template_ir_store)
-    }
 }
 
 #[test]
@@ -213,15 +221,17 @@ fn structural_string_round_trips_through_public_projection_and_import_materialis
         ConstStringPiece::Resource(producer_resource_id),
         ConstStringPiece::SiteRoot,
     ];
-    let module_constant = Declaration {
-        id: constant_path,
-        value: Expression::structural_string(producer_pieces, None),
-        binding_span: None,
-        config_qualifier: None,
-    };
-    let const_values =
-        ConstValueStore::from_test_declarations(vec![module_constant], &producer_type_environment)
-            .expect("structural string constant should be representable in the value store");
+    let mut const_values = ConstValueStore::default();
+    let structural_id = const_values
+        .insert_resolved(
+            producer_string_type_id,
+            ConstValuePayload::String(ConstStringValue::Pieces(producer_pieces)),
+            None,
+        )
+        .expect("structural string constant should be representable in the value store");
+    const_values
+        .bind_module_constant(constant_path, structural_id)
+        .expect("structural string constant binds");
 
     let root_table = ResolvedPublicTypeRootTable {
         roots: vec![ResolvedPublicTypeRoot {
@@ -290,18 +300,20 @@ fn structural_string_round_trips_through_public_projection_and_import_materialis
     assert!(consumer_materialiser.module_resources.origins().is_empty());
     let consumer_string_type_id = consumer_materialiser.type_environment.builtins().string;
     let mut consumer_string_table = StringTable::new();
+    let mut consumer_constants = ConstValueStore::default();
     let _path_fork = PathInternerFork::empty();
     let materialised = materialize_public_folded_value(
         &mut consumer_materialiser,
         &constant.folded_value,
         consumer_string_type_id,
+        &mut consumer_constants,
         &mut consumer_string_table,
         None,
     )
     .expect("consumer import projection should materialise structural string pieces");
-    let ExpressionKind::StructuralString {
-        pieces: consumer_pieces,
-    } = &materialised.kind
+    let ConstValuePayload::String(ConstStringValue::Pieces(consumer_pieces)) = consumer_constants
+        .payload(materialised)
+        .expect("materialised string has content")
     else {
         panic!("expected consumer materialisation to retain structural string pieces");
     };
@@ -330,65 +342,96 @@ fn anonymous_const_record_round_trips_through_public_projection_and_import_mater
     let mut path_fork = PathInternerFork::empty();
     let producer_type_environment = TypeEnvironment::new();
     let producer_marker = producer_type_environment.anonymous_const_record_type();
-
-    let nested_count = Declaration {
-        id: path_fork
-            .try_intern_portable_path("count", &mut producer_string_table)
-            .expect("test path fits"),
-        value: Expression::int(7, None, ValueMode::ImmutableOwned),
-        binding_span: None,
-        config_qualifier: None,
+    let mut const_values = ConstValueStore::default();
+    let year_id = const_values
+        .insert_resolved(
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            ConstValuePayload::FixedScalar(
+                FixedScalarValue::signed(FixedScalar::I32, 2026).expect("2026 fits I32"),
+            ),
+            None,
+        )
+        .expect("fixture year fits store");
+    let enabled_id = const_values
+        .insert_resolved(builtin_type_ids::BOOL, ConstValuePayload::Bool(true), None)
+        .expect("fixture enabled fits store");
+    let count_id = const_values
+        .insert_resolved(
+            builtin_type_ids::fixed_scalar(FixedScalar::I32),
+            ConstValuePayload::FixedScalar(
+                FixedScalarValue::signed(FixedScalar::I32, 7).expect("7 fits I32"),
+            ),
+            None,
+        )
+        .expect("fixture count fits store");
+    let count_path = path_fork
+        .try_intern_portable_path("count", &mut producer_string_table)
+        .expect("test path fits");
+    let nested_id = {
+        use crate::compiler_frontend::ast::const_values::store::{
+            ConstValueField, ConstValueMetadata,
+        };
+        use crate::compiler_frontend::ast::expressions::expression_types::ConstValueKind;
+        let mut metadata =
+            ConstValueMetadata::resolved(producer_marker, None, ValueMode::ImmutableOwned);
+        metadata.const_record_state = ConstRecordState::ConstRecord;
+        metadata.value_kind = ConstValueKind::Composite;
+        metadata.hir_visible = false;
+        const_values
+            .insert_value(
+                metadata,
+                ConstValuePayload::Record(vec![ConstValueField {
+                    name: count_path,
+                    value: count_id,
+                }]),
+            )
+            .expect("fixture nested record fits store")
     };
-    let nested_record = Expression::anonymous_const_record(
-        vec![nested_count],
-        None,
-        ValueMode::ImmutableOwned,
-        producer_marker,
-    );
-
-    let producer_fields = vec![
-        Declaration {
-            id: path_fork
-                .try_intern_portable_path("year", &mut producer_string_table)
-                .expect("test path fits"),
-            value: Expression::int(2026, None, ValueMode::ImmutableOwned),
-            binding_span: None,
-            config_qualifier: None,
-        },
-        Declaration {
-            id: path_fork
-                .try_intern_portable_path("enabled", &mut producer_string_table)
-                .expect("test path fits"),
-            value: Expression::bool(true, None, ValueMode::ImmutableOwned),
-            binding_span: None,
-            config_qualifier: None,
-        },
-        Declaration {
-            id: path_fork
-                .try_intern_portable_path("nested", &mut producer_string_table)
-                .expect("test path fits"),
-            value: nested_record,
-            binding_span: None,
-            config_qualifier: None,
-        },
-    ];
+    let year_path = path_fork
+        .try_intern_portable_path("year", &mut producer_string_table)
+        .expect("test path fits");
+    let enabled_path = path_fork
+        .try_intern_portable_path("enabled", &mut producer_string_table)
+        .expect("test path fits");
+    let nested_path = path_fork
+        .try_intern_portable_path("nested", &mut producer_string_table)
+        .expect("test path fits");
     let constant_path = path_fork
         .try_intern_portable_path("meta", &mut producer_string_table)
         .expect("test path fits");
-    let module_constant = Declaration {
-        id: constant_path,
-        value: Expression::anonymous_const_record(
-            producer_fields,
-            None,
-            ValueMode::ImmutableOwned,
-            producer_marker,
-        ),
-        binding_span: None,
-        config_qualifier: None,
-    };
-    let const_values =
-        ConstValueStore::from_test_declarations(vec![module_constant], &producer_type_environment)
+    {
+        use crate::compiler_frontend::ast::const_values::store::{
+            ConstValueField, ConstValueMetadata,
+        };
+        use crate::compiler_frontend::ast::expressions::expression_types::ConstValueKind;
+        let mut metadata =
+            ConstValueMetadata::resolved(producer_marker, None, ValueMode::ImmutableOwned);
+        metadata.const_record_state = ConstRecordState::ConstRecord;
+        metadata.value_kind = ConstValueKind::Composite;
+        metadata.hir_visible = false;
+        let root_id = const_values
+            .insert_value(
+                metadata,
+                ConstValuePayload::Record(vec![
+                    ConstValueField {
+                        name: year_path,
+                        value: year_id,
+                    },
+                    ConstValueField {
+                        name: enabled_path,
+                        value: enabled_id,
+                    },
+                    ConstValueField {
+                        name: nested_path,
+                        value: nested_id,
+                    },
+                ]),
+            )
             .expect("anonymous const record constant should be representable in the value store");
+        const_values
+            .bind_module_constant(constant_path, root_id)
+            .expect("anonymous const record binds");
+    }
 
     let producer_module_origin = StableModuleOriginIdentity::from_portable_path(
         StablePackageIdentity::project_local("test-project"),
@@ -455,10 +498,11 @@ fn anonymous_const_record_round_trips_through_public_projection_and_import_mater
         .iter()
         .map(|field| field.name.as_str())
         .collect::<Vec<_>>();
+
     assert_eq!(exported_field_names, ["year", "enabled", "nested"]);
     assert_eq!(
         exported_fields[0].type_identity,
-        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int)
+        CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::FixedScalar(FixedScalar::I32))
     );
     assert_eq!(
         exported_fields[2].type_identity,
@@ -470,24 +514,35 @@ fn anonymous_const_record_round_trips_through_public_projection_and_import_mater
         .type_environment
         .anonymous_const_record_type();
     let mut consumer_string_table = StringTable::new();
+    let mut consumer_constants = ConstValueStore::default();
     let _path_fork = PathInternerFork::empty();
     let materialised = materialize_public_folded_value(
         &mut consumer_materialiser,
         &constant.folded_value,
         consumer_marker,
+        &mut consumer_constants,
         &mut consumer_string_table,
         None,
     )
     .expect("consumer import projection should materialise an anonymous const record");
 
-    assert_eq!(materialised.type_id, consumer_marker);
     assert_eq!(
-        materialised.const_record_state,
+        consumer_constants
+            .metadata(materialised)
+            .expect("materialised record has content")
+            .type_id,
+        consumer_marker
+    );
+    assert_eq!(
+        consumer_constants
+            .metadata(materialised)
+            .expect("materialised record has content")
+            .const_record_state,
         ConstRecordState::ConstRecord
     );
-    let ExpressionKind::AnonymousConstRecord {
-        fields: imported_fields,
-    } = &materialised.kind
+    let ConstValuePayload::Record(imported_fields) = consumer_constants
+        .payload(materialised)
+        .expect("materialised record has content")
     else {
         panic!("expected consumer materialisation to rebuild an anonymous const record");
     };
@@ -496,7 +551,7 @@ fn anonymous_const_record_round_trips_through_public_projection_and_import_mater
         .map(|field| {
             consumer_materialiser
                 .path_fork
-                .component(field.id)
+                .component(field.name)
                 .map(|id| consumer_string_table.resolve(id))
         })
         .collect::<Vec<_>>();
@@ -505,25 +560,41 @@ fn anonymous_const_record_round_trips_through_public_projection_and_import_mater
         vec![Some("year"), Some("enabled"), Some("nested")]
     );
 
-    assert_eq!(imported_fields[0].value.type_id, builtin_type_ids::INT);
+    assert_eq!(
+        consumer_constants
+            .metadata(imported_fields[0].value)
+            .expect("imported field has content")
+            .type_id,
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
+    );
     assert!(matches!(
-        imported_fields[0].value.kind,
-        ExpressionKind::Int(2026)
+        consumer_constants.payload(imported_fields[0].value),
+        Some(ConstValuePayload::FixedScalar(value))
+            if *value == FixedScalarValue::signed(FixedScalar::I32, 2026).expect("2026 fits I32")
     ));
     assert!(matches!(
-        imported_fields[1].value.kind,
-        ExpressionKind::Bool(true)
+        consumer_constants.payload(imported_fields[1].value),
+        Some(ConstValuePayload::Bool(true))
     ));
 
     // The nested anonymous field re-materializes as an anonymous const record, not a struct.
-    assert_eq!(imported_fields[2].value.type_id, consumer_marker);
     assert_eq!(
-        imported_fields[2].value.const_record_state,
+        consumer_constants
+            .metadata(imported_fields[2].value)
+            .expect("nested field has content")
+            .type_id,
+        consumer_marker
+    );
+    assert_eq!(
+        consumer_constants
+            .metadata(imported_fields[2].value)
+            .expect("nested field has content")
+            .const_record_state,
         ConstRecordState::ConstRecord
     );
-    let ExpressionKind::AnonymousConstRecord {
-        fields: imported_nested_fields,
-    } = &imported_fields[2].value.kind
+    let ConstValuePayload::Record(imported_nested_fields) = consumer_constants
+        .payload(imported_fields[2].value)
+        .expect("nested field has content")
     else {
         panic!("expected the nested imported field to stay an anonymous const record");
     };
@@ -531,13 +602,14 @@ fn anonymous_const_record_round_trips_through_public_projection_and_import_mater
     assert_eq!(
         consumer_materialiser
             .path_fork
-            .component(imported_nested_fields[0].id)
+            .component(imported_nested_fields[0].name)
             .map(|id| consumer_string_table.resolve(id)),
         Some("count")
     );
     assert!(matches!(
-        imported_nested_fields[0].value.kind,
-        ExpressionKind::Int(7)
+        consumer_constants.payload(imported_nested_fields[0].value),
+        Some(ConstValuePayload::FixedScalar(value))
+            if *value == FixedScalarValue::signed(FixedScalar::I32, 7).expect("7 fits I32")
     ));
 }
 
@@ -545,8 +617,9 @@ fn anonymous_const_record_round_trips_through_public_projection_and_import_mater
 fn fixed_scalar_round_trips_through_import_materialisation_with_identity() {
     let mut consumer_materialiser = ConsumerFoldedValueMaterialiser::new();
     let mut consumer_string_table = StringTable::new();
+    let mut consumer_constants = ConstValueStore::default();
 
-    // U64::MAX cannot pass through `Int`: the import path must carry the exact bits.
+    // `U64::MAX` must keep its exact bits: a narrower carrier cannot represent it.
     let u64_max =
         FixedScalarValue::unsigned(FixedScalar::U64, u64::MAX).expect("U64::MAX fits U64");
     let u64_type = builtin_type_ids::fixed_scalar(FixedScalar::U64);
@@ -554,14 +627,21 @@ fn fixed_scalar_round_trips_through_import_materialisation_with_identity() {
         &mut consumer_materialiser,
         &PublicFoldedValue::FixedScalar(u64_max),
         u64_type,
+        &mut consumer_constants,
         &mut consumer_string_table,
         None,
     )
     .expect("a fixed-scalar folded value should import");
-    assert_eq!(materialised.type_id, u64_type);
+    assert_eq!(
+        consumer_constants
+            .metadata(materialised)
+            .expect("materialised scalar has content")
+            .type_id,
+        u64_type
+    );
     assert!(matches!(
-        materialised.kind,
-        ExpressionKind::FixedScalar(value) if value == u64_max
+        consumer_constants.payload(materialised),
+        Some(ConstValuePayload::FixedScalar(value)) if *value == u64_max
     ));
 
     // -0.0 stays negative through the import path: `==` would hide a sign flip.
@@ -572,13 +652,21 @@ fn fixed_scalar_round_trips_through_import_materialisation_with_identity() {
         &mut consumer_materialiser,
         &PublicFoldedValue::FixedScalar(neg_zero_f16),
         f16_type,
+        &mut consumer_constants,
         &mut consumer_string_table,
         None,
     )
     .expect("a signed-zero folded value should import");
-    assert_eq!(materialised.type_id, f16_type);
-    let ExpressionKind::FixedScalar(imported) = materialised.kind else {
-        panic!("expected the import to rebuild a fixed-scalar expression");
+    assert_eq!(
+        consumer_constants
+            .metadata(materialised)
+            .expect("materialised scalar has content")
+            .type_id,
+        f16_type
+    );
+    let Some(ConstValuePayload::FixedScalar(imported)) = consumer_constants.payload(materialised)
+    else {
+        panic!("expected the import to rebuild a fixed-scalar value");
     };
     assert_eq!(
         f64::to_bits(imported.as_f64().expect("F16 reads as f64")),
@@ -599,18 +687,84 @@ fn fixed_scalar_round_trips_through_import_materialisation_with_identity() {
             &mut consumer_materialiser,
             &PublicFoldedValue::FixedScalar(value),
             expected,
+            &mut consumer_constants,
             &mut consumer_string_table,
             None,
         )
         .expect("each scalar identity should import");
-        assert_eq!(materialised.type_id, expected);
+        assert_eq!(
+            consumer_constants
+                .metadata(materialised)
+                .expect("materialised scalar has content")
+                .type_id,
+            expected
+        );
         assert!(matches!(
-            materialised.kind,
-            ExpressionKind::FixedScalar(round_tripped) if round_tripped == value
+            consumer_constants.payload(materialised),
+            Some(ConstValuePayload::FixedScalar(round_tripped)) if *round_tripped == value
         ));
     }
     assert_ne!(u8_five, u16_five);
     assert_ne!(u8_five, byte_five);
+}
+
+#[test]
+fn folded_range_import_preserves_each_endpoint_type_and_value() {
+    let mut consumer_materialiser = ConsumerFoldedValueMaterialiser::new();
+    let mut consumer_string_table = StringTable::new();
+    let mut consumer_constants = ConstValueStore::default();
+    let cases = [
+        (
+            FixedScalarValue::unsigned(FixedScalar::U16, u64::from(u16::MAX))
+                .expect("U16 maximum fits U16"),
+            FixedScalarValue::unsigned(FixedScalar::U64, u64::MAX).expect("U64 maximum fits U64"),
+        ),
+        (
+            FixedScalarValue::binary_float(FixedScalar::F16, -0.0)
+                .expect("negative zero is finite"),
+            FixedScalarValue::binary_float(FixedScalar::F32, f64::from(f32::from_bits(1)))
+                .expect("smallest F32 subnormal is finite"),
+        ),
+    ];
+
+    for (start, end) in cases {
+        let folded = PublicFoldedValue::Range {
+            start: Box::new(PublicFoldedValue::FixedScalar(start)),
+            end: Box::new(PublicFoldedValue::FixedScalar(end)),
+        };
+        let imported = materialize_public_folded_value(
+            &mut consumer_materialiser,
+            &folded,
+            builtin_type_ids::RANGE,
+            &mut consumer_constants,
+            &mut consumer_string_table,
+            None,
+        )
+        .expect("folded numeric range should import");
+        let ConstValuePayload::Range {
+            start: imported_start,
+            end: imported_end,
+        } = consumer_constants
+            .payload(imported)
+            .expect("imported range has content")
+        else {
+            panic!("range import must preserve its endpoint values");
+        };
+
+        for (endpoint, expected) in [(*imported_start, start), (*imported_end, end)] {
+            assert_eq!(
+                consumer_constants
+                    .metadata(endpoint)
+                    .expect("range endpoint has content")
+                    .type_id,
+                builtin_type_ids::fixed_scalar(expected.scalar())
+            );
+            assert!(matches!(
+                consumer_constants.payload(endpoint),
+                Some(ConstValuePayload::FixedScalar(value)) if *value == expected
+            ));
+        }
+    }
 }
 
 #[test]
@@ -639,7 +793,7 @@ fn named_struct_record_import_keeps_the_struct_instance_path() {
                 },
                 FieldDefinition {
                     name: year_path,
-                    type_id: builtin_type_ids::INT,
+                    type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     span: None,
                 },
             ]),
@@ -655,49 +809,67 @@ fn named_struct_record_import_keeps_the_struct_instance_path() {
         },
         PublicFoldedField {
             name: "year".to_owned(),
-            type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::Int),
-            value: PublicFoldedValue::Int(2026),
+            type_identity: CanonicalTypeIdentity::Builtin(CanonicalBuiltinType::FixedScalar(
+                FixedScalar::I32,
+            )),
+            value: PublicFoldedValue::FixedScalar(
+                FixedScalarValue::signed(FixedScalar::I32, 2026).expect("2026 fits I32"),
+            ),
         },
     ]);
     let mut consumer_materialiser = ConsumerFoldedValueMaterialiser {
         type_environment: consumer_type_environment,
         module_resources: ModuleResourceTable::new(),
-        template_ir_store: Rc::new(RefCell::new(TemplateIrStore::new())),
         path_fork,
     };
+    let mut consumer_constants = ConstValueStore::default();
     let materialised = materialize_public_folded_value(
         &mut consumer_materialiser,
         &folded,
         struct_type_id,
+        &mut consumer_constants,
         &mut consumer_string_table,
         None,
     )
     .expect("named struct record should keep the struct instance import path");
 
-    assert_eq!(materialised.type_id, struct_type_id);
-    let ExpressionKind::StructInstance(fields) = &materialised.kind else {
+    assert_eq!(
+        consumer_constants
+            .metadata(materialised)
+            .expect("materialised record has content")
+            .type_id,
+        struct_type_id
+    );
+    let ConstValuePayload::Record(fields) = consumer_constants
+        .payload(materialised)
+        .expect("materialised record has content")
+    else {
         panic!("named struct records must keep materialising as struct instances");
     };
     assert_eq!(fields.len(), 2);
     assert_eq!(
         consumer_materialiser
             .path_fork
-            .component(fields[0].id)
+            .component(fields[0].name)
             .map(|id| consumer_string_table.resolve(id)),
         Some("title")
     );
     assert!(matches!(
-        &fields[0].value.kind,
-        ExpressionKind::StringSlice(_)
+        consumer_constants.payload(fields[0].value),
+        Some(ConstValuePayload::String(ConstStringValue::Text(_)))
     ));
     assert_eq!(
         consumer_materialiser
             .path_fork
-            .component(fields[1].id)
+            .component(fields[1].name)
             .map(|id| consumer_string_table.resolve(id)),
         Some("year")
     );
-    assert!(matches!(fields[1].value.kind, ExpressionKind::Int(2026)));
+    assert!(matches!(
+        consumer_constants.payload(fields[1].value),
+        Some(ConstValuePayload::FixedScalar(value))
+            if *value == FixedScalarValue::signed(FixedScalar::I32, 2026).expect("2026 fits I32")
+    ));
 }
 
 fn metadata_record(
@@ -715,9 +887,17 @@ fn metadata_record(
 }
 
 fn declaration(path: &PathId, data_type: DataType) -> Declaration {
+    let type_id = match data_type {
+        DataType::Bool => builtin_type_ids::BOOL,
+        DataType::Inferred => builtin_type_ids::NONE,
+        _ => panic!("unsupported imported-constant fixture type"),
+    };
     Declaration {
         id: *path,
-        value: Expression::no_value(None, data_type, ValueMode::ImmutableOwned),
+        type_id,
+        diagnostic_type: data_type,
+        value_mode: ValueMode::ImmutableOwned,
+        value: DeclarationValue::Absent,
         binding_span: None,
         config_qualifier: None,
     }

@@ -1,18 +1,18 @@
 @core/math PI, sin, cos, sqrt
 @data/constants base_count, scale_factor
 
-scaled_count || -> Int:
+scaled_count || -> I32:
     return base_count * scale_factor
 ;
 
-wave |phase Float| -> Float:
+wave |phase F64| -> F64:
     return sin(phase) + cos(phase * 2.0)
 ;
 
-hypotenuse |a Float, b Float| -> Float:
+hypotenuse |a F64, b F64| -> F64:
     return sqrt((a * a) + (b * b))
 ;
 
-pi_value || -> Float:
+pi_value || -> F64:
     return PI
 ;

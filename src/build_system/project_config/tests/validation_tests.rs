@@ -10,8 +10,7 @@
 //! closed section schema, its typed section storage that the builder's readers consume
 //! directly, the grouped output roots that drive directory output resolution, and the
 //! inactive-section behaviour when no builder registered the schema.
-//! WHY: these invariants have no end-to-end fixture until grouped records and builder
-//! sections are validated, so the schema walk and the grouped-record dispatch are pinned here.
+//! WHY: the schema walk and application invariants belong to the build-owned config boundary.
 
 use super::{
     ConfigApplyError, ConfigSchemaView, SchemaFieldIndexes, ValidatedConfigValue, ValueCheck,
@@ -42,7 +41,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use crate::projects::routing::{PageUrlStyle, parse_html_site_config};
 use crate::projects::settings::{Config, HtmlSectionConfig};
-use moth_lexical::numeric::profile::NumericProfile;
+use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use std::path::{Path, PathBuf};
 
 // -------------------------
@@ -51,6 +50,14 @@ use std::path::{Path, PathBuf};
 
 fn text(text: &str) -> PublicFoldedValue {
     PublicFoldedValue::String(OwnedFoldedString::Text(text.to_owned()))
+}
+
+/// One exact `I32` folded integer.
+fn int(value: i32) -> PublicFoldedValue {
+    PublicFoldedValue::FixedScalar(
+        FixedScalarValue::signed(FixedScalar::I32, i64::from(value))
+            .expect("a test-provided i32 fits its own scalar"),
+    )
 }
 
 fn record(fields: Vec<(&str, PublicFoldedValue)>) -> PublicFoldedValue {
@@ -209,12 +216,8 @@ fn rejects_wrong_record_shape_on_record_field() {
     let schema = site_record_schema(UnknownFieldPolicy::Reject);
     let mut string_table = StringTable::new();
 
-    let (validated, errors) = validate_field(
-        &schema,
-        site_field(&schema),
-        &PublicFoldedValue::Int(3),
-        &mut string_table,
-    );
+    let (validated, errors) =
+        validate_field(&schema, site_field(&schema), &int(3), &mut string_table);
 
     assert!(
         validated.is_none(),
@@ -237,7 +240,7 @@ fn rejects_shape_failure_inside_nested_record() {
     let (validated, errors) = validate_field(
         &schema,
         site_field(&schema),
-        &record(vec![("title", PublicFoldedValue::Int(7))]),
+        &record(vec![("title", int(7))]),
         &mut string_table,
     );
 
@@ -523,7 +526,7 @@ fn rejects_int_element_in_string_collection_with_shape_reason() {
     let (validated, errors) = validate_field(
         &schema,
         root_field(&schema, 0),
-        &PublicFoldedValue::Collection(vec![text("lib"), PublicFoldedValue::Int(3)]),
+        &PublicFoldedValue::Collection(vec![text("lib"), int(3)]),
         &mut string_table,
     );
 
@@ -553,7 +556,10 @@ fn accepts_int_collection_and_nested_optional_elements() {
     schema
         .register_field(
             root,
-            ConfigSchemaField::collection("counts", ConfigFieldShape::Int),
+            ConfigSchemaField::collection(
+                "counts",
+                ConfigFieldShape::FixedScalar(FixedScalar::I32),
+            ),
         )
         .expect("schema is unfrozen");
     schema
@@ -573,7 +579,7 @@ fn accepts_int_collection_and_nested_optional_elements() {
     let (validated, errors) = validate_field(
         &schema,
         counts_field,
-        &PublicFoldedValue::Collection(vec![PublicFoldedValue::Int(1), PublicFoldedValue::Int(2)]),
+        &PublicFoldedValue::Collection(vec![int(1), int(2)]),
         &mut string_table,
     );
     assert!(errors.is_empty(), "unexpected diagnostics: {errors:?}");
@@ -581,7 +587,14 @@ fn accepts_int_collection_and_nested_optional_elements() {
         Some(ValidatedConfigValue::Collection(values)) => {
             assert_eq!(
                 values,
-                vec![ValidatedConfigValue::Int(1), ValidatedConfigValue::Int(2)]
+                vec![
+                    ValidatedConfigValue::FixedScalar(
+                        FixedScalarValue::signed(FixedScalar::I32, 1).expect("one fits I32"),
+                    ),
+                    ValidatedConfigValue::FixedScalar(
+                        FixedScalarValue::signed(FixedScalar::I32, 2).expect("two fits I32"),
+                    ),
+                ]
             )
         }
         other => panic!("expected a validated int collection, got {other:?}"),
@@ -677,10 +690,7 @@ fn applies_grouped_project_record_to_config_fields() {
                 ("version", text("1.2.3")),
                 ("author", text("Ada")),
                 ("license", text("MIT")),
-                (
-                    "template_const_loop_iteration_limit",
-                    PublicFoldedValue::Int(500),
-                ),
+                ("template_const_loop_iteration_limit", int(500)),
             ]),
         )],
         &mut string_table,
@@ -796,7 +806,7 @@ fn rejects_wrong_shape_inside_grouped_project_record() {
     let mut string_table = StringTable::new();
 
     let (config, errors) = validate_and_apply(
-        vec![("project", record(vec![("name", PublicFoldedValue::Int(5))]))],
+        vec![("project", record(vec![("name", int(5))]))],
         &mut string_table,
     );
 
@@ -1146,7 +1156,6 @@ fn applies_authored_grouped_html_section_from_compiled_config_source() {
 
     let compiled = compile_config_source(
         ConfigCompilationRequest {
-            numeric_profile: NumericProfile::STANDARD,
             authored_path: Path::new("project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code: "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\n\nhtml #= (\n    origin = \"/docs\",\n    html_lang = \"en-GB\",\n    dev_output = \"site/dev\",\n)\n",
@@ -1185,7 +1194,6 @@ fn preserves_project_shape_diagnostic_after_dependency_projection() {
     let style_directives = StyleDirectiveRegistry::built_ins();
     let compiled = compile_config_source(
         ConfigCompilationRequest {
-            numeric_profile: NumericProfile::STANDARD,
             authored_path: Path::new("project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code: "project #= \"docs\"\n",
@@ -1381,13 +1389,16 @@ fn rejects_an_invalid_moth_project_identifier() {
 #[test]
 fn converts_concrete_project_template_metadata_to_string() {
     let mut string_table = StringTable::new();
-    let template = PublicFoldedValue::ConstTemplate(PublicConstTemplate {
-        kind: PublicConstTemplateKind::Wrapper,
-        pieces: vec![PublicConstTemplatePiece::Text(OwnedFoldedString::Text(
-            "hello".to_owned(),
-        ))],
-        conditional_child_wrappers: Vec::new(),
-    });
+    let template = PublicFoldedValue::ConstTemplate {
+        template: PublicConstTemplate {
+            kind: PublicConstTemplateKind::Wrapper,
+            pieces: vec![PublicConstTemplatePiece::Text(OwnedFoldedString::Text(
+                "hello".to_owned(),
+            ))],
+            conditional_child_wrappers: Vec::new(),
+        },
+        folded: None,
+    };
 
     let (config, errors) = validate_and_apply(
         vec![(
@@ -1406,16 +1417,19 @@ fn converts_concrete_project_template_metadata_to_string() {
 #[test]
 fn converts_text_only_string_pieces_in_project_template_metadata() {
     let mut string_table = StringTable::new();
-    let template = PublicFoldedValue::ConstTemplate(PublicConstTemplate {
-        kind: PublicConstTemplateKind::Wrapper,
-        pieces: vec![PublicConstTemplatePiece::Text(OwnedFoldedString::Pieces(
-            vec![
-                OwnedFoldedStringPiece::Text("open".to_owned()),
-                OwnedFoldedStringPiece::Text(" note".to_owned()),
-            ],
-        ))],
-        conditional_child_wrappers: Vec::new(),
-    });
+    let template = PublicFoldedValue::ConstTemplate {
+        template: PublicConstTemplate {
+            kind: PublicConstTemplateKind::Wrapper,
+            pieces: vec![PublicConstTemplatePiece::Text(OwnedFoldedString::Pieces(
+                vec![
+                    OwnedFoldedStringPiece::Text("open".to_owned()),
+                    OwnedFoldedStringPiece::Text(" note".to_owned()),
+                ],
+            ))],
+            conditional_child_wrappers: Vec::new(),
+        },
+        folded: None,
+    };
 
     let (config, errors) = validate_and_apply(
         vec![(
@@ -1433,16 +1447,19 @@ fn converts_text_only_string_pieces_in_project_template_metadata() {
 #[test]
 fn rejects_unresolved_project_template_metadata() {
     let mut string_table = StringTable::new();
-    let template = PublicFoldedValue::ConstTemplate(PublicConstTemplate {
-        kind: PublicConstTemplateKind::Wrapper,
-        pieces: vec![PublicConstTemplatePiece::Slot(PublicConstTemplateSlot {
-            key: PublicTemplateSlotKey::Named("title".to_owned()),
-            applied_child_wrappers: Vec::new(),
-            child_wrappers: Vec::new(),
-            skip_parent_child_wrappers: false,
-        })],
-        conditional_child_wrappers: Vec::new(),
-    });
+    let template = PublicFoldedValue::ConstTemplate {
+        template: PublicConstTemplate {
+            kind: PublicConstTemplateKind::Wrapper,
+            pieces: vec![PublicConstTemplatePiece::Slot(PublicConstTemplateSlot {
+                key: PublicTemplateSlotKey::Named("title".to_owned()),
+                applied_child_wrappers: Vec::new(),
+                child_wrappers: Vec::new(),
+                skip_parent_child_wrappers: false,
+            })],
+            conditional_child_wrappers: Vec::new(),
+        },
+        folded: None,
+    };
 
     let (_, errors) = validate_and_apply(
         vec![(
@@ -1466,7 +1483,6 @@ fn retains_compiled_project_metadata_type_and_field_location() {
     let style_directives = StyleDirectiveRegistry::built_ins();
     let compiled = compile_config_source(
         ConfigCompilationRequest {
-            numeric_profile: NumericProfile::STANDARD,
             authored_path: Path::new("project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code: "project #= (\n    name = \"docs\",\n    custom_note = \"open\",\n)\n",
@@ -1552,7 +1568,6 @@ fn applies_direct_project_config_global_through_validation() {
         .expect("builder global name should be platform-neutral");
     let compiled = compile_config_source(
         ConfigCompilationRequest {
-            numeric_profile: NumericProfile::STANDARD,
             authored_path: Path::new("project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code: "version #Config of String\nproject #= (\n    name = \"docs\",\n    version = version,\n)\n",
@@ -1589,7 +1604,6 @@ fn applies_optional_direct_project_config_absence_and_retains_resolution_provena
     let globals = crate::compiler_frontend::build_config::BuilderConfigGlobalSet::new();
     let compiled = compile_config_source(
         ConfigCompilationRequest {
-            numeric_profile: NumericProfile::STANDARD,
             authored_path: Path::new("project/config.moth"),
             file_id: SourceId::COMPILATION_ROOT,
             source_code: "author #Config of String?\nproject #= (\n    name = \"docs\",\n    author = author,\n)\n",
@@ -1628,4 +1642,122 @@ fn applies_optional_direct_project_config_absence_and_retains_resolution_provena
     ))
     .expect("optional config absence should validate and apply");
     assert_eq!(config.author, None);
+}
+
+#[test]
+fn scalar_leaves_preserve_exact_identity_and_payload() {
+    for scalar in FixedScalar::ALL {
+        let value = if scalar.signed_range().is_some() {
+            FixedScalarValue::signed(scalar, -1)
+        } else if let Some(maximum) = scalar.unsigned_max() {
+            FixedScalarValue::unsigned(scalar, maximum)
+        } else {
+            FixedScalarValue::binary_float(scalar, -0.0)
+        }
+        .expect("each test value fits its declared scalar");
+        let field = ConfigSchemaField::fixed_scalar("value", scalar);
+        let schema = ConfigSchema::new("test record", UnknownFieldPolicy::Reject);
+        let mut string_table = StringTable::new();
+        let (validated, errors) = validate_field(
+            &schema,
+            &field,
+            &PublicFoldedValue::FixedScalar(value),
+            &mut string_table,
+        );
+        assert!(errors.is_empty(), "unexpected diagnostics: {errors:?}");
+        assert_eq!(
+            validated,
+            Some(ValidatedConfigValue::FixedScalar(value)),
+            "validation must retain {scalar:?} and its exact bits"
+        );
+
+        let different_scalar = if scalar == FixedScalar::I32 {
+            FixedScalar::I64
+        } else {
+            FixedScalar::I32
+        };
+        let different_value =
+            FixedScalarValue::signed(different_scalar, 1).expect("one fits both signed test types");
+        let (validated, errors) = validate_field(
+            &schema,
+            &field,
+            &PublicFoldedValue::FixedScalar(different_value),
+            &mut string_table,
+        );
+        assert!(
+            validated.is_none(),
+            "{scalar:?} must reject {different_scalar:?}"
+        );
+        assert!(matches!(
+            first_invalid_reason(&errors),
+            InvalidConfigReason::InvalidConfigValueShape { .. }
+        ));
+    }
+}
+
+#[test]
+fn project_loop_limit_rejects_another_integer_width() {
+    let mut string_table = StringTable::new();
+    let (_, errors) = validate_and_apply(
+        vec![(
+            "project",
+            record(vec![
+                ("name", text("docs")),
+                (
+                    "template_const_loop_iteration_limit",
+                    PublicFoldedValue::FixedScalar(
+                        FixedScalarValue::signed(FixedScalar::I64, 500)
+                            .expect("the test loop limit fits I64"),
+                    ),
+                ),
+            ]),
+        )],
+        &mut string_table,
+    );
+    assert!(matches!(
+        first_invalid_reason(&errors),
+        InvalidConfigReason::InvalidConfigValueShape { .. }
+    ));
+}
+
+#[test]
+fn project_loop_limit_preserves_resource_bound_diagnostics() {
+    for (value, expected) in [
+        (0, "a positive integer"),
+        (-1, "a positive integer"),
+        (1_000_001, "an integer no greater than 1000000"),
+    ] {
+        let mut string_table = StringTable::new();
+        let (_, errors) = validate_and_apply(
+            vec![(
+                "project",
+                record(vec![
+                    ("name", text("docs")),
+                    ("template_const_loop_iteration_limit", int(value)),
+                ]),
+            )],
+            &mut string_table,
+        );
+        let InvalidConfigReason::InvalidProjectSettingValue {
+            expected: actual, ..
+        } = first_invalid_reason(&errors)
+        else {
+            panic!("expected a loop resource-bound diagnostic, got {errors:?}");
+        };
+        assert_eq!(string_table.resolve(*actual), expected);
+    }
+
+    let mut string_table = StringTable::new();
+    let (config, errors) = validate_and_apply(
+        vec![(
+            "project",
+            record(vec![
+                ("name", text("docs")),
+                ("template_const_loop_iteration_limit", int(1_000_000)),
+            ]),
+        )],
+        &mut string_table,
+    );
+    assert!(errors.is_empty(), "unexpected diagnostics: {errors:?}");
+    assert_eq!(config.template_const_loop_iteration_limit, 1_000_000);
 }

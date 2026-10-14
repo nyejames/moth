@@ -245,7 +245,10 @@ impl ModuleCompilationSchedule {
     /// builder view and source-origin table while transient provider mutations remain isolated
     /// to the job. Failures travel in the premerge lane; the final boundary owns the single
     /// vessel conversion.
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "check-only preparation keeps directives, mutable span builders and external-import state, resolver and dependency resolution, mutable string/path tables and selected source texts separate"
+    )]
     pub(super) fn prepare_check_only_jobs(
         &mut self,
         style_directives: &StyleDirectiveRegistry,
@@ -328,7 +331,10 @@ impl ModuleCompilationSchedule {
 /// graph cycle, a missing project-local root or a graph/inventory disagreement surfaces as a
 /// typed premerge failure without panicking; the final boundary owns the vessel conversion.
 #[allow(dead_code)]
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "project discovery keeps configuration, resolver, sources, directives and dependency resolution, mutable span/graph/import/resource/string/path owners and the timers-only boundary separate"
+)]
 pub(crate) fn discover_all_modules_in_project(
     config: &Config,
     project_path_resolver: &ProjectPathResolver,
@@ -366,7 +372,10 @@ pub(crate) fn discover_all_modules_in_project(
 /// Discover a project inventory and optionally prepare transient check-only units.
 ///
 /// The default project discovery path remains canonical-only. Check mode opts in explicitly so
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "project discovery keeps its configuration, resolver, source and dependency inputs, mutable span/graph/import/resource/string/path owners, check-only opt-in and selected source texts and the timers-only boundary separate"
+)]
 pub(crate) fn discover_all_modules_in_project_with_check_only(
     config: &Config,
     project_path_resolver: &ProjectPathResolver,
@@ -405,7 +414,10 @@ pub(crate) fn discover_all_modules_in_project_with_check_only(
 /// Discover a source-package inventory and optionally prepare transient check-only units.
 ///
 /// Source packages use the same explicit opt-in as the project boundary; their canonical graph
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "package discovery keeps its configuration, resolver, source and dependency inputs, mutable span/graph/import/resource/string/path owners, check-only opt-in and selected source texts and the timers-only boundary separate"
+)]
 pub(crate) fn discover_all_modules_in_package_with_check_only(
     config: &Config,
     project_path_resolver: &ProjectPathResolver,
@@ -442,7 +454,10 @@ pub(crate) fn discover_all_modules_in_package_with_check_only(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "boundary discovery keeps configuration, resolver, sources, directives and dependency resolution, mutable span/graph/import/resource/string/path owners, normal-entry and check-only policies, selected source texts and the timers-only boundary separate"
+)]
 fn discover_all_modules_in_boundary(
     config: &Config,
     project_path_resolver: &ProjectPathResolver,
@@ -637,7 +652,10 @@ fn compiler_source_id_for_index(
 /// no target becomes another module root. Provider clauses, external package discovery and
 /// resolution rows are all job-local; file references use a fresh resource registry whose IDs die
 /// with the job.
-#[allow(clippy::too_many_arguments)]
+#[allow(
+    clippy::too_many_arguments,
+    reason = "transient module preparation keeps owner and source identities, candidate sources and source-tree lookup, directives and preparation context, mutable spans/imports/selected texts, resolver and dependency resolution, origin data and string/path fork sources separate"
+)]
 fn prepare_check_only_module(
     owner_module_id: ModuleId,
     source_index: SourceRecordIndex,

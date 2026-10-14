@@ -1,0 +1,7 @@
+entry = "."
+
+# Read only the numeric leaf so output never recursively formats the shared aggregate.
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "shared_pair=4294967296"

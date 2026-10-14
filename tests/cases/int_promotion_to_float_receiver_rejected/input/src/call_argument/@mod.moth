@@ -1,0 +1,5 @@
+receive |value F64| -> F64:
+    return value
+;
+bound I32 = 5
+received = receive(bound)

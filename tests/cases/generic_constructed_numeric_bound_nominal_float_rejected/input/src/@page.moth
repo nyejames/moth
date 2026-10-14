@@ -1,0 +1,13 @@
+-- A bound whole leaf inside a direct generic constructor stays integer. The
+-- later F32 receiver cannot reinterpret that origin.
+
+Packet type T = |value T|
+
+read_f32 |value F32| -> String:
+    return cast value
+;
+
+count = 1
+packet = Packet(count)
+text = read_f32(packet.value)
+[:[text]]

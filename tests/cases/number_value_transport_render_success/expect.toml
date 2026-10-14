@@ -1,5 +1,4 @@
 entry = "."
-numeric_profile = "Int64/Float32"
 
 [backends.html]
 mode = "success"

@@ -1,0 +1,41 @@
+-- Retained sibling custom-error binding.
+--
+-- `ready_custom` is already a completed typed call when the catch suffix binds
+-- its handler error, while `pending_identity` is still retained because its
+-- unannotated argument origin has no selected type yet. The completed sibling
+-- operand is the only compatible error producer in the protected comparison, so
+-- the bound handler error keeps the custom type and the recovery helper accepts
+-- it; a builtin `Error` binding would reject `recover_custom`.
+--
+-- Nothing in the protected comparison is arithmetic, so no implicit numeric
+-- failure can change custom-error compatibility. The `fail` parameter selects
+-- the authored failure and success runtime branches, and `pending` stays
+-- unannotated so the identity argument is genuinely pending when the handler
+-- error type is selected.
+
+CustomFailure = |
+    marker I32,
+|
+
+ready_custom |fail Bool| -> I32, CustomFailure!:
+    if fail:
+        return! CustomFailure(marker = 9)
+    ;
+    return 5
+;
+
+pending_identity |value I32| -> I32:
+    return value
+;
+
+recover_custom |err CustomFailure| -> Bool:
+    return err.marker is 9
+;
+
+sibling_probe |fail Bool| -> Bool:
+    pending = 1
+    outcome = ready_custom(fail) is pending_identity(pending) catch |err| then recover_custom(err)
+    return outcome
+;
+
+[:scalar retained sibling custom failure=[sibling_probe(true)] success=[sibling_probe(false)]]

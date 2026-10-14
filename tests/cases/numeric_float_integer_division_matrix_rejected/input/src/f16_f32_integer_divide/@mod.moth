@@ -1,0 +1,5 @@
+hidden ||:
+    left F16 = 2
+    right F32 = 2
+    value = left // right
+;

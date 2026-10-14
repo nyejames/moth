@@ -11,8 +11,8 @@ validation and lifetime validation.
 
 [codeblock, $code("moth"):
     Size = |
-        width Int,
-        height Int,
+        width I32,
+        height I32,
     |
 
     show_window ||:

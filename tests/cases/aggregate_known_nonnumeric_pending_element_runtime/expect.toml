@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "known_nonnumeric_pending label=4294967296 len=1 wide=true narrow=false flags_len=2 comparison_wide=true comparison_narrow=false"

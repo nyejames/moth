@@ -4,6 +4,6 @@ ResultShape type T, E ::
 ;
 
 ok_result ResultShape of String, Error = ResultShape::Ok("hello")
-err_result ResultShape of Int, String = ResultShape::Err("nope")
+err_result ResultShape of I32, String = ResultShape::Err("nope")
 
 [: generic choice success]

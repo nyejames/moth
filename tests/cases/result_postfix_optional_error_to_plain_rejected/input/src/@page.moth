@@ -2,11 +2,11 @@ SmallError = |
     message String,
 |
 
-inner || -> Int, SmallError?!:
+inner || -> I32, SmallError?!:
     return! SmallError("optional error")
 ;
 
-outer || -> Int, SmallError!:
+outer || -> I32, SmallError!:
     value = inner()!
     return value
 ;

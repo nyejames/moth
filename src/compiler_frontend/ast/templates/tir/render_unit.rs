@@ -11,6 +11,8 @@
 //! authority during render-unit preparation.
 
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::Style;
 
@@ -173,8 +175,14 @@ fn tir_formatter_messages_to_template_error(messages: CompilerMessages) -> Templ
 /// WHAT: thin wrapper around `format_tir_template` that returns formatter
 ///       warnings with the formatted TIR result.
 /// WHY: warnings are user-visible formatter behavior and must reach the caller.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the scope context receives formatter warnings, so it stays a separate input"
+)]
 pub(in crate::compiler_frontend::ast::templates) fn run_tir_formatter_with_warnings(
     store: &mut TemplateIrStore,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     root: TemplateIrId,
     phase: TemplateTirPhase,
     context: TemplateViewContext,
@@ -182,8 +190,17 @@ pub(in crate::compiler_frontend::ast::templates) fn run_tir_formatter_with_warni
     scope_context: &ScopeContext,
     string_table: &mut StringTable,
 ) -> Result<TirFormatterResult, TemplateError> {
-    let result = format_tir_template(store, root, phase, context, style, string_table)
-        .map_err(tir_formatter_messages_to_template_error)?;
+    let result = format_tir_template(
+        store,
+        expression_builder,
+        const_values,
+        root,
+        phase,
+        context,
+        style,
+        string_table,
+    )
+    .map_err(tir_formatter_messages_to_template_error)?;
 
     for warning in &result.warnings {
         scope_context.emit_warning(warning.clone());
@@ -204,12 +221,16 @@ pub(in crate::compiler_frontend::ast::templates) fn format_tir_body_root(
     body_root: TemplateIrNodeId,
     style: &Style,
     context: &ScopeContext,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
 ) -> Result<TemplateIrNodeId, TemplateError> {
     let mut store = context.template_ir_store.borrow_mut();
     let empty_context = TemplateViewContext::default();
     let result = format_tir_body_node_root(
         &mut store,
+        expression_builder,
+        const_values,
         None,
         body_root,
         TemplateTirPhase::Parsed,
@@ -273,6 +294,8 @@ pub(in crate::compiler_frontend::ast::templates) fn prepare_loop_aggregate_wrapp
     root_children: &[TemplateIrNodeId],
     string_table: &StringTable,
     template_ir_store: &mut TemplateIrStore,
+    expression_builder: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
 ) -> Result<TemplateIrNodeId, TemplateError> {
     // Derive the head-prefix TIR nodes from the owning template's parser-emitted
     // root children. Reusing those exact nodes preserves parser identity and
@@ -284,8 +307,14 @@ pub(in crate::compiler_frontend::ast::templates) fn prepare_loop_aggregate_wrapp
         &head_prefix_nodes,
         template_ir_store,
     )?;
-    let composed_root =
-        compose_tir_head_chain_from_root(template_ir_store, aggregate_root, string_table, true)?;
+    let composed_root = compose_tir_head_chain_from_root(
+        template_ir_store,
+        expression_builder,
+        const_values,
+        aggregate_root,
+        string_table,
+        true,
+    )?;
     Ok(composed_root)
 }
 
@@ -316,6 +345,9 @@ pub(in crate::compiler_frontend::ast::templates) fn head_prefix_tir_nodes(
         if matches!(
             node.kind,
             TemplateIrNodeKind::Loop { .. } | TemplateIrNodeKind::Conditional { .. }
+        ) || matches!(
+            &node.kind,
+            TemplateIrNodeKind::RetainedNumericIntake(role) if role.completes_into_control_flow()
         ) {
             break;
         }

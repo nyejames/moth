@@ -27,21 +27,13 @@ use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::moth_template::{
-    CompiledMothTemplateDocument, MothTemplateCompileOutput, MothTemplateCompileRequest,
-    MothTemplateInput, MothTemplateSource, compile_moth_template,
+    CompiledMothTemplateDocument, MothTemplateCompileOutput, MothTemplateInput, MothTemplateSource,
+    compile_moth_template,
 };
 use crate::projects::html_project::style_directives::html_project_style_directives;
-use moth_lexical::numeric::profile::NumericProfile;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
-
-fn request(input: MothTemplateInput) -> MothTemplateCompileRequest {
-    MothTemplateCompileRequest {
-        input,
-        numeric_profile: NumericProfile::STANDARD,
-    }
-}
 
 fn temp_project(files: &[(&str, &str)]) -> TempDir {
     let temp_dir = tempfile::tempdir().expect("temp project should be created");
@@ -58,8 +50,7 @@ fn temp_project(files: &[(&str, &str)]) -> TempDir {
 
 fn compile_ok(input: MothTemplateInput) -> MothTemplateCompileOutput {
     let mut string_table = StringTable::new();
-    compile_moth_template(request(input), &mut string_table)
-        .expect("Moth template input should compile")
+    compile_moth_template(input, &mut string_table).expect("Moth template input should compile")
 }
 
 #[test]
@@ -81,8 +72,7 @@ fn warnings_keep_document_snapshots_on_success_and_later_preparation_failure() {
             inputs.push(temp_dir.path().join("c/page.mtf"));
         }
         let mut string_table = StringTable::new();
-        let result =
-            compile_moth_template(request(MothTemplateInput::Files(inputs)), &mut string_table);
+        let result = compile_moth_template(MothTemplateInput::Files(inputs), &mut string_table);
         let messages = if include_failure {
             result.expect_err("the third document should fail preparation")
         } else {
@@ -307,10 +297,10 @@ fn distinct_origins_claiming_one_direct_output_path_are_diagnosed() {
     let mut string_table = StringTable::new();
 
     let messages = compile_moth_template(
-        request(MothTemplateInput::Directory {
+        MothTemplateInput::Directory {
             path: temp_dir.path().to_path_buf(),
             recursive: true,
-        }),
+        },
         &mut string_table,
     )
     .expect_err("distinct origins claiming one output path should fail");
@@ -386,10 +376,10 @@ fn request_wide_conflict_leaves_every_source_unhashed() {
     let mut resource_inputs = ResourceInputRegistry::new();
 
     let messages = super::compile::compile_moth_template_with_registry(
-        request(MothTemplateInput::Directory {
+        MothTemplateInput::Directory {
             path: temp_dir.path().to_path_buf(),
             recursive: true,
-        }),
+        },
         &mut string_table,
         &mut resource_inputs,
     )
@@ -460,7 +450,7 @@ fn mixed_relative_and_absolute_in_memory_paths_are_diagnosed() {
     let mut string_table = StringTable::new();
 
     let messages = compile_moth_template(
-        request(MothTemplateInput::Sources(vec![
+        MothTemplateInput::Sources(vec![
             MothTemplateSource {
                 display_path: PathBuf::from("memory/intro.mtf"),
                 source_text: "first".to_owned(),
@@ -469,7 +459,7 @@ fn mixed_relative_and_absolute_in_memory_paths_are_diagnosed() {
                 display_path: temp_dir.path().join("absolute.mtf"),
                 source_text: "second".to_owned(),
             },
-        ])),
+        ]),
         &mut string_table,
     )
     .expect_err("mixed relative and absolute display paths have one portable basis");
@@ -649,9 +639,7 @@ fn content_reference_onto_the_entry_reuses_its_registered_kind() {
     let mut string_table = StringTable::new();
 
     let result = compile_moth_template(
-        request(MothTemplateInput::Files(vec![
-            temp_dir.path().join("entry.mtf"),
-        ])),
+        MothTemplateInput::Files(vec![temp_dir.path().join("entry.mtf")]),
         &mut string_table,
     );
 
@@ -678,11 +666,9 @@ fn content_source_identities_follow_canonical_logical_order_not_reference_order(
     ]);
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut units = request(MothTemplateInput::Files(vec![
-        temp_dir.path().join("zeta.mtf"),
-    ]))
-    .collect_sources(&mut string_table, &mut path_fork)
-    .expect("the template unit should collect");
+    let mut units = MothTemplateInput::Files(vec![temp_dir.path().join("zeta.mtf")])
+        .collect_sources(&mut string_table, &mut path_fork)
+        .expect("the template unit should collect");
     assert_eq!(units.len(), 1);
 
     let style_directives = StyleDirectiveRegistry::merged(&html_project_style_directives())
@@ -727,11 +713,9 @@ fn content_source_preparation_failures_name_the_logical_source() {
     ]);
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut units = request(MothTemplateInput::Files(vec![
-        temp_dir.path().join("page.mtf"),
-    ]))
-    .collect_sources(&mut string_table, &mut path_fork)
-    .expect("the template unit should collect");
+    let mut units = MothTemplateInput::Files(vec![temp_dir.path().join("page.mtf")])
+        .collect_sources(&mut string_table, &mut path_fork)
+        .expect("the template unit should collect");
 
     let style_directives = StyleDirectiveRegistry::merged(&html_project_style_directives())
         .expect("style directives should merge");
@@ -791,7 +775,7 @@ fn aborted_content_walk_retains_unvisited_canonical_source_identity() {
 
     let mut string_table = StringTable::new();
     let Err(messages) = compile_moth_template(
-        request(MothTemplateInput::File(temp_dir.path().join("page.mtf"))),
+        MothTemplateInput::File(temp_dir.path().join("page.mtf")),
         &mut string_table,
     ) else {
         panic!("the unreadable canonical content target should fail discovery");
@@ -827,11 +811,9 @@ fn retained_resolution_diagnostics_name_the_final_logical_source() {
     let temp_dir = temp_project(&[("page.mtf", "# Page\n\n[@absent.md]")]);
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut units = request(MothTemplateInput::Files(vec![
-        temp_dir.path().join("page.mtf"),
-    ]))
-    .collect_sources(&mut string_table, &mut path_fork)
-    .expect("the template unit should collect");
+    let mut units = MothTemplateInput::Files(vec![temp_dir.path().join("page.mtf")])
+        .collect_sources(&mut string_table, &mut path_fork)
+        .expect("the template unit should collect");
 
     let style_directives = StyleDirectiveRegistry::merged(&html_project_style_directives())
         .expect("style directives should merge");
@@ -869,9 +851,7 @@ fn unreadable_content_value_surfaces_its_own_read_failure() {
     let mut string_table = StringTable::new();
 
     let messages = compile_moth_template(
-        request(MothTemplateInput::Files(vec![
-            temp_dir.path().join("page.mtf"),
-        ])),
+        MothTemplateInput::Files(vec![temp_dir.path().join("page.mtf")]),
         &mut string_table,
     )
     .expect_err("an unreadable content source should fail the compile");
@@ -1022,11 +1002,9 @@ fn template_bundle_source_and_header_paths_survive_success_finalization() {
     ]);
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
-    let mut units = request(MothTemplateInput::Files(vec![
-        temp_dir.path().join("page.mtf"),
-    ]))
-    .collect_sources(&mut string_table, &mut path_fork)
-    .expect("the template unit should collect");
+    let mut units = MothTemplateInput::Files(vec![temp_dir.path().join("page.mtf")])
+        .collect_sources(&mut string_table, &mut path_fork)
+        .expect("the template unit should collect");
     let source_path = units[0].source_path.clone();
     let style_directives = StyleDirectiveRegistry::merged(&html_project_style_directives())
         .expect("style directives should merge");
@@ -1124,7 +1102,6 @@ fn template_bundle_source_and_header_paths_survive_success_finalization() {
             source_code: None,
             style_directives: &style_directives,
             file_value_resolution: Some(bundle),
-            numeric_profile: NumericProfile::STANDARD,
         },
         &mut string_table,
     )
@@ -1151,7 +1128,7 @@ fn duplicate_source_paths_are_diagnostics() {
     let mut string_table = StringTable::new();
 
     let messages = compile_moth_template(
-        request(MothTemplateInput::Files(vec![path.clone(), path])),
+        MothTemplateInput::Files(vec![path.clone(), path]),
         &mut string_table,
     )
     .expect_err("duplicate input paths should fail");

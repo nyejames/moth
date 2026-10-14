@@ -1,4 +1,4 @@
-values_for |flag Bool| -> Int, String:
+values_for |flag Bool| -> I32, String:
     numeric_value, label = if flag is:
         true => then 1
         else => then 0, "no"

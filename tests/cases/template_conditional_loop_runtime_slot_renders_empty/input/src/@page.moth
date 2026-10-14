@@ -1,4 +1,4 @@
-should_continue |counter ~Int| -> Bool:
+should_continue |counter ~I32| -> Bool:
     counter += 1
     return counter < 4
 ;

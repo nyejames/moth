@@ -1,4 +1,4 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains = ["real=2.5, int=2 "]
+rendered_output_exact = " real=2.5, int=2, negative=-2.5/-2/-2 "

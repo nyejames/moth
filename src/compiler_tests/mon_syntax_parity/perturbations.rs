@@ -8,12 +8,9 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidExpressionReason, MissingWhitespace, SymbolicSpacingConstruct, SymbolicSpacingError,
 };
 use crate::compiler_frontend::instrumentation::lock_counter_test;
-use crate::mon::{
-    Field, MonErrorCode, NumericProfile, PathSegment, Schema, SchemaType, Value, Variant,
-};
+use crate::mon::{Field, MonErrorCode, PathSegment, Schema, SchemaType, Value, Variant};
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use moth_lexical::numeric::parse::NumberLiteralErrorReason;
-use moth_lexical::numeric::profile::{FloatPrecision, IntWidth};
 
 use super::support::{
     MonExpectation, SourceExpectation, SourceReason, assert_fixture, fixture, in_declarations,
@@ -24,7 +21,6 @@ use super::support::{
 #[test]
 fn bounded_syntax_perturbations_keep_typed_parity() {
     let _guard = lock_counter_test();
-    let profile = NumericProfile::STANDARD;
     let equal_spacing = [" ", "\t", "\n"];
     let comma_spacing = [" ", "\t", "\n"];
     let integer_literals = [("1", 1), ("1_0", 10)];
@@ -35,8 +31,8 @@ fn bounded_syntax_perturbations_keep_typed_parity() {
     let mut fixtures = Vec::new();
 
     let flat_schema = Schema::record(vec![
-        Field::required("first", SchemaType::Int),
-        Field::required("second", SchemaType::Float),
+        Field::required("first", SchemaType::I32),
+        Field::required("second", SchemaType::F64),
     ]);
     for (equal_index, after_equal) in equal_spacing.iter().enumerate() {
         for (comma_index, after_comma) in comma_spacing.iter().enumerate() {
@@ -45,20 +41,17 @@ fn bounded_syntax_perturbations_keep_typed_parity() {
                     let literal = format!(
                         "first ={after_equal}{integer_text},{after_comma}second ={after_equal}{float_text}"
                     );
-                    fixtures.push(
-                        fixture(
-                            format!("flat_eq_{equal_index}_comma_{comma_index}_{literal:?}"),
-                            literal,
-                            "",
-                            flat_schema.clone(),
-                            SourceExpectation::Accept,
-                            MonExpectation::Accept(Value::Record(vec![
-                                ("first".into(), Value::Int(integer_value)),
-                                ("second".into(), Value::Float(f64::from_bits(float_bits))),
-                            ])),
-                        )
-                        .with_profile(profile),
-                    );
+                    fixtures.push(fixture(
+                        format!("flat_eq_{equal_index}_comma_{comma_index}_{literal:?}"),
+                        literal,
+                        "",
+                        flat_schema.clone(),
+                        SourceExpectation::Accept,
+                        MonExpectation::Accept(Value::Record(vec![
+                            ("first".into(), Value::I32(integer_value)),
+                            ("second".into(), Value::F64(f64::from_bits(float_bits))),
+                        ])),
+                    ));
                 }
             }
         }
@@ -71,20 +64,17 @@ fn bounded_syntax_perturbations_keep_typed_parity() {
         for (equal_index, after_equal) in equal_spacing.iter().enumerate() {
             let nested_literal = nested_record_literal(depth, after_equal, nested_integer.0);
             let literal = format!("value ={after_equal}{nested_literal}");
-            fixtures.push(
-                fixture(
-                    format!("nested_depth_{depth}_eq_{equal_index}_{literal:?}"),
-                    literal,
-                    "",
-                    nested_schema.clone(),
-                    SourceExpectation::Accept,
-                    MonExpectation::Accept(Value::Record(vec![(
-                        "value".into(),
-                        nested_record_value(depth, nested_integer.1),
-                    )])),
-                )
-                .with_profile(profile),
-            );
+            fixtures.push(fixture(
+                format!("nested_depth_{depth}_eq_{equal_index}_{literal:?}"),
+                literal,
+                "",
+                nested_schema.clone(),
+                SourceExpectation::Accept,
+                MonExpectation::Accept(Value::Record(vec![(
+                    "value".into(),
+                    nested_record_value(depth, nested_integer.1),
+                )])),
+            ));
         }
     }
 
@@ -92,7 +82,7 @@ fn bounded_syntax_perturbations_keep_typed_parity() {
         "point",
         SchemaType::Struct {
             name: "Point".into(),
-            fields: vec![Field::required("x", SchemaType::Int)],
+            fields: vec![Field::required("x", SchemaType::I32)],
         },
     )]);
     for (spacing_index, after_equal) in equal_spacing.iter().take(2).enumerate() {
@@ -102,72 +92,65 @@ fn bounded_syntax_perturbations_keep_typed_parity() {
                 fixture(
                     format!("point_qualifier_{spacing_index}_{literal:?}"),
                     literal,
-                    "Point = | x Int |\n",
+                    "Point = | x I32 |\n",
                     point_schema.clone(),
                     SourceExpectation::Accept,
                     MonExpectation::Accept(Value::Record(vec![(
                         "point".into(),
-                        Value::Record(vec![("x".into(), Value::Int(number_value))]),
+                        Value::Record(vec![("x".into(), Value::I32(number_value))]),
                     )])),
                 )
-                .with_profile(profile)
                 .with_source_nominal_type("point", "Point"),
             );
         }
     }
 
-    let choice_declarations = "Theme ::\n    Ready,\n    Selected | value Int |,\n;\n";
+    let choice_declarations = "Theme ::\n    Ready,\n    Selected | value I32 |,\n;\n";
     let choice_schema = Schema::record(vec![Field::required(
         "selection",
         SchemaType::Choice {
             name: "Theme".into(),
             variants: vec![
                 Variant::unit("Ready"),
-                Variant::payload("Selected", vec![Field::required("value", SchemaType::Int)]),
+                Variant::payload("Selected", vec![Field::required("value", SchemaType::I32)]),
             ],
         },
     )]);
     for (spacing_index, after_equal) in equal_spacing.iter().take(2).enumerate() {
         for (number_text, number_value) in integer_literals {
             let literal = format!("selection = Theme::Selected(value ={after_equal}{number_text})");
-            fixtures.push(
-                fixture(
-                    format!("choice_qualifier_{spacing_index}_{literal:?}"),
-                    literal,
-                    choice_declarations,
-                    choice_schema.clone(),
-                    SourceExpectation::Accept,
-                    MonExpectation::Accept(Value::Record(vec![(
-                        "selection".into(),
-                        Value::Choice {
-                            qualifier: Some("Theme".into()),
-                            variant: "Selected".into(),
-                            fields: vec![("value".into(), Value::Int(number_value))],
-                        },
-                    )])),
-                )
-                .with_profile(profile),
-            );
+            fixtures.push(fixture(
+                format!("choice_qualifier_{spacing_index}_{literal:?}"),
+                literal,
+                choice_declarations,
+                choice_schema.clone(),
+                SourceExpectation::Accept,
+                MonExpectation::Accept(Value::Record(vec![(
+                    "selection".into(),
+                    Value::Choice {
+                        qualifier: Some("Theme".into()),
+                        variant: "Selected".into(),
+                        fields: vec![("value".into(), Value::I32(number_value))],
+                    },
+                )])),
+            ));
         }
     }
-    fixtures.push(
-        fixture(
-            "choice_unit_qualifier_Theme::Ready",
-            "selection = Theme::Ready",
-            choice_declarations,
-            choice_schema,
-            SourceExpectation::Accept,
-            MonExpectation::Accept(Value::Record(vec![(
-                "selection".into(),
-                Value::Choice {
-                    qualifier: Some("Theme".into()),
-                    variant: "Ready".into(),
-                    fields: Vec::new(),
-                },
-            )])),
-        )
-        .with_profile(profile),
-    );
+    fixtures.push(fixture(
+        "choice_unit_qualifier_Theme::Ready",
+        "selection = Theme::Ready",
+        choice_declarations,
+        choice_schema,
+        SourceExpectation::Accept,
+        MonExpectation::Accept(Value::Record(vec![(
+            "selection".into(),
+            Value::Choice {
+                qualifier: Some("Theme".into()),
+                variant: "Ready".into(),
+                fields: Vec::new(),
+            },
+        )])),
+    ));
 
     assert_eq!(
         fixtures.len(),
@@ -320,7 +303,7 @@ fn missing_equals_spacing_is_rejected_by_source_and_mon() {
             declarations: "",
             equals_occurrence: 1,
             value: "1",
-            schema: Schema::record(vec![Field::required("first", SchemaType::Int)]),
+            schema: Schema::record(vec![Field::required("first", SchemaType::I32)]),
             path: vec![PathSegment::Field("first".into())],
         },
         NamedSpacingCase {
@@ -332,8 +315,8 @@ fn missing_equals_spacing_is_rejected_by_source_and_mon() {
             equals_occurrence: 2,
             value: "2",
             schema: Schema::record(vec![
-                Field::required("first", SchemaType::Int),
-                Field::required("later", SchemaType::Int),
+                Field::required("first", SchemaType::I32),
+                Field::required("later", SchemaType::I32),
             ]),
             path: vec![PathSegment::Field("later".into())],
         },
@@ -348,7 +331,7 @@ fn missing_equals_spacing_is_rejected_by_source_and_mon() {
             schema: Schema::record(vec![Field::required(
                 "outer",
                 SchemaType::Record {
-                    fields: vec![Field::required("inner", SchemaType::Int)],
+                    fields: vec![Field::required("inner", SchemaType::I32)],
                 },
             )]),
             path: vec![
@@ -361,14 +344,14 @@ fn missing_equals_spacing_is_rejected_by_source_and_mon() {
             prefix: "box = Box(",
             field: "inner",
             suffix: ")",
-            declarations: "Box = | inner Int |\n",
+            declarations: "Box = | inner I32 |\n",
             equals_occurrence: 2,
             value: "4",
             schema: Schema::record(vec![Field::required(
                 "box",
                 SchemaType::Struct {
                     name: "Box".into(),
-                    fields: vec![Field::required("inner", SchemaType::Int)],
+                    fields: vec![Field::required("inner", SchemaType::I32)],
                 },
             )]),
             path: vec![
@@ -381,7 +364,7 @@ fn missing_equals_spacing_is_rejected_by_source_and_mon() {
             prefix: "state = Theme::Pair(",
             field: "inner",
             suffix: ")",
-            declarations: "Theme ::\n    Pair | inner Int |,\n;\n",
+            declarations: "Theme ::\n    Pair | inner I32 |,\n;\n",
             equals_occurrence: 2,
             value: "5",
             schema: Schema::record(vec![Field::required(
@@ -390,7 +373,7 @@ fn missing_equals_spacing_is_rejected_by_source_and_mon() {
                     name: "Theme".into(),
                     variants: vec![Variant::payload(
                         "Pair",
-                        vec![Field::required("inner", SchemaType::Int)],
+                        vec![Field::required("inner", SchemaType::I32)],
                     )],
                 },
             )]),
@@ -527,14 +510,14 @@ fn map_spacing_fixture(
     let map_literal = format!("{{{}{entry}}}", case.prefix);
     let literal = format!("items = {map_literal}");
     let source = format!(
-        "MapHolder = | items {{String = Int}} |\n\
+        "MapHolder = | items {{String = I32}} |\n\
          data = MapHolder(items = {map_literal})\n"
     );
     let schema = Schema::record(vec![Field::required(
         "items",
         SchemaType::Map {
             key: Box::new(SchemaType::String),
-            value: Box::new(SchemaType::Int),
+            value: Box::new(SchemaType::I32),
         },
     )]);
 
@@ -580,7 +563,7 @@ fn source_equals_spacing_error(
 
 fn first_field_before_equals(trivia: TriviaClass) -> super::support::ParityFixture {
     let literal = format!("first{} = 1", trivia.text);
-    let schema = Schema::record(vec![Field::required("first", SchemaType::Int)]);
+    let schema = Schema::record(vec![Field::required("first", SchemaType::I32)]);
     let (source, mon) = if trivia.source_line_break.is_some() {
         (
             source_expression_assignment(in_literal(&literal, "=", 1)),
@@ -589,7 +572,7 @@ fn first_field_before_equals(trivia: TriviaClass) -> super::support::ParityFixtu
     } else {
         (
             SourceExpectation::Accept,
-            MonExpectation::Accept(Value::Record(vec![("first".into(), Value::Int(1))])),
+            MonExpectation::Accept(Value::Record(vec![("first".into(), Value::I32(1))])),
         )
     };
     fixture(
@@ -605,8 +588,8 @@ fn first_field_before_equals(trivia: TriviaClass) -> super::support::ParityFixtu
 fn later_field_before_equals(trivia: TriviaClass) -> super::support::ParityFixture {
     let literal = format!("first = 0, later{} = 1", trivia.text);
     let schema = Schema::record(vec![
-        Field::required("first", SchemaType::Int),
-        Field::required("later", SchemaType::Int),
+        Field::required("first", SchemaType::I32),
+        Field::required("later", SchemaType::I32),
     ]);
     let (source, mon) = if trivia.source_line_break.is_some() {
         (
@@ -620,8 +603,8 @@ fn later_field_before_equals(trivia: TriviaClass) -> super::support::ParityFixtu
         (
             SourceExpectation::Accept,
             MonExpectation::Accept(Value::Record(vec![
-                ("first".into(), Value::Int(0)),
-                ("later".into(), Value::Int(1)),
+                ("first".into(), Value::I32(0)),
+                ("later".into(), Value::I32(1)),
             ])),
         )
     };
@@ -640,7 +623,7 @@ fn nested_field_before_equals(trivia: TriviaClass) -> super::support::ParityFixt
     let schema = Schema::record(vec![Field::required(
         "outer",
         SchemaType::Record {
-            fields: vec![Field::required("inner", SchemaType::Int)],
+            fields: vec![Field::required("inner", SchemaType::I32)],
         },
     )]);
     let (source, mon) = if trivia.source_line_break.is_some() {
@@ -653,7 +636,7 @@ fn nested_field_before_equals(trivia: TriviaClass) -> super::support::ParityFixt
             SourceExpectation::Accept,
             MonExpectation::Accept(Value::Record(vec![(
                 "outer".into(),
-                Value::Record(vec![("inner".into(), Value::Int(1))]),
+                Value::Record(vec![("inner".into(), Value::I32(1))]),
             )])),
         )
     };
@@ -673,7 +656,7 @@ fn nominal_field_before_equals(trivia: TriviaClass) -> super::support::ParityFix
         "box",
         SchemaType::Struct {
             name: "Box".into(),
-            fields: vec![Field::required("inner", SchemaType::Int)],
+            fields: vec![Field::required("inner", SchemaType::I32)],
         },
     )]);
     let (source, mon) = if trivia.source_line_break.is_some() {
@@ -686,14 +669,14 @@ fn nominal_field_before_equals(trivia: TriviaClass) -> super::support::ParityFix
             SourceExpectation::Accept,
             MonExpectation::Accept(Value::Record(vec![(
                 "box".into(),
-                Value::Record(vec![("inner".into(), Value::Int(1))]),
+                Value::Record(vec![("inner".into(), Value::I32(1))]),
             )])),
         )
     };
     fixture(
         format!("nominal_field_before_equals_{}", trivia.name),
         literal,
-        "inner #= 0\nBox = | inner Int |\n",
+        "inner #= 0\nBox = | inner I32 |\n",
         schema,
         source,
         mon,
@@ -709,7 +692,7 @@ fn choice_field_before_equals(trivia: TriviaClass) -> super::support::ParityFixt
             name: "Theme".into(),
             variants: vec![
                 Variant::unit("Ready"),
-                Variant::payload("Pair", vec![Field::required("inner", SchemaType::Int)]),
+                Variant::payload("Pair", vec![Field::required("inner", SchemaType::I32)]),
             ],
         },
     )]);
@@ -733,7 +716,7 @@ fn choice_field_before_equals(trivia: TriviaClass) -> super::support::ParityFixt
                 Value::Choice {
                     qualifier: Some("Theme".into()),
                     variant: "Pair".into(),
-                    fields: vec![("inner".into(), Value::Int(1))],
+                    fields: vec![("inner".into(), Value::I32(1))],
                 },
             )])),
         )
@@ -741,7 +724,7 @@ fn choice_field_before_equals(trivia: TriviaClass) -> super::support::ParityFixt
     fixture(
         format!("choice_field_before_equals_{}", trivia.name),
         literal,
-        "inner #= 0\nTheme ::\n    Ready,\n    Pair | inner Int |,\n;\n",
+        "inner #= 0\nTheme ::\n    Ready,\n    Pair | inner I32 |,\n;\n",
         schema,
         source,
         mon,
@@ -754,23 +737,23 @@ fn after_equals(trivia: TriviaClass) -> super::support::ParityFixture {
         format!("after_equals_{}", trivia.name),
         literal,
         "",
-        Schema::record(vec![Field::required("first", SchemaType::Int)]),
+        Schema::record(vec![Field::required("first", SchemaType::I32)]),
         SourceExpectation::Accept,
-        MonExpectation::Accept(Value::Record(vec![("first".into(), Value::Int(1))])),
+        MonExpectation::Accept(Value::Record(vec![("first".into(), Value::I32(1))])),
     )
 }
 
 fn comma_boundary_schema() -> Schema {
     Schema::record(vec![
-        Field::required("first", SchemaType::Int),
-        Field::required("later", SchemaType::Int),
+        Field::required("first", SchemaType::I32),
+        Field::required("later", SchemaType::I32),
     ])
 }
 
 fn comma_boundary_value() -> Value {
     Value::Record(vec![
-        ("first".into(), Value::Int(1)),
-        ("later".into(), Value::Int(2)),
+        ("first".into(), Value::I32(1)),
+        ("later".into(), Value::I32(2)),
     ])
 }
 
@@ -802,7 +785,7 @@ fn nested_record_boundary_schema() -> Schema {
     Schema::record(vec![Field::required(
         "outer",
         SchemaType::Record {
-            fields: vec![Field::required("inner", SchemaType::Int)],
+            fields: vec![Field::required("inner", SchemaType::I32)],
         },
     )])
 }
@@ -810,7 +793,7 @@ fn nested_record_boundary_schema() -> Schema {
 fn nested_record_boundary_value() -> Value {
     Value::Record(vec![(
         "outer".into(),
-        Value::Record(vec![("inner".into(), Value::Int(1))]),
+        Value::Record(vec![("inner".into(), Value::I32(1))]),
     )])
 }
 
@@ -844,12 +827,12 @@ fn nominal_head_gap(trivia: TriviaClass) -> super::support::ParityFixture {
         "box",
         SchemaType::Struct {
             name: "Box".into(),
-            fields: vec![Field::required("inner", SchemaType::Int)],
+            fields: vec![Field::required("inner", SchemaType::I32)],
         },
     )]);
     let expected = Value::Record(vec![(
         "box".into(),
-        Value::Record(vec![("inner".into(), Value::Int(1))]),
+        Value::Record(vec![("inner".into(), Value::I32(1))]),
     )]);
     let (source, mon) = match trivia.source_line_break {
         None => (SourceExpectation::Accept, MonExpectation::Accept(expected)),
@@ -871,7 +854,7 @@ fn nominal_head_gap(trivia: TriviaClass) -> super::support::ParityFixture {
     fixture(
         format!("nominal_head_gap_{}", trivia.name),
         literal,
-        "Box = | inner Int |\n",
+        "Box = | inner I32 |\n",
         schema,
         source,
         mon,
@@ -887,7 +870,7 @@ fn choice_head_gap(trivia: TriviaClass) -> super::support::ParityFixture {
             name: "Theme".into(),
             variants: vec![
                 Variant::unit("Ready"),
-                Variant::payload("Pair", vec![Field::required("inner", SchemaType::Int)]),
+                Variant::payload("Pair", vec![Field::required("inner", SchemaType::I32)]),
             ],
         },
     )]);
@@ -896,7 +879,7 @@ fn choice_head_gap(trivia: TriviaClass) -> super::support::ParityFixture {
         Value::Choice {
             qualifier: Some("Theme".into()),
             variant: "Pair".into(),
-            fields: vec![("inner".into(), Value::Int(1))],
+            fields: vec![("inner".into(), Value::I32(1))],
         },
     )]);
     let (source, mon) = match trivia.source_line_break {
@@ -919,7 +902,7 @@ fn choice_head_gap(trivia: TriviaClass) -> super::support::ParityFixture {
     fixture(
         format!("choice_head_gap_{}", trivia.name),
         literal,
-        "Theme ::\n    Ready,\n    Pair | inner Int |,\n;\n",
+        "Theme ::\n    Ready,\n    Pair | inner I32 |,\n;\n",
         schema,
         source,
         mon,
@@ -927,9 +910,9 @@ fn choice_head_gap(trivia: TriviaClass) -> super::support::ParityFixture {
 }
 
 #[test]
-fn nested_numeric_receivers_preserve_profiled_and_fixed_values() {
+fn nested_numeric_receivers_preserve_exact_width_and_fixed_values() {
     let _guard = lock_counter_test();
-    let fixtures = nested_numeric_profile_fixtures()
+    let fixtures = nested_numeric_width_fixtures()
         .into_iter()
         .chain([
             nested_fixed_numeric_fixture(),
@@ -940,52 +923,103 @@ fn nested_numeric_receivers_preserve_profiled_and_fixed_values() {
     assert_eq!(
         fixtures.len(),
         6,
-        "four profile-sensitive cases, one fixed-width stress case and one nested rejection"
+        "four exact width combinations, one fixed-width stress case and one nested rejection"
     );
     for fixture in fixtures {
         assert_fixture(fixture);
     }
 }
 
-fn nested_numeric_profile_fixtures() -> Vec<super::support::ParityFixture> {
-    super::integer_destinations::profiles()
-        .into_iter()
-        .map(|(profile_name, profile)| {
-            let (minimum_text, minimum) = match profile.int_width {
-                IntWidth::Bits32 => ("-2147483648", i64::from(i32::MIN)),
-                IntWidth::Bits64 => ("-9223372036854775808", i64::MIN),
-            };
-            let expected_float = match profile.float_precision {
-                FloatPrecision::Bits32 => f64::from(f32::from_bits(0x3dcc_cccd)),
-                FloatPrecision::Bits64 => f64::from_bits(0x3fb9_9999_9999_999a),
-            };
-            fixture(
-                format!("nested_numeric_profile_{profile_name}"),
-                format!("value = ProfilePacket(profile_int = {minimum_text}, profile_float = 0.1)"),
-                "ProfilePacket = | profile_int Int, profile_float Float |\n",
-                Schema::record(vec![Field::required(
-                    "value",
-                    SchemaType::Struct {
-                        name: "ProfilePacket".into(),
-                        fields: vec![
-                            Field::required("profile_int", SchemaType::Int),
-                            Field::required("profile_float", SchemaType::Float),
-                        ],
-                    },
-                )]),
-                SourceExpectation::Accept,
-                MonExpectation::Accept(Value::Record(vec![(
-                    "value".into(),
-                    Value::Record(vec![
-                        ("profile_int".into(), Value::Int(minimum)),
-                        ("profile_float".into(), Value::Float(expected_float)),
-                    ]),
-                )])),
-            )
-            .with_profile(profile)
-            .with_source_nominal_type("value", "ProfilePacket")
-        })
-        .collect()
+/// The four supported exact integer/float width combinations, each declaring its own receiver.
+///
+/// WHY: width and precision belong to the declared source and schema types, so the same
+///      observable pairs are asserted through exact scalar receivers.
+fn nested_numeric_width_fixtures() -> Vec<super::support::ParityFixture> {
+    let f32_0_1 = f64::from(f32::from_bits(0x3dcc_cccd));
+    let f64_0_1 = f64::from_bits(0x3fb9_9999_9999_999a);
+    vec![
+        nested_width_fixture(
+            "nested_exact_int32_float32",
+            "I32",
+            SchemaType::I32,
+            "-2147483648",
+            Value::I32(i32::MIN),
+            "F32",
+            SchemaType::F32,
+            Value::F32(f32_0_1),
+        ),
+        nested_width_fixture(
+            "nested_exact_int32_float64",
+            "I32",
+            SchemaType::I32,
+            "-2147483648",
+            Value::I32(i32::MIN),
+            "F64",
+            SchemaType::F64,
+            Value::F64(f64_0_1),
+        ),
+        nested_width_fixture(
+            "nested_exact_int64_float32",
+            "I64",
+            SchemaType::I64,
+            "-9223372036854775808",
+            Value::I64(i64::MIN),
+            "F32",
+            SchemaType::F32,
+            Value::F32(f32_0_1),
+        ),
+        nested_width_fixture(
+            "nested_exact_int64_float64",
+            "I64",
+            SchemaType::I64,
+            "-9223372036854775808",
+            Value::I64(i64::MIN),
+            "F64",
+            SchemaType::F64,
+            Value::F64(f64_0_1),
+        ),
+    ]
+}
+
+/// One nested exact-width receiver pair inside a nominal struct.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the parity fixture keeps its name, integer type/schema/source spelling/value and floating type/schema/value explicit so authored syntax and expected exact-width values remain independently specified"
+)]
+fn nested_width_fixture(
+    name: &str,
+    int_type: &str,
+    int_schema: SchemaType,
+    int_text: &str,
+    int_value: Value,
+    float_type: &str,
+    float_schema: SchemaType,
+    float_value: Value,
+) -> super::support::ParityFixture {
+    fixture(
+        name,
+        format!("value = WidthPacket(int_value = {int_text}, float_value = 0.1)"),
+        format!("WidthPacket = | int_value {int_type}, float_value {float_type} |\n"),
+        Schema::record(vec![Field::required(
+            "value",
+            SchemaType::Struct {
+                name: "WidthPacket".into(),
+                fields: vec![
+                    Field::required("int_value", int_schema),
+                    Field::required("float_value", float_schema),
+                ],
+            },
+        )]),
+        SourceExpectation::Accept,
+        MonExpectation::Accept(Value::Record(vec![(
+            "value".into(),
+            Value::Record(vec![
+                ("int_value".into(), int_value),
+                ("float_value".into(), float_value),
+            ]),
+        )])),
+    )
+    .with_source_nominal_type("value", "WidthPacket")
 }
 
 fn nested_fixed_numeric_fixture() -> super::support::ParityFixture {
@@ -1132,7 +1166,7 @@ fn nested_narrow_integer_rejection() -> super::support::ParityFixture {
 
 fn nested_record_type(depth: usize) -> SchemaType {
     if depth == 0 {
-        return SchemaType::Int;
+        return SchemaType::I32;
     }
 
     SchemaType::Record {
@@ -1148,9 +1182,9 @@ fn nested_record_literal(depth: usize, after_equal: &str, number: &str) -> Strin
     literal
 }
 
-fn nested_record_value(depth: usize, number: i64) -> Value {
+fn nested_record_value(depth: usize, number: i32) -> Value {
     if depth == 0 {
-        return Value::Int(number);
+        return Value::I32(number);
     }
 
     Value::Record(vec![(

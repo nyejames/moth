@@ -3,7 +3,7 @@ Create a struct by calling its type name.
 [codeblock, $code("moth"):
     Player = |
         name String,
-        score Int = 0,
+        score I32 = 0,
     |
 
     player = Player("Priya")

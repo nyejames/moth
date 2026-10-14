@@ -1,0 +1,16 @@
+-- Arithmetic on a named operand is not inferred backward through a generic result.
+-- The unconstrained base stays I32, so the later U64 receiver is rejected.
+
+identity type T |value T| -> T:
+    return value
+;
+
+read_u64 |value U64| -> U64:
+    return value
+;
+
+base = 1
+value = identity(base + base)
+received = read_u64(value)
+
+[: [received]]

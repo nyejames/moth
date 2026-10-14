@@ -1,0 +1,20 @@
+entry = "."
+
+# HTML success is the runtime output. The Wasm failure block at 7:1 is bg909-observed (constructor-second-wasm-gates.json) and unverified until the parent harness run.
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "retained-optional-subject inline=4294967312 block=4294967313 full=4294967314 statement=4294967315 template=4294967316 exactequal=equal relational=less"
+
+[backends.html_wasm]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0064"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-RULE-0064"
+reason = "unsupported_backend_feature.fixed_width_scalar_values"
+path = "input/@page.moth"
+line = 7
+column = 1

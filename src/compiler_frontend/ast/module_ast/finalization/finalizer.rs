@@ -12,27 +12,28 @@ use super::super::emission::AstEmission;
 use super::super::environment::AstModuleEnvironment;
 use super::const_fact_collection::ConstFactCollector;
 use super::normalize_ast::{TemplateNormalizationError, discard_inactive_assertion_messages};
-use super::public_const_templates::const_template_value_from_projection;
 use super::static_if_specialization::{StaticIfCandidate, StaticIfSpecialization};
-use crate::compiler_frontend::ast::ast_nodes::NodeKind;
-use crate::compiler_frontend::ast::const_values::body_local::insert_body_local_const_records;
-use crate::compiler_frontend::ast::const_values::store::{
-    ConstTemplateValue, ConstValueStore, ConstValueStoreError,
+use crate::compiler_frontend::ast::ast_nodes::{AstNode, NodeKind};
+use crate::compiler_frontend::ast::const_values::store::ConstValueStoreError;
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    ExprId, ExpressionFreezeRoots, PlaceId,
 };
 use crate::compiler_frontend::ast::expressions::failure_classification::AstBuiltinFailureSummaries;
+use crate::compiler_frontend::ast::expressions::failure_facts::ImplicitFailureSource;
 use crate::compiler_frontend::ast::generic_functions::{
-    ModuleMaterialisationEnvironmentInput, ModuleMaterialisationPreparationBuilder,
+    GenericRequestSlot, ModuleMaterialisationEnvironmentInput,
+    ModuleMaterialisationPreparationBuilder,
 };
 use crate::compiler_frontend::ast::statements::terminality::{
     terminality_policy_for_signature, validate_function_body_terminality,
 };
-use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::top_level_templates::{
     collect_and_strip_comment_templates, collect_const_top_level_fragments,
 };
 use crate::compiler_frontend::ast::{
     Ast, AstBuildResult, AstChoiceDefinition, AstPublicInterfaceProjectionInput,
 };
+use crate::compiler_frontend::builtins::casts::targets::BuiltinCastFallibility;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
@@ -44,8 +45,11 @@ use crate::compiler_frontend::headers::parse_file_headers::TopLevelConstFragment
 use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::traits::environment::CoreTraitKind;
+use crate::compiler_frontend::traits::evidence::environment::InfallibleCastEvidenceContract;
 use crate::projects::settings::IMPLICIT_START_FUNC_NAME;
 use crate::timing_scope_attributed_opt;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::rc::Rc;
 
 #[cfg(debug_assertions)]
@@ -59,10 +63,10 @@ use super::debug_type_validation::debug_validate_type_ids_for_hir;
 /// WHY: separates finalization orchestration from environment building and
 /// node emission so each phase has a single, clear responsibility.
 pub(in crate::compiler_frontend::ast) struct AstFinalizer<'context, 'services> {
-    pub(super) context: &'context AstPhaseContext<'services>,
+    pub(super) context: AstPhaseContext<'services>,
     pub(super) environment: AstModuleEnvironment,
     pub(super) path_fork:
-        &'services mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
+        &'context mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
 }
 
 /// When AST finalization builds the declaring-module generic materialisation context.
@@ -76,12 +80,38 @@ pub(in crate::compiler_frontend::ast) enum MaterialisationContextRetention {
     ForDeferredRequests,
 }
 
+impl ExpressionFreezeRoots for Vec<AstNode> {
+    fn visit_expression_ids(&self, visitor: &mut dyn FnMut(ExprId)) {
+        for node in self {
+            node.visit_expression_ids(visitor);
+        }
+    }
+
+    fn visit_expression_ids_mut(&mut self, visitor: &mut dyn FnMut(&mut ExprId)) {
+        for node in self {
+            node.visit_expression_ids_mut(visitor);
+        }
+    }
+
+    fn visit_place_ids(&self, visitor: &mut dyn FnMut(PlaceId)) {
+        for node in self {
+            node.visit_place_ids(visitor);
+        }
+    }
+
+    fn visit_place_ids_mut(&mut self, visitor: &mut dyn FnMut(&mut PlaceId)) {
+        for node in self {
+            node.visit_place_ids_mut(visitor);
+        }
+    }
+}
+
 impl<'context, 'services> AstFinalizer<'context, 'services> {
-    /// Creates a new finalizer with the given phase context, resolved environment, and path table.
+    /// Creates a finalizer owning the phase context and borrowing the path table.
     pub(in crate::compiler_frontend::ast) fn new(
-        context: &'context AstPhaseContext<'services>,
+        context: AstPhaseContext<'services>,
         environment: AstModuleEnvironment,
-        path_fork: &'services mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
+        path_fork: &'context mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
     ) -> Self {
         Self {
             context,
@@ -112,9 +142,10 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         // ----------------------------
         let doc_fragments = collect_and_strip_comment_templates(
             &mut emitted.ast,
+            &mut self.context.expression_builder,
+            &mut self.context.const_values,
             string_table,
             self.context.template_const_loop_iteration_limit,
-            self.context.numeric_profile,
             Rc::clone(&self.context.template_ir_store),
         )
         .map_err(TemplateNormalizationError::from)
@@ -139,8 +170,8 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             self.context.timing_metric_family.module_constant(),
             self.context.timing_context
         );
-        let projected_const_templates =
-            self.project_const_templates(string_table)
+        let default_const_templates =
+            self.project_default_const_templates(string_table)
                 .map_err(|error| {
                     self.template_normalization_error_messages(
                         error,
@@ -148,61 +179,18 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                         string_table,
                     )
                 })?;
-        // The TIR store borrow lives only for store construction. Const-fact collection and
-        // generated materialisation below take the same `RefCell` again.
-        let const_values = {
-            let template_ir_store = self.context.template_ir_store.borrow();
-            let mut template_builder =
-                |defining_path: Option<&PathId>,
-                 template: &Template|
-                 -> Result<ConstTemplateValue, ConstValueStoreError> {
-                    // A root module constant was already projected once by `project_const_templates`.
-                    // Only a nested template inside an aggregate constant is projected here, and it
-                    // must go through the same owner rather than a second classification rule.
-                    let projected = match defining_path {
-                    Some(path) => projected_const_templates
-                        .module_values
-                        .get(path)
-                        .cloned()
-                        .ok_or_else(|| {
-                            CompilerError::compiler_error(
-                                "Module constant template has no single finalization projection.",
-                            )
-                        })?,
-                    None => self
-                        .project_template_value(template, &template_ir_store, string_table)
-                        .map_err(|error| match error {
-                            TemplateNormalizationError::Diagnostic(diagnostic) => {
-                                ConstValueStoreError::Diagnostic(diagnostic)
-                            }
-                            TemplateNormalizationError::Infrastructure(error) => {
-                                ConstValueStoreError::Infrastructure(error)
-                            }
-                        })?,
-                };
-
-                    const_template_value_from_projection(projected, template)
-                };
-
-            ConstValueStore::from_declaration_table(
+        // Content has been owned by the phase since declaration/default construction. Module
+        // rows bind header-resolved values into that same owner, never a second graph.
+        let mut const_values = std::mem::take(&mut self.context.const_values);
+        const_values
+            .populate_from_declaration_table(
                 &self.environment.lookups.declaration_table,
                 &self.environment.lookups.resolved_module_constants,
-                &self.environment.type_environment,
-                &mut template_builder,
             )
-            .and_then(|mut store| {
-                insert_body_local_const_records(
-                    &mut store,
-                    &emitted.ast,
-                    &self.environment.type_environment,
-                    &mut template_builder,
-                )?;
-                Ok(store)
-            })
-        }
-        .map_err(|error| {
-            self.const_value_store_error_messages(error, &emitted.warnings, string_table)
-        })?;
+            .map_err(|error| {
+                self.const_value_store_error_messages(error, &emitted.warnings, string_table)
+            })?;
+        self.context.const_values = const_values;
 
         // ----------------------------
         //  Prepare static-control-flow candidate
@@ -212,10 +200,11 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         // after every authored template and type boundary has passed below.
         let mut static_candidate = StaticIfCandidate::prepare(
             &emitted.ast,
-            &const_values,
+            &mut self.context.const_values,
+            &mut self.context.expression_builder,
             Rc::clone(&self.context.template_ir_store),
             string_table,
-            self.context.numeric_profile,
+            &self.environment.type_environment,
         )
         .map_err(|error| {
             self.template_normalization_error_messages(error, &emitted.warnings, string_table)
@@ -232,7 +221,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                         string_table,
                     )
                 })?;
-            self.validate_no_unresolved_executable_types(&emitted.ast, &const_values)
+            self.validate_no_unresolved_executable_types(&emitted.ast, &self.context.const_values)
                 .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
 
             // The candidate owns its exact annotated TIR contexts. Normalize those active views,
@@ -245,8 +234,11 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                         string_table,
                     )
                 })?;
-            self.validate_no_unresolved_executable_types(static_candidate.ast(), &const_values)
-                .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
+            self.validate_no_unresolved_executable_types(
+                static_candidate.ast(),
+                &self.context.const_values,
+            )
+            .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
         } else {
             // The common runtime-only path retains the existing single normalization owner. The
             // unchanged projection is discarded without allocating normalization overlays.
@@ -258,7 +250,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                         string_table,
                     )
                 })?;
-            self.validate_no_unresolved_executable_types(&emitted.ast, &const_values)
+            self.validate_no_unresolved_executable_types(&emitted.ast, &self.context.const_values)
                 .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
         }
 
@@ -268,8 +260,14 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         // The authored assertion message must remain available to the authoritative AST
         // type/TIR boundary validation above. Only after that validation succeeds may AST
         // finalization discard compile-time-inactive executable message state.
-        discard_inactive_assertion_messages(&mut emitted.ast)
-            .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
+        discard_inactive_assertion_messages(
+            &mut emitted.ast,
+            &mut self.context.expression_builder,
+            &mut self.context.const_values,
+        )
+        .map_err(|error| {
+            self.template_normalization_error_messages(error, &emitted.warnings, string_table)
+        })?;
 
         let start_function_path = self.context.root_role.has_implicit_start().then(|| {
             self.path_fork
@@ -285,17 +283,16 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         // ----------------------------
         let template_specialization = StaticIfSpecialization::run(
             &mut emitted.validated_generic_template_bodies,
-            &const_values,
+            &mut self.context.const_values,
+            &mut self.context.expression_builder,
             Rc::clone(&self.context.template_ir_store),
             string_table,
-            self.context.numeric_profile,
+            &self.environment.type_environment,
         )
         .map_err(|error| {
             self.template_normalization_error_messages(error, &emitted.warnings, string_table)
         })?;
         specialization.merge(template_specialization);
-        emitted.deferred_generic_requests =
-            specialization.commit_active_generic_requests(emitted.deferred_generic_requests);
         self.validate_specialized_function_terminality(
             &emitted.ast,
             start_function_path,
@@ -308,21 +305,34 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             &emitted.warnings,
             string_table,
         )?;
-        self.validate_generic_builtin_failure_boundaries(
+        let infallible_cast_evidence = self
+            .collect_infallible_cast_evidence(&emitted.ast)
+            .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
+        let has_assertion_validation_candidates = emitted
+            .deferred_generic_requests
+            .iter()
+            .any(|slot| matches!(slot, GenericRequestSlot::AssertionValidation(_)));
+        let assertion_validation_paths = self.validate_generic_builtin_failure_boundaries(
             &emitted.validated_generic_template_bodies,
             &emitted.ast,
+            &infallible_cast_evidence,
+            has_assertion_validation_candidates,
             &emitted.warnings,
             string_table,
         )?;
+        let committed_generic_requests = specialization
+            .commit_generic_requests(
+                std::mem::take(&mut emitted.deferred_generic_requests),
+                &assertion_validation_paths,
+            )
+            .map_err(|error| self.error_messages(error, &emitted.warnings, string_table))?;
 
         // ----------------------------
         //  Synchronize finalized public defaults
         // ----------------------------
-        // The emitted AST now carries normalized defaults. Synchronize that one completed copy
-        // into public roots and receiver root entries.
-        // Generic declarations without emitted nodes normalize their retained defaults here as
-        // before.
-        self.synchronize_normalized_public_defaults(&emitted.ast, string_table)
+        // Defaults are already folded handles from their declaration boundary. Synchronize
+        // those canonical handles into public and receiver contracts, without folding again.
+        self.synchronize_normalized_public_defaults(&emitted.ast)
             .map_err(|error| {
                 self.template_normalization_error_messages(error, &emitted.warnings, string_table)
             })?;
@@ -334,11 +344,12 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         // views after static selection, so inactive bodies publish no executable advisory facts.
         let const_facts = ConstFactCollector::new(
             string_table,
-            &const_values,
+            &mut self.context.const_values,
+            &mut self.context.expression_builder,
             Rc::clone(&self.context.template_ir_store),
-            self.context.numeric_profile,
+            &self.environment.type_environment,
         )
-        .collect(&const_values, &emitted.ast, start_function_path.as_ref())
+        .collect(&emitted.ast, start_function_path.as_ref())
         .map_err(|error| {
             self.template_normalization_error_messages(error, &emitted.warnings, string_table)
         })?;
@@ -386,18 +397,17 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         let retain_materialisation_context = match materialisation_retention {
             MaterialisationContextRetention::Always => true,
             MaterialisationContextRetention::ForDeferredRequests => {
-                !emitted.deferred_generic_requests.is_empty()
+                !committed_generic_requests.executable.is_empty()
+                    || !committed_generic_requests.assertion_validation.is_empty()
             }
         };
         let materialisation_context = if retain_materialisation_context {
             let context = ModuleMaterialisationPreparationBuilder::from_environment(
                 ModuleMaterialisationEnvironmentInput {
                     lookups: &owned_lookups,
-                    const_values: &const_values,
                     type_environment: &type_environment,
                     public_trait_roots: &resolved_public_trait_roots,
-                    default_const_templates_by_path: projected_const_templates.by_path,
-                    entry_dir: self.context.entry_dir,
+                    default_const_templates_by_path: default_const_templates,
                     module_origin: self
                         .context
                         .file_value_resolution
@@ -414,17 +424,10 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                         .as_ref()
                         .map(|services| services.frozen_identity_handle.clone())
                         .unwrap_or_else(FrozenIdentityHandle::new),
-                    module_resources: self
-                        .context
-                        .file_value_resolution
-                        .as_ref()
-                        .map(|services| Rc::clone(&services.module_resources)),
                     string_table,
-                    numeric_profile: self.context.numeric_profile,
                     template_const_loop_iteration_limit: self
                         .context
                         .template_const_loop_iteration_limit,
-                    capacity_estimate: self.context.capacity_estimate,
                 },
             )
             .map_err(|error| {
@@ -443,9 +446,8 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         // ----------------------------
         //  Merge builtin AST nodes
         // ----------------------------
-        // The materialisation preparation above is the last reader of the environment's builtin
-        // nodes and captures its own complete snapshot whenever it builds a context, so the
-        // nodes move straight into the returned AST instead of paying one final deep clone.
+        // Generic capture projects nominal inputs from resolved facts, not builtin AST nodes.
+        // Those definitions have only the executable AST reader now, so move them directly.
         // Builtin definitions stay ahead of every authored node.
         if !owned_lookups.builtin_struct_ast_nodes.is_empty() {
             let mut ast_nodes = owned_lookups.builtin_struct_ast_nodes;
@@ -454,13 +456,9 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         }
 
         #[cfg(feature = "benchmark_counters")]
-        {
-            let template_ir_store = self.context.template_ir_store.borrow();
-            super::expression_census::record_published_expression_census(
-                &emitted.ast,
-                &template_ir_store,
-            );
-        }
+        super::expression_census::record_published_expression_census(
+            &self.context.expression_builder,
+        );
 
         #[cfg(debug_assertions)]
         {
@@ -469,12 +467,47 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             let template_ir_store = self.context.template_ir_store.borrow();
             debug_validate_type_ids_for_hir(
                 &emitted.ast,
-                &const_values,
+                &self.context.const_values,
                 &choice_definitions,
                 &type_environment,
                 &template_ir_store,
+                &self.context.expression_builder,
             );
         }
+        // Validation-only roots stay available through every TIR, failure and debug reader.
+        // Only completed executable roots enter the consuming freeze after this barrier.
+        emitted.validated_generic_template_bodies.clear();
+        let AstPhaseContext {
+            template_ir_store,
+            expression_builder,
+            const_values,
+            file_value_resolution,
+            entry_dir,
+            root_role,
+            ..
+        } = self.context;
+        let template_ir_store = Rc::try_unwrap(template_ir_store).map_err(|shared| {
+            CompilerMessages::from_error_with_warnings(
+                CompilerError::compiler_error(format!(
+                    "AST finalization: {} TIR references remain at the last-reader barrier",
+                    Rc::strong_count(&shared)
+                )),
+                emitted.warnings.clone(),
+                string_table,
+            )
+            .with_type_context_for_all_diagnostics(type_environment.clone())
+        })?;
+        drop(template_ir_store);
+        let expressions = expression_builder
+            .freeze(&mut emitted.ast)
+            .map_err(|error| {
+                CompilerMessages::from_error_with_warnings(
+                    error,
+                    emitted.warnings.clone(),
+                    string_table,
+                )
+                .with_type_context_for_all_diagnostics(type_environment.clone())
+            })?;
 
         let public_interface_projection_input = AstPublicInterfaceProjectionInput {
             root_table: resolved_public_type_roots,
@@ -482,18 +515,17 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             trait_environment: Some(owned_lookups.trait_environment),
             trait_evidence_environment: Some(owned_lookups.trait_evidence_environment),
         };
-        let module_resources = self
-            .context
-            .file_value_resolution
+        let module_resources = file_value_resolution
             .as_ref()
             .map(|services| Rc::clone(&services.module_resources));
         Ok(AstBuildResult {
             ast: Ast {
                 nodes: emitted.ast,
+                expressions,
                 const_values,
                 doc_fragments,
-                entry_path: self.context.entry_dir.to_owned(),
-                root_role: self.context.root_role,
+                entry_path: entry_dir,
+                root_role,
                 const_top_level_fragments,
                 warnings: emitted.warnings,
                 choice_definitions,
@@ -501,12 +533,14 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 type_environment,
                 const_facts,
                 imported_functions_by_local_path: owned_lookups.imported_functions_by_local_path,
+                infallible_cast_evidence,
                 static_if_function_provenance,
             },
             module_resources,
             public_interface_projection_input,
             materialisation_context,
-            deferred_generic_requests: emitted.deferred_generic_requests,
+            deferred_generic_requests: committed_generic_requests.executable,
+            assertion_validation_generic_requests: committed_generic_requests.assertion_validation,
         })
     }
 
@@ -566,17 +600,95 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
         }
     }
 
-    /// Validate dormant contracts against the closed facts of every retained local typed body.
-    /// Template verdicts remain AST-local; concrete instances still undergo HIR convergence.
+    /// Evidence owns the requirement method identity. Generic instances are direct children of
+    /// their retained template path, including generated sidecars' `__generated_instance`.
+    fn collect_infallible_cast_evidence(
+        &self,
+        concrete_nodes: &[crate::compiler_frontend::ast::ast_nodes::AstNode],
+    ) -> Result<FxHashMap<PathId, InfallibleCastEvidenceContract>, CompilerError> {
+        let lookups = &self.environment.lookups;
+        let mut contracts = FxHashMap::default();
+        for evidence in lookups.trait_evidence_environment.canonical_evidence() {
+            if !matches!(
+                lookups.trait_environment.core_trait_kind(evidence.trait_id),
+                Some(CoreTraitKind::Castable {
+                    fallibility: BuiltinCastFallibility::Infallible,
+                    ..
+                })
+            ) {
+                continue;
+            }
+            let definition = lookups
+                .trait_environment
+                .get(evidence.trait_id)
+                .ok_or_else(|| {
+                    CompilerError::compiler_error("Canonical cast evidence has no resolved trait.")
+                })?;
+            let target_name = self
+                .environment
+                .type_environment
+                .nominal_path(evidence.target_type_id)
+                .and_then(|path| self.path_fork.component(*path))
+                .ok_or_else(|| {
+                    CompilerError::compiler_error("Canonical cast evidence has no nominal name.")
+                })?;
+            for mapping in &evidence.requirements {
+                let requirement = definition
+                    .requirements
+                    .iter()
+                    .find(|requirement| requirement.id == mapping.requirement_id)
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "Canonical cast evidence has no resolved requirement.",
+                        )
+                    })?;
+                contracts.insert(
+                    mapping.method_path,
+                    InfallibleCastEvidenceContract {
+                        target_name,
+                        trait_name: definition.name,
+                        requirement_name: requirement.name,
+                        span: evidence.declaration_span,
+                    },
+                );
+            }
+        }
+        // Generated evidence can still name the template. Carry its obligation onto each
+        // emitted concrete instance without replacing any directly selected method mapping.
+        for node in concrete_nodes {
+            let NodeKind::Function(path, _, _) = &node.kind else {
+                continue;
+            };
+            let Some(template_path) = self.path_fork.parent(*path) else {
+                continue;
+            };
+            if !lookups
+                .generic_function_templates_by_path
+                .contains_key(&template_path)
+            {
+                continue;
+            }
+            if let Some(contract) = contracts.get(&template_path).copied() {
+                contracts.entry(*path).or_insert(contract);
+            }
+        }
+        Ok(contracts)
+    }
+
+    /// Validate dormant contracts after AST-local call and catch dependencies reach closure.
+    /// Empty provisional facts cannot discharge evidence or prune recovery. Concrete instances
+    /// still undergo HIR convergence independently of these retained template verdicts.
     fn validate_generic_builtin_failure_boundaries(
         &self,
         nodes: &[crate::compiler_frontend::ast::ast_nodes::AstNode],
         concrete_nodes: &[crate::compiler_frontend::ast::ast_nodes::AstNode],
+        infallible_cast_evidence: &FxHashMap<PathId, InfallibleCastEvidenceContract>,
+        has_assertion_validation_candidates: bool,
         warnings: &[CompilerDiagnostic],
         string_table: &StringTable,
-    ) -> Result<(), CompilerMessages> {
-        if nodes.is_empty() {
-            return Ok(());
+    ) -> Result<FxHashSet<PathId>, CompilerMessages> {
+        if nodes.is_empty() && !has_assertion_validation_candidates {
+            return Ok(FxHashSet::default());
         }
 
         let builtin_error_type = self
@@ -586,9 +698,12 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 CanonicalBuiltinType::Error,
             ));
         let template_ir_store = self.context.template_ir_store.borrow();
-        let summaries =
-            AstBuiltinFailureSummaries::compute(&[nodes, concrete_nodes], &template_ir_store)
-                .map_err(|error| self.error_messages(error, warnings, string_table))?;
+        let summaries = AstBuiltinFailureSummaries::compute(
+            &[nodes, concrete_nodes],
+            &template_ir_store,
+            &self.context.expression_builder,
+        )
+        .map_err(|error| self.error_messages(error, warnings, string_table))?;
         for node in nodes {
             let NodeKind::Function(path, signature, _) = &node.kind else {
                 continue;
@@ -596,6 +711,17 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             let Some(pending) = summaries.function_facts(*path) else {
                 continue;
             };
+            if let Some(contract) = infallible_cast_evidence.get(path)
+                && let Some(contributor) = summaries.first_active(&pending.body.implicit)
+            {
+                let witness = summaries.witness(contributor);
+                return Err(CompilerMessages::from_diagnostic_with_warnings(
+                    CompilerDiagnostic::infallible_cast_evidence_failure(contract, &witness),
+                    warnings.to_owned(),
+                    string_table,
+                )
+                .with_type_context_for_all_diagnostics(self.environment.type_environment.clone()));
+            }
             for check in &pending.body.deferred_custom_catches {
                 let candidate = check
                     .candidates
@@ -686,7 +812,25 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             )
             .with_type_context_for_all_diagnostics(self.environment.type_environment.clone()));
         }
-        Ok(())
+        // Only witnesses on completed concrete roots can demand inactive generic validation.
+        // Dormant template checks above and eliminated static branches own no such demand.
+        let mut assertion_validation_paths = FxHashSet::default();
+        if has_assertion_validation_candidates {
+            for node in concrete_nodes {
+                let NodeKind::Function(path, ..) = node.kind else {
+                    continue;
+                };
+                let Some(pending) = summaries.function_facts(path) else {
+                    continue;
+                };
+                for contributor in &pending.assertion_message_calls {
+                    if let ImplicitFailureSource::PrivateCall(path) = contributor.source {
+                        assertion_validation_paths.insert(path);
+                    }
+                }
+            }
+        }
+        Ok(assertion_validation_paths)
     }
 
     fn validate_specialized_function_terminality(
@@ -704,7 +848,15 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 signature,
                 start_function_path.is_some_and(|start_path| start_path == *path),
             );
-            if let Some(diagnostic) = validate_function_body_terminality(body, policy, node.span) {
+            let terminality_diagnostic = validate_function_body_terminality(
+                body,
+                policy,
+                node.span,
+                &self.context.expression_builder,
+                &self.context.const_values,
+            )
+            .map_err(|error| self.error_messages(error, warnings, string_table))?;
+            if let Some(diagnostic) = terminality_diagnostic {
                 return Err(CompilerMessages::from_diagnostic_with_warnings(
                     diagnostic,
                     warnings.to_owned(),
@@ -726,7 +878,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
     fn collect_choice_definitions(&self) -> Vec<AstChoiceDefinition> {
         let mut choice_definitions = vec![];
         for entry in self.environment.lookups.declaration_table.iter() {
-            let type_id = entry.value.type_id;
+            let type_id = entry.type_id;
             let Some(choice_def) = self
                 .environment
                 .type_environment

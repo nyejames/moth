@@ -1,0 +1,35 @@
+-- Retain an uncalled generic declaration so dormant validation also sees these summaries.
+identity type T |value T| -> T:
+    return value
+;
+
+first |value I8, again Bool| -> I8:
+    if again:
+        return second(value)
+    ;
+    return value + 1
+;
+
+second |value I8| -> I8:
+    return first(value, false)
+;
+
+recover |value I8| -> I8:
+    return first(value, true) catch:
+        nested = second(value) catch then -7
+        then nested
+    ;
+;
+
+safe_sum |unsigned U8, signed I8| -> I16:
+    -- Every U8 + I8 result fits I16, so this failing handler cannot execute.
+    return unsigned + signed catch:
+        fallback I16 = cast first(127, false)
+        then fallback
+    ;
+;
+
+recovered = recover(127)
+ok = recover(0)
+safe = safe_sum(255, 127)
+[: recursive recovery=[recovered] ok=[ok] safe=[safe]]

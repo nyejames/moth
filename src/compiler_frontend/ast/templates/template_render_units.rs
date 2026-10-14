@@ -10,14 +10,16 @@
 //! pipeline.
 
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::Style;
 use crate::compiler_frontend::ast::templates::tir::{
-    ControlFlowBodyKind, DerivedTemplateMetadata, TemplateConstructionContext, TemplateIrNodeId,
-    TemplateIrNodeKind, TemplateTirPhase, TemplateTirReference,
-    build_conditional_body_candidate_root_from_tir_nodes, compose_tir_head_chain_from_root,
-    format_tir_body_root, head_prefix_tir_nodes, prepare_loop_aggregate_wrapper,
-    run_tir_formatter_with_warnings, sequence_children,
+    ControlFlowBodyKind, DerivedTemplateMetadata, RetainedControlFlowRenderUnit,
+    RetainedNumericIntakeRole, TemplateConstructionContext, TemplateIrNodeId, TemplateIrNodeKind,
+    TemplateTirPhase, TemplateTirReference, build_conditional_body_candidate_root_from_tir_nodes,
+    compose_tir_head_chain_from_root, format_tir_body_root, head_prefix_tir_nodes,
+    prepare_loop_aggregate_wrapper, run_tir_formatter_with_warnings, sequence_children,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -33,6 +35,8 @@ pub(in crate::compiler_frontend::ast::templates) fn install_formatted_tir_refere
     has_control_flow: bool,
     style: &Style,
     context: &ScopeContext,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
 ) -> Result<(), TemplateError> {
     if has_control_flow {
@@ -48,6 +52,8 @@ pub(in crate::compiler_frontend::ast::templates) fn install_formatted_tir_refere
     let mut store = context.template_ir_store.borrow_mut();
     let formatter_result = run_tir_formatter_with_warnings(
         &mut store,
+        expression_builder,
+        const_values,
         reference.root,
         reference.phase,
         reference.context,
@@ -77,23 +83,65 @@ struct TirBodyRootInput<'a> {
     control_flow_node_id: TemplateIrNodeId,
 }
 
-/// Prepares a conditional body TIR root from parser-emitted head-prefix nodes
+/// Builds a conditional body render unit from parser-emitted head-prefix nodes
 /// plus the parsed body root.
 ///
-/// WHAT: reuses the owning template's parser-emitted head-prefix TIR nodes,
-///       formats the parsed body root, builds a candidate root node combining
-///       head prefix and body, and composes it so head-chain wrappers apply to
-///       the body. Inherited `$children(..)` wrappers stay on the wrapper-context
-///       overlay attached after composition.
-/// WHY: with control-flow bodies emitted directly into TIR, body-root
-///      preparation reuses the parser-emitted body sequence and the owning
-///      template's head-prefix nodes. The prepared root is installed directly
-///      onto the owning TIR control-flow node; a missing store/root or
-///      impossible replacement is an internal `CompilerError`, not a silent
-///      fallback.
+/// WHAT: formats the body, combines it with the owning template's head prefix,
+///       and composes the shared head chain. Inherited `$children(..)` wrappers
+///       stay on the wrapper-context overlay attached after composition.
+/// WHY: concrete and retained conditional positions use the same TIR composition
+///      authority without rebuilding a second template representation.
+fn compose_conditional_body_tir_root(
+    root_children: &[TemplateIrNodeId],
+    style: &Style,
+    body_root: TemplateIrNodeId,
+    context: &ScopeContext,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    string_table: &mut StringTable,
+) -> Result<TemplateIrNodeId, TemplateError> {
+    // Derive the head-prefix TIR nodes from the owning template's parser-emitted
+    // root children. Reusing them avoids rebuilding TIR from formatted output.
+    let head_prefix_nodes = {
+        let store = context.template_ir_store.borrow();
+        head_prefix_tir_nodes(&store, root_children).map_err(TemplateError::from)?
+    };
+
+    // The parser-emitted body is formatted before head-chain composition so the
+    // final body tree carries formatted text.
+    let body_root = format_tir_body_root(
+        body_root,
+        style,
+        context,
+        expression_builder,
+        const_values,
+        string_table,
+    )?;
+
+    let mut store = context.template_ir_store.borrow_mut();
+    let body_children = sequence_children(&store, body_root).map_err(TemplateError::from)?;
+    let candidate_root = build_conditional_body_candidate_root_from_tir_nodes(
+        &head_prefix_nodes,
+        &body_children,
+        &mut store,
+    )?;
+
+    compose_tir_head_chain_from_root(
+        &mut store,
+        expression_builder,
+        const_values,
+        candidate_root,
+        string_table,
+        true,
+    )
+}
+
+/// Installs the shared conditional render unit on a concrete control-flow node.
 fn prepare_conditional_body_tir_root(
     input: TirBodyRootInput<'_>,
     context: &ScopeContext,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
 ) -> Result<(), TemplateError> {
     let TirBodyRootInput {
@@ -103,38 +151,19 @@ fn prepare_conditional_body_tir_root(
         control_flow_node_id,
     } = input;
 
-    // Derive the head-prefix TIR nodes from the owning template's parser-emitted
-    // root children. These are the same nodes the parser materialized from the
-    // shared head-prefix atoms, so reusing them avoids rebuilding TIR from
-    // the formatted TIR root.
-    let head_prefix_nodes = {
-        let store = context.template_ir_store.borrow();
-        head_prefix_tir_nodes(&store, root_children).map_err(TemplateError::from)?
-    };
-
-    // The body is already a parser-emitted TIR sequence node. Formatting and
-    // head-chain composition operate on this root directly without reconstructing
-    // a second template representation.
-
-    // Format the body root before head-chain composition so the final body tree
-    // carries formatted text. The store borrow is released around this call
-    // because the TIR formatter mutates the shared module store through `TirView`.
-    let body_root = format_tir_body_root(body_root, style, context, string_table)?;
-
-    let mut store = context.template_ir_store.borrow_mut();
-    let body_children = sequence_children(&store, body_root).map_err(TemplateError::from)?;
-
-    // Build a candidate root node combining the head-prefix nodes with the body
-    // children, then compose so head-chain wrappers apply to the body.
-    let candidate_root = build_conditional_body_candidate_root_from_tir_nodes(
-        &head_prefix_nodes,
-        &body_children,
-        &mut store,
+    let composed_root = compose_conditional_body_tir_root(
+        root_children,
+        style,
+        body_root,
+        context,
+        expression_builder,
+        const_values,
+        string_table,
     )?;
-    let composed_root =
-        compose_tir_head_chain_from_root(&mut store, candidate_root, string_table, true)?;
 
-    store
+    context
+        .template_ir_store
+        .borrow_mut()
         .replace_control_flow_body(
             control_flow_node_id,
             ControlFlowBodyKind::ConditionalBody,
@@ -143,161 +172,230 @@ fn prepare_conditional_body_tir_root(
         .map_err(TemplateError::from)
 }
 
-/// Prepares a loop body TIR root from the parsed body root.
-///
-/// WHAT: formats the parsed TIR body root and installs the result as the loop's
-///       body root. Inherited `$children(..)` wrappers stay on the
-///       wrapper-context overlay attached after composition.
-/// WHY: loop bodies do not carry the owning template's shared head prefix (that
-///      wraps the aggregate output), so they can skip head-chain composition.
-///      The formatted root is installed directly onto the TIR `Loop` node; a
-///      missing store/root or impossible replacement is an internal
-///      `CompilerError`, not a silent fallback.
-fn prepare_loop_body_tir_root(
-    control_flow_node_id: TemplateIrNodeId,
-    style: &Style,
-    body_root: TemplateIrNodeId,
-    context: &ScopeContext,
-    string_table: &mut StringTable,
-) -> Result<(), TemplateError> {
-    // The loop body is already a parser-emitted TIR sequence node, so formatting
-    // operates on it directly without reconstructing a second representation.
-
-    // Release the store borrow around the TIR formatter call; the formatter
-    // authority mutates the shared module store through `TirView`.
-    let body_root = format_tir_body_root(body_root, style, context, string_table)?;
-
-    context
-        .template_ir_store
-        .borrow_mut()
-        .replace_control_flow_body(
-            control_flow_node_id,
-            ControlFlowBodyKind::LoopBody,
-            body_root,
-        )
-        .map_err(TemplateError::from)
+/// Prepared loop body and wrapper roots produced by the shared render-unit authority.
+struct PreparedLoopRenderUnit {
+    body: TemplateIrNodeId,
+    aggregate_wrapper: TemplateIrNodeId,
 }
 
-/// Applies composition and formatting to a structured control-flow template.
+/// Builds the formatted loop body and aggregate wrapper from parser-emitted TIR roots.
 ///
-/// For `if`, the conditional body is a complete TIR render unit that includes
-/// the shared head prefix. For `loop`, the per-iteration body is finalized
-/// independently and the parser-emitted head prefix becomes an aggregate-wrapper
-/// TIR subtree, so later folding and lowering apply it once around the aggregate.
-///
-/// After each body is formatted, this installs the prepared body root directly
-/// onto the owning parser TIR control-flow node. The control-flow node and its
-/// body node IDs are read from the construction context and TIR store, not from
-/// a durable AST carrier.
+/// Loop bodies skip the shared head prefix because it wraps the aggregate output
+/// once, not each iteration.
+fn prepare_loop_render_unit_roots(
+    body: TemplateIrNodeId,
+    construction_context: &TemplateConstructionContext,
+    style: &Style,
+    context: &ScopeContext,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    string_table: &mut StringTable,
+) -> Result<PreparedLoopRenderUnit, TemplateError> {
+    let body = format_tir_body_root(
+        body,
+        style,
+        context,
+        expression_builder,
+        const_values,
+        string_table,
+    )?;
+    let mut store = context.template_ir_store.borrow_mut();
+    let aggregate_wrapper = prepare_loop_aggregate_wrapper(
+        construction_context.root_children(),
+        string_table,
+        &mut store,
+        expression_builder,
+        const_values,
+    )?;
+    Ok(PreparedLoopRenderUnit {
+        body,
+        aggregate_wrapper,
+    })
+}
+
+/// Inputs required by shared control-flow render-unit preparation.
 pub(in crate::compiler_frontend::ast::templates) struct ControlFlowRenderUnitRequest<'a> {
     pub(in crate::compiler_frontend::ast::templates) style: &'a Style,
     pub(in crate::compiler_frontend::ast::templates) context: &'a ScopeContext,
+    pub(in crate::compiler_frontend::ast::templates) expression_builder:
+        &'a mut AstExpressionBuilder,
+    pub(in crate::compiler_frontend::ast::templates) const_values: &'a mut ConstValueStore,
     pub(in crate::compiler_frontend::ast::templates) string_table: &'a mut StringTable,
 }
 
+enum ControlFlowRenderTarget {
+    Concrete {
+        body_kind: ControlFlowBodyKind,
+        body_root: TemplateIrNodeId,
+    },
+    Retained {
+        body_kind: ControlFlowBodyKind,
+        body_root: TemplateIrNodeId,
+    },
+}
+
+/// Prepares the first registered control-flow node through the shared TIR render-unit owner.
 pub(in crate::compiler_frontend::ast::templates) fn prepare_control_flow_render_units(
     construction_context: &TemplateConstructionContext,
     request: ControlFlowRenderUnitRequest<'_>,
 ) -> Result<(), TemplateError> {
-    let ControlFlowRenderUnitRequest {
-        style,
-        context,
-        string_table,
-    } = request;
-
-    // Locate the owning TIR control-flow node through the construction context.
-    // The body parser already constructed the Conditional/Loop node and its
-    // body node IDs in the TIR store; render-unit preparation reads and
-    // updates them directly.
     let control_flow_node_id = construction_context.control_flow_node_id().ok_or_else(|| {
         CompilerError::compiler_error(
             "prepare_control_flow_render_units called on template without a TIR control-flow node",
         )
     })?;
 
-    // Extract the body kind and ID before preparation. The RefCell
-    // borrow must end before the mutable store operations below, so the
-    // IDs are copied rather than holding a borrowed reference to the kind.
-    let (body_kind, body_root) = {
-        let store = context.template_ir_store.borrow();
+    // Copy the target shape before formatting mutates the shared store.
+    let target = {
+        let store = request.context.template_ir_store.borrow();
         let node = store.get_node(control_flow_node_id).ok_or_else(|| {
             CompilerError::compiler_error(
                 "Control-flow node disappeared from the TIR store during render-unit preparation.",
             )
         })?;
         match &node.kind {
-            TemplateIrNodeKind::Conditional { body, .. } => {
-                (ControlFlowBodyKind::ConditionalBody, *body)
+            TemplateIrNodeKind::Conditional { body, .. } => ControlFlowRenderTarget::Concrete {
+                body_kind: ControlFlowBodyKind::ConditionalBody,
+                body_root: *body,
+            },
+            TemplateIrNodeKind::Loop { body, .. } => ControlFlowRenderTarget::Concrete {
+                body_kind: ControlFlowBodyKind::LoopBody,
+                body_root: *body,
+            },
+            TemplateIrNodeKind::RetainedNumericIntake(role)
+                if role.completes_into_control_flow() =>
+            {
+                let role = *role;
+                let (body_kind, body_root) = match role {
+                    RetainedNumericIntakeRole::ConditionalLoopCondition { body, .. }
+                    | RetainedNumericIntakeRole::LoopRange { body, .. }
+                    | RetainedNumericIntakeRole::LoopCollection { body, .. } => {
+                        (ControlFlowBodyKind::LoopBody, body)
+                    }
+                    RetainedNumericIntakeRole::ConditionalSelector { body, .. } => {
+                        (ControlFlowBodyKind::ConditionalBody, body)
+                    }
+                    RetainedNumericIntakeRole::HeadExpression { .. } => {
+                        return Err(CompilerError::compiler_error(
+                            "head-expression intake was reported as a control-flow position.",
+                        )
+                        .into());
+                    }
+                };
+                ControlFlowRenderTarget::Retained {
+                    body_kind,
+                    body_root,
+                }
             }
-            TemplateIrNodeKind::Loop { body, .. } => (ControlFlowBodyKind::LoopBody, *body),
             _ => {
                 return Err(CompilerError::compiler_error(
-                    "Control-flow node was neither a Conditional nor a Loop during render-unit preparation.",
+                    "Control-flow node was neither a Conditional, Loop, nor retained control-flow position during render-unit preparation.",
                 )
                 .into());
             }
         }
     };
 
-    match body_kind {
-        ControlFlowBodyKind::ConditionalBody => {
-            prepare_conditional_body_tir_root(
-                TirBodyRootInput {
-                    root_children: construction_context.root_children(),
-                    style,
-                    body_root,
+    match target {
+        ControlFlowRenderTarget::Concrete {
+            body_kind,
+            body_root,
+        } => match body_kind {
+            ControlFlowBodyKind::ConditionalBody => {
+                prepare_conditional_body_tir_root(
+                    TirBodyRootInput {
+                        root_children: construction_context.root_children(),
+                        style: request.style,
+                        body_root,
+                        control_flow_node_id,
+                    },
+                    request.context,
+                    request.expression_builder,
+                    request.const_values,
+                    request.string_table,
+                )?;
+            }
+            ControlFlowBodyKind::LoopBody => {
+                prepare_loop_render_units(
                     control_flow_node_id,
-                },
-                context,
-                string_table,
-            )?;
-        }
+                    body_root,
+                    construction_context,
+                    request,
+                )?;
+            }
+        },
+        ControlFlowRenderTarget::Retained {
+            body_kind,
+            body_root,
+        } => {
+            let (body, render_unit) = match body_kind {
+                ControlFlowBodyKind::ConditionalBody => (
+                    compose_conditional_body_tir_root(
+                        construction_context.root_children(),
+                        request.style,
+                        body_root,
+                        request.context,
+                        request.expression_builder,
+                        request.const_values,
+                        request.string_table,
+                    )?,
+                    RetainedControlFlowRenderUnit::Conditional,
+                ),
+                ControlFlowBodyKind::LoopBody => {
+                    let prepared = prepare_loop_render_unit_roots(
+                        body_root,
+                        construction_context,
+                        request.style,
+                        request.context,
+                        request.expression_builder,
+                        request.const_values,
+                        request.string_table,
+                    )?;
+                    (
+                        prepared.body,
+                        RetainedControlFlowRenderUnit::Loop {
+                            aggregate_wrapper: prepared.aggregate_wrapper,
+                        },
+                    )
+                }
+            };
 
-        ControlFlowBodyKind::LoopBody => {
-            prepare_loop_render_units(
-                control_flow_node_id,
-                body_root,
-                construction_context,
-                style,
-                context,
-                string_table,
-            )?;
+            request
+                .context
+                .template_ir_store
+                .borrow_mut()
+                .record_retained_control_flow_render_unit(control_flow_node_id, body, render_unit)
+                .map_err(TemplateError::from)?;
         }
     }
 
     Ok(())
 }
 
-/// Prepares the loop body and installs the aggregate-wrapper subtree.
-///
-/// WHAT: reads the loop body node ID from the TIR `Loop` node, prepares the
-///       body, then builds and installs the aggregate wrapper directly onto the
-///       TIR `Loop` node. The aggregate wrapper root no longer needs to be
-///       cached on a durable carrier because the TIR node owns it.
+/// Prepares the loop body and installs its complete render unit on a concrete `Loop`.
 fn prepare_loop_render_units(
     control_flow_node_id: TemplateIrNodeId,
     body: TemplateIrNodeId,
     construction_context: &TemplateConstructionContext,
-    style: &Style,
-    context: &ScopeContext,
-    string_table: &mut StringTable,
+    request: ControlFlowRenderUnitRequest<'_>,
 ) -> Result<(), TemplateError> {
-    // Prepare the loop body with the same format-once + TIR pattern used
-    // by the conditional body. Loop bodies skip the shared head prefix
-    // because the owning head wraps the aggregate output once, not each
-    // iteration.
-    prepare_loop_body_tir_root(control_flow_node_id, style, body, context, string_table)?;
-
-    let mut template_ir_store = context.template_ir_store.borrow_mut();
-    let aggregate_wrapper = prepare_loop_aggregate_wrapper(
-        construction_context.root_children(),
-        string_table,
-        &mut template_ir_store,
+    let prepared = prepare_loop_render_unit_roots(
+        body,
+        construction_context,
+        request.style,
+        request.context,
+        request.expression_builder,
+        request.const_values,
+        request.string_table,
     )?;
 
-    // Install the composed TIR aggregate-wrapper subtree onto the owning
-    // `Loop` node.
-    template_ir_store.replace_loop_aggregate_wrapper(control_flow_node_id, aggregate_wrapper)?;
+    let mut store = request.context.template_ir_store.borrow_mut();
 
+    store.replace_control_flow_body(
+        control_flow_node_id,
+        ControlFlowBodyKind::LoopBody,
+        prepared.body,
+    )?;
+    store.replace_loop_aggregate_wrapper(control_flow_node_id, prepared.aggregate_wrapper)?;
     Ok(())
 }

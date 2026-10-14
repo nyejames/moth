@@ -2,7 +2,7 @@
 //!
 //! WHAT: protects exact exponent materialization, immutable value handoff, and canonical
 //!       arbitrary-precision formatting.
-//! WHY: consumers need one exact decimal value without profile-sized or floating-point intermediates.
+//! WHY: consumers need one exact decimal value without fixed-width or floating-point intermediates.
 
 use crate::compiler_frontend::datatypes::number::{
     NumberArithmeticError, NumberIntegerConversionError, NumberMaterializationError, NumberValue,

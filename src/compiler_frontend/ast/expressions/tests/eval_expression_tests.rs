@@ -6,17 +6,24 @@
 //!      semantic drift before it reaches HIR lowering.
 
 use super::*;
+use crate::compiler_frontend::ast::Ast;
 use crate::compiler_frontend::ast::ast_nodes::NodeKind;
-use crate::compiler_frontend::ast::const_values::store::{ConstStringPiece, ConstValuePayload};
-use crate::compiler_frontend::ast::expressions::expression::Operator;
-use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
+use crate::compiler_frontend::ast::const_values::store::{
+    ConstStringPiece, ConstStringValue, ConstValueMetadata, ConstValuePayload, ConstValueStore,
+};
+use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
+use crate::compiler_frontend::ast::expressions::expression_rpn::{
+    ExpressionRpnItem, ResolvedOperation,
+};
+use crate::compiler_frontend::ast::expressions::expression_store::{
+    AstExpressionBuilder, ExprId, ExpressionOperationView, ExpressionView,
+};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarationTable};
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticKind, DiagnosticOperator, DiagnosticPayload, InvalidBuiltinCallReason,
     OperatorOperandPosition, TypeDiagnosticKind, TypeMismatchContext,
 };
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -36,26 +43,100 @@ use moth_lexical::numeric::parse::NumberLiteralErrorReason;
 use std::rc::Rc;
 use std::sync::Arc;
 
-fn first_start_declaration_expression(source: &str) -> Expression {
+/// A parsed start-function declaration initializer. The owning AST keeps its expression graph alive.
+struct ParsedExpression {
+    ast: Ast,
+    root: ExprId,
+}
+
+impl ParsedExpression {
+    fn view(&self) -> ExpressionView<'_> {
+        self.ast
+            .expressions
+            .view(self.root)
+            .expect("parsed root expression should be stored")
+    }
+
+    fn value_type_id(&self) -> TypeId {
+        self.view()
+            .value_type_id()
+            .expect("parsed expression should have one value type")
+    }
+
+    fn payload(&self) -> Option<&ConstValuePayload> {
+        constant_payload(&self.ast.const_values, self.view())
+    }
+}
+
+fn constant_payload<'a>(
+    const_values: &'a ConstValueStore,
+    view: ExpressionView<'a>,
+) -> Option<&'a ConstValuePayload> {
+    match view.operation() {
+        ExpressionOperationView::Constant(id) => const_values.payload(id),
+        _ => None,
+    }
+}
+
+fn assert_folded_fixed_scalar(expression: &ParsedExpression, expected: FixedScalarValue) {
+    assert!(
+        matches!(
+            expression.payload(),
+            Some(ConstValuePayload::FixedScalar(scalar)) if *scalar == expected
+        ),
+        "expected folded {expected:?}, got {:?}",
+        expression.payload()
+    );
+}
+
+fn resolved_operation_of<'a>(view: ExpressionView<'a>) -> Option<&'a ResolvedOperation> {
+    match view.operation() {
+        ExpressionOperationView::NumericUnary { facts, .. }
+        | ExpressionOperationView::NumericBinary { facts, .. }
+        | ExpressionOperationView::Compare { facts, .. }
+        | ExpressionOperationView::Range { facts, .. } => Some(facts),
+        _ => None,
+    }
+}
+
+/// Pre-order views of `root` and every descendant expression.
+fn subtree_views(root: ExpressionView<'_>) -> Vec<ExpressionView<'_>> {
+    let mut views = Vec::new();
+    collect_subtree_views(root, &mut views);
+    views
+}
+
+fn collect_subtree_views<'a>(view: ExpressionView<'a>, views: &mut Vec<ExpressionView<'a>>) {
+    views.push(view);
+    view.visit_children(|child| collect_subtree_views(child, views));
+}
+
+fn first_start_declaration_expression(source: &str) -> ParsedExpression {
     nth_start_declaration_expression(source, 0)
 }
 
-fn nth_start_declaration_expression(source: &str, index: usize) -> Expression {
+fn nth_start_declaration_expression(source: &str, index: usize) -> ParsedExpression {
     let (ast, _path_fork, _string_table) = parse_single_file_ast(source);
-    let start_function = ast
-        .nodes
-        .iter()
-        .find(|node| matches!(node.kind, NodeKind::Function(_, _, _)))
-        .expect("start function should exist");
+    let root = {
+        let start_function = ast
+            .nodes
+            .iter()
+            .find(|node| matches!(node.kind, NodeKind::Function(_, _, _)))
+            .expect("start function should exist");
 
-    let NodeKind::Function(_, _, body) = &start_function.kind else {
-        panic!("expected start function body");
-    };
-    let NodeKind::VariableDeclaration(declaration) = &body[index].kind else {
-        panic!("expected start statement {index} to be a variable declaration");
-    };
+        let NodeKind::Function(_, _, body) = &start_function.kind else {
+            panic!("expected start function body");
+        };
+        let NodeKind::VariableDeclaration(declaration) = &body[index].kind else {
+            panic!("expected start statement {index} to be a variable declaration");
+        };
 
-    declaration.value.to_owned()
+        declaration
+            .value
+            .initializer()
+            .expect("parsed declaration initializer")
+    };
+    ParsedExpression { ast, root }
 }
 
 fn assert_unsupported_operator(source: &str, expected_operator: DiagnosticOperator) {
@@ -70,6 +151,29 @@ fn assert_unsupported_operator(source: &str, expected_operator: DiagnosticOperat
         "expected {expected_operator:?} for {source:?}, got {:?}",
         diagnostic.payload
     );
+}
+
+/// Builds a `String` operand holding a `SiteRoot` structural piece. The piece is not final text,
+/// so the operand must stay unfolded in every runtime position.
+fn structural_site_root_operand(
+    expressions: &mut AstExpressionBuilder,
+    constants: &mut ConstValueStore,
+) -> ExprId {
+    let constant = constants
+        .insert_value(
+            ConstValueMetadata::resolved(builtin_type_ids::STRING, None, ValueMode::ImmutableOwned),
+            ConstValuePayload::String(ConstStringValue::Pieces(vec![ConstStringPiece::SiteRoot])),
+        )
+        .expect("structural string constant should insert");
+    expressions
+        .constant(
+            constant,
+            builtin_type_ids::STRING,
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("structural string operand should build")
+        .id()
 }
 
 #[test]
@@ -91,20 +195,25 @@ fn ordinary_expression_rejects_path_string_concatenation() {
     )
     .with_source_file_scope(source_scope);
 
-    let nodes = vec![
-        ExpressionRpnItem::Operand(Expression::structural_string(
-            vec![ConstStringPiece::SiteRoot],
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let structural_path = structural_site_root_operand(&mut expressions, &mut constants);
+    let suffix = expressions
+        .string_slice(
+            &mut constants,
+            string_table.get_or_intern(String::from("?v=1")),
             None,
-        )),
+            ValueMode::ImmutableOwned,
+        )
+        .expect("string slice operand should build");
+
+    let nodes = vec![
+        ExpressionRpnItem::Operand(structural_path),
         ExpressionRpnItem::Operator {
             operator: Operator::Add,
             span: None,
         },
-        ExpressionRpnItem::Operand(Expression::string_slice(
-            string_table.get_or_intern(String::from("?v=1")),
-            None,
-            ValueMode::ImmutableOwned,
-        )),
+        ExpressionRpnItem::Operand(suffix.id()),
     ];
 
     let mut current_type = ExpectedType::Infer;
@@ -115,6 +224,8 @@ fn ordinary_expression_rejects_path_string_concatenation() {
         &context,
         nodes,
         &mut type_interner,
+        &mut expressions,
+        &mut constants,
         &mut current_type,
         &ValueMode::ImmutableOwned,
         &mut string_table,
@@ -159,17 +270,21 @@ fn structural_string_equality_is_refused_only_in_a_constant_context() {
             0,
         )
     };
-    let nodes = |string_table: &mut StringTable| {
+    let mut expressions = AstExpressionBuilder::new().unwrap();
+    let mut constants = ConstValueStore::default();
+    let structural = structural_site_root_operand(&mut expressions, &mut constants);
+    let plain = expressions
+        .string_slice(
+            &mut constants,
+            string_table.intern("plain"),
+            None,
+            ValueMode::ImmutableOwned,
+        )
+        .expect("plain string operand should build");
+    let nodes = || {
         vec![
-            ExpressionRpnItem::Operand(Expression::structural_string(
-                vec![ConstStringPiece::SiteRoot],
-                None,
-            )),
-            ExpressionRpnItem::Operand(Expression::string_slice(
-                string_table.intern("plain"),
-                None,
-                ValueMode::ImmutableOwned,
-            )),
+            ExpressionRpnItem::Operand(structural),
+            ExpressionRpnItem::Operand(plain.id()),
             ExpressionRpnItem::Operator {
                 operator: Operator::Equality,
                 span: None,
@@ -186,8 +301,10 @@ fn structural_string_equality_is_refused_only_in_a_constant_context() {
     let mut constant_expected_type = ExpectedType::Infer;
     let constant_error = evaluate_expression(
         &context(ContextKind::Constant),
-        nodes(&mut string_table),
+        nodes(),
         &mut constant_type_interner,
+        &mut expressions,
+        &mut constants,
         &mut constant_expected_type,
         &ValueMode::ImmutableOwned,
         &mut string_table,
@@ -212,36 +329,39 @@ fn structural_string_equality_is_refused_only_in_a_constant_context() {
         &mut runtime_compatibility_cache,
     );
     let mut runtime_expected_type = ExpectedType::Infer;
-    let runtime_expression = match evaluate_expression(
+    let runtime_root = match evaluate_expression(
         &context(ContextKind::Function),
-        nodes(&mut string_table),
+        nodes(),
         &mut runtime_type_interner,
+        &mut expressions,
+        &mut constants,
         &mut runtime_expected_type,
         &ValueMode::ImmutableOwned,
         &mut string_table,
         &path_fork,
     ) {
-        Ok(expression) => expression,
+        Ok(root) => root,
         Err(_) => {
             panic!("runtime equality must preserve the structural operation without a diagnostic")
         }
     };
 
-    let ExpressionKind::Runtime(runtime_items) = runtime_expression.kind else {
-        panic!("runtime equality should remain a complete runtime RPN expression");
-    };
+    let runtime_view = expressions
+        .view_owned(runtime_root)
+        .expect("runtime equality root should be stored");
+    assert!(
+        matches!(
+            runtime_view.operation(),
+            ExpressionOperationView::Compare { facts, .. }
+                if facts.operator == Operator::Equality
+        ),
+        "runtime equality should remain a resolved Compare expression"
+    );
     assert_eq!(
-        runtime_items.items.len(),
+        subtree_views(runtime_view).len(),
         3,
         "runtime context must preserve both operands and the equality operator"
     );
-    assert!(matches!(
-        runtime_items.items.last(),
-        Some(ExpressionRpnItem::Operator {
-            operator: Operator::Equality,
-            ..
-        })
-    ));
 }
 
 #[test]
@@ -270,45 +390,6 @@ fn logical_mix_rejects_non_bool_rhs_after_comparison() {
 }
 
 #[test]
-fn int_constructor_is_rejected_with_removed_scalar_constructor_diagnostic() {
-    let diagnostic = parse_single_file_ast_diagnostic("value = Int(\"1\")\n");
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidBuiltinCall {
-            reason: InvalidBuiltinCallReason::ScalarConstructorRemoved,
-            ..
-        }
-    ));
-}
-
-#[test]
-fn float_constructor_is_rejected_with_removed_scalar_constructor_diagnostic() {
-    let diagnostic = parse_single_file_ast_diagnostic("value = Float(1.5)\n");
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidBuiltinCall {
-            reason: InvalidBuiltinCallReason::ScalarConstructorRemoved,
-            ..
-        }
-    ));
-}
-
-#[test]
-fn uint_constructor_is_rejected_with_named_scalar_constructor_diagnostic() {
-    let diagnostic = parse_single_file_ast_diagnostic("value = Uint(\"42\")\n");
-    let DiagnosticPayload::InvalidBuiltinCall {
-        reason: InvalidBuiltinCallReason::ScalarConstructorRemoved,
-        builtin_name: Some(_),
-    } = diagnostic.payload
-    else {
-        panic!(
-            "expected named ScalarConstructorRemoved diagnostic, got {:?}",
-            diagnostic.payload
-        );
-    };
-}
-
-#[test]
 fn bool_constructor_is_rejected_with_removed_scalar_constructor_diagnostic() {
     let diagnostic = parse_single_file_ast_diagnostic("value = Bool(true)\n");
     assert!(matches!(
@@ -322,8 +403,8 @@ fn bool_constructor_is_rejected_with_removed_scalar_constructor_diagnostic() {
 
 #[test]
 fn fixed_scalar_constructors_are_rejected_with_removed_scalar_constructor_diagnostic() {
-    // Explicit-width type names are type spellings, not conversion functions, so they must take
-    // the same path as `Int(...)`/`Float(...)` instead of becoming an unknown-symbol call.
+    // Explicit-width type names are type spellings, not conversion functions, so a call form must
+    // report the removed scalar constructor instead of becoming an unknown-symbol call.
     for source in [
         "value = U8(200)\n",
         "value = I64(200)\n",
@@ -356,7 +437,7 @@ fn comparison_operator_accepts_option_to_scalar_comparison() {
     let value =
         nth_start_declaration_expression("maybe String? = \"x\"\nvalue = maybe is \"x\"\n", 1);
 
-    assert_eq!(value.diagnostic_type, DataType::Bool);
+    assert_eq!(value.value_type_id(), builtin_type_ids::BOOL);
 }
 
 #[test]
@@ -365,23 +446,29 @@ fn comparison_operator_rejects_none_without_option_context() {
 }
 
 #[test]
-fn mixed_int_float_arithmetic_resolves_to_float() {
+fn mixed_whole_and_decimal_literal_arithmetic_resolves_to_f64() {
     let value = first_start_declaration_expression("value = 1 + 2.5\n");
 
-    assert_eq!(value.diagnostic_type, DataType::Float);
+    assert_eq!(
+        value.value_type_id(),
+        builtin_type_ids::fixed_scalar(FixedScalar::F64)
+    );
 }
 
 #[test]
-fn int_division_resolves_to_float() {
+fn real_division_of_whole_literals_resolves_to_f64() {
     let value = first_start_declaration_expression("value = 5 / 2\n");
 
-    assert_eq!(value.diagnostic_type, DataType::Float);
+    assert_eq!(
+        value.value_type_id(),
+        builtin_type_ids::fixed_scalar(FixedScalar::F64)
+    );
 }
 
 #[test]
 fn grouped_integer_subexpression_does_not_override_division_result_type() {
     let (ast, _path_fork, _string_table) =
-        parse_single_file_ast("value #= ((10 * 10) + (20 * 20)) / 10\n\ntyped Float = value\n");
+        parse_single_file_ast("value #= ((10 * 10) + (20 * 20)) / 10\n\ntyped F64 = value\n");
     let value_id = ast
         .const_values
         .iter_module_constant_views()
@@ -393,18 +480,23 @@ fn grouped_integer_subexpression_does_not_override_division_result_type() {
         .value(value_id)
         .expect("the inferred constant value should be retained");
 
-    assert_eq!(value.metadata.type_id, builtin_type_ids::FLOAT);
-    assert_eq!(value.metadata.diagnostic_type, DataType::Float);
+    assert_eq!(
+        value.metadata.type_id,
+        builtin_type_ids::fixed_scalar(FixedScalar::F64)
+    );
     assert!(
-        matches!(value.payload, ConstValuePayload::Float(result) if (result - 50.0).abs() < f64::EPSILON)
+        matches!(&value.payload, ConstValuePayload::FixedScalar(scalar) if scalar.as_f64() == Some(50.0))
     );
 }
 
 #[test]
-fn integer_division_resolves_to_int() {
+fn integer_division_resolves_to_i32() {
     let value = first_start_declaration_expression("value = 5 // 2\n");
 
-    assert_eq!(value.diagnostic_type, DataType::Int);
+    assert_eq!(
+        value.value_type_id(),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
+    );
 }
 
 #[test]
@@ -421,11 +513,13 @@ fn integer_division_rejects_float_int_operands() {
 fn multiline_expression_with_operator_on_next_line_resolves_correctly() {
     let value = first_start_declaration_expression("value = 1\n + 2\n + 3\n");
 
-    assert_eq!(value.diagnostic_type, DataType::Int);
-    assert!(
-        matches!(value.kind, ExpressionKind::Int(6)),
-        "expected folded Int(6), got {:?}",
-        value.kind
+    assert_eq!(
+        value.value_type_id(),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
+    );
+    assert_folded_fixed_scalar(
+        &value,
+        FixedScalarValue::signed(FixedScalar::I32, 6).expect("6 is an I32 value"),
     );
 }
 
@@ -433,11 +527,13 @@ fn multiline_expression_with_operator_on_next_line_resolves_correctly() {
 fn multiline_expression_with_operator_at_end_of_line_resolves_correctly() {
     let value = first_start_declaration_expression("value = 1 +\n 2 +\n 3\n");
 
-    assert_eq!(value.diagnostic_type, DataType::Int);
-    assert!(
-        matches!(value.kind, ExpressionKind::Int(6)),
-        "expected folded Int(6), got {:?}",
-        value.kind
+    assert_eq!(
+        value.value_type_id(),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
+    );
+    assert_folded_fixed_scalar(
+        &value,
+        FixedScalarValue::signed(FixedScalar::I32, 6).expect("6 is an I32 value"),
     );
 }
 
@@ -445,19 +541,12 @@ fn multiline_expression_with_operator_at_end_of_line_resolves_correctly() {
 fn multiline_comparison_expression_resolves_to_bool() {
     let value = first_start_declaration_expression("value = 1\n is\n 1\n");
 
-    assert_eq!(value.diagnostic_type, DataType::Bool);
+    assert_eq!(value.value_type_id(), builtin_type_ids::BOOL);
     assert!(
-        matches!(value.kind, ExpressionKind::Bool(true)),
+        matches!(value.payload(), Some(ConstValuePayload::Bool(true))),
         "expected folded Bool(true), got {:?}",
-        value.kind
+        value.payload()
     );
-}
-
-#[test]
-fn mixed_int_float_comparison_resolves_to_bool() {
-    let value = first_start_declaration_expression("value = 1 <= 2.5\n");
-
-    assert_eq!(value.diagnostic_type, DataType::Bool);
 }
 
 #[test]
@@ -469,7 +558,7 @@ fn bool_relational_comparison_is_rejected() {
 fn string_equality_comparison_resolves_to_bool() {
     let value = first_start_declaration_expression("value = \"a\" is \"b\"\n");
 
-    assert_eq!(value.diagnostic_type, DataType::Bool);
+    assert_eq!(value.value_type_id(), builtin_type_ids::BOOL);
 }
 
 #[test]
@@ -479,7 +568,7 @@ fn string_equality_accepts_quoted_and_runtime_template_values() {
         2,
     );
 
-    assert_eq!(value.diagnostic_type, DataType::Bool);
+    assert_eq!(value.value_type_id(), builtin_type_ids::BOOL);
 }
 
 #[test]
@@ -491,7 +580,7 @@ fn string_ordering_comparison_is_rejected() {
 fn char_relational_comparison_resolves_to_bool() {
     let value = first_start_declaration_expression("value = 'a' < 'b'\n");
 
-    assert_eq!(value.diagnostic_type, DataType::Bool);
+    assert_eq!(value.value_type_id(), builtin_type_ids::BOOL);
 }
 
 #[test]
@@ -511,12 +600,26 @@ fn fully_constant_boolean_and_comparison_expressions_fold() {
         panic!("expected folded declaration");
     };
 
+    let root = declaration
+        .value
+        .initializer()
+        .expect("fixture initializer");
+    let view = ast
+        .expressions
+        .view(root)
+        .expect("folded initializer should be stored");
     assert!(
-        matches!(declaration.value.kind, ExpressionKind::Bool(false)),
-        "expected fully-folded boolean/comparison expression to collapse to Bool(false), got {:?}",
-        declaration.value.kind
+        matches!(
+            constant_payload(&ast.const_values, view),
+            Some(ConstValuePayload::Bool(false))
+        ),
+        "expected fully-folded boolean/comparison expression to collapse to Bool(false)"
     );
-    assert_eq!(declaration.value.diagnostic_type, DataType::Bool);
+    assert_eq!(
+        view.value_type_id()
+            .expect("folded boolean should have a type"),
+        builtin_type_ids::BOOL
+    );
 }
 
 #[test]
@@ -531,12 +634,10 @@ fn string_slice_concatenation_with_variable_is_rejected() {
 fn folded_template_preserves_template_diagnostic_type() {
     let value = first_start_declaration_expression("value = [:template body]\n");
 
-    assert_eq!(value.type_id, builtin_type_ids::STRING);
-    assert_eq!(value.diagnostic_type, DataType::StringSlice);
+    assert_eq!(value.value_type_id(), builtin_type_ids::STRING);
     assert!(
-        matches!(value.kind, ExpressionKind::StringSlice(_)),
-        "expected folded template to collapse to a string slice kind, got {:?}",
-        value.kind
+        matches!(value.payload(), Some(ConstValuePayload::String(_))),
+        "expected folded template to collapse to a string constant"
     );
 }
 
@@ -547,12 +648,10 @@ fn copied_template_string_preserves_copy_expression_kind() {
         1,
     );
 
-    assert_eq!(value.type_id, builtin_type_ids::STRING);
-    assert_eq!(value.diagnostic_type, DataType::StringSlice);
+    assert_eq!(value.value_type_id(), builtin_type_ids::STRING);
     assert!(
-        matches!(value.kind, ExpressionKind::Copy(_)),
-        "expected explicit copy to remain a copy expression, got {:?}",
-        value.kind
+        matches!(value.view().operation(), ExpressionOperationView::Copy(_)),
+        "expected explicit copy to remain a copy expression"
     );
 }
 
@@ -580,31 +679,26 @@ fn direct_fixed_literal_materialises_signed_minimum_from_token_sign() {
     let value = first_start_declaration_expression("small I8 = -128\n");
 
     assert_eq!(
-        value.diagnostic_type,
-        DataType::FixedScalar(FixedScalar::I8)
-    );
-    assert_eq!(
-        value.type_id,
+        value.value_type_id(),
         builtin_type_ids::fixed_scalar(FixedScalar::I8)
     );
-    assert!(
-        matches!(
-            value.kind,
-            ExpressionKind::FixedScalar(scalar) if scalar == FixedScalarValue::signed(FixedScalar::I8, -128).expect("I8 minimum should materialise")
-        ),
-        "expected I8(-128), got {:?}",
-        value.kind
+    assert_folded_fixed_scalar(
+        &value,
+        FixedScalarValue::signed(FixedScalar::I8, -128).expect("I8 minimum should materialise"),
     );
 }
 
 #[test]
 fn direct_fixed_literal_rejects_parser_negation_as_operator_result() {
+    // A parser-level subtraction is an operator, so both operands must be representable at the
+    // declared `I8` destination: a positive `128` is not. Folding `0 - 128` into the direct
+    // `-128` spelling would wrongly accept it.
     let diagnostic = parse_single_file_ast_diagnostic("small I8 = 0 - 128\n");
 
     assert!(matches!(
         diagnostic.payload,
-        DiagnosticPayload::TypeMismatch {
-            context: TypeMismatchContext::Declaration,
+        DiagnosticPayload::InvalidNumberLiteral {
+            reason: NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I8),
             ..
         }
     ));
@@ -614,57 +708,44 @@ fn direct_fixed_literal_rejects_parser_negation_as_operator_result() {
 fn direct_fixed_literal_materialises_u64_max() {
     let value = first_start_declaration_expression("large U64 = 18_446_744_073_709_551_615\n");
     assert_eq!(
-        value.diagnostic_type,
-        DataType::FixedScalar(FixedScalar::U64)
+        value.value_type_id(),
+        builtin_type_ids::fixed_scalar(FixedScalar::U64)
     );
-    assert!(
-        matches!(
-            value.kind,
-            ExpressionKind::FixedScalar(scalar) if scalar == FixedScalarValue::unsigned(FixedScalar::U64, u64::MAX).expect("U64 maximum should materialise")
-        ),
-        "expected U64 max, got {:?}",
-        value.kind
+    assert_folded_fixed_scalar(
+        &value,
+        FixedScalarValue::unsigned(FixedScalar::U64, u64::MAX)
+            .expect("U64 maximum should materialise"),
     );
 }
 
 #[test]
-fn direct_fixed_literal_materialises_default_profile_large_u64() {
+fn direct_fixed_literal_materialises_large_u64() {
     let value = first_start_declaration_expression("large U64 = 18_000_000_000\n");
 
     assert_eq!(
-        value.diagnostic_type,
-        DataType::FixedScalar(FixedScalar::U64)
+        value.value_type_id(),
+        builtin_type_ids::fixed_scalar(FixedScalar::U64)
     );
-    assert!(
-        matches!(
-            value.kind,
-            ExpressionKind::FixedScalar(scalar) if scalar == FixedScalarValue::unsigned(FixedScalar::U64, 18_000_000_000).expect("default-profile U64 literal should materialise")
-        ),
-        "expected U64(18000000000), got {:?}",
-        value.kind
+    assert_folded_fixed_scalar(
+        &value,
+        FixedScalarValue::unsigned(FixedScalar::U64, 18_000_000_000)
+            .expect("U64 literal should materialise"),
     );
 }
 
 #[test]
 fn direct_fixed_literal_materialises_byte_endpoints() {
     let low = first_start_declaration_expression("raw Byte = 0\n");
-    assert!(
-        matches!(
-            low.kind,
-            ExpressionKind::FixedScalar(scalar) if scalar == FixedScalarValue::unsigned(FixedScalar::Byte, 0).expect("Byte zero should materialise")
-        ),
-        "expected Byte(0), got {:?}",
-        low.kind
+    assert_folded_fixed_scalar(
+        &low,
+        FixedScalarValue::unsigned(FixedScalar::Byte, 0).expect("Byte zero should materialise"),
     );
 
     let high = first_start_declaration_expression("raw Byte = 255\n");
-    assert!(
-        matches!(
-            high.kind,
-            ExpressionKind::FixedScalar(scalar) if scalar == FixedScalarValue::unsigned(FixedScalar::Byte, 255).expect("Byte maximum should materialise")
-        ),
-        "expected Byte(255), got {:?}",
-        high.kind
+    assert_folded_fixed_scalar(
+        &high,
+        FixedScalarValue::unsigned(FixedScalar::Byte, 255)
+            .expect("Byte maximum should materialise"),
     );
 }
 
@@ -672,30 +753,32 @@ fn direct_fixed_literal_materialises_byte_endpoints() {
 fn direct_fixed_literal_materialises_f16_and_f32_bits() {
     let half = first_start_declaration_expression("half F16 = 0.1\n");
     assert_eq!(
-        half.diagnostic_type,
-        DataType::FixedScalar(FixedScalar::F16)
+        half.value_type_id(),
+        builtin_type_ids::fixed_scalar(FixedScalar::F16)
     );
     assert!(
         matches!(
-            half.kind,
-            ExpressionKind::FixedScalar(scalar) if scalar.as_f64().is_some_and(|value| value.to_bits() == moth_lexical::numeric::binary16::round_f64_to_f16(0.1).to_bits())
+            half.payload(),
+            Some(ConstValuePayload::FixedScalar(scalar))
+                if scalar.as_f64().is_some_and(|value| value.to_bits() == moth_lexical::numeric::binary16::round_f64_to_f16(0.1).to_bits())
         ),
         "expected F16(0.1) bits, got {:?}",
-        half.kind
+        half.payload()
     );
 
     let single = first_start_declaration_expression("single F32 = 0.1\n");
     assert_eq!(
-        single.diagnostic_type,
-        DataType::FixedScalar(FixedScalar::F32)
+        single.value_type_id(),
+        builtin_type_ids::fixed_scalar(FixedScalar::F32)
     );
     assert!(
         matches!(
-            single.kind,
-            ExpressionKind::FixedScalar(scalar) if scalar.as_f64().is_some_and(|value| value == f64::from(0.1f32))
+            single.payload(),
+            Some(ConstValuePayload::FixedScalar(scalar))
+                if scalar.as_f64().is_some_and(|value| value == f64::from(0.1f32))
         ),
         "expected F32(0.1) bits, got {:?}",
-        single.kind
+        single.payload()
     );
 }
 
@@ -704,122 +787,150 @@ fn direct_fixed_literal_materialises_whole_literal_into_f64() {
     let value = first_start_declaration_expression("wide F64 = 2\n");
 
     assert_eq!(
-        value.diagnostic_type,
-        DataType::FixedScalar(FixedScalar::F64)
+        value.value_type_id(),
+        builtin_type_ids::fixed_scalar(FixedScalar::F64)
     );
     assert!(
         matches!(
-            value.kind,
-            ExpressionKind::FixedScalar(scalar) if scalar.as_f64() == Some(2.0)
+            value.payload(),
+            Some(ConstValuePayload::FixedScalar(scalar)) if scalar.as_f64() == Some(2.0)
         ),
         "expected F64(2.0), got {:?}",
-        value.kind
+        value.payload()
     );
 }
 
 #[test]
-fn profile_float_whole_literals_materialise_directly_with_float_identity_and_signed_zero() {
-    let large = first_start_declaration_expression("large Float = 18_446_744_073_709_551_615\n");
-    assert_eq!(large.type_id, builtin_type_ids::FLOAT);
+fn f64_whole_literals_materialise_directly_with_exact_identity_and_signed_zero() {
+    let large = first_start_declaration_expression("large F64 = 18_446_744_073_709_551_615\n");
+    assert_eq!(
+        large.value_type_id(),
+        builtin_type_ids::fixed_scalar(FixedScalar::F64)
+    );
     assert!(
-        matches!(large.kind, ExpressionKind::Float(value) if value == 18_446_744_073_709_551_615_f64),
-        "expected a profile Float beyond Int range, got {:?}",
-        large.kind
+        matches!(
+            large.payload(),
+            Some(ConstValuePayload::FixedScalar(scalar))
+                if scalar.as_f64() == Some(18_446_744_073_709_551_615_f64)
+        ),
+        "expected an F64 value beyond I32 range, got {:?}",
+        large.payload()
     );
 
-    let negative_zero = first_start_declaration_expression("negative Float = -0\n");
-    assert_eq!(negative_zero.type_id, builtin_type_ids::FLOAT);
+    let negative_zero = first_start_declaration_expression("negative F64 = -0\n");
+    assert_eq!(
+        negative_zero.value_type_id(),
+        builtin_type_ids::fixed_scalar(FixedScalar::F64)
+    );
     assert!(
-        matches!(negative_zero.kind, ExpressionKind::Float(value) if value.to_bits() == (-0.0_f64).to_bits()),
-        "expected a sign-preserving profile Float zero, got {:?}",
-        negative_zero.kind
+        matches!(
+            negative_zero.payload(),
+            Some(ConstValuePayload::FixedScalar(scalar))
+                if scalar.as_f64().is_some_and(|value| value.to_bits() == (-0.0_f64).to_bits())
+        ),
+        "expected a sign-preserving F64 zero, got {:?}",
+        negative_zero.payload()
     );
 
-    let optional =
-        first_start_declaration_expression("maybe Float? = 18_446_744_073_709_551_615\n");
-    let ExpressionKind::Coerced { value: inner, .. } = &optional.kind else {
-        panic!(
-            "optional Float should wrap the directly materialised value, got {:?}",
-            optional.kind
-        );
-    };
-    assert_eq!(inner.type_id, builtin_type_ids::FLOAT);
+    let optional = first_start_declaration_expression("maybe F64? = 18_446_744_073_709_551_615\n");
+    let inner = coerced_inner(&optional);
+    assert_eq!(
+        inner
+            .value_type_id()
+            .expect("optional inner should have one value type"),
+        builtin_type_ids::fixed_scalar(FixedScalar::F64)
+    );
     assert!(matches!(
-        &inner.kind,
-        ExpressionKind::Float(value) if *value == 18_446_744_073_709_551_615_f64
+        constant_payload(&optional.ast.const_values, inner),
+        Some(ConstValuePayload::FixedScalar(scalar))
+            if scalar.as_f64() == Some(18_446_744_073_709_551_615_f64)
     ));
 
     let f32 = first_start_declaration_expression("single F32 = 18_446_744_073_709_551_615\n");
     assert_eq!(
-        f32.type_id,
+        f32.value_type_id(),
         builtin_type_ids::fixed_scalar(FixedScalar::F32)
     );
-    assert!(matches!(f32.kind, ExpressionKind::FixedScalar(_)));
+    assert!(matches!(
+        f32.payload(),
+        Some(ConstValuePayload::FixedScalar(_))
+    ));
 
     let f64 = first_start_declaration_expression("double F64 = 18_446_744_073_709_551_615\n");
     assert_eq!(
-        f64.type_id,
+        f64.value_type_id(),
         builtin_type_ids::fixed_scalar(FixedScalar::F64)
     );
-    assert!(matches!(f64.kind, ExpressionKind::FixedScalar(_)));
+    assert!(matches!(
+        f64.payload(),
+        Some(ConstValuePayload::FixedScalar(_))
+    ));
 }
 
 #[test]
-fn profile_float_peer_materialises_whole_literals_without_int_range_narrowing() {
+fn f64_peer_materialises_whole_literals_without_i32_range_narrowing() {
     let sum = nth_start_declaration_expression(
-        "peer Float = 1.0\nsum = peer + 18_446_744_073_709_551_615\n",
+        "peer F64 = 1.0\nsum = peer + 18_446_744_073_709_551_615\n",
         1,
     );
 
-    assert_eq!(sum.type_id, builtin_type_ids::FLOAT);
-    let ExpressionKind::Runtime(rpn) = &sum.kind else {
-        panic!("a variable-plus-literal expression should remain runtime RPN");
-    };
+    assert_eq!(
+        sum.value_type_id(),
+        builtin_type_ids::fixed_scalar(FixedScalar::F64)
+    );
     assert!(
-        rpn.items.iter().any(|item| matches!(
-            item,
-            ExpressionRpnItem::Operand(operand)
-                if matches!(operand.kind, ExpressionKind::Float(value) if value == 18_446_744_073_709_551_615_f64)
-        )),
-        "the immediate Float peer should materialise the whole literal as profile Float"
+        sum.payload().is_none(),
+        "a variable-plus-literal expression should remain runtime"
+    );
+    assert!(
+        constant_leaves(&sum.ast.const_values, sum.view())
+            .iter()
+            .any(|(_, payload)| matches!(
+                payload,
+                ConstValuePayload::FixedScalar(scalar)
+                    if scalar.as_f64() == Some(18_446_744_073_709_551_615_f64)
+            )),
+        "the immediate F64 peer should materialise the whole literal as F64"
     );
 }
 
 #[test]
-fn compound_float_subtree_materialises_lone_peer_as_profile_float() {
-    // The baseline accepts every shape below: a compound Float subtree resolves naturally
-    // before the lone literal reads its Float peer, so no Int range narrowing applies. The
-    // comparison shape stays Bool while its Float side folds the same way.
+fn compound_f64_subtree_materialises_lone_peer_as_f64() {
+    // A compound decimal subtree resolves as `F64` before the lone whole literal reads its
+    // floating-family peer, so no I32 range narrowing applies. The comparison shape stays Bool
+    // while its floating side folds the same way.
     for source in [
         "value = 0.5 + 0.5 + 3000000000\n",
         "value = (0.5 + 0.5) + 3000000000\n",
         "value = 1.5 * 2.0 * 3000000000\n",
         "value = 3000000000 * (1.5 + 0.5)\n",
-        "value Float = -(0.5) + 3000000000\n",
+        "value F64 = -(0.5) + 3000000000\n",
     ] {
         let expression = first_start_declaration_expression(source);
         assert_eq!(
-            expression.type_id,
-            builtin_type_ids::FLOAT,
-            "compound Float peer should keep profile Float for {source:?}"
+            expression.value_type_id(),
+            builtin_type_ids::fixed_scalar(FixedScalar::F64),
+            "compound F64 peer should keep F64 for {source:?}"
         );
     }
     let comparison = first_start_declaration_expression("value = 0.5 + 0.5 < 3000000000\n");
-    assert_eq!(comparison.type_id, builtin_type_ids::BOOL);
+    assert_eq!(comparison.value_type_id(), builtin_type_ids::BOOL);
 }
 
 #[test]
-fn int_and_fixed_receiving_context_keeps_integer_rules_and_does_not_retag_operator_results() {
-    let int_overflow = parse_single_file_ast_diagnostic("large Int = 18_446_744_073_709_551_615\n");
+fn i32_and_fixed_receiving_context_keeps_integer_rules_and_does_not_retag_operator_results() {
+    // The exact `I32` receiver owns the range check, so the literal reports the fixed-scalar
+    // reason for its destination.
+    let int_overflow = parse_single_file_ast_diagnostic("large I32 = 18_446_744_073_709_551_615\n");
     assert!(matches!(
         int_overflow.payload,
         DiagnosticPayload::InvalidNumberLiteral {
-            reason: NumberLiteralErrorReason::OutsideIntRange,
+            reason: NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I32),
             ..
         }
     ));
 
-    let decimal_int = parse_single_file_ast_diagnostic("value Int = 1.0\n");
+    let decimal_int = parse_single_file_ast_diagnostic("value I32 = 1.0\n");
     assert!(matches!(
         decimal_int.payload,
         DiagnosticPayload::TypeMismatch {
@@ -829,12 +940,29 @@ fn int_and_fixed_receiving_context_keeps_integer_rules_and_does_not_retag_operat
     ));
 
     let unconstrained = first_start_declaration_expression("value = 1 + 1\n");
-    assert_eq!(unconstrained.type_id, builtin_type_ids::INT);
-    assert!(matches!(unconstrained.kind, ExpressionKind::Int(2)));
+    assert_eq!(
+        unconstrained.value_type_id(),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
+    );
+    assert_folded_fixed_scalar(
+        &unconstrained,
+        FixedScalarValue::signed(FixedScalar::I32, 2).expect("2 is an I32 value"),
+    );
 
-    let operator_result = parse_single_file_ast_diagnostic("value F32 = 1 + 1\n");
+    // Raw literal arithmetic is typed by the receiving context before operator selection, so a
+    // `F32` receiver materialises both whole literals and folds the `F32` sum.
+    let literal_arithmetic = first_start_declaration_expression("value F32 = 1 + 1\n");
+    assert_eq!(
+        literal_arithmetic.value_type_id(),
+        builtin_type_ids::fixed_scalar(FixedScalar::F32)
+    );
+
+    // Concrete named operands are never retagged by the receiver: two `I32` operands produce
+    // `I32`, and the exact `F32` annotation rejects that completed result.
+    let concrete_operands =
+        parse_single_file_ast_diagnostic("left I32 = 1\nright I32 = 2\nvalue F32 = left + right\n");
     assert!(matches!(
-        operator_result.payload,
+        concrete_operands.payload,
         DiagnosticPayload::TypeMismatch {
             context: TypeMismatchContext::Declaration,
             ..
@@ -846,46 +974,52 @@ fn int_and_fixed_receiving_context_keeps_integer_rules_and_does_not_retag_operat
 fn direct_fixed_literal_materialises_option_of_fixed() {
     let value = nth_start_declaration_expression("maybe U8? = 200\n", 0);
 
-    let ExpressionKind::Coerced { value: inner, .. } = &value.kind else {
-        panic!(
-            "option-of-fixed should wrap the materialised literal, got {:?}",
-            value.kind
-        );
-    };
+    let inner = coerced_inner(&value);
     assert!(
         matches!(
-            inner.kind,
-            ExpressionKind::FixedScalar(scalar) if scalar == FixedScalarValue::unsigned(FixedScalar::U8, 200).expect("U8 literal should materialise before wrapping")
+            constant_payload(&value.ast.const_values, inner),
+            Some(ConstValuePayload::FixedScalar(scalar))
+                if *scalar == FixedScalarValue::unsigned(FixedScalar::U8, 200)
+                    .expect("U8 literal should materialise before wrapping")
         ),
         "expected U8(200) inside the option wrap, got {:?}",
-        inner.kind
+        constant_payload(&value.ast.const_values, inner)
     );
 }
 
 #[test]
-fn operator_result_into_fixed_reports_declaration_mismatch() {
-    let diagnostic = parse_single_file_ast_diagnostic("small U8 = 1 + 1\n");
+fn literal_arithmetic_into_fixed_uses_the_receiving_context() {
+    // D15: an exact receiving context types raw literal operands before operator selection, so
+    // equal `U8` operands keep `U8` and the checked constant folds instead of being promoted to
+    // a wider domain and rejected at the exact receiver.
+    let value = first_start_declaration_expression("small U8 = 1 + 1\n");
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::TypeMismatch {
-            context: TypeMismatchContext::Declaration,
-            ..
-        }
-    ));
+    assert_eq!(
+        value.value_type_id(),
+        builtin_type_ids::fixed_scalar(FixedScalar::U8)
+    );
+    assert_folded_fixed_scalar(
+        &value,
+        FixedScalarValue::unsigned(FixedScalar::U8, 2).expect("2 is a U8 value"),
+    );
 }
 
 #[test]
-fn large_operator_result_into_u64_reports_int_range_error() {
-    let diagnostic = parse_single_file_ast_diagnostic("large U64 = 18_000_000_000 + 1\n");
+fn operator_result_into_u64_uses_the_receiving_context() {
+    // The explicit `U64` receiver types the whole-number leaves before operator selection, so
+    // the complete literal keeps its exact value without an I32 intermediate. The defaulted
+    // no-receiver boundary is covered by `unannotated_overflow_keeps_default_int_range_error`.
+    let value = first_start_declaration_expression("large U64 = 18_000_000_000 + 1\n");
 
-    assert!(matches!(
-        diagnostic.payload,
-        DiagnosticPayload::InvalidNumberLiteral {
-            reason: NumberLiteralErrorReason::OutsideIntRange,
-            ..
-        }
-    ));
+    assert_eq!(
+        value.value_type_id(),
+        builtin_type_ids::fixed_scalar(FixedScalar::U64)
+    );
+    assert_folded_fixed_scalar(
+        &value,
+        FixedScalarValue::unsigned(FixedScalar::U64, 18_000_000_001)
+            .expect("18000000001 is a U64 value"),
+    );
 }
 
 #[test]
@@ -909,56 +1043,42 @@ fn decimal_spelling_into_integer_fixed_reports_declaration_mismatch() {
 fn grouped_literal_into_fixed_materialises_destination() {
     let value = first_start_declaration_expression("small U8 = (5)\n");
 
-    assert!(
-        matches!(
-            value.kind,
-            ExpressionKind::FixedScalar(scalar) if scalar == FixedScalarValue::unsigned(FixedScalar::U8, 5).expect("grouped U8 literal should materialise")
-        ),
-        "expected U8(5), got {:?}",
-        value.kind
+    assert_folded_fixed_scalar(
+        &value,
+        FixedScalarValue::unsigned(FixedScalar::U8, 5)
+            .expect("grouped U8 literal should materialise"),
     );
 }
 
 #[test]
-fn grouped_operator_result_into_fixed_is_not_retagged() {
-    let diagnostic = parse_single_file_ast_diagnostic("small U8 = (5) + 1\n");
+fn grouped_literal_arithmetic_into_fixed_materialises_destination() {
+    let value = first_start_declaration_expression("small U8 = (5) + 1\n");
 
-    assert!(
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::TypeMismatch {
-                context: TypeMismatchContext::Declaration,
-                ..
-            }
-        ),
-        "grouped operator result must keep the Declaration mismatch, got {:?}",
-        diagnostic.payload
+    assert_eq!(
+        value.value_type_id(),
+        builtin_type_ids::fixed_scalar(FixedScalar::U8)
+    );
+    assert_folded_fixed_scalar(
+        &value,
+        FixedScalarValue::unsigned(FixedScalar::U8, 6).expect("6 is a U8 value"),
     );
 }
 
 #[test]
-fn parser_negation_into_signed_minimum_reports_declaration_mismatch() {
+fn parser_negation_over_out_of_range_operand_reports_fixed_range_error() {
+    // `-(128)` is an operator negation, so the operand literal must itself be representable at
+    // the I8 destination: a positive `128` is not, unlike the direct `-128` spelling whose sign
+    // is parser-owned (covered by
+    // `direct_fixed_literal_materialises_signed_minimum_from_token_sign`).
     let diagnostic = parse_single_file_ast_diagnostic("small I8 = -(128)\n");
 
-    assert!(
-        !matches!(
-            diagnostic.payload,
-            DiagnosticPayload::InvalidNumberLiteral { .. }
-        ),
-        "parser-owned negation is an operator result, not a fixed range error: {:?}",
-        diagnostic.payload
-    );
-    assert!(
-        matches!(
-            diagnostic.payload,
-            DiagnosticPayload::TypeMismatch {
-                context: TypeMismatchContext::Declaration,
-                ..
-            }
-        ),
-        "expected a Declaration mismatch, got {:?}",
-        diagnostic.payload
-    );
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::InvalidNumberLiteral {
+            reason: NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I8),
+            ..
+        }
+    ));
 }
 
 #[test]
@@ -981,28 +1101,33 @@ fn curly_literal_into_fixed_reports_baseline_mismatch() {
 
 #[test]
 fn unannotated_overflow_keeps_default_int_range_error() {
+    // An unconstrained whole literal defaults to the exact `I32` domain, so an above-range
+    // value reports the fixed-scalar range reason for that destination.
     let diagnostic = parse_single_file_ast_diagnostic("value = 3_000_000_000\n");
 
     assert!(matches!(
         diagnostic.payload,
         DiagnosticPayload::InvalidNumberLiteral {
-            reason: NumberLiteralErrorReason::OutsideIntRange,
+            reason: NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I32),
             ..
         }
     ));
 }
 
 #[test]
-fn fixed_width_arithmetic_uses_canonical_promotion_domains() {
+fn fixed_width_arithmetic_uses_exact_result_domains() {
+    // D15: equal operand types keep their own type, same-signedness mixes take the wider
+    // width, mixed signedness takes the smallest containing signed type, and real division
+    // always produces F64. No 32-bit integer or minimum-F32 floor applies.
     let cases = [
-        ("U8", "+", "U8", FixedScalar::U32),
+        ("U8", "+", "U8", FixedScalar::U8),
         ("I32", "+", "U32", FixedScalar::I64),
-        ("I8", "*", "I16", FixedScalar::I32),
+        ("I8", "*", "I16", FixedScalar::I16),
         ("U32", "-", "U64", FixedScalar::U64),
         ("U8", "/", "U8", FixedScalar::F64),
-        ("U8", "//", "U8", FixedScalar::U32),
+        ("U8", "//", "U8", FixedScalar::U8),
         ("I64", "%", "I8", FixedScalar::I64),
-        ("F16", "*", "F16", FixedScalar::F32),
+        ("F16", "*", "F16", FixedScalar::F16),
         ("F16", "+", "F64", FixedScalar::F64),
     ];
 
@@ -1015,11 +1140,24 @@ fn fixed_width_arithmetic_uses_canonical_promotion_domains() {
         );
     }
 
-    assert_binary_result_type("Int", "+", "Int", builtin_type_ids::INT);
-    assert_binary_result_type("Float", "+", "Float", builtin_type_ids::FLOAT);
-    assert_binary_result_type("Int", "+", "Float", builtin_type_ids::FLOAT);
-    assert_binary_result_type("Float", "+", "Int", builtin_type_ids::FLOAT);
-    assert_binary_result_type("Int", "/", "Int", builtin_type_ids::FLOAT);
+    assert_binary_result_type(
+        "I32",
+        "+",
+        "I32",
+        builtin_type_ids::fixed_scalar(FixedScalar::I32),
+    );
+    assert_binary_result_type(
+        "F64",
+        "+",
+        "F64",
+        builtin_type_ids::fixed_scalar(FixedScalar::F64),
+    );
+    assert_binary_result_type(
+        "I32",
+        "/",
+        "I32",
+        builtin_type_ids::fixed_scalar(FixedScalar::F64),
+    );
 }
 
 #[test]
@@ -1027,9 +1165,8 @@ fn unsupported_fixed_width_arithmetic_keeps_operator_diagnostics() {
     let cases = [
         ("I64", "+", "U64", DiagnosticOperator::Add),
         ("I32", "+", "U64", DiagnosticOperator::Add),
-        ("U8", "+", "Int", DiagnosticOperator::Add),
-        ("Int", "+", "U8", DiagnosticOperator::Add),
-        ("F32", "+", "Float", DiagnosticOperator::Add),
+        ("I32", "+", "F64", DiagnosticOperator::Add),
+        ("F64", "+", "I32", DiagnosticOperator::Add),
         ("U8", "+", "F32", DiagnosticOperator::Add),
         ("Byte", "+", "Byte", DiagnosticOperator::Add),
         ("F32", "//", "F32", DiagnosticOperator::IntDivide),
@@ -1052,20 +1189,22 @@ fn fixed_width_comparisons_use_compatibility_without_arithmetic_promotion() {
     }
 
     assert_binary_rejected("Byte", "is", "U8", DiagnosticOperator::Equality);
-    assert_binary_rejected("U8", "is", "Int", DiagnosticOperator::Equality);
+    assert_binary_rejected("U8", "is", "F32", DiagnosticOperator::Equality);
 }
 
 #[test]
 fn unary_minus_uses_the_numeric_negation_domain() {
+    // D15: unary minus preserves a signed integer or binary float operand type, so `-I8` is
+    // `I8` and `-F16` is `F16`; every unsigned or `Byte` operand stays invalid.
     for (operand_type, result_scalar) in [
-        ("I8", FixedScalar::I32),
-        ("F16", FixedScalar::F32),
+        ("I8", FixedScalar::I8),
+        ("F16", FixedScalar::F16),
         ("I64", FixedScalar::I64),
     ] {
         let source = format!("operand {operand_type} = 1\nvalue = -operand\n");
         let value = nth_start_declaration_expression(&source, 1);
         assert_eq!(
-            value.type_id,
+            value.value_type_id(),
             builtin_type_ids::fixed_scalar(result_scalar),
             "unexpected negation result for {operand_type}"
         );
@@ -1084,10 +1223,12 @@ fn unary_minus_uses_the_numeric_negation_domain() {
 
 #[test]
 fn pending_numeric_literals_materialise_from_immediate_fixed_peers() {
+    // D15: both operands resolve to `U8`, so the checked result keeps `U8`; the raw literal
+    // still materialises directly at its peer's exact domain.
     let right_peer = nth_start_declaration_expression("x U8 = 5\nvalue = x + 1\n", 1);
     assert_eq!(
-        right_peer.type_id,
-        builtin_type_ids::fixed_scalar(FixedScalar::U32)
+        right_peer.value_type_id(),
+        builtin_type_ids::fixed_scalar(FixedScalar::U8)
     );
     assert_runtime_contains_fixed_literal(
         &right_peer,
@@ -1096,8 +1237,8 @@ fn pending_numeric_literals_materialise_from_immediate_fixed_peers() {
 
     let left_peer = nth_start_declaration_expression("x U8 = 5\nvalue = 1 + x\n", 1);
     assert_eq!(
-        left_peer.type_id,
-        builtin_type_ids::fixed_scalar(FixedScalar::U32)
+        left_peer.value_type_id(),
+        builtin_type_ids::fixed_scalar(FixedScalar::U8)
     );
     assert_runtime_contains_fixed_literal(
         &left_peer,
@@ -1106,7 +1247,7 @@ fn pending_numeric_literals_materialise_from_immediate_fixed_peers() {
 
     let float_peer = nth_start_declaration_expression("f F32 = 1\nvalue = f * 0.5\n", 1);
     assert_eq!(
-        float_peer.type_id,
+        float_peer.value_type_id(),
         builtin_type_ids::fixed_scalar(FixedScalar::F32)
     );
     assert_runtime_contains_fixed_literal(
@@ -1117,7 +1258,7 @@ fn pending_numeric_literals_materialise_from_immediate_fixed_peers() {
 
     let byte_comparison =
         nth_start_declaration_expression("raw Byte = 255\nvalue = raw is 255\n", 1);
-    assert_eq!(byte_comparison.type_id, builtin_type_ids::BOOL);
+    assert_eq!(byte_comparison.value_type_id(), builtin_type_ids::BOOL);
     assert_runtime_contains_fixed_literal(
         &byte_comparison,
         FixedScalarValue::unsigned(FixedScalar::Byte, 255)
@@ -1126,14 +1267,14 @@ fn pending_numeric_literals_materialise_from_immediate_fixed_peers() {
 
     let chained = nth_start_declaration_expression("x U8 = 5\nvalue = x + 1 + 1\n", 1);
     assert_eq!(
-        chained.type_id,
-        builtin_type_ids::fixed_scalar(FixedScalar::U32)
+        chained.value_type_id(),
+        builtin_type_ids::fixed_scalar(FixedScalar::U8)
     );
 
     let grouped_literal = nth_start_declaration_expression("x U8 = 5\nvalue = x + (1)\n", 1);
     assert_eq!(
-        grouped_literal.type_id,
-        builtin_type_ids::fixed_scalar(FixedScalar::U32)
+        grouped_literal.value_type_id(),
+        builtin_type_ids::fixed_scalar(FixedScalar::U8)
     );
     assert_runtime_contains_fixed_literal(
         &grouped_literal,
@@ -1152,10 +1293,29 @@ fn peer_literal_materialisation_preserves_natural_and_grouped_operator_types() {
         }
     ));
 
+    // A decimal leaf beside an exact integer peer keeps its own family: the integer
+    // destination is dropped for a decimal token, the leaf defaults to F64, and the family mix
+    // is rejected instead of inserting an implicit conversion.
     assert_unsupported_operator("x U8 = 5\nvalue = x + 1.5\n", DiagnosticOperator::Add);
-    assert_unsupported_operator("x U8 = 5\nvalue = x + (1 + 2)\n", DiagnosticOperator::Add);
-    assert_unsupported_operator("x U8 = 5\nvalue = 1 + 1 + x\n", DiagnosticOperator::Add);
-    assert_unsupported_operator("x U8 = 5\nvalue = x to 10\n", DiagnosticOperator::Range);
+
+    // A compound literal-only subtree beside an exact fixed peer takes that peer's domain in
+    // either operand order, so grouped whole-literal arithmetic materialises as U8.
+    for source in [
+        "x U8 = 5\nvalue = x + (1 + 2)\n",
+        "x U8 = 5\nvalue = 1 + 1 + x\n",
+    ] {
+        let expression = nth_start_declaration_expression(source, 1);
+        assert_eq!(
+            expression.value_type_id(),
+            builtin_type_ids::fixed_scalar(FixedScalar::U8),
+            "grouped literal arithmetic beside a U8 peer should keep U8 for {source:?}"
+        );
+    }
+
+    // A range header combines its endpoints through the shared Add table, so a defaulted I32
+    // end beside a U8 start selects the I32 counter domain instead of failing.
+    let range_value = nth_start_declaration_expression("x U8 = 5\nvalue = x to 10\n", 1);
+    assert_eq!(range_value.value_type_id(), builtin_type_ids::RANGE);
 }
 
 #[test]
@@ -1170,53 +1330,38 @@ fn optional_fixed_scalar_does_not_materialise_pending_peers_as_inner_scalars() {
             operator: DiagnosticOperator::Add,
             rhs: Some(type_id),
             ..
-        } if type_id == builtin_type_ids::INT
+        } if type_id == builtin_type_ids::fixed_scalar(FixedScalar::I32)
     ));
 }
 
 #[test]
 fn number_operator_domains_keep_scale_and_reject_invalid_families() {
-    let add = binary_expression("Dec2", "+", "Int");
-    assert!(matches!(add.diagnostic_type, DataType::Number(scale) if scale.get() == 2));
+    let add = binary_expression("Dec2", "+", "I32");
+    assert_number_scale(&add, 2);
 
     let reversed_subtract = binary_expression("U64", "-", "Dec2");
-    assert!(matches!(
-        reversed_subtract.diagnostic_type,
-        DataType::Number(scale) if scale.get() == 2
-    ));
+    assert_number_scale(&reversed_subtract, 2);
 
     let mixed_comparison = binary_expression("Dec2", "<", "I64");
-    assert_eq!(mixed_comparison.type_id, builtin_type_ids::BOOL);
+    assert_eq!(mixed_comparison.value_type_id(), builtin_type_ids::BOOL);
 
-    let int_power = binary_expression("Dec2", "^", "Int");
-    assert!(matches!(
-        int_power.diagnostic_type,
-        DataType::Number(scale) if scale.get() == 2
-    ));
+    let int_power = binary_expression("Dec2", "^", "I32");
+    assert_number_scale(&int_power, 2);
 
     let decimal_division = binary_expression("Dec2", "/", "Dec2");
-    assert!(matches!(
-        decimal_division.diagnostic_type,
-        DataType::Number(scale) if scale.get() == 2
-    ));
+    assert_number_scale(&decimal_division, 2);
 
     let integer_division = binary_expression("Dec0", "//", "Dec0");
-    assert!(matches!(
-        integer_division.diagnostic_type,
-        DataType::Number(scale) if scale.get() == 0
-    ));
+    assert_number_scale(&integer_division, 0);
 
     let remainder = binary_expression("Dec2", "%", "Dec2");
-    assert!(matches!(
-        remainder.diagnostic_type,
-        DataType::Number(scale) if scale.get() == 2
-    ));
+    assert_number_scale(&remainder, 2);
 
     for (left, operator, right, diagnostic_operator) in [
         ("Dec", "/", "Dec", DiagnosticOperator::Divide),
         ("Dec2", "//", "Dec2", DiagnosticOperator::IntDivide),
         ("Dec2", "+", "Dec3", DiagnosticOperator::Add),
-        ("Dec2", "+", "Float", DiagnosticOperator::Add),
+        ("Dec2", "+", "F64", DiagnosticOperator::Add),
         ("Dec2", "+", "Byte", DiagnosticOperator::Add),
         ("Dec2", "^", "Dec2", DiagnosticOperator::Exponent),
         ("Dec2", "^", "I64", DiagnosticOperator::Exponent),
@@ -1239,7 +1384,7 @@ fn pending_literal_subtrees_use_the_local_dec_peer_in_both_orders() {
         "negated = -base\n",
     );
     let base = first_start_declaration_expression(source);
-    assert_number_literal(&base, base.type_id, "125", 2);
+    assert_number_literal(&base, base.value_type_id(), "125", 2);
 
     for (index, coefficient) in [
         (1, "100"),
@@ -1251,154 +1396,170 @@ fn pending_literal_subtrees_use_the_local_dec_peer_in_both_orders() {
         (7, "20"),
     ] {
         let expression = nth_start_declaration_expression(source, index);
-        assert_eq!(expression.type_id, base.type_id);
-        assert_runtime_contains_number_literal(&expression, base.type_id, coefficient, 2);
+        assert_eq!(expression.value_type_id(), base.value_type_id());
+        assert_runtime_contains_number_literal(&expression, base.value_type_id(), coefficient, 2);
     }
     let same = nth_start_declaration_expression(source, 8);
-    assert_eq!(same.type_id, builtin_type_ids::BOOL);
-    assert_runtime_contains_number_literal(&same, base.type_id, "30", 2);
+    assert_eq!(same.value_type_id(), builtin_type_ids::BOOL);
+    assert_runtime_contains_number_literal(&same, base.value_type_id(), "30", 2);
     let negated = nth_start_declaration_expression(source, 9);
-    assert_eq!(negated.type_id, base.type_id);
-    assert!(matches!(
-        &negated.diagnostic_type,
-        DataType::Number(scale) if scale.get() == 2
-    ));
+    assert_eq!(negated.value_type_id(), base.value_type_id());
+    assert_number_scale(&negated, 2);
 }
 
 #[test]
-fn uint_receiver_types_literal_arithmetic_before_evaluation() {
-    // The Uint receiver reaches whole-number leaves through
-    // arithmetic and groups; leaves materialise as Uint directly, never via Int.
-    // Literal-only Uint arithmetic folds to its checked value.
+fn u32_receiver_types_literal_arithmetic_before_evaluation() {
+    // The U32 receiver reaches whole-number leaves through arithmetic and groups; leaves
+    // materialise as U32 directly, never via a signed-integer intermediate. Literal-only U32 arithmetic
+    // folds to its checked value.
     let source = concat!(
-        "count Uint = 1 + 2\n",
-        "large Uint = 3_000_000_000 + 1\n",
-        "grouped Uint = (1 + 2) * 3\n",
+        "count U32 = 1 + 2\n",
+        "large U32 = 3_000_000_000 + 1\n",
+        "grouped U32 = (1 + 2) * 3\n",
     );
     for (index, expected) in [3_u64, 3_000_000_001, 9].iter().enumerate() {
         let expression = nth_start_declaration_expression(source, index);
-        assert_eq!(expression.type_id, builtin_type_ids::UINT);
-        assert!(
-            matches!(expression.diagnostic_type, DataType::Uint),
-            "expected Uint diagnostic type, got {:?}",
-            expression.diagnostic_type
+        assert_eq!(
+            expression.value_type_id(),
+            builtin_type_ids::fixed_scalar(FixedScalar::U32)
         );
-        assert!(
-            matches!(&expression.kind, ExpressionKind::Uint(value) if value == expected),
-            "expected folded Uint({expected}), got {:?}",
-            expression.kind
+        assert_folded_fixed_scalar(
+            &expression,
+            FixedScalarValue::unsigned(FixedScalar::U32, *expected)
+                .expect("fixture value is a U32 value"),
         );
-        assert_no_pending_expression_items(&expression);
+        assert_completed_expression_tree(&expression);
     }
 
-    // The folded-Int analogue still folds.
+    // The folded-I32 analogue still folds.
     let natural = first_start_declaration_expression("value = 1 + 2\n");
-    assert_eq!(natural.type_id, builtin_type_ids::INT);
-    assert!(matches!(natural.kind, ExpressionKind::Int(3)));
+    assert_eq!(
+        natural.value_type_id(),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
+    );
+    assert_folded_fixed_scalar(
+        &natural,
+        FixedScalarValue::signed(FixedScalar::I32, 3).expect("3 is an I32 value"),
+    );
 }
 
 #[test]
-fn uint_peer_types_literal_only_subtree_from_either_side() {
-    // A mutable Uint base keeps the peer sum runtime, mirroring the Dec
-    // peer test: the literal-only side reads Uint context from the peer, and
-    // folds that side to its checked Uint value inside the runtime sum.
+fn u32_peer_types_literal_only_subtree_from_either_side() {
+    // A mutable U32 base keeps the peer sum runtime, mirroring the Dec peer test: the
+    // literal-only side reads U32 context from the peer, and folds that side to its checked
+    // U32 value inside the runtime sum.
     let source = concat!(
-        "peer ~Uint = 10\n",
+        "peer ~U32 = 10\n",
         "from_right = (1 + 2) + peer\n",
         "from_left = peer + (1 + 2)\n",
     );
     let peer = first_start_declaration_expression(source);
-    assert_eq!(peer.type_id, builtin_type_ids::UINT);
-    assert!(matches!(peer.kind, ExpressionKind::Uint(10)));
+    assert_eq!(
+        peer.value_type_id(),
+        builtin_type_ids::fixed_scalar(FixedScalar::U32)
+    );
+    assert_folded_fixed_scalar(
+        &peer,
+        FixedScalarValue::unsigned(FixedScalar::U32, 10).expect("10 is a U32 value"),
+    );
 
     for index in 1..=2 {
         let expression = nth_start_declaration_expression(source, index);
         assert_eq!(
-            expression.type_id, peer.type_id,
-            "a Uint peer must type the opposite literal-only subtree"
+            expression.value_type_id(),
+            peer.value_type_id(),
+            "a U32 peer must type the opposite literal-only subtree"
         );
-        assert_no_pending_expression_items(&expression);
-        assert_runtime_contains_uint_literal(&expression, 3);
+        assert_completed_expression_tree(&expression);
+        assert_runtime_contains_fixed_literal(
+            &expression,
+            FixedScalarValue::unsigned(FixedScalar::U32, 3).expect("3 is a U32 value"),
+        );
     }
 
-    // A subtree holding a typed Int is not literal-only: the receiver still
-    // rejects the mixed pair instead of converting the Int operand.
-    let typed = parse_single_file_ast_diagnostic("signed Int = 1\ninvalid Uint = signed + 2\n");
-    assert!(
-        matches!(
-            typed.payload,
-            DiagnosticPayload::UnsupportedOperatorTypes {
-                operator: DiagnosticOperator::Add,
-                ..
-            }
-        ),
-        "typed Int beside Uint must keep its identity, got {:?}",
-        typed.payload
-    );
+    // A subtree holding a typed I32 operand is not literal-only: the receiver still refuses
+    // to convert the named operand, so the mixed-width result is rejected at the declaration
+    // instead of being retagged to the receiver.
+    let typed = parse_single_file_ast_diagnostic("signed I32 = 1\ninvalid U32 = signed + 2\n");
+    let DiagnosticPayload::TypeMismatch {
+        expected, context, ..
+    } = typed.payload
+    else {
+        panic!(
+            "typed I32 beside a U32 receiver must fail the exact receiving check, got {:?}",
+            typed.payload
+        );
+    };
+    assert_eq!(context, TypeMismatchContext::Declaration);
+    assert_eq!(expected, builtin_type_ids::fixed_scalar(FixedScalar::U32));
 
-    // Named Int constants stay typed under a Uint receiver for the same reason.
-    let named = parse_single_file_ast_diagnostic("left #Int = 1\nresult Uint = left + 2\n");
-    assert!(
-        matches!(
-            named.payload,
-            DiagnosticPayload::UnsupportedOperatorTypes {
-                operator: DiagnosticOperator::Add,
-                ..
-            }
-        ),
-        "named Int constants stay typed, got {:?}",
-        named.payload
-    );
+    // Named I32 constants stay typed under a U32 receiver for the same reason.
+    let named = parse_single_file_ast_diagnostic("left #I32 = 1\nresult U32 = left + 2\n");
+    let DiagnosticPayload::TypeMismatch {
+        expected, context, ..
+    } = named.payload
+    else {
+        panic!(
+            "a named I32 constant must stay typed under a U32 receiver, got {:?}",
+            named.payload
+        );
+    };
+    assert_eq!(context, TypeMismatchContext::Declaration);
+    assert_eq!(expected, builtin_type_ids::fixed_scalar(FixedScalar::U32));
 }
 
 #[test]
-fn uint_power_exponent_shares_the_uint_domain() {
-    // Uint power uses ordinary same-family arithmetic: the raw exponent
-    // receives Uint context, unlike the Dec exponent which keeps profile Int.
-    // A mutable base keeps the peer power shape runtime while folding
-    // the literal-only exponent to its checked Uint value inside it.
-    let source = concat!("base ~Uint = 2\n", "value = base ^ (1 + 2)\n");
+fn u32_power_exponent_shares_the_u32_domain() {
+    // U32 power uses ordinary same-family arithmetic: the raw exponent receives U32 context,
+    // unlike the Dec exponent which keeps I32. A mutable base keeps the peer power shape
+    // runtime while folding the literal-only exponent to its checked U32 value inside it.
+    let source = concat!("base ~U32 = 2\n", "value = base ^ (1 + 2)\n");
     let value = nth_start_declaration_expression(source, 1);
-    assert_eq!(value.type_id, builtin_type_ids::UINT);
-    assert_no_pending_expression_items(&value);
-    assert_runtime_contains_uint_literal(&value, 3);
-
-    // A Uint receiver types the whole power shape, base and grouped
-    // exponent alike, and folds it to the checked value itself.
-    let received = first_start_declaration_expression("value Uint = 2 ^ (1 + 2)\n");
-    assert_eq!(received.type_id, builtin_type_ids::UINT);
-    assert_no_pending_expression_items(&received);
-    assert!(
-        matches!(&received.kind, ExpressionKind::Uint(8)),
-        "expected folded Uint(8), got {:?}",
-        received.kind
+    assert_eq!(
+        value.value_type_id(),
+        builtin_type_ids::fixed_scalar(FixedScalar::U32)
     );
-    // Dec power still keeps its exponent in profile Int.
+    assert_completed_expression_tree(&value);
+    assert_runtime_contains_fixed_literal(
+        &value,
+        FixedScalarValue::unsigned(FixedScalar::U32, 3).expect("3 is a U32 value"),
+    );
+
+    // A U32 receiver types the whole power shape, base and grouped exponent alike, and folds
+    // it to the checked value itself.
+    let received = first_start_declaration_expression("value U32 = 2 ^ (1 + 2)\n");
+    assert_eq!(
+        received.value_type_id(),
+        builtin_type_ids::fixed_scalar(FixedScalar::U32)
+    );
+    assert_completed_expression_tree(&received);
+    assert_folded_fixed_scalar(
+        &received,
+        FixedScalarValue::unsigned(FixedScalar::U32, 8).expect("8 is a U32 value"),
+    );
+    // Dec power still keeps its exponent in I32.
     let dec = nth_start_declaration_expression("base ~Dec2 = 1.5\npower = base ^ (1 + 2)\n", 1);
-    assert_runtime_number_power_keeps_int_exponent(&dec);
+    assert_runtime_number_power_keeps_i32_exponent(&dec);
 }
 
 #[test]
-fn dec_receiver_keeps_uint_base_power_exponent_in_uint() {
-    // Under a Dec receiver the exponent edge follows the base type: a Uint
-    // base routes its grouped exponent through Uint context, so `3 ^ 2`
-    // stays a Uint input to the exact Dec mixed rule.
+fn dec_receiver_keeps_u32_base_power_exponent_in_u32() {
+    // Under a Dec receiver the exponent edge follows the base type: a U32 base routes its
+    // grouped exponent through U32 context, so `3 ^ 2` stays a U32 input to the exact Dec
+    // mixed rule.
     let source = concat!("base Dec2 = 1.5\n", "scaled Dec2 = base * 3 ^ 2\n",);
     let scaled = nth_start_declaration_expression(source, 1);
-    assert_eq!(
-        scaled.diagnostic_type,
-        DataType::Number(NumberScale::new(2).expect("test Dec scale is valid"))
-    );
-    assert_no_pending_expression_items(&scaled);
+    assert_number_scale(&scaled, 2);
+    assert_completed_expression_tree(&scaled);
 
-    // A Dec base under the same receiver keeps the exponent in profile Int.
+    // A Dec base under the same receiver keeps the exponent in I32.
     let dec_base =
         nth_start_declaration_expression("base Dec2 = 1.5\nscaled Dec2 = base * base ^ 2\n", 1);
-    assert_runtime_number_power_keeps_int_exponent(&dec_base);
+    assert_runtime_number_power_keeps_i32_exponent(&dec_base);
 
-    // A typed Uint exponent is still not an implicit Dec exponent.
+    // A typed U32 exponent is still not an implicit Dec exponent.
     assert_unsupported_operator(
-        "base Dec2 = 1.5\nfactor Uint = 3\nscaled Dec2 = base ^ factor\n",
+        "base Dec2 = 1.5\nfactor U32 = 3\nscaled Dec2 = base ^ factor\n",
         DiagnosticOperator::Exponent,
     );
 }
@@ -1406,85 +1567,69 @@ fn dec_receiver_keeps_uint_base_power_exponent_in_uint() {
 #[test]
 fn dec_receiver_left_nested_powers_resolve_each_level_once() {
     // `((base ^ 1) ^ 1) ^ 1` with a typed Dec base under a Dec receiver:
-    // every exponent edge follows the Dec base, so each `1` stays profile
-    // Int. The receiver schedules each base once; resolving the exponent
+    // every exponent edge follows the Dec base, so each `1` stays I32.
+    // The receiver schedules each base once; resolving the exponent
     // must not revisit an already-resolved base subtree.
     let source = concat!("base Dec2 = 1.5\n", "cubed Dec2 = ((base ^ 1) ^ 1) ^ 1\n",);
     let base = first_start_declaration_expression(source);
     let cubed = nth_start_declaration_expression(source, 1);
-    assert_eq!(cubed.type_id, base.type_id);
-    assert_no_pending_expression_items(&cubed);
-    let ExpressionKind::Runtime(rpn) = &cubed.kind else {
-        panic!(
-            "nested Dec power keeps a runtime base, got {:?}",
-            cubed.kind
-        );
-    };
-    assert_eq!(
-        rpn.items
-            .iter()
-            .filter(|item| matches!(
-                item,
-                ExpressionRpnItem::Operator {
-                    operator: Operator::Exponent,
-                    ..
-                }
-            ))
-            .count(),
-        3,
-        "every nesting level keeps its power operator, got {:?}",
-        rpn.items
+    assert_eq!(cubed.value_type_id(), base.value_type_id());
+    assert_completed_expression_tree(&cubed);
+    assert!(
+        cubed.payload().is_none(),
+        "nested Dec power keeps a runtime base, got {:?}",
+        cubed.payload()
     );
+    let views = subtree_views(cubed.view());
     assert_eq!(
-        rpn.items
+        views
             .iter()
-            .filter(|item| matches!(
-                item,
-                ExpressionRpnItem::Operand(operand)
-                    if operand.type_id == builtin_type_ids::INT
-                        && matches!(&operand.kind, ExpressionKind::Int(1))
-            ))
+            .filter(|view| resolved_operation_of(**view)
+                .is_some_and(|operation| operation.operator == Operator::Exponent))
             .count(),
         3,
-        "every nested exponent stays a profile-Int one, got {:?}",
-        rpn.items
+        "every nesting level keeps its power operator"
+    );
+    let leaves = constant_leaves(&cubed.ast.const_values, cubed.view());
+    assert_eq!(
+        leaves
+            .iter()
+            .filter(|(type_id, payload)| {
+                *type_id == builtin_type_ids::fixed_scalar(FixedScalar::I32)
+                    && matches!(
+                        payload,
+                        ConstValuePayload::FixedScalar(value)
+                            if *value == FixedScalarValue::signed(FixedScalar::I32, 1)
+                                .expect("1 is an I32 value")
+                    )
+            })
+            .count(),
+        3,
+        "every nested exponent stays an exact I32(1)"
     );
     assert!(
-        !rpn.items.iter().any(|item| matches!(
-            item,
-            ExpressionRpnItem::Operand(operand)
-                if matches!(&operand.kind, ExpressionKind::Number(_))
-        )),
-        "no nested exponent may materialise as Number: {:?}",
-        rpn.items
+        !leaves
+            .iter()
+            .any(|(_, payload)| matches!(payload, ConstValuePayload::Number(_))),
+        "no nested exponent may materialise as Number"
     );
 }
 
 #[test]
-fn uint_decimal_leaves_keep_float_typing_and_completed_float_rejects() {
-    // A decimal leaf beside a Uint peer keeps Float typing: the unannotated
-    // mix selects the mixed Uint/Float rule and folds to Float.
-    let source = "peer Uint = 10\nvalue = peer + 1.5\n";
-    let mixed = nth_start_declaration_expression(source, 1);
-    assert_eq!(mixed.type_id, builtin_type_ids::FLOAT);
-    assert_eq!(mixed.diagnostic_type, DataType::Float);
-    assert_no_pending_expression_items(&mixed);
-    // A Uint receiver does not convert the completed mixed-Float result either.
-    let declared = parse_single_file_ast_diagnostic("peer Uint = 10\nresult Uint = peer + 1.5\n");
-    assert!(
-        matches!(
-            declared.payload,
-            DiagnosticPayload::TypeMismatch {
-                context: TypeMismatchContext::Declaration,
-                ..
-            }
-        ),
-        "a Uint receiver must not convert the mixed-Float result, got {:?}",
-        declared.payload
+fn u32_decimal_mix_rejects_and_completed_f64_rejects_into_u32() {
+    // D15/D00 remove the old integer-to-float mixing convenience: a decimal leaf beside a
+    // U32 operand does not select a float result without an explicit conversion.
+    assert_unsupported_operator(
+        "peer U32 = 10\nvalue = peer + 1.5\n",
+        DiagnosticOperator::Add,
+    );
+    assert_unsupported_operator(
+        "peer U32 = 10\nresult U32 = peer + 1.5\n",
+        DiagnosticOperator::Add,
     );
 
-    // The completed Float result cannot coerce back into a Uint receiver.
-    let completed = parse_single_file_ast_diagnostic("result Uint = 1.5 + 2.5\n");
+    // The completed F64 result cannot coerce back into a U32 receiver.
+    let completed = parse_single_file_ast_diagnostic("result U32 = 1.5 + 2.5\n");
     assert!(
         matches!(
             completed.payload,
@@ -1493,119 +1638,127 @@ fn uint_decimal_leaves_keep_float_typing_and_completed_float_rejects() {
                 ..
             }
         ),
-        "completed Float must not coerce into Uint, got {:?}",
+        "completed F64 must not coerce into U32, got {:?}",
         completed.payload
     );
 
-    // Unary minus on a typed Uint is a compile error, including known zero.
+    // Unary minus on a typed U32 is a compile error, including known zero.
     assert_unsupported_operator(
-        "peer Uint = 10\nvalue = -peer\n",
+        "peer U32 = 10\nvalue = -peer\n",
         DiagnosticOperator::Subtract,
     );
     assert_unsupported_operator(
-        "peer Uint = 0\nvalue = -peer\n",
+        "peer U32 = 0\nvalue = -peer\n",
         DiagnosticOperator::Subtract,
     );
 }
 
 #[test]
-fn uint_grouped_compound_exponent_keeps_uint_rhs() {
-    // Grouped `^=` on a Uint target keeps ordinary same-family arithmetic: the
-    // grouped right side receives Uint context, while Dec keeps the Int edge.
-    let source = concat!("powered ~Uint = 2\n", "powered ^= 1 + 2\n");
+fn u32_grouped_compound_exponent_keeps_u32_rhs() {
+    // Grouped `^=` on a U32 target keeps ordinary same-family arithmetic: the
+    // grouped right side receives U32 context, while Dec keeps the I32 edge.
+    let source = concat!("powered ~U32 = 2\n", "powered ^= 1 + 2\n");
     let (ast, path_fork, string_table) = parse_single_file_ast(source);
     let body = start_function_body(&ast, &path_fork, &string_table);
     let NodeKind::Assignment { target, value } = &body[1].kind else {
-        panic!("expected grouped Uint exponent compound assignment");
+        panic!("expected grouped U32 exponent compound assignment");
     };
-    assert_eq!(value.type_id, target.type_id);
-    assert!(
-        matches!(value.diagnostic_type, DataType::Uint),
-        "grouped Uint ^= must keep a Uint right side, got {:?}",
-        value.diagnostic_type
+    let target_type = ast
+        .expressions
+        .place(*target)
+        .expect("compound target place should be stored")
+        .metadata()
+        .type_id;
+    let root = *value;
+    let expression = ParsedExpression { ast, root };
+    assert_eq!(expression.value_type_id(), target_type);
+    assert_eq!(
+        expression.value_type_id(),
+        builtin_type_ids::fixed_scalar(FixedScalar::U32),
+        "grouped U32 ^= must keep a U32 right side"
     );
-    assert_no_pending_expression_items(value);
+    assert_completed_expression_tree(&expression);
 }
 
 #[test]
 fn dec_peer_and_receiver_differ_on_partly_typed_inner_sums() {
-    // Without a receiver the inner `integer + 1` stays checked Int arithmetic: the peer is
-    // not a Dec and the subtree is not literal-only, so `1` keeps `ExpressionKind::Int`.
-    let peer_source = "value Dec4 = 1\ninteger Int = 7\nresult = value + (integer + 1)\n";
+    // Without a receiver the inner `integer + 1` stays checked I32 arithmetic: the peer is
+    // not a Dec and the subtree is not literal-only, so `1` keeps a fixed I32 identity.
+    let peer_source = "value Dec4 = 1\ninteger I32 = 7\nresult = value + (integer + 1)\n";
     let peer_inner = nth_start_declaration_expression(peer_source, 2);
-    let ExpressionKind::Runtime(peer_rpn) = &peer_inner.kind else {
-        panic!(
-            "a partly typed peer sum should stay runtime, got {:?}",
-            peer_inner.kind
-        );
-    };
-    let mut int_literals = peer_rpn.items.iter().filter_map(|item| match item {
-        ExpressionRpnItem::Operand(operand)
-            if operand.type_id == builtin_type_ids::INT
-                && matches!(operand.kind, ExpressionKind::Int(_)) =>
-        {
-            Some(operand)
-        }
-        _ => None,
-    });
-    let one = int_literals
+    assert!(
+        peer_inner.payload().is_none(),
+        "a partly typed peer sum should stay runtime, got {:?}",
+        peer_inner.payload()
+    );
+    let i32_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
+    let mut int_literals = constant_leaves(&peer_inner.ast.const_values, peer_inner.view())
+        .into_iter()
+        .filter(|(type_id, payload)| {
+            *type_id == i32_type && matches!(payload, ConstValuePayload::FixedScalar(_))
+        });
+    let (_, one) = int_literals
         .next()
-        .expect("the inner Int sum should keep its `1` as ExpressionKind::Int");
-    assert!(matches!(one.kind, ExpressionKind::Int(1)));
+        .expect("the inner I32 sum should keep its `1` as a fixed I32 literal");
+    assert!(matches!(
+        one,
+        ConstValuePayload::FixedScalar(value)
+            if *value == FixedScalarValue::signed(FixedScalar::I32, 1).expect("1 is an I32 value")
+    ));
     assert!(int_literals.next().is_none());
 
     // Under an explicit Dec4 receiver the context reaches `1`, so the inner operation is
     // mixed Dec4 and `1` materialises as a Dec4 `Number`.
-    let received_source = "value Dec4 = 1\ninteger Int = 7\nresult Dec4 = value + (integer + 1)\n";
+    let received_source = "value Dec4 = 1\ninteger I32 = 7\nresult Dec4 = value + (integer + 1)\n";
     let received = nth_start_declaration_expression(received_source, 2);
     assert_eq!(
-        received.type_id,
-        nth_start_declaration_expression(received_source, 0).type_id
+        received.value_type_id(),
+        nth_start_declaration_expression(received_source, 0).value_type_id()
     );
     assert_runtime_contains_number_literal(
         &received,
-        nth_start_declaration_expression(received_source, 0).type_id,
+        nth_start_declaration_expression(received_source, 0).value_type_id(),
         "10000",
         4,
     );
 
-    // `(i + j) + 1` under a Dec4 receiver keeps the inner sum checked Int while the lone
+    // `(i + j) + 1` under a Dec4 receiver keeps the inner sum checked I32 while the lone
     // `1` reads the mixed outer peer as Dec4; `i + (j + 1)` lets the receiver reach `1`
     // so both sums produce Dec4.
-    let grouped_source = "left Int = 3\nright Int = 4\nouter Dec4 = (left + right) + 1\n";
+    let grouped_source = "left I32 = 3\nright I32 = 4\nouter Dec4 = (left + right) + 1\n";
     let outer = nth_start_declaration_expression(grouped_source, 2);
-    let ExpressionKind::Runtime(outer_rpn) = &outer.kind else {
-        panic!(
-            "a grouped inner-Int sum should stay runtime, got {:?}",
-            outer.kind
-        );
-    };
-    // The inner `left + right` keeps checked Int typing (both operands stay Int), while the
-    // lone `1` reads the mixed Dec4 outer peer as a Dec4 Number.
     assert!(
-        outer_rpn
-            .items
-            .iter()
-            .filter(|item| matches!(
-                item,
-                ExpressionRpnItem::Operand(operand) if operand.type_id == builtin_type_ids::INT
-            ))
-            .count()
-            >= 2,
-        "the inner Int sum should keep both Int operands: {:?}",
-        outer_rpn.items
+        outer.payload().is_none(),
+        "a grouped inner-I32 sum should stay runtime, got {:?}",
+        outer.payload()
+    );
+    // The inner `left + right` keeps checked I32 typing while the outer peer stays runtime.
+    let i32_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
+    let i32_operands = subtree_views(outer.view())
+        .into_iter()
+        .filter(|view| {
+            resolved_operation_of(*view).is_none()
+                && view
+                    .value_type_id()
+                    .expect("operand should have one value type")
+                    == i32_type
+        })
+        .count();
+    assert!(
+        i32_operands >= 2,
+        "the inner I32 sum should keep both I32 operands"
     );
     assert_runtime_contains_number_literal(
         &outer,
-        nth_start_declaration_expression("anchor Dec4 = 0\n", 0).type_id,
+        nth_start_declaration_expression("anchor Dec4 = 0\n", 0).value_type_id(),
         "10000",
         4,
     );
-    let nested_source = "left Int = 3\nright Int = 4\nouter Dec4 = left + (right + 1)\n";
+    let nested_source = "left I32 = 3\nright I32 = 4\nouter Dec4 = left + (right + 1)\n";
     let nested = nth_start_declaration_expression(nested_source, 2);
     assert_eq!(
-        nested.type_id,
-        nth_start_declaration_expression("anchor Dec4 = 0\n", 0).type_id
+        nested.value_type_id(),
+        nth_start_declaration_expression("anchor Dec4 = 0\n", 0).value_type_id()
     );
 }
 
@@ -1622,7 +1775,7 @@ fn dec_contextual_arithmetic_preserves_literal_type_and_coefficient() {
         "left_power Dec4 = (2 ^ 3) ^ 2\n",
         "base ~Dec4 = 2\n",
         "runtime_power Dec4 = base ^ (1 + 2)\n",
-        "exponent ~Int = 3\n",
+        "exponent ~I32 = 3\n",
         "runtime_base Dec4 = 2 ^ exponent\n",
     );
     let anchor = first_start_declaration_expression(source);
@@ -1636,35 +1789,48 @@ fn dec_contextual_arithmetic_preserves_literal_type_and_coefficient() {
         (7, "640000"),
     ] {
         let expression = nth_start_declaration_expression(source, index);
-        assert_number_literal(&expression, anchor.type_id, coefficient, 4);
+        assert_number_literal(&expression, anchor.value_type_id(), coefficient, 4);
     }
 
     for index in [9, 11] {
         let expression = nth_start_declaration_expression(source, index);
-        assert_eq!(expression.type_id, anchor.type_id);
-        let ExpressionKind::Runtime(rpn) = &expression.kind else {
+        assert_eq!(expression.value_type_id(), anchor.value_type_id());
+        let ExpressionOperationView::NumericBinary {
+            left: base,
+            right: exponent,
+            facts,
+            ..
+        } = expression.view().operation()
+        else {
             panic!("a mutable power operand should keep the expression runtime");
         };
-        let [
-            ExpressionRpnItem::Operand(base),
-            ExpressionRpnItem::Operand(exponent),
-            ExpressionRpnItem::Operator {
-                operator: Operator::Exponent,
-                ..
-            },
-        ] = rpn.items.as_slice()
-        else {
-            panic!(
-                "power should retain its base and exponent operands: {:?}",
-                rpn.items
-            );
-        };
-        assert_eq!(base.type_id, anchor.type_id);
-        assert_eq!(exponent.type_id, builtin_type_ids::INT);
+        assert_eq!(facts.operator, Operator::Exponent);
+        assert_eq!(
+            base.value_type_id()
+                .expect("power base should have one value type"),
+            anchor.value_type_id()
+        );
+        assert_eq!(
+            exponent
+                .value_type_id()
+                .expect("power exponent should have one value type"),
+            builtin_type_ids::fixed_scalar(FixedScalar::I32)
+        );
         if index == 9 {
-            assert!(matches!(exponent.kind, ExpressionKind::Int(3)));
+            assert!(matches!(
+                constant_payload(&expression.ast.const_values, exponent),
+                Some(ConstValuePayload::FixedScalar(value))
+                    if *value == FixedScalarValue::signed(FixedScalar::I32, 3)
+                        .expect("3 is an I32 value")
+            ));
         } else {
-            assert_number_literal(base, anchor.type_id, "20000", 4);
+            assert_number_view(
+                &expression.ast.const_values,
+                base,
+                anchor.value_type_id(),
+                "20000",
+                4,
+            );
         }
     }
 }
@@ -1734,7 +1900,7 @@ fn completed_evaluator_results_contain_no_pending_syntax() {
     );
     for index in 0..=5 {
         let expression = nth_start_declaration_expression(source, index);
-        let visited = assert_no_pending_expression_items(&expression);
+        let visited = assert_completed_expression_tree(&expression);
         if index == 5 {
             // Both `peer` leaves keep `nested` runtime, so the walker must visit the
             // outer operands rather than only folded constants.
@@ -1769,10 +1935,12 @@ fn bounded_flat_and_nested_dec_arithmetic_have_identical_exact_results() {
     let flat = first_start_declaration_expression(&source);
     let nested = nth_start_declaration_expression(&source, 1);
 
-    assert_number_literal(&flat, flat.type_id, "128000", 4);
-    assert_number_literal(&nested, flat.type_id, "128000", 4);
-    let (ExpressionKind::Number(flat_value), ExpressionKind::Number(nested_value)) =
-        (&flat.kind, &nested.kind)
+    assert_number_literal(&flat, flat.value_type_id(), "128000", 4);
+    assert_number_literal(&nested, flat.value_type_id(), "128000", 4);
+    let (
+        Some(ConstValuePayload::Number(flat_value)),
+        Some(ConstValuePayload::Number(nested_value)),
+    ) = (flat.payload(), nested.payload())
     else {
         panic!("both bounded expressions should fold to exact Dec values");
     };
@@ -1780,7 +1948,7 @@ fn bounded_flat_and_nested_dec_arithmetic_have_identical_exact_results() {
 }
 
 #[test]
-fn number_power_keeps_pending_and_typed_exponents_in_profile_int() {
+fn number_power_keeps_pending_and_typed_exponents_in_i32() {
     let source = concat!(
         "base ~Dec2 = 1.5\n",
         "plain = base ^ 2\n",
@@ -1792,16 +1960,13 @@ fn number_power_keeps_pending_and_typed_exponents_in_profile_int() {
     let base = first_start_declaration_expression(source);
     for index in 1..=5 {
         let expression = nth_start_declaration_expression(source, index);
-        assert_eq!(expression.type_id, base.type_id);
-        assert!(matches!(
-            &expression.diagnostic_type,
-            DataType::Number(scale) if scale.get() == 2
-        ));
-        assert_runtime_number_power_keeps_int_exponent(&expression);
+        assert_eq!(expression.value_type_id(), base.value_type_id());
+        assert_number_scale(&expression, 2);
+        assert_runtime_number_power_keeps_i32_exponent(&expression);
     }
 
     let parameter_source = concat!(
-        "power |base Dec2, exponent Int| -> Dec2:\n",
+        "power |base Dec2, exponent I32| -> Dec2:\n",
         "    return base ^ exponent\n",
         ";\n",
     );
@@ -1810,34 +1975,33 @@ fn number_power_keeps_pending_and_typed_exponents_in_profile_int() {
     let NodeKind::Return(values) = &body[0].kind else {
         panic!("the typed-parameter function should return the power expression");
     };
-    let expression = &values[0];
+    let expression = ast
+        .expressions
+        .view(values[0])
+        .expect("the returned power expression should be stored");
     assert_eq!(
-        ast.type_environment.number_scale(expression.type_id),
+        ast.type_environment.number_scale(
+            expression
+                .value_type_id()
+                .expect("returned power should have one value type")
+        ),
         Some(NumberScale::new(2).expect("test Dec scale is valid"))
     );
-    let ExpressionKind::Runtime(rpn) = &expression.kind else {
-        panic!("a typed Int parameter keeps the power expression runtime-dependent");
-    };
-    let exponent_index = rpn
-        .items
-        .iter()
-        .position(|item| {
-            matches!(
-                item,
-                ExpressionRpnItem::Operator {
-                    operator: Operator::Exponent,
-                    ..
-                }
-            )
-        })
-        .expect("the function return should contain Dec power");
-    let Some(ExpressionRpnItem::Operand(exponent)) = exponent_index
-        .checked_sub(1)
-        .and_then(|index| rpn.items.get(index))
+    let ExpressionOperationView::NumericBinary {
+        right: exponent,
+        facts,
+        ..
+    } = expression.operation()
     else {
-        panic!("the typed exponent should immediately precede the power operator");
+        panic!("a typed I32 parameter keeps the power expression runtime-dependent");
     };
-    assert_eq!(exponent.type_id, builtin_type_ids::INT);
+    assert_eq!(facts.operator, Operator::Exponent);
+    assert_eq!(
+        exponent
+            .value_type_id()
+            .expect("typed exponent should have one value type"),
+        builtin_type_ids::fixed_scalar(FixedScalar::I32)
+    );
 }
 
 fn assert_binary_result_type(
@@ -1848,9 +2012,9 @@ fn assert_binary_result_type(
 ) {
     let expression = binary_expression(left_type, operator, right_type);
     assert_eq!(
-        expression.type_id, expected_type,
-        "{left_type} {operator} {right_type} resolved to {:?}",
-        expression.diagnostic_type
+        expression.value_type_id(),
+        expected_type,
+        "{left_type} {operator} {right_type} resolved to a different type"
     );
 }
 
@@ -1865,133 +2029,166 @@ fn assert_binary_rejected(
     assert_unsupported_operator(&source, diagnostic_operator);
 }
 
-fn binary_expression(left_type: &str, operator: &str, right_type: &str) -> Expression {
+fn binary_expression(left_type: &str, operator: &str, right_type: &str) -> ParsedExpression {
     let source =
         format!("left {left_type} = 1\nright {right_type} = 2\nvalue = left {operator} right\n");
     nth_start_declaration_expression(&source, 2)
 }
 
-fn assert_runtime_contains_fixed_literal(expression: &Expression, expected: FixedScalarValue) {
-    let ExpressionKind::Runtime(rpn) = &expression.kind else {
-        panic!("expected a runtime expression, got {:?}", expression.kind);
-    };
-
+fn assert_runtime_contains_fixed_literal(
+    expression: &ParsedExpression,
+    expected: FixedScalarValue,
+) {
     assert!(
-        rpn.items.iter().any(|item| matches!(
-            item,
-            ExpressionRpnItem::Operand(operand)
-                if matches!(operand.kind, ExpressionKind::FixedScalar(value) if value == expected)
-        )),
-        "expected runtime RPN to contain {expected}, got {:?}",
-        rpn.items
+        expression.payload().is_none(),
+        "expected a runtime expression, got folded {:?}",
+        expression.payload()
     );
-}
-
-fn assert_runtime_contains_uint_literal(expression: &Expression, expected: u64) {
-    let ExpressionKind::Runtime(rpn) = &expression.kind else {
-        panic!("expected a runtime expression, got {:?}", expression.kind);
-    };
-
     assert!(
-        rpn.items.iter().any(|item| matches!(
-            item,
-            ExpressionRpnItem::Operand(operand)
-                if operand.type_id == builtin_type_ids::UINT
-                    && matches!(&operand.kind, ExpressionKind::Uint(value) if *value == expected)
-        )),
-        "expected runtime RPN to contain Uint({expected}), got {:?}",
-        rpn.items
+        constant_leaves(&expression.ast.const_values, expression.view())
+            .iter()
+            .any(|(_, payload)| matches!(
+                payload,
+                ConstValuePayload::FixedScalar(value) if *value == expected
+            )),
+        "expected runtime expression to contain {expected:?}"
     );
 }
 
 fn assert_runtime_contains_number_literal(
-    expression: &Expression,
+    expression: &ParsedExpression,
     expected_type_id: TypeId,
     expected_coefficient: &str,
     expected_scale: u16,
 ) {
-    let ExpressionKind::Runtime(rpn) = &expression.kind else {
-        panic!("expected a runtime expression, got {:?}", expression.kind);
-    };
-
     assert!(
-        rpn.items.iter().any(|item| matches!(
-            item,
-            ExpressionRpnItem::Operand(operand)
-                if operand.type_id == expected_type_id
+        expression.payload().is_none(),
+        "expected a runtime expression, got folded {:?}",
+        expression.payload()
+    );
+    assert!(
+        constant_leaves(&expression.ast.const_values, expression.view())
+            .iter()
+            .any(|(type_id, payload)| {
+                *type_id == expected_type_id
                     && matches!(
-                        &operand.kind,
-                        ExpressionKind::Number(value)
+                        payload,
+                        ConstValuePayload::Number(value)
                             if value.coefficient().to_string() == expected_coefficient
                                 && value.scale().get() == expected_scale
                     )
-        )),
-        "expected runtime RPN to contain Number({expected_coefficient}, scale {expected_scale}), got {:?}",
-        rpn.items
+            }),
+        "expected runtime expression to contain Number({expected_coefficient}, scale {expected_scale})"
     );
 }
 
-fn assert_runtime_number_power_keeps_int_exponent(expression: &Expression) {
-    let ExpressionKind::Runtime(rpn) = &expression.kind else {
-        panic!("expected a runtime expression, got {:?}", expression.kind);
-    };
-
+fn assert_runtime_number_power_keeps_i32_exponent(expression: &ParsedExpression) {
     assert!(
-        rpn.items.iter().any(|item| matches!(
-            item,
-            ExpressionRpnItem::Operand(operand)
-                if operand.type_id == builtin_type_ids::INT
-                    && matches!(&operand.kind, ExpressionKind::Int(_))
-        )),
-        "expected profile-Int exponent operand, got {:?}",
-        rpn.items
+        expression.payload().is_none(),
+        "expected a runtime power expression, got folded {:?}",
+        expression.payload()
+    );
+    let leaves = constant_leaves(&expression.ast.const_values, expression.view());
+    assert!(
+        leaves.iter().any(|(type_id, payload)| {
+            *type_id == builtin_type_ids::fixed_scalar(FixedScalar::I32)
+                && matches!(payload, ConstValuePayload::FixedScalar(_))
+        }),
+        "expected an I32 exponent operand"
     );
     assert!(
-        !rpn.items.iter().any(|item| matches!(
-            item,
-            ExpressionRpnItem::Operand(operand)
-                if matches!(&operand.kind, ExpressionKind::Number(_))
-        )),
-        "pending power exponent must not be materialised as Number: {:?}",
-        rpn.items
+        !leaves
+            .iter()
+            .any(|(_, payload)| matches!(payload, ConstValuePayload::Number(_))),
+        "pending power exponent must not be materialised as Number"
     );
 }
 
 fn assert_number_literal(
-    expression: &Expression,
+    expression: &ParsedExpression,
     expected_type_id: TypeId,
     expected_coefficient: &str,
     expected_scale: u16,
 ) {
-    assert_eq!(expression.type_id, expected_type_id);
-    let ExpressionKind::Number(value) = &expression.kind else {
-        panic!("expected an exact Dec value, got {:?}", expression.kind);
+    assert_eq!(expression.value_type_id(), expected_type_id);
+    let Some(ConstValuePayload::Number(value)) = expression.payload() else {
+        panic!(
+            "expected an exact Dec value, got {:?}",
+            expression.payload()
+        );
     };
     assert_eq!(value.coefficient().to_string(), expected_coefficient);
     assert_eq!(value.scale().get(), expected_scale);
-    assert_eq!(expression.diagnostic_type, DataType::Number(value.scale()));
+    assert_number_scale(expression, expected_scale);
 }
 
-fn assert_no_pending_expression_items(expression: &Expression) -> usize {
-    let mut visited_operands = 0;
-    let mut operands = vec![expression];
-    while let Some(expression) = operands.pop() {
-        let ExpressionKind::Runtime(rpn) = &expression.kind else {
-            continue;
-        };
-        for item in &rpn.items {
-            match item {
-                ExpressionRpnItem::Operand(operand) => {
-                    visited_operands += 1;
-                    operands.push(operand);
-                }
-                ExpressionRpnItem::Operator { .. } => {}
-                ExpressionRpnItem::PendingNumericLiteral { .. }
-                | ExpressionRpnItem::PendingGroup { .. } => {
-                    panic!("completed evaluator result retains pending syntax: {item:?}");
-                }
-            }
-        }
+fn assert_number_view(
+    const_values: &ConstValueStore,
+    view: ExpressionView<'_>,
+    expected_type_id: TypeId,
+    expected_coefficient: &str,
+    expected_scale: u16,
+) {
+    assert_eq!(
+        view.value_type_id()
+            .expect("folded operand should have one value type"),
+        expected_type_id
+    );
+    let Some(ConstValuePayload::Number(value)) = constant_payload(const_values, view) else {
+        panic!("expected a folded exact Dec operand");
+    };
+    assert_eq!(value.coefficient().to_string(), expected_coefficient);
+    assert_eq!(value.scale().get(), expected_scale);
+}
+
+fn number_scale_of(expression: &ParsedExpression) -> Option<NumberScale> {
+    expression
+        .ast
+        .type_environment
+        .number_scale(expression.value_type_id())
+}
+
+fn assert_number_scale(expression: &ParsedExpression, expected_scale: u16) {
+    assert_eq!(
+        number_scale_of(expression).map(|scale| scale.get()),
+        Some(expected_scale),
+        "expected a Dec{expected_scale} result"
+    );
+}
+
+/// Folded leaves reachable from `root`, paired with each leaf's value type.
+fn constant_leaves<'a>(
+    const_values: &'a ConstValueStore,
+    root: ExpressionView<'a>,
+) -> Vec<(TypeId, &'a ConstValuePayload)> {
+    subtree_views(root)
+        .into_iter()
+        .filter_map(|view| {
+            let payload = constant_payload(const_values, view)?;
+            let type_id = view
+                .value_type_id()
+                .expect("folded leaf should have one value type");
+            Some((type_id, payload))
+        })
+        .collect()
+}
+
+/// The value wrapped by an option coercion (`maybe T? = value`).
+fn coerced_inner(expression: &ParsedExpression) -> ExpressionView<'_> {
+    match expression.view().operation() {
+        ExpressionOperationView::Coerce { value, .. } => value,
+        _ => panic!("expected the expression to be an option coercion"),
     }
-    visited_operands
+}
+
+/// Walks the completed expression graph and returns the number of nodes visited. Every node
+/// must report one value type. Pending parse syntax has no `ExpressionOperationView` form, so
+/// the completed-only guarantee is enforced by the operation type rather than by this walk.
+fn assert_completed_expression_tree(expression: &ParsedExpression) -> usize {
+    let views = subtree_views(expression.view());
+    for view in &views {
+        view.value_type_id()
+            .expect("completed expression node should have one value type");
+    }
+    views.len()
 }

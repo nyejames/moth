@@ -1,4 +1,4 @@
-reject_float_intdivide |value Uint, factor Float| -> String:
+reject_float_intdivide |value U32, factor F64| -> String:
     result = value // factor
     return [result]
 ;
