@@ -1038,6 +1038,10 @@ Generated-function requests accompany module link data as materialisation depend
 
 These per-function facts are the linking authority. Module-wide summaries are derived indexes only. Reachability follows stable call edges recorded from already-specialised HIR, without rescanning HIR for link facts, folding constants, choosing branches, mutating HIR, inspecting borrow facts or choosing targets/output. Some target checks also inspect the paired semantic type environment rather than reconstructing types from syntax.
 
+Module runtime-import candidates combine source-owned provider availability, builder runtime metadata and packages demanded by final executable external-call facts after summary convergence. Generated sidecars resolve their selected root's final demand before publication through the same canonical projection. Candidates remain availability, not entry liveness, and include no validation-only executable demand.
+
+Within one issuing external registry, candidate projection reconciles the canonical provider record with every matching builder runtime record. These records must agree on asset presence, stable origin, asset kind, canonical byte source and required runtime module/import-name sets. Authored spans supply provenance rather than runtime identity. Compatible references preserve canonical provider provenance. Conflicting runtime facts fail as an internal invariant instead of choosing a provider-first or duplicate-record fallback. Valid inline/Core/runtime helpers may have no provider asset.
+
 ## Target-contract validation
 
 The build system supplies explicit entry/package/tooling roots and the completed deterministic target assignment. Compiler validation runs after HIR, borrow and complete link-level lifetime-topology validation.

@@ -14,9 +14,9 @@
 
 ```text
 STATUS: active on link-fixes-and-test-cleanup
-CURRENT_SLICE: executable red regression established, runtime-import handoff next
-BLOCKERS: supplied website archive unavailable in inspected input locations
-NEXT_ACTION: complete final-call-demanded runtime candidates and checked HTML glue inputs
+CURRENT_SLICE: runtime-import handoff accepted; topology coverage next
+BLOCKERS: none
+NEXT_ACTION: cover topology, runtime liveness and per-entry output contracts
 ```
 
 The reviewed main includes the typed-expression/native-result Phase 4 checkpoint. Its plan explicitly pauses before Phase 5. The affected source still collects ordinary-module provider candidates by source-file ownership and still loses later error types during infrastructure aggregation. The original missing-asset path remains present. Establish an executed failing baseline before changing it. [S1] [S2] [S5] [S6]
@@ -77,7 +77,7 @@ Permanent authorities own semantics. Plans record delivery and approved task dec
 **Owners:** the uploaded website, `tests/cases/`, `src/build_system/tests/build_dependency_tests.rs` and `src/compiler_tests/integration_test_runner/assertions/`.
 
 - [x] Record the checkout revision, dirty state, Rust toolchain, Node version, command and build profile. Read the repository's pinned toolchain files. Keep baseline logs under `./tmp`.
-- [ ] Build a disposable copy of the supplied website with unchanged source. Its archive has `config.moth` at the repository root, `src/@page.moth` and `src/components/@components.moth`. The page calls the directly re-exported `animate_canvas` from `src/components/background-animation.js`.
+- [x] Build a disposable copy of the supplied website with unchanged source. Its archive has `config.moth` at the repository root, `src/@page.moth` and `src/components/@components.moth`. The page calls the directly re-exported `animate_canvas` from `src/components/background-animation.js`.
 - [x] Reproduce with the small project below. Record whether failure is the expected missing runtime asset, an earlier independent diagnostic or a harness problem.
 - [x] Before patching, add a permanent regression whose post-fix expectation is successful execution. Demonstrate its failure on the baseline. Preserve the smallest source shape even when adding a richer companion scenario.
 
@@ -196,12 +196,12 @@ Add it to `HirModuleLinkFacts`. Flatten the existing block records' `reachable_e
 
 ### 2.1 Select packages from complete executable facts
 
-- [ ] Add an accessor test through real lowered code showing both `HirStatementKind::Call` and `HirTerminator::Invoke` contribute external call facts. The current collector already funnels both through `collect_call_target`. Reuse those facts rather than creating another HIR walk. [S10]
-- [ ] Use `function_link_facts` only after `run_generated_summary_convergence` returns. Keep the existing freeze/publication order. Preserve the Boracle prefix's early return rather than demanding production runtime metadata from an analysis-only result.
-- [ ] Resolve each external function through the module's effective registry, validating its definition and owning package. Deduplicate requested packages in that registry domain. An unknown finalized callable is an internal error, not an absent optional dependency.
-- [ ] Extend the source-file-derived candidate set with packages demanded by final external calls. Keep directly owned source candidates and builder runtime metadata as conservative availability facts. This preserves facade/export-only and existing tooling consumers without making them live outputs.
-- [ ] Evolve/rename `collect_external_import_candidates_for_source_files` to reflect this broader responsibility and update its caller. Reuse `collect_external_import_candidates_for_packages` as the canonical projection path. Remove an obsolete forwarding helper if the refactor makes it unnecessary.
-- [ ] Return checked failure from the shared collector where metadata conflicts. Publish into the existing `ModuleLinkFacts.external_import_candidates`. Keep one record per package within that module's registry domain.
+- [x] Add an accessor test through real lowered code showing both `HirStatementKind::Call` and `HirTerminator::Invoke` contribute external call facts. The current collector already funnels both through `collect_call_target`. Reuse those facts rather than creating another HIR walk. [S10]
+- [x] Use `function_link_facts` only after `run_generated_summary_convergence` returns. Keep the existing freeze/publication order. Preserve the Boracle prefix's early return rather than demanding production runtime metadata from an analysis-only result.
+- [x] Resolve each external function through the module's effective registry, validating its definition and owning package. Deduplicate requested packages in that registry domain. An unknown finalized callable is an internal error, not an absent optional dependency.
+- [x] Extend the source-file-derived candidate set with packages demanded by final external calls. Keep directly owned source candidates and builder runtime metadata as conservative availability facts. This preserves facade/export-only and existing tooling consumers without making them live outputs.
+- [x] Evolve/rename `collect_external_import_candidates_for_source_files` to reflect this broader responsibility and update its caller. Reuse `collect_external_import_candidates_for_packages` as the canonical projection path. Remove an obsolete forwarding helper if the refactor makes it unnecessary.
+- [x] Return checked failure from the shared collector where metadata conflicts. Publish into the existing `ModuleLinkFacts.external_import_candidates`. Keep one record per package within that module's registry domain.
 
 Process each module's retained call facts once. Gather package identities before cloning output records. The existing source-based and package-based collectors are the starting owners, not two independently maintained policies. [S11] Avoid a full reachability result for every possible root, per-call provider rescans or cloning complete `ResolvedExternalImport` values just to discard diagnostics and exported-symbol lists.
 
@@ -218,15 +218,15 @@ An authored `source_span` is provenance, not runtime identity. Different import 
 
 Conflicting runtime facts fail explicitly. In particular, `Some(asset)` versus `None`, different origins/byte sources or different required runtime contracts cannot be hidden by `dedup_by_key`, `or_insert` or provider-first fallback. Compare already retained facts without new filesystem reads, content hashing or source parsing. Apply this rule at the one merge owner rather than implementing equality checks in every renderer.
 
-- [ ] Test compatible repeated references with different authored spans.
-- [ ] Inject a conflicting provider/builder record and assert an internal error naming the package and conflicting fact.
-- [ ] Retain a no-asset Core helper control case so strictness does not reject legitimate inline/runtime implementations.
+- [x] Test compatible repeated references with different authored spans.
+- [x] Inject a conflicting provider/builder record and assert an internal error naming the package and conflicting fact.
+- [x] Retain a no-asset Core helper control case so strictness does not reject legitimate inline/runtime implementations.
 
 ### 2.3 Preserve entry liveness and generated convergence
 
 Keep the existing `collect_reachable_external_package_ids` and entry filtering over final executable reachability. Supplying a candidate must not activate a facade's dormant root, add a Moth function to `linked_modules` or emit every candidate. [S5]
 
-Generated sidecars already use package-derived metadata. Inspect their final publication in `module_compilation/generated/convergence/` as well as initial materialisation. Preserve complete candidates if convergence changes call form. Any newly demanded package must be resolved before publication, while removed validation-only work must not become an entry runtime dependency. Reuse the same lookup policy rather than adding a generated-only fallback. [S12]
+Generated sidecars already use package-derived metadata. Inspect their final publication in `module_compilation/generated/convergence.rs` as well as initial materialisation. Preserve complete candidates if convergence changes call form. Any newly demanded package must be resolved before publication, while removed validation-only work must not become an entry runtime dependency. Reuse the same lookup policy rather than adding a generated-only fallback. [S12]
 
 The synced AST service retains `assertion_validation_generic_requests` separately from executable demand. A true assertion's message can require semantic validation without requiring its external asset at runtime. This is a mandatory liveness regression, not an invitation to alter assertion validation.
 
@@ -234,11 +234,11 @@ The synced AST service retains `assertion_validation_generic_requests` separatel
 
 Validate selected external exports in the existing `generate_module_glue`/referenced-export preparation path before source emission. Reuse that work rather than adding a second graph walk. Keep the final source generator's defensive lookup.
 
-- [ ] A referenced emitted function has a definition and applicable JS lowering in the registry used to interpret it. The current `collect_referenced_exports` silently skips missing definitions/lowerings. Replace that behaviour for broken closed inputs with an explicit internal error. Valid non-module JS lowerings still need no wrapper. [S13]
-- [ ] Every selected `ExternalModuleExport` resolves to compatible entry metadata with a JS runtime asset. Preserve normal typed target rejection before this boundary for a genuinely unsupported source call.
-- [ ] Error details identify the failing stage, entry or calling module where available, Moth function/JS export, readable package path and build-local IDs. Resolve these from existing records. Add only the narrow context the failure actually needs.
+- [x] A referenced emitted function has a definition and applicable JS lowering in the registry used to interpret it. The current `collect_referenced_exports` silently skips missing definitions/lowerings. Replace that behaviour for broken closed inputs with an explicit internal error. Valid non-module JS lowerings still need no wrapper. [S13]
+- [x] Every selected `ExternalModuleExport` resolves to compatible entry metadata with a JS runtime asset. Preserve normal typed target rejection before this boundary for a genuinely unsupported source call.
+- [x] Error details identify the failing stage, entry or calling module where available, Moth function/JS export, readable package path and build-local IDs. Resolve these from existing records. Add only the narrow context the failure actually needs.
 - [ ] Distinguish missing candidate, candidate with no asset and wrong asset kind where those facts are available. State that validated runtime metadata is inconsistent. Keep developer detail after the shared compiler-bug introduction from Task 4.
-- [ ] Inject unknown-function, missing-asset and wrong-kind inputs at the owning boundary. Assert the internal failure instead of allowing a missing wrapper or browser import error.
+- [x] Inject unknown-function, missing-asset and wrong-kind inputs at the owning boundary. Assert the internal failure instead of allowing a missing wrapper or browser import error.
 
 Registry identity must remain correct through the whole join, including the merged `referenced_external_functions` in `js_path.rs`. This task fixes the same-project missing-candidate path. It does not authorise an unqualified build-global registry merge. Task 5 owns evidence for any existing cross-package weakness.
 
@@ -385,7 +385,7 @@ Each row records: case, actual command, revision/profile, fixture, result, expec
 ## 6. Validate, document and land
 
 - [ ] Run focused tests after each coherent task. Keep the first red result and the corresponding green result. Ensure every filter selects the intended nonzero test set.
-- [ ] Rebuild the unchanged website in dev and release with the patched compiler. Verify `background-animation.js`, the actual glue import and the HTML import chain. A browser check of the animation is useful additional evidence, not a replacement for deterministic automated execution.
+- [x] Rebuild the unchanged website in dev and release with the patched compiler. Verify `background-animation.js`, the actual glue import and the HTML import chain. A browser check of the animation is useful additional evidence, not a replacement for deterministic automated execution.
 - [ ] If another website bug blocks the full build, record it separately. Keep the compiler regression green and make no claim that the whole site passes until it does. The website remains unchanged.
 - [ ] Review the real provider/table path, output deduplication, final generated call facts, classification wrappers and aggregate transport. Check no new AST dependency, HIR mutation or eager asset read was introduced.
 - [ ] Run `cargo fmt --all` for Rust changes and the targeted Cargo/integration commands below. Run affected feature lanes when their owners changed, including the opt-in Boracle check if this patch touches its prefix or feature-gated compilation path.

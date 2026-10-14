@@ -39,7 +39,7 @@ use crate::compiler_frontend::module_compilation::artefact::{
     ResolvedConstFragment,
 };
 use crate::compiler_frontend::module_compilation::context::ModuleCompilationContext;
-use crate::compiler_frontend::module_compilation::external_imports::collect_external_import_candidates_for_source_files;
+use crate::compiler_frontend::module_compilation::external_imports::collect_external_import_candidates;
 use crate::compiler_frontend::module_compilation::generated::artefacts::GeneratedFunctionDelta;
 use crate::compiler_frontend::module_compilation::generated::convergence::{
     install_exact_concrete_call_summaries, run_generated_summary_convergence,
@@ -750,6 +750,7 @@ fn run_semantic_stages(
     );
     generated_materialisation?;
     let borrow_analysis = run_generated_summary_convergence(
+        context,
         compiler,
         &mut hir_module,
         &mut function_link_facts,
@@ -823,15 +824,15 @@ fn run_semantic_stages(
     ));
     borrow_log!("=== END BORROW CHECKER OUTPUT ===");
 
-    // Collect provider-resolved imports used by this module after the frontend has
-    // consumed them. HIR still carries only stable external IDs; this side payload is for
-    // backend asset/glue planning. The source paths were resolved from the ordered module-local
-    // candidate IDs before syntax consumption, not from the boundary-wide source database.
-    let external_import_candidates = collect_external_import_candidates_for_source_files(
+    // Final call facts include external bindings reached through source facades. Candidates
+    // remain conservative availability; entry assembly still selects exact executable demand.
+    let external_import_candidates = collect_external_import_candidates(
         &source_logical_paths,
+        &function_link_facts,
+        compiler.external_package_registry.as_ref(),
         external_dependency_resolution_table,
         context.builder_runtime_packages,
-    );
+    )?;
 
     let numeric_proofs = analyse_numeric_proofs(&hir_module, &type_environment);
 

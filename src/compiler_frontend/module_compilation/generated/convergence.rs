@@ -40,9 +40,14 @@ use crate::compiler_frontend::hir::private_failure_lane::{
 };
 use crate::compiler_frontend::hir::reachability::{
     HirModuleLinkFacts, collect_module_function_link_facts,
+    collect_reachability_from_function_link_facts,
 };
 use crate::compiler_frontend::instrumentation::{FrontendCounter, add_frontend_counter};
 use crate::compiler_frontend::module_compilation::artefact::Module;
+use crate::compiler_frontend::module_compilation::context::ModuleCompilationContext;
+use crate::compiler_frontend::module_compilation::external_imports::{
+    collect_external_import_candidates_for_packages, collect_external_import_package_ids,
+};
 use crate::compiler_frontend::public_call_summary::validate_public_call_summary_transition;
 use crate::compiler_frontend::public_call_summary::{
     PublicCallSummary, PublicCallSummaryTransition,
@@ -402,9 +407,10 @@ fn add_model_edges(
 /// Run monotone summary convergence for one base HIR and its completed local sidecars.
 #[allow(
     clippy::too_many_arguments,
-    reason = "convergence keeps the frontend, base HIR, link facts, generated transaction, bootstrap borrow report, mutable type environment, warnings and the timers-only context as separate borrows"
+    reason = "convergence keeps shared compilation context and independently mutable stage owners as separate borrows"
 )]
 pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_convergence(
+    context: &ModuleCompilationContext<'_>,
     compiler: &mut CompilerFrontend<'_>,
     hir_module: &mut HirModule,
     function_link_facts: &mut HirModuleLinkFacts,
@@ -665,6 +671,45 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
     generated_transaction
         .retain_reachable_sidecars(&reachable_sidecars)
         .map_err(PremergeFailure::Infrastructure)?;
+    // Only executable sidecars survive this transaction. Rebuild their availability facts from
+    // the final selected root, after failure-lane rewrites and validation-only demand removal.
+    for node_id in convergence_model.generated_node_ids() {
+        let Some(ConvergenceNode::Generated(identity)) = convergence_model.node(node_id) else {
+            continue;
+        };
+        if !reachable_sidecars.contains(identity.as_ref()) {
+            continue;
+        }
+        let sidecar = generated_transaction.sidecar_mut(identity)?;
+        let root = sidecar
+            .module
+            .executable
+            .hir
+            .function_ids_by_generated
+            .get(identity.as_ref())
+            .copied()
+            .ok_or_else(|| {
+                CompilerError::compiler_error(format!(
+                    "Generated sidecar {identity:?} lost its selected root before publication"
+                ))
+            })?;
+        let reachability = collect_reachability_from_function_link_facts(
+            &sidecar.module.link_facts.functions,
+            &[root],
+        )?;
+        let registry = &sidecar.module.link_facts.external_package_registry;
+        let package_ids = collect_external_import_package_ids(
+            reachability.reachable_external_calls.iter(),
+            registry,
+        )?;
+        sidecar.module.link_facts.external_import_candidates =
+            collect_external_import_candidates_for_packages(
+                &package_ids,
+                context.external_dependency_resolution_table,
+                context.builder_runtime_packages,
+                registry,
+            )?;
+    }
     Ok(borrow_analysis)
 }
 

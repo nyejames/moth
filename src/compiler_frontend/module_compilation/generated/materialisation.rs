@@ -26,7 +26,9 @@ use crate::compiler_frontend::module_compilation::artefact::{
     Module, ModuleCompilerMetadata, ModuleExecutable, ModuleLinkFacts, ModuleRootActivity,
 };
 use crate::compiler_frontend::module_compilation::context::ModuleCompilationContext;
-use crate::compiler_frontend::module_compilation::external_imports::collect_external_import_candidates_for_packages;
+use crate::compiler_frontend::module_compilation::external_imports::{
+    collect_external_import_candidates_for_packages, collect_external_import_package_ids,
+};
 use crate::compiler_frontend::module_compilation::generated::artefacts::GeneratedFunctionSidecar;
 use crate::compiler_frontend::module_compilation::generated::convergence::exact_generated_sidecar_summary;
 use crate::compiler_frontend::module_compilation::generated::provider_materialisations::{
@@ -44,7 +46,6 @@ use crate::compiler_frontend::semantic_identity::{
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
-use rustc_hash::FxHashSet;
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -449,23 +450,18 @@ fn materialise_generated_request_inner<'build>(
         let reachability =
             collect_reachability_from_function_link_facts(&functions, &[function_id])
                 .map_err(PremergeFailure::Infrastructure)?;
-        let mut reachable_package_ids = FxHashSet::default();
-        for external_function_id in &reachability.reachable_external_functions {
-            let package_id = context
-                .external_packages
-                .resolve_function_package_id(*external_function_id)
-                .ok_or_else(|| {
-                    PremergeFailure::Infrastructure(CompilerError::compiler_error(format!(
-                        "Generated external function {external_function_id:?} has no owning package"
-                    )))
-                })?;
-            reachable_package_ids.insert(package_id);
-        }
+        let reachable_package_ids = collect_external_import_package_ids(
+            reachability.reachable_external_calls.iter(),
+            &context.external_packages,
+        )
+        .map_err(PremergeFailure::Infrastructure)?;
         let external_import_candidates = collect_external_import_candidates_for_packages(
             &reachable_package_ids,
             context.external_dependency_resolution_table,
             context.builder_runtime_packages,
-        );
+            &context.external_packages,
+        )
+        .map_err(PremergeFailure::Infrastructure)?;
         // The publication owner in convergence computes the paired table from the final HIR.
         // Nothing reads this empty table before then, and an empty table retains every check.
         Ok(Module {

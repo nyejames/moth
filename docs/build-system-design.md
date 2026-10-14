@@ -705,6 +705,8 @@ Build-wide provider emission deduplicates runtime assets, module specifiers and 
 
 Direct builder bindings and provider-created bindings share stable binding identity and runtime asset policy. No per-entry scan recreates source dependencies.
 
+Selected JavaScript module exports require a definition and applicable lowering in their issuing registry and matching entry metadata with a JavaScript runtime asset. Glue preparation checks these closed inputs before source emission. Missing candidates, absent assets and wrong asset kinds identify inconsistent validated metadata, while valid non-module helper lowerings need no wrapper or provider asset.
+
 ### Resource emission
 
 The HTML builder assigns URL contexts, plans exact resource outputs, deduplicates origins/sources/reads and produces resource warnings from semantic use locations. It returns ordinary output records. The following section owns the general resource contract.

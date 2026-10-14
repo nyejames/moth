@@ -42,6 +42,7 @@ use crate::compiler_frontend::semantic_identity::{
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::style_directives::StyleDirectiveRegistry;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::projects::html_project::external_js::js_import_provider::JsExternalImportProvider;
 use crate::projects::settings::Config;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use std::collections::VecDeque;
@@ -1754,6 +1755,7 @@ fn reachable_generated_sidecars_follow_final_live_call_edges() {
 fn compile_owned_service_fixture(
     source: &str,
     single_file: bool,
+    external_sources: &[(&str, &str)],
 ) -> (ProjectFrontendCompilation, StringTable) {
     let directory = tempfile::tempdir().expect("the service fixture directory should exist");
     let source_root = directory.path().join("src");
@@ -1765,6 +1767,10 @@ fn compile_owned_service_fixture(
         "project #= (name = \"release\", entry_root = \"src\")\nhtml #= ()\n",
     )
     .expect("the directory fixture config should be written");
+    for (path, contents) in external_sources {
+        fs::write(source_root.join(path), contents)
+            .expect("the external service fixture should be written");
+    }
     let entry = if single_file {
         source_path.clone()
     } else {
@@ -1772,12 +1778,18 @@ fn compile_owned_service_fixture(
     };
     let mut config = Config::new(entry);
     let mut strings = StringTable::new();
+    let mut surface = BuilderSurface::with_mandatory_core();
+    if !external_sources.is_empty() {
+        surface
+            .external_import_providers
+            .register(std::sync::Arc::new(JsExternalImportProvider::new()));
+    }
     let frontend = compile_project_frontend(
         &mut config,
         BuildProfile::Dev,
         None,
         &StyleDirectiveRegistry::built_ins(),
-        &mut BuilderSurface::with_mandatory_core(),
+        &mut surface,
         &mut strings,
     )
     .expect("the canonical service should return its complete retained-fact outcome");
@@ -1809,7 +1821,7 @@ fn module_and_single_file_results_reconverge_recursive_failure_facts_after_servi
         result = forward(1, recovered, false) catch then 0\n[: result=[result]]\n";
 
     for single_file in [false, true] {
-        let (frontend, strings) = compile_owned_service_fixture(SOURCE, single_file);
+        let (frontend, strings) = compile_owned_service_fixture(SOURCE, single_file, &[]);
         assert!(!frontend.has_diagnosed_or_blocked());
 
         let modules = frontend
@@ -2124,7 +2136,7 @@ fn completed_service_diagnoses_retained_generic_assertion_and_custom_catch_sites
 
     for single_file in [false, true] {
         for (source, assertion) in [(assertion_source, true), (catch_source, false)] {
-            let (frontend, mut strings) = compile_owned_service_fixture(source, single_file);
+            let (frontend, mut strings) = compile_owned_service_fixture(source, single_file, &[]);
             assert!(frontend.has_diagnosed_or_blocked());
             let messages = frontend
                 .into_render_messages_with_frozen_identity(&mut strings, None, None)
@@ -2237,7 +2249,7 @@ fn active_and_inert_generic_message_share_one_completed_service_identity() {
         check |value String|:\n    assert(true, message(value))\n;\n\
         check(\"safe\")\nactive_message = message(\"live\")\n[: result=[active_message]]\n";
     for single_file in [false, true] {
-        let (frontend, _) = compile_owned_service_fixture(SOURCE, single_file);
+        let (frontend, _) = compile_owned_service_fixture(SOURCE, single_file, &[]);
         assert!(!frontend.has_diagnosed_or_blocked());
         let artefacts = frontend
             .project
@@ -2331,5 +2343,195 @@ fn active_and_inert_generic_message_share_one_completed_service_identity() {
                 .find("message(value)")
                 .expect("the fixture has one inert message occurrence")
         );
+    }
+}
+
+#[test]
+fn final_generated_failure_lanes_keep_external_candidates_without_validation_only_sidecars() {
+    let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    // Materialisation records the later private helper's protected call without a CFG failure
+    // edge. Convergence must add the handler-only provider once that call becomes an Invoke.
+    const SOURCE: &str = "@live.js touch, read\n@dormant.js dormant\n@recovery.js recover\n\
+        double |value I32| -> I32:\n    return value * 2\n;\n\
+        execute type T |marker T, value I32| -> I32:\n\
+            doubled = double(value)\n    touch()\n    io.line(\"live\")\n\
+            observed = read() catch then 0\n\
+            recovered = late(value) catch then recover()\n\
+            return doubled + observed + recovered\n;\n\
+        late |value I32| -> I32:\n    return value + 2147483647\n;\n\
+        message type T |marker T| -> String:\n    return dormant()\n;\n\
+        assert(true, message(\"checked\"))\n\
+        result = execute(\"active\", 2) catch then 0\n[:[result]]\n";
+    const LIVE: &str = "/** @moth.sig touch || -> */\n\
+        export function touch() {}\n\
+        /** @moth.sig read || -> I32, Error! */\n\
+        export function read() { return { ok: true, value: 3 }; }\n";
+    const DORMANT: &str = "/** @moth.sig dormant || -> String */\n\
+        export function dormant() { return \"unused\"; }\n";
+    const RECOVERY: &str = "/** @moth.sig recover || -> I32 */\n\
+        export function recover() { return 0; }\n";
+
+    for single_file in [false, true] {
+        let (frontend, _) = compile_owned_service_fixture(
+            SOURCE,
+            single_file,
+            &[
+                ("live.js", LIVE),
+                ("dormant.js", DORMANT),
+                ("recovery.js", RECOVERY),
+            ],
+        );
+        assert!(!frontend.has_diagnosed_or_blocked());
+        let sidecars = frontend.project.generated.sidecars().collect::<Vec<_>>();
+        let [sidecar] = sidecars.as_slice() else {
+            panic!("only the executable generic instance should be published");
+        };
+        assert_eq!(sidecar.identity.declaration().defining_name(), "execute");
+        let hir = &sidecar.module.executable.hir;
+        let root = hir.function_ids_by_generated[&sidecar.identity];
+        let root_function = hir
+            .functions
+            .iter()
+            .find(|function| function.id == root)
+            .expect("the selected generated root should survive convergence");
+        assert!(
+            root_function.error_return.is_some(),
+            "the private helper's inferred failure must rewrite the generated root's call lane"
+        );
+        assert!(hir.blocks.iter().any(|block| matches!(
+            &block.terminator,
+            HirTerminator::Invoke {
+                operation: HirFallibleOperation::Call {
+                    target: CallTarget::ModulePrivate(_),
+                    ..
+                },
+                ..
+            }
+        )));
+        assert!(
+            hir.blocks.iter().any(|block| matches!(
+                &block.terminator,
+                HirTerminator::Invoke {
+                    operation: HirFallibleOperation::Call {
+                        target: CallTarget::ModulePrivate(identity),
+                        ..
+                    },
+                    ..
+                } if identity.defining_name() == "late"
+            )),
+            "the initially pending protected call must acquire its inferred failure edge"
+        );
+        let statement_external = hir
+            .blocks
+            .iter()
+            .flat_map(|block| &block.statements)
+            .filter_map(|statement| match &statement.kind {
+                HirStatementKind::Call {
+                    target: CallTarget::External(function),
+                    ..
+                } => Some(*function),
+                _ => None,
+            })
+            .collect::<FxHashSet<_>>();
+        let invoked_external = hir
+            .blocks
+            .iter()
+            .filter_map(|block| match &block.terminator {
+                HirTerminator::Invoke {
+                    operation:
+                        HirFallibleOperation::Call {
+                            target: CallTarget::External(function),
+                            ..
+                        },
+                    ..
+                } => Some(*function),
+                _ => None,
+            })
+            .collect::<FxHashSet<_>>();
+        assert_eq!(
+            statement_external.len(),
+            3,
+            "touch, Core IO and the newly reachable recovery provider remain calls"
+        );
+        assert!(statement_external.contains(&ExternalFunctionId::IoLine));
+        assert_eq!(
+            invoked_external.len(),
+            1,
+            "read retains its typed error edge"
+        );
+
+        let reachability = collect_reachability_from_function_link_facts(
+            &sidecar.module.link_facts.functions,
+            &[root],
+        )
+        .expect("final generated link facts should match its rewritten root");
+        let registry = &sidecar.module.link_facts.external_package_registry;
+        let candidates = &sidecar.module.link_facts.external_import_candidates;
+        assert_eq!(
+            reachability.reachable_external_functions,
+            statement_external
+                .union(&invoked_external)
+                .copied()
+                .collect()
+        );
+        let assets = candidates
+            .iter()
+            .filter_map(|candidate| candidate.runtime_asset.as_ref())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            assets.len(),
+            2,
+            "only the live and recovery providers should supply generated runtime assets"
+        );
+        assert!(
+            assets
+                .iter()
+                .any(|asset| asset.canonical_source_path.ends_with("live.js"))
+        );
+        assert!(
+            assets
+                .iter()
+                .any(|asset| asset.canonical_source_path.ends_with("recovery.js")),
+            "final candidate refresh must retain the provider first reached through the new failure edge"
+        );
+        assert!(assets.iter().all(|asset| asset.asset_kind == "js"));
+        for call in &reachability.reachable_external_calls {
+            assert!(registry.get_function_by_id(call.function_id).is_some());
+            let package = registry
+                .resolve_function_package_id(call.function_id)
+                .expect("each final external call retains its registry owner");
+            assert!(registry.get_package_by_id(package).is_some());
+            if call.function_id == ExternalFunctionId::IoLine {
+                assert!(
+                    candidates
+                        .iter()
+                        .filter(|candidate| candidate.package_id == package)
+                        .all(|candidate| candidate.runtime_asset.is_none()),
+                    "a registered Core helper is valid without a provider asset"
+                );
+            } else {
+                assert!(
+                    candidates
+                        .iter()
+                        .any(|candidate| candidate.package_id == package),
+                    "both external Call and Invoke must retain their provider candidate"
+                );
+            }
+        }
+        for module in frontend.successful_module_views() {
+            assert!(
+                module
+                    .link_facts
+                    .functions
+                    .direct_call_targets()
+                    .into_iter()
+                    .all(|(_, target)| !matches!(
+                        target,
+                        CallTarget::Generated(identity)
+                            if identity.declaration().defining_name() == "message"
+                    )),
+                "validation-only generic demand must not remain live"
+            );
+        }
     }
 }
