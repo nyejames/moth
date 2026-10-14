@@ -385,7 +385,7 @@ This reminder neither activates recovery work nor adds a parallel config path.
 ### Phase 1: Recognition, signatures and shared arguments
 
 - [ ] Add owner/context/form descriptors by extending the existing directive registration authority.
-- [ ] Reject registry conflicts deterministically, including duplicate builder names.
+- [ ] Reject registry conflicts deterministically, including duplicate builder registrations.
 - [ ] Reuse the delivered MON shared list/argument owner and slot routing for template and source directive arguments.
 - [ ] Retain balanced invocation ranges during preparation without another expression parser.
 - [ ] Add empty-parenthesis, placement, unknown and deferred-name diagnostics.
