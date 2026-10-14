@@ -359,6 +359,19 @@ Recheck these anchors at activation:
 
 Extend or consolidate these owners. Do not add a broad `utils` module or a trait hierarchy merely to hide directive dispatch.
 
+### Diagnostic-control migration sites
+
+When the earlier diagnostic controls are delivered, carry `max_errors_per_module`
+and `max_errors_per_project` into the closed `$project` signature. Both use `I32?`,
+default to 5 and 30 respectively and accept only positive present values. Explicit
+`none` disables the corresponding limit. Preserve the strict module allowance,
+soft project scheduling cutoff and separate internal AST recovery-work guard.
+Treat schema/defaults, config application, compiler-options projection, build-only
+ownership, canonical config documentation and regression tests as required update
+sites. Keep these controls out of source-visible semantic metadata and semantic
+fingerprints. Read the permanent compiler/build/config contracts at activation.
+This reminder neither activates recovery work nor adds a parallel config path.
+
 ## 10. Implementation phases
 
 ### Phase 0: Refresh and contract baseline
