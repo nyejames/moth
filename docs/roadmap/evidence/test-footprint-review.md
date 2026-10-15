@@ -157,3 +157,13 @@ The independent backend-cluster audit traced the explicit jump transfer consumer
 Definitions fall from 75 to 71 and noncomment LOC from 2,971 to 2,894. Distinct physical/logical identity, permissions, canonicalisation, error-lane and platform contracts remain unchanged. The registered module passed 62/62 on macOS, and the adjacent typed-root owner passed 1/1. Actual `adversarial_multi_file_helper_chain` and `multi_file_module` commands each passed 1/1. Formatting passed. Linux-only raw-byte and Windows-only paths were compared but not executed locally.
 
 The independent filesystem audit accepted all four comparisons and retained owners without findings. The typed duplicate-root survivor fixes the reason, while remaining mixed/support-root tests and diagnostic-schema owners retain the shared `MOTH-CONFIG-0001` code contract. Static gate equivalence does not claim Linux or Windows execution.
+
+### HIR lowering, validation and diagnostic contracts
+
+`runtime_template_handoff_expression_lowers_inline_to_accumulator` was merged into `runtime_template_expression_lowers_inline_to_accumulator`. Both build the same `"hello"` runtime-template expression, lower through the same API and assert an empty prelude, no helpers, local `Copy` and the entry-block string assignment. Names and `.expect` text differ; the removed test never built a distinct handoff fixture. Separate nested-handoff and missing-handoff owners remain.
+
+`expression_test_builder_produces_valid_hir_module_metadata` was removed as fixture-only wiring: it installs an empty `Return` on the test builder and expects validation success without lowering an expression. This is not claimed equivalent to an integration case. Real lowered-module acceptance remains in `valid_module_passes_explicit_validation`; malformed metadata, provenance, CFG, numeric domains and pending-handler owners remain.
+
+Lowering falls from 63 to 61 definitions and 4,518 to 4,454 noncomment LOC. Validation retains 87 definitions / 4,635 LOC and diagnostic-model coverage retains 91 / 4,377. Targeted modules passed 61/61, 87/87 and 91/91. Actual `template_slots_nested_runtime` and `fulfilment_ledger_runtime` executions each passed 1/1. Formatting passed.
+
+The independent HIR/diagnostic audit accepted both removals and all 241 baseline decisions without required code findings. Its inventory precision note was applied: the nested-linear-handoff keeper checks chunk presence and one initialization, not relative chunk order. Intentional “Const records are data-only” guidance remains a user-facing terminology contract, rather than incidental wording to delete.

@@ -1388,6 +1388,7 @@
       "existing_owner": "src/compiler_frontend/hir/tests/hir_validation_tests.rs",
       "default_decision": "keep: distinct local invariant or failure path, no equivalent surviving assertion established",
       "required_validation": "cargo test -p moth --lib hir_validation_tests",
+      "review_outcome": "Phase 4: retain all 87 definitions and 4635 noncomment LOC. Malformed child IDs, cycles, CFG/handler records and numeric/type-domain validation have no equivalent replacement.",
       "tests": [
         {
           "test_id": "validator_accepts_field_projection_owned_by_current_nominal_type",
@@ -1922,12 +1923,13 @@
       "existing_owner": "src/compiler_frontend/hir/tests/hir_expression_lowering_tests.rs",
       "default_decision": "keep: distinct local invariant or failure path, no equivalent surviving assertion established",
       "required_validation": "cargo test -p moth --lib hir_expression_lowering_tests",
+      "review_outcome": "Phase 4: merge one assertion-equivalent runtime-template test and remove one fixture-only validation-success test, retaining 61 definitions and 4454 noncomment LOC. Real lowered-module acceptance, nested handoff and malformed/provenance owners remain.",
       "tests": [
         {
           "test_id": "expression_test_builder_produces_valid_hir_module_metadata",
           "line": 424,
           "asserted_contract": "test-only setup_builder fixture validates after manually installing an empty Return, without exercising expression lowering.",
-          "decision": "remove_candidate",
+          "decision": "removed",
           "reason": "Fixture wiring and bare validation success do not protect a distinct expression-lowering regression. Retain valid_module_passes_explicit_validation and malformed-HIR metadata/provenance owners."
         },
         {
@@ -2102,14 +2104,14 @@
           "test_id": "runtime_template_handoff_expression_lowers_inline_to_accumulator",
           "line": 2098,
           "asserted_contract": "**same input builder (`runtime_template_expression`) and same assertions as 2055**; no distinct handoff fixture is tested.",
-          "decision": "merge_candidate",
+          "decision": "merged",
           "surviving_test_id": "runtime_template_expression_lowers_inline_to_accumulator",
           "overlap_status": "confirmed overlap"
         },
         {
           "test_id": "runtime_template_handoff_expression_flattens_nested_linear_handoff",
           "line": 2140,
-          "asserted_contract": "nested linear handoff yields ordered before/inner/after content and one accumulator initialization.",
+          "asserted_contract": "nested linear handoff contains before/inner/after chunks and one accumulator initialization; relative chunk order is not asserted.",
           "decision": "keep"
         },
         {
@@ -2995,6 +2997,7 @@
       "existing_owner": "src/compiler_frontend/compiler_messages/tests/diagnostic_model_tests.rs",
       "default_decision": "keep: distinct local invariant or failure path, no equivalent surviving assertion established",
       "required_validation": "cargo test -p moth --lib diagnostic_model_tests",
+      "review_outcome": "Phase 4: retain all 91 definitions and 4377 noncomment LOC. Typed payload/reason, code, identity remapping, labels/spans and intentional user-guidance rendering remain distinct local contracts.",
       "tests": [
         {
           "test_id": "descriptor_codes_are_stable_and_non_empty",
