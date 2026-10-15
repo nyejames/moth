@@ -167,3 +167,37 @@ The independent filesystem audit accepted all four comparisons and retained owne
 Lowering falls from 63 to 61 definitions and 4,518 to 4,454 noncomment LOC. Validation retains 87 definitions / 4,635 LOC and diagnostic-model coverage retains 91 / 4,377. Targeted modules passed 61/61, 87/87 and 91/91. Actual `template_slots_nested_runtime` and `fulfilment_ledger_runtime` executions each passed 1/1. Formatting passed.
 
 The independent HIR/diagnostic audit accepted both removals and all 241 baseline decisions without required code findings. Its inventory precision note was applied: the nested-linear-handoff keeper checks chunk presence and one initialization, not relative chunk order. Intentional “Const records are data-only” guidance remains a user-facing terminology contract, rather than incidental wording to delete.
+
+### Borrow, Boracle and numeric-domain owners
+
+`boracle_oracle_write_through_exclusive_alias_does_not_fabricate_conflict` was merged into `boracle_oracle_write_through_exclusive_alias_is_safe`. The bodies are textually identical: two bindings, fresh owner, exclusive alias, paired alias update, fresh rebind, owner read and `CompleteSafe { executions: 1, .. }`. Oracle definitions fall from 111 to 110 and noncomment LOC from 5,430 to 5,415. Malformed problems, typed inconclusive bounds, closed cycles, capability retirement/reissue, failure traces and independent generated/reducer/campaign owners remain unchanged.
+
+All three differently named reference-related tests remain inside the full-module validation filter. `boracle_alias_result_loans_preserve_repeated_argument_event_owners` checks reference-solver facts only; it does not run the operational Oracle. Inventory precision corrections distinguish an exhausted execution bound from an event bound, and an unpaired conflicting write from the earlier paired exclusive-alias update.
+
+The adjacent `src/compiler_frontend/datatypes/tests/numeric_operators_tests.rs` review retains all 15 definitions below. This addendum is outside the ten-file / 665-definition baseline. These are domain-policy owners, not claims of arithmetic execution, every scalar value or exhaustive decimal scales.
+
+| Retained test ID | Distinct asserted boundary |
+| --- | --- |
+| `common_fixed_integer_matches_the_complete_range_rule_for_every_pair` | All 64 ordered integer pairs against an independently derived complete-range oracle. |
+| `common_fixed_integer_matches_the_published_d15_examples` | Literal published outcomes, including unsupported pairs, checked in both directions. |
+| `fixed_integer_operators_compute_in_the_common_type_and_divide_in_f64` | Seven operators across all pairs; real division uses F64 only after common-domain eligibility. |
+| `fixed_float_operators_preserve_the_wider_precision_without_an_f32_floor` | Exact wider float identity, including F16/F16, and integer-division rejection. |
+| `number_arithmetic_keeps_its_scale_and_rejects_invalid_scale_operators` | Decimal scale preservation, integer mixing and scale-specific division restrictions. |
+| `number_power_accepts_only_an_exact_i32_exponent` | Decimal power accepts the exact I32 exponent identity only. |
+| `number_mixes_only_with_integer_domains_for_arithmetic_and_comparison` | Decimal comparison compatibility and sampled invalid arithmetic families. |
+| `fixed_integer_and_binary_float_families_never_mix_implicitly` | Integer/float arithmetic and comparison reject in both directions. |
+| `negate_is_never_a_binary_operation` | The binary-domain entry point rejects a unary operator. |
+| `negation_preserves_signed_and_float_width_and_rejects_unsigned_and_byte` | Unary identity preservation and unsigned/Byte rejection, not minimum-value execution. |
+| `every_fixed_integer_pair_compares_including_i64_with_u64` | Comparison compatibility is broader than arithmetic common-domain eligibility. |
+| `discharge_proves_only_range_contained_fixed_integer_add_sub_mul_negate` | Bounded positive/negative result-range proof rows; wider carriers do not erase real failure. |
+| `failure_codes_leave_exact_float_negation_and_dec_arithmetic_without_a_failure_edge` | Selected exact failure-code slices; I32 binary rows require nonempty codes rather than exact per-operator slices. |
+| `range_iteration_uses_the_fixed_pairwise_table_and_rejects_dec` | Pairwise range-domain selection and incompatible-family rejection, not loop termination. |
+| `byte_is_outside_every_numeric_operator_domain` | Injected numeric Byte rejects; separate source Byte equality/ordering remains outside this policy. |
+
+Numeric HIR conversion, invalid-domain/type, explicit comparison-conversion and success/error-slot owners remain separate in the core ledger. Nearby fixed-scalar and decimal-value files were not exhaustively inventoried by this addendum.
+
+The complete Oracle-module filter passed 133/133, including the 110 selected-file definitions and nested module owners. `just boracle` passed formatting, feature-enabled Clippy, borrow-problem 46/46, last-use 5/5 and the feature-enabled Boracle lane 259/259. Numeric policy passed 15/15. The measured campaign was unchanged and was not executed.
+
+The actual ledger runtime also passed 1/1 with `cargo run --quiet --features boracle -- tests --case fulfilment_ledger_runtime --terse`.
+
+The independent proof/domain audit accepted the duplicate deletion and strict keep decisions without code findings. Its two additional precision corrections were applied: historical aggregate/call-result “write-through” names actually construct `Define`, then detect later unpaired source mutation. Their provenance assertions remain; the separate destination matrix owns genuine `Update`. These names supply no evidence of an additional write-through path.

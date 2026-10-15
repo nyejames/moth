@@ -2317,6 +2317,7 @@
       "existing_owner": "src/compiler_frontend/analysis/borrow_checker/boracle/oracle/tests/mod.rs",
       "default_decision": "keep: distinct local invariant or failure path, no equivalent surviving assertion established",
       "required_validation": "cargo test -p moth --lib --features boracle compiler_frontend::analysis::borrow_checker::boracle::oracle::tests",
+      "review_outcome": "Phase 4: merge one textually identical exclusive-alias safety test, retaining 110 definitions and 5415 noncomment LOC. Malformed input, bounded execution, capability generations, reference-solver crosschecks and independent generated/reducer/campaign owners remain.",
       "tests": [
         {
           "test_id": "boracle_oracle_many_shared_aliases_on_one_node_do_not_conflict",
@@ -2363,7 +2364,7 @@
         {
           "test_id": "boracle_oracle_write_through_shared_alias_conflicts_directly",
           "line": 196,
-          "asserted_contract": "shared alias write-through conflicts at paired access.",
+          "asserted_contract": "shared alias write-through conflicts at an unpaired UseKind::Write; the earlier exclusive-alias Update is paired.",
           "decision": "keep"
         },
         {
@@ -2471,7 +2472,7 @@
         {
           "test_id": "boracle_oracle_write_through_aggregate_issues_field_provenance",
           "line": 987,
-          "asserted_contract": "aggregate write-through issues field provenance; conflict at paired write.",
+          "asserted_contract": "Aggregate Define over an existing shared alias issues shared field provenance; later unpaired source mutation conflicts, with exact field holder, issue event and target evidence. Does not exercise alias-backed Update write-through.",
           "decision": "keep"
         },
         {
@@ -2591,7 +2592,7 @@
         {
           "test_id": "boracle_oracle_write_through_call_result_issues_provenance",
           "line": 1727,
-          "asserted_contract": "result write-through issues provenance and conflicts with source mutation.",
+          "asserted_contract": "Call-result Define over an existing shared alias issues shared AliasParams provenance; later unpaired argument mutation conflicts, with exact effect issue event, result holder and target evidence. Does not exercise alias-backed Update write-through.",
           "decision": "keep"
         },
         {
@@ -2843,7 +2844,7 @@
         {
           "test_id": "boracle_oracle_closed_cycle_precedes_exhausted_execution_bound",
           "line": 4036,
-          "asserted_contract": "closed-cycle detection precedes event bound; checks block/explored.",
+          "asserted_contract": "closed-cycle detection precedes exhausted execution count; checks block/explored.",
           "decision": "keep"
         },
         {
@@ -2898,7 +2899,7 @@
           "test_id": "boracle_oracle_write_through_exclusive_alias_does_not_fabricate_conflict",
           "line": 4876,
           "asserted_contract": "**exact duplicate of line 178**: same fixture and CompleteSafe assertion.",
-          "decision": "merge_candidate",
+          "decision": "merged",
           "surviving_test_id": "boracle_oracle_write_through_exclusive_alias_is_safe",
           "overlap_status": "confirmed overlap"
         },
