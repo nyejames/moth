@@ -1,6 +1,6 @@
 # Moth test footprint audit and conservative improvement plan
 
-Status: initial evidence-backed audit and implementation plan, 2026-10-14
+Status: active, Phase 0 accepted, next Phase 1 assertion-only cleanup
 Repository: `nyejames/moth`, branch `expression-refactor`, commit `1343c64ecbc5433b546c3ad31cf5c175cf51f184`
 Policy companion: `docs/src/developer-docs/style-guide/testing.mtf` (revised replacement supplied separately)
 

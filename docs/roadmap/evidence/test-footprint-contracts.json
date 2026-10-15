@@ -1,0 +1,4229 @@
+{
+  "baseline": "bf84a6c6da188820a549edd37effadce2e2c744f",
+  "scope": "All 665 literal #[test] definitions in the ten selected review files, including gated definitions. Line numbers refer to activation, not later edits.",
+  "decision_rule": "Keep distinct contracts. merge_candidate requires implementation-phase comparison and independent audit before deletion. Failure paths appear in asserted_contract, including negative rejection and invalid-state owners.",
+  "files": [
+    {
+      "path": "src/compiler_frontend/tests/frontend_pipeline_tests.rs",
+      "level": "unit or compiler-stage invariant",
+      "baseline_test_count": 74,
+      "baseline_noncomment_loc": 4698,
+      "fixture_dependencies_and_lane": "FrontendProject, FrontendBuildProfile::Dev, failure_project and local source fixtures; AST/HIR/borrow handoff, not runtime replacement",
+      "existing_owner": "src/compiler_frontend/tests/frontend_pipeline_tests.rs",
+      "default_decision": "keep: distinct local invariant or failure path, no equivalent surviving assertion established",
+      "required_validation": "cargo test -p moth --lib frontend_pipeline_tests",
+      "tests": [
+        {
+          "test_id": "compiles_single_file_program_through_borrow_check",
+          "asserted_contract": "single-file entry compiles through HIR and borrow checking; checks entry structure, report consistency, and borrow facts for reachable entry statements.",
+          "decision": "keep",
+          "line": 465
+        },
+        {
+          "test_id": "compiles_multi_file_dependency_program_through_borrow_check",
+          "asserted_contract": "same pipeline with a dependency helper; checks helper parameters and borrow summary.",
+          "decision": "keep",
+          "line": 508
+        },
+        {
+          "test_id": "frontend_diagnostics_preserve_source_spans",
+          "asserted_contract": "host-call AST error and mutable-alias borrow error retain source spans.",
+          "decision": "keep",
+          "line": 557
+        },
+        {
+          "test_id": "html_style_directive_available_during_header_parsing",
+          "asserted_contract": "project `$html` directive is available during header parsing and its constant folds to a String.",
+          "decision": "keep",
+          "line": 623
+        },
+        {
+          "test_id": "runtime_bool_condition_lowers_one_branch_diamond",
+          "asserted_contract": "runtime Bool condition lowers to exactly one HIR `if`.",
+          "decision": "keep",
+          "line": 682
+        },
+        {
+          "test_id": "compile_time_true_condition_reaches_hir_without_a_branch",
+          "asserted_contract": "static true condition produces no HIR branch.",
+          "decision": "keep",
+          "line": 702
+        },
+        {
+          "test_id": "compile_time_false_condition_without_else_lowers_no_branch_body",
+          "asserted_contract": "static false/no-else condition produces no HIR branch body.",
+          "decision": "keep",
+          "line": 722
+        },
+        {
+          "test_id": "terminality_observes_the_selected_branch",
+          "asserted_contract": "selected static branch’s return establishes terminality; no HIR branch remains.",
+          "decision": "keep",
+          "line": 742
+        },
+        {
+          "test_id": "selected_terminating_value_if_body_replaces_its_receiver_before_hir",
+          "asserted_contract": "selected terminating value arm replaces the receiver before HIR; no branch remains.",
+          "decision": "keep",
+          "line": 764
+        },
+        {
+          "test_id": "selected_statement_branch_keeps_its_immediate_scope_before_nested_control_flow",
+          "asserted_contract": "selected static statement arm remains its own lexical scope, distinct from nested runtime-if scope.",
+          "decision": "keep",
+          "line": 784
+        },
+        {
+          "test_id": "synthetic_start_keeps_ast_builtin_error_slot_before_hir_narrowing",
+          "asserted_contract": "across five start-program shapes (plain, propagated, recovered, checked numeric, caught numeric), AST start retains canonical Error slot plus one success slot.",
+          "decision": "keep",
+          "line": 832
+        },
+        {
+          "test_id": "implicit_failure_private_chain_preserves_success_and_selects_error_materialisation",
+          "asserted_contract": "private call chain keeps I32 success values, propagates one numeric-origin contributor through private summaries, materialises builtin Error only at the Error-slot caller, and lowers numeric failure as Invoke rather than trap.",
+          "decision": "keep",
+          "line": 1158
+        },
+        {
+          "test_id": "implicit_failure_lanes_and_builtin_catch_preserve_float_integrity_guards",
+          "asserted_contract": "numeric private failure lanes do not absorb external F64 integrity checks; checks Trap/Invoke channel counts, outward numeric failure, and caught recovery reachability.",
+          "decision": "keep",
+          "line": 1294
+        },
+        {
+          "test_id": "implicit_failure_compound_writeback_and_range_update_join_private_lane",
+          "asserted_contract": "mixed-domain U16→U8 compound write-back remains its own failure producer alongside range-step failure; checks both source/origin contracts.",
+          "decision": "keep",
+          "line": 1426
+        },
+        {
+          "test_id": "private_failure_lane_marks_edge_locals_as_temps_without_weakening_fresh_mutable_arguments",
+          "asserted_contract": "lane edge locals are typed writable temps with separate success/error destinations, while fresh mutable argument origin remains intact.",
+          "decision": "keep",
+          "line": 1508
+        },
+        {
+          "test_id": "private_failure_lane_preserves_unrelated_fatal_fallible_edge",
+          "asserted_contract": "installer preserves injected fatal edge and converts only the unrelated fallible store-conversion edge to canonical Error return.",
+          "decision": "keep",
+          "line": 1623
+        },
+        {
+          "test_id": "implicit_failure_custom_contract_requires_explicit_mapping_even_with_other_error_return",
+          "asserted_contract": "custom `Failure!` does not implicitly consume numeric overflow; exact diagnostic/reason, witness and source span; explicit mapping succeeds.",
+          "decision": "keep",
+          "line": 1856
+        },
+        {
+          "test_id": "implicit_failure_catch_covers_multiply_and_add_not_only_last_operand",
+          "asserted_contract": "both parenthesizations catch the complete multiply-plus-add and retain both operation producers without escaping witness.",
+          "decision": "keep",
+          "line": 1915
+        },
+        {
+          "test_id": "implicit_failure_folded_catch_preserves_eligibility_without_escaping_failure",
+          "asserted_contract": "folded arithmetic remains catch-eligible; inline and block forms fold to 3, retain checked-numeric eligibility, and do not escape.",
+          "decision": "keep",
+          "line": 1959
+        },
+        {
+          "test_id": "implicit_failure_folded_catch_still_type_checks_handler_values",
+          "asserted_contract": "inline and block handlers with String instead of I32 reject with stable type code and span even when protected arithmetic folds.",
+          "decision": "keep",
+          "line": 2002
+        },
+        {
+          "test_id": "implicit_failure_hir_two_numeric_operations_sequence_success_and_share_one_handler",
+          "asserted_contract": "two numeric Invokes sequence success-only; their failure adapters share the same catch Error slot; handler does not read unavailable success values.",
+          "decision": "keep",
+          "line": 2030
+        },
+        {
+          "test_id": "implicit_failure_nested_handler_catch_uses_its_own_error_continuation",
+          "asserted_contract": "nested divide catch has its own handler/slot; outer multiply catch remains separate.",
+          "decision": "keep",
+          "line": 2237
+        },
+        {
+          "test_id": "implicit_failure_catch_covers_private_operands_arguments_and_typed_call",
+          "asserted_contract": "catch protects private operands, nested call arguments, and typed call evaluation across three source shapes; checks facts and lowering.",
+          "decision": "keep",
+          "line": 2276
+        },
+        {
+          "test_id": "implicit_failure_catch_covers_receiver_evaluation_and_method_arguments",
+          "asserted_contract": "catch protects fallible method receiver evaluation and method-argument arithmetic.",
+          "decision": "keep",
+          "line": 2319
+        },
+        {
+          "test_id": "implicit_failure_catch_accepts_multiple_builtin_errors_without_erasing_code_zero",
+          "asserted_contract": "compatible builtin errors and numeric failure recover together; authored Error code `0` remains intact.",
+          "decision": "keep",
+          "line": 2343
+        },
+        {
+          "test_id": "implicit_failure_catch_accepts_one_custom_identity_without_numeric_failure",
+          "asserted_contract": "catch accepts one custom identity, preserves its type/binding, and does not fabricate numeric failure.",
+          "decision": "keep",
+          "line": 2401
+        },
+        {
+          "test_id": "implicit_failure_custom_catch_accepts_known_infallible_private_operand",
+          "asserted_contract": "custom typed producer plus infallible private operand is accepted and lowered.",
+          "decision": "keep",
+          "line": 2433
+        },
+        {
+          "test_id": "implicit_failure_custom_catch_projects_private_compatibility_checks_into_hir",
+          "asserted_contract": "deferred custom catch compatibility facts and spans survive into HIR for a private call; no numeric contributors.",
+          "decision": "keep",
+          "line": 2465
+        },
+        {
+          "test_id": "implicit_failure_custom_catch_reports_handler_compatibility_before_protected_work",
+          "asserted_contract": "nested custom handlers diagnose the incompatible inner handler before protected work, with inner producer/catch spans.",
+          "decision": "keep",
+          "line": 2525
+        },
+        {
+          "test_id": "implicit_failure_catch_rejects_custom_numeric_and_distinct_typed_errors",
+          "asserted_contract": "rejects custom/numeric mix and incompatible custom Error identities, preserving exact types/spans and stable rule code.",
+          "decision": "keep",
+          "line": 2605
+        },
+        {
+          "test_id": "implicit_failure_cast_catch_retains_operand_and_conversion_contracts",
+          "asserted_contract": "cast catch protects both operand arithmetic and narrowing; also checks an infallible conversion around multiply and rejects cast with no evidence.",
+          "decision": "keep",
+          "line": 2662
+        },
+        {
+          "test_id": "implicit_failure_bound_catch_has_error_fields_unbound_catch_has_no_binding",
+          "asserted_contract": "bound Error exposes correctly typed fields; unbound catch invents no binding; both lower.",
+          "decision": "keep",
+          "line": 2756
+        },
+        {
+          "test_id": "implicit_failure_handler_terminality_and_arity_are_checked_before_hir",
+          "asserted_contract": "terminal handlers pass; fallthrough, excess results, and unavailable success targets reject for their exact reasons.",
+          "decision": "keep",
+          "line": 2808
+        },
+        {
+          "test_id": "implicit_failure_multi_success_catch_preserves_slot_order_and_required_arity",
+          "asserted_contract": "I32/String success slots and fallback values retain order/types; missing fallback slot rejects.",
+          "decision": "keep",
+          "line": 2886
+        },
+        {
+          "test_id": "implicit_failure_private_multi_success_catch_preserves_slot_order",
+          "asserted_contract": "private-call multi-success slots and fallback order/types survive lowering.",
+          "decision": "keep",
+          "line": 2962
+        },
+        {
+          "test_id": "implicit_failure_in_handler_goes_outward_not_back_into_its_own_catch",
+          "asserted_contract": "handler failure propagates outward, not into its protected catch; checks HIR and custom-boundary diagnostic.",
+          "decision": "keep",
+          "line": 3013
+        },
+        {
+          "test_id": "implicit_failure_catch_keeps_comma_and_logical_line_boundaries",
+          "asserted_contract": "earlier uncaught operation and later caught assignment remain separate; comma/result-slot boundary remains distinct.",
+          "decision": "keep",
+          "line": 3104
+        },
+        {
+          "test_id": "implicit_failure_catch_rejects_inner_argument_group_condition_template_and_constant",
+          "asserted_contract": "catches inside nested argument groups, parenthesized groups, conditions, template, or constant are rejected; multiline form gets its own reason.",
+          "decision": "keep",
+          "line": 3142
+        },
+        {
+          "test_id": "implicit_failure_catch_remains_ineligible_for_literal_or_infallible_call",
+          "asserted_contract": "literal and infallible-call catch remain ineligible for both private and exported variants.",
+          "decision": "keep",
+          "line": 3182
+        },
+        {
+          "test_id": "implicit_failure_catch_preserves_propagation_and_optional_conflicts",
+          "asserted_contract": "postfix `!`/`?` conflicts with catch, including cast-operand combinations, preserve separate reasons.",
+          "decision": "keep",
+          "line": 3200
+        },
+        {
+          "test_id": "implicit_failure_compound_rhs_catch_does_not_consume_arithmetic_or_narrowing",
+          "asserted_contract": "RHS catch does not cover compound arithmetic or later U16→U8 store conversion; checks operation origin and target type.",
+          "decision": "keep",
+          "line": 3254
+        },
+        {
+          "test_id": "implicit_failure_error_alias_is_canonical_but_lookalike_is_not",
+          "asserted_contract": "alias of builtin Error is canonical; structural custom lookalike remains distinct and rejected.",
+          "decision": "keep",
+          "line": 3327
+        },
+        {
+          "test_id": "implicit_failure_error_wrapper_struct_is_not_canonical",
+          "asserted_contract": "nominal Error wrapper is not builtin Error; custom errors reject with witness and stable code.",
+          "decision": "keep",
+          "line": 3392
+        },
+        {
+          "test_id": "implicit_failure_static_invalid_arithmetic_is_not_made_valid_by_catch_or_error_slot",
+          "asserted_contract": "static divide/modulo by zero, overflow, and invalid exponent remain compile-time errors despite catch/Error slot.",
+          "decision": "keep",
+          "line": 3448
+        },
+        {
+          "test_id": "implicit_failure_assertion_message_rejects_inferred_call_even_when_inactive",
+          "asserted_contract": "fallible assertion message rejects under active and inactive conditions.",
+          "decision": "keep",
+          "line": 3481
+        },
+        {
+          "test_id": "implicit_failure_assertion_message_rejects_template_range_runtime_step",
+          "asserted_contract": "assertion message cannot carry failure from template/range runtime-step work.",
+          "decision": "keep",
+          "line": 3499
+        },
+        {
+          "test_id": "implicit_failure_dormant_generic_assertion_message_rejects_private_failure",
+          "asserted_contract": "dormant generic assertion-message failure rejects with and without Error slot.",
+          "decision": "keep",
+          "line": 3515
+        },
+        {
+          "test_id": "implicit_failure_prepared_recovery_lowers_catch_with_outward_assertion",
+          "asserted_contract": "prepared catch recovery lowers while later assertion remains outward.",
+          "decision": "keep",
+          "line": 3534
+        },
+        {
+          "test_id": "implicit_failure_infallible_message_keeps_ordinary_assertion",
+          "asserted_contract": "infallible assertion message is accepted and assertion remains in HIR.",
+          "decision": "keep",
+          "line": 3555
+        },
+        {
+          "test_id": "implicit_failure_dormant_generic_contracts_validate_before_instantiation",
+          "asserted_contract": "dormant generic contracts are checked before instantiation; numeric/custom contract failure diagnostics are exact, valid dormant functions are not emitted.",
+          "decision": "keep",
+          "line": 3577
+        },
+        {
+          "test_id": "implicit_failure_range_loop_witnesses_carry_step_guard_codes",
+          "asserted_contract": "I32/F64 range failures retain exact step-guard code sets and source spans.",
+          "decision": "keep",
+          "line": 3661
+        },
+        {
+          "test_id": "implicit_failure_dormant_complete_recursive_graph_without_numeric_origin_is_infallible",
+          "asserted_contract": "complete dormant recursive identity graph without numeric producer is accepted.",
+          "decision": "keep",
+          "line": 3723
+        },
+        {
+          "test_id": "implicit_failure_dormant_private_generic_identity_and_transitive_chain_are_infallible",
+          "asserted_contract": "private generic identity/transitive chain order variants remain infallible without fabricated executable body.",
+          "decision": "keep",
+          "line": 3736
+        },
+        {
+          "test_id": "implicit_failure_dormant_private_numeric_helper_retains_active_numeric_witness",
+          "asserted_contract": "dormant generic helper route retains the active multiply overflow origin and call spans.",
+          "decision": "keep",
+          "line": 3778
+        },
+        {
+          "test_id": "implicit_failure_dormant_recursive_chain_with_numeric_origin_is_rejected",
+          "asserted_contract": "recursive dormant generic call graph with numeric origin is rejected.",
+          "decision": "keep",
+          "line": 3808
+        },
+        {
+          "test_id": "implicit_failure_self_recursive_back_edge_keeps_overflow_origin_at_both_boundaries",
+          "asserted_contract": "self-recursive back edge does not erase multiply origin at concrete/custom and dormant boundaries; repeated concrete result deterministic.",
+          "decision": "keep",
+          "line": 3871
+        },
+        {
+          "test_id": "implicit_failure_mutual_recursive_back_edge_keeps_overflow_origin_at_both_boundaries",
+          "asserted_contract": "mutual-recursive graph preserves both boundary witnesses and deterministic concrete result.",
+          "decision": "keep",
+          "line": 3930
+        },
+        {
+          "test_id": "implicit_failure_origin_free_self_recursion_stays_infallible_at_concrete_boundary",
+          "asserted_contract": "origin-free self-recursion remains infallible through concrete HIR summary convergence.",
+          "decision": "keep",
+          "line": 3982
+        },
+        {
+          "test_id": "implicit_failure_dormant_custom_error_generic_receiver_uses_closed_trait_requirement_contract",
+          "asserted_contract": "dormant custom-error generic receiver resolves its closed trait requirement.",
+          "decision": "keep",
+          "line": 3998
+        },
+        {
+          "test_id": "implicit_failure_typed_map_catch_resolves_infallible_private_arguments_in_both_orders",
+          "asserted_contract": "typed map catch accepts infallible private key helper in both declaration orders.",
+          "decision": "keep",
+          "line": 4011
+        },
+        {
+          "test_id": "implicit_failure_typed_map_catch_recovers_failing_private_argument",
+          "asserted_contract": "typed-map catch recovers numeric failure from private key helper and lowers.",
+          "decision": "keep",
+          "line": 4035
+        },
+        {
+          "test_id": "implicit_failure_private_catch_routes_argument_failure_before_outer_call",
+          "asserted_contract": "failing nested argument occurs before outer call; pending private lane routes it to the proper handler and drains the record.",
+          "decision": "keep",
+          "line": 4046
+        },
+        {
+          "test_id": "implicit_failure_catch_abandons_later_temporaries_without_handler_reads",
+          "asserted_contract": "first failure abandons later protected value; handler never reads abandoned temp; pending records drain.",
+          "decision": "keep",
+          "line": 4188
+        },
+        {
+          "test_id": "implicit_failure_rhs_caught_compound_update_reports_writeback_origin",
+          "asserted_contract": "catching typed RHS does not hide compound write-back failure at exported boundary; exact U8 target, distinct write-back span, no call witness.",
+          "decision": "keep",
+          "line": 4305
+        },
+        {
+          "test_id": "implicit_failure_uncaught_compound_update_reports_writeback_origin",
+          "asserted_contract": "uncaught compound conversion identifies later store-conversion origin, U8 target, and label.",
+          "decision": "keep",
+          "line": 4399
+        },
+        {
+          "test_id": "implicit_failure_plain_return_arithmetic_keeps_operation_origin",
+          "asserted_contract": "exported arithmetic diagnostic retains operation origin/span and exact label.",
+          "decision": "keep",
+          "line": 4441
+        },
+        {
+          "test_id": "implicit_failure_custom_slot_keeps_writeback_origin",
+          "asserted_contract": "custom-slot diagnostic retains compound write-back origin, U8 target, and source label.",
+          "decision": "keep",
+          "line": 4471
+        },
+        {
+          "test_id": "implicit_failure_failed_compound_writeback_keeps_target_after_rhs_catch",
+          "asserted_contract": "caught typed RHS leaves checked write-back Cast Invoke outside the catch through private-lane installation; borrows still pass.",
+          "decision": "keep",
+          "line": 4512
+        },
+        {
+          "test_id": "implicit_failure_zero_success_statement_catch_covers_host_argument_evaluation",
+          "asserted_contract": "error-only host statement can be caught with no success slots; uncaught typed host error rejects.",
+          "decision": "keep",
+          "line": 4636
+        },
+        {
+          "test_id": "implicit_failure_zero_success_host_catch_lowers_pending_numeric_argument",
+          "asserted_contract": "numeric argument failure precedes error-only host call; both failures reach the same handler slot, with no fabricated success.",
+          "decision": "keep",
+          "line": 4677
+        },
+        {
+          "test_id": "implicit_failure_catches_keep_external_float_checks_on_function_boundary",
+          "asserted_contract": "custom and builtin catches do not absorb external-float validation Trap.",
+          "decision": "keep",
+          "line": 4748
+        },
+        {
+          "test_id": "implicit_failure_builtin_catch_lowers_numeric_get_and_set_arguments",
+          "asserted_contract": "collection get/set numeric argument catches lower; success arity differs correctly.",
+          "decision": "keep",
+          "line": 4822
+        },
+        {
+          "test_id": "implicit_failure_zero_success_receiver_and_builtin_catches_keep_typed_error_contracts",
+          "asserted_contract": "error-only method/set catches preserve empty success arity; uncaught method Error rejects.",
+          "decision": "keep",
+          "line": 4867
+        },
+        {
+          "test_id": "implicit_failure_same_module_cross_file_call_keeps_canonical_private_failure_lane",
+          "asserted_contract": "same-module cross-file helper retains canonical target and call span; caller’s Error slot discharges helper failure after summary convergence.",
+          "decision": "keep",
+          "line": 4920
+        }
+      ]
+    },
+    {
+      "path": "src/compiler_frontend/ast/generic_functions/tests/frozen_body_tests.rs",
+      "level": "unit or compiler-stage invariant",
+      "baseline_test_count": 46,
+      "baseline_noncomment_loc": 4328,
+      "fixture_dependencies_and_lane": "Local frozen syntax/materialisation fixtures; donor/requester path, source, resource and sidecar ownership",
+      "existing_owner": "src/compiler_frontend/ast/generic_functions/tests/frozen_body_tests.rs",
+      "default_decision": "keep: distinct local invariant or failure path, no equivalent surviving assertion established",
+      "required_validation": "cargo test -p moth --lib frozen_body_tests",
+      "tests": [
+        {
+          "test_id": "frozen_content_value_captures_and_reinterns_resource_pieces",
+          "asserted_contract": "captures folded content text/resource pieces, re-interns into generated table, and preserves one stable sidecar resource origin.",
+          "decision": "keep",
+          "line": 357
+        },
+        {
+          "test_id": "missing_content_fold_fails_loudly_during_capture",
+          "asserted_contract": "missing pre-folded content fails capture with the expected message.",
+          "decision": "keep",
+          "line": 448
+        },
+        {
+          "test_id": "non_string_content_fold_fails_loudly_during_capture",
+          "asserted_contract": "non-String folded content fails capture with the expected message.",
+          "decision": "keep",
+          "line": 477
+        },
+        {
+          "test_id": "frozen_body_preserves_donor_range_and_path_spelling",
+          "asserted_contract": "donor SourceId, token range/sequence, Stage 0 facts, and `provider/CONST` spelling survive materialisation.",
+          "decision": "keep",
+          "line": 506
+        },
+        {
+          "test_id": "frozen_body_keeps_declaration_path_distinct_from_owning_source_file",
+          "asserted_contract": "declaration path remains distinct from donor file identity; donor path rows remain file-owned.",
+          "decision": "keep",
+          "line": 580
+        },
+        {
+          "test_id": "frozen_body_preserves_multiple_referenced_canonical_path_expressions",
+          "asserted_contract": "body path handles and corresponding resolution facts retain first-reference order, preserve donor IDs, and omit unreferenced rows.",
+          "decision": "keep",
+          "line": 640
+        },
+        {
+          "test_id": "repeated_spellings_share_one_frozen_string_entry",
+          "asserted_contract": "repeated spelling uses one frozen string-table entry.",
+          "decision": "keep",
+          "line": 825
+        },
+        {
+          "test_id": "source_body_captures_share_donor_strings_after_construction_owners_drop",
+          "asserted_contract": "captures share donor-string allocation and materialise after construction owners drop.",
+          "decision": "keep",
+          "line": 871
+        },
+        {
+          "test_id": "preparation_clones_share_one_frozen_donor_allocation",
+          "asserted_contract": "cloned preparations point to the same frozen donor allocation.",
+          "decision": "keep",
+          "line": 941
+        },
+        {
+          "test_id": "a_materialised_body_with_only_a_path_identity_is_rejected",
+          "asserted_contract": "incomplete source identity table pair is rejected.",
+          "decision": "keep",
+          "line": 961
+        },
+        {
+          "test_id": "canonical_string_only_donors_borrow_identity_without_retaining_file_tokens",
+          "asserted_contract": "canonical String-only donor identity resolves colliding token spelling without retaining file tokens.",
+          "decision": "keep",
+          "line": 999
+        },
+        {
+          "test_id": "malformed_materialised_donor_text_handle_is_infrastructure_failure",
+          "asserted_contract": "malformed donor string handle maps to token-view invariant infrastructure failure.",
+          "decision": "keep",
+          "line": 1099
+        },
+        {
+          "test_id": "donor_numeric_literal_text_renders_through_borrowed_origin",
+          "asserted_contract": "colliding numeric IDs still render donor-authored `-12.5` / `12.5` and lexical fields.",
+          "decision": "keep",
+          "line": 1154
+        },
+        {
+          "test_id": "a_segmented_donor_body_borrows_its_source_sequence",
+          "asserted_contract": "borrowed segmented token sequence preserves source/tags/spans and exact included/skipped positions.",
+          "decision": "keep",
+          "line": 1292
+        },
+        {
+          "test_id": "donor_path_handles_render_through_borrowed_origin",
+          "asserted_contract": "colliding path handle resolves provider spelling and retained span.",
+          "decision": "keep",
+          "line": 1454
+        },
+        {
+          "test_id": "frozen_body_syntax_is_send_without_donor_identity",
+          "asserted_contract": "compile-time Send proof for `StableBodySyntax`.",
+          "decision": "keep",
+          "line": 1534
+        },
+        {
+          "test_id": "generated_materialisation_requires_live_table_to_extend_requester_prefix",
+          "asserted_contract": "an exact live extension of requester string prefix is accepted.",
+          "decision": "keep",
+          "line": 1562
+        },
+        {
+          "test_id": "generated_materialisation_rejects_an_incompatible_string_prefix",
+          "asserted_contract": "empty, truncated, or same-length incompatible string prefixes reject with the domain error.",
+          "decision": "keep",
+          "line": 1574
+        },
+        {
+          "test_id": "detachment_releases_recursive_lookup_owners_before_ast_lowering",
+          "asserted_contract": "detach releases recursive owners, drops donor state, then rebases/materialises/folds defaults and lowers using only retained sidecar facts.",
+          "decision": "keep",
+          "line": 1634
+        },
+        {
+          "test_id": "published_siblings_materialise_independently_and_leave_the_retained_context_frozen",
+          "asserted_contract": "sibling instances materialise independently without mutating retained frozen syntax.",
+          "decision": "keep",
+          "line": 1857
+        },
+        {
+          "test_id": "frozen_resource_parameter_default_materialises_into_a_sidecar_local_table",
+          "asserted_contract": "folded resource default projects into sidecar-local resource table with stable origin/provenance.",
+          "decision": "keep",
+          "line": 2420
+        },
+        {
+          "test_id": "const_template_parameter_default_survives_detach_freeze_and_sidecar_local_rebasing",
+          "asserted_contract": "const-template resource default survives owner release/rebase with exact text, origin, identity and span.",
+          "decision": "keep",
+          "line": 2534
+        },
+        {
+          "test_id": "materialised_generic_bodies_keep_colliding_path_facts_separate",
+          "asserted_contract": "equal numeric path handles in independently captured bodies resolve distinct assets.",
+          "decision": "keep",
+          "line": 2667
+        },
+        {
+          "test_id": "frozen_resource_body_materialises_into_a_sidecar_local_table",
+          "asserted_contract": "frozen resource body creates a sidecar-local handle resolving its origin.",
+          "decision": "keep",
+          "line": 2799
+        },
+        {
+          "test_id": "frozen_resource_body_captures_resolved_subset_before_materialisation",
+          "asserted_contract": "capture stores only the referenced canonical resource row and its exact path/class.",
+          "decision": "keep",
+          "line": 2850
+        },
+        {
+          "test_id": "repeated_frozen_resource_body_materialisations_preserve_stable_origin",
+          "asserted_contract": "repeated body materialisations get table-local handles but retain one stable origin.",
+          "decision": "keep",
+          "line": 2889
+        },
+        {
+          "test_id": "repeated_frozen_resource_default_projection_reuses_one_sidecar_handle",
+          "asserted_contract": "same-sidecar repeated default projection reuses the same ResourceId and single row.",
+          "decision": "keep",
+          "line": 2965
+        },
+        {
+          "test_id": "repeated_frozen_resource_default_materialisations_preserve_stable_origin_across_sidecars",
+          "asserted_contract": "independent default sidecars preserve origin while IDs remain table-local.",
+          "decision": "keep",
+          "line": 3040
+        },
+        {
+          "test_id": "requester_template_identity_index_is_exact_and_rejects_duplicate_bodies",
+          "asserted_contract": "bodyless imported declaration does not conflict; one body indexes exactly; duplicate body is rejected with `.is_err()` only (the assertion does not pin an error reason).",
+          "decision": "keep",
+          "line": 3183
+        },
+        {
+          "test_id": "frozen_generic_rejects_absent_path_handle",
+          "asserted_contract": "absent PathSyntaxId rejects with exact message.",
+          "decision": "keep",
+          "line": 3237
+        },
+        {
+          "test_id": "ordinary_stage0_lookup_returns_empty_for_unknown_row",
+          "asserted_contract": "ordinary lookup of unknown row returns `None`.",
+          "decision": "keep",
+          "line": 3255
+        },
+        {
+          "test_id": "frozen_generic_lookup_requires_retained_owner",
+          "asserted_contract": "owner lookup returns `None`; foreign SourceId is rejected with `.is_err()` only.",
+          "decision": "keep",
+          "line": 3270
+        },
+        {
+          "test_id": "frozen_generic_rejects_duplicate_path_handle",
+          "asserted_contract": "duplicate retained path handle rejects with exact message.",
+          "decision": "keep",
+          "line": 3290
+        },
+        {
+          "test_id": "generic_body_rejects_foreign_source_range",
+          "asserted_contract": "body rejects foreign TokenRange source identity.",
+          "decision": "keep",
+          "line": 3313
+        },
+        {
+          "test_id": "stale_in_range_template_row_fails_declaration_identity_validation",
+          "asserted_contract": "in-range but wrong declaration identity is rejected.",
+          "decision": "keep",
+          "line": 3327
+        },
+        {
+          "test_id": "generated_evidence_authorization_requires_the_selected_trait_pair",
+          "asserted_contract": "only the selected `(I32, TraitId(7))` evidence pair authorizes.",
+          "decision": "keep",
+          "line": 3346
+        },
+        {
+          "test_id": "provider_context_rebases_same_index_foreign_paths_by_spelling_for_the_requester",
+          "asserted_contract": "same-index cross-domain paths rebase by spelling, not numeric-ID reuse.",
+          "decision": "keep",
+          "line": 3366
+        },
+        {
+          "test_id": "incomplete_or_missing_retained_identity_pair_rejects_rebase",
+          "asserted_contract": "incomplete pair and absent issuing pair each reject with separate error contracts.",
+          "decision": "keep",
+          "line": 3466
+        },
+        {
+          "test_id": "materialised_body_declaration_cursor_translates_colliding_symbol_payloads",
+          "asserted_contract": "declaration cursor resolves colliding token symbols to donor spellings.",
+          "decision": "keep",
+          "line": 3498
+        },
+        {
+          "test_id": "callable_only_nominal_signature_retains_private_blueprint",
+          "asserted_contract": "callable-only Packet signature retains private helper/blueprint but not source visibility; generated body lowers.",
+          "decision": "keep",
+          "line": 3658
+        },
+        {
+          "test_id": "detached_generic_retains_only_installed_string_constants_after_store_release",
+          "asserted_contract": "after 64 large unused constants and store release, only installed needed string constant survives and lowers exactly.",
+          "decision": "keep",
+          "line": 3843
+        },
+        {
+          "test_id": "no_generic_preparation_retains_no_local_folded_payload",
+          "asserted_contract": "no generic preparation retains no local folded payload while concrete callable contracts remain.",
+          "decision": "keep",
+          "line": 3933
+        },
+        {
+          "test_id": "nested_template_retains_helper_only_constant_after_declaring_capture_release",
+          "asserted_contract": "nested generic retains helper-only constant after declaring capture release and lowers with that value.",
+          "decision": "keep",
+          "line": 3965
+        },
+        {
+          "test_id": "nested_template_retains_distinct_source_dependency_visibility",
+          "asserted_contract": "outer and inner generic retain distinct source dependency visibility; inner remains usable after outer release.",
+          "decision": "keep",
+          "line": 4090
+        },
+        {
+          "test_id": "callable_only_choice_signature_retains_private_hir_shell",
+          "asserted_contract": "callable-only Signal choice keeps private helper and a materialisable HIR-facing shell.",
+          "decision": "keep",
+          "line": 4126
+        },
+        {
+          "test_id": "repeated_bounded_forwarding_preserves_bodyless_receiver_parameter_owner",
+          "asserted_contract": "repeated outer→middle→inner bounded forwarding preserves exact public nominal receiver parameter owner and evidence; distinct colliding target path rejects.",
+          "decision": "keep",
+          "line": 4172
+        }
+      ]
+    },
+    {
+      "path": "src/compiler_frontend/ast/templates/tir/tests/slot_composition_tests.rs",
+      "level": "unit or compiler-stage invariant",
+      "baseline_test_count": 54,
+      "baseline_noncomment_loc": 2720,
+      "fixture_dependencies_and_lane": "Existing local TIR store/builders and route/expand/compose helpers; head_chain_receiver_collects_one_slot_layout requires benchmark_counters",
+      "existing_owner": "src/compiler_frontend/ast/templates/tir/tests/slot_composition_tests.rs",
+      "default_decision": "keep: distinct local invariant or failure path, no equivalent surviving assertion established",
+      "required_validation": "cargo test -p moth --lib slot_composition_tests",
+      "tests": [
+        {
+          "test_id": "schema_from_default_slot_only",
+          "asserted_contract": "default key/has-any schema is exact.",
+          "decision": "keep",
+          "line": 388
+        },
+        {
+          "test_id": "schema_from_named_slots",
+          "asserted_contract": "exact named key set; no default/positional.",
+          "decision": "keep",
+          "line": 402
+        },
+        {
+          "test_id": "schema_from_positional_slots",
+          "asserted_contract": "exact positional indexes; no default/named.",
+          "decision": "keep",
+          "line": 434
+        },
+        {
+          "test_id": "schema_from_mixed_slot_types",
+          "asserted_contract": "exact combined default/named/positional schema.",
+          "decision": "keep",
+          "line": 460
+        },
+        {
+          "test_id": "schema_from_nested_child_template_containing_slot",
+          "asserted_contract": "nested child slot contributes to parent schema.",
+          "decision": "keep",
+          "line": 489
+        },
+        {
+          "test_id": "schema_from_conditional_containing_slot",
+          "asserted_contract": "conditional descendant slot contributes.",
+          "decision": "keep",
+          "line": 525
+        },
+        {
+          "test_id": "schema_from_loop_containing_slot",
+          "asserted_contract": "loop-body descendant slot contributes.",
+          "decision": "keep",
+          "line": 558
+        },
+        {
+          "test_id": "loose_fill_target_prefers_positional_slot_after_default_in_conditional_body",
+          "asserted_contract": "positional key remains loose target even with default encountered first in conditional body.",
+          "decision": "keep",
+          "line": 594
+        },
+        {
+          "test_id": "loose_fill_target_prefers_aggregate_positional_slot_after_loop_body_default",
+          "asserted_contract": "positional slot in loop aggregate beats default in loop body.",
+          "decision": "keep",
+          "line": 632
+        },
+        {
+          "test_id": "repeated_default_slots_are_valid_replay_sites",
+          "asserted_contract": "schema key deduplicates while both default placeholder occurrences remain.",
+          "decision": "keep",
+          "line": 673
+        },
+        {
+          "test_id": "ordered_slot_keys_returns_deterministic_order",
+          "asserted_contract": "keys order deterministically across author ordering, including Default, positional, and named keys.",
+          "decision": "keep",
+          "line": 708
+        },
+        {
+          "test_id": "accepts_target_validates_correctly",
+          "asserted_contract": "exact accepted/rejected default/named/positional targets.",
+          "decision": "keep",
+          "line": 750
+        },
+        {
+          "test_id": "skipped_node_kinds_do_not_contribute_to_schema",
+          "asserted_contract": "Text, DynamicExpression, and AggregateOutput do not create slot keys.",
+          "decision": "keep",
+          "line": 774
+        },
+        {
+          "test_id": "route_explicit_insert_to_each_target_slot_key",
+          "asserted_contract": "explicit named/default/positional insert bodies route to only their target buckets.",
+          "decision": "keep",
+          "line": 823
+        },
+        {
+          "test_id": "route_missing_loose_node_produces_internal_error",
+          "asserted_contract": "missing loose contribution node is infrastructure failure with exact missing-node authority.",
+          "decision": "keep",
+          "line": 973
+        },
+        {
+          "test_id": "route_missing_insert_body_node_produces_internal_error",
+          "asserted_contract": "missing insert-body node is a separate infrastructure failure.",
+          "decision": "keep",
+          "line": 997
+        },
+        {
+          "test_id": "route_loose_content_to_positional_slots",
+          "asserted_contract": "authored loose chunks fill positional 0 then 1 in order.",
+          "decision": "keep",
+          "line": 1026
+        },
+        {
+          "test_id": "route_loose_content_to_default_slot_after_positional_exhaustion",
+          "asserted_contract": "first chunk fills positional slot; remaining text/child content goes to default in order.",
+          "decision": "keep",
+          "line": 1072
+        },
+        {
+          "test_id": "route_loose_whitespace_after_head_fill_to_next_child_contribution",
+          "asserted_contract": "head fill consumes positional slot; body whitespace separator remains attached to following child/default chunk.",
+          "decision": "keep",
+          "line": 1122
+        },
+        {
+          "test_id": "route_loose_content_to_default_slot_only",
+          "asserted_contract": "default bucket receives body text/child in authored order.",
+          "decision": "keep",
+          "line": 1180
+        },
+        {
+          "test_id": "unknown_insert_target_produces_diagnostic",
+          "asserted_contract": "unknown named target emits `InsertTargetsUnknownNamedSlot`.",
+          "decision": "keep",
+          "line": 1220
+        },
+        {
+          "test_id": "loose_content_without_default_or_positional_slots_produces_diagnostic",
+          "asserted_contract": "meaningful loose content against named-only schema emits `LooseContentWithoutDefaultSlot`.",
+          "decision": "keep",
+          "line": 1245
+        },
+        {
+          "test_id": "named_only_slots_discard_loose_whitespace_around_insert_contributions",
+          "asserted_contract": "whitespace around named insert is discarded; insert body routes exactly to named bucket.",
+          "decision": "keep",
+          "line": 1272
+        },
+        {
+          "test_id": "extra_loose_content_beyond_positional_capacity_produces_diagnostic",
+          "asserted_contract": "excess positional content emits `ExtraLooseContentWithoutDefaultSlot`.",
+          "decision": "keep",
+          "line": 1338
+        },
+        {
+          "test_id": "empty_fill_template_with_slots_wrapper_routes_to_empty_contributions",
+          "asserted_contract": "slot schema is discovered but every fill bucket remains empty.",
+          "decision": "keep",
+          "line": 1360
+        },
+        {
+          "test_id": "mixed_explicit_inserts_and_loose_content_are_bucketed",
+          "asserted_contract": "explicit named contribution and loose default content land in separate buckets.",
+          "decision": "keep",
+          "line": 1395
+        },
+        {
+          "test_id": "expand_routes_each_slot_key_branch_to_its_contribution",
+          "asserted_contract": "all key branches expand in wrapper declaration order.",
+          "decision": "keep",
+          "line": 1461
+        },
+        {
+          "test_id": "missing_slot_renders_as_empty",
+          "asserted_contract": "missing key expands to an empty Sequence.",
+          "decision": "keep",
+          "line": 1510
+        },
+        {
+          "test_id": "expansion_missing_wrapper_set_produces_internal_error",
+          "asserted_contract": "referenced missing wrapper set is infrastructure failure.",
+          "decision": "keep",
+          "line": 1549
+        },
+        {
+          "test_id": "expansion_missing_conditional_wrapper_set_produces_internal_error",
+          "asserted_contract": "conditional child with missing wrapper-set authority is a separate infrastructure failure.",
+          "decision": "keep",
+          "line": 1593
+        },
+        {
+          "test_id": "repeated_slot_replays_same_contributions",
+          "asserted_contract": "repeated placeholders replay the same contribution node identity twice.",
+          "decision": "keep",
+          "line": 1653
+        },
+        {
+          "test_id": "nested_child_template_clone_vs_reuse_by_slot_presence",
+          "asserted_contract": "slot-bearing nested child is cloned/expanded; slotless child reuses original template identity.",
+          "decision": "keep",
+          "line": 1697
+        },
+        {
+          "test_id": "nested_child_slot_expansion_preserves_phase_context_wrapper_set_and_slot_plan",
+          "asserted_contract": "nested expansion preserves Composed phase, full view-context overlays, wrapper set and runtime slot plan.",
+          "decision": "keep",
+          "line": 1797
+        },
+        {
+          "test_id": "wrapper_application_preserves_only_authorised_structural_context",
+          "asserted_contract": "slot-bearing wrapper strips unauthorized overlays according to Parsed/Composed policy.",
+          "decision": "keep",
+          "line": 1903
+        },
+        {
+          "test_id": "slotless_wrapper_application_preserves_complete_reference_identity",
+          "asserted_contract": "slotless wrapper returns complete original reference identity/context/phase.",
+          "decision": "keep",
+          "line": 1991
+        },
+        {
+          "test_id": "conditional_with_slot_in_body_is_expanded",
+          "asserted_contract": "conditional-body slot receives its contribution.",
+          "decision": "keep",
+          "line": 2056
+        },
+        {
+          "test_id": "loop_with_slots_in_body_is_expanded",
+          "asserted_contract": "loop-body slot receives its contribution.",
+          "decision": "keep",
+          "line": 2130
+        },
+        {
+          "test_id": "no_slots_in_wrapper_returns_original_root",
+          "asserted_contract": "no-slot wrapper returns identical root.",
+          "decision": "keep",
+          "line": 2197
+        },
+        {
+          "test_id": "expand_preserves_non_slot_nodes",
+          "asserted_contract": "non-slot Text, AggregateOutput, and DynamicExpression node IDs remain unchanged while contribution is spliced.",
+          "decision": "keep",
+          "line": 2228
+        },
+        {
+          "test_id": "single_receiver_routes_head_and_body_fill_in_authored_order",
+          "asserted_contract": "head and body contributions route to one receiver in exact authored order.",
+          "decision": "keep",
+          "line": 2375
+        },
+        {
+          "test_id": "head_chain_receiver_collects_one_slot_layout",
+          "asserted_contract": "under `benchmark_counters`, one receiver performs exactly one slot-schema walk.",
+          "decision": "keep",
+          "line": 2437
+        },
+        {
+          "test_id": "composed_wrapper_published_summary_matches_the_expanded_tree",
+          "asserted_contract": "published summary equals recomputed expanded-tree facts.",
+          "decision": "keep",
+          "line": 2475
+        },
+        {
+          "test_id": "head_chain_missing_root_authority_remains_infrastructure_error",
+          "asserted_contract": "missing root remains compiler infrastructure error.",
+          "decision": "keep",
+          "line": 2526
+        },
+        {
+          "test_id": "nested_receivers_route_multiple_fills_in_chain_order",
+          "asserted_contract": "nested receivers resolve bottom-up and retain chain marker/fill order.",
+          "decision": "keep",
+          "line": 2562
+        },
+        {
+          "test_id": "receiver_with_no_fill_stays_unresolved",
+          "asserted_contract": "receiver without fill is not spuriously resolved.",
+          "decision": "keep",
+          "line": 2652
+        },
+        {
+          "test_id": "receiver_with_named_slots",
+          "asserted_contract": "named insert routes into named placeholder during composition.",
+          "decision": "keep",
+          "line": 2681
+        },
+        {
+          "test_id": "mixed_head_text_and_receiver",
+          "asserted_contract": "preceding head text remains before receiver result.",
+          "decision": "keep",
+          "line": 2730
+        },
+        {
+          "test_id": "no_receiver_returns_original_root_with_head_and_body_in_order",
+          "asserted_contract": "absent receiver preserves root and head/body order.",
+          "decision": "keep",
+          "line": 2788
+        },
+        {
+          "test_id": "compose_preserves_non_receiver_head_child_templates",
+          "asserted_contract": "nonreceiver head child and body node identities/template IDs remain intact.",
+          "decision": "keep",
+          "line": 2834
+        },
+        {
+          "test_id": "wrap_direct_child_in_single_wrapper_with_default_slot",
+          "asserted_contract": "direct child is inserted into default slot with identity/content preserved.",
+          "decision": "keep",
+          "line": 2949
+        },
+        {
+          "test_id": "shared_child_dag_replays_one_application_at_each_structural_occurrence",
+          "asserted_contract": "shared DAG child gets the same application at both structural occurrences.",
+          "decision": "keep",
+          "line": 2988
+        },
+        {
+          "test_id": "wrap_direct_child_in_wrapper_without_slots",
+          "asserted_contract": "slotless wrapper content precedes unchanged child.",
+          "decision": "keep",
+          "line": 3032
+        },
+        {
+          "test_id": "wrap_direct_child_in_multiple_wrappers",
+          "asserted_contract": "nested wrapper order is exact.",
+          "decision": "keep",
+          "line": 3077
+        },
+        {
+          "test_id": "head_chain_returns_the_original_root_when_no_receiver_exists",
+          "asserted_contract": "no-receiver head-chain path returns original root.",
+          "decision": "keep",
+          "line": 3145
+        }
+      ]
+    },
+    {
+      "path": "src/compiler_frontend/ast/templates/tests/create_template_node/parser_tir_tests.rs",
+      "level": "unit or compiler-stage invariant",
+      "baseline_test_count": 46,
+      "baseline_noncomment_loc": 2350,
+      "fixture_dependencies_and_lane": "create_template_node local publish_template_source, parse_template, parse_const_required_template and TIR/folding helpers",
+      "existing_owner": "src/compiler_frontend/ast/templates/tests/create_template_node/parser_tir_tests.rs",
+      "default_decision": "keep: distinct local invariant or failure path, no equivalent surviving assertion established",
+      "required_validation": "cargo test -p moth --lib parser_tir_tests",
+      "tests": [
+        {
+          "test_id": "parser_tir_owns_contiguous_literal_body_text",
+          "asserted_contract": "multiline literal body becomes exact normalized body-text node.",
+          "decision": "keep",
+          "line": 169
+        },
+        {
+          "test_id": "parser_tir_records_quoted_and_raw_markers_as_body_text",
+          "asserted_contract": "quoted/backtick markers are literal body text with exact spelling.",
+          "decision": "keep",
+          "line": 193
+        },
+        {
+          "test_id": "parser_tir_records_suppressed_child_template_brackets_as_literal_text",
+          "asserted_contract": "`$doc` suppression emits bracket syntax as literal text.",
+          "decision": "keep",
+          "line": 216
+        },
+        {
+          "test_id": "template_tir_folds_nested_child_as_child_template_boundary",
+          "asserted_contract": "nested child remains structural ChildTemplate between text nodes; final folded output asserted.",
+          "decision": "keep",
+          "line": 240
+        },
+        {
+          "test_id": "parser_preserves_foldable_nested_child_as_template_boundary",
+          "asserted_contract": "const-required child source retains ChildTemplate boundary; assertion is a subset of test 39.",
+          "decision": "merge_candidate",
+          "line": 292,
+          "surviving_test_id": "parser_tir_records_finalized_child_template_as_child_template_node",
+          "overlap_status": "confirmed overlap"
+        },
+        {
+          "test_id": "template_tir_records_child_template_in_conditional_body",
+          "asserted_contract": "conditional body contains Text/ChildTemplate/Text structure.",
+          "decision": "keep",
+          "line": 401
+        },
+        {
+          "test_id": "conditional_body_tir_root_derives_shared_head_prefix_from_parser_tir",
+          "asserted_contract": "shared head prefix is present in selected conditional-body TIR.",
+          "decision": "keep",
+          "line": 477
+        },
+        {
+          "test_id": "parser_tir_records_loop_node",
+          "asserted_contract": "loop node/header, aggregate wrapper/output, body text, and control-flow summary are asserted.",
+          "decision": "keep",
+          "line": 518
+        },
+        {
+          "test_id": "template_tir_records_child_template_in_loop_body",
+          "asserted_contract": "loop body retains Text/ChildTemplate/Text structure.",
+          "decision": "keep",
+          "line": 572
+        },
+        {
+          "test_id": "parser_tir_records_default_slot_placeholder",
+          "asserted_contract": "exact root shape and Default slot key/count.",
+          "decision": "keep",
+          "line": 624
+        },
+        {
+          "test_id": "parser_tir_records_named_slot_placeholder",
+          "asserted_contract": "exact root shape and named key.",
+          "decision": "keep",
+          "line": 669
+        },
+        {
+          "test_id": "parser_tir_records_positional_slot_placeholder",
+          "asserted_contract": "exact root shape and positional key.",
+          "decision": "keep",
+          "line": 702
+        },
+        {
+          "test_id": "parser_tir_records_string_literal_head_before_body_with_head_origin",
+          "asserted_contract": "head/body text order and distinct origin.",
+          "decision": "keep",
+          "line": 734
+        },
+        {
+          "test_id": "parser_tir_records_numeric_head_as_dynamic_expression_with_head_origin",
+          "asserted_contract": "numeric head is DynamicExpression with Head origin; body remains Body text.",
+          "decision": "keep",
+          "line": 761
+        },
+        {
+          "test_id": "formatter_inline_code_literal_preserves_code_markup_in_parser_tir",
+          "asserted_contract": "formatted parser-TIR markdown contains exact inline-code markup.",
+          "decision": "keep",
+          "line": 817
+        },
+        {
+          "test_id": "formatter_inline_code_preserves_span_for_authored_body_head_insert_anchor",
+          "asserted_contract": "inline-code span preserves authored child boundary and its surrounding head-insert text.",
+          "decision": "keep",
+          "line": 848
+        },
+        {
+          "test_id": "inline_code_head_insert_records_formatted_tir_phase",
+          "asserted_contract": "formatted phase, nonempty child structure, and exact folded code output.",
+          "decision": "keep",
+          "line": 946
+        },
+        {
+          "test_id": "head_stringslice_records_formatted_tir_phase",
+          "asserted_contract": "head literal plus markdown body reaches Formatted and folds exactly.",
+          "decision": "keep",
+          "line": 991
+        },
+        {
+          "test_id": "style_child_wrapper_no_children_records_formatted_tir_phase",
+          "asserted_contract": "no-op children wrapper reaches Formatted and exact output.",
+          "decision": "keep",
+          "line": 1022
+        },
+        {
+          "test_id": "style_child_wrapper_with_children_records_formatted_tir_phase",
+          "asserted_contract": "same fixture/output as test 31; subset of 31.",
+          "decision": "merge_candidate",
+          "line": 1053,
+          "surviving_test_id": "formatter_children_wrapper_composition_keeps_formatted_reference",
+          "overlap_status": "confirmed overlap"
+        },
+        {
+          "test_id": "head_only_literal_text_records_formatted_tir_phase",
+          "asserted_contract": "head-only template reaches Formatted and folds to `head`.",
+          "decision": "keep",
+          "line": 1085
+        },
+        {
+          "test_id": "pure_direct_dynamic_formatter_template_records_formatted_tir_phase",
+          "asserted_contract": "directly constructed, source-unexpressible dynamic-only template is accepted through formatter-view installation.",
+          "decision": "keep",
+          "line": 1153
+        },
+        {
+          "test_id": "head_expression_folds_through_tir_formatter",
+          "asserted_contract": "nonliteral numeric head expression reaches Formatted and folds to `42`.",
+          "decision": "keep",
+          "line": 1229
+        },
+        {
+          "test_id": "raw_directive_preserves_whitespace_and_advances_through_formatter_adapter",
+          "asserted_contract": "`$raw` retains exact authored whitespace through formatter adapter and Formatted phase.",
+          "decision": "keep",
+          "line": 1265
+        },
+        {
+          "test_id": "parent_formatter_does_not_leak_into_nested_child_without_formatter",
+          "asserted_contract": "parent markdown is Formatted, child formatter stays absent, and child raw HTML is not escaped.",
+          "decision": "keep",
+          "line": 1334
+        },
+        {
+          "test_id": "nested_child_with_own_formatter_is_formatted_independently",
+          "asserted_contract": "child’s own markdown formatter escapes HTML independently of parent.",
+          "decision": "keep",
+          "line": 1385
+        },
+        {
+          "test_id": "formatted_tir_reference_installs_formatted_output_for_simple_template",
+          "asserted_contract": "simple formatted output is installed at Formatted phase.",
+          "decision": "keep",
+          "line": 1440
+        },
+        {
+          "test_id": "formatted_tir_reference_installs_with_opaque_body_child_template",
+          "asserted_contract": "formatted text surrounds an opaque ChildTemplate; child remains separately inspectable.",
+          "decision": "keep",
+          "line": 1470
+        },
+        {
+          "test_id": "formatter_head_chain_composition_keeps_formatted_reference",
+          "asserted_contract": "head wrapper composition preserves Formatted reference and exact nested output.",
+          "decision": "keep",
+          "line": 1530
+        },
+        {
+          "test_id": "positional_default_slot_children_preserve_separator_whitespace",
+          "asserted_contract": "positional/default child output preserves separator whitespace and authored order.",
+          "decision": "keep",
+          "line": 1639
+        },
+        {
+          "test_id": "formatter_children_wrapper_composition_keeps_formatted_reference",
+          "asserted_contract": "formatted child-wrapper composition preserves phase and exact output; subsumes test 20.",
+          "decision": "keep",
+          "line": 1741
+        },
+        {
+          "test_id": "formatter_named_insert_installs_formatted_reference_and_preserves_routing",
+          "asserted_contract": "formatted named insert keeps routing and exact combined output.",
+          "decision": "keep",
+          "line": 1775
+        },
+        {
+          "test_id": "no_formatter_slot_receiver_does_not_claim_formatted_phase",
+          "asserted_contract": "despite the stale/misleading name, the test asserts **Formatted** phase and empty output for missing default slot.",
+          "decision": "keep",
+          "line": 1936
+        },
+        {
+          "test_id": "no_formatter_child_wrapper_reaches_formatted_phase_through_tir",
+          "asserted_contract": "no-formatter wrapper reaches Formatted and preserves expected child output.",
+          "decision": "keep",
+          "line": 1966
+        },
+        {
+          "test_id": "formatted_tir_reference_installs_formatted_conditional_body",
+          "asserted_contract": "conditional body’s formatted TIR and control-flow summary are asserted.",
+          "decision": "keep",
+          "line": 1995
+        },
+        {
+          "test_id": "formatted_tir_reference_installs_formatted_loop_body",
+          "asserted_contract": "loop body formatted text, header, aggregate output, control-flow summary, and authored span are asserted.",
+          "decision": "keep",
+          "line": 2033
+        },
+        {
+          "test_id": "no_formatter_control_flow_owner_reaches_formatted_phase",
+          "asserted_contract": "plain conditional/loop whitespace normalisation and `$raw` preservation all reach Formatted.",
+          "decision": "keep",
+          "line": 2097
+        },
+        {
+          "test_id": "default_whitespace_linear_records_formatted_tir_phase",
+          "asserted_contract": "default whitespace normalisation reaches Formatted and exact folded output.",
+          "decision": "keep",
+          "line": 2183
+        },
+        {
+          "test_id": "parser_tir_records_finalized_child_template_as_child_template_node",
+          "asserted_contract": "same const-required input as test 5; additionally checks exact three-node order, child summary, parent summary, and max depth.",
+          "decision": "keep",
+          "line": 2215
+        },
+        {
+          "test_id": "parser_records_template_valued_head_as_structural_child_before_body_parse",
+          "asserted_contract": "after `parse_template_head`, template-valued head is a structural ChildTemplate with exact reference root/phase/context.",
+          "decision": "keep",
+          "line": 2265
+        },
+        {
+          "test_id": "parser_tir_records_template_valued_head_reference_as_child_template",
+          "asserted_contract": "full parse preserves template-valued head as structural child and body text; distinct from test 40’s pre-body stage handoff.",
+          "decision": "keep",
+          "line": 2388
+        },
+        {
+          "test_id": "parser_tir_skips_conditional_child_wrappers_for_fresh_control_flow_child",
+          "asserted_contract": "`$fresh` conditional child has no conditional wrapper set and wrapper count is zero.",
+          "decision": "keep",
+          "line": 2511
+        },
+        {
+          "test_id": "doc_comment_with_formatter_records_comment_kind",
+          "asserted_contract": "`$doc` root retains `Comment(Doc)` kind.",
+          "decision": "keep",
+          "line": 2554
+        },
+        {
+          "test_id": "no_prefix_if_finalizes_with_direct_conditional_root",
+          "asserted_contract": "no-prefix `if` finalizes with Conditional root rather than Sequence wrapper.",
+          "decision": "keep",
+          "line": 2589
+        },
+        {
+          "test_id": "no_prefix_loop_finalizes_with_direct_loop_root",
+          "asserted_contract": "no-prefix loop finalizes with Loop root rather than Sequence wrapper.",
+          "decision": "keep",
+          "line": 2617
+        },
+        {
+          "test_id": "linear_template_preserves_sequence_root_shape",
+          "asserted_contract": "linear template still finalizes with Sequence root.",
+          "decision": "keep",
+          "line": 2645
+        }
+      ]
+    },
+    {
+      "path": "src/compiler_frontend/hir/tests/hir_validation_tests.rs",
+      "level": "unit or compiler-stage invariant",
+      "baseline_test_count": 87,
+      "baseline_noncomment_loc": 4635,
+      "fixture_dependencies_and_lane": "minimal_lowered_hir_module plus directly mutated invalid HIR; numeric operation/cast policy fixtures",
+      "existing_owner": "src/compiler_frontend/hir/tests/hir_validation_tests.rs",
+      "default_decision": "keep: distinct local invariant or failure path, no equivalent surviving assertion established",
+      "required_validation": "cargo test -p moth --lib hir_validation_tests",
+      "tests": [
+        {
+          "test_id": "validator_accepts_field_projection_owned_by_current_nominal_type",
+          "line": 391,
+          "asserted_contract": "owner struct’s field load/projection validates.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_field_projection_owned_by_another_nominal_type",
+          "line": 430,
+          "asserted_contract": "foreign nominal field with a matching value type is rejected; preserves source span.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_field_projection_owned_by_another_generic_instance",
+          "line": 498,
+          "asserted_contract": "rejects a field from another generic instance despite matching substituted field type; preserves owner span.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_resolves_field_and_index_projections_from_each_reached_type",
+          "line": 590,
+          "asserted_contract": "valid Outer → collection index → Inner field chain.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_foreign_field_after_index_projection",
+          "line": 667,
+          "asserted_contract": "rejects foreign field after index projection even when scalar type matches; checks exact span.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_place_classification_for_non_load_values",
+          "line": 769,
+          "asserted_contract": "rejects a fixed scalar literal classified as a Place; checks error type and invariant message.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_accepts_rvalue_load_and_checks_load_copy_place_types",
+          "line": 794,
+          "asserted_contract": "accepts RValue load; separately rejects malformed Load and Copy whose expression/place types disagree.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_numeric_ops_with_invalid_fixed_domains",
+          "line": 1240,
+          "asserted_contract": "rejects Float IntegerDivide, U32 Divide, and U32 Negate.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_fixed_numeric_op_operand_type_mismatch",
+          "line": 1278,
+          "asserted_contract": "rejects U8/U32 operands in U32 Add.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_accepts_valid_fixed_numeric_ops",
+          "line": 1295,
+          "asserted_contract": "accepts U32 Add/IntegerDivide, I32/I8 Negate, and F64 Divide.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_accepts_uint_numeric_ops_and_rejects_mixed_or_negated_pairs",
+          "line": 1349,
+          "asserted_contract": "accepts U32 Add/Subtract/Multiply/IntegerDivide/Remainder/Power; rejects U32 Divide, mixed U32/I32 Add, and U32 Negate.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_accepts_uint_cast_pairs_and_comparisons",
+          "line": 1412,
+          "asserted_contract": "accepts fallible U32↔I32 casts and exact U32/U32 and U32/I32 comparisons.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_accepts_number_operator_scale_rules_and_int_power_exponent",
+          "line": 1441,
+          "asserted_contract": "accepts Dec2 arithmetic/negation, Dec0 IntegerDivide, and Dec power with I32 exponent.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_number_operator_scale_and_operand_mismatches",
+          "line": 1468,
+          "asserted_contract": "rejects invalid Divide/IntegerDivide scale, Dec exponent, mixed fixed operand, and unequal Dec scales.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_unregistered_number_domain_without_panicking",
+          "line": 1507,
+          "asserted_contract": "malformed Dec7 domain/type combination rejects without panic.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_distinguishes_fallible_number_cast_pairs",
+          "line": 1526,
+          "asserted_contract": "accepts Dec4→Dec2 and Dec2→I32; rejects Dec widening and unsupported Dec/fixed pairs.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_numeric_conversion_cast_source_policy_mismatch",
+          "line": 1573,
+          "asserted_contract": "rejects cast source inconsistent with policy.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_numeric_conversion_cast_success_slot_type_mismatch",
+          "line": 1589,
+          "asserted_contract": "rejects incorrect success-slot type.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_numeric_conversion_cast_error_slot_type_mismatch",
+          "line": 1605,
+          "asserted_contract": "rejects non-builtin error slot.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_uses_numeric_comparison_compatibility_and_keeps_same_type_other_values",
+          "line": 1621,
+          "asserted_contract": "accepts I64/U64 Lt and Byte Eq; rejects I32/F64 Eq.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_requires_explicit_integer_to_number_comparison_conversion",
+          "line": 1642,
+          "asserted_contract": "accepts explicit I32/U64-to-Dec conversion; rejects unconverted I32/Dec.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "valid_module_passes_explicit_validation",
+          "line": 1654,
+          "asserted_contract": "valid lowered module passes explicit validation.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_assertion_message_evaluation_fact_mismatch",
+          "line": 1694,
+          "asserted_contract": "Option<String> None paired with Folded terminator fact rejects with mismatch message.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_numeric_op_operand_shape_mismatch",
+          "line": 1740,
+          "asserted_contract": "malformed binary-shaped Negate rejects with message.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_numeric_op_operand_domain_mismatch",
+          "line": 1793,
+          "asserted_contract": "I32 Add with F64 operands rejects.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_integer_divide_on_float_domain",
+          "line": 1844,
+          "asserted_contract": "F64 IntegerDivide rejects with operator/domain message.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_accepts_internal_string_append_with_scalar_chunk",
+          "line": 1928,
+          "asserted_contract": "String accumulator plus I32 chunk and String result validates.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_string_append_with_non_string_result",
+          "line": 1958,
+          "asserted_contract": "bad result type rejects with message.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_string_append_with_non_string_accumulator",
+          "line": 1993,
+          "asserted_contract": "bad accumulator type rejects with message.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_plain_numeric_unary_op",
+          "line": 2027,
+          "asserted_contract": "plain UnaryOp Negate instead of NumericOp rejects with message.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_accepts_format_float_trap",
+          "line": 2158,
+          "asserted_contract": "accepts valid FormatFloat trap.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_accepts_validate_float_trap",
+          "line": 2185,
+          "asserted_contract": "accepts valid ValidateFloat trap.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_accepts_validate_float_with_exact_fixed_f64_type",
+          "line": 2212,
+          "asserted_contract": "accepts exact fixed-F64 type.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_validate_float_result_type_mismatch",
+          "line": 2240,
+          "asserted_contract": "rejects F64 source/F32 result.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_validate_float_with_non_float_source",
+          "line": 2271,
+          "asserted_contract": "rejects correctly typed I32 source to ValidateFloat.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_format_float_trap_with_non_string_result",
+          "line": 2311,
+          "asserted_contract": "rejects non-String result and checks message.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_discharged_mode_on_float_and_range_step_statements",
+          "line": 2345,
+          "asserted_contract": "separate Infallible FormatFloat, ValidateFloat, and RangeStepFailure cases; checks mode messages.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_invalid_jump_target",
+          "line": 2436,
+          "asserted_contract": "unknown block target rejects with unknown-block diagnostic.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_accepts_typed_jump_definition_from_local_source",
+          "line": 2488,
+          "asserted_contract": "valid typed source-to-destination jump transfer.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_jump_with_unknown_source_or_destination_local",
+          "line": 2521,
+          "asserted_contract": "separately tests unknown source and destination locals.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_mismatched_and_duplicate_jump_destinations",
+          "line": 2576,
+          "asserted_contract": "separately tests type mismatch and duplicate destination.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_requires_jump_destinations_to_belong_to_the_target_block",
+          "line": 2645,
+          "asserted_contract": "rejects destination local that belongs only to source block.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_requires_all_incoming_edges_to_agree_on_destination_set_and_arity",
+          "line": 2682,
+          "asserted_contract": "rejects no-transfer If arm vs Jump and same-arity predecessors with different destinations.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_accepts_reordered_incoming_jump_destination_pairs",
+          "line": 2824,
+          "asserted_contract": "accepts reordered pairs for same destination set.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_jump_sources_owned_by_another_function",
+          "line": 2915,
+          "asserted_contract": "rejects helper-function local as start-entry edge source.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_requires_parameters_to_be_defined_in_the_entry_block",
+          "line": 2992,
+          "asserted_contract": "rejects parameter local defined in non-entry block.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_parameter_definition_destinations_but_accepts_updates",
+          "line": 3023,
+          "asserted_contract": "rejects ABI parameter definitions through Write, RangeStepFailure, and CFG jump; accepts mutable parameter Update and ordinary mutable assignment Update.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_non_literal_match_pattern",
+          "line": 3164,
+          "asserted_contract": "rejects Load as match pattern.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rechecks_shared_expression_in_match_pattern_context",
+          "line": 3256,
+          "asserted_contract": "shared literal first passes ordinary expression validation then fails as wrong pattern type; checks match-span attribution/message.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_fixed_match_literal_type_different_from_scrutinee",
+          "line": 3385,
+          "asserted_contract": "rejects fixed literal type mismatch.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_fixed_match_relational_type_different_from_scrutinee",
+          "line": 3407,
+          "asserted_contract": "rejects relational pattern type mismatch.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_option_labelled_fixed_scalar_match_pattern",
+          "line": 3432,
+          "asserted_contract": "rejects OptionValue discriminator on fixed scalar pattern.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_missing_side_table_mappings",
+          "line": 3456,
+          "asserted_contract": "clears side table after valid lowering; rejects.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_unresolved_generic_parameter_types",
+          "line": 3522,
+          "asserted_contract": "rejects unresolved generic parameter local type.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_collection_containing_generic_parameter",
+          "line": 3582,
+          "asserted_contract": "rejects generic inside collection local type.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_option_containing_generic_parameter",
+          "line": 3598,
+          "asserted_contract": "rejects generic inside Option.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_generic_nominal_instance_containing_generic_parameter",
+          "line": 3612,
+          "asserted_contract": "rejects generic inside Box-like nominal instance.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_function_type_containing_generic_parameter",
+          "line": 3632,
+          "asserted_contract": "rejects generic in function type.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_struct_field_type_containing_generic_parameter",
+          "line": 3647,
+          "asserted_contract": "rejects generic in struct field.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_function_return_type_containing_generic_parameter",
+          "line": 3706,
+          "asserted_contract": "rejects generic return type.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_function_error_type_containing_generic_parameter",
+          "line": 3728,
+          "asserted_contract": "rejects generic error type.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_function_parameter_type_containing_generic_parameter",
+          "line": 3749,
+          "asserted_contract": "rejects generic parameter type.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_choice_payload_type_containing_generic_parameter",
+          "line": 3807,
+          "asserted_contract": "rejects generic choice payload.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_expression_type_containing_generic_parameter",
+          "line": 3836,
+          "asserted_contract": "rejects generic expression type.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_anonymous_const_record_marker_on_local",
+          "line": 3873,
+          "asserted_contract": "marker cannot leak into local runtime type.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_anonymous_const_record_marker_on_expression",
+          "line": 3888,
+          "asserted_contract": "marker cannot leak into expression runtime type.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_anonymous_const_record_marker_on_function_return",
+          "line": 3928,
+          "asserted_contract": "marker cannot leak into function return.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "classify_hir_type_rejects_anonymous_const_record_marker",
+          "line": 3952,
+          "asserted_contract": "ABI classifier rejects marker.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_placeholder_terminator",
+          "line": 3967,
+          "asserted_contract": "rejects placeholder terminator.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_region_cycle",
+          "line": 4016,
+          "asserted_contract": "rejects cyclic region parent relation.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_accepts_deep_runtime_not_chain_on_small_stack",
+          "line": 4061,
+          "asserted_contract": "2,048 nested Not nodes and repeated shared chain validate on a 1 MiB child-thread stack.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_cycle_in_expression_id_graph",
+          "line": 4128,
+          "asserted_contract": "rejects expression graph cycle.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_cycle_after_consecutive_not_rows",
+          "line": 4166,
+          "asserted_contract": "rejects cycle after consecutive Not rows.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_dangling_expression_child_id",
+          "line": 4214,
+          "asserted_contract": "rejects dangling expression child ID.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_clears_consecutive_not_rows_after_dangling_child_error",
+          "line": 4250,
+          "asserted_contract": "dangling child error followed by repeat validation; checks equal errors and cleanup of Not rows.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_dangling_index_expression_id",
+          "line": 4288,
+          "asserted_contract": "rejects dangling index expression ID.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_missing_region_parent",
+          "line": 4329,
+          "asserted_contract": "rejects absent parent region.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_cross_function_cfg_edges",
+          "line": 4374,
+          "asserted_contract": "rejects cross-function edge.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "lowering_errors_preserve_string_table_context",
+          "line": 4445,
+          "asserted_contract": "lowering infrastructure error carries string-table context.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "hir_variant_construct_option_invalid_index_rejected",
+          "line": 4495,
+          "asserted_contract": "rejects invalid Option variant index.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "hir_variant_construct_choice_wrong_field_name_rejected",
+          "line": 4586,
+          "asserted_contract": "rejects choice field name not matching variant payload.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "hir_variant_construct_choice_wrong_field_type_rejected",
+          "line": 4726,
+          "asserted_contract": "rejects choice payload field type mismatch.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_collection_expression_with_non_collection_type",
+          "line": 4867,
+          "asserted_contract": "rejects collection expression typed as I32.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_accepts_collection_expression_with_growable_collection_type",
+          "line": 4888,
+          "asserted_contract": "accepts growable collection.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_accepts_collection_expression_with_fixed_collection_type",
+          "line": 4904,
+          "asserted_contract": "accepts fixed collection.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_rejects_number_literal_scale_that_mismatches_hir_type",
+          "line": 4920,
+          "asserted_contract": "matching Dec scale passes; deliberately mismatched scale ID rejects.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "validator_owns_pending_catch_handler_edges_and_rejects_dangling_or_cross_function_records",
+          "line": 4988,
+          "asserted_contract": "parsed catch fixture validates its pending handler record; separately rejects dangling statement and cross-function handler records.",
+          "decision": "keep"
+        }
+      ]
+    },
+    {
+      "path": "src/compiler_frontend/hir/tests/hir_expression_lowering_tests.rs",
+      "level": "unit or compiler-stage invariant",
+      "baseline_test_count": 63,
+      "baseline_noncomment_loc": 4518,
+      "fixture_dependencies_and_lane": "Local AST expression builders/registered locals and runtime_template_expression; inspect lowering output or precise internal rejection",
+      "existing_owner": "src/compiler_frontend/hir/tests/hir_expression_lowering_tests.rs",
+      "default_decision": "keep: distinct local invariant or failure path, no equivalent surviving assertion established",
+      "required_validation": "cargo test -p moth --lib hir_expression_lowering_tests",
+      "tests": [
+        {
+          "test_id": "expression_test_builder_produces_valid_hir_module_metadata",
+          "line": 424,
+          "asserted_contract": "test-only setup_builder fixture validates after manually installing an empty Return, without exercising expression lowering.",
+          "decision": "remove_candidate",
+          "reason": "Fixture wiring and bare validation success do not protect a distinct expression-lowering regression. Retain valid_module_passes_explicit_validation and malformed-HIR metadata/provenance owners."
+        },
+        {
+          "test_id": "runtime_template_slot_placeholder_materializes_as_no_output_owned_node",
+          "line": 447,
+          "asserted_contract": "slot is represented as no-output owned node; text chunks remain before/after it.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "escaped_slot_insert_helpers_fail_when_they_reach_hir_runtime_lowering",
+          "line": 505,
+          "asserted_contract": "escaped slot insertion reaches raw runtime lowering and rejects with exact common compiler-bug text.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "escaped_slot_definition_helpers_fail_when_they_reach_hir_runtime_lowering",
+          "line": 538,
+          "asserted_contract": "equivalent definition-helper failure path, same message.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "runtime_template_without_handoff_reports_compiler_bug",
+          "line": 571,
+          "asserted_contract": "StringFunction template without handoff reports compiler bug.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "lowers_primitive_literals",
+          "line": 602,
+          "asserted_contract": "literal HIR rows preserve I32/F64/Bool/Char/String values; no prelude.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "lowers_int_above_i32_range_without_truncation",
+          "line": 728,
+          "asserted_contract": "3,000,000,000 is I64, not truncated.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "lowers_reference_to_registered_local",
+          "line": 764,
+          "asserted_contract": "registered local is a Place Load.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "lowers_reference_to_module_constant_when_local_is_missing",
+          "line": 808,
+          "asserted_contract": "absent local resolves module constant value.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "lowers_runtime_rpn_arithmetic_stack_correctly",
+          "line": 853,
+          "asserted_contract": "`x,2,y,*,+` produces I32 arithmetic and load.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "runtime_division_subexpression_infers_float_type_in_hir",
+          "line": 933,
+          "asserted_contract": "regular division yields F64 intermediate/result.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "runtime_integer_division_lowers_to_hir_int_div_with_int_type",
+          "line": 987,
+          "asserted_contract": "integer division remains I32 IntegerDivide.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "lowers_unary_not_in_runtime_rpn",
+          "line": 1031,
+          "asserted_contract": "nested runtime Not rows preserve Boolean types and exact authored span mapping.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "lowers_range_operator_in_runtime_rpn",
+          "line": 1101,
+          "asserted_contract": "runtime range expression becomes Range.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "lowers_function_call_to_call_statement_and_temp_load",
+          "line": 1136,
+          "asserted_contract": "local call, one argument, one Define result temp, RValue Load.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "expression_function_call_uses_success_shape_for_single_return",
+          "line": 1197,
+          "asserted_contract": "single success slot is I32.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "expression_function_call_uses_success_shape_for_no_return",
+          "line": 1239,
+          "asserted_contract": "no return slots.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "expression_function_call_uses_success_shape_for_multi_return",
+          "line": 1272,
+          "asserted_contract": "ordered I32/Bool success slots.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "forwarded_multiple_return_wraps_each_optional_slot_without_repeating_call",
+          "line": 1322,
+          "asserted_contract": "one call, two result definitions, each optionally wrapped with its type preserved.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "expression_host_call_uses_success_shape",
+          "line": 1373,
+          "asserted_contract": "Host call result uses I32 success shape.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "expression_handled_fallible_call_fallback_uses_success_shape",
+          "line": 1407,
+          "asserted_contract": "handled call fallback shape and HandledByCatch facts.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "optional_user_defined_cast_recovery_merges_the_inner_target_type",
+          "line": 1491,
+          "asserted_contract": "recovery joins inner String target, not optional wrapper.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "expression_handled_result_preserves_success_shape",
+          "line": 1610,
+          "asserted_contract": "two handled result slots preserve order and types.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "lowers_fresh_mutable_call_argument_via_hidden_local_with_origin_metadata",
+          "line": 1713,
+          "asserted_contract": "fresh mutable argument gets temp and origin metadata; checks kind/index and no fabricated call span.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "lowers_receiver_method_call_with_receiver_as_first_argument",
+          "line": 1793,
+          "asserted_contract": "source receiver precedes explicit args.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "lowers_builtin_scalar_receiver_method_call_with_receiver_as_first_argument",
+          "line": 1873,
+          "asserted_contract": "builtin scalar receiver is first arg.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "lowers_host_call_expression_with_host_target",
+          "line": 1937,
+          "asserted_contract": "call target is External IoLine.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "preserves_left_to_right_call_prelude_order_in_nested_call_args",
+          "line": 1984,
+          "asserted_contract": "nested call argument preludes preserve left-to-right call target order.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "runtime_template_expression_lowers_inline_to_accumulator",
+          "line": 2056,
+          "asserted_contract": "no prelude/helper, Copy local result, literal “hello” assigned to accumulator.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "runtime_template_handoff_expression_lowers_inline_to_accumulator",
+          "line": 2098,
+          "asserted_contract": "**same input builder (`runtime_template_expression`) and same assertions as 2055**; no distinct handoff fixture is tested.",
+          "decision": "merge_candidate",
+          "surviving_test_id": "runtime_template_expression_lowers_inline_to_accumulator",
+          "overlap_status": "confirmed overlap"
+        },
+        {
+          "test_id": "runtime_template_handoff_expression_flattens_nested_linear_handoff",
+          "line": 2140,
+          "asserted_contract": "nested linear handoff yields ordered before/inner/after content and one accumulator initialization.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "runtime_template_inline_accumulator_coerces_non_string_segments",
+          "line": 2208,
+          "asserted_contract": "non-String segment is coerced through inline accumulator.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "runtime_template_lowers_nested_templates_in_order",
+          "line": 2242,
+          "asserted_contract": "nested literal chunks preserve A/B/C order.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "runtime_template_control_flow_bool_if_lowers_inline_without_helper_call",
+          "line": 2308,
+          "asserted_contract": "Bool If inlines without helper; checks one initialization and branch writes.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "runtime_template_control_flow_bool_if_branch_preserves_fallible_propagation_cfg",
+          "line": 2402,
+          "asserted_contract": "Bool If keeps fallible Invoke/error-return CFG, no helper.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "runtime_template_control_flow_bool_if_coerces_dynamic_branch_chunks",
+          "line": 2504,
+          "asserted_contract": "dynamic branch chunk is coerced to String.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "runtime_template_control_flow_option_capture_lowers_match_and_payload_binding",
+          "line": 2563,
+          "asserted_contract": "Option match materializes scrutinee once; present path binds payload, absent path does not.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "runtime_template_control_flow_loop_range_lowers_inline_and_wraps_aggregate_when_emitted",
+          "line": 2708,
+          "asserted_contract": "emitted range loop wraps aggregate and marks emission.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "runtime_template_control_flow_loop_collection_materializes_iterable_and_length_once",
+          "line": 2811,
+          "asserted_contract": "iterable and CollectionLength each materialized once.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "runtime_template_control_flow_conditional_loop_rechecks_condition_and_wraps_when_emitted",
+          "line": 2900,
+          "asserted_contract": "condition reevaluated; aggregate wrapper/marker appears when emitted.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "runtime_template_control_flow_loop_empty_body_does_not_mark_iteration_emitted",
+          "line": 2968,
+          "asserted_contract": "empty body does not set emitted marker.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "local_resolution_uses_full_path_identity_not_leaf_name",
+          "line": 3162,
+          "asserted_contract": "full symbol path prevents leaf-only local resolution.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "nominal_struct_identity_uses_field_parent_path",
+          "line": 3208,
+          "asserted_contract": "StructConstruct uses nominal/field parent path identity.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "rejects_const_record_struct_instance_runtime_lowering",
+          "line": 3266,
+          "asserted_contract": "rejects runtime const-record construction with exact message.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "temp_locals_are_not_resolvable_as_user_symbols",
+          "line": 3319,
+          "asserted_contract": "compiler temp cannot be resolved via user symbol lookup after first lowering.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "field_access_uses_base_struct_identity_not_global_leaf_lookup",
+          "line": 3375,
+          "asserted_contract": "FieldId comes from base struct, not global leaf lookup.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "field_access_from_module_constant_base_materializes_temp_place",
+          "line": 3455,
+          "asserted_contract": "module-constant struct base becomes temp Place and field load.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "const_record_module_constant_field_access_lowers_field_value_without_struct_construct",
+          "line": 3560,
+          "asserted_contract": "constant record field read lowers direct value without StructConstruct/temp.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "lowers_collection_builtin_host_calls_from_explicit_ast_nodes",
+          "line": 3645,
+          "asserted_contract": "explicit collection AST nodes map to Get/Set/PushFixed/PushGrowable/Remove/Length ops, effects/fallibility/result slots; includes operation/receiver mismatch probe.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "map_literal_lowering_preserves_entry_order",
+          "line": 3867,
+          "asserted_contract": "Map literal retains key/value order.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "map_builtin_calls_lower_to_first_class_hir_ops",
+          "line": 3960,
+          "asserted_contract": "Map Get/Set/Length become first-class MapOps with expected receiver/arguments/results.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "lowers_choice_variant_expression_to_hir_variant_construct",
+          "line": 4097,
+          "asserted_contract": "Choice variant expression preserves choice/variant identity and payload type.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "collection_expression_lowering_preserves_fixed_type_identity",
+          "line": 4186,
+          "asserted_contract": "fixed capacity/elements remain in collection type identity.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "lowers_option_none_to_hir_variant_construct",
+          "line": 4249,
+          "asserted_contract": "None uses Option VariantConstruct carrier/index zero/no fields.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "external_float_call_emits_validate_float_in_current_block",
+          "line": 4287,
+          "asserted_contract": "external float Call followed by ValidateFloat in current block.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "external_fixed_f64_call_allocates_and_validates_its_exact_type",
+          "line": 4337,
+          "asserted_contract": "exact fixed F64 result local is validated.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "external_float_call_in_builtin_error_function_validates_through_invoke",
+          "line": 4397,
+          "asserted_contract": "boundary check uses Invoke in builtin Error function.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "external_int_call_does_not_emit_validate_float",
+          "line": 4452,
+          "asserted_contract": "integer negative control emits no validation.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "external_fallible_float_call_propagation_validates_success",
+          "line": 4493,
+          "asserted_contract": "propagation validates success only.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "external_fallible_float_call_catch_validates_success",
+          "line": 4568,
+          "asserted_contract": "catch validates success before merge.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "coerced_numeric_promotion_lowers_to_explicit_infallible_cast",
+          "line": 4686,
+          "asserted_contract": "U32/I32 promotion to F64 is explicit NumericConversion Cast with exact source values and no prelude.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "metadata_replacement_preserves_distinct_occurrence_mappings",
+          "line": 4766,
+          "asserted_contract": "replacement preserves AST/source occurrence maps, regions, reuse/allocation.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "lowers_deep_runtime_numeric_chain_without_stack_growth",
+          "line": 4854,
+          "asserted_contract": "4,096-deep numeric chain lowers on a 1 MiB stack.",
+          "decision": "keep"
+        }
+      ]
+    },
+    {
+      "path": "src/compiler_frontend/analysis/borrow_checker/boracle/oracle/tests/mod.rs",
+      "level": "unit or compiler-stage invariant",
+      "baseline_test_count": 111,
+      "baseline_noncomment_loc": 5430,
+      "fixture_dependencies_and_lane": "Local Fixture and BorrowProblemParts normalized problems plus direct oracle state; feature boracle, bounded independent executor",
+      "existing_owner": "src/compiler_frontend/analysis/borrow_checker/boracle/oracle/tests/mod.rs",
+      "default_decision": "keep: distinct local invariant or failure path, no equivalent surviving assertion established",
+      "required_validation": "cargo test -p moth --lib --features boracle compiler_frontend::analysis::borrow_checker::boracle::oracle::tests",
+      "tests": [
+        {
+          "test_id": "boracle_oracle_many_shared_aliases_on_one_node_do_not_conflict",
+          "line": 31,
+          "asserted_contract": "many shared aliases to one generation remain safe.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_interval_conflict_survives_prior_undecidable_overlap",
+          "line": 53,
+          "asserted_contract": "definite conflict still wins after earlier undecidable overlap; exact witness/path.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_only_undecidable_interval_overlap_is_inconclusive",
+          "line": 89,
+          "asserted_contract": "undecidable overlap only yields typed Inconclusive with paths.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_shared_capability_then_overlapping_exclusive_access_conflicts",
+          "line": 114,
+          "asserted_contract": "shared capability vs later exclusive access; checks access event/kinds.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_exclusive_capability_then_overlapping_shared_access_conflicts",
+          "line": 142,
+          "asserted_contract": "exclusive cap vs later shared access, exact conflicting event.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_rebinding_shared_alias_writes_through_without_killing_holder",
+          "line": 162,
+          "asserted_contract": "read shared alias, owner write, re-alias; complete safe.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_write_through_exclusive_alias_is_safe",
+          "line": 179,
+          "asserted_contract": "exclusive alias Update, rebind Fresh, owner read is safe.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_write_through_shared_alias_conflicts_directly",
+          "line": 196,
+          "asserted_contract": "shared alias write-through conflicts at paired access.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_write_through_covered_projection_of_shared_alias_conflicts_directly",
+          "line": 226,
+          "asserted_contract": "projected alias write-through conflict; exact projected paths.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_call_result_realias_conflicts_at_owner_write_not_definition",
+          "line": 270,
+          "asserted_contract": "call-result alias conflict is at owner write, not result definition.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_scope_exit_while_call_result_pending_is_malformed",
+          "line": 308,
+          "asserted_contract": "pending call-result confirmation plus scope exit is malformed.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_definition_before_call_result_confirmation_is_malformed",
+          "line": 352,
+          "asserted_contract": "definition before confirmation is malformed.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_alias_from_place_rebind_kills_call_argument_holder",
+          "line": 392,
+          "asserted_contract": "source rebind kills old call-argument holder; checks end/replacement provenance.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_projection_holder_liveness_ends_before_owner_write",
+          "line": 465,
+          "asserted_contract": "projected holder ends before owner write; checks interval/cap evidence.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_bare_defining_write_retires_overlapping_holders",
+          "line": 550,
+          "asserted_contract": "defining write retires root/field/observer holders; safe.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_defining_root_retires_child_alias_and_later_write_is_safe",
+          "line": 590,
+          "asserted_contract": "root Define retires child alias.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_defining_write_on_unavailable_place_installs_nothing",
+          "line": 610,
+          "asserted_contract": "unavailable destination Define installs no binding; later read is compiler error.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_slot_definition_write_defers_replacement_to_writer",
+          "line": 625,
+          "asserted_contract": "direct state-transition proof that slot definition defers replacement until writer.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_slot_replacement_retires_the_destination_held_capability",
+          "line": 683,
+          "asserted_contract": "direct transition proof for destination-held cap end/retirement.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_copy_result_preserves_alias_topology_and_independence",
+          "line": 746,
+          "asserted_contract": "copy preserves aggregate child alias topology while source/destination remain independent.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_repeated_child_alias_inside_aggregate_is_observable",
+          "line": 795,
+          "asserted_contract": "repeated child alias remains observable; checks accesses and shared node.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_repeated_keyless_domain_child_with_distinct_nodes_is_typed_inconclusive",
+          "line": 825,
+          "asserted_contract": "distinct keyless child nodes refuse with typed inconclusive, IDs/path/explored.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_repeated_identified_field_with_distinct_nodes_is_typed_inconclusive",
+          "line": 871,
+          "asserted_contract": "same refusal for identified Field.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_same_node_repeated_keyless_domain_child_still_aliases",
+          "line": 917,
+          "asserted_contract": "same-node repeated keyless child conflicts as alias.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_aggregate_field_provenance_conflicts_after_source_mutation",
+          "line": 956,
+          "asserted_contract": "aggregate field provenance observes source mutation; checks cap/target.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_write_through_aggregate_issues_field_provenance",
+          "line": 987,
+          "asserted_contract": "aggregate write-through issues field provenance; conflict at paired write.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_aggregate_field_provenance_falls_back_to_destination_holder",
+          "line": 1029,
+          "asserted_contract": "provenance holder fallback is destination.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_projection_access_resolves_to_child_and_checks_child_legality",
+          "line": 1058,
+          "asserted_contract": "child projection resolves to child, checks capability provenance and overlap.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_scope_exit_retires_places_and_ends_holder_intervals",
+          "line": 1095,
+          "asserted_contract": "scope exit retires place and cap; subsequent non-defining use errors.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_scope_exit_with_surviving_holder_is_typed_inconclusive",
+          "line": 1132,
+          "asserted_contract": "typed MultiHolderLoan, exact loan/holder count.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_scope_exit_accumulates_retired_holders_across_stages_is_typed_inconclusive",
+          "line": 1165,
+          "asserted_contract": "same typed refusal after staged retirements.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_multi_holder_loan_issue_is_typed_inconclusive",
+          "line": 1195,
+          "asserted_contract": "typed multi-holder refusal with exact loan/holder/explored fields.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_multi_holder_loan_surviving_hold_is_typed_inconclusive",
+          "line": 1223,
+          "asserted_contract": "surviving holder refusal after exclusive-write prefix gap.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_duplicated_holder_loan_reaches_a_real_outcome",
+          "line": 1256,
+          "asserted_contract": "duplicate holder collapses; reaches actual conflict rather than inconclusive.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_unavailable_loan_place_is_compiler_error_before_refusal",
+          "line": 1283,
+          "asserted_contract": "unavailable place error precedes multi-holder refusal.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_unavailable_multi_holder_loan_holder_is_compiler_error",
+          "line": 1304,
+          "asserted_contract": "unavailable holder likewise errors before refusal.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_killed_capability_with_different_target_is_not_superseded",
+          "line": 1325,
+          "asserted_contract": "different target not superseded; later use after end errors.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_killed_capability_same_generation_overlapping_projection_is_superseded",
+          "line": 1375,
+          "asserted_contract": "same-generation overlapping projected capability superseded on loop.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_call_argument_interval_extends_to_call_effect",
+          "line": 1431,
+          "asserted_contract": "arguments remain live through CallEffect; second argument conflicts with first cap.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_call_argument_ends_at_call_effect_before_later_storage_access",
+          "line": 1468,
+          "asserted_contract": "cap ends at effect; later access safe.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_loan_holder_call_argument_exercises_loan_capability",
+          "line": 1499,
+          "asserted_contract": "call-argument use exercises loan capability; exact event/last-exercised.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_trace_and_debug_rendering_are_reproducible",
+          "line": 1543,
+          "asserted_contract": "repeat runs produce equal trace/debug and deterministic capability/conflict ordering.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_single_alias_params_result_confirmation_is_safe",
+          "line": 1625,
+          "asserted_contract": "one AliasParams result confirms safely.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_alias_params_result_slot_write_after_effect_is_safe",
+          "line": 1652,
+          "asserted_contract": "result slot write after effect stays safe.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_call_result_provenance_conflicts_after_argument_mutation",
+          "line": 1685,
+          "asserted_contract": "result provenance cap conflicts after argument mutation, checks holder/target.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_write_through_call_result_issues_provenance",
+          "line": 1727,
+          "asserted_contract": "result write-through issues provenance and conflicts with source mutation.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_copy_of_decidable_remaining_path_executes",
+          "line": 1776,
+          "asserted_contract": "copy of remaining decidable path executes with separate node.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_lazy_projection_materialisation_is_idempotent",
+          "line": 1800,
+          "asserted_contract": "repeated materialization of projection reuses node.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_rebind_alias_origins_is_typed_inconclusive",
+          "line": 1827,
+          "asserted_contract": "Alias origins on rebind produce typed refusal with exact origins/explored.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_rebind_alias_from_place_slot_update_issues_shared_provenance",
+          "line": 1847,
+          "asserted_contract": "slot Update issues shared provenance; owner mutation conflicts.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_alias_update_rebind_preserves_referent_and_tracks_incoming_path",
+          "line": 1879,
+          "asserted_contract": "Update keeps destination referent but records incoming path/provenance.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_direct_alias_definition_replaces_slot_with_alias_capability",
+          "line": 1939,
+          "asserted_contract": "direct alias Define installs alias cap; source write conflicts.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_call_result_alias_origins_is_typed_inconclusive",
+          "line": 1971,
+          "asserted_contract": "Alias origins in call result produce typed refusal.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_call_result_unknown_is_typed_inconclusive",
+          "line": 2005,
+          "asserted_contract": "unknown call result produces typed refusal.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_multiple_call_result_alias_params_issue_each_provenance_capability",
+          "line": 2034,
+          "asserted_contract": "each AliasParams origin gets separate provenance cap; exact conflict/source.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_executed_event_bound_is_typed_inconclusive",
+          "line": 2087,
+          "asserted_contract": "zero event limit refuses before event execution.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_dynamic_generation_bound_is_typed_inconclusive",
+          "line": 2106,
+          "asserted_contract": "generation limit refusal with explored count.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_path_separates_shared_use_and_mutation",
+          "line": 2125,
+          "asserted_contract": "mutually exclusive path separates use/mutation; safe executions.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_branch_join_preserves_swapped_independent_values",
+          "line": 2164,
+          "asserted_contract": "branch join enumerates swapped independent values; safe.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_early_return_does_not_mask_higher_arm_conflict",
+          "line": 2219,
+          "asserted_contract": "lower return cannot mask higher-arm conflict; verifies block witness.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_success_only_alias_does_not_leak_to_error_arm",
+          "line": 2271,
+          "asserted_contract": "success alias absent on error arm; safe path count.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_error_only_mutation_does_not_leak_to_success_arm",
+          "line": 2312,
+          "asserted_contract": "error mutation absent on success arm.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_loop_preserves_slot_role_across_alias_rebinds",
+          "line": 2353,
+          "asserted_contract": "loop role preserved; asserts exact bound/refusal behavior.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_reissued_capability_after_scope_exit_exercises_newest_instance",
+          "line": 2428,
+          "asserted_contract": "scope exit/reissue exercises newest cap; checks IDs, ends, access.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_loop_redefines_alias_without_writing_through",
+          "line": 2543,
+          "asserted_contract": "loop Define retires prior alias; bounded executions remain inconclusive.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_break_terminator_executes_exact_successor",
+          "line": 2609,
+          "asserted_contract": "Break follows only its declared successor and checks resulting conflict.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_continue_terminator_executes_exact_successor",
+          "line": 2619,
+          "asserted_contract": "Continue follows exact successor.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_runtime_failure_is_explicit_trace_scanned_exit",
+          "line": 2662,
+          "asserted_contract": "runtime-failure exit scans and retains prior conflict.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_assert_failure_is_explicit_trace_scanned_exit",
+          "line": 2667,
+          "asserted_contract": "Assert-failure exit likewise retains prior conflict.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_unreachable_block_never_executes_or_keeps_capability_live",
+          "line": 2705,
+          "asserted_contract": "unreachable block does not execute or keep cap live, even with zero generation budget.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_repeated_loan_issue_is_independent_and_kill_scoped",
+          "line": 2738,
+          "asserted_contract": "repeated loop issues/kill scope independently; distinguishes killed from still-open loan.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_live_loan_conflict_survives_expired_call_argument",
+          "line": 2908,
+          "asserted_contract": "expired call argument does not mask later live-loan conflict.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_second_call_invocation_issues_fresh_argument_capabilities",
+          "line": 3037,
+          "asserted_contract": "second invocation issues a fresh dynamic cap; checks both events/ends/conflict.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_exercise_capabilities_skip_expired_call_argument",
+          "line": 3236,
+          "asserted_contract": "expired argument skipped; live loan still exercised at later event.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_call_effect_ceiling_clamps_dragged_call_argument_interval",
+          "line": 3321,
+          "asserted_contract": "manually constructed state proves effect ceiling clamps call-argument interval.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_call_effect_respects_explicit_end",
+          "line": 3407,
+          "asserted_contract": "explicit scope end wins over CallEffect; cap end/last-exercised exact.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_update_through_shared_alias_conflicts_at_the_write",
+          "line": 3468,
+          "asserted_contract": "shared alias Update conflicts at paired write, not by treating it as Define.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_alias_params_provenance_survives_its_confirming_write",
+          "line": 3490,
+          "asserted_contract": "result confirmation retires neither provenance cap nor generation; later source mutation conflict.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_native_result_slots_preserve_shared_origin_overlap",
+          "line": 3539,
+          "asserted_contract": "**reference + Oracle cross-check** for shared native result provenance; static conflict exists and runtime witness points at mutation.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_call_argument_origins_follow_event_order_at_a_shared_point",
+          "line": 3588,
+          "asserted_contract": "**reference + Oracle cross-check**; same-point call observes replacement origin, confirmation does not kill loan, mutation conflicts on both.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_alias_result_loans_preserve_repeated_argument_event_owners",
+          "line": 3688,
+          "asserted_contract": "reference owner preserves each repeated argument event’s origin loan and confirmation behavior; it asserts reference results, not an Oracle run.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_projection_onto_residual_path_is_typed_inconclusive",
+          "line": 3763,
+          "asserted_contract": "projection residual path must not collapse to base node; typed refusal.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_rebind_alias_from_place_with_residual_path_is_typed_inconclusive",
+          "line": 3796,
+          "asserted_contract": "rebind residual path cannot synthesize a definite base-node alias.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_alias_replacing_slot_preserves_residual_source_path",
+          "line": 3827,
+          "asserted_contract": "direct alias replacement preserves residual path and checks conflict path.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_bare_slot_rebind_retires_overlapping_projection_holder",
+          "line": 3880,
+          "asserted_contract": "no paired access; slot transition still retires structurally overlapping projected holder.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_install_definition_retires_overlapping_holder_on_unavailable_destination",
+          "line": 3908,
+          "asserted_contract": "direct state-transition proof for unavailable destination, which normalized LoanIssue cannot construct.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_scope_exit_closed_cycle_is_non_terminating_cycle",
+          "line": 4022,
+          "asserted_contract": "closed cycle after scope exit returns NonTerminatingCycle.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_closed_cycle_precedes_exhausted_execution_bound",
+          "line": 4036,
+          "asserted_contract": "closed-cycle detection precedes event bound; checks block/explored.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_safe_branch_and_closed_cycle_is_inconclusive",
+          "line": 4054,
+          "asserted_contract": "safe branch plus closed cycle is Inconclusive.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_non_terminating_cycle_is_inconclusive",
+          "line": 4072,
+          "asserted_contract": "repeated cycle typed refusal with exact block/explored.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_bound_changes_preserve_complete_outcomes",
+          "line": 4088,
+          "asserted_contract": "expanded bounds preserve complete safe/conflict outcomes; smaller bound yields event-limit inconclusive.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_deterministic_path_order_selects_lowest_conflict",
+          "line": 4158,
+          "asserted_contract": "adversarial edge/event ordering still returns lowest conflict; trace deterministic.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_execution_bound_is_typed_inconclusive",
+          "line": 4220,
+          "asserted_contract": "exact execution limit/explored refusal.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_block_entry_bound_is_typed_inconclusive",
+          "line": 4239,
+          "asserted_contract": "exact loop-body entry bound and explored count.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_binding_destination_matrix_covers_local_and_projected_writes",
+          "line": 4437,
+          "asserted_contract": "broad operation × prior-state matrix for Define/Update local/projected destinations. Checks BindingWrite/definition distinction, destination/source roles, capability retirement/preservation, call-effect confirmation, unavailable access behavior, generations and resulting reads/conflicts. This is already a table-driven consolidation; retain all matrix cells.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_rebinding_slot_does_not_conflict_with_old_observer",
+          "line": 4855,
+          "asserted_contract": "rebinding destination leaves old observer independently safe.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_write_through_exclusive_alias_does_not_fabricate_conflict",
+          "line": 4876,
+          "asserted_contract": "**exact duplicate of line 178**: same fixture and CompleteSafe assertion.",
+          "decision": "merge_candidate",
+          "surviving_test_id": "boracle_oracle_write_through_exclusive_alias_is_safe",
+          "overlap_status": "confirmed overlap"
+        },
+        {
+          "test_id": "boracle_oracle_write_through_alias_does_not_reissue_source_capability",
+          "line": 4893,
+          "asserted_contract": "Update ignores replacement value for write-through; disjoint later source write remains safe.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_write_through_exclusive_alias_resolves_to_referent_node",
+          "line": 4920,
+          "asserted_contract": "Update retains referent; later Define ends old alias and installs new node.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_update_from_direct_place_turns_a_slot_into_an_alias",
+          "line": 4977,
+          "asserted_contract": "direct-place Update installs alias cap; source mutation conflicts.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_slot_update_retains_generation_evidence",
+          "line": 5021,
+          "asserted_contract": "Update retains prior value alias and distinct new node.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_alias_update_is_mutation_even_with_generation_evidence",
+          "line": 5051,
+          "asserted_contract": "generation evidence does not turn Update into Define; shared-alias mutation conflicts.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_false_bit_call_update_confirmation_allows_next_definition",
+          "line": 5072,
+          "asserted_contract": "CallEffect Update plus `definition=false` confirmation allows subsequent Define; distinct target.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_define_retires_alias_when_use_definition_is_false",
+          "line": 5112,
+          "asserted_contract": "Define operation authority overrides false Use.definition; compares reference and Oracle retirement.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_mutable_parameter_write_reaches_external_generation",
+          "line": 5189,
+          "asserted_contract": "mutable-parameter write reaches external generation and conflicts with shared cap.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_non_defining_unavailable_access_is_compiler_error",
+          "line": 5232,
+          "asserted_contract": "read of unavailable place is compiler error.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_access_after_explicit_end_is_compiler_error",
+          "line": 5243,
+          "asserted_contract": "use after explicit end is compiler error.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_concurrent_capabilities_from_same_source_are_all_exercised",
+          "line": 5257,
+          "asserted_contract": "direct state setup with two same-target caps; both exercise at expected event.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_unresolvable_event_cross_reference_is_rejected_at_construction",
+          "line": 5320,
+          "asserted_contract": "malformed event/use cross-reference rejected during problem construction.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_safe_truncation_is_never_reported_as_complete_safe",
+          "line": 5344,
+          "asserted_contract": "truncated otherwise-safe execution must be Inconclusive, never CompleteSafe.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "boracle_oracle_zero_block_entry_bound_refuses_the_entry_block",
+          "line": 5364,
+          "asserted_contract": "zero entry bound refuses block 0 before exploration; exact reason and explored count.",
+          "decision": "keep"
+        }
+      ]
+    },
+    {
+      "path": "src/compiler_frontend/compiler_messages/tests/diagnostic_model_tests.rs",
+      "level": "unit or compiler-stage invariant",
+      "baseline_test_count": 91,
+      "baseline_noncomment_loc": 4377,
+      "fixture_dependencies_and_lane": "Typed diagnostic constructors, local span/path/string/freeze contexts and terminal/terse/dev renderers",
+      "existing_owner": "src/compiler_frontend/compiler_messages/tests/diagnostic_model_tests.rs",
+      "default_decision": "keep: distinct local invariant or failure path, no equivalent surviving assertion established",
+      "required_validation": "cargo test -p moth --lib diagnostic_model_tests",
+      "tests": [
+        {
+          "test_id": "descriptor_codes_are_stable_and_non_empty",
+          "line": 91,
+          "asserted_contract": "literal descriptor codes/default severities/titles and nonempty kind code.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "compiler_capacity_diagnostic_keeps_the_triggering_span_and_resource",
+          "line": 170,
+          "asserted_contract": "capacity resource payload, exact triggering span, code/title.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "every_diagnostic_descriptor_has_a_unique_category_code",
+          "line": 201,
+          "asserted_contract": "all descriptors have unique code, category prefix and title.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "category_and_default_severity_derive_from_kind",
+          "line": 245,
+          "asserted_contract": "Syntax/Type/Import categories and error severity derive from kind.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "explicit_severity_can_override_descriptor_default",
+          "line": 258,
+          "asserted_contract": "warning override honored.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "diagnostic_identity_uses_descriptor_code_actual_severity_and_typed_reason",
+          "line": 278,
+          "asserted_contract": "identity includes code, actual severity, and typed reason.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "unsupported_backend_feature_exposes_stable_reason_key",
+          "line": 304,
+          "asserted_contract": "stable UnsupportedBackend reason.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "body_declaration_placement_preserves_source_name_and_stable_reason",
+          "line": 324,
+          "asserted_contract": "source name, name span, stable code/reason and two guidance sentences.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "mutable_function_parameter_feature_exposes_stable_reason_key",
+          "line": 365,
+          "asserted_contract": "distinct stable backend reason.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "non_utf8_output_folder_reason_has_stable_identity_and_rendering",
+          "line": 385,
+          "asserted_contract": "typed reason identity and exact config rendering.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "output_folder_collision_rendering_preserves_both_authored_spellings",
+          "line": 415,
+          "asserted_contract": "“Build”/“build” spelling preserved.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "every_authored_stable_reason_key_is_unique_and_well_formed",
+          "line": 434,
+          "asserted_contract": "nonempty unique well-formed keys.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "stable_reason_key_format_rejects_unqualified_or_noncanonical_keys",
+          "line": 457,
+          "asserted_contract": "accepts qualified canonical key; rejects nine malformed forms.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "reasonless_payloads_have_no_reason_key",
+          "line": 484,
+          "asserted_contract": "reasonless payload yields None.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "reason_key_dispatch_covers_distinct_typed_reason_families",
+          "line": 503,
+          "asserted_contract": "reason-key dispatch preserves type/map/collection families.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "diagnostic_bag_tracks_errors_warnings_and_order",
+          "line": 538,
+          "asserted_contract": "counts, insertion order, move to Vec.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "compiler_messages_counts_and_order_come_from_structured_diagnostics",
+          "line": 572,
+          "asserted_contract": "structured diagnostics own count/order.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "compiler_messages_with_warnings_keep_typed_diagnostics_off_error_mirrors",
+          "line": 607,
+          "asserted_contract": "warning/error mirror separation.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "compiler_messages_with_infrastructure_error_preserve_warning_production_order",
+          "line": 641,
+          "asserted_contract": "preserves warning output plus infrastructure failure.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "infrastructure_setter_and_message_append_preserve_every_ordered_cause",
+          "line": 692,
+          "asserted_contract": "ordered mixed compiler/file causes, metadata, spans, paths, count.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "infrastructure_causes_keep_colliding_source_owners_through_append_and_freeze",
+          "line": 736,
+          "asserted_contract": "colliding SourceId owners retain paths/text through freeze.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "failed_freeze_retains_warnings_causes_and_source_contents_before_appending_failure",
+          "line": 856,
+          "asserted_contract": "preserves warning/cause/source owner details and appends freeze failure without loss.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "attach_rejects_foreign_domain_table_behind_rendered_path_payload",
+          "line": 915,
+          "asserted_contract": "foreign string-domain table rejected.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "attach_rejects_rendered_path_beyond_the_candidate_table",
+          "line": 948,
+          "asserted_contract": "out-of-range PathId rejected.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "attach_ignores_foreign_domain_table_for_diagnostics_without_path_payloads",
+          "line": 971,
+          "asserted_contract": "path-free payload does not retain irrelevant foreign table.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "attach_rejects_unresolvable_unused_path_table_node",
+          "line": 1026,
+          "asserted_contract": "invalid unused retained path node rejected at attach.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "not_exported_by_public_surface_remaps_path_and_surface_name_after_aggregation",
+          "line": 1068,
+          "asserted_contract": "both path and name survive nonidentity aggregation/freeze.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "attach_retains_table_for_nominal_type_render_context_without_path_payloads",
+          "line": 1168,
+          "asserted_contract": "nominal TypeMismatch type context keeps needed path table.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "batch_attaches_table_for_nominal_type_context_and_survives_canonical_round_trip",
+          "line": 1217,
+          "asserted_contract": "batch gate plus Premerge → ModuleDiagnostics → batch → messages round-trip.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "attach_rejects_unresolved_rendered_ancestor",
+          "line": 1289,
+          "asserted_contract": "validates complete ancestor chain, not just leaf.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "compiler_messages_preserve_type_context_ranges_when_prepending_and_appending",
+          "line": 1318,
+          "asserted_contract": "type-context ranges survive prepend/append and render ordering.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "append_preserves_frozen_and_remaps_unfrozen_string_and_type_owners",
+          "line": 1399,
+          "asserted_contract": "frozen/unfrozen owners preserve names, type context, identity and ranges through aggregation.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "append_and_remap_keep_frozen_path_tables_in_owner_domain",
+          "line": 1586,
+          "asserted_contract": "frozen and mutable path-table ownership preserved after remap.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "freeze_keeps_existing_frozen_owners_when_later_rows_still_need_conversion",
+          "line": 1842,
+          "asserted_contract": "freeze preserves existing frozen owners in both insertion orders.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "remap_string_ids_updates_payloads_labels_and_tokens",
+          "line": 1904,
+          "asserted_contract": "remaps IDs across ExpectedToken, duplicate name, import labels, borrow place; spans unchanged.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "remap_string_ids_updates_legacy_dependency_replacement",
+          "line": 1999,
+          "asserted_contract": "remaps dependency replacement StringId.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "remap_string_ids_updates_compile_time_evaluation_operation",
+          "line": 2033,
+          "asserted_contract": "remaps compile-time operation payload.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "remap_string_ids_updates_receiver_declaration_names",
+          "line": 2079,
+          "asserted_contract": "remaps receiver declaration names.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "duplicate_declaration_with_previous_location_keeps_secondary_label",
+          "line": 2128,
+          "asserted_contract": "retains previous declaration label/span and source name.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "duplicate_declaration_without_previous_location_omits_secondary_label",
+          "line": 2169,
+          "asserted_contract": "no prior span means no secondary label.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "value_receiver_diagnostic_preserves_factual_arity_and_producer_span",
+          "line": 2199,
+          "asserted_contract": "exact produced/expected arity and producer span; stable code/reason and differing 0-vs-2 guidance.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "type_mismatch_constructor_carries_type_ids_without_rendering",
+          "line": 2247,
+          "asserted_contract": "constructor keeps TypeIds.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "type_mismatch_terminal_guidance_renders_type_names_with_context",
+          "line": 2278,
+          "asserted_contract": "terminal renderer resolves names without IDs.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "type_mismatch_terse_renderer_renders_type_names_with_context",
+          "line": 2305,
+          "asserted_contract": "terse renderer does likewise.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "invalid_string_escape_renderer_preserves_the_authored_escape_spelling",
+          "line": 2332,
+          "asserted_contract": "preserves escaped authored spelling.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "invalid_string_escape_renderer_distinguishes_physical_newlines_and_trailing_backslashes",
+          "line": 2356,
+          "asserted_contract": "distinct exact prose for physical newline vs trailing slash.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "rule_renderers_use_user_facing_messages_not_reason_debug_names",
+          "line": 2383,
+          "asserted_contract": "prose does not leak reason enum Debug names.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "immutable_binding_diagnostic_carries_secondary_declaration_label",
+          "line": 2417,
+          "asserted_contract": "exact secondary declaration span/label.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "syntax_and_choice_renderers_use_user_facing_messages_not_reason_debug_names",
+          "line": 2477,
+          "asserted_contract": "exact user-facing syntax/choice prose.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "choice_variant_unknown_variant_suggests_close_candidate",
+          "line": 2539,
+          "asserted_contract": "close typo suggests Ready and preserves available variants.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "choice_variant_unknown_variant_no_suggestion_for_unrelated_name",
+          "line": 2581,
+          "asserted_contract": "unrelated name gets no suggestion; full name/list retained.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "syntax_renderers_keep_typed_prose_without_error_conversion",
+          "line": 2623,
+          "asserted_contract": "table of ~27 syntax reasons, exact terse/terminal numeric and syntax messages, no enum Debug names.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "invalid_expression_renderers_keep_structured_reason_prose",
+          "line": 2904,
+          "asserted_contract": "six invalid-expression reason rows, exact guidance and no Debug names.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "failure_handling_diagnostics_preserve_producer_types_and_spans",
+          "line": 2987,
+          "asserted_contract": "six failure-handling reasons preserve producer span/type and catch primary span.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "propagation_boundary_renderers_preserve_authored_count_and_semantic_error_types",
+          "line": 3079,
+          "asserted_contract": "success slot counts and semantic `ParseFailure!`/`start Error!` wording.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "builtin_failure_witness_labels_render_calls_before_the_original_operation",
+          "line": 3151,
+          "asserted_contract": "witness call labels precede operation span, exact labels/count, freeze/attach.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "phase_1_2_renderers_keep_source_language_terminology",
+          "line": 3235,
+          "asserted_contract": "12 typed reason cases preserve current terminology.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "source_dependency_renderers_use_current_language_terminology",
+          "line": 3327,
+          "asserted_contract": "six NamespaceTypeValueMisuse combinations and dependency wording.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "render_boundary_smoke_coverage_hides_internal_debug_names_by_family",
+          "line": 3443,
+          "asserted_contract": "seven diagnostic families across terminal/terse/dev-server boundaries.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "incompatible_choice_comparison_renderer_hides_reason_debug_names",
+          "line": 3530,
+          "asserted_contract": "comparison prose hides enum internals.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "mutable_access_required_renders_explicit_marker_guidance",
+          "line": 3582,
+          "asserted_contract": "explicit `~` marker.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "immutable_place_mutable_access_renders_binding_name_for_missing_marker",
+          "line": 3607,
+          "asserted_contract": "binding name and mutable-declaration fix.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "immutable_place_mutable_access_renders_authored_marker_with_binding_name",
+          "line": 3634,
+          "asserted_contract": "authored marker and exact binding name.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "immutable_place_mutable_access_uses_generic_fallback_without_binding_name",
+          "line": 3657,
+          "asserted_contract": "no-name fallback avoids internal place/value terminology.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "mutable_access_on_non_place_renders_fresh_value_guidance",
+          "line": 3712,
+          "asserted_contract": "temporary/fresh-value guidance rather than immutable repair.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "unnamed_parameter_renders_one_based_position_without_internal_slot",
+          "line": 3755,
+          "asserted_contract": "parameter position is one-based; no slot internals.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "mutable_access_not_allowed_tells_author_to_remove_authored_marker",
+          "line": 3782,
+          "asserted_contract": "remove unnecessary marker.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "invalid_call_shape_remap_updates_binding_name_and_parameter_name",
+          "line": 3815,
+          "asserted_contract": "remapped callee, parameter and binding names survive merge.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "source_method_missing_marker_renders_named_receiver_example",
+          "line": 3888,
+          "asserted_contract": "named `~p.move(...)` example.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "source_method_missing_marker_omits_example_without_binding_name",
+          "line": 3910,
+          "asserted_contract": "no fabricated receiver name.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "source_method_immutable_receiver_names_binding_to_declare_mutable",
+          "line": 3933,
+          "asserted_contract": "immutable place guidance includes binding.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "source_method_non_place_receiver_requires_mutable_place",
+          "line": 3952,
+          "asserted_contract": "temporary/nonplace receiver guidance.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "collection_missing_marker_names_kind_and_explicit_access",
+          "line": 3973,
+          "asserted_contract": "Collection kind and `~` spelling.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "collection_immutable_receiver_names_binding_to_declare_mutable",
+          "line": 3995,
+          "asserted_contract": "binding-specific Collection repair.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "collection_non_place_receiver_requires_mutable_binding",
+          "line": 4017,
+          "asserted_contract": "nonplace Collection receiver advice.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "map_immutable_receiver_names_kind_and_binding",
+          "line": 4040,
+          "asserted_contract": "Map kind and binding.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "authored_marker_on_immutable_receiver_keeps_marker_wording",
+          "line": 4062,
+          "asserted_contract": "authored-marker branch wording.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "authored_marker_on_non_place_receiver_explains_temporary",
+          "line": 4085,
+          "asserted_contract": "nonplace temporary branch wording.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "unneeded_mutable_marker_tells_author_to_remove_it",
+          "line": 4108,
+          "asserted_contract": "remove unnecessary receiver marker.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "const_record_runtime_call_renders_current_source_term",
+          "line": 4130,
+          "asserted_contract": "current “const record” terminology.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "invalid_receiver_call_remap_updates_receiver_binding_name",
+          "line": 4152,
+          "asserted_contract": "receiver binding survives remap.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "generic_instantiation_rendering_resolves_type_name",
+          "line": 4190,
+          "asserted_contract": "renders Box type name.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "generic_conflict_rendering_resolves_concrete_type_names",
+          "line": 4220,
+          "asserted_contract": "renders I32/String concrete names.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "builtin_cast_shape_diagnostic_preserves_stable_code_and_rendering",
+          "line": 4263,
+          "asserted_contract": "stable code 0046 and exact rendering.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "token_diagnostics_render_source_spelling_not_token_debug_names",
+          "line": 4287,
+          "asserted_contract": "source token spellings, not enum names.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "borrow_conflict_rendering_hides_payload_debug_names",
+          "line": 4321,
+          "asserted_contract": "borrow prose hides payload Debug data.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "borrow_labels_preserve_order_and_exact_source_spans",
+          "line": 4352,
+          "asserted_contract": "exact primary/secondary spans, label order and message.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "remapping_diagnostic_strings_leaves_source_spans_unchanged",
+          "line": 4383,
+          "asserted_contract": "string remap leaves spans intact.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "preparation_capture_validates_source_identity_without_encoding_or_rebinding",
+          "line": 4427,
+          "asserted_contract": "accepts same SourceId, rejects foreign ID without span, leaves fields unchanged.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "preparation_capture_allows_spanless_diagnostics",
+          "line": 4454,
+          "asserted_contract": "None span remains None and no labels fabricated.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "failure_writeback_label_keeps_target_type_through_diagnostic_context_handoff",
+          "line": 4675,
+          "asserted_contract": "U8 failure-writeback target preserved through diagnosed-batch handoff and nonidentity merge.",
+          "decision": "keep"
+        }
+      ]
+    },
+    {
+      "path": "src/backends/js/tests/control_flow.rs",
+      "level": "unit or compiler-stage invariant",
+      "baseline_test_count": 18,
+      "baseline_noncomment_loc": 2428,
+      "fixture_dependencies_and_lane": "Shared JS tests/support.rs plus inline HIR, NumericProofs::default(), direct_js(false); nested-diamond rows execute emitted JS",
+      "existing_owner": "src/backends/js/tests/control_flow.rs",
+      "default_decision": "keep: distinct local invariant or failure path, no equivalent surviving assertion established",
+      "required_validation": "cargo test -p moth --lib control_flow",
+      "tests": [
+        {
+          "test_id": "emits_structured_if_without_dispatcher",
+          "line": 22,
+          "fixture": "Inline acyclic if/else HIR; both arms jump with values to a merge local.",
+          "asserted_contract": "Emits structured if; no switch (__bb dispatcher.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "nested_diamond_preserves_transport_and_dispatcher_fallback",
+          "line": 125,
+          "fixture": "Inline nested If/Invoke diamond; four table rows: If, Fallible, SharedError, SharedContinuationError; merge args and mutable locals.",
+          "asserted_contract": "Dispatcher iff shared-error/shared-continuation cases; exact edge-capture count and capture-before-bind order; shared continuation assignment once; runs emitted JS with Node and checks three result/error/mutation rows per case.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "emits_structured_match_without_inlining_synthetic_merge_arm",
+          "line": 531,
+          "fixture": "Acyclic match on literal 0/1/wildcard; arm jumps converge on post-match continuation.",
+          "asserted_contract": "Stages match value; does not emit synthetic wildcard as `else if (true)`; no dispatcher.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "literal_match_uses_structured_lowering_when_cfg_is_acyclic",
+          "line": 650,
+          "fixture": "Acyclic literal 1/2/wildcard match with common continuation.",
+          "asserted_contract": "Stages scrutinee once; emits strict `=== 1` and `=== 2`; no dispatcher.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "option_present_match_checks_some_tag_without_payload_comparison",
+          "line": 783,
+          "fixture": "Constructs Option Some with payload 10; matches OptionPresent and wildcard.",
+          "asserted_contract": "Emits `.tag === \"some\"`; does not compare `.value`.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "literal_match_uses_dispatcher_when_cfg_contains_cycle",
+          "line": 911,
+          "fixture": "Literal 0 arm jumps back to match; literal 1 arm returns.",
+          "asserted_contract": "Emits dispatcher loop/switch, stages match value, preserves strict literal comparisons 0 and 1.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "structured_match_merge_convergence_lowers_jump_arguments",
+          "line": 1038,
+          "fixture": "Acyclic match literals 0/1/wildcard; arms define 10/20/30 then pass each to one merge local.",
+          "asserted_contract": "No dispatcher; exactly three jump-argument captures and three destination-binding assignments.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "dispatcher_match_merge_convergence_lowers_jump_arguments",
+          "line": 1219,
+          "fixture": "Same three-arm merge shape with a cycle returning to the match.",
+          "asserted_contract": "Dispatcher selected; at least three captures and three merge assignments.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "match_guard_condition_emits_pattern_and_guard_conjunction",
+          "line": 1408,
+          "fixture": "Acyclic literal match with guarded arm.",
+          "asserted_contract": "Emits pattern test combined with guard conjunction; no dispatcher.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "dispatcher_match_without_selected_arm_emits_no_arm_selected_fallback",
+          "line": 1530,
+          "fixture": "Cyclic guarded literal match with no fallback arm; guard prevents selection.",
+          "asserted_contract": "Dispatcher selected; emits exact `throw new Error(\"No match arm selected\");` fallback.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "falls_back_to_dispatcher_for_cfg_cycle",
+          "line": 1637,
+          "fixture": "Minimal cyclic if CFG with loop edge and return exit.",
+          "asserted_contract": "Emits dispatcher switch for CFG cycle.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "lowers_break_and_continue_terminators_with_dispatcher",
+          "line": 1725,
+          "fixture": "Inline CFG with Continue target block 3 and Break target block 4, then return.",
+          "asserted_contract": "Emits dispatcher switch and block-number assignments `= 3;` and `= 4;`.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "jump_args_lower_block_to_block_value_transfer",
+          "line": 1811,
+          "fixture": "Two-block acyclic direct jump; source local initialized to 7, passed to destination local.",
+          "asserted_contract": "Exactly one capture; uses `__moth_read(source)` before defining target with `__moth_binding`; no dispatcher.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "structured_branch_merge_lowers_jump_arguments",
+          "line": 1903,
+          "fixture": "Acyclic if/else branches define distinct values and pass each to a common merge parameter.",
+          "asserted_contract": "Structured/no dispatcher; exactly two captures and two merge assignments.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "dispatcher_loop_back_edge_lowers_jump_arguments",
+          "line": 2026,
+          "fixture": "Cyclic loop CFG whose back edge carries a value into a target block parameter.",
+          "asserted_contract": "Dispatcher selected; at least two captures and two target-parameter assignments.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "jump_args_define_explicit_destination_binding",
+          "line": 2147,
+          "fixture": "Two-block acyclic direct jump; local 0 initialized to 42, passed to destination local 1 (`alias_param`).",
+          "asserted_contract": "Destination receives a fresh `__moth_binding(__jump_arg_0)` binding; no other assertion.",
+          "decision": "merge_candidate",
+          "surviving_test_id": "jump_args_lower_block_to_block_value_transfer",
+          "overlap_status": "likely overlap - inspect"
+        },
+        {
+          "test_id": "dispatcher_with_native_fallible_return_packs_success_at_abi",
+          "line": 2228,
+          "fixture": "Cyclic native fallible function: loop-body local assignment, then returns string `done`; success and error slots are Strings.",
+          "asserted_contract": "Dispatcher retained; returns `{ tag: \"ok\", value: \"done\" }`; no propagation-sentinel catch wrapper.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "multiple_acyclic_if_blocks_stay_structured",
+          "line": 2338,
+          "fixture": "One function with four independent sequential acyclic if/else blocks.",
+          "asserted_contract": "At least four emitted ifs; no dispatcher loop/switch.",
+          "decision": "keep"
+        }
+      ]
+    },
+    {
+      "path": "src/build_system/tests/stage0_filesystem_identity_tests.rs",
+      "level": "unit or compiler-stage invariant",
+      "baseline_test_count": 75,
+      "baseline_noncomment_loc": 2971,
+      "fixture_dependencies_and_lane": "tempfile-owned trees and local discovery/identity/graph helpers, Dev profile for frontend calls; preserve Linux/Unix/Windows gates",
+      "existing_owner": "src/build_system/tests/stage0_filesystem_identity_tests.rs",
+      "default_decision": "keep: distinct local invariant or failure path, no equivalent surviving assertion established",
+      "required_validation": "cargo test -p moth --lib stage0_filesystem_identity_tests",
+      "tests": [
+        {
+          "test_id": "source_tree_rejects_non_utf8_file_name",
+          "line": 62,
+          "fixture": "Linux: `src/@home.moth` plus `src/<raw filename [0xC3,0x28]>`.",
+          "asserted_contract": "SourceTreeIndex discovery fails with primary `ErrorType::File`; message contains `Non-UTF-8`.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "source_tree_rejects_non_utf8_folder_name",
+          "line": 99,
+          "fixture": "Linux: `src/@home.moth` plus a directory named with raw bytes `[0xC3,0x28]`.",
+          "asserted_contract": "SourceTreeIndex discovery fails with primary File error; message contains `Non-UTF-8`.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "facade_discovery_rejects_non_utf8_direct_child_of_project_root",
+          "line": 136,
+          "fixture": "Linux: valid `src/@page.moth` plus invalid-byte direct child under project root.",
+          "asserted_contract": "Project-facade discovery does not silently skip the name; primary File error mentions `Non-UTF-8`.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "package_boundary_traversal_rejects_non_utf8_name",
+          "line": 175,
+          "fixture": "Linux: registered ProjectLocal `pkg/` with only a raw `[0xC3,0x28]` filename containing `x ~= 1\\n`.",
+          "asserted_contract": "Package boundary index construction fails with primary File error; message contains `Non-UTF-8`.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "legacy_package_folder_does_not_scan_non_utf8_names",
+          "line": 207,
+          "fixture": "Linux: invalid-byte directory under legacy `packages/`; valid `src/@page.moth`; no registered filesystem package.",
+          "asserted_contract": "Project path resolver succeeds and has no source-package roots; legacy folder is not scanned.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "single_file_rejects_non_utf8_extension",
+          "line": 258,
+          "fixture": "Unix: single-file entry `main.<raw extension [0xC3,0x28]>`; compile helper passes the path extension.",
+          "asserted_contract": "Dev single-file frontend rejects with `ErrorType::File`; message contains `UTF-8`.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "single_file_rejects_non_utf8_entry_name",
+          "line": 287,
+          "fixture": "Linux: raw `[0xC3,0x28]` basename with `.moth` extension; valid source content.",
+          "asserted_contract": "Dev single-file frontend rejects with `ErrorType::File`; message contains `UTF-8`.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "single_file_rejects_unpaired_wide_extension",
+          "line": 338,
+          "fixture": "Windows: single-file entry `main.<unpaired UTF-16 [0xD800]>`.",
+          "asserted_contract": "Dev single-file frontend rejects with `ErrorType::File`; message contains `UTF-8`.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "reserved_project_globals_package_prefix_is_rejected_before_indexing",
+          "line": 417,
+          "fixture": "Registered ProjectLocal package prefix `project`; package root contains `@home.moth`.",
+          "asserted_contract": "Fails before indexing with `InvalidConfigReason::ProjectGlobalsNameReserved`.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "canonical_root_with_single_hash_file_derives_unique_view",
+          "line": 442,
+          "fixture": "Registered `pkg/` with `@home.moth`.",
+          "asserted_contract": "Prepared root and root file are canonical; exactly one package index; indexed entry root file equals prepared canonical root file.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "canonicalization_failure_returns_file_error",
+          "line": 494,
+          "fixture": "Registered package root points to a nonexistent child of temp directory.",
+          "asserted_contract": "Fails with `ErrorType::File`; message contains `canonicalize`.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "missing_normal_module_root_rejected_during_boundary_indexing",
+          "line": 519,
+          "fixture": "Registered, existing empty `pkg/` directory.",
+          "asserted_contract": "Typed `InvalidConfigReason::SourcePackageMissingRoot`.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "support_root_does_not_satisfy_package_normal_module_root_requirement",
+          "line": 539,
+          "fixture": "Registered `pkg/` containing only `+support.moth`.",
+          "asserted_contract": "Typed `InvalidConfigReason::SourcePackageMissingRoot`; support root does not satisfy normal-root requirement.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "support_root_beside_package_normal_module_root_uses_shared_root_collision_diagnostic",
+          "line": 560,
+          "fixture": "Registered `pkg/` containing `@mod.moth` and `+support.moth`.",
+          "asserted_contract": "Typed `InvalidConfigReason::MultipleModuleRootFiles`.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "multiple_normal_module_roots_rejected_during_boundary_indexing",
+          "line": 582,
+          "fixture": "Registered `pkg/` containing `@home.moth` and `@page.moth`.",
+          "asserted_contract": "Typed `InvalidConfigReason::SourcePackageMultipleRoots`.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "unreadable_normal_module_root_returns_file_error",
+          "line": 611,
+          "fixture": "Unix: registered `pkg/` with `@home.moth`; `RestrictedDirectory::deny_listing` removes listing permission while canonicalization remains possible.",
+          "asserted_contract": "Package boundary traversal fails with primary `ErrorType::File`.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "independent_package_indexes_have_boundary_local_module_ids",
+          "line": 636,
+          "fixture": "Registered `alpha/` and `beta/`, each with `@mod.moth`.",
+          "asserted_contract": "Indexes ordered by prefix alpha,beta; each has one module rooted at its own canonical package root; IDs remain boundary-local.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "package_boundary_indexes_classify_provider_files_under_nearest_module",
+          "line": 691,
+          "fixture": "Registered `pkg/` with `@mod.moth` and `helper.js`; Js external-import provider registered.",
+          "asserted_contract": "Provider file classified as provider-owned JS under nearest module owner.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "invalid_candidate_without_valid_normal_module_root_returns_file_error",
+          "line": 803,
+          "fixture": "Linux: package helper creates `pkg/<raw [0xC3,0x28]>` with empty contents; registered ProjectLocal prefix `pkg`.",
+          "asserted_contract": "Boundary indexing fails with File/non-UTF-8 error even without a valid normal root.",
+          "decision": "merge_candidate",
+          "surviving_test_id": "package_boundary_traversal_rejects_non_utf8_name",
+          "overlap_status": "likely overlap - inspect"
+        },
+        {
+          "test_id": "valid_normal_module_root_plus_invalid_candidate_still_returns_file_error",
+          "line": 823,
+          "fixture": "Linux: same package helper plus valid `@home.moth`.",
+          "asserted_contract": "Boundary indexing still fails with File/non-UTF-8 error; valid root does not mask malformed candidate.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "assigns_module_ids_in_canonical_logical_path_order",
+          "line": 900,
+          "fixture": "Project `src/` has `@home.moth`, `zeta/@page.moth`, `alpha/@mod.moth`, `alpha/inner/@page.moth`; creation order starts with zeta.",
+          "asserted_contract": "Module logical paths are ordered `\"\", alpha, alpha/inner, zeta`; entry role is Normal.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "module_root_role_classifier_maps_filename_markers_to_roles",
+          "line": 939,
+          "fixture": "Pure filename inputs: `@page.moth`, `+pkg.moth`, `page.moth`, `config.moth`, `+.moth`, `#.moth`.",
+          "asserted_contract": "Classifier maps normal/support markers to roles and other names to None.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "module_identity_is_independent_of_cosmetic_root_filename_suffix",
+          "line": 955,
+          "fixture": "Project `src/` with `page/@mod.moth` and sibling `other/@page.moth`; replace page root with `page/@page.moth` and rediscover.",
+          "asserted_contract": "Page and sibling ModuleIds/logical path remain stable across cosmetic root suffix rename.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "records_explicit_root_roles_for_normal_and_support_roots",
+          "line": 1017,
+          "fixture": "Project roots `page/@page.moth` and `components/+ui.moth`.",
+          "asserted_contract": "Table roles are Normal/Support; graph includes canonical normal root file as entry and excludes support root file.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "records_structural_ancestry_by_nearest_module_containment",
+          "line": 1068,
+          "fixture": "Project `src/@page.moth`, `outer/@mod.moth`, `outer/inner/@page.moth`.",
+          "asserted_contract": "Entry has no ancestor; outer parent is entry; inner parent is outer; direct-child relationships are exact.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "support_roots_participate_in_structural_ancestry",
+          "line": 1116,
+          "fixture": "Project `page/@page.moth` and nested `page/components/+ui.moth`.",
+          "asserted_contract": "Support root’s nearest ancestor is the enclosing page module.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "discovers_project_package_facade_outside_entry_root_containment",
+          "line": 1146,
+          "fixture": "Project `src/@page.moth` plus project-root `+package.moth`.",
+          "asserted_contract": "Facade role is ProjectPackageFacade; no ancestor/children; excluded from entry graph; facade discovery is recorded.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "missing_project_root_surfaces_file_error_not_missing_facade",
+          "line": 1206,
+          "fixture": "Valid `src/@page.moth`, but facade discovery is given a nonexistent project root.",
+          "asserted_contract": "Primary File error with message mentioning `discovering package facade`; not treated as an absent optional facade.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "unreadable_project_root_surfaces_file_error_not_missing_facade",
+          "line": 1240,
+          "fixture": "Unix: valid source root plus unreadable project root; listing denied with `RestrictedDirectory`.",
+          "asserted_contract": "Primary File error with facade-discovery message; unreadable root is not treated as missing facade.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "facade_outside_entry_root_is_not_classified_as_a_support_root",
+          "line": 1294,
+          "fixture": "Same project-root `+package.moth` plus `src/@page.moth` fixture as facade-discovery test.",
+          "asserted_contract": "Support-role count is zero; exactly one ProjectPackageFacade is discovered.",
+          "decision": "merge_candidate",
+          "surviving_test_id": "discovers_project_package_facade_outside_entry_root_containment",
+          "overlap_status": "likely overlap - inspect"
+        },
+        {
+          "test_id": "rejects_multiple_normal_module_roots_in_one_directory",
+          "line": 1322,
+          "fixture": "Project `src/` contains `@page.moth` and `@mod.moth`; direct SourceTreeIndex discovery.",
+          "asserted_contract": "Failure’s first diagnostic code is `MOTH-CONFIG-0001`.",
+          "decision": "merge_candidate",
+          "surviving_test_id": "source_tree_index_rejects_duplicate_normal_module_root_files",
+          "overlap_status": "likely overlap - inspect"
+        },
+        {
+          "test_id": "rejects_mixed_normal_and_support_roots_in_one_directory",
+          "line": 1357,
+          "fixture": "Project `src/` contains `@page.moth` and `+pkg.moth`.",
+          "asserted_contract": "Failure’s first diagnostic code is `MOTH-CONFIG-0001`.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "rejects_multiple_support_roots_in_one_directory",
+          "line": 1392,
+          "fixture": "Project `src/pkg/` contains `+one.moth` and `+two.moth`.",
+          "asserted_contract": "Failure’s first diagnostic code is `MOTH-CONFIG-0001`.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "empty_table_has_no_identities_or_ancestry",
+          "line": 1427,
+          "fixture": "Direct `ModuleIdentityTable::empty()` construction; no filesystem fixture.",
+          "asserted_contract": "Module identity count is zero.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "stable_identity_is_equal_across_distinct_checkout_roots",
+          "line": 1487,
+          "fixture": "Two temporary checkout roots with same project name and equivalent entry/alpha modules.",
+          "asserted_contract": "Entry and alpha stable origins compare equal across roots; portable path is alpha; debug representation omits absolute checkout paths.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "changing_project_name_changes_stable_identity",
+          "line": 1549,
+          "fixture": "Equivalent trees under two roots with project names `first` and `second`.",
+          "asserted_contract": "Origins differ; configured package names are preserved; origin kind is ProjectLocal.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "changing_logical_module_path_changes_stable_identity",
+          "line": 1575,
+          "fixture": "Same project with entry logical path empty and nested `alpha` module.",
+          "asserted_contract": "Origins differ and preserve exact logical paths.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "changing_root_role_changes_stable_identity",
+          "line": 1601,
+          "fixture": "Entry normal root and project facade share empty logical path; facade is also built under another checkout.",
+          "asserted_contract": "Normal and facade origins differ by role; facade identity is stable across checkout roots.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "cosmetic_root_suffix_rename_does_not_change_stable_identity",
+          "line": 1653,
+          "fixture": "Equivalent module roots under two temporary checkouts, one `@page.moth`, one `@mod.moth`.",
+          "asserted_contract": "Stable origin identities compare equal.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "project_local_package_identity_preserves_configured_name_verbatim",
+          "line": 1674,
+          "fixture": "Direct identity constructor input `  weird/name  `; no filesystem fixture.",
+          "asserted_contract": "ProjectLocal package identity preserves configured name exactly, including spaces and slash.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "absolute_logical_path_is_rejected",
+          "line": 1716,
+          "fixture": "Direct stable-origin construction from `/alpha`.",
+          "asserted_contract": "Returns `ErrorType::Compiler`; message contains `invalid component`.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "parent_component_logical_path_is_rejected",
+          "line": 1725,
+          "fixture": "Direct stable-origin construction from `../alpha`.",
+          "asserted_contract": "Returns `ErrorType::Compiler`; message contains `invalid component`.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "non_utf8_logical_component_is_rejected",
+          "line": 1735,
+          "fixture": "Linux: direct logical path component from raw bytes `[0xC3,0x28]`.",
+          "asserted_contract": "Returns `ErrorType::Compiler`; message contains `not UTF-8`.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "valid_relative_logical_path_still_builds_identity",
+          "line": 1748,
+          "fixture": "Direct stable-origin construction from `alpha/inner`.",
+          "asserted_contract": "Succeeds with portable path `alpha/inner` and Normal role.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "synthetic_single_file_origin_is_deterministic_normal_with_empty_path",
+          "line": 1756,
+          "fixture": "Direct synthetic single-file identity construction; empty logical path and configured project name.",
+          "asserted_contract": "Normal role, empty path, expected project name; repeated construction is equal.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "root_and_nested_files_receive_correct_nearest_owner",
+          "line": 1937,
+          "fixture": "Shared nested fixture: src/@page + accounts.moth; alpha/@mod + helper.moth; alpha/inner/@page + deep.moth; .mtf/.md registry.",
+          "asserted_contract": "Exact entry/alpha/inner owned path lists; same-named @page files in different modules have distinct logical identities.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "nested_module_files_transfer_to_nested_module_not_ancestor",
+          "line": 1997,
+          "fixture": "Same shared nested fixture as root-and-nested ownership test.",
+          "asserted_contract": "Alpha does not own `inner/deep.moth` or `deep.moth`; nested module boundary transfers ownership.",
+          "decision": "merge_candidate",
+          "surviving_test_id": "root_and_nested_files_receive_correct_nearest_owner",
+          "overlap_status": "likely overlap - inspect"
+        },
+        {
+          "test_id": "registered_bd_and_md_kinds_are_included",
+          "line": 2022,
+          "fixture": "Entry `@page.moth`, `page.mtf`, `content.md`; registry maps .mtf to MothTemplate and .md to PlainMarkdown.",
+          "asserted_contract": "Both registered kinds are owned; relative paths are sorted.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "known_but_unselected_sources_are_indexed_as_unsupported",
+          "line": 2062,
+          "fixture": "Entry root plus `page.mtf`, `content.md`, `notes.txt`; empty source-kind registry.",
+          "asserted_contract": ".mtf/.md remain indexed but unsupported; .txt is excluded; no unrooted records.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "owned_entries_have_deterministic_logical_order_independent_of_creation",
+          "line": 2106,
+          "fixture": "Entry root and alpha/zeta/internal files created in non-sorted order.",
+          "asserted_contract": "Owned portable relative paths have deterministic sorted order independent of creation order.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "project_facade_owns_its_root_source",
+          "line": 2146,
+          "fixture": "Entry `src/@page.moth` plus project-root `+package.moth` outside entry root.",
+          "asserted_contract": "Facade owns exactly its root source at relative `+package.moth`, classified as compiler-semantic Moth.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "unrooted_supported_candidates_remain_explicit_facts",
+          "line": 2181,
+          "fixture": "No module root; supported `orphan.moth` and `page.mtf` candidates.",
+          "asserted_contract": "No modules; both candidates remain unrooted with portable logical paths in deterministic order.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "owned_source_identity_is_independent_of_checkout_root",
+          "line": 2218,
+          "fixture": "Same nested module tree built under two distinct checkout roots.",
+          "asserted_contract": "Alpha/helper logical source identity is equal across roots; debug output omits absolute roots.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "unknown_registered_extension_is_excluded",
+          "line": 2266,
+          "fixture": "Entry `@page.moth` plus `notes.txt`; registry claims txt as MothTemplate.",
+          "asserted_contract": "Unknown compiler extension remains excluded from owned and unrooted records.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "mismatched_known_extension_mapping_is_indexed_as_unsupported",
+          "line": 2303,
+          "fixture": "Entry root plus `page.mtf`; registry maps known .mtf to mismatched PlainMarkdown kind.",
+          "asserted_contract": "Candidate retains identity but is unsupported; it is not moved to unrooted.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "unrooted_source_ids_are_ordered_by_portable_logical_path_across_roots",
+          "line": 2347,
+          "fixture": "Two no-root trees with alpha/zeta/mismatch candidates created in reverse logical order.",
+          "asserted_contract": "Unrooted IDs follow sorted portable entry-root-relative paths identically across checkouts.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "facade_file_inside_entry_root_is_owned_exactly_once_by_facade",
+          "line": 2388,
+          "fixture": "Project root equals entry root `.`; same directory contains `@page.moth` and `+package.moth`.",
+          "asserted_contract": "Facade owns its root file exactly once; entry module owns only @page; central source table has one facade record.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "compilation_root_table_keeps_normal_root_when_facade_shares_entry_root",
+          "line": 2459,
+          "fixture": "Same-root compatibility fixture: `@page.moth` and `+package.moth` under `.`.",
+          "asserted_contract": "Compilation-root table retains canonical normal @page root rather than selecting the facade.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "source_row_handles_address_their_own_record",
+          "line": 2479,
+          "fixture": "Shared nested module tree.",
+          "asserted_contract": "Canonical-path lookup returns a handle whose resolved record has the same canonical path.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "every_supported_file_appears_exactly_once",
+          "line": 2502,
+          "fixture": "Shared nested module tree.",
+          "asserted_contract": "Owned plus unrooted source indices cover every indexed record exactly once; canonical paths are unique.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "owned_and_unrooted_sets_reference_valid_records_with_matching_state",
+          "line": 2548,
+          "fixture": "Shared nested tree plus a separate no-root orphan-source fixture.",
+          "asserted_contract": "Owned records have matching owner and Owned identity; orphan record has Unrooted state and identity.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "source_ids_are_deterministic_across_creation_order_and_checkout_roots",
+          "line": 2606,
+          "fixture": "Equivalent nested trees under two roots with reverse/forward creation order.",
+          "asserted_contract": "Full SourceLogicalIdentity sequence is equal; debug output omits absolute checkout paths.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "provider_owned_files_are_classified_and_owned_by_nearest_module",
+          "line": 2740,
+          "fixture": "Entry root plus helper.js; nested feature/@mod plus util.js; custom Js provider registered.",
+          "asserted_contract": "Provider classification is JS and ownership follows nearest module; source order and canonical lookup retain expected owner.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "provider_owned_files_without_a_registered_provider_are_not_indexed",
+          "line": 2831,
+          "fixture": "Entry root plus provider-shaped `.wit` file; no provider registered.",
+          "asserted_contract": "Unregistered-provider file is absent from owned source inventory.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "nodes_are_stored_in_deterministic_module_id_order",
+          "line": 2929,
+          "fixture": "Project root, alpha and zeta module roots created in non-sorted order.",
+          "asserted_contract": "Graph nodes match identity-table ModuleId order and metadata; source ownership remains in central index and agrees with each module.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "entry_modules_are_normal_only_and_facade_is_separate",
+          "line": 2981,
+          "fixture": "Normal entry and pages roots, components/+ui support root, project-root +package facade.",
+          "asserted_contract": "Only normal roots are entry modules; support and facade excluded; facade remains separate and parentless.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "support_visibility_is_visible_to_owner_and_normal_descendants_outside_subtree",
+          "line": 3036,
+          "fixture": "Site root; markdown support package with private parser; pages and pages/article normal descendants.",
+          "asserted_contract": "Support visible to owner site and normal descendants pages/article outside its private subtree.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "support_visibility_enforces_private_same_scope_and_outer_scope_boundaries",
+          "line": 3075,
+          "fixture": "Site root; markdown support/private parser; assets same-scope support; pages/extras nested support.",
+          "asserted_contract": "Not visible to private parser, self, or same-scope support; visible to nested support; invalid non-support query returns false.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "support_visibility_rejects_modules_outside_owner_subtree",
+          "line": 3127,
+          "fixture": "Site root; other normal branch; pages normal root with components support.",
+          "asserted_contract": "Support is not visible to a normal module outside its owning subtree.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "independent_ready_modules_share_wave_zero_in_module_id_order",
+          "line": 3152,
+          "fixture": "Root plus alpha and beta modules; graph tested with no edges and with alpha->beta.",
+          "asserted_contract": "No-edge graph yields one sorted wave; edge insertion outcomes are Inserted then AlreadyPresent; provider compiles before consumer.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "facade_is_ordered_by_real_edges_not_a_fake_dependency",
+          "line": 3223,
+          "fixture": "Site root, pages module, project facade.",
+          "asserted_contract": "Facade is in wave zero with no edges; after real site/pages -> facade edges it follows both providers.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "dependency_cycle_reports_blocked_modules_as_internal_error",
+          "line": 3293,
+          "fixture": "Root plus alpha and beta; add alpha->beta and beta->alpha.",
+          "asserted_contract": "Completed graph scheduling fails with `ErrorType::Compiler`; message identifies cycle and both modules.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "self_edge_and_invalid_ids_are_rejected_without_panicking",
+          "line": 3341,
+          "fixture": "Root plus alpha; attempt alpha self-edge and out-of-range ModuleId.",
+          "asserted_contract": "Both rejected with Compiler errors; graph remains unchanged and completes to one wave.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "frozen_adjacency_orders_consumers_in_module_id_order",
+          "line": 3378,
+          "fixture": "Root plus alpha/beta/gamma; alpha provider edges inserted to consumers in reverse ModuleId order.",
+          "asserted_contract": "After completion, provider is first wave and two consumers are second wave sorted by ModuleId, not insertion order.",
+          "decision": "keep"
+        },
+        {
+          "test_id": "invalid_graph_phase_use_reports_internal_errors",
+          "line": 3444,
+          "fixture": "Root plus alpha/beta; exercise incomplete graph, then completed graph mutation and second completion.",
+          "asserted_contract": "Each lifecycle violation returns Compiler error with phase message; completed graph still schedules provider then consumer in two waves.",
+          "decision": "keep"
+        }
+      ]
+    }
+  ]
+}
