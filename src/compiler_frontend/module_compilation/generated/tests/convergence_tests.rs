@@ -2350,7 +2350,8 @@ fn final_generated_failure_lanes_keep_external_candidates_without_validation_onl
     let _guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     // Materialisation records the later private helper's protected call without a CFG failure
     // edge. Convergence must add the handler-only provider once that call becomes an Invoke.
-    const SOURCE: &str = "@live.js touch, read\n@dormant.js dormant\n@recovery.js recover\n\
+    const SOURCE: &str = "@live.js touch, read, ready\n@dormant.js dormant\n\
+        @recovery.js recover\n@active_message.js assertion_message\n\
         double |value I32| -> I32:\n    return value * 2\n;\n\
         execute type T |marker T, value I32| -> I32:\n\
             doubled = double(value)\n    touch()\n    io.line(\"live\")\n\
@@ -2359,16 +2360,22 @@ fn final_generated_failure_lanes_keep_external_candidates_without_validation_onl
             return doubled + observed + recovered\n;\n\
         late |value I32| -> I32:\n    return value + 2147483647\n;\n\
         message type T |marker T| -> String:\n    return dormant()\n;\n\
+        active_message type T |marker T| -> String:\n    return assertion_message()\n;\n\
+        assert(ready(), active_message(\"active assertion\"))\n\
         assert(true, message(\"checked\"))\n\
         result = execute(\"active\", 2) catch then 0\n[:[result]]\n";
     const LIVE: &str = "/** @moth.sig touch || -> */\n\
         export function touch() {}\n\
+        /** @moth.sig ready || -> Bool */\n\
+        export function ready() { return true; }\n\
         /** @moth.sig read || -> I32, Error! */\n\
         export function read() { return { ok: true, value: 3 }; }\n";
     const DORMANT: &str = "/** @moth.sig dormant || -> String */\n\
         export function dormant() { return \"unused\"; }\n";
     const RECOVERY: &str = "/** @moth.sig recover || -> I32 */\n\
         export function recover() { return 0; }\n";
+    const ACTIVE_MESSAGE: &str = "/** @moth.sig assertion_message || -> String */\n\
+        export function assertion_message() { return \"active assertion provider\"; }\n";
 
     for single_file in [false, true] {
         let (frontend, _) = compile_owned_service_fixture(
@@ -2378,14 +2385,24 @@ fn final_generated_failure_lanes_keep_external_candidates_without_validation_onl
                 ("live.js", LIVE),
                 ("dormant.js", DORMANT),
                 ("recovery.js", RECOVERY),
+                ("active_message.js", ACTIVE_MESSAGE),
             ],
         );
         assert!(!frontend.has_diagnosed_or_blocked());
         let sidecars = frontend.project.generated.sidecars().collect::<Vec<_>>();
-        let [sidecar] = sidecars.as_slice() else {
-            panic!("only the executable generic instance should be published");
-        };
-        assert_eq!(sidecar.identity.declaration().defining_name(), "execute");
+        assert_eq!(
+            sidecars.len(),
+            2,
+            "only the executed and active-message generic instances should be published"
+        );
+        let sidecar = sidecars
+            .iter()
+            .find(|sidecar| sidecar.identity.declaration().defining_name() == "execute")
+            .expect("the executed generic instance should be published");
+        let active_message = sidecars
+            .iter()
+            .find(|sidecar| sidecar.identity.declaration().defining_name() == "active_message")
+            .expect("the active assertion-message generic instance should be published");
         let hir = &sidecar.module.executable.hir;
         let root = hir.function_ids_by_generated[&sidecar.identity];
         let root_function = hir
@@ -2517,6 +2534,57 @@ fn final_generated_failure_lanes_keep_external_candidates_without_validation_onl
                 );
             }
         }
+        let message_hir = &active_message.module.executable.hir;
+        let message_root = message_hir.function_ids_by_generated[&active_message.identity];
+        let message_reachability = collect_reachability_from_function_link_facts(
+            &active_message.module.link_facts.functions,
+            &[message_root],
+        )
+        .expect("final active-message link facts should retain its provider call");
+        assert_eq!(message_reachability.reachable_external_calls.len(), 1);
+        assert_eq!(message_reachability.reachable_external_functions.len(), 1);
+        let message_registry = &active_message.module.link_facts.external_package_registry;
+        let message_call = &message_reachability.reachable_external_calls[0];
+        assert!(
+            message_registry
+                .get_function_by_id(message_call.function_id)
+                .is_some()
+        );
+        let message_package = message_registry
+            .resolve_function_package_id(message_call.function_id)
+            .expect("the active-message call retains its issuing registry");
+        assert!(
+            message_registry
+                .get_package_by_id(message_package)
+                .is_some()
+        );
+        let message_candidates = &active_message.module.link_facts.external_import_candidates;
+        assert_eq!(message_candidates.len(), 1);
+        assert_eq!(message_candidates[0].package_id, message_package);
+        let message_asset = message_candidates[0]
+            .runtime_asset
+            .as_ref()
+            .expect("the active-message provider must supply its sole runtime asset");
+        assert!(
+            message_asset
+                .canonical_source_path
+                .ends_with("active_message.js")
+        );
+        assert_eq!(message_asset.asset_kind, "js");
+        assert_eq!(
+            frontend
+                .successful_module_views()
+                .flat_map(|module| module.link_facts.functions.direct_call_targets())
+                .filter_map(|(_, target)| match target {
+                    CallTarget::Generated(identity) => {
+                        Some(identity.declaration().defining_name().to_owned())
+                    }
+                    _ => None,
+                })
+                .collect::<FxHashSet<_>>(),
+            FxHashSet::from_iter(["execute".to_owned(), "active_message".to_owned()]),
+            "the published source facts retain both executable demands and no inert message"
+        );
         for module in frontend.successful_module_views() {
             assert!(
                 module

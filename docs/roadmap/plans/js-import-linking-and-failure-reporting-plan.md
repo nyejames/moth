@@ -14,9 +14,9 @@
 
 ```text
 STATUS: active on link-fixes-and-test-cleanup
-CURRENT_SLICE: typed failure transport and three-view reporting accepted
-BLOCKERS: none
-NEXT_ACTION: execute the bounded adjacent-defect campaign and record each disposition
+CURRENT_SLICE: bounded adjacent campaign accepted, including the registered-provider namespace correction
+BLOCKERS: none for the required same-project and reporting contracts; independent provider-identity collision deferred in the evidence report
+NEXT_ACTION: reconcile permanent contracts and status, then run the final integrated gate and Slice review on this branch
 ```
 
 The reviewed main includes the typed-expression/native-result Phase 4 checkpoint. Its plan explicitly pauses before Phase 5. The affected source still collects ordinary-module provider candidates by source-file ownership and still loses later error types during infrastructure aggregation. The original missing-asset path remains present. Establish an executed failing baseline before changing it. [S1] [S2] [S5] [S6]

@@ -3,9 +3,18 @@
 // Or these tests will fail on Windows due to attempts to delete non-empty temp directories while files are still open.
 
 use super::*;
-use crate::build_system::build::{ProjectBuilder, build_project};
+use crate::build_system::build::{ProjectBuilder, ProjectCompilation, build_project};
 use crate::build_system::output::output_path_identity;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
+use crate::compiler_frontend::external_packages::{
+    CanonicalBindingSymbolIdentity, ExternalAbiType, ExternalJsLowering, ExternalReturnSlot,
+    ExternalSymbolCategory, ExternalSymbolId, ExternalSymbolPath,
+};
+use crate::compiler_frontend::paths::resource_identity::{
+    PortableResourcePath, StableProviderResourceOwnerId, StableResourceOriginId,
+    StableResourceOwnerId,
+};
+use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::utilities::basic::portable_path_text;
 use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
 use std::collections::{BTreeMap, HashMap};
@@ -660,6 +669,416 @@ fn build_html_project_reexport_fixture_emits_provider_and_exact_wrappers() {
         fs::read_to_string(output_root.join("index.html")).expect("page output should exist"),
         page
     );
+}
+
+/// Adds real source-package boundaries while retaining the production HTML surface and backend.
+struct RegisteredJsPackageBuilder {
+    project_root: PathBuf,
+    package_root: PathBuf,
+    marker_root: PathBuf,
+    reverse_registration: bool,
+}
+
+impl BackendBuilder for RegisteredJsPackageBuilder {
+    fn frontend_surface(&self) -> BuilderSurface {
+        let mut surface = HtmlProjectBuilder::new().frontend_surface();
+        let mut packages = [
+            ("campaign", self.package_root.clone()),
+            ("marker", self.marker_root.clone()),
+        ];
+        if self.reverse_registration {
+            packages.reverse();
+        }
+        for (prefix, root) in packages {
+            surface
+                .source_packages
+                .register_filesystem_root(prefix, root, PackageOrigin::Builder);
+        }
+        surface
+    }
+
+    fn frontend_style_directives(&self) -> Vec<StyleDirectiveSpec> {
+        HtmlProjectBuilder::new().frontend_style_directives()
+    }
+
+    fn validate_project_config(
+        &self,
+        config: &Config,
+        string_table: &mut StringTable,
+    ) -> Result<(), ProjectConfigError> {
+        HtmlProjectBuilder::new().validate_project_config(config, string_table)
+    }
+
+    fn build_backend(
+        &self,
+        compilation: ProjectCompilation,
+        config: &Config,
+        build_profile: BuildProfile,
+        flags: &[Flag],
+        string_table: &mut StringTable,
+    ) -> Result<Project, CompilerMessages> {
+        let providers = [
+            (
+                "binding.js",
+                "projectValue",
+                self.project_root.join("src/binding.js"),
+            ),
+            (
+                "providers/binding.js",
+                "packageValue",
+                self.package_root.join("providers/binding.js"),
+            ),
+        ];
+        // Inspect real definitions through each module's issuing registry. Pointer equality
+        // or equal local IDs alone would not prove that package and project calls agree.
+        for module in compilation.modules() {
+            let registry = &module.link_facts.external_package_registry;
+            for (logical_path, export_name, _) in &providers {
+                let identity = CanonicalBindingSymbolIdentity {
+                    package: StablePackageIdentity::binding(
+                        PackageOrigin::ProjectLocal,
+                        &format!("@html-js/{logical_path}"),
+                    ),
+                    symbol_path: ExternalSymbolPath::try_from_single("provider_value")
+                        .expect("the fixture symbol is a valid leaf"),
+                    category: ExternalSymbolCategory::Function,
+                };
+                let Some(ExternalSymbolId::Function(function_id)) =
+                    registry.resolve_canonical_symbol(&identity)
+                else {
+                    panic!("every compiled boundary must resolve {identity:?}");
+                };
+                assert_eq!(
+                    registry.canonical_symbol_identity(ExternalSymbolId::Function(function_id)),
+                    Some(identity)
+                );
+                let definition = registry
+                    .get_function_by_id(function_id)
+                    .expect("a resolved function must have a definition");
+                assert_eq!(definition.name, "provider_value");
+                assert!(definition.parameters.is_empty());
+                assert_eq!(
+                    definition.returns,
+                    [ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str)]
+                );
+                assert!(definition.error_return_type.is_none());
+                assert!(matches!(
+                    &definition.lowerings.js,
+                    Some(ExternalJsLowering::ExternalModuleExport { export_name: actual })
+                        if actual == export_name
+                ));
+            }
+        }
+        let entries = compilation.entries();
+        assert_eq!(
+            entries.len(),
+            1,
+            "source package roots must not become pages"
+        );
+        assert_eq!(entries[0].external_imports.len(), providers.len());
+        for (logical_path, _, source) in &providers {
+            let expected_origin = StableResourceOriginId::new(
+                StableResourceOwnerId::Provider(StableProviderResourceOwnerId::new(
+                    "html-js",
+                    StablePackageIdentity::binding(
+                        PackageOrigin::ProjectLocal,
+                        &format!("@html-js/{logical_path}"),
+                    ),
+                )),
+                PortableResourcePath::from_portable_spelling(format!("_moth/js/{logical_path}"))
+                    .expect("the fixture output is a portable resource path"),
+            );
+            let imports = entries[0]
+                .external_imports
+                .iter()
+                .filter(|import| {
+                    import
+                        .runtime_asset
+                        .as_ref()
+                        .is_some_and(|asset| asset.origin == expected_origin)
+                })
+                .collect::<Vec<_>>();
+            let [import] = imports.as_slice() else {
+                panic!("the entry must retain exactly one import for {expected_origin:?}");
+            };
+            let package = entries[0]
+                .module
+                .link_facts
+                .external_package_registry
+                .get_package_by_id(import.package_id)
+                .expect("entry import package must resolve in its issuing registry");
+            assert_eq!(package.path, format!("@html-js/{logical_path}"));
+            assert_eq!(package.metadata.origin, PackageOrigin::ProjectLocal);
+            assert!(import.required_runtime_imports.is_empty());
+            let asset = import
+                .runtime_asset
+                .as_ref()
+                .expect("the matched import has its provider asset");
+            assert_eq!(
+                asset.canonical_source_path,
+                fs::canonicalize(source).expect("provider source should exist")
+            );
+            assert_eq!(asset.asset_kind, "js");
+        }
+        HtmlProjectBuilder::new().build_backend(
+            compilation,
+            config,
+            build_profile,
+            flags,
+            string_table,
+        )
+    }
+}
+
+#[test]
+fn build_html_registered_source_package_preserves_provider_identity_and_order() {
+    let temporary = tempfile::tempdir().expect("should create campaign roots");
+    let mut baseline = None;
+    // Isolate topologies so the nested provider root cannot survive in the flat fixture.
+    // Flat package module 0 is in bounds in the project graph but has a different namespace.
+    for (topology, package_root_source, provider_root_source) in [
+        (
+            "nested",
+            "export:\n    @providers provider_value as package_value\n;\n",
+            Some("export:\n    @binding.js provider_value\n;\n"),
+        ),
+        (
+            "flat",
+            "export:\n    @providers/binding.js provider_value as package_value\n;\n",
+            None,
+        ),
+    ] {
+        // Compare an identical-root repeat with reversed creation and registration order.
+        for (root_index, reversed) in [(0, false), (1, true), (0, false)] {
+            let root = temporary.path().join(topology).join(root_index.to_string());
+            let project_root = root.join("project");
+            let package_root = root.join("campaign");
+            let marker_root = root.join("marker");
+            let mut sources = vec![
+                (
+                    project_root.join("config.moth"),
+                    "project #= (\n    name = \"package_campaign\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+                ),
+                (
+                    project_root.join("src/@page.moth"),
+                    "@binding.js provider_value as project_value\n@campaign package_value\n@marker marker\n[:project=[project_value()]|package=[package_value()]|[marker]]\n",
+                ),
+                (
+                    project_root.join("src/binding.js"),
+                    "/** @moth.sig provider_value || -> String */\nexport function projectValue() { return \"project:17\"; }\n",
+                ),
+                (package_root.join("@mod.moth"), package_root_source),
+                (
+                    package_root.join("providers/binding.js"),
+                    "/** @moth.sig provider_value || -> String */\nexport function packageValue() { return \"package:29\"; }\n",
+                ),
+                (
+                    marker_root.join("@mod.moth"),
+                    "export:\n    marker #= \"marker:43\"\n;\n",
+                ),
+            ];
+            if let Some(source) = provider_root_source {
+                sources.push((package_root.join("providers/@mod.moth"), source));
+            }
+            if reversed {
+                sources.reverse();
+            }
+            for (path, source) in sources {
+                fs::create_dir_all(path.parent().expect("fixture source has a parent"))
+                    .expect("should create fixture directories");
+                fs::write(path, source).expect("should write campaign source");
+            }
+            let builder = ProjectBuilder::new(Box::new(RegisteredJsPackageBuilder {
+                project_root: project_root.clone(),
+                package_root: package_root.clone(),
+                marker_root,
+                reverse_registration: reversed,
+            }));
+            let mut built = build_project(
+                &builder,
+                project_root.to_str().expect("fixture path should be UTF-8"),
+                &[],
+                &BuildConfigInputSet::new(),
+            )
+            .expect("registered source and project providers should link together");
+            let project_source = project_root.join("src/binding.js");
+            let package_source = package_root.join("providers/binding.js");
+            assert_deferred_provider_sources(
+                &mut built.project,
+                &[
+                    ("_moth/js/binding.js", project_source.as_path()),
+                    ("_moth/js/providers/binding.js", package_source.as_path()),
+                ],
+            );
+            let outputs = BuiltOutputs::index(&built.project);
+            let glue_path = outputs.exactly_one_path("generated glue module", |path| {
+                path.starts_with(GLUE_MODULE_PREFIX)
+            });
+            let glue = js_text(outputs.at(glue_path));
+            let page = html_text(outputs.at("index.html"));
+            assert_eq!(outputs.paths(), vec![glue_path, "index.html"]);
+            assert_page_imports_glue(page, &format!("./{glue_path}"), glue);
+            assert_glue_exports(
+                glue,
+                &[
+                    ("../binding.js", &["projectValue"]),
+                    ("../providers/binding.js", &["packageValue"]),
+                ],
+            );
+            let output_root = root.join("output");
+            write_project_outputs(
+                &built.project,
+                &always_write_options(output_root.clone(), None),
+            )
+            .expect("the central writer should materialise registered package assets");
+            for (path, source) in [
+                ("_moth/js/binding.js", &project_source),
+                ("_moth/js/providers/binding.js", &package_source),
+            ] {
+                assert_eq!(
+                    fs::read(output_root.join(path)).expect("provider output must exist"),
+                    fs::read(source).expect("provider source must exist")
+                );
+            }
+            assert_eq!(
+                fs::read_to_string(output_root.join(glue_path)).expect("glue output must exist"),
+                glue
+            );
+            assert_eq!(
+                fs::read_to_string(output_root.join("index.html")).expect("page output must exist"),
+                page
+            );
+            // Keep actual import/export order but discard registry-local aliases and the
+            // absolute-path-derived glue filename when comparing equivalent checkouts.
+            let mut wrapper_symbols = HashMap::new();
+            let mut import_order = Vec::new();
+            for line in glue
+                .lines()
+                .filter_map(|line| line.strip_prefix("import { "))
+            {
+                let (bindings, path) = line
+                    .split_once(" } from ")
+                    .expect("glue imports have named bindings");
+                let mut exports = Vec::new();
+                for binding in bindings.split(", ") {
+                    let (export, alias) =
+                        binding.split_once(" as ").expect("raw import has an alias");
+                    let suffix = alias
+                        .strip_prefix("__moth_external_fn")
+                        .expect("provider imports have generated local aliases");
+                    wrapper_symbols.insert(
+                        format!("__moth_glue_fn{suffix}"),
+                        (path.to_owned(), export.to_owned()),
+                    );
+                    exports.push(export);
+                }
+                import_order.push((path.to_owned(), exports.join(",")));
+            }
+            assert_eq!(
+                import_order.len(),
+                2,
+                "both provider imports must enter the order comparison"
+            );
+            let wrapper_order = glue
+                .lines()
+                .filter_map(|line| line.strip_prefix("export function "))
+                .map(|line| {
+                    let (name, _) = line.split_once('(').expect("wrapper has parameters");
+                    wrapper_symbols
+                        .remove(name)
+                        .expect("every emitted wrapper must select one imported provider export")
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                wrapper_order.len(),
+                2,
+                "both selected wrappers must enter the order comparison"
+            );
+            assert!(
+                wrapper_symbols.is_empty(),
+                "each selected export needs a wrapper"
+            );
+            let asset_order = built
+                .project
+                .deferred_resources
+                .iter()
+                .map(|asset| portable_path_text(&asset.relative_output_path))
+                .collect::<Vec<_>>();
+            let rendered =
+                crate::compiler_tests::integration_test_runner::assertions::execute_html_harness_for_test(
+                    &mut built,
+                )
+                .expect("the existing Node harness should execute both providers");
+            assert_eq!(rendered.runtime_error_message(), None);
+            let rendered = rendered.combined_output();
+            assert_eq!(rendered, "project=project:17|package=package:29|marker:43");
+            let signature = (import_order, wrapper_order, asset_order, rendered);
+            if let Some(baseline) = &baseline {
+                assert_eq!(
+                    &signature, baseline,
+                    "topology and creation/registration order must not change linkage"
+                );
+            } else {
+                baseline = Some(signature);
+            }
+        }
+    }
+}
+
+#[test]
+fn build_html_normal_sibling_name_is_not_visible_from_child_module() {
+    let temporary = tempfile::tempdir().expect("should create sibling fixtures");
+    let mut baseline = None;
+    for reversed in [false, true] {
+        let root = temporary
+            .path()
+            .join(if reversed { "reverse" } else { "forward" });
+        let mut sources = [
+            (
+                "config.moth",
+                "project #= (\n    name = \"sibling_boundary\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+            ),
+            ("src/@page.moth", "@consumer value\n[:[value]]\n"),
+            (
+                "src/consumer/@mod.moth",
+                "export:\n    @provider value\n;\n",
+            ),
+            (
+                "src/provider/@mod.moth",
+                "export:\n    value #= \"must not escape through a sibling lookup\"\n;\n",
+            ),
+        ];
+        if reversed {
+            sources.reverse();
+        }
+        for (path, source) in sources {
+            let path = root.join(path);
+            fs::create_dir_all(path.parent().expect("fixture source has a parent"))
+                .expect("should create fixture directories");
+            fs::write(path, source).expect("should write sibling fixture");
+        }
+        let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
+        let errors = match build_project(
+            &builder,
+            root.to_str().expect("fixture root should be UTF-8"),
+            &[],
+            &BuildConfigInputSet::new(),
+        ) {
+            Ok(_) => panic!("module-root-relative lookup must not search normal sibling modules"),
+            Err(errors) => errors,
+        };
+        assert!(!errors.has_infrastructure_error());
+        let codes = errors
+            .diagnostics()
+            .map(|diagnostic| diagnostic.kind.code())
+            .collect::<Vec<_>>();
+        assert_eq!(codes, vec!["MOTH-IMPORT-0005"]);
+        if let Some(baseline) = &baseline {
+            assert_eq!(&codes, baseline);
+        } else {
+            baseline = Some(codes);
+        }
+    }
 }
 
 #[test]

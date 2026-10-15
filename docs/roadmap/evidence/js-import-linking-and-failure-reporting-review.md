@@ -4,7 +4,7 @@
 
 Implementation started on `link-fixes-and-test-cleanup` at `aa072a27a32b7233b1e3dcfdd9e4f42b0578bafc` with a clean staged, unstaged and untracked worktree. The user selected this branch, overriding the plan's proposed main landing. Other paused programmes remain paused.
 
-Rust is the repository pin `1.99.0` (`b940084d7`, aarch64-apple-darwin), Cargo `1.99.0`, Clippy `0.1.99` and rustfmt `1.10.0-stable`. Checks use the pinned Node `24.21.0` from the installed nvm version. The baseline uses Cargo's dev profile and HTML development output.
+Rust is the repository pin `1.99.0` (`b940084d7`, aarch64-apple-darwin), Cargo `1.99.0`, Clippy `0.1.99` and rustfmt `1.10.0-stable`. Activation selected the installed nvm Node `24.21.0`. The adjacent campaign records a later environment mismatch below and explicitly selects that executable on every authoritative command. The baseline uses Cargo's dev profile and HTML development output.
 
 ## Baseline regression
 
@@ -162,3 +162,194 @@ The static metadata capture proves presentation, not live recovery. The separate
 Five fresh audit lanes reviewed cold ownership, premerge/discovery transport, AST adapters, presentation/status and producer/dev-server classification. One required finding migrated an existing infrastructure-only content failure test from a fabricated diagnostic-zero source lookup to its explicit cause owner. A fresh focused verifier accepted that correction and the named signature result. Validation also caught two Boracle-only scalar adapters, mechanical Clippy issues and a direct test clock; each was corrected without suppression. The final missing-entry regression uses the production build cycle once, preserving a warning and asserting the published failure classification.
 
 Infrastructure renderers still show host paths, messages and metadata rather than source-span excerpts. Paired source provenance remains available in the cold carrier. Acquisition-race rollback received source review but no concurrent race execution; external strong-owner failure and weak aliases have deterministic coverage. These limits do not claim the paused final failure-lane or host-isolation migration.
+
+## Bounded adjacent-defect campaign
+
+The CLI campaign used the `8f15579ec08d6659e4e4360e74b55e3d9de5aad6` debug compiler, SHA-256 `2b3d53107b8d505086e6e7670a092059610d25e504ef644218844ee34451c628`, with development and release project output where stated. Rust probes used that checkpoint plus the campaign candidate. Every authoritative campaign command selected Node `24.21.0` through `PATH=/Users/aneirinjames/.nvm/versions/node/v24.21.0/bin:$PATH`.
+
+| Case | Actual command | Revision/profile and fixture | Observed result | Expected contract | First failing owner | Evidence and disposition |
+|---|---|---|---|---|---|---|
+| Registry-boundary overlap | `cargo test -p moth --lib build_dependency_tests -- --nocapture` with the two temporary probes; `cargo test -p moth --lib canonical_binding_identity_resolves_across_independent_registries` after its extension | Campaign candidate, test/dev, registered project/campaign/marker fixture and existing independent-registry test | Both providers execute as `project=project:17\|package=package:29\|marker:43`. The independent control resolves one canonical function from ID 702 to 703 and rejects a different canonical function that reuses raw ID 702 | Preserve canonical providers and never join unrelated registry-local IDs | None in shared-registry link assembly | One `Arc` registry enters both graphs at `compilation.rs:1371-1407`. Entry unions use issuing registries, linked lowering merges external IDs and final glue uses the entry registry. This path shares rather than remaps IDs. Both controls pass |
+| Registered source-package metadata | Same Cargo command, then `cargo test -p moth --lib build_dependency_tests` without temporary includes and the focused registered-package filter after its extension | Campaign candidate, test/dev, nested package facade and direct unrooted-provider topology | Original nested candidate panics at `module_namespace.rs:523`, length 1/index 1. Isolated `aa072a27` reproduces it. Corrected nested and in-bounds flat lookups, actual writer bytes and Node execution pass | Resolve providers against their owning package namespace and issuing registry, including when local indexes happen to be in bounds in both graphs | `DirectoryDependencyResolution::resolve_provider_target` dropped boundary/prefix | Red receipts `artifact://238` and `artifact://248`, green mixed probe `artifact://252`, permanent 27-test suite and focused six-build matrix. Confirmed pre-existing compiler defect, fixed without flattening the original fixture |
+| Scoped support, deep facade and invalid namespace | `cargo test -p moth --lib build_dependency_tests`; `cargo run --quiet -- tests --case module_facade_transitive_reexport_closure_success --backend html --terse`; same runner for `module_boundary_cross_module_facade_allowed` | Campaign candidate, test/dev, existing scoped support/two-page fixture, two-hop child facade and new normal-sibling control | Scoped support keeps page wrappers isolated. Both selected HTML integration cases pass 1/1. Reversed creation orders both report only `MOTH-IMPORT-0005` for a child importing its normal sibling | Legal facades stay usable and direct normal-sibling lookup stays invalid | None | Artifact and typed negative controls pass, with integration receipt `artifact://260`. This does not extend topology |
+| Asset-only rebuild | `node tmp/js-linking-rebuild-campaign.mjs` | `8f15579ec`, debug/dev, `tmp/js-linking-rebuild-campaign-AavEQC/fixture` | Annotation and Moth source stay unchanged. New emitted bytes execute as `rebuild-byte-edit-9823`, replacing `rebuild-baseline-4107` | Propagate provider bytes on rebuild | None | `results.json` stages 1-2 retain source/output hashes and exact native Node output. Pass for freshness, no cache or semantic-reuse claim |
+| Signature, export removal and last caller | Same Node command | Same compiler/profile/fixture | Signature edit gives `MOTH-TYPE-0001`. Removed selected export gives `MOTH-IMPORT-0005`. Restores execute successfully. Removing both callers deletes provider and glue from disk and manifest while retaining `index.html` and `rebuild-entry` | Typed source failures and normal stale cleanup | None | Stages 3-7 retain commands, diagnostics, output snapshots and the v4 HTML/dev manifest containing only `index.html`. Pass |
+| Concrete native results and assertion demand | `cargo test -p moth --lib final_generated_failure_lanes_keep_external_candidates_without_validation_only_sidecars`; `node tmp/js-linking-demand-target-campaign.mjs` | Campaign test candidate and `8f15579ec` debug compiler, dev/release fixtures under `tmp/js-linking-demand-target-campaign-1792029318281` | Final source/generated facts retain Call/Invoke providers and active message sidecar, prune inert validation-only message. Native success prints `live`, `result=7`, `messageCalls=0`. False assertion exits 1 with `JS_DEMAND_ACTIVE_MESSAGE_FATAL_6F28` | Publish final executable demand, evaluate active message only on failure, preserve fatal assertions | None | Existing convergence test and exact native ES-module graph execution pass. The fatal result is an uncaught assertion Error, not a returned entry Error or import failure |
+| HTML-Wasm | `target/debug/moth build <campaign>/wasm-reexport-generic --html-wasm` and with `--release` | `8f15579ec`, dev/release, generic call through a pure source facade | Both exit 1 with exactly `MOTH-RULE-0058`, source label on `return label()`, no missing-asset infrastructure | Reject unsupported reachable external functions through target validation | Target validation correctly rejects the call | Same demand campaign receipts. Pass for typed rejection. Mixed JS/Wasm affinity routing remains accepted but undelivered |
+| Runtime imports, ordinary JS resources and conflicts | `node tmp/js-linking-runtime-resource-campaign.mjs`, real Chromium at `/dev/` and `/release/`, existing dedup/conflict/preflight Cargo filters | `8f15579ec`, debug compiler, dev/release under `tmp/js-linking-runtime-resource-campaign-fCBGBY` | One mapped runtime, provider and glue execute. Visible text `runtime=17 ordinary=./drawing/provider.js`, href `./drawing/provider.js`, no JS errors. Distinct-origin output collision gives only `MOTH-CONFIG-0001`, no outputs | Preserve resource origin versus byte source, exact runtime imports and preflight | None | `records.json`, `browser-results.json` and screenshots. All three script fetches return 200 in both profiles. Existing Rust controls pass for deduplication, reserved glue collision and unhashed file-ancestor/symlink conflicts. CLI output absence alone proves no byte-read claim |
+| Determinism | `cargo test -p moth --lib build_dependency_tests`; focused `build_html_registered_source_package_preserves_provider_identity_and_order` after the matrix extension | Campaign candidate, test/dev, nested and flat roots, each with `[0, 1, 0]` forward/reversed/forward creation and registration | All six builds match runtime, provider destinations, import order and wrapper order. Negative sibling diagnostics match across creation orders | Repeat identical roots and vary legal input order without comparing absolute-path glue hashes | None | Both topologies compare nonempty two-import/two-wrapper semantic sequences and exact writer bytes. Pass for input-order independence, not arbitrary publication schedules |
+
+Before the final matrix extension, targeted validation passed `cargo clippy -p moth --all-targets`, 27 build-dependency tests, the extended one-test independent-registry control, three provider-discovery controls and the one-test generated-convergence owner. Both selected HTML integration filters returned 1/1. Formatting used `cargo fmt --all`.
+
+The resource/preflight commands each selected and passed one existing test:
+
+```sh
+cargo test -p moth --lib distinct_origins_colliding_at_provider_path_report_both_spans
+cargo test -p moth --lib reserved_javascript_glue_output_rejects_resource_planning
+cargo test -p moth --lib shared_origin_across_entries_emits_one_planned_record
+cargo test -p moth --lib plan_dedupes_js_assets_across_modules
+cargo test -p moth --lib plan_dedupes_runtime_specifiers_across_modules
+cargo test -p moth --lib deferred_resource_file_ancestor_conflict_stays_unhashed
+cargo test -p moth --lib deferred_resource_symlink_destination_conflict_stays_unhashed
+```
+
+Additional namespace controls selected two `direct_selection_resolves_` tests and one `direct_child_private_path_bypass_is_rejected` test, all passing. These receipts cover macOS/arm64. They claim no Linux or Windows execution.
+
+Pinned `just validate` passed before the final test-only in-bounds extension: 6128 main workspace-unit tests, all other workspace suites, 2786/2786 compiler integration results, clean docs and zero source/dependency/feature-audit findings. After that extension, the focused registered-package filter passed all six build/runtime rows and `cargo clippy -p moth --all-targets` passed. The corrected compiler also rebuilt the unchanged supplied website in dev and release, four outputs each.
+
+Three fresh phase lanes reviewed registered-package/canonical identity, generated demand/target evidence and the complete campaign/reproducer. All returned clean with no required corrections. The registered-package lane identified an optional in-bounds namespace coverage gap, so the same scenario gained the flat topology without replacing its nested row. The demand receipts contain ten command records, five per profile. They don't independently exercise an external `{ ok: false }` return or returned-entry Error; prior topology/failure coverage remains unchanged.
+
+A fresh focused verifier accepted the added nested/flat matrix and confirmed that it catches wrong-namespace selection even when the local module ID stays in bounds. No required phase finding remains. The three temporary CLI campaign scripts were removed after their evidence review. Saved receipts and output snapshots remain under ignored `tmp`, and the independent collision retains its documented source and local reproducer.
+
+### Namespace correction and retained limits
+
+`DirectoryDependencyResolution` already owns the source index, boundary, package prefix and path fork. Provider lookup now borrows that context and selects the matching project or package namespace. Its source row and namespace use the same boundary-local module ID. The obsolete global path-search fallback and helper were deleted. Ordinary dependency lookup, private boundaries, diagnostics and output policies remain unchanged.
+
+The permanent build test retains the nested package topology and adds an isolated flat-provider row for silent in-bounds misrouting. Both retain same-basename distinguishable providers, the real output writer and existing Node harness. A temporary minimal nested probe also executed `package=package:29` after correction. Temporary Rust includes were removed from both compiler trees.
+
+The initial resumed shell selected Node `26.10.0`. The resource script rejected it before creating a fixture. The demand script and first six rebuild stages executed on 26, but those receipts do not count as pinned validation. Explicit Node 24 reruns supplied the results above. The rebuild script initially rejected the cleanup page's two classic inline scripts after its artifact/manifest assertions had passed. Concatenating their exact authored order into one classic context corrected that smoke harness limit without changing compiler input or output. Native module graphs remain unrewritten and install no DOM mocks or import-map substitutes.
+
+Chromium made one unrelated `/favicon.ico` request that returned 404 in the development check. Provider, glue and runtime requests all succeeded. The report claims no network-wide zero-error result.
+
+### Independent provider-identity collision
+
+Two different physical providers at the same boundary-relative `binding.js` path still collide. Both the activation compiler and corrected candidate report:
+
+```text
+External package '@html-js/binding.js' is already registered.
+```
+
+The current mixed probe run selected 29 tests: 28 passed and only this exact collision failed. The isolated activation run selected one test and failed with the same compiler cause. The failure occurs before backend execution, so neither two emitted providers nor the expected runtime result has been delivered for this input.
+
+Minimal fixture, with `project/` and `package/` as sibling directories:
+
+```moth
+-- project/config.moth
+project #= (
+    name = "package_collision_campaign",
+    entry_root = "src",
+)
+html #= ()
+
+-- project/src/@page.moth
+@binding.js provider_value as project_value
+@campaign package_value
+[:project=[project_value()]|package=[package_value()]]
+
+-- package/@mod.moth
+export:
+    @binding.js provider_value as package_value
+;
+```
+
+```js
+// project/src/binding.js
+/** @moth.sig provider_value || -> String */
+export function projectValue() { return "project:17"; }
+
+// package/binding.js
+/** @moth.sig provider_value || -> String */
+export function packageValue() { return "package:29"; }
+```
+
+Register `package/` as Builder source package `campaign` on the production HTML surface, then call `build_project` on `project/`. The following temporary test belongs at the end of `src/build_system/tests/build_dependency_tests.rs`, which already imports the build APIs and helpers. Set `MOTH_JS_LINKING_REPRO_ROOT` to the fixture's parent directory. It expects success rather than pinning the defect:
+
+```rust
+struct CollisionCampaignBuilder {
+    package_root: PathBuf,
+}
+
+impl BackendBuilder for CollisionCampaignBuilder {
+    fn frontend_surface(&self) -> BuilderSurface {
+        let mut surface = HtmlProjectBuilder::new().frontend_surface();
+        surface.source_packages.register_filesystem_root(
+            "campaign",
+            self.package_root.clone(),
+            PackageOrigin::Builder,
+        );
+        surface
+    }
+
+    fn frontend_style_directives(&self) -> Vec<StyleDirectiveSpec> {
+        HtmlProjectBuilder::new().frontend_style_directives()
+    }
+
+    fn validate_project_config(
+        &self,
+        config: &Config,
+        strings: &mut StringTable,
+    ) -> Result<(), ProjectConfigError> {
+        HtmlProjectBuilder::new().validate_project_config(config, strings)
+    }
+
+    fn build_backend(
+        &self,
+        compilation: ProjectCompilation,
+        config: &Config,
+        profile: BuildProfile,
+        flags: &[Flag],
+        strings: &mut StringTable,
+    ) -> Result<Project, CompilerMessages> {
+        HtmlProjectBuilder::new().build_backend(compilation, config, profile, flags, strings)
+    }
+}
+
+#[test]
+fn package_campaign_exact_logical_path_collision() {
+    let root = PathBuf::from(
+        std::env::var_os("MOTH_JS_LINKING_REPRO_ROOT").expect("set the fixture parent"),
+    );
+    let builder = ProjectBuilder::new(Box::new(CollisionCampaignBuilder {
+        package_root: root.join("package"),
+    }));
+    let mut built = build_project(
+        &builder,
+        root.join("project").to_str().expect("fixture path is UTF-8"),
+        &[],
+        &BuildConfigInputSet::new(),
+    )
+    .expect("distinct source boundaries must retain distinct providers");
+    let output_root = root.join("output");
+    write_project_outputs(
+        &built.project,
+        &always_write_options(output_root.clone(), None),
+    )
+    .expect("the central writer must retain both provider assets");
+    let mut actual = built
+        .project
+        .deferred_resources
+        .iter()
+        .map(|asset| fs::read(output_root.join(&asset.relative_output_path)).unwrap())
+        .collect::<Vec<_>>();
+    actual.sort();
+    let mut expected = vec![
+        fs::read(root.join("project/src/binding.js")).unwrap(),
+        fs::read(root.join("package/binding.js")).unwrap(),
+    ];
+    expected.sort();
+    assert_eq!(actual, expected, "both exact byte sources must survive");
+    let rendered =
+        crate::compiler_tests::integration_test_runner::assertions::execute_html_harness_for_test(
+            &mut built,
+        )
+        .expect("the emitted module graph must execute");
+    assert_eq!(rendered.runtime_error_message(), None);
+    assert_eq!(rendered.combined_output(), "project=project:17|package=package:29");
+}
+```
+
+Actual commands used the preserved fully qualified temporary probe, `tmp/js-linking-package-campaign-collision/probe.rs`. Current-tree execution used the mixed Cargo command above. Baseline execution temporarily included that absolute probe path in the isolated `aa072a27` compiler and ran:
+
+```sh
+env PATH=/Users/aneirinjames/.nvm/versions/node/v24.21.0/bin:$PATH \
+  MOTH_JS_LINKING_REPRO_ROOT=/Users/aneirinjames/projects/beanstalk/moth/tmp/js-linking-package-campaign-collision \
+  cargo test --manifest-path tmp/js-linking-baseline-compiler/Cargo.toml \
+  --target-dir /Users/aneirinjames/projects/beanstalk/moth/tmp/js-linking-baseline-target \
+  -p moth --lib package_campaign_exact_logical_path_collision -- --nocapture
+```
+
+Raw receipts: `artifact://252` for the corrected candidate and `artifact://255` for activation. The permanent fixture above preserves the collision independently of ignored local artifacts.
+
+**Disposition: confirmed pre-existing compiler defect, deferred to a source-package provider-identity slice.** `discovery_provider_imports.rs` constructs `ExternalImportRequest` with a boundary-relative logical path but no stable source-package identity. `js_import_provider.rs` derives the same ProjectLocal binding key from both paths, and `ExternalPackageRegistry::register_package` rejects the second. Runtime assets also derive the same provider origin/output destination. Skipping duplicate registration would neither preserve both implementations nor fix output identity.
+
+The next slice must carry the canonical stable source-package identity, already constructed in `source_package_discovery.rs`, through the provider request, binding identity and provider resource origin/output placement. Reuse the existing injective package-prefix owner. Keep project-local output policy, alias independence and distinct byte sources intact. Validate same logical paths across project/package and two packages, canonical ID resolution, exact runtime values, output conflicts and deterministic order. This crosses the provider request and stable resource-identity contracts rather than the final-call candidate repair, so the bounded campaign preserves it instead of inventing an absolute-path prefix, flattening source topology or emitting all assets.
