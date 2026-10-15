@@ -72,3 +72,16 @@ The miniature report generator remains unadmitted. Existing template owners cove
 The baseline documentation checkpoint command `cargo run --quiet -- build docs --release` built 81 output files. The read-only inventory phase changed no production or test sources.
 
 The independent Phase 0 audit required two evidence corrections: distinguish test-owning files from test counts, and validate the complete Oracle module rather than filtering out its three differently named reference cross-checks. Both corrections now appear above and in the ledger. Its helper-test review also identified the fixture-only removal candidate. These findings changed no executable sources.
+
+## Phase 1 assertion-only cleanup
+
+Both `value_if_*` cases retain their unique presence marker and their complete ordered output sequence. The removed presence fragments already occur in the unchanged ordered list. A throwaway TOML comparison found every other parsed backend field identical. No source fixture, backend block or diagnostic changed.
+
+| Existing case and surviving owner | Presence fragments removed | Expectation LOC before / after | Moth LOC before / after |
+|---|---:|---:|---:|
+| `value_if_block_single_predicate`, `language.expressions.value_if_block_single_predicate_acceptance` | 12 | 33 / 21 | 99 / 99 |
+| `value_if_multi_bind_inferred_single_predicate`, `language.expressions.value_if_multi_bind_inferred_single_predicate_acceptance` | 13 | 34 / 21 | 104 / 104 |
+
+The selected HTML runtime commands each passed 1/1. `just validate` passed formatting, default Clippy, feature coverage, source/dependency audits, workspace tests including 6,128 compiler tests, all 2,786 integration executions and the docs check. All commands selected pinned Node `24.21.0`. Canonical case count and Rust test counts remain unchanged.
+
+The independent presence/order audit accepted the phase without findings after tracing both assertion fields into the same runtime-output evaluator.
