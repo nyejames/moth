@@ -549,7 +549,7 @@ fn rejects_unmaterialized_template_constants_in_hir_module_constant_lowering() {
     )
     .expect_err("template constants should fail in HIR");
     let error = error
-        .infrastructure_error()
+        .primary_infrastructure_error()
         .expect("HIR lowering failure should be wrapped for rendering");
     assert!(error.msg.contains(
         "Template constant reached HIR module-constant lowering before AST materialized it.",
@@ -620,7 +620,7 @@ fn rejects_nested_unmaterialized_template_constants_in_hir_module_constant_lower
     )
     .expect_err("nested template constants should fail");
     let error = error
-        .infrastructure_error()
+        .primary_infrastructure_error()
         .expect("HIR lowering failure should be wrapped for rendering");
     assert!(error.msg.contains(
         "Template constant reached HIR module-constant lowering before AST materialized it.",

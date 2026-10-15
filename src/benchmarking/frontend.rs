@@ -499,28 +499,13 @@ fn run_frontend_benchmark_with_owner_internal(
                     &mut string_table,
                     project_source_files.take(),
                     None,
-                )
-                .map_err(|error| {
-                    frontend_benchmark_error(
-                        FrontendBenchmarkFailureKind::Compilation,
-                        Vec::new(),
-                        error.msg,
-                    )
-                })?;
+                );
             #[cfg(not(feature = "data_layout_memory_probe"))]
-            let messages = frontend
-                .into_render_messages_with_frozen_identity(
-                    &mut string_table,
-                    project_source_files.take(),
-                    None,
-                )
-                .map_err(|error| {
-                    frontend_benchmark_error(
-                        FrontendBenchmarkFailureKind::Compilation,
-                        Vec::new(),
-                        error.msg,
-                    )
-                })?;
+            let messages = frontend.into_render_messages_with_frozen_identity(
+                &mut string_table,
+                project_source_files.take(),
+                None,
+            );
             #[cfg(feature = "data_layout_memory_probe")]
             let retention = FrontendBenchmarkRetention::from(retention);
             #[cfg(not(feature = "data_layout_memory_probe"))]

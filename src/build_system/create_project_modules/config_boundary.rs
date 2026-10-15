@@ -789,10 +789,13 @@ pub(super) fn build_config_resolution_failure(
         &error,
         BuildConfigResolutionError::DirectProjectProviderMissing { .. }
     ) {
-        return PremergeFailure::Infrastructure(CompilerError::compiler_error(format!(
-            "grouped-project build-config value for '{}' was not retained by config folding",
-            error.name().as_str()
-        )));
+        return PremergeFailure::Infrastructure(
+            CompilerError::compiler_error(format!(
+                "grouped-project build-config value for '{}' was not retained by config folding",
+                error.name().as_str()
+            ))
+            .into(),
+        );
     }
     if let BuildConfigResolutionError::NumericLiteralOutOfRange {
         contract,

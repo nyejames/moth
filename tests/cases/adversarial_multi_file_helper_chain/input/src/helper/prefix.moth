@@ -1,3 +1,9 @@
-prefix || -> String:
-    return "A"
+prefix |level I32| -> String?:
+    if level > 0:
+        if level is 1:
+            return "A"
+        ;
+        return "C"
+    ;
+    return none
 ;

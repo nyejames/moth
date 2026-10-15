@@ -1,0 +1,3 @@
+export:
+    @background-animation.js animate_canvas, observed
+;

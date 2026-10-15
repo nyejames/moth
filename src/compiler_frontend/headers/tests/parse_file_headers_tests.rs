@@ -7,6 +7,9 @@
 
 use super::*;
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
+use crate::compiler_frontend::compiler_errors::{
+    CompilerError, CompilerErrorMetadataKey, CompilerMessages,
+};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DeferredFeatureReason, DiagnosticBag, DiagnosticKind,
     DiagnosticLabelMessage, DiagnosticPayload, InvalidChoiceVariantReason, InvalidConfigReason,
@@ -1160,4 +1163,33 @@ fn snapshot_prepared_type_anchors(
         }
     }
     (type_alias_count, inferred_count, anchors)
+}
+
+#[test]
+fn binding_messages_move_every_infrastructure_cause_into_header_failure() {
+    let primary = CompilerError::compiler_error("binding infrastructure cause");
+    let mut secondary = CompilerError::file_error(
+        std::path::Path::new("binding-input.moth"),
+        "binding secondary cause",
+    );
+    secondary.new_metadata_entry(
+        CompilerErrorMetadataKey::CompilationStage,
+        "bind".to_owned(),
+    );
+    let expected = [primary.clone(), secondary.clone()];
+    let mut messages = CompilerMessages::from_error(primary, StringTable::new());
+    messages.set_infrastructure_error(secondary);
+
+    let HeaderPreparationFailure::Infrastructure(errors) = HeaderPreparationFailure::from(messages)
+    else {
+        panic!("binding infrastructure failures must not become source diagnostics");
+    };
+    let actual = errors.iter().collect::<Vec<_>>();
+    assert_eq!(actual.len(), expected.len());
+    for (actual, expected) in actual.into_iter().zip(expected) {
+        assert_eq!(actual.msg, expected.msg);
+        assert_eq!(actual.error_type, expected.error_type);
+        assert_eq!(actual.host_path, expected.host_path);
+        assert_eq!(actual.metadata, expected.metadata);
+    }
 }

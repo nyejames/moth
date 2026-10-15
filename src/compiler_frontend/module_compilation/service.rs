@@ -14,7 +14,7 @@ use crate::compiler_frontend::analysis::borrow_checker::BorrowCheckReport;
 use crate::compiler_frontend::analysis::numeric_proofs::analyse_numeric_proofs;
 use crate::compiler_frontend::arena::FrontendArenaCapacityEstimate;
 use crate::compiler_frontend::ast::AstBuildResult;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, ModuleDiagnostics, PremergeDiagnosticBatch, PremergeFailure,
 };
@@ -39,7 +39,7 @@ use crate::compiler_frontend::module_compilation::artefact::{
     ResolvedConstFragment,
 };
 use crate::compiler_frontend::module_compilation::context::ModuleCompilationContext;
-use crate::compiler_frontend::module_compilation::external_imports::collect_external_import_candidates_for_source_files;
+use crate::compiler_frontend::module_compilation::external_imports::collect_external_import_candidates;
 use crate::compiler_frontend::module_compilation::generated::artefacts::GeneratedFunctionDelta;
 use crate::compiler_frontend::module_compilation::generated::convergence::{
     install_exact_concrete_call_summaries, run_generated_summary_convergence,
@@ -103,7 +103,7 @@ pub(crate) fn compile_module(
     prepared: PreparedModuleInput,
     known_generated: KnownGeneratedFunctions<'_>,
     #[cfg(feature = "timers")] timing_context: Option<crate::timing::TimingContext>,
-) -> Result<ModuleCompilationOutcome, CompilerError> {
+) -> Result<ModuleCompilationOutcome, Box<InfrastructureErrors>> {
     // The entry file is a retained preparation identity, so it is resolved from the payload
     // rather than repeated as an argument the caller must keep in sync.
     let entry_file_path = prepared
@@ -171,7 +171,7 @@ pub(crate) fn compile_module(
 
     // Normalize the deeper stages' classified premerge lane once at this semantic boundary.
     // A successful compilation becomes `Success`. A diagnosed batch becomes `Diagnosed`
-    // (user-facing diagnostics the renderer surfaces) or `Err(CompilerError)` when the batch
+    // (user-facing diagnostics the renderer surfaces) or an infrastructure aggregate when the batch
     // fails diagnosed validation. An infrastructure failure propagates unchanged. This is the
     // single lossless ownership transfer; graph and render consumers never re-classify.
     match compile_result {
@@ -198,18 +198,19 @@ pub(crate) fn compile_module(
         #[cfg(feature = "boracle")]
         Ok(SemanticStageOutput::Boracle(_)) => Err(CompilerError::compiler_error(
             "normal module compilation unexpectedly stopped at the Boracle prefix",
-        )),
+        )
+        .into()),
         Err(mut failure) => {
             failure.attach_path_table_if_missing(Arc::new(compiler.path_fork.snapshot_table()))?;
             match failure {
                 PremergeFailure::Diagnosed(batch) => match ModuleDiagnostics::from_batch(batch) {
                     Ok(diagnostics) => Ok(ModuleCompilationOutcome::Diagnosed(diagnostics)),
-                    Err(error) => Err(error),
+                    Err(error) => Err(error.into()),
                 },
                 PremergeFailure::Infrastructure(error) => Err(error),
                 // Mixed double-failures only arise at source-finalization tails and never reach
                 // module compilation; abort through the typed lane if one ever does.
-                PremergeFailure::Mixed { error, .. } => Err(*error),
+                PremergeFailure::Mixed { error, .. } => Err(error),
             }
         }
     }
@@ -286,16 +287,16 @@ pub(crate) fn compile_module_for_boracle(
         timing_context,
     ) {
         Ok(SemanticStageOutput::Boracle(input)) => Ok(*input),
-        Ok(SemanticStageOutput::Complete(_)) => Err(PremergeFailure::Infrastructure(
-            CompilerError::compiler_error(
+        Ok(SemanticStageOutput::Complete(_)) => {
+            Err(PremergeFailure::from(CompilerError::compiler_error(
                 "Boracle compiler service unexpectedly completed the normal semantic pipeline",
-            ),
-        )),
+            )))
+        }
         Err(mut failure) => {
             if let Err(error) =
                 failure.attach_path_table_if_missing(Arc::new(compiler.path_fork.snapshot_table()))
             {
-                return Err(PremergeFailure::Infrastructure(error));
+                return Err(PremergeFailure::from(error));
             }
             Err(failure)
         }
@@ -750,6 +751,7 @@ fn run_semantic_stages(
     );
     generated_materialisation?;
     let borrow_analysis = run_generated_summary_convergence(
+        context,
         compiler,
         &mut hir_module,
         &mut function_link_facts,
@@ -823,15 +825,15 @@ fn run_semantic_stages(
     ));
     borrow_log!("=== END BORROW CHECKER OUTPUT ===");
 
-    // Collect provider-resolved imports used by this module after the frontend has
-    // consumed them. HIR still carries only stable external IDs; this side payload is for
-    // backend asset/glue planning. The source paths were resolved from the ordered module-local
-    // candidate IDs before syntax consumption, not from the boundary-wide source database.
-    let external_import_candidates = collect_external_import_candidates_for_source_files(
+    // Final call facts include external bindings reached through source facades. Candidates
+    // remain conservative availability; entry assembly still selects exact executable demand.
+    let external_import_candidates = collect_external_import_candidates(
         &source_logical_paths,
+        &function_link_facts,
+        compiler.external_package_registry.as_ref(),
         external_dependency_resolution_table,
         context.builder_runtime_packages,
-    );
+    )?;
 
     let numeric_proofs = analyse_numeric_proofs(&hir_module, &type_environment);
 

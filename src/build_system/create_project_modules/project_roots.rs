@@ -166,10 +166,13 @@ fn resolve_project_roots(
     let project_root = match fs::canonicalize(&config.entry_dir) {
         Ok(path) => path,
         Err(error) => {
-            return Err(PremergeFailure::Infrastructure(CompilerError::file_error(
-                &config.entry_dir,
-                format!("Failed to canonicalize project root: {error}"),
-            )));
+            return Err(PremergeFailure::Infrastructure(
+                CompilerError::file_error(
+                    &config.entry_dir,
+                    format!("Failed to canonicalize project root: {error}"),
+                )
+                .into(),
+            ));
         }
     };
 
@@ -192,10 +195,13 @@ fn resolve_project_roots(
     let entry_root = match fs::canonicalize(&entry_root_path) {
         Ok(path) => path,
         Err(error) => {
-            return Err(PremergeFailure::Infrastructure(CompilerError::file_error(
-                &entry_root_path,
-                format!("Failed to canonicalize configured entry root: {error}"),
-            )));
+            return Err(PremergeFailure::Infrastructure(
+                CompilerError::file_error(
+                    &entry_root_path,
+                    format!("Failed to canonicalize configured entry root: {error}"),
+                )
+                .into(),
+            ));
         }
     };
 

@@ -1772,7 +1772,7 @@ fn preparation_terminates_for_cyclic_nested_wrapper_contexts() {
         panic!("cyclic wrapper contexts must stay on the infrastructure lane, got {error:?}");
     };
     assert_eq!(
-        error.error_type,
+        error.primary.error_type,
         crate::compiler_frontend::compiler_errors::ErrorType::Compiler
     );
 }

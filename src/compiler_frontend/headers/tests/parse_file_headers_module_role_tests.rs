@@ -24,6 +24,42 @@ fn imported_module_root_discards_root_body_but_keeps_exportable_headers() {
         matches!(header.kind, HeaderKind::Struct { .. })
             && header.export_mode == HeaderExportMode::Public
     }));
+
+    // Imported roots have no start-body AST consumer, so preparation must diagnose an
+    // unclosed runtime template before discarding it, including inside a collection.
+    for file_path in ["src/@components.moth", "src/@page.moth"] {
+        for source in ["[: broken", "values = {\n[: broken"] {
+            let errors = expect_header_error(
+                parse_single_file_headers_with_entry(source, file_path, "src/@page.moth"),
+                &format!(
+                    "unterminated runtime template must fail preparation: {file_path}: {source:?}"
+                ),
+            );
+            assert_eq!(
+                errors.diagnostics.len(),
+                1,
+                "expected one delimiter diagnostic for {file_path}: {source:?}"
+            );
+            let diagnostic = &errors.diagnostics[0];
+            assert_eq!(
+                diagnostic.kind,
+                DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnexpectedEndOfFile)
+            );
+            assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0017");
+            let DiagnosticPayload::UnexpectedEndOfFile {
+                expected_delimiter: Some(expected_delimiter),
+            } = &diagnostic.payload
+            else {
+                panic!("expected a typed EOF diagnostic naming the missing template delimiter");
+            };
+            assert_eq!(errors.string_table.resolve(*expected_delimiter), "]");
+            assert_eq!(
+                diagnostic.primary_span,
+                Some(source_span_for(source, "", source.len())),
+                "the missing template delimiter must point at EOF for {file_path}: {source:?}"
+            );
+        }
+    }
 }
 
 #[test]

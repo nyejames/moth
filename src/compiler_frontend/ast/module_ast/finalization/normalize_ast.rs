@@ -42,7 +42,7 @@ use crate::compiler_frontend::ast::templates::tir::{
     owned_runtime_slot_handoff_for_prepared_view, owned_runtime_template_handoff_for_prepared_view,
     replace_expression_overlay_entries,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateSlotReason, InvalidTemplateStructureReason,
 };
@@ -1010,7 +1010,7 @@ fn replace_inactive_assertion_message(
 #[derive(Debug)]
 pub(in crate::compiler_frontend::ast) enum TemplateNormalizationError {
     Diagnostic(CompilerDiagnostic),
-    Infrastructure(Box<CompilerError>),
+    Infrastructure(Box<InfrastructureErrors>),
 }
 
 impl From<CompilerDiagnostic> for TemplateNormalizationError {
@@ -1021,7 +1021,13 @@ impl From<CompilerDiagnostic> for TemplateNormalizationError {
 
 impl From<CompilerError> for TemplateNormalizationError {
     fn from(error: CompilerError) -> Self {
-        TemplateNormalizationError::Infrastructure(Box::new(error))
+        TemplateNormalizationError::Infrastructure(error.into())
+    }
+}
+
+impl From<Box<InfrastructureErrors>> for TemplateNormalizationError {
+    fn from(errors: Box<InfrastructureErrors>) -> Self {
+        Self::Infrastructure(errors)
     }
 }
 

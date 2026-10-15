@@ -20,7 +20,7 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
 };
 use crate::compiler_frontend::ast::numeric_known_shape::KnownShapeId;
 use crate::compiler_frontend::ast::statements::functions::FunctionParameter;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidCallShapeReason, TypeMismatchContext, ValueReceiverContext,
 };
@@ -42,7 +42,7 @@ use crate::compiler_frontend::type_coercion::contextual::coerce_expression_to_de
 
 pub(crate) enum CallValidationError {
     Diagnostic(CompilerDiagnostic),
-    Infrastructure(Box<CompilerError>),
+    Infrastructure(Box<InfrastructureErrors>),
 }
 
 impl From<CompilerDiagnostic> for CallValidationError {
@@ -53,7 +53,13 @@ impl From<CompilerDiagnostic> for CallValidationError {
 
 impl From<CompilerError> for CallValidationError {
     fn from(error: CompilerError) -> Self {
-        CallValidationError::Infrastructure(Box::new(error))
+        CallValidationError::Infrastructure(error.into())
+    }
+}
+
+impl From<Box<InfrastructureErrors>> for CallValidationError {
+    fn from(errors: Box<InfrastructureErrors>) -> Self {
+        Self::Infrastructure(errors)
     }
 }
 

@@ -1,8 +1,8 @@
 //! HIR reachability regression tests.
 //!
-//! WHAT: exercises the backend-neutral HIR reachability helper against hand-built CFGs.
-//! WHY: runtime metadata consumers need deterministic function/block/external-call facts without
-//! coupling these tests to AST lowering or backend emission.
+//! WHAT: exercises backend-neutral link facts through lowered source and hand-built CFGs.
+//! WHY: runtime metadata consumers need deterministic function/block/external-call facts from
+//! both native call forms, independently of backend emission and entry selection.
 
 use crate::compiler_frontend::ast::const_values::store::ConstStringPiece;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
@@ -10,7 +10,10 @@ use crate::compiler_frontend::compiler_errors::ErrorType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
-use crate::compiler_frontend::external_packages::{CallTarget, ExternalFunctionId};
+use crate::compiler_frontend::external_packages::{
+    CallTarget, ExternalFunctionDef, ExternalFunctionId, ExternalFunctionLowerings,
+    ExternalPackageRegistry, ExternalSignatureType,
+};
 use crate::compiler_frontend::hir::blocks::HirBlock;
 use crate::compiler_frontend::hir::expression_store::{HirExpressionStore, HirValueRange};
 use crate::compiler_frontend::hir::expressions::{HirExpression, HirExpressionKind, HirMapOp};
@@ -43,9 +46,109 @@ use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId,
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
+use crate::compiler_frontend::tests::hir_fixture_support::lower_hir;
+use crate::compiler_frontend::tests::parse_support::parse_single_file_ast_build_result_with_registry;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
 use std::path::Path;
+
+#[test]
+fn direct_external_calls_retains_lowered_call_and_invoke_sites_in_order() {
+    let mut registry = ExternalPackageRegistry::new();
+    let notify = registry
+        .register_function(ExternalFunctionDef {
+            name: "notify".to_owned(),
+            parameters: vec![],
+            returns: vec![],
+            error_return_type: None,
+            lowerings: ExternalFunctionLowerings::default(),
+        })
+        .expect("infallible external fixture must register");
+    let attempt = registry
+        .register_function(ExternalFunctionDef {
+            name: "attempt".to_owned(),
+            parameters: vec![],
+            returns: vec![],
+            error_return_type: Some(ExternalSignatureType::BuiltinError),
+            lowerings: ExternalFunctionLowerings::default(),
+        })
+        .expect("fallible external fixture must register");
+    let (build_result, mut path_fork, mut string_table) =
+        parse_single_file_ast_build_result_with_registry(
+            "@test/default notify, attempt\n\
+             probe || -> Error!:\n\
+                 notify()\n\
+                 notify()\n\
+                 attempt()!\n\
+                 notify()\n\
+             ;\n",
+            registry.clone(),
+        )
+        .expect("external call fixture must parse through the frontend");
+    let module = lower_hir(
+        build_result.ast,
+        &mut string_table,
+        &mut path_fork,
+        &registry,
+    );
+
+    let statement_calls = module
+        .blocks
+        .iter()
+        .flat_map(|block| &block.statements)
+        .filter_map(|statement| match &statement.kind {
+            HirStatementKind::Call {
+                target: CallTarget::External(function_id),
+                ..
+            } => Some(*function_id),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        statement_calls,
+        vec![notify, notify, notify],
+        "infallible source calls must lower to external Call statements"
+    );
+    let invoke_calls = module
+        .blocks
+        .iter()
+        .filter_map(|block| match &block.terminator {
+            HirTerminator::Invoke {
+                operation:
+                    HirFallibleOperation::Call {
+                        target: CallTarget::External(function_id),
+                        ..
+                    },
+                ..
+            } => Some(*function_id),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        invoke_calls,
+        vec![attempt],
+        "fallible source calls must lower to an external Invoke terminator"
+    );
+
+    let facts = collect_module_function_link_facts(&module)
+        .expect("lowered external calls must produce retained link facts");
+    let calls = facts.direct_external_calls().collect::<Vec<_>>();
+    assert_eq!(
+        calls
+            .iter()
+            .map(|call| call.function_id)
+            .collect::<Vec<_>>(),
+        vec![notify, notify, attempt, notify],
+        "the borrowed accessor must retain both call forms and repeated sites across blocks"
+    );
+    assert!(calls.iter().all(|call| call.span.is_some()));
+    assert_ne!(calls[0].span, calls[1].span);
+    assert_ne!(calls[1].span, calls[3].span);
+    assert!(
+        facts.direct_call_targets().is_empty(),
+        "external calls must remain outside the convergence call-target contract"
+    );
+}
 
 #[test]
 fn start_reachability_ignores_unreachable_function_external_calls() {

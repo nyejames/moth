@@ -13,7 +13,7 @@ use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnIte
 use crate::compiler_frontend::ast::expressions::expression_store::ExpressionConstructionFailure;
 use crate::compiler_frontend::ast::numeric_construction::DeferredExpressionSuffix;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::headers::HeaderParseFailure;
 use crate::compiler_frontend::source::SourceSpan;
@@ -42,7 +42,7 @@ pub(crate) struct NumericDeferral {
 #[derive(Debug)]
 pub(crate) enum ExpressionParseError {
     Diagnostic(CompilerDiagnostic),
-    Infrastructure(Box<CompilerError>),
+    Infrastructure(Box<InfrastructureErrors>),
     /// A numeric-dependent expression fragment only body completion can finish.
     NumericDeferral(Box<NumericDeferral>),
 }
@@ -57,9 +57,7 @@ impl From<ExpressionConstructionFailure> for ExpressionParseError {
     fn from(failure: ExpressionConstructionFailure) -> Self {
         match failure {
             ExpressionConstructionFailure::Diagnostic(diagnostic) => Self::Diagnostic(diagnostic),
-            ExpressionConstructionFailure::Invariant(error) => {
-                Self::Infrastructure(Box::new(error))
-            }
+            ExpressionConstructionFailure::Invariant(error) => Self::Infrastructure(error),
         }
     }
 }
@@ -80,7 +78,7 @@ impl From<HeaderParseFailure> for ExpressionParseError {
                 ExpressionParseError::Diagnostic(diagnostic)
             }
             HeaderParseFailure::Infrastructure(error) => {
-                ExpressionParseError::Infrastructure(Box::new(error))
+                ExpressionParseError::Infrastructure(error.into())
             }
         }
     }
@@ -88,7 +86,13 @@ impl From<HeaderParseFailure> for ExpressionParseError {
 
 impl From<CompilerError> for ExpressionParseError {
     fn from(error: CompilerError) -> Self {
-        ExpressionParseError::Infrastructure(Box::new(error))
+        ExpressionParseError::Infrastructure(error.into())
+    }
+}
+
+impl From<Box<InfrastructureErrors>> for ExpressionParseError {
+    fn from(errors: Box<InfrastructureErrors>) -> Self {
+        Self::Infrastructure(errors)
     }
 }
 
@@ -145,10 +149,11 @@ impl ExpressionParseError {
                 Ok(*deferral)
             }
             ExpressionParseError::NumericDeferral(_) => Err(ExpressionParseError::Infrastructure(
-                Box::new(CompilerError::compiler_error(format!(
+                CompilerError::compiler_error(format!(
                     "numeric-dependent expression at {position} cannot be retained: the \
                          enclosing construct does not support body-root numeric completion"
-                ))),
+                ))
+                .into(),
             )),
             other => Err(other),
         }
@@ -166,15 +171,15 @@ impl ExpressionParseError {
     pub(crate) fn at_boundary_without_numeric_retention(
         self,
         boundary: &str,
-    ) -> Result<CompilerDiagnostic, CompilerError> {
+    ) -> Result<CompilerDiagnostic, Box<InfrastructureErrors>> {
         match self {
             ExpressionParseError::Diagnostic(diagnostic) => Ok(diagnostic),
-            ExpressionParseError::Infrastructure(error) => Err(*error),
+            ExpressionParseError::Infrastructure(error) => Err(error),
             ExpressionParseError::NumericDeferral(_) => {
                 Err(CompilerError::compiler_error(format!(
                     "a numeric-dependent expression fragment reached {boundary}, which cannot retain \
                  or complete it before the body root"
-                )))
+                )).into())
             }
         }
     }
@@ -191,7 +196,7 @@ impl ExpressionParseError {
     ) -> ExpressionParseError {
         match self.at_boundary_without_numeric_retention(boundary) {
             Ok(diagnostic) => ExpressionParseError::Diagnostic(diagnostic),
-            Err(error) => ExpressionParseError::Infrastructure(Box::new(error)),
+            Err(error) => ExpressionParseError::Infrastructure(error),
         }
     }
 }

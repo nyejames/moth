@@ -1,4 +1,4 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains = ["A-hello-B"]
+rendered_output_exact = "A-hello-B|C-world-D|missing-again-B"

@@ -240,7 +240,7 @@ pub(crate) fn parse_single_file_ast_build_result_with_registry(
     .map_err(|failure| {
         failure
             .into_messages(string_table)
-            .into_diagnostics()
+            .diagnostics
             .into_iter()
             .next()
             .expect("dependency sorting failed without a diagnostic")
@@ -280,7 +280,7 @@ pub(crate) fn parse_single_file_ast_build_result_with_registry(
     .map_err(|messages| {
         if let Some(diagnostic) = messages.first_error() {
             diagnostic.clone()
-        } else if let Some(error) = messages.infrastructure_error() {
+        } else if let Some(error) = messages.primary_infrastructure_error() {
             panic!(
                 "frontend parsing failed with infrastructure error: {}",
                 error.msg

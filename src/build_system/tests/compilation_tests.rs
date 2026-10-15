@@ -778,6 +778,98 @@ fn forced_path_exhaustion_during_module_publication_reports_capacity_diagnostic(
     assert_eq!(diagnostics[0].severity, DiagnosticSeverity::Error);
 }
 
+#[test]
+fn source_finish_failures_preserve_every_cause_and_original_provenance() {
+    use crate::compiler_frontend::compiler_errors::{
+        CompilerErrorMetadataKey, CompilerMessages, ErrorType,
+    };
+    use crate::compiler_frontend::compiler_messages::{
+        CompilerDiagnostic, PremergeDiagnosticBatch, PremergeFailure,
+    };
+    use crate::compiler_frontend::source::{LocalSpan, SourceDatabase, SourceId, SourceSpan};
+
+    for mixed in [false, true] {
+        let primary_span = SourceSpan::new(SourceId::COMPILATION_ROOT, LocalSpan::source_start());
+        let mut primary =
+            CompilerError::new("original failure", Some(primary_span), ErrorType::Compiler);
+        primary.metadata.insert(
+            CompilerErrorMetadataKey::CompilationStage,
+            "semantic compilation".to_owned(),
+        );
+        let mut messages = CompilerMessages::from_error(primary, StringTable::new());
+        messages.set_source_database(Arc::new(SourceDatabase::empty()));
+        messages
+            .freeze_source_contexts()
+            .expect("the original source context should freeze");
+        let PremergeFailure::Infrastructure(errors) = PremergeFailure::from(messages) else {
+            panic!("an infrastructure-only vessel must retain its typed lane");
+        };
+        let failure = if mixed {
+            PremergeFailure::Mixed {
+                batch: PremergeDiagnosticBatch::from_diagnostic(
+                    CompilerDiagnostic::unreachable_match_arm(None),
+                    StringTable::new(),
+                ),
+                error: errors,
+            }
+        } else {
+            PremergeFailure::Infrastructure(errors)
+        };
+        let mut finish = CompilerError::file_error(
+            std::path::Path::new("finish-source.moth"),
+            "first finish failure",
+        );
+        finish.metadata.insert(
+            CompilerErrorMetadataKey::CompilationStage,
+            "source finalization".to_owned(),
+        );
+        let failure = super::append_finish_failure(failure, finish);
+        let failure = super::append_finish_failure(
+            failure,
+            CompilerError::compiler_error("second finish failure"),
+        );
+        let errors = match failure {
+            PremergeFailure::Infrastructure(errors) if !mixed => errors,
+            PremergeFailure::Mixed { batch, error } if mixed => {
+                assert_eq!(batch.into_messages().diagnostic_slice().len(), 1);
+                error
+            }
+            _ => panic!("appending finish failures must preserve the original failure lane"),
+        };
+        let causes = errors.iter().collect::<Vec<_>>();
+        assert_eq!(causes.len(), 3);
+        assert_eq!(causes[0].msg, "original failure");
+        assert_eq!(causes[0].error_type, ErrorType::Compiler);
+        assert_eq!(causes[0].source_span, Some(primary_span));
+        assert_eq!(causes[0].host_path, None);
+        assert_eq!(
+            causes[0]
+                .metadata
+                .get(&CompilerErrorMetadataKey::CompilationStage)
+                .map(String::as_str),
+            Some("semantic compilation"),
+        );
+        assert!(errors.frozen_identity_for_cause(0).is_some());
+        assert_eq!(causes[1].msg, "first finish failure");
+        assert_eq!(causes[1].error_type, ErrorType::File);
+        assert_eq!(causes[1].source_span, None);
+        assert_eq!(
+            causes[1].host_path.as_deref(),
+            Some(std::path::Path::new("finish-source.moth")),
+        );
+        assert_eq!(
+            causes[1]
+                .metadata
+                .get(&CompilerErrorMetadataKey::CompilationStage)
+                .map(String::as_str),
+            Some("source finalization"),
+        );
+        assert!(errors.frozen_identity_for_cause(1).is_none());
+        assert_eq!(causes[2].msg, "second finish failure");
+        assert!(causes[2].metadata.is_empty());
+    }
+}
+
 /// Build one successful check-only semantic result carrying a `PathId`-bearing warning plus one
 /// generated sidecar warning, each interned against its own isolated string-table domain.
 fn check_only_success_result_with_warnings() -> (
@@ -932,9 +1024,8 @@ fn check_only_success_batches_render_local_paths_through_production_construction
     // only a correct per-batch remap can still resolve the path components.
     let mut string_table = StringTable::new();
     string_table.intern("sidecar");
-    let messages = frontend
-        .into_render_messages_with_frozen_identity(&mut string_table, None, None)
-        .expect("transient check-only warnings should render");
+    let messages =
+        frontend.into_render_messages_with_frozen_identity(&mut string_table, None, None);
     let rendered = display_messages::format_terse_compiler_messages(&messages);
     assert_eq!(
         rendered.len(),
@@ -945,6 +1036,158 @@ fn check_only_success_batches_render_local_paths_through_production_construction
         assert!(
             rendered.iter().any(|line| line.contains(spelling)),
             "check-only warning must render its original path spelling {spelling:?}: {rendered:?}"
+        );
+    }
+}
+
+#[test]
+fn render_tail_retains_trailing_causes_warning_and_source_when_freeze_fails() {
+    use crate::build_system::create_project_modules::compiled_boundary::{
+        CompiledGraphBoundary, CompletedSourcePackageRegistry, ProjectFrontendCompilation,
+    };
+    use crate::build_system::create_project_modules::project_module_graph::ProjectModuleGraph;
+    use crate::compiler_frontend::compiler_errors::{
+        CompilerErrorMetadataKey, CompilerMessages, ErrorType,
+    };
+    use crate::compiler_frontend::compiler_messages::{
+        CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, NameNamespace,
+        RuleDiagnosticKind,
+    };
+    use crate::compiler_frontend::source::{
+        ExtendedSpanBuilder, LocalSpan, SourceDatabase, SourceSpan,
+    };
+    use std::path::Path;
+
+    let path = Path::new("/project/trailing.moth");
+    let mut strings = StringTable::new();
+    let name = strings.intern("trailing-warning");
+    let mut source = SourceDatabase::build(std::iter::once(path), path, None, &mut strings)
+        .expect("project source should build");
+    let source_id = source
+        .get_by_canonical_path(path)
+        .expect("registered source")
+        .id;
+    source
+        .retain_text(source_id, "original trailing source".to_owned())
+        .expect("source snapshot should be retained");
+    // This real external owner makes move-only freezing fail without a platform-specific seam.
+    let external_source = Arc::new(source);
+    let mut spans = ExtendedSpanBuilder::new();
+    let span = SourceSpan::new(
+        source_id,
+        LocalSpan::exact(0, 1, &mut spans).expect("compact span"),
+    );
+    let mut primary =
+        CompilerError::new("original compiler cause", Some(span), ErrorType::Compiler);
+    primary.new_metadata_entry(
+        CompilerErrorMetadataKey::CompilationStage,
+        "original stage".to_owned(),
+    );
+    let secondary =
+        CompilerError::file_error(Path::new("trailing-input.moth"), "original file cause");
+    let expected = [primary.clone(), secondary.clone()];
+    let warning = CompilerDiagnostic::with_severity(
+        DiagnosticKind::Rule(RuleDiagnosticKind::UnknownName),
+        DiagnosticSeverity::Warning,
+        None,
+        DiagnosticPayload::UnknownName {
+            name,
+            namespace: NameNamespace::Value,
+        },
+    );
+    let mut trailing = CompilerMessages::from_diagnostics(vec![warning.clone()], strings.clone());
+    trailing.set_infrastructure_error(primary);
+    trailing.set_infrastructure_error(secondary);
+    let project = CompiledGraphBoundary {
+        structure: ProjectModuleGraph::from_normal_roots(Vec::new()),
+        modules: ModuleArtifactStore::new(0),
+        generated: BoundaryGeneratedFunctionStore::default(),
+        diagnosed: Vec::new(),
+        blocked: Vec::new(),
+    };
+    let frontend = ProjectFrontendCompilation::new(
+        project,
+        CompletedSourcePackageRegistry::new(),
+        ResourceInputRegistry::new(),
+        Vec::new(),
+    )
+    .expect("empty frontend should validate");
+    #[cfg(feature = "data_layout_memory_probe")]
+    let (messages, retention) = frontend.into_render_messages_with_frozen_identity_and_metrics(
+        &mut strings,
+        Some(Arc::clone(&external_source)),
+        Some(trailing),
+    );
+    #[cfg(not(feature = "data_layout_memory_probe"))]
+    let messages = frontend.into_render_messages_with_frozen_identity(
+        &mut strings,
+        Some(Arc::clone(&external_source)),
+        Some(trailing),
+    );
+    #[cfg(feature = "data_layout_memory_probe")]
+    {
+        let expected = external_source.retention_metrics();
+        assert_eq!(
+            retention.source_snapshot_bytes,
+            expected.source_snapshot_bytes
+        );
+        assert_eq!(retention.extended_span_rows, expected.extended_span_rows);
+        assert_eq!(
+            retention.source_identity_slots,
+            expected.source_identity_slots
+        );
+        assert_eq!(retention.retained_identity_contexts, 0);
+        assert_eq!(retention.path_table_count, 1);
+    }
+    assert_eq!(messages.warning_count(), 1);
+    assert_eq!(messages.error_count(), 1);
+    assert_eq!(messages.diagnostic_slice(), &[warning]);
+    let errors = messages
+        .infrastructure_errors()
+        .expect("original failures must remain");
+    let actual = errors.iter().collect::<Vec<_>>();
+    assert_eq!(
+        actual.len(),
+        3,
+        "freeze failure must append, not replace, original causes"
+    );
+    for (actual, expected) in actual.iter().zip(expected) {
+        assert_eq!(actual.msg, expected.msg);
+        assert_eq!(actual.error_type, expected.error_type);
+        assert_eq!(actual.host_path, expected.host_path);
+        assert_eq!(actual.source_span, expected.source_span);
+        assert_eq!(actual.metadata, expected.metadata);
+    }
+    assert_eq!(actual[2].error_type, ErrorType::Compiler);
+    let cause_sources = (0..2).map(|index| {
+        errors
+            .source_database_for_cause(index)
+            .expect("exact live cause owner")
+    });
+    let warning_source = messages
+        .source_database_for_diagnostic(0)
+        .expect("live warning owner");
+    for source in cause_sources.chain(std::iter::once(warning_source)) {
+        assert_eq!(
+            source
+                .get_by_canonical_path(path)
+                .expect("original physical source")
+                .id,
+            source_id
+        );
+        assert_eq!(
+            source.retained_text(source_id),
+            Some("original trailing source")
+        );
+        assert_eq!(
+            source.paths().render_portable(
+                source
+                    .source_logical_path(source_id)
+                    .expect("logical source path"),
+                &messages.string_table,
+                &mut Vec::new(),
+            ),
+            "trailing.moth",
         );
     }
 }

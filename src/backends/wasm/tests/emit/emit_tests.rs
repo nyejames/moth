@@ -511,7 +511,7 @@ fn rejects_invalid_helper_export_policy() {
     )
     .expect_err("invalid helper policy should fail");
     let error = error
-        .infrastructure_error()
+        .primary_infrastructure_error()
         .expect("Wasm generation failure should be wrapped for rendering");
     assert_eq!(
         &error.error_type,
@@ -2084,7 +2084,7 @@ fn rejects_unsupported_wasm_feature_flags() {
     )
     .expect_err("unsupported feature toggle should fail");
     let error = error
-        .infrastructure_error()
+        .primary_infrastructure_error()
         .expect("Wasm generation failure should be wrapped for rendering");
     assert_eq!(
         &error.error_type,
@@ -2144,7 +2144,7 @@ fn rejects_unsupported_cfg_lowering_strategy() {
     )
     .expect_err("unsupported cfg strategy should fail");
     let error = error
-        .infrastructure_error()
+        .primary_infrastructure_error()
         .expect("Wasm generation failure should be wrapped for rendering");
     assert_eq!(
         &error.error_type,

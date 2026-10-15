@@ -215,11 +215,7 @@ pub(crate) fn compile_moth_template_source(
             preparation_warnings,
             string_table,
         );
-        return Err(attach_finalized_source_database(
-            messages,
-            source_builder,
-            string_table,
-        ));
+        return Err(attach_finalized_source_database(messages, source_builder));
     }
 
     let entry_file_id = match source_builder
@@ -235,11 +231,7 @@ pub(crate) fn compile_moth_template_source(
                 preparation_warnings,
                 string_table,
             );
-            return Err(attach_finalized_source_database(
-                messages,
-                source_builder,
-                string_table,
-            ));
+            return Err(attach_finalized_source_database(messages, source_builder));
         }
     };
     if all_prepared
@@ -253,11 +245,7 @@ pub(crate) fn compile_moth_template_source(
             preparation_warnings,
             string_table,
         );
-        return Err(attach_finalized_source_database(
-            messages,
-            source_builder,
-            string_table,
-        ));
+        return Err(attach_finalized_source_database(messages, source_builder));
     }
     if !bundle_input {
         let Some(source_code) = direct_source_code.take() else {
@@ -266,11 +254,7 @@ pub(crate) fn compile_moth_template_source(
                 preparation_warnings,
                 string_table,
             );
-            return Err(attach_finalized_source_database(
-                messages,
-                source_builder,
-                string_table,
-            ));
+            return Err(attach_finalized_source_database(messages, source_builder));
         };
         source_builder
             .sources_mut()
@@ -286,11 +270,7 @@ pub(crate) fn compile_moth_template_source(
             preparation_warnings,
             string_table,
         );
-        return Err(attach_finalized_source_database(
-            messages,
-            source_builder,
-            string_table,
-        ));
+        return Err(attach_finalized_source_database(messages, source_builder));
     }
     let entry_scope = source_builder
         .sources()
@@ -330,19 +310,11 @@ pub(crate) fn compile_moth_template_source(
                     warnings,
                     string_table,
                 );
-                return Err(attach_finalized_source_database(
-                    messages,
-                    source_builder,
-                    string_table,
-                ));
+                return Err(attach_finalized_source_database(messages, source_builder));
             }
             Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
                 let messages = CompilerMessages::from_error(error, string_table.clone());
-                return Err(attach_finalized_source_database(
-                    messages,
-                    source_builder,
-                    string_table,
-                ));
+                return Err(attach_finalized_source_database(messages, source_builder));
             }
         };
         let freeze_result = prepared.freeze_path_syntax(string_table, &mut path_fork);
@@ -354,11 +326,7 @@ pub(crate) fn compile_moth_template_source(
                 preparation_warnings,
                 string_table,
             );
-            return Err(attach_finalized_source_database(
-                messages,
-                source_builder,
-                string_table,
-            ));
+            return Err(attach_finalized_source_database(messages, source_builder));
         }
     }
 
@@ -370,11 +338,7 @@ pub(crate) fn compile_moth_template_source(
     {
         let messages =
             CompilerMessages::from_error_with_warnings(error, preparation_warnings, string_table);
-        return Err(attach_finalized_source_database(
-            messages,
-            source_builder,
-            string_table,
-        ));
+        return Err(attach_finalized_source_database(messages, source_builder));
     }
 
     let sorted = match order_template_headers(
@@ -389,11 +353,7 @@ pub(crate) fn compile_moth_template_source(
         Err(failure) => {
             let mut messages = failure.into_messages(string_table);
             messages.prepend_diagnostics_preserving_context(preparation_warnings);
-            return Err(attach_finalized_source_database(
-                messages,
-                source_builder,
-                string_table,
-            ));
+            return Err(attach_finalized_source_database(messages, source_builder));
         }
     };
 
@@ -441,11 +401,7 @@ pub(crate) fn compile_moth_template_source(
             source_builder,
         } => {
             messages.prepend_diagnostics_preserving_context(preparation_warnings);
-            Err(attach_finalized_source_database(
-                messages,
-                source_builder,
-                string_table,
-            ))
+            Err(attach_finalized_source_database(messages, source_builder))
         }
     }
 }
@@ -510,7 +466,7 @@ fn order_template_headers(
             string_table,
             path_fork,
         )
-        .map_err(PremergeFailure::Infrastructure)?,
+        .map_err(PremergeFailure::from)?,
         None => ContentSourceTargets::empty(),
     };
     resolve_module_dependencies(
@@ -618,21 +574,20 @@ fn fold_template_semantics(
 }
 
 /// Finalize the private source database once its last span producer has finished.
+/// A finalisation failure appends to the vessel, retaining earlier causes and identity contexts.
 fn attach_finalized_source_database(
     mut messages: CompilerMessages,
     source_builder: SourceDatabaseBuilder,
-    string_table: &StringTable,
 ) -> CompilerMessages {
     match source_builder.finish() {
         Ok(source_files) => {
             messages.set_source_database(Arc::new(source_files));
             messages
         }
-        Err(error) => CompilerMessages::from_error_with_warnings(
-            error,
-            messages.into_diagnostics(),
-            string_table,
-        ),
+        Err(error) => {
+            messages.set_infrastructure_error(error);
+            messages
+        }
     }
 }
 

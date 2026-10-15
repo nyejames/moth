@@ -203,6 +203,7 @@ fn assert_internal_authority_error(error: &TemplateError, expected_message: &str
     let TemplateError::Infrastructure(error) = error else {
         panic!("malformed composition authority should remain an infrastructure error");
     };
+    let error = &error.primary;
 
     assert_eq!(error.error_type, ErrorType::Compiler);
     assert!(

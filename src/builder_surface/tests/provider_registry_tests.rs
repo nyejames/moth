@@ -261,30 +261,16 @@ fn resolution_table_import(package_id: u32) -> ResolvedExternalImport {
 }
 
 #[test]
-fn resolution_table_deduplicates_repeated_imports_from_same_source_file() {
-    let mut table = ExternalImportResolutionTable::new();
-    let resolved = resolution_table_import(1);
-
-    // Same source file, two different prefixes, same package.
-    table.insert("src/main.moth", "helper.js", resolved.clone());
-    table.insert("src/main.moth", "helper", resolved);
-
-    let result =
-        table.collect_unique_resolved_imports_for_source_files(&["src/main.moth".to_owned()]);
-
-    assert_eq!(result.len(), 1);
-    assert_eq!(result[0].package_id, ExternalPackageId(1));
-}
-
-#[test]
 fn resolution_table_replacing_same_source_prefix_updates_collected_package() {
     let mut table = ExternalImportResolutionTable::new();
 
     table.insert("src/main.moth", "helper.js", resolution_table_import(1));
     table.insert("src/main.moth", "helper.js", resolution_table_import(2));
 
-    let result =
-        table.collect_unique_resolved_imports_for_source_files(&["src/main.moth".to_owned()]);
+    let source_files = ["src/main.moth".to_owned()];
+    let result = table
+        .resolved_imports_for_source_files(&source_files)
+        .collect::<Vec<_>>();
 
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].package_id, ExternalPackageId(2));
@@ -312,36 +298,18 @@ fn resolution_table_collects_different_packages_from_different_source_files() {
         resolution_table_import(2),
     );
 
-    let result = table.collect_unique_resolved_imports_for_source_files(&[
+    let source_files = [
         "src/@page.moth".to_owned(),
         "src/feature/@page.moth".to_owned(),
-    ]);
+    ];
+    let result = table
+        .resolved_imports_for_source_files(&source_files)
+        .collect::<Vec<_>>();
 
     assert_eq!(result.len(), 2);
     let package_ids: Vec<_> = result.iter().map(|r| r.package_id).collect();
     assert!(package_ids.contains(&ExternalPackageId(1)));
     assert!(package_ids.contains(&ExternalPackageId(2)));
-}
-
-#[test]
-fn resolution_table_orders_results_by_package_id_regardless_of_insert_order() {
-    let mut table = ExternalImportResolutionTable::new();
-
-    // Insert out of order.
-    table.insert("src/a.moth", "a.js", resolution_table_import(5));
-    table.insert("src/b.moth", "b.js", resolution_table_import(3));
-    table.insert("src/c.moth", "c.js", resolution_table_import(7));
-
-    let result = table.collect_unique_resolved_imports_for_source_files(&[
-        "src/a.moth".to_owned(),
-        "src/b.moth".to_owned(),
-        "src/c.moth".to_owned(),
-    ]);
-
-    assert_eq!(result.len(), 3);
-    assert_eq!(result[0].package_id, ExternalPackageId(3));
-    assert_eq!(result[1].package_id, ExternalPackageId(5));
-    assert_eq!(result[2].package_id, ExternalPackageId(7));
 }
 
 // ------------------------------

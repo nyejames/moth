@@ -21,7 +21,7 @@ use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::builtins::CollectionBuiltinOp;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastFallibility;
 use crate::compiler_frontend::builtins::maps::MapBuiltinOp;
-use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
+use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType, InfrastructureErrors};
 use crate::compiler_frontend::compiler_messages::{
     AstCapacityResource, CompilerDiagnostic, ValueReceiverContext,
 };
@@ -528,11 +528,11 @@ pub(crate) struct CompletedExpressionInput {
 #[derive(Debug)]
 pub(crate) enum ExpressionConstructionFailure {
     Diagnostic(CompilerDiagnostic),
-    Invariant(CompilerError),
+    Invariant(Box<InfrastructureErrors>),
 }
 impl From<CompilerError> for ExpressionConstructionFailure {
     fn from(e: CompilerError) -> Self {
-        Self::Invariant(e)
+        Self::Invariant(e.into())
     }
 }
 pub(super) fn invariant(message: &str) -> CompilerError {
@@ -791,9 +791,9 @@ impl AstExpressionBuilder {
                     let id = FailureFactId(
                         NonZeroU32::new(self.storage.failures.len() as u32 + 1).ok_or_else(
                             || {
-                                ExpressionConstructionFailure::Invariant(invariant(
-                                    "side ID exhausted",
-                                ))
+                                ExpressionConstructionFailure::Invariant(
+                                    invariant("side ID exhausted").into(),
+                                )
                             },
                         )?,
                     );
@@ -809,9 +809,9 @@ impl AstExpressionBuilder {
                     let id = OccurrenceFactId(
                         NonZeroU32::new(self.storage.occurrences.len() as u32 + 1).ok_or_else(
                             || {
-                                ExpressionConstructionFailure::Invariant(invariant(
-                                    "side ID exhausted",
-                                ))
+                                ExpressionConstructionFailure::Invariant(
+                                    invariant("side ID exhausted").into(),
+                                )
                             },
                         )?,
                     );

@@ -121,7 +121,7 @@ pub(super) fn canonicalize_local_ordering_hints(
                 .expect("header body range has no prepared source-path identity"),
         ) {
             Ok(visibility) => visibility,
-            Err(error) => return Err(HeaderPreparationFailure::Infrastructure(error)),
+            Err(error) => return Err(HeaderPreparationFailure::Infrastructure(error.into())),
         };
 
         let file_dependency_clauses = file_dependency_clauses_by_source
@@ -173,7 +173,7 @@ pub(super) fn canonicalize_local_ordering_hints(
                 let selections = match dependency.selections(selection_table) {
                     Ok(selections) => selections,
                     Err(error) => {
-                        return Err(HeaderPreparationFailure::Infrastructure(error));
+                        return Err(HeaderPreparationFailure::Infrastructure(error.into()));
                     }
                 };
                 if dependency.dependency.path == hint.path() && selections.is_empty() {

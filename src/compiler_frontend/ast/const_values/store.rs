@@ -20,7 +20,7 @@ use crate::compiler_frontend::ast::module_ast::environment::declaration_table::{
 };
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::Template;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
 use crate::compiler_frontend::compiler_messages::{AstCapacityResource, CompilerDiagnostic};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -103,7 +103,7 @@ pub(crate) enum ConstTemplateValue {
 #[derive(Debug)]
 pub(crate) enum ConstValueStoreError {
     Diagnostic(CompilerDiagnostic),
-    Infrastructure(Box<CompilerError>),
+    Infrastructure(Box<InfrastructureErrors>),
 }
 
 impl From<CompilerDiagnostic> for ConstValueStoreError {
@@ -114,7 +114,7 @@ impl From<CompilerDiagnostic> for ConstValueStoreError {
 
 impl From<CompilerError> for ConstValueStoreError {
     fn from(error: CompilerError) -> Self {
-        Self::Infrastructure(Box::new(error))
+        Self::Infrastructure(error.into())
     }
 }
 

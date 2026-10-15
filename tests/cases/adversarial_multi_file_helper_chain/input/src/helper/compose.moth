@@ -1,6 +1,12 @@
 @helper/prefix prefix
 
-compose |value String| -> String:
-    left = prefix()
-    return [:[left]-[value]-B]
+compose |value String, level I32| -> String:
+    left = prefix(level)
+    if left is |selected|:
+        if level > 1:
+            return [:[selected]-[value]-D]
+        ;
+        return [:[selected]-[value]-B]
+    ;
+    return [:missing-[value]-B]
 ;

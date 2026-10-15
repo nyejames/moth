@@ -10452,6 +10452,20 @@ contract = "language.dependencies.explicit_moth_extension_rejected"
 role = "primary"
 
 [[case]]
+id = "html_js_reexport_linking"
+path = "html_js_reexport_linking"
+tags = ["integration", "imports", "external-js"]
+contract = "build.external_js.reexport_runtime_linking"
+role = "primary"
+
+[[case]]
+id = "html_js_binding_runtime_topology"
+path = "html_js_binding_runtime_topology"
+tags = ["integration", "imports", "external-js"]
+contract = "build.external_js.reexport_runtime_linking"
+role = "boundary"
+
+[[case]]
 id = "unsupported_external_js_import_rejected"
 path = "unsupported_external_js_import_rejected"
 tags = ["integration", "dependencies", "external-imports", "diagnostics"]
@@ -16750,3 +16764,10 @@ path = "capture_file_visible_names_rejected"
 tags = ["integration", "bindings", "aliases", "traits", "diagnostics", "name-resolution"]
 contract = "language.bindings.file_visible_names_cannot_be_shadowed"
 role = "boundary"
+
+[[case]]
+id = "fulfilment_ledger_runtime"
+path = "fulfilment_ledger_runtime"
+tags = ["integration", "language", "runtime", "adversarial", "control-flow", "collections", "borrows", "results"]
+contract = "language.scenarios.fulfilment_stock_conservation"
+role = "primary"

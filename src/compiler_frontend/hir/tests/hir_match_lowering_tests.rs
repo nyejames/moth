@@ -800,7 +800,7 @@ fn match_guard_rejects_lowering_when_guard_emits_prelude_statements() {
     .expect_err("guard expressions with preludes should fail HIR lowering");
 
     let error = err
-        .infrastructure_error()
+        .primary_infrastructure_error()
         .expect("HIR lowering failure should be wrapped for rendering");
     assert_eq!(&error.error_type, &ErrorType::HirTransformation);
     assert!(
@@ -884,7 +884,7 @@ fn match_rejects_non_literal_pattern_expressions() {
     )
     .expect_err("non-literal match pattern should fail HIR lowering");
     let error = err
-        .infrastructure_error()
+        .primary_infrastructure_error()
         .expect("HIR lowering failure should be wrapped for rendering");
     assert_eq!(&error.error_type, &ErrorType::HirTransformation);
     assert!(
@@ -928,7 +928,7 @@ fn break_outside_loop_reports_hir_transformation_error() {
     )
     .expect_err("break outside loop should fail");
     let error = err
-        .infrastructure_error()
+        .primary_infrastructure_error()
         .expect("HIR lowering failure should be wrapped for rendering");
     assert_eq!(&error.error_type, &ErrorType::HirTransformation);
     assert!(error.msg.contains("active loop context"));
@@ -966,7 +966,7 @@ fn continue_outside_loop_reports_hir_transformation_error() {
     )
     .expect_err("continue outside loop should fail");
     let error = err
-        .infrastructure_error()
+        .primary_infrastructure_error()
         .expect("HIR lowering failure should be wrapped for rendering");
     assert_eq!(&error.error_type, &ErrorType::HirTransformation);
     assert!(error.msg.contains("active loop context"));
@@ -1007,7 +1007,7 @@ fn top_level_return_reports_hir_transformation_error() {
     .expect_err("top-level return should fail");
 
     let error = err
-        .infrastructure_error()
+        .primary_infrastructure_error()
         .expect("HIR lowering failure should be wrapped for rendering");
     assert_eq!(&error.error_type, &ErrorType::HirTransformation);
     assert!(error.msg.contains("Top-level return"));

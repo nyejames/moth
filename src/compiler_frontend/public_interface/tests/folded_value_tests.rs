@@ -1368,9 +1368,12 @@ fn const_store_rejects_duplicate_module_constant_defining_paths() {
 
     match result {
         Err(ConstValueStoreError::Infrastructure(error)) => assert!(
-            error.msg.contains("Duplicate constant path binding."),
+            error
+                .primary
+                .msg
+                .contains("Duplicate constant path binding."),
             "expected a duplicate-path diagnostic, got: {}",
-            error.msg
+            error.primary.msg
         ),
         other => panic!("expected a duplicate-path infrastructure error, got {other:?}"),
     }
@@ -1431,10 +1434,11 @@ fn ingest_rejects_unbound_reference_in_module_constant() {
         Ok(_) => panic!("an unbound reference must not ingest as a constant value"),
         Err(ConstValueStoreError::Infrastructure(error)) => assert!(
             error
+                .primary
                 .msg
                 .contains("Constant reference has no folded binding."),
             "expected an unbound-reference diagnostic, got: {}",
-            error.msg
+            error.primary.msg
         ),
         Err(other) => panic!("expected an unbound-reference infrastructure error, got {other:?}"),
     }

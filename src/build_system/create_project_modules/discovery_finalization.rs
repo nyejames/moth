@@ -1,9 +1,12 @@
+//! Final source ownership and failure publication for private discovery traversals.
+
 use super::discovery_identity_rebind::{
     SourceIdentityMap, build_source_identity_map, rebind_discovery_diagnostics,
     rebind_resolved_file_reference_diagnostics, rebind_source_discovery_failure,
 };
 use super::discovery_missing_source_load::load_missing_sources;
 use super::*;
+use crate::build_system::create_project_modules::compilation::append_finish_failure;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use std::sync::Arc;
 /// Finish only retained work on an aborted walk. Queued sources remain unloaded.
@@ -50,7 +53,7 @@ pub(super) fn finalize_failed_discovery(
                 file.path.display()
             ));
             return finish_discovery_source_owner(
-                PremergeFailure::Infrastructure(error),
+                PremergeFailure::Infrastructure(error.into()),
                 source_builder,
             );
         }
@@ -63,7 +66,7 @@ pub(super) fn finalize_failed_discovery(
             Ok(mut output) => {
                 if let Err(error) = rebind_discovery_diagnostics(&mut output.warnings, source_ids) {
                     return finish_discovery_source_owner(
-                        PremergeFailure::Infrastructure(error),
+                        PremergeFailure::Infrastructure(error.into()),
                         source_builder,
                     );
                 }
@@ -75,7 +78,7 @@ pub(super) fn finalize_failed_discovery(
                     rebind_discovery_diagnostics(&mut error.warnings, source_ids)
                 {
                     return finish_discovery_source_owner(
-                        PremergeFailure::Infrastructure(remap_error),
+                        PremergeFailure::Infrastructure(remap_error.into()),
                         source_builder,
                     );
                 }
@@ -98,7 +101,7 @@ pub(super) fn finalize_failed_discovery(
         Ok(error) => error,
         Err(error) => {
             return finish_discovery_source_owner(
-                PremergeFailure::Infrastructure(error),
+                PremergeFailure::Infrastructure(error.into()),
                 source_builder,
             );
         }
@@ -113,7 +116,7 @@ pub(super) fn finalize_failed_discovery(
                 .attach_path_table_if_missing(Arc::new(source_builder.sources().paths().clone()))
             {
                 return finish_discovery_source_owner(
-                    PremergeFailure::Infrastructure(error),
+                    PremergeFailure::Infrastructure(error.into()),
                     source_builder,
                 );
             }
@@ -128,7 +131,9 @@ pub(super) fn finalize_failed_discovery(
             }
             failure
         }
-        SourceDiscoveryError::Infrastructure(error) => PremergeFailure::Infrastructure(error),
+        SourceDiscoveryError::Infrastructure(error) => {
+            PremergeFailure::Infrastructure(error.into())
+        }
         SourceDiscoveryError::Finalized(_) => {
             unreachable!("discovery failure cannot already carry a finalized source owner")
         }
@@ -136,7 +141,7 @@ pub(super) fn finalize_failed_discovery(
     let path_table = Arc::new(source_builder.sources().paths().clone());
     if let Err(error) = terminal_failure.attach_path_table_if_missing(path_table) {
         return finish_discovery_source_owner(
-            PremergeFailure::Infrastructure(error),
+            append_finish_failure(terminal_failure, error),
             source_builder,
         );
     }
@@ -149,9 +154,8 @@ pub(super) fn finalize_failed_discovery(
 /// Finishing here is the only path that can publish those tables after a post-registration error.
 ///
 /// WHAT: finishes the builder, then pairs the finished database with the typed failure.
-///       A builder-finish failure supersedes the prior failure as typed infrastructure,
-///       matching the package-boundary `?` precedent; there is no finished database to
-///       preserve in that case.
+///       A builder-finish failure appends its cause to the original failure because there
+///       is no finished database to preserve in that case.
 /// WHY: the finalized failure must never drop the finished owner, and no intermediate
 ///      vessel may be constructed before the parent final boundary.
 pub(super) fn finish_discovery_source_owner(
@@ -160,21 +164,24 @@ pub(super) fn finish_discovery_source_owner(
 ) -> SourceDiscoveryError {
     match source_builder.finish() {
         Ok(source_database) => SourceDiscoveryError::finalized(failure, source_database),
-        Err(error) => SourceDiscoveryError::Infrastructure(error),
+        Err(error) => SourceDiscoveryError::Premerge(append_finish_failure(failure, error)),
     }
 }
 
 /// Finish the final source owner beside an infrastructure error.
 ///
 /// WHAT: pairs a typed infrastructure error with its finished database; a builder-finish
-///       failure supersedes as typed infrastructure with no database to preserve.
+///       failure appends another cause without replacing the original failure.
 /// WHY: retention and identity-rebinding errors occur after registration, so their source
 ///      snapshots must still reach the final boundary.
 pub(super) fn discovery_finalization_error(
     error: CompilerError,
     source_builder: SourceDatabaseBuilder,
 ) -> SourceDiscoveryError {
-    finish_discovery_source_owner(PremergeFailure::Infrastructure(error), source_builder)
+    finish_discovery_source_owner(
+        PremergeFailure::Infrastructure(error.into()),
+        source_builder,
+    )
 }
 
 /// Move every known synthetic snapshot and its original span builder into final source ownership.

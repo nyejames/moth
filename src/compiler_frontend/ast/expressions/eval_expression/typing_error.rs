@@ -7,7 +7,7 @@
 
 use crate::compiler_frontend::ast::const_eval::ConstantFoldError;
 use crate::compiler_frontend::ast::expressions::expression_store::ExpressionConstructionFailure;
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 
 /// Either a user-facing diagnostic or an internal infrastructure failure.
@@ -19,7 +19,7 @@ use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 ///      ability to report internal failures.
 pub(crate) enum ExpressionTypingError {
     Diagnostic(CompilerDiagnostic),
-    Infrastructure(Box<CompilerError>),
+    Infrastructure(Box<InfrastructureErrors>),
 }
 
 impl From<CompilerDiagnostic> for ExpressionTypingError {
@@ -30,7 +30,13 @@ impl From<CompilerDiagnostic> for ExpressionTypingError {
 
 impl From<CompilerError> for ExpressionTypingError {
     fn from(error: CompilerError) -> Self {
-        ExpressionTypingError::Infrastructure(Box::new(error))
+        ExpressionTypingError::Infrastructure(error.into())
+    }
+}
+
+impl From<Box<InfrastructureErrors>> for ExpressionTypingError {
+    fn from(errors: Box<InfrastructureErrors>) -> Self {
+        Self::Infrastructure(errors)
     }
 }
 

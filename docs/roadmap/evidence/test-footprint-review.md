@@ -1,0 +1,354 @@
+# Test footprint implementation evidence
+
+## Baseline and same-scope measurements
+
+Work started on `link-fixes-and-test-cleanup` at `bf84a6c6da188820a549edd37effadce2e2c744f`, with a clean staged, unstaged and untracked worktree. The implementation uses this checkout rather than the plan's historical `expression-refactor` revision. Other roadmap programmes remain paused.
+
+The local toolchain reports Rust `1.99.0` (`b940084d7`, aarch64-apple-darwin), Clippy `0.1.99` and rustfmt `1.10.0-stable`. Authoritative runtime commands explicitly select `/Users/aneirinjames/.nvm/versions/node/v24.21.0/bin` on `PATH`, matching `.node-version`. The initial default executable reported Node `26.10.0`; it supplied no runtime acceptance evidence.
+
+Rust measurements use `tokei 14.0.0` code lines, excluding blanks and comment-only lines. Embedded Moth fixture strings count as Rust fixture code. Whole-scope `#[test]` counts are literal markers, not an AST count of definitions: quoted audit-fixture text contributes, for example `xtask/src/honesty_audit/tests.rs:61`. The ten selected files instead reconcile every named definition, including feature- and platform-gated definitions, against the 665-row baseline ledger. The test-directory scope includes Rust files under a `tests` path component or named `tests.rs` within `src`, `crates/moth-lexical`, `crates/moth-mon` and `xtask/src`.
+
+Moth measurements count nonblank physical `.moth` lines except lines whose first non-whitespace characters are `--`, including config and helpers and excluding generated `dev` and `release` directories. Expectation measurements exclude blank lines and comment-only `#` lines. These explicit physical-line rules support same-scope before/after comparison. They do not reconstruct the unavailable counting method behind the supplied 328,410 Rust LOC estimate or its 78,981-line whole-corpus figure.
+
+Before measurements use `bf84a6c6`; after measurements use accepted implementation checkpoint `46ff0a759`. The recount reconciled all original IDs and their surviving owners without mismatches.
+
+| Scope | Before noncomment LOC | After noncomment LOC | Source inventory, before / after |
+|---|---:|---:|---|
+| Rust test directories, 491 files | 319,605 | 319,441 | 7,115 / 7,105 literal `#[test]` markers |
+| Ten selected Rust review files | 38,455 | 38,177 | 665 / 655 actual test definitions |
+| Canonical Moth sources | 44,340 | 44,476 | 5,473 / 5,475 files; 2,395 / 2,396 cases |
+| Canonical expectations | 20,229 | 20,208 | 2,786 / 2,787 authored backend blocks |
+
+| Selected Rust file | Before LOC | After LOC | Before definitions | After definitions |
+|---|---:|---:|---:|---:|
+| `frontend_pipeline_tests.rs` | 4,698 | 4,698 | 74 | 74 |
+| `frozen_body_tests.rs` | 4,328 | 4,328 | 46 | 46 |
+| `slot_composition_tests.rs` | 2,720 | 2,720 | 54 | 54 |
+| `parser_tir_tests.rs` | 2,350 | 2,296 | 46 | 44 |
+| JS `control_flow.rs` | 2,428 | 2,360 | 18 | 17 |
+| `stage0_filesystem_identity_tests.rs` | 2,971 | 2,894 | 75 | 71 |
+| `hir_expression_lowering_tests.rs` | 4,518 | 4,454 | 63 | 61 |
+| `hir_validation_tests.rs` | 4,635 | 4,635 | 87 | 87 |
+| Boracle oracle `tests/mod.rs` | 5,430 | 5,415 | 111 | 110 |
+| `diagnostic_model_tests.rs` | 4,377 | 4,377 | 91 | 91 |
+
+| Integration case | Before Moth LOC | After Moth LOC | Before expectation LOC | After expectation LOC |
+|---|---:|---:|---:|---:|
+| `value_if_block_single_predicate` | 99 | 99 | 33 | 21 |
+| `value_if_multi_bind_inferred_single_predicate` | 104 | 104 | 34 | 21 |
+| `control_flow` | 39 | 53 | 4 | 4 |
+| `adversarial_choice_payload_control_flow` | 94 | 131 | 9 | 9 |
+| `adversarial_multi_file_helper_chain` | 16 | 30 | 4 | 4 |
+| `fulfilment_ledger_runtime` | 0 | 71 | 0 | 4 |
+
+## Baseline execution and inventories
+
+| Command at `bf84a6c6` | Observed result |
+|---|---|
+| `cargo run --quiet -- tests --audit` | 2,395 cases, 2,786 backend executions, zero hard suite-policy violations |
+| `just test-honesty-audit` | 1,520 scanned files, including 820 test-owning files, zero hard findings, zero source or feature-lane findings, 208 suite advisories |
+| `cargo run --quiet -- tests --case <id> --terse`, for each of the five cases above | Each passed 1/1, including actual emitted JavaScript execution |
+
+Advisory and weak-assertion review counts supply investigation leads, not deletion permission.
+
+Generated reports remain under `target/test-reports/`. Ignored `tmp/test-footprint/baseline-integration_suite_inventory.json` and `baseline-test_honesty_inventory.json` preserve their activation snapshots before later commands replace them. The same directory retains `baseline-rust-tokei.json` and `baseline-measurements.json`, including per-file Moth counts. The tracked August honesty inventory remains historical and unchanged.
+
+## Phase 0 ownership decisions
+
+`test-footprint-contracts.json` records all 665 selected unit IDs, their actual assertion contracts, direct fixture owners, lanes and initial dispositions. A mechanical comparison matched every recorded ID to its baseline definition and corrected one transcribed Oracle name. The ledger preserves baseline locations rather than following subsequent line shifts.
+
+| Classification | Candidate or owner | Decision and retained failure boundary |
+|---|---|---|
+| Confirmed overlap | Two `value_if_*` presence/ordered assertion pairs | Merge repeated presence declarations only. Preserve both ordered sequences and their unique case markers. |
+| Confirmed overlap | `control_flow` second range sum | Extend in place with a loop/helper/nested-decision result. Preserve original if, nested-if and match outcomes. |
+| Confirmed gap | Choice-payload adversarial case | Execute unused handler branches, observe each loop variant and run actual recovery. Compare backend representation owners before changing artefact assertions. |
+| Confirmed gap | Transitive helper chain | Extend the same three-file chain with input-dependent results. Direct imports, aliases and module initialisation own different contracts. |
+| Confirmed overlap | Two parser/TIR subsets, one HIR template pair and one Oracle alias-write pair | Review the exact survivor mappings in the ledger during the owning implementation phases. |
+| Likely overlap - inspect | One JS jump-argument subset and four Stage 0 fixture pairs | Compare complete fixtures and assertions before consolidation. Preserve destination binding, facade counts, raw-name error precedence, nearest ownership and typed duplicate-root reasons. |
+| Fixture-only test - remove candidate | `expression_test_builder_produces_valid_hir_module_metadata` | Only checks test-builder wiring and bare validation success. Preserve real lowered-module acceptance in `valid_module_passes_explicit_validation` and every malformed-HIR metadata/provenance contract. |
+| Distinct contract - keep | Frontend pipeline, frozen materialisation and TIR slot composition | Preserve all stage-handoff, origin/lifetime, schema/routing/replay and malformed-input owners. Existing helpers already centralise useful setup. |
+| Distinct contract - keep | HIR validation, diagnostic model and remaining Oracle cases | Preserve malformed-IR/numeric-domain, payload/span/remapping, capability/generation/alias and bounded-execution contracts. |
+| Distinct contract - keep | Debug/release fixed-numeric siblings and protected exact-output cases | Preserve both profile executions and exact failure/evaluation-order assertions. Repeated source bytes do not prove redundant behaviour. |
+| Missing interaction | Fulfilment ledger | Admit one small HTML scenario for stock conservation across repeated, partial/rejected and returned orders with a caught helper error. Existing collection, arithmetic-atomicity and borrow cases do not assert this domain invariant. |
+
+The miniature report generator remains unadmitted. Existing template owners cover its constituent operations, and no distinct executable regression has yet justified another case. Phase 3 first assesses the ledger against a valid mutation.
+
+The baseline documentation checkpoint command `cargo run --quiet -- build docs --release` built 81 output files. The read-only inventory phase changed no production or test sources.
+
+The independent Phase 0 audit required two evidence corrections: distinguish test-owning files from test counts, and validate the complete Oracle module rather than filtering out its three differently named reference cross-checks. Both corrections now appear above and in the ledger. Its helper-test review also identified the fixture-only removal candidate. These findings changed no executable sources.
+
+## Phase 1 assertion-only cleanup
+
+Both `value_if_*` cases retain their unique presence marker and their complete ordered output sequence. The removed presence fragments already occur in the unchanged ordered list. A throwaway TOML comparison found every other parsed backend field identical. No source fixture, backend block or diagnostic changed.
+
+| Existing case and surviving owner | Presence fragments removed | Expectation LOC before / after | Moth LOC before / after |
+|---|---:|---:|---:|
+| `value_if_block_single_predicate`, `language.expressions.value_if_block_single_predicate_acceptance` | 12 | 33 / 21 | 99 / 99 |
+| `value_if_multi_bind_inferred_single_predicate`, `language.expressions.value_if_multi_bind_inferred_single_predicate_acceptance` | 13 | 34 / 21 | 104 / 104 |
+
+The selected HTML runtime commands each passed 1/1. `just validate` passed formatting, default Clippy, feature coverage, source/dependency audits, workspace tests including 6,128 compiler tests, all 2,786 integration executions and the docs check. All commands selected pinned Node `24.21.0`. Canonical case count and Rust test counts remain unchanged.
+
+The independent presence/order audit accepted the phase without findings after tracing both assertion fields into the same runtime-output evaluator.
+
+## Phase 2 existing integration owners
+
+| Case and unchanged contract | Newly observed failure surface | Moth LOC before / after |
+|---|---|---:|
+| `control_flow`, `language.control_flow.if_nested_match_execution` | Nested helper returns produce `2,4,9,6` inside a loop, skipping input `4`. Exact output preserves the original branch/match results and sum `10`, with linked total `21`. | 39 / 53 |
+| `adversarial_choice_payload_control_flow`, `language.choices.payload_control_flow_chain_executes` | Exact output observes small/large/failure/pending handlers, payloads from every loop iteration, separate counts, original nested/imported results and actual `zero:0` recovery exactly once. | 94 / 131 |
+| `adversarial_multi_file_helper_chain`, `language.modules.transitive_helper_chain_executes` | Exact `A-hello-B\|C-world-D\|missing-again-B` observes two input-dependent prefixes and absent-option recovery through the original three-source chain. | 16 / 30 |
+
+Each changed case passed its selected HTML runtime command immediately after its fixture handoff. The complete canonical integration run passed 2,786/2,786 with 2,395 cases. `cargo run --quiet -- check docs --terse` reported no errors or warnings. Expectation LOC remains `4`, `9` and `4` respectively. No Rust test, manifest role, backend/profile or diagnostic expectation changed.
+
+The choice case keeps its two named-payload constructor snippets because the compared unit carrier owner does not prove those field structures. The removed tag comparisons and generic `if (` snippets survive in `choice_match_lowers_to_structured_if_with_choice_tags`; `emits_structured_if_without_dispatcher` owns conditional strategy. `literal_match_uses_dispatcher_when_cfg_contains_cycle` retains dispatcher `while (true)` and switch structure. Runtime output does not replace these backend contracts.
+
+Fresh independent semantic and backend-ownership audits both accepted Phase 2 without findings. The changed progress route also rebuilt through `cargo run --quiet -- build docs --release`, producing 81 outputs.
+
+## Phase 3 fulfilment ledger and discovered header defect
+
+`fulfilment_ledger_runtime` adds one HTML primary for `language.scenarios.fulfilment_stock_conservation`. Existing collection, catch-order, arithmetic-atomicity and borrow owners do not check conservation across this domain-level sequence: request `4`, partially fulfil request `8`, reject request `1` from empty stock, return `3`, fulfil request `2` and reject request `0`. The event ledger preserves original error codes/messages and exact order. Per-event assertions protect conservation and nonnegative stock; exact output protects accepted/partial/rejected counts, final balances and an independent copied snapshot.
+
+The first fixture draft used reserved variant name `Return`, which correctly failed with `MOTH-RULE-0039`. Renaming it `Restock` preserved the domain event. The valid multiline collection then exposed a compiler defect: `MOTH-RULE-0002` at line 30 treated `Order::Request(4)` as another `Order` declaration. The existing multiline struct-constructor fixture did not exercise qualified choice constructors.
+
+The header walk now reuses allocation-free `NestingDepth` while retaining runtime tokens. Nested expression newlines no longer trigger declaration/dependency discovery. Declaration and template handlers still own the ranges they consume. The walk preserves EOF for malformed-expression diagnostics rather than creating an infrastructure failure. The existing `start_function_retains_segmented_source_runs_in_order_with_eof` test now checks collection/map/grouped/call content, retained path and delimiter order, subsequent genuine declarations and a true duplicate's source span. It adds no test definition or second parser.
+
+After the repair, the ledger runtime command passed 1/1 and all 309 selected header tests passed. A temporary valid mutation debited one stock unit before returning the empty-stock error. The caller recovered the original error, then the per-event conservation assertion failed at runtime: 0/1 correct, unexpected uncaught Moth Error `assertion failed`. This proves an assertion detects mutation surviving a recovered helper error, not just successful compilation. The mutation was removed.
+
+Parent review removed final source assertions that duplicated the exact output, retaining the independent per-event invariants. The real multiline syntax remains in the permanent fixture. HTML-Wasm aggregate, collection, mutable-parameter and recoverable-error lowering remains outside this scenario's supported execution lane. The report-generator candidate remains unadmitted rather than adding a second programme without distinct mutation evidence.
+
+The restored ledger passed 1/1. `cargo run --quiet -- tests --audit` reported 2,396 cases and 2,787 backend executions, and the full integration run passed 2,787/2,787. The new fixture adds 71 noncomment Moth lines across source and config, with four expectation lines. `cargo fmt -p moth` passed. A direct `cargo run --quiet -- check tests/cases/fulfilment_ledger_runtime/input --terse` reported no errors or warnings, and the changed progress page rebuilt with 81 documentation outputs.
+
+The production audit found one required P2 correction: the new nested-token path accepted an unclosed nested template in an imported root, whose discarded runtime body has no AST consumer. Extending the existing imported-root test reproduced the lost diagnostic before correction. Nested templates now use the existing structural capture and retain their complete range without publishing a top-level fragment. The regression requires one `MOTH-SYNTAX-0017`, typed missing `]` and exact EOF span for imported/active plain/nested forms. A positive existing test also verifies nested collection/group templates leave the direct fragment count at one. After correction, all 309 header tests, the ledger 1/1 and the full 2,787 integration executions passed again.
+
+The independent ledger-admission audit accepted the scenario without findings. Fresh focused production verification accepted the imported-template correction and single-pass ownership with no remaining required finding. Its positive nested-template extension checks fragment count rather than exact retained tokens or immediately following declarations; control-flow inspection and the existing segmented-retention test provide the supporting evidence for those properties.
+
+## Phase 4 unit ownership checkpoints
+
+### Frontend pipeline
+
+Keep all 74 original `frontend_pipeline_tests.rs` IDs at 4,698 noncomment LOC. Its shared `failure_project` helper already centralises useful repeated setup. The similar implicit-failure fixtures assert different producer facts, CFG joins, success/error arity, recursion, write-back, float guards and borrow outcomes. Integration output cannot replace those handoff facts, and no equivalent same-boundary rows justified a table conversion or deletion. `cargo test -p moth --lib compiler_frontend::tests::frontend_pipeline_tests -- --format terse` passed 74/74.
+
+The independent frontend-cluster audit accepted retention without required correction. This preserves existing coverage rather than proving stable-origin joins through the harness's empty origin lookup or HIR narrowing from an AST-signature assertion. The documentation checkpoint built 81 outputs.
+
+### AST templates and generics
+
+Two parser/TIR subsets merge into unchanged stronger same-file survivors:
+
+- `parser_preserves_foldable_nested_child_as_template_boundary` → `parser_tir_records_finalized_child_template_as_child_template_node`. The identical const-required fixture retains the child boundary plus exact sibling order, child reference and parent/child summaries.
+- `style_child_wrapper_with_children_records_formatted_tir_phase` → `formatter_children_wrapper_composition_keeps_formatted_reference`. The identical wrapper fixture retains exact formatted output and `Formatted` phase, plus the composed-phase check.
+
+Parser definitions fall from 46 to 44 and noncomment LOC from 2,350 to 2,296. All 46 frozen-body and 54 slot-composition definitions remain at 4,328 and 2,720 LOC. Their identity, lifetime, resource, schema, replay, routing and malformed-state contracts stay distinct.
+
+Filtered parser and frozen runs passed 44/44 and 46/46. Slot composition passed 53/53 in default configuration, and its `benchmark_counters`-gated layout case passed 1/1. Existing `template_slots_nested_runtime` and `template_slot_wrapper_runtime` HTML smoke commands each passed 1/1. Formatting passed. The independent AST-cluster audit proved both assertion subsets and accepted all retained local owners without findings.
+
+### JavaScript backend
+
+`jump_args_define_explicit_destination_binding` merges into unchanged `jump_args_lower_block_to_block_value_transfer`. Both construct the same acyclic two-block, one-argument transfer. The survivor retains the explicit destination's fresh binding and additionally checks one source-read capture and structured lowering without a dispatcher. Different small literals and display names add no separate boundary.
+
+The file falls from 18 to 17 definitions and 2,428 to 2,360 noncomment LOC. All cyclic fallback, branch/match merge, swap, rebinding and nested-diamond owners remain. The complete registered control-flow module passed 17/17; actual `dispatcher_loop_match_result_fallback` and `control_flow` runtime commands each passed 1/1. Formatting passed.
+
+The independent backend-cluster audit traced the explicit jump transfer consumer, proved the removed assertion subset and accepted every retained strategy owner without findings.
+
+### Stage 0 filesystem identity
+
+| Original ID | Surviving owner | Retained boundary |
+|---|---|---|
+| `invalid_candidate_without_valid_normal_module_root_returns_file_error` | `package_boundary_traversal_rejects_non_utf8_name` | Same Linux-only raw filename, package-boundary traversal and File/non-UTF-8 failure before contents are read. Valid-root-plus-invalid-name precedence remains separate. |
+| `facade_outside_entry_root_is_not_classified_as_a_support_root` | `discovers_project_package_facade_outside_entry_root_containment` | Both exact counts move into the richer facade identity, ancestry, graph-exclusion and stats owner. |
+| `nested_module_files_transfer_to_nested_module_not_ancestor` | `root_and_nested_files_receive_correct_nearest_owner` | Exact ancestor and nested owned-path sets imply both removed exclusions and preserve the destination owner. |
+| `rejects_multiple_normal_module_roots_in_one_directory` | Adjacent `source_tree_index_rejects_duplicate_normal_module_root_files` | Typed `MultipleModuleRootFiles`, canonical directory and two candidates retain the fixed diagnostic-code check. Cosmetic root suffixes and unused config entry-root spelling do not alter this direct-discovery boundary. |
+
+Definitions fall from 75 to 71 and noncomment LOC from 2,971 to 2,894. Distinct physical/logical identity, permissions, canonicalisation, error-lane and platform contracts remain unchanged. The registered module passed 62/62 on macOS, and the adjacent typed-root owner passed 1/1. Actual `adversarial_multi_file_helper_chain` and `multi_file_module` commands each passed 1/1. Formatting passed. Linux-only raw-byte and Windows-only paths were compared but not executed locally.
+
+The independent filesystem audit accepted all four comparisons and retained owners without findings. The typed duplicate-root survivor fixes the reason, while remaining mixed/support-root tests and diagnostic-schema owners retain the shared `MOTH-CONFIG-0001` code contract. Static gate equivalence does not claim Linux or Windows execution.
+
+### HIR lowering, validation and diagnostic contracts
+
+`runtime_template_handoff_expression_lowers_inline_to_accumulator` was merged into `runtime_template_expression_lowers_inline_to_accumulator`. Both build the same `"hello"` runtime-template expression, lower through the same API and assert an empty prelude, no helpers, local `Copy` and the entry-block string assignment. Names and `.expect` text differ; the removed test never built a distinct handoff fixture. Separate nested-handoff and missing-handoff owners remain.
+
+`expression_test_builder_produces_valid_hir_module_metadata` was removed as fixture-only wiring: it installs an empty `Return` on the test builder and expects validation success without lowering an expression. This is not claimed equivalent to an integration case. Real lowered-module acceptance remains in `valid_module_passes_explicit_validation`; malformed metadata, provenance, CFG, numeric domains and pending-handler owners remain.
+
+Lowering falls from 63 to 61 definitions and 4,518 to 4,454 noncomment LOC. Validation retains 87 definitions / 4,635 LOC and diagnostic-model coverage retains 91 / 4,377. Targeted modules passed 61/61, 87/87 and 91/91. Actual `template_slots_nested_runtime` and `fulfilment_ledger_runtime` executions each passed 1/1. Formatting passed.
+
+The independent HIR/diagnostic audit accepted both removals and all 241 baseline decisions without required code findings. Its inventory precision note was applied: the nested-linear-handoff keeper checks chunk presence and one initialization, not relative chunk order. Intentional “Const records are data-only” guidance remains a user-facing terminology contract, rather than incidental wording to delete.
+
+### Borrow, Boracle and numeric-domain owners
+
+`boracle_oracle_write_through_exclusive_alias_does_not_fabricate_conflict` was merged into `boracle_oracle_write_through_exclusive_alias_is_safe`. The bodies are textually identical: two bindings, fresh owner, exclusive alias, paired alias update, fresh rebind, owner read and `CompleteSafe { executions: 1, .. }`. Oracle definitions fall from 111 to 110 and noncomment LOC from 5,430 to 5,415. Malformed problems, typed inconclusive bounds, closed cycles, capability retirement/reissue, failure traces and independent generated/reducer/campaign owners remain unchanged.
+
+All three differently named reference-related tests remain inside the full-module validation filter. `boracle_alias_result_loans_preserve_repeated_argument_event_owners` checks reference-solver facts only; it does not run the operational Oracle. Inventory precision corrections distinguish an exhausted execution bound from an event bound, and an unpaired conflicting write from the earlier paired exclusive-alias update.
+
+The adjacent `src/compiler_frontend/datatypes/tests/numeric_operators_tests.rs` review retains all 15 definitions below. This addendum is outside the ten-file / 665-definition baseline. These are domain-policy owners, not claims of arithmetic execution, every scalar value or exhaustive decimal scales.
+
+| Retained test ID | Distinct asserted boundary |
+| --- | --- |
+| `common_fixed_integer_matches_the_complete_range_rule_for_every_pair` | All 64 ordered integer pairs against an independently derived complete-range oracle. |
+| `common_fixed_integer_matches_the_published_d15_examples` | Literal published outcomes, including unsupported pairs, checked in both directions. |
+| `fixed_integer_operators_compute_in_the_common_type_and_divide_in_f64` | Seven operators across all pairs; real division uses F64 only after common-domain eligibility. |
+| `fixed_float_operators_preserve_the_wider_precision_without_an_f32_floor` | Exact wider float identity, including F16/F16, and integer-division rejection. |
+| `number_arithmetic_keeps_its_scale_and_rejects_invalid_scale_operators` | Decimal scale preservation, integer mixing and scale-specific division restrictions. |
+| `number_power_accepts_only_an_exact_i32_exponent` | Decimal power accepts the exact I32 exponent identity only. |
+| `number_mixes_only_with_integer_domains_for_arithmetic_and_comparison` | Decimal comparison compatibility and sampled invalid arithmetic families. |
+| `fixed_integer_and_binary_float_families_never_mix_implicitly` | Integer/float arithmetic and comparison reject in both directions. |
+| `negate_is_never_a_binary_operation` | The binary-domain entry point rejects a unary operator. |
+| `negation_preserves_signed_and_float_width_and_rejects_unsigned_and_byte` | Unary identity preservation and unsigned/Byte rejection, not minimum-value execution. |
+| `every_fixed_integer_pair_compares_including_i64_with_u64` | Comparison compatibility is broader than arithmetic common-domain eligibility. |
+| `discharge_proves_only_range_contained_fixed_integer_add_sub_mul_negate` | Bounded positive/negative result-range proof rows; wider carriers do not erase real failure. |
+| `failure_codes_leave_exact_float_negation_and_dec_arithmetic_without_a_failure_edge` | Selected exact failure-code slices; I32 binary rows require nonempty codes rather than exact per-operator slices. |
+| `range_iteration_uses_the_fixed_pairwise_table_and_rejects_dec` | Pairwise range-domain selection and incompatible-family rejection, not loop termination. |
+| `byte_is_outside_every_numeric_operator_domain` | Injected numeric Byte rejects; separate source Byte equality/ordering remains outside this policy. |
+
+Numeric HIR conversion, invalid-domain/type, explicit comparison-conversion and success/error-slot owners remain separate in the core ledger. Nearby fixed-scalar and decimal-value files were not exhaustively inventoried by this addendum.
+
+The complete Oracle-module filter passed 133/133, including the 110 selected-file definitions and nested module owners. `just boracle` passed formatting, feature-enabled Clippy, borrow-problem 46/46, last-use 5/5 and the feature-enabled Boracle lane 259/259. Numeric policy passed 15/15. The measured campaign was unchanged and was not executed.
+
+The actual ledger runtime also passed 1/1 with `cargo run --quiet --features boracle -- tests --case fulfilment_ledger_runtime --terse`.
+
+The independent proof/domain audit accepted the duplicate deletion and strict keep decisions without code findings. Its two additional precision corrections were applied: historical aggregate/call-result “write-through” names actually construct `Define`, then detect later unpaired source mutation. Their provenance assertions remain; the separate destination matrix owns genuine `Update`. These names supply no evidence of an additional write-through path.
+
+## Measured outcome and checkpoint provenance
+
+The final reconciliation preserves all 665 baseline ledger rows: 655 definitions remain, nine deletions map to proven surviving owners and one obsolete fixture-only test is removed. Every original ID matched the baseline; every keeper and mapped survivor exists in the accepted tree. The adjacent Stage 0 typed-root survivor is explicitly outside the ten-file measurement scope. No unresolved deletion candidate or unaccounted ID remains.
+
+The selected Rust files remove 278 noncomment lines. Expanding existing header regressions adds 114 lines within the whole Rust test-directory scope, so its net reduction is 164 lines rather than 278. Existing integration extensions add 65 Moth lines; the single admitted programme adds 71. The expectation corpus removes 25 duplicated presence rows and adds four ledger expectation lines. These counts describe authored footprint, not coverage quality or runtime performance.
+
+| Accepted checkpoint | Completed phase and independent audit |
+|---|---|
+| `5428ba8bb` | Phase 0 inventories and ownership baseline; evidence precision corrections accepted. |
+| `b1b7ffeee` | Phase 1 presence/order consolidation; evaluator ownership audit clean. |
+| `1fa015f3f` | Phase 2 richer existing integrations; semantic and backend-artefact audits clean. |
+| `d040ed97e` | Phase 3 ledger admission and header fix; admission audit clean, required imported-template diagnostic correction independently verified. |
+| `bd1f6c348` | Phase 4 frontend keep decisions; stage-invariant audit clean. |
+| `b4f4e8f2f` | Phase 4 parser/TIR subsets; AST ownership audit clean. |
+| `c38041263` | Phase 4 JavaScript jump subset; backend ownership audit clean. |
+| `dd991580f` | Phase 4 filesystem consolidation; platform/identity audit clean. |
+| `2d977ed23` | Phase 4 HIR consolidation and diagnostic keep decisions; invariant audit clean after inventory precision correction. |
+| `46ff0a759` | Phase 4 Oracle duplicate and numeric keep decisions; proof/domain audit clean after inventory precision corrections. |
+| `5a3fff880` | Phase 5 measured outcome and target limitations; independent recount and owner-reconciliation audit clean. |
+
+At `46ff0a759`, `cargo run --quiet -- tests --audit` regenerated 2,396 cases / 2,787 backend executions. `just test-honesty-audit` scanned 1,520 files, including 820 test-owning files: zero hard, source-audit or feature-lane findings, zero ledger-integrity findings and 208 suite advisories. `cargo run --quiet -- build docs --release` built 81 outputs. Phase 3's complete runtime pass belongs to `d040ed97e`. The final integrated run is recorded separately below.
+
+Raw recount data remains in ignored `tmp/test-footprint/final-measurements.json`, including exact counting implementation, source hashes and all owner reconciliations. Recounting uses `tokei --output json --types Rust src crates/moth-lexical crates/moth-mon xtask/src`, filtered to the declared test-directory scope, and the physical Moth/TOML rules above. The tracked tables and ID ledger preserve the outcome independently of temporary reports.
+
+### Supported targets and retained rejection owners
+
+The ledger owns exact HTML success only. Its manifest has no HTML-Wasm block, and no full-ledger Wasm run is claimed. Focused existing owners retain the target boundaries below; TOML `reason` values pin diagnostic keys, while separate typed-HIR tests own the Rust reason enums.
+
+| Existing owner | Retained HTML-Wasm diagnostic |
+|---|---|
+| `html_wasm_collection_runtime_coverage` | `MOTH-RULE-0058`, unsupported external function; no function identity or reason key asserted in TOML. |
+| `fixed_width_struct_field_js_runs_wasm_gated` | `MOTH-RULE-0064`, `unsupported_backend_feature.fixed_width_scalar_values`. |
+| `fixed_width_choice_payload_js_runs_wasm_gated` | `MOTH-RULE-0064`, `unsupported_backend_feature.fixed_width_scalar_values`. |
+| `uint_wasm_recoverable_rejected` | `MOTH-RULE-0064`, `unsupported_backend_feature.recoverable_numeric_failure`. |
+| `error_values_html_wasm_unsupported` | `MOTH-RULE-0064`, `unsupported_backend_feature.error_values`. |
+| `custom_error_fallible_control_flow_html_wasm_unsupported` | `MOTH-RULE-0064`, `unsupported_backend_feature.fallible_control_flow`. |
+| `mutable_parameter_wasm_rejected` | `MOTH-RULE-0064`, `unsupported_backend_feature.mutable_function_parameters`. |
+
+The collection integration fixture reaches `.set`, not the ledger's `.push`. `collection_helpers_keep_receiver_parameter_access_modes` separately asserts that growable and fixed `push` have no Wasm lowering. The fixed-width cases protect their narrow scalar domains; they are not evidence that every aggregate, or this ledger, hits that reason. No single focused failure demonstrates the ledger's first Wasm diagnostic or exercises its stock invariant on that target.
+
+Fresh `cargo run --quiet -- tests --case <id> --terse` commands at `46ff0a759` passed 2/2 each for `html_wasm_collection_runtime_coverage`, `mutable_parameter_wasm_rejected` and `custom_error_fallible_control_flow_html_wasm_unsupported`, covering their HTML success and exact expected Wasm rejection.
+
+The independent Phase 5 audit accepted the report without findings after independently recounting source/metadata, reconciling all 665 IDs and inspecting the seven focused target expectations. It confirmed the global literal-marker qualification and the 81 + 33 added header-fixture lines. Final integrated validation and roadmap retirement are recorded in closeout rather than attributed to this earlier phase.
+
+## Final integrated validation and closeout
+
+`PATH="/Users/aneirinjames/.nvm/versions/node/v24.21.0/bin:$PATH" just validate-full` passed on `5a3fff880` plus the uncommitted plan-retirement candidate. The candidate deletes the completed plan and removes its roadmap bullet, leaving later programmes paused. No executable source differs from accepted implementation checkpoint `46ff0a759`.
+
+| Final gate family | Observed outcome |
+|---|---|
+| Routine and workspace formatting, default and standard-feature Clippy | Passed. |
+| Feature coverage, source audit and first-party dependency audit | Zero findings. |
+| Workspace tests | Passed, including 6,120 compiler tests and 853 xtask tests. |
+| Canonical integration runtime | 2,787/2,787 passed. |
+| Documentation source check | Passed. |
+| Executing feature matrix | All ten standard lanes passed. |
+| Test-honesty audit | Zero hard or integrity findings, 208 suite advisories. |
+| Non-recording benchmark CI | All 148 standard cases preflighted and the quick CLI/frontend measurements completed. |
+| Scaling | All 14 series within their existing budgets. |
+| No-timer release artifact | Clean, 10,350,416 bytes. |
+
+Boracle remains opt-in and its separately executed gate is recorded above. The unchanged measured campaign, stress schedules, Linux-only raw-byte paths and Windows-only paths were not executed locally. The ledger remains HTML-only, and Candidate B remains unadmitted. No performance improvement is inferred from a passing budget.
+
+Three fresh final review lanes passed without required findings: production header ownership and diagnostics, verification contracts and scenario admission, and evidence/status consistency. They traced downstream consumers and retained owners rather than treating passing counts as semantic proof. The positive nested-template assertion's coverage limit remains explicit above. No final-lane correction was required.
+
+The fresh cross-scope integration audit passed. Its initial P2 proposal for a general discarded-runtime brace/group EOF check was withdrawn after comparing `bf84a6c6` with the candidate: the pure-EOF behaviour predates this patch, and Stage 2 explicitly does not validate executable bodies. The existing nested-template capture contract is different and remains protected. Adding a parallel expression validator would exceed this work's scope.
+
+A temporary real-project probe also rejected an unclosed collection with `MOTH-SYNTAX-0017`, expected `}`, at `components/@components.moth:5:3`. Each dependency module's own root is active during its compilation, so that result does not isolate the per-file `ImportedModuleRoot` role. The probe inputs were removed. No required correction remains, and executable sources are unchanged from the full-gate run.
+
+## Post-cleanup review: grouped delimiters
+
+The review's collection and grouping fixtures both reach EOF without a Stage 2 diagnostic in the per-file imported-root probe. The active-root probe retains each body for AST validation. Stage 2 owns declaration separation, not executable-expression validation, as specified in `docs/compiler-design-overview.md` under `Header syntax preparation`. A dependency module compiles its own root before publication, even when no entry activates its runtime work.
+
+The new `dormant_dependency_root_grouped_delimiters_report_eof_in_child_source` regression runs both fixtures through canonical project compilation with a consumed public declaration in the dependency root. Each produces exactly one error, typed `UnexpectedEndOfFile` / `MOTH-SYNTAX-0017`, naming `}` or `)` and pointing at the dependency source's exact zero-width EOF. Payload strings and spans resolve through the diagnostic's frozen identity. The source-identity suite passed 6/6 and the existing imported-template regression passed 1/1.
+
+Actual `cargo run --quiet -- check tmp/review-delimiter-smoke --terse` probes exited 1 with one source error and no warnings: the collection reported expected `}` at `components/@components.moth:6:7`, and the grouping reported expected `)` at `5:10`. Temporary probes were removed after observation. The requested regression protection belongs at canonical compilation rather than in the header-only test. No production parser change or additional expression validator was needed.
+
+## Post-review reconciliation
+
+### Final integration execution count (finding 2)
+
+The retained final `just validate-full` log confirms 2,787/2,787 executions, including the ledger scenario. The report already records that count at the reviewed head `dc83b1b12`. The 2,786 figures describe pre-ledger checkpoints:
+
+| Pre-ledger checkpoint | Recorded executions |
+|---|---:|
+| Baseline `cargo run --quiet -- tests --audit` at `bf84a6c6` | 2,395 cases / 2,786 executions |
+| Phase 1 `just validate` | 2,786 integration executions |
+| Phase 2 complete canonical run | 2,786/2,786 across 2,395 cases |
+| Adjacent JavaScript report's Phase 4 `just validate`, on its own earlier code candidate | 2,786/2,786 compiler integration results |
+
+The retained final gate log is `163.bash-original.log` (`SHA-256 56d04254eee78c04d0eb0fb0b68091bcdd9fab4093bf0830a2022f73091394bd`). Its first line echoes `just validate` because that is the first step of `validate-full`, and it contains the later `fmt-workspace-check`, `clippy-features`, feature-matrix, honesty-audit, `validate-perf` and `timers-erasure-check` families of the same run. Exact excerpts (lines 226-227 and 1033-1034):
+
+```text
+cargo run --quiet -- tests --terse
+Tests: 2787/2787 correct in 15.96s.
+```
+
+```text
+cargo run --quiet -- tests --audit
+Wrote integration suite inventory to target/test-reports/integration_suite_inventory.json (2396 cases, 2787 backend executions).
+```
+
+The audit command writes an inventory record, not an execution record. The execution record is the `tests --terse` line, and both commands load the same suite:
+
+- `fixture::load_test_suite()` reads the canonical `tests/cases/manifest.toml`, verifies the manifest declares every discovered fixture root and expands each declared `expect.toml` backend block into one `TestCaseSpec` (`load_canonical_case_specs_at` in `fixture.rs`).
+- `reporting::build_suite_inventory_report` counts distinct canonical case IDs as `manifest_case_count` and `suite.cases.len()` as `expanded_backend_execution_count` (`reporting.rs:258-259`).
+- Unfiltered execution takes the same `suite.cases`: `select_cases` keeps every case when no filter applies (`runner.rs:274-296`), `execute_test_case` builds each block through `build_project` (`execution.rs:15-70`) and the terse line prints the executed total (`reporting.rs:1001-1003`).
+
+Before follow-up validation replaced local reports, the retained `target/test-reports/integration_suite_inventory.json` (schema 10, run `tests --audit`, revision `5a3fff8806e8834611a9ad69cbaacbfbc0662ae5`) contained `fulfilment_ledger_runtime` under contract `language.scenarios.fulfilment_stock_conservation` with one `html` success block and `rendered_output_exact: true`. The 2,787 declared backend executions and 2,787 executed blocks in the same gate log describe the same case set, including the ledger scenario. The original run has no selection gap. Fresh validation covers the later delimiter-regression addition separately.
+
+### Eight non-ledger test removals (finding 3)
+
+A name-level scan of literal `#[test]` markers and their following function names across tracked Rust files between `aa072a27` and `dc83b1b12` finds 19 removed names and 32 added names. This scan includes quoted fixture source, so it is not an AST count. Reviewing the changed definitions identifies one reworked successor pair, leaving 18 removals and 31 additions, matching the review. Ten removals belong to the 665-row ledger. The other eight removals and the successor pair are reconciled below.
+
+| Removed definition and file | Commit | Old assertion | Current owner or reason |
+|---|---|---|---|
+| `resolution_table_deduplicates_repeated_imports_from_same_source_file`, `src/builder_surface/tests/provider_registry_tests.rs` | `1dae29ce2` | Two prefixes for the same package from one source collected as one record through `collect_unique_resolved_imports_for_source_files` | That method is gone. `collect_external_import_candidates_for_packages` projects one record per requested package, and `runtime_candidates_merge_semantic_contracts_and_preserve_provider_provenance` requests a two-package set with a duplicated builder record and asserts exactly two candidates. `resolution_table.rs` now documents that deduplication and compatibility belong to the frontend runtime-import projection. |
+| `resolution_table_orders_results_by_package_id_regardless_of_insert_order`, same file | `1dae29ce2` | Inserts 5, 3, 7 were collected in ascending package order | The projection sorts by package ID, and the same test asserts `vec![package_id, other_package_id]` as deterministic publication order. Build-level `build_html_registered_source_package_preserves_provider_identity_and_order` keeps import and wrapper order against real writer bytes. |
+| `default_error_headers_keep_friendly_type_specific_visuals`, `src/compiler_frontend/compiler_messages/tests/display_messages_tests.rs` | `8f15579ec` | Pinned `error_visual` and `error_display_name` for seven error types | Both helpers no longer exist. `every_cause_type_has_truthful_introduction_in_all_views` in the new `render/tests/infrastructure_tests.rs` covers classification and introduction text for all six `ErrorType` cases across terminal, terse and HTML views. |
+| `compiler_messages_from_error_wraps_one_error_without_warnings`, same file | `8f15579ec` | `from_error` carried one error, zero warnings, the outer lane and no diagnosed first error | Carrier fields superseded by `infrastructure_aggregate_round_trips_into_compiler_errors` and `infrastructure_setter_and_message_append_preserve_every_ordered_cause`, which assert the aggregate lane, every ordered cause and `error_count() == 1`. |
+| `compiler_error_metadata_and_host_path_are_preserved`, same file | `8f15579ec` | Constructor setter/getter round trip for host path and metadata | Retained by `infrastructure_aggregate_round_trips_into_compiler_errors` for the primary and additional cause, and by `hostile_causes_are_escaped_without_losing_raw_details_or_terse_fields` for per-cause retention after rendering. |
+| `compiler_error_preserves_exact_source_span_and_host_path`, same file | `8f15579ec` | Constructor setter/getter round trip for span and host path | Same two owners. |
+| `invalid_utf8_host_paths_remain_distinct`, same file | `8f15579ec` | Unix-gated inequality of two invalid-UTF-8 fixture paths | Intentionally removed as a trivial carrier assertion: it assigned two paths directly and compared them, without exercising a production encoding boundary. `project_build_executor_preserves_non_utf8_entry_path_as_file_failure` protects exact preservation of one invalid-UTF-8 path through the producer. Stage 0 raw-name tests protect rejection of unrepresentable names, not inequality of two retained identities. |
+| `dev_server_error_messages_use_dev_server_error_type`, `src/projects/dev_server/tests/build_loop_tests.rs` | `8f15579ec` | The helper wrapped one infrastructure error typed `DevServer` | The helper still constructs `ErrorType::DevServer` (`build_loop.rs:546-550`). `every_cause_type_has_truthful_introduction_in_all_views` covers the classification in every rendered view, and the remaining dev-server tests keep the build-cycle and warning-carry contracts. |
+
+| Reworked definition | Commit | Successor |
+|---|---|---|
+| `single_infrastructure_error_round_trips_into_compiler_error`, `compiler_messages/tests/module_diagnostics_tests.rs` | `8f15579ec` | `infrastructure_aggregate_round_trips_into_compiler_errors` in the same file. The successor keeps the message, span, host path, error type and metadata round trip and extends it to two causes, asserting each cause separately. |
+
+At head `18fd47c2e` the totals are 19 removed names and 33 added names. The extra addition is `dormant_dependency_root_grouped_delimiters_report_eof_in_child_source`. It adds no integration case, so the 2,396-case / 2,787-execution inventory is unchanged. No deleted test was restored and the 665-row ledger keeps its ten-file scope.
+
+### Grouped-delimiter phase validation note
+
+The grouped-delimiter phase evidence also covers the complete `source_identity_loading_tests` module. Default features select the six ungated definitions (`6/6`, matching the figure in the grouped-delimiter section above). The `timers` feature selects those six plus the six gated instrumentation definitions for `12/12`, including `dormant_dependency_root_grouped_delimiters_report_eof_in_child_source`, `ast_aggregate_metrics_recorded_with_timers` and `unguarded_parallel_compile_registers_into_an_active_timing_session`. The existing imported-template regression passed `1/1`. A retained session log (`289.bash-original.log`, `SHA-256 7c618831491c1621dbf193e966dadd7746718711614dd6904bacc3197aa488eb`) holds the `12/12` run.
+
+### Review follow-up gate scheduling
+
+An initial follow-up `just validate-full` run passed correctness checks and benchmark preflight, then `bench-ci` rejected concurrent changes to the three Markdown reconciliation files. Its tracked-tree stability guard correctly invalidated that performance run. The retry ran on the clean `114d1c562` checkpoint after those edits stopped and passed. The invalidated run supplies no performance acceptance evidence.
+
+### Review follow-up final validation
+
+`env PATH=/Users/aneirinjames/.nvm/versions/node/v24.21.0/bin:$PATH just validate-full` passed on `114d1c562`. The retained receipt is `393.bash-original.log` (`SHA-256 3f7a0873cc5533c6e72631bbbf471f7d4fdca07682a03ea13c8f6afb0633f433`). It records 6,121 compiler tests, 853 xtask tests, 2,787/2,787 canonical integration executions, all ten standard feature lanes, zero hard honesty or source/dependency/feature findings, all 148 benchmark preflights, completed non-recording quick measurements, all 14 scaling series within budget and a clean 10,350,416-byte no-timer binary. The selected `fulfilment_ledger_runtime` HTML command also passed 1/1. No performance improvement is claimed.
+
+Independent phase audits accepted the delimiter regression and both reconciliation concerns. Final scoped review accepted the canonical delimiter ownership and found one required evidence correction: the retired two-path carrier inequality was not equivalent to Stage 0 rejection of a single unrepresentable name. The reconciliation now states that intentional removal and the narrower retained producer contract explicitly. Boracle, its campaign, stress schedules, other operating systems and remote CI were not rerun for this follow-up.
+
+The accepted follow-up checkpoints are `18fd47c2e` for delimiter diagnostics and `114d1c562` for evidence reconciliation and the deferred provider-identity owner. Fresh focused verification accepted the final coverage-claim correction, and the separate cross-scope integration audit passed without required findings. Closeout changes only this Markdown evidence record after the full-gate pass.

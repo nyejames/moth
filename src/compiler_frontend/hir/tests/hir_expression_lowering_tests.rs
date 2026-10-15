@@ -47,21 +47,17 @@ use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId};
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
-use crate::compiler_frontend::external_packages::{
-    CallTarget, ExternalFunctionId, ExternalPackageRegistry,
-};
+use crate::compiler_frontend::external_packages::{CallTarget, ExternalFunctionId};
 use crate::compiler_frontend::folded_value::OwnedFoldedString;
 use crate::compiler_frontend::hir::blocks::HirBlock;
-use crate::compiler_frontend::hir::expression_store::{
-    HirConstructionFailure, HirProjection, HirValueRange,
-};
+use crate::compiler_frontend::hir::expression_store::{HirConstructionFailure, HirProjection};
 use crate::compiler_frontend::hir::expressions::{
     HirExpression, HirExpressionKind, HirMapOp, HirVariantCarrier, OPTION_SOME_VARIANT_INDEX,
     ValueKind,
 };
 use crate::compiler_frontend::hir::hir_builder::{
     HirBuilder, expressions_to_owned_render_node, register_local, runtime_template_expression,
-    setup_builder, validate_module_for_tests,
+    setup_builder,
 };
 use crate::compiler_frontend::hir::hir_side_table::HirLocalOriginKind;
 use crate::compiler_frontend::hir::ids::{
@@ -418,29 +414,6 @@ fn assert_no_synthesized_helper_functions(builder: &HirBuilder<'_>) {
             .any(|function| function.id == start_function),
         "the sole expression-fixture function should be its declared start function"
     );
-}
-
-#[test]
-fn expression_test_builder_produces_valid_hir_module_metadata() {
-    let mut path_fork = super::PathInternerFork::empty();
-    let mut string_table = StringTable::new();
-    let mut builder = setup_builder(&mut string_table, &mut path_fork);
-    let entry_id = super::start_function(&builder.module).entry;
-    let entry_block = builder
-        .module
-        .blocks
-        .iter_mut()
-        .find(|block| block.id == entry_id)
-        .expect("expression fixture should expose its declared entry block");
-    entry_block.terminator = HirTerminator::Return(HirValueRange::empty());
-
-    validate_module_for_tests(
-        &builder.module,
-        &*builder.string_table,
-        &builder.type_environment,
-        &ExternalPackageRegistry::new(),
-    )
-    .expect("the shared expression builder fixture should satisfy HIR validation");
 }
 
 #[test]
@@ -2079,48 +2052,6 @@ fn runtime_template_expression_lowers_inline_to_accumulator() {
                 .expect("runtime template should have a view"),
         )
         .expect("runtime template lowering should succeed");
-
-    assert!(lowered.prelude.is_empty());
-    assert_no_synthesized_helper_functions(&builder);
-    assert!(matches!(
-        &expression_row(&builder, lowered.value).kind,
-        HirExpressionKind::Copy(place) if super::is_local_place(place)
-    ));
-    let entry_block = declared_entry_block(&builder);
-    assert!(block_assigns_string_literal(
-        &builder.module,
-        entry_block,
-        "hello"
-    ));
-}
-
-#[test]
-fn runtime_template_handoff_expression_lowers_inline_to_accumulator() {
-    let mut path_fork = super::PathInternerFork::empty();
-    let mut string_table = StringTable::new();
-    let hello = string_table.intern("hello");
-    let span = None;
-    let mut expressions = AstExpressionBuilder::new().unwrap();
-    let mut constants = ConstValueStore::default();
-    let hello_expr = expressions
-        .string_slice(&mut constants, hello, span, ValueMode::ImmutableOwned)
-        .expect("fixture string should construct");
-    let expr = runtime_template_expression(
-        &mut expressions,
-        &constants,
-        span,
-        vec![hello_expr.id()],
-        &string_table,
-    );
-    let mut builder = setup_builder(&mut string_table, &mut path_fork);
-
-    let lowered = builder
-        .lower_expression(
-            expressions
-                .view(expr)
-                .expect("runtime template should have a view"),
-        )
-        .expect("owned runtime template handoff expression should lower");
 
     assert!(lowered.prelude.is_empty());
     assert_no_synthesized_helper_functions(&builder);

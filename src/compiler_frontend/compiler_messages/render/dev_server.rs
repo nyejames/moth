@@ -3,7 +3,11 @@
 //! WHAT: converts structured diagnostics into escaped HTML cards for the dev-server error page.
 //! WHY: the dev-server needs clickable source links and readable diagnostic output.
 
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::{CompilerMessages, InfrastructureErrors};
+use crate::compiler_frontend::compiler_messages::render::infrastructure::{
+    ISSUE_URL, InfrastructureClass, format_error_guidance_lines, infrastructure_class,
+    infrastructure_heading,
+};
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, ResolvedDiagnosticLabel, display_column_number, display_gutter_width,
     display_line_number, expand_tabs_for_display, primary_caret_padding, primary_underline_length,
@@ -104,12 +108,12 @@ pub(crate) fn render_compiler_messages_html(
     // after every error diagnostic and before warnings/notes — mirroring the severity-bucket
     // display order without fabricating a user diagnostic.
     let mut cards = Vec::new();
-    let mut outer_emitted = messages.infrastructure_error().is_none();
+    let mut outer_emitted = messages.infrastructure_errors().is_none();
     for diagnostic_index in messages.diagnostic_display_order() {
         let diagnostic = &messages.diagnostic_slice()[diagnostic_index];
         if !outer_emitted && diagnostic.severity != DiagnosticSeverity::Error {
-            if let Some(error) = messages.infrastructure_error() {
-                cards.push(render_compiler_error_card(error));
+            if let Some(errors) = messages.infrastructure_errors() {
+                cards.push(render_infrastructure_card(errors));
             }
             outer_emitted = true;
         }
@@ -119,8 +123,8 @@ pub(crate) fn render_compiler_messages_html(
             messages.diagnostic_render_context(diagnostic_index),
         ));
     }
-    if !outer_emitted && let Some(error) = messages.infrastructure_error() {
-        cards.push(render_compiler_error_card(error));
+    if !outer_emitted && let Some(errors) = messages.infrastructure_errors() {
+        cards.push(render_infrastructure_card(errors));
     }
     if cards.is_empty() {
         return String::from("<p>No compiler diagnostics available.</p>");
@@ -128,36 +132,45 @@ pub(crate) fn render_compiler_messages_html(
     cards.join("\n")
 }
 
-/// Render the outer infrastructure failure as an error card.
-///
-/// Infrastructure failures carry no retained source snapshot at this boundary. Only their host
-/// path, message and structured guidance are rendered; no source frame is synthesized.
-fn render_compiler_error_card(error: &CompilerError) -> String {
+/// Keep all causes inside one infrastructure event, without resolving unpaired source IDs.
+fn render_infrastructure_card(errors: &InfrastructureErrors) -> String {
     let (severity_label, severity_visual, badge_class) =
         severity_display(DiagnosticSeverity::Error);
-
     let mut body = String::new();
-    body.push_str(&format!(
-        r#"<p class="diagnostic-message">{}</p>"#,
-        escape_html(&error.msg)
-    ));
-    if let Some(host_path) = error.host_path.as_deref() {
+    for (index, error) in errors.iter().enumerate() {
+        body.push_str(r#"<section class="infrastructure-cause">"#);
+        let heading = infrastructure_heading(&error.error_type);
+        if index == 0 {
+            body.push_str(&format!("<h3>{heading}</h3>"));
+        } else {
+            body.push_str(&format!("<h3>Additional cause {index}: {heading}</h3>"));
+        }
+        let class = infrastructure_class(&error.error_type);
         body.push_str(&format!(
-            r#"<p class="source-path">{}</p>"#,
-            escape_html(&portable_path_text(host_path))
+            r#"<p class="infrastructure-introduction">{}</p>"#,
+            escape_html(class.introduction())
         ));
-    }
-    for guidance in
-        crate::compiler_frontend::compiler_messages::display_messages::format_error_guidance_lines(
-            error,
-        )
-    {
+        if class == InfrastructureClass::CompilerBug {
+            body.push_str(&format!(r#"<p><a href="{ISSUE_URL}">{ISSUE_URL}</a></p>"#));
+        }
         body.push_str(&format!(
-            r#"<p class="guidance">Hint: {}</p>"#,
-            escape_html(&guidance)
+            r#"<p>Details:</p><p class="diagnostic-message">{}</p>"#,
+            escape_html(&error.msg)
         ));
+        if let Some(host_path) = error.host_path.as_deref() {
+            body.push_str(&format!(
+                r#"<p class="source-path">{}</p>"#,
+                escape_html(&portable_path_text(host_path))
+            ));
+        }
+        for guidance in format_error_guidance_lines(error) {
+            body.push_str(&format!(
+                r#"<p class="guidance">Hint: {}</p>"#,
+                escape_html(&guidance)
+            ));
+        }
+        body.push_str("</section>");
     }
-
     format!(
         r#"<article class="diagnostic" data-diagnostic-code="MOTH-INFRA-0001"><div class="diagnostic-head"><span class="{badge_class}">{severity_visual} {severity_label}</span><span class="kind">Infrastructure failure</span></div>{body}</article>"#
     )

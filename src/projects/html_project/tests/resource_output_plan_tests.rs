@@ -500,7 +500,7 @@ fn resource_collision_render_keeps_project_primary_and_package_secondary_domains
         }),
         0,
     );
-    let messages = messages
+    messages
         .freeze_source_contexts()
         .expect("mixed project/package source contexts should freeze");
     let diagnostic = messages
@@ -624,7 +624,7 @@ fn reserved_package_resource_render_uses_package_extended_span_table() {
         }),
         0,
     );
-    let messages = messages
+    messages
         .freeze_source_contexts()
         .expect("mixed project/package source contexts should freeze");
     let diagnostic = messages

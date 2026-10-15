@@ -287,9 +287,8 @@ impl<'a> DirectoryDependencyResolution<'a> {
             provider_path,
             declaring_canonical_path,
             dependency_span,
-            self.source_tree_index,
+            &self,
             string_table,
-            self.path_fork,
         )
     }
 }
@@ -497,53 +496,51 @@ impl ModuleNamespaceSet {
         provider_path: PathId,
         declaring_canonical_path: &Path,
         dependency_span: Option<SourceSpan>,
-        project_source_tree_index: &SourceTreeIndex,
+        resolution: &DirectoryDependencyResolution<'_>,
         string_table: &mut StringTable,
-        path_fork: &PathInternerFork,
     ) -> Result<PathBuf, CompilerDiagnostic> {
-        if path_contains_dotdot(provider_path, path_fork, string_table) {
+        if path_contains_dotdot(provider_path, resolution.path_fork, string_table) {
             return Err(CompilerDiagnostic::invalid_import_path(
                 provider_path,
                 InvalidImportPathReason::ParentDirectorySegment,
                 dependency_span,
             ));
         }
-        let (namespace, index) = match project_source_tree_index
+        let source_index = resolution
+            .source_tree_index
             .source_index_for_canonical_path(declaring_canonical_path)
-        {
-            Some(source_index) => {
-                let consumer_record = project_source_tree_index.source(source_index);
-                let SourceOwnership::Owned(module_id) = consumer_record.ownership() else {
-                    return Err(CompilerDiagnostic::missing_import_target(
-                        provider_path,
-                        dependency_span,
-                    ));
-                };
-                (
-                    &self.project_namespaces[module_id.index()],
-                    project_source_tree_index,
-                )
-            }
-            None => {
-                let (package_prefix, package_index, module_id) = self
-                    .find_package_namespace_owner(declaring_canonical_path)
-                    .ok_or_else(|| {
-                        CompilerDiagnostic::missing_import_target(provider_path, dependency_span)
-                    })?;
-                let namespaces = self
+            .ok_or_else(|| {
+                CompilerDiagnostic::missing_import_target(provider_path, dependency_span)
+            })?;
+        let SourceOwnership::Owned(module_id) = resolution
+            .source_tree_index
+            .source(source_index)
+            .ownership()
+        else {
+            return Err(CompilerDiagnostic::missing_import_target(
+                provider_path,
+                dependency_span,
+            ));
+        };
+        // Module IDs and source rows are local to the context's project or package boundary.
+        let namespace = match resolution.boundary {
+            NamespaceBoundary::Project => &self.project_namespaces[module_id.index()],
+            NamespaceBoundary::Package => {
+                let package_prefix = resolution
+                    .package_prefix
+                    .expect("package resolution carries its prefix");
+                &self
                     .package_namespaces
                     .get(package_prefix)
-                    .expect("package prefix found by find_package_namespace_owner");
-                package_index
-                    .source_index_for_canonical_path(declaring_canonical_path)
-                    .expect("package owner lookup found the declaring source");
-                (&namespaces[module_id.index()], package_index)
+                    .expect("package resolution prefix exists")[module_id.index()]
             }
         };
 
         let mut scratch = Vec::new();
         let key = portable_dependency_key(
-            path_fork.resolve_components(provider_path, &mut scratch),
+            resolution
+                .path_fork
+                .resolve_components(provider_path, &mut scratch),
             string_table,
         );
         if namespace.is_ambiguous(&key) {
@@ -554,9 +551,11 @@ impl ModuleNamespaceSet {
         }
 
         match namespace.entries.get(&key) {
-            Some(NamespaceEntry::SameModuleProvider { source_index }) => {
-                Ok(index.source(*source_index).canonical_path().to_path_buf())
-            }
+            Some(NamespaceEntry::SameModuleProvider { source_index }) => Ok(resolution
+                .source_tree_index
+                .source(*source_index)
+                .canonical_path()
+                .to_path_buf()),
             Some(NamespaceEntry::CrossModule { .. })
             | Some(NamespaceEntry::SameModuleSource { .. }) => {
                 Err(CompilerDiagnostic::cross_module_import_not_exported(
@@ -684,23 +683,6 @@ impl ModuleNamespaceSet {
                     .strip_prefix(dependency_prefix)
                     .is_some_and(|remainder| remainder.starts_with('/'))
             })
-    }
-    /// Find the package boundary, index and owning module for a canonical declaring path.
-    fn find_package_namespace_owner(
-        &self,
-        canonical_path: &Path,
-    ) -> Option<(&str, &SourceTreeIndex, ModuleId)> {
-        for (dependency_prefix, package_index) in self.package_boundary_indexes.iter() {
-            if let Some(source_index) =
-                package_index.source_index_for_canonical_path(canonical_path)
-            {
-                let ownership = package_index.source(source_index).ownership();
-                if let SourceOwnership::Owned(module_id) = ownership {
-                    return Some((dependency_prefix, package_index, module_id));
-                }
-            }
-        }
-        None
     }
 }
 

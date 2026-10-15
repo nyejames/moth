@@ -4484,7 +4484,7 @@ fn lowering_errors_preserve_string_table_context() {
     .expect_err("unknown function call should fail HIR lowering");
 
     let _error = messages
-        .infrastructure_error()
+        .primary_infrastructure_error()
         .expect("expected HIR lowering error");
 }
 // ---------------------------------------------------------------------------

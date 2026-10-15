@@ -383,10 +383,13 @@ fn choice_payload_field_name(
     string_table: &StringTable,
 ) -> ChoicePatternResult<StringId> {
     path_fork.component(field.id).ok_or_else(|| {
-        ExpressionParseError::Infrastructure(Box::new(CompilerError::compiler_error(format!(
-            "Choice payload field '{}' has no leaf name during match-pattern parsing",
-            path_fork.render_portable(field.id, string_table, &mut Vec::new())
-        ))))
+        ExpressionParseError::Infrastructure(
+            CompilerError::compiler_error(format!(
+                "Choice payload field '{}' has no leaf name during match-pattern parsing",
+                path_fork.render_portable(field.id, string_table, &mut Vec::new())
+            ))
+            .into(),
+        )
     })
 }
 

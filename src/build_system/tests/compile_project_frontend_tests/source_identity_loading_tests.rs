@@ -43,9 +43,8 @@ fn directory_graph_retains_independent_diagnostics_without_blocked_consumer_casc
     )
     .expect("diagnosed modules are retained in the typed frontend outcome");
     let project_source = frontend.project_source_database.take();
-    let messages = frontend
-        .into_render_messages_with_frozen_identity(&mut string_table, project_source, None)
-        .expect("frontend diagnostics should install frozen render identity");
+    let messages =
+        frontend.into_render_messages_with_frozen_identity(&mut string_table, project_source, None);
 
     assert_eq!(
         messages.error_count(),
@@ -175,7 +174,7 @@ fn selected_preload_read_failure_stays_in_the_existing_file_error_lane() {
         Err(error) => error,
     };
     let error_value = error
-        .infrastructure_error()
+        .primary_infrastructure_error()
         .expect("selected preload failure should remain an infrastructure file error");
     assert_eq!(&error_value.error_type, &ErrorType::File);
     assert!(
@@ -288,9 +287,8 @@ fn project_facade_rejects_own_project_globals_dependency_before_semantic_use() {
     )
     .expect("a facade dependency diagnostic should remain a retained frontend outcome");
     let project_source = frontend.project_source_database.take();
-    let messages = frontend
-        .into_render_messages_with_frozen_identity(&mut string_table, project_source, None)
-        .expect("facade diagnostics should install frozen render identity");
+    let messages =
+        frontend.into_render_messages_with_frozen_identity(&mut string_table, project_source, None);
 
     let matching = messages
         .diagnostics()
@@ -906,7 +904,7 @@ fn unguarded_parallel_compile_registers_into_an_active_timing_session() {
                 // The concurrent fixture must fail for the infrastructure file-error reason, not
                 // carry a user diagnostic: the invalid-UTF-8 source is unreadable, not invalid.
                 let error_value = thread_error
-                    .infrastructure_error()
+                    .primary_infrastructure_error()
                     .expect("concurrent failure should remain an infrastructure file error");
                 assert_eq!(&error_value.error_type, &ErrorType::File);
                 assert!(
@@ -959,4 +957,123 @@ fn unguarded_parallel_compile_registers_into_an_active_timing_session() {
             .map(|module| module.logical_identity.as_str())
             .collect::<Vec<_>>()
     );
+}
+
+/// A dependency module root's dormant runtime work is validated by that module's own canonical
+/// compilation. Each review fixture leaves a grouped delimiter open after the root's public
+/// declaration, and the HTML-selected entry consumes that public value without activating it.
+#[test]
+fn dormant_dependency_root_grouped_delimiters_report_eof_in_child_source() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let _temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = _temp.path().to_path_buf();
+    fs::create_dir_all(dir.join("src/components")).expect("should create dependency module root");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    // The entry is HTML-selected by its authored root fragment and imports the public value.
+    fs::write(
+        dir.join("src/@page.moth"),
+        "@components label\n[:[label]]\n",
+    )
+    .expect("should write entry page");
+
+    for (case, dormant_work, expected_delimiter) in [
+        ("collection", "values = {\n    1,\n    2,\n", "}"),
+        ("grouping", "value = (\n    1 + 2\n", ")"),
+    ] {
+        let dependency_source = format!("export:\n    label #= \"components\"\n;\n{dormant_work}");
+        fs::write(
+            dir.join("src/components/@components.moth"),
+            &dependency_source,
+        )
+        .expect("should write dependency module root");
+
+        let mut config = Config::new(dir.clone());
+        let style_directives = StyleDirectiveRegistry::built_ins();
+        let mut string_table = StringTable::new();
+        let mut frontend = compile_project_frontend(
+            &mut config,
+            BuildProfile::Dev,
+            None,
+            &style_directives,
+            &mut BuilderSurface::with_mandatory_core(),
+            &mut string_table,
+        )
+        .expect("a diagnosed dependency module stays a retained frontend outcome");
+        let project_source = frontend.project_source_database.take();
+        let messages = frontend.into_render_messages_with_frozen_identity(
+            &mut string_table,
+            project_source,
+            None,
+        );
+
+        assert!(
+            !messages.has_infrastructure_error(),
+            "{case}: malformed dependency source must stay in the diagnostic lane: {messages:?}"
+        );
+        assert_eq!(
+            messages.error_count(),
+            1,
+            "{case}: the dependency root should diagnose once and the blocked page must not \
+             cascade: {messages:?}"
+        );
+        let (diagnostic_index, diagnostic) = messages
+            .diagnostics()
+            .enumerate()
+            .find(|(_, diagnostic)| {
+                matches!(
+                    &diagnostic.payload,
+                    DiagnosticPayload::UnexpectedEndOfFile { .. }
+                )
+            })
+            .expect("the dormant group must report one typed unexpected-EOF diagnostic");
+        assert_eq!(
+            diagnostic.kind,
+            DiagnosticKind::Syntax(SyntaxDiagnosticKind::UnexpectedEndOfFile),
+            "{case}: {diagnostic:?}"
+        );
+        assert_eq!(diagnostic.kind.code(), "MOTH-SYNTAX-0017", "{case}");
+        assert_eq!(diagnostic.severity, DiagnosticSeverity::Error, "{case}");
+        // Payload strings belong to the diagnostic's frozen identity, not the merged table.
+        let frozen_identity = messages
+            .frozen_identity_context_for_diagnostic(diagnostic_index)
+            .expect("project diagnostics must retain their frozen source identity");
+        let DiagnosticPayload::UnexpectedEndOfFile {
+            expected_delimiter: Some(expected_delimiter_id),
+        } = &diagnostic.payload
+        else {
+            panic!("{case}: expected a typed EOF payload naming the missing delimiter");
+        };
+        assert_eq!(
+            frozen_identity.strings().resolve(*expected_delimiter_id),
+            expected_delimiter,
+            "{case}: the dormant group must name its own missing delimiter"
+        );
+
+        let span = diagnostic
+            .primary_span
+            .expect("the EOF diagnostic must retain its authored span");
+        let dependency_path = fs::canonicalize(dir.join("src/components/@components.moth"))
+            .expect("dependency source path should canonicalize");
+        let source_slot = frozen_identity
+            .get(span.source())
+            .expect("the EOF span must resolve through the dependency's own source identity");
+        assert_eq!(
+            source_slot.canonical_os_path.as_deref(),
+            Some(dependency_path.as_path()),
+            "{case}: the missing delimiter must belong to the dependency source"
+        );
+        let range = span.byte_range(frozen_identity);
+        assert_eq!(
+            (range.start(), range.end()),
+            (
+                dependency_source.len() as u32,
+                dependency_source.len() as u32
+            ),
+            "{case}: the missing delimiter must point at the dependency source's exact EOF"
+        );
+    }
 }

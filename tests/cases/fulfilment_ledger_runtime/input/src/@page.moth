@@ -1,0 +1,73 @@
+Stock = |
+    available I32,
+    shipped I32,
+    returned I32,
+|
+
+Order ::
+    Request | amount I32 |,
+    Restock | amount I32 |,
+;
+
+fulfil_request |stock ~Stock, requested I32| -> I32, Error!:
+    if requested <= 0:
+        return! Error("invalid", 17)
+    ;
+    if stock.available is 0:
+        return! Error("empty", 19)
+    ;
+
+    available = copy stock.available
+    delivered = if requested <= available then requested else available
+    stock.available -= delivered
+    stock.shipped += delivered
+    return delivered
+;
+
+stock ~= Stock(10, 0, 0)
+snapshot = copy stock
+orders = {
+    Order::Request(4),
+    Order::Request(8),
+    Order::Request(1),
+    Order::Restock(3),
+    Order::Request(2),
+    Order::Request(0),
+}
+ledger ~{String} = {}
+accepted ~= 0
+partial ~= 0
+rejected ~= 0
+
+loop orders |order|:
+    event ~= ""
+    if order is:
+        Request(amount) =>
+            delivered = fulfil_request(~stock, amount) catch |failure|:
+                rejected += 1
+                event = [:request[amount]=[failure.code]:[failure.message]]
+                then 0
+            ;
+            if delivered > 0:
+                accepted += 1
+                status = if delivered < amount:
+                    partial += 1
+                    then "partial"
+                else
+                    then "full"
+                ;
+                event = [:request[amount]=[delivered]/[status]]
+            ;
+        Restock(amount) =>
+            stock.available += amount
+            stock.returned += amount
+            event = [:return[amount]]
+    ;
+
+    observed_stock = stock
+    ~ledger.push(event)
+    assert(observed_stock.available + observed_stock.shipped is 10 + observed_stock.returned)
+    assert(stock.available >= 0)
+;
+
+[:ledger:[loop ledger |entry|:[entry];]accepted=[accepted],partial=[partial],rejected=[rejected];available=[stock.available],shipped=[stock.shipped],returned=[stock.returned];snapshot=[snapshot.available]/[snapshot.shipped]/[snapshot.returned]]

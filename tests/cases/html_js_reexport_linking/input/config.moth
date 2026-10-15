@@ -1,0 +1,5 @@
+project #= (
+    name = "js_reexport_probe",
+    entry_root = "src",
+)
+html #= ()

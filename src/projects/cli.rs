@@ -463,15 +463,10 @@ fn build_command_outcome(
                     let output_file_count = write_summary.emitted_count();
                     let warning_count = build_result.warnings.len();
                     let warnings = match build_result.take_warning_messages() {
-                        Ok(warnings) => warnings,
-                        Err(error) => {
-                            return BuildCommandOutcome::OutputPlanError {
-                                messages: CompilerMessages::from_error(
-                                    error,
-                                    crate::compiler_frontend::symbols::string_interning::StringTable::new(),
-                                ),
-                            };
+                        Some(messages) if messages.infrastructure_errors().is_some() => {
+                            return BuildCommandOutcome::OutputPlanError { messages };
                         }
+                        warnings => warnings,
                     };
                     BuildCommandOutcome::Success {
                         output_file_count,
@@ -480,17 +475,7 @@ fn build_command_outcome(
                     }
                 }
                 Err(BuildOutputStageError::Write(messages)) => {
-                    let messages = match build_result.take_output_failure_messages(messages) {
-                        Ok(messages) => messages,
-                        Err(error) => {
-                            return BuildCommandOutcome::OutputPlanError {
-                                messages: CompilerMessages::from_error(
-                                    error,
-                                    crate::compiler_frontend::symbols::string_interning::StringTable::new(),
-                                ),
-                            };
-                        }
-                    };
+                    let messages = build_result.take_output_failure_messages(messages);
                     BuildCommandOutcome::WriteError(messages)
                 }
                 Err(BuildOutputStageError::OutputPlan(error)) => {
@@ -498,13 +483,7 @@ fn build_command_outcome(
                         error,
                         crate::compiler_frontend::symbols::string_interning::StringTable::new(),
                     );
-                    let messages = match build_result.take_output_failure_messages(messages) {
-                        Ok(messages) => messages,
-                        Err(error) => CompilerMessages::from_error(
-                            error,
-                            crate::compiler_frontend::symbols::string_interning::StringTable::new(),
-                        ),
-                    };
+                    let messages = build_result.take_output_failure_messages(messages);
                     BuildCommandOutcome::OutputPlanError { messages }
                 }
             }

@@ -204,4 +204,9 @@ impl FrozenIdentityContext {
     pub(crate) fn source_record(&self, id: SourceId) -> &SourceRecord {
         self.sources.source_record(id)
     }
+
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub(crate) fn retention_metrics(&self) -> super::SourceDatabaseRetentionMetrics {
+        self.sources.retention_metrics()
+    }
 }

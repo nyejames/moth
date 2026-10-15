@@ -762,6 +762,16 @@ fn canonical_binding_identity_resolves_across_independent_registries() {
             scalar_int_constant("VALUE", 1),
         )
         .expect("consumer constant should register with a different local ID");
+    let other_function_path =
+        ExternalSymbolPath::from_components(vec!["nested".to_owned(), "other".to_owned()]);
+    consumer
+        .register_function_at_path(
+            consumer_package,
+            other_function_path,
+            ExternalFunctionId::Synthetic(702),
+            empty_void_function("other"),
+        )
+        .expect("consumer function should reuse the provider's raw ID at another path");
 
     assert_eq!(
         consumer.resolve_canonical_symbol(&function_identity),
@@ -776,6 +786,17 @@ fn canonical_binding_identity_resolves_across_independent_registries() {
     assert_eq!(
         consumer.resolve_canonical_symbol(&constant_identity),
         Some(ExternalSymbolId::Constant(ExternalConstantId(707)))
+    );
+    let reused_id_identity = consumer
+        .canonical_symbol_identity(ExternalSymbolId::Function(ExternalFunctionId::Synthetic(
+            702,
+        )))
+        .expect("consumer should publish a canonical identity for the reused raw ID");
+    assert!(
+        provider
+            .resolve_canonical_symbol(&reused_id_identity)
+            .is_none(),
+        "the same raw function ID at another path must not resolve"
     );
 
     let mismatched_origin = CanonicalBindingSymbolIdentity {

@@ -90,10 +90,9 @@ pub(super) fn validate_diagnostics(
                     )
                 }),
         );
-        // The outer failure has no rendered diagnostic of its own; its message stays
-        // searchable so message fragments can still pin an infrastructure failure.
-        if let Some(error) = messages.infrastructure_error() {
-            rendered_messages.push(error.msg.clone());
+        // Search each retained cause independently so fragments cannot straddle unrelated failures.
+        if let Some(errors) = messages.infrastructure_errors() {
+            rendered_messages.extend(errors.iter().map(|error| error.msg.clone()));
         }
         if !rendered_messages.iter().any(|message| {
             super::contains_ordered_substrings(message, &expectation.message_contains)

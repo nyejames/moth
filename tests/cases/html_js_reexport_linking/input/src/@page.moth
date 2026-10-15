@@ -1,0 +1,4 @@
+@components animate_canvas, observed
+
+animate_canvas("canvas")
+[:[observed()]]

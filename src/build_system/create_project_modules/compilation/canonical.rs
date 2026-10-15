@@ -12,7 +12,7 @@ use crate::compiler_frontend::build_config::{
     BuildConfigContractFact, BuildConfigInputSet, BuildConfigResolutionIndex,
     BuilderConfigGlobalSet, ResolvedBuildConfigMap,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidDependencyClauseReason, ModuleDiagnostics, PremergeDiagnosticBatch,
     PremergeFailure,
@@ -78,7 +78,11 @@ enum DirectoryModuleTaskOutcome {
     /// Check-only units have no graph slot, so this outcome is intentionally not retained in the
     /// final boundary. The provider's own diagnosed/blocked record remains authoritative.
     Blocked,
-    Infrastructure(CompilerError),
+    Infrastructure(Box<InfrastructureErrors>),
+    Mixed {
+        batch: PremergeDiagnosticBatch,
+        error: Box<InfrastructureErrors>,
+    },
 }
 
 /// Immutable inputs shared by one project or source-package boundary compilation.
@@ -623,7 +627,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                 let batch = PremergeDiagnosticBatch::from_diagnostic(diagnostic, table);
                 let outcome = match ModuleDiagnostics::from_batch(batch) {
                     Ok(diagnostics) => DirectoryModuleTaskOutcome::Diagnosed(diagnostics),
-                    Err(error) => DirectoryModuleTaskOutcome::Infrastructure(error),
+                    Err(error) => DirectoryModuleTaskOutcome::Infrastructure(error.into()),
                 };
                 return DirectoryModuleTaskResult {
                     module_id,
@@ -638,7 +642,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                     module_id,
                     string_table_base_len: base_len,
                     path_base_len,
-                    outcome: DirectoryModuleTaskOutcome::Infrastructure(error),
+                    outcome: DirectoryModuleTaskOutcome::Infrastructure(error.into()),
                 };
             }
         }
@@ -658,7 +662,7 @@ impl<'boundary, 'services> DirectoryModuleCompileContext<'boundary, 'services> {
                     module_id,
                     string_table_base_len: base_len,
                     path_base_len,
-                    outcome: DirectoryModuleTaskOutcome::Infrastructure(error),
+                    outcome: DirectoryModuleTaskOutcome::Infrastructure(error.into()),
                 };
             }
         };
@@ -768,7 +772,7 @@ fn compile_check_only_job(
                 module_id,
                 string_table_base_len: base_len,
                 path_base_len,
-                outcome: DirectoryModuleTaskOutcome::Infrastructure(error),
+                outcome: DirectoryModuleTaskOutcome::Infrastructure(error.into()),
             };
         }
     }
@@ -800,15 +804,13 @@ fn compile_check_only_job(
             ) {
                 PremergeFailure::Diagnosed(batch) => match ModuleDiagnostics::from_batch(batch) {
                     Ok(diagnostics) => DirectoryModuleTaskOutcome::Diagnosed(diagnostics),
-                    Err(error) => DirectoryModuleTaskOutcome::Infrastructure(error),
+                    Err(error) => DirectoryModuleTaskOutcome::Infrastructure(error.into()),
                 },
                 PremergeFailure::Infrastructure(error) => {
                     DirectoryModuleTaskOutcome::Infrastructure(error)
                 }
-                // Mixed double-failures only arise at source-finalization tails and never
-                // reach module tasks; abort through the typed lane if one ever does.
-                PremergeFailure::Mixed { error, .. } => {
-                    DirectoryModuleTaskOutcome::Infrastructure(*error)
+                PremergeFailure::Mixed { batch, error } => {
+                    DirectoryModuleTaskOutcome::Mixed { batch, error }
                 }
             };
             return DirectoryModuleTaskResult {
@@ -923,6 +925,9 @@ pub(super) fn compile_check_only_batches(
             DirectoryModuleTaskOutcome::Infrastructure(error) => {
                 return Err(PremergeFailure::Infrastructure(error));
             }
+            DirectoryModuleTaskOutcome::Mixed { batch, error } => {
+                return Err(PremergeFailure::Mixed { batch, error });
+            }
         }
     }
     Ok(transient_batches)
@@ -964,7 +969,7 @@ pub(super) fn check_only_success_batch(
     // `append_messages_preserving_context`.
     let mut batch = PremergeDiagnosticBatch::from_diagnostics(warnings, module_string_table);
     if let Err(error) = batch.attach_path_table_if_missing(Arc::new(path_fork.snapshot_table())) {
-        return Err(PremergeFailure::Infrastructure(error));
+        return Err(PremergeFailure::from(error));
     }
     Ok(Some(batch))
 }
@@ -1131,7 +1136,10 @@ pub(super) fn compile_module_waves_in_premerge_lane(
                     .into());
                 }
                 DirectoryModuleTaskOutcome::Infrastructure(error) => {
-                    return Err(error.into());
+                    return Err(PremergeFailure::Infrastructure(error));
+                }
+                DirectoryModuleTaskOutcome::Mixed { batch, error } => {
+                    return Err(PremergeFailure::Mixed { batch, error });
                 }
             }
         }

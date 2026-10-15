@@ -105,7 +105,7 @@ fn foreign_postfix_receiver_at_eof_is_rejected_before_token_erasure() {
     let Err(ExpressionParseError::Infrastructure(error)) = result else {
         panic!("a foreign postfix receiver must return an invariant error");
     };
-    assert_eq!(error.error_type, ErrorType::Compiler);
+    assert_eq!(error.primary.error_type, ErrorType::Compiler);
     assert_eq!(storage_state(&second), before);
     assert_eq!(cursor.current_tag(), TokenTag::EOF);
 

@@ -2,16 +2,13 @@
 //!
 //! WHAT: owns one diagnosed module's user-facing diagnostics, its module-local string table and
 //!       render contexts produced alongside them.
-//! WHY: the semantic module boundary separates a diagnosed source failure (user diagnostics the
-//!      renderer surfaces) from an infrastructure `CompilerError` that aborts the build. This
-//!      owner is the single place that classifies a deeper stage's boundary `CompilerMessages`
-//!      into one of those two result classes, and it is structurally unable to carry an
-//!      infrastructure failure: the constructor routes the outer `CompilerError` lane back out
-//!      as a typed `CompilerError` instead of storing it as a normal diagnosed result.
+//! WHY: the semantic module boundary classifies `CompilerMessages` into diagnosed source
+//! failures or an owned infrastructure aggregate. A diagnosed module cannot retain infrastructure
+//! causes, so the constructor moves every cause back out through its typed error lane.
 
 use super::compiler_errors::{
-    CompilerError, CompilerMessages, RenderFrozenContext, RenderPathContext, RenderSourceContext,
-    RenderTypeContext,
+    CompilerError, CompilerMessages, InfrastructureErrors, RenderFrozenContext, RenderPathContext,
+    RenderSourceContext, RenderTypeContext,
 };
 use super::{CompilerDiagnostic, DiagnosticSeverity, PremergeDiagnosticBatch};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -21,10 +18,8 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 /// WHAT: carries the ordered user-facing diagnostics, the module-local `StringTable` and render
 ///       contexts produced for one module, plus enough render identity to surface the diagnostics
 ///       after the local compilation call has finished.
-/// WHY: a diagnosed module must expose no `Module` and no infrastructure failure. The
-///      constructor rejects any outer `CompilerError` lane and routes it back as a typed
-///      `CompilerError`, so a successful `ModuleDiagnostics` only ever carries user-facing
-///      diagnostics the renderer is allowed to surface.
+/// WHY: a diagnosed module exposes no `Module` and no infrastructure failure. Its constructor
+/// routes every outer infrastructure cause back through `InfrastructureErrors`.
 #[derive(Debug)]
 pub(crate) struct ModuleDiagnostics {
     diagnostics: Vec<CompilerDiagnostic>,
@@ -36,31 +31,22 @@ pub(crate) struct ModuleDiagnostics {
 }
 
 impl ModuleDiagnostics {
-    /// Classify a deeper stage's boundary `CompilerMessages` into a diagnosed module or a typed
-    /// infrastructure `CompilerError`.
+    /// Classify boundary messages into a diagnosed module or the whole infrastructure aggregate.
     ///
-    /// WHAT: returns `Ok(ModuleDiagnostics)` when the message set carries no outer infrastructure
-    ///       failure and at least one user-facing `Error` diagnostic; warnings and notes may
-    ///       accompany that error and stay in production order for rendering. Returns
-    ///       `Err(CompilerError)` when the set carries the outer infrastructure lane: the typed
-    ///       error is recovered as-is, and any non-error (Warning/Note) companions it travelled
-    ///       with — the legitimate `from_error_with_warnings` shape emitted by AST/HIR stages —
-    ///       are discarded because the typed `Err` lane aborts the owning compilation and does
-    ///       not surface warnings. An empty, warning/note-only, or mixed user-error-plus-outer
-    ///       sequence is reported as a compiler invariant failure.
-    /// WHY: deeper stage APIs still return the legacy `CompilerMessages` vessel, and AST/HIR
-    ///      stages legitimately prepend warnings to a single infrastructure failure. The semantic
-    ///      module boundary normalizes them once, here, using only the outer lane and
-    ///      `DiagnosticSeverity` — never rendered strings, stable diagnostic codes or `ErrorType`
-    ///      guesses — and never silently drops a user error that travelled beside an
-    ///      infrastructure failure.
+    /// User errors retain their warning/note companions in production order. Infrastructure
+    /// failures move out unchanged and discard warning/note companions because the typed error
+    /// lane aborts the compilation. Mixing user errors with infrastructure causes is malformed:
+    /// append an invariant failure without replacing any original cause. Empty and warning-only
+    /// failures also report invariants rather than constructing empty diagnosed modules.
     ///
-    /// The infrastructure error carries its own typed source span or host path. The consumed
-    /// message set's `StringTable` remains owned by the diagnosed lane and is not attached to or
-    pub(crate) fn from_messages(messages: CompilerMessages) -> Result<Self, CompilerError> {
+    /// Classification reads only the outer lane and diagnostic severity, never rendered strings,
+    /// diagnostic codes or infrastructure error kinds.
+    pub(crate) fn from_messages(
+        messages: CompilerMessages,
+    ) -> Result<Self, Box<InfrastructureErrors>> {
         let CompilerMessages {
             diagnostics,
-            infrastructure_error,
+            infrastructure_errors,
             string_table,
             render_frozen_contexts,
             render_source_contexts,
@@ -78,7 +64,7 @@ impl ModuleDiagnostics {
             }
         }
 
-        match infrastructure_error {
+        match infrastructure_errors {
             None => {
                 // No outer failure. A diagnosed module requires at least one user-facing
                 // `Error` diagnostic; warnings and notes may accompany that error and stay in
@@ -89,11 +75,12 @@ impl ModuleDiagnostics {
                     if diagnostics.is_empty() {
                         return Err(CompilerError::compiler_error(
                             "module semantic stage returned a failure with no diagnostics",
-                        ));
+                        )
+                        .into());
                     }
                     return Err(CompilerError::compiler_error(
                         "module semantic stage returned a failure with no user-facing error diagnostic",
-                    ));
+                    ).into());
                 }
 
                 Ok(ModuleDiagnostics {
@@ -106,25 +93,19 @@ impl ModuleDiagnostics {
                         .map_or_else(Vec::new, |contexts| contexts.into_vec()),
                 })
             }
-            Some(error) => {
-                // An outer infrastructure failure. The legitimate `from_error_with_warnings`
-                // shape from AST/HIR stages emits non-error (Warning/Note) companion diagnostics
-                // before the single failure, so an outer failure may carry companions. Recover
-                // the originating `CompilerError` as-is and discard the companions: the typed
-                // `Err` lane aborts the owning compilation and does not surface warnings. A
-                // user-facing `Error` diagnostic beside the outer failure is malformed — the
-                // current stage contracts never blend a user error with an infrastructure
-                // failure — and is reported as an invariant instead of silently dropping the
-                // user error.
+            Some(mut errors) => {
+                // Warning/note companions are discarded at this aborting boundary. A user error
+                // cannot be surfaced through this lane, so retain its malformed-sequence
+                // invariant after every original infrastructure cause.
                 if has_user_error {
-                    return Err(CompilerError::compiler_error(format!(
+                    errors.push(CompilerError::compiler_error(format!(
                         "module semantic stage returned a malformed diagnostic sequence mixing a \
                          user-facing error with an infrastructure failure among {total} total",
                         total = diagnostics.len(),
                     )));
                 }
 
-                Err(*error)
+                Err(errors)
             }
         }
     }
@@ -136,7 +117,7 @@ impl ModuleDiagnostics {
     pub(crate) fn into_messages(self) -> CompilerMessages {
         CompilerMessages {
             diagnostics: self.diagnostics,
-            infrastructure_error: None,
+            infrastructure_errors: None,
             string_table: Box::new(self.string_table),
             render_frozen_contexts: self.render_frozen_contexts,
             render_source_contexts: self.render_source_contexts,
