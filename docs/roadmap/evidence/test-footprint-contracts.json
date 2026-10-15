@@ -12,6 +12,7 @@
       "existing_owner": "src/compiler_frontend/tests/frontend_pipeline_tests.rs",
       "default_decision": "keep: distinct local invariant or failure path, no equivalent surviving assertion established",
       "required_validation": "cargo test -p moth --lib frontend_pipeline_tests",
+      "review_outcome": "Phase 4: retain all 74 definitions and 4698 noncomment LOC. Existing failure_project fixture covers useful shared setup; similar implicit-failure tests assert distinct AST/HIR, CFG, arity, effect and borrow boundaries.",
       "tests": [
         {
           "test_id": "compiles_single_file_program_through_borrow_check",

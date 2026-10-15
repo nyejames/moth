@@ -117,3 +117,11 @@ The restored ledger passed 1/1. `cargo run --quiet -- tests --audit` reported 2,
 The production audit found one required P2 correction: the new nested-token path accepted an unclosed nested template in an imported root, whose discarded runtime body has no AST consumer. Extending the existing imported-root test reproduced the lost diagnostic before correction. Nested templates now use the existing structural capture and retain their complete range without publishing a top-level fragment. The regression requires one `MOTH-SYNTAX-0017`, typed missing `]` and exact EOF span for imported/active plain/nested forms. A positive existing test also verifies nested collection/group templates leave the direct fragment count at one. After correction, all 309 header tests, the ledger 1/1 and the full 2,787 integration executions passed again.
 
 The independent ledger-admission audit accepted the scenario without findings. Fresh focused production verification accepted the imported-template correction and single-pass ownership with no remaining required finding. Its positive nested-template extension checks fragment count rather than exact retained tokens or immediately following declarations; control-flow inspection and the existing segmented-retention test provide the supporting evidence for those properties.
+
+## Phase 4 unit ownership checkpoints
+
+### Frontend pipeline
+
+Keep all 74 original `frontend_pipeline_tests.rs` IDs at 4,698 noncomment LOC. Its shared `failure_project` helper already centralises useful repeated setup. The similar implicit-failure fixtures assert different producer facts, CFG joins, success/error arity, recursion, write-back, float guards and borrow outcomes. Integration output cannot replace those handoff facts, and no equivalent same-boundary rows justified a table conversion or deletion. `cargo test -p moth --lib compiler_frontend::tests::frontend_pipeline_tests -- --format terse` passed 74/74.
+
+The independent frontend-cluster audit accepted retention without required correction. This preserves existing coverage rather than proving stable-origin joins through the harness's empty origin lookup or HIR narrowing from an AST-signature assertion. The documentation checkpoint built 81 outputs.
