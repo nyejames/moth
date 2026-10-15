@@ -48,7 +48,7 @@ The plan's generated convergence directory reference drifted: the current owner 
 
 ## Supplied website input
 
-After initial input discovery, the user supplied `~/projects/websites/personal/nyejames.com`. A disposable source copy lives under ignored `tmp/js-linking-website`; the original site remains unchanged. Website baseline and final rebuild evidence use this supplied tree, not a reconstructed site or compiler workaround.
+After initial input discovery, the user supplied `~/projects/websites/personal/nyejames.com`. Rebuilds used a disposable source copy under ignored `tmp/js-linking-website`; the original site remains unchanged. Website baseline and final rebuild evidence use this supplied tree, not a reconstructed site or compiler workaround. The smoke copy and isolated baseline compiler/target were removed after proof, with raw receipts retained.
 
 The isolated activation compiler was built from `git archive aa072a27` under `tmp/js-linking-baseline-compiler` with its own target directory. Both the minimal probe and supplied site failed with the original missing runtime asset for `ExternalPackageId(8)`. An initial shared-target attempt reused a binary that passed the minimal integrity probe, so it was discarded as baseline evidence. The isolated build's red integrity probe establishes the compiler used for the website baseline.
 
@@ -370,4 +370,25 @@ The release build refreshed ten tracked HTML files, including eight previously s
 
 The independent contract/status audit and expanded generated-backfill review returned clean. The expanded review initially raised two literal tracker references in the borrow-status cells at `docs/src/docs/progress/@page.moth:324` and `:332`. Baseline inspection confirmed the same plain-template source already existed at `930b9c103`, so the auditor withdrew the required finding. Those two pre-existing source-presentation defects remain a separate documentation follow-up rather than an unrelated source edit in this task. This receipt does not claim that every existing documentation link works.
 
-Relevant structured audit rows were already stale or did not cover these owners, so the audit log remains unchanged. No new structured audit coverage was recorded. Final integrated validation, plan retirement and final Slice acceptance remain separate closeout gates.
+Relevant structured audit rows were already stale or did not cover these owners, so the audit log remains unchanged. No new structured audit coverage was recorded.
+
+## Final integrated validation and review
+
+The final `just validate-full` run explicitly prepended `/Users/aneirinjames/.nvm/versions/node/v24.21.0/bin` to `PATH` and passed on macOS arm64 with the pinned Rust toolchain. The candidate used `70af91f6b` plus plan retirement and the roadmap-entry removal. Subsequent evidence-record updates do not change compiler sources, tests, build configuration, Moth documentation sources or generated outputs.
+
+| Final gate | Observed result |
+|---|---|
+| Formatting and Clippy | Routine and workspace formatting passed, as did ordinary and all-target standard-feature Clippy |
+| Workspace tests | 6,128 main unit tests passed, together with the CLI, library, xtask and documentation suites |
+| Compiler integration and docs | 2,786/2,786 correct, then docs check with no errors or warnings |
+| Standard feature matrix | All 10 executing lanes passed |
+| Source, dependency and feature audits | No findings |
+| Test honesty | No hard, open-hard or integrity findings. Existing dispositioned review entries and 208 suite advisories remain |
+| Non-recording performance checks | All 148 benchmark cases passed shared preflight. The gate measured eight CLI and ten frontend quick cases, then passed all 14 scaling budgets |
+| Timer erasure | The no-timer release binary passed the marker check |
+
+The quick benchmark output reports changed workloads for seven of eight CLI and eight of ten frontend comparisons, so it does not establish a matched pre/post performance result. Neither budgets nor benchmark history changed. The full receipt remains in ignored `tmp/js-linking-final-validate-full.log`. The separate opt-in Boracle gate and real website, CLI, dev-server and documentation browser checks are recorded above. No Linux, Windows or remote CI result is claimed.
+
+Six fresh read-only final lanes returned `pass`: final runtime facts and generated publication, Stage 0 namespace and HTML handoff, cold cause ownership and freezing, connected frontend transport, failure classification and presentation, and work-source completion with evidence and documentation. None reported a required correction or blocking test gap. Their static reviews consumed the executed receipts rather than rerunning validation.
+
+The accepted implementation checkpoints are `4c19a00c8`, `1dae29ce2`, `160782190`, `8f15579ec`, `930b9c103` and `70af91f6b`. The closeout retires the finished plan and its roadmap entry while retaining permanent contracts and the larger provider-identity handoff in this report. The fresh cross-scope integration Slice review returned `pass` with no required finding after tracing the combined implementation, acceptance evidence and retirement diff. No required review finding or validation failure remains.

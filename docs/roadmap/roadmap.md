@@ -29,8 +29,6 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 ## Sequenced work
 
-- [Fix JS import linking](./plans/js-import-linking-and-failure-reporting-plan.md)
-
 - [Test footprint audit and cleanup](./plans/test-footprint-audit-and-plan.md)
 
 - [Typed semantic expressions and dense compiler foundations](./plans/typed-semantic-expressions-plan.md) - **Phase 4 onwards will resume after plans above** The checkpoint retains `expression-refactor` source `534aea1a5`, including accepted R1, R2.0–R2.4 and P2 isolation. Historical R2.4 matched comparisons, local `just validate-full` and all 14 scaling series qualify `6b855aab9`, not the main squash tree, with grouped-not dev HIR at n^0.88 under n^1.25. Fresh Windows Canvas/frontend proof remains pending. Phases 5–8 remain unstarted and require explicit reactivation. Later type/folding, Wiring and Core-evaluation scopes remain unchanged. Package work consumes only merged prerequisites.
