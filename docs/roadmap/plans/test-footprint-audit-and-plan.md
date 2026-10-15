@@ -1,6 +1,6 @@
 # Moth test footprint audit and conservative improvement plan
 
-Status: active, Phase 4 accepted, next measured outcome report
+Status: active, Phases 0–5 accepted, final review and integrated validation pending
 Repository: `nyejames/moth`, branch `expression-refactor`, commit `1343c64ecbc5433b546c3ad31cf5c175cf51f184`
 Policy companion: `docs/src/developer-docs/style-guide/testing.mtf` (revised replacement supplied separately)
 

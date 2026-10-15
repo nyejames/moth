@@ -1,41 +1,45 @@
 # Test footprint implementation evidence
 
-## Baseline and measurement rules
+## Baseline and same-scope measurements
 
 Work started on `link-fixes-and-test-cleanup` at `bf84a6c6da188820a549edd37effadce2e2c744f`, with a clean staged, unstaged and untracked worktree. The implementation uses this checkout rather than the plan's historical `expression-refactor` revision. Other roadmap programmes remain paused.
 
 The local toolchain reports Rust `1.99.0` (`b940084d7`, aarch64-apple-darwin), Clippy `0.1.99` and rustfmt `1.10.0-stable`. Authoritative runtime commands explicitly select `/Users/aneirinjames/.nvm/versions/node/v24.21.0/bin` on `PATH`, matching `.node-version`. The initial default executable reported Node `26.10.0`; it supplied no runtime acceptance evidence.
 
-Rust measurements use `tokei 14.0.0` code lines, excluding blanks and comment-only lines. Embedded Moth fixture strings count as Rust fixture code. Test counts include every literal `#[test]` attribute, including feature- and platform-gated definitions. The test-directory scope includes Rust files under a `tests` path component or named `tests.rs` within `src`, `crates/moth-lexical`, `crates/moth-mon` and `xtask/src`.
+Rust measurements use `tokei 14.0.0` code lines, excluding blanks and comment-only lines. Embedded Moth fixture strings count as Rust fixture code. Whole-scope `#[test]` counts are literal markers, not an AST count of definitions: quoted audit-fixture text contributes, for example `xtask/src/honesty_audit/tests.rs:61`. The ten selected files instead reconcile every named definition, including feature- and platform-gated definitions, against the 665-row baseline ledger. The test-directory scope includes Rust files under a `tests` path component or named `tests.rs` within `src`, `crates/moth-lexical`, `crates/moth-mon` and `xtask/src`.
 
 Moth measurements count nonblank physical `.moth` lines except lines whose first non-whitespace characters are `--`, including config and helpers and excluding generated `dev` and `release` directories. Expectation measurements exclude blank lines and comment-only `#` lines. These explicit physical-line rules support same-scope before/after comparison. They do not reconstruct the unavailable counting method behind the supplied 328,410 Rust LOC estimate or its 78,981-line whole-corpus figure.
 
-| Baseline scope | Noncomment LOC | Test definitions or cases |
-|---|---:|---:|
-| Rust test directories, 491 files | 319,605 | 7,115 test definitions |
-| Ten selected Rust review files | 38,455 | 665 test definitions |
-| Canonical Moth sources, 5,473 files | 44,340 | 2,395 cases |
+Before measurements use `bf84a6c6`; after measurements use accepted implementation checkpoint `46ff0a759`. The recount reconciled all original IDs and their surviving owners without mismatches.
 
-| Selected Rust file | Baseline noncomment LOC | Baseline test definitions |
-|---|---:|---:|
-| `frontend_pipeline_tests.rs` | 4,698 | 74 |
-| `frozen_body_tests.rs` | 4,328 | 46 |
-| `slot_composition_tests.rs` | 2,720 | 54 |
-| `parser_tir_tests.rs` | 2,350 | 46 |
-| JS `control_flow.rs` | 2,428 | 18 |
-| `stage0_filesystem_identity_tests.rs` | 2,971 | 75 |
-| `hir_expression_lowering_tests.rs` | 4,518 | 63 |
-| `hir_validation_tests.rs` | 4,635 | 87 |
-| Boracle oracle `tests/mod.rs` | 5,430 | 111 |
-| `diagnostic_model_tests.rs` | 4,377 | 91 |
+| Scope | Before noncomment LOC | After noncomment LOC | Source inventory, before / after |
+|---|---:|---:|---|
+| Rust test directories, 491 files | 319,605 | 319,441 | 7,115 / 7,105 literal `#[test]` markers |
+| Ten selected Rust review files | 38,455 | 38,177 | 665 / 655 actual test definitions |
+| Canonical Moth sources | 44,340 | 44,476 | 5,473 / 5,475 files; 2,395 / 2,396 cases |
+| Canonical expectations | 20,229 | 20,208 | 2,786 / 2,787 authored backend blocks |
 
-| Existing integration case | Baseline Moth LOC | Baseline expectation LOC |
-|---|---:|---:|
-| `value_if_block_single_predicate` | 99 | 33 |
-| `value_if_multi_bind_inferred_single_predicate` | 104 | 34 |
-| `control_flow` | 39 | 4 |
-| `adversarial_choice_payload_control_flow` | 94 | 9 |
-| `adversarial_multi_file_helper_chain` | 16 | 4 |
+| Selected Rust file | Before LOC | After LOC | Before definitions | After definitions |
+|---|---:|---:|---:|---:|
+| `frontend_pipeline_tests.rs` | 4,698 | 4,698 | 74 | 74 |
+| `frozen_body_tests.rs` | 4,328 | 4,328 | 46 | 46 |
+| `slot_composition_tests.rs` | 2,720 | 2,720 | 54 | 54 |
+| `parser_tir_tests.rs` | 2,350 | 2,296 | 46 | 44 |
+| JS `control_flow.rs` | 2,428 | 2,360 | 18 | 17 |
+| `stage0_filesystem_identity_tests.rs` | 2,971 | 2,894 | 75 | 71 |
+| `hir_expression_lowering_tests.rs` | 4,518 | 4,454 | 63 | 61 |
+| `hir_validation_tests.rs` | 4,635 | 4,635 | 87 | 87 |
+| Boracle oracle `tests/mod.rs` | 5,430 | 5,415 | 111 | 110 |
+| `diagnostic_model_tests.rs` | 4,377 | 4,377 | 91 | 91 |
+
+| Integration case | Before Moth LOC | After Moth LOC | Before expectation LOC | After expectation LOC |
+|---|---:|---:|---:|---:|
+| `value_if_block_single_predicate` | 99 | 99 | 33 | 21 |
+| `value_if_multi_bind_inferred_single_predicate` | 104 | 104 | 34 | 21 |
+| `control_flow` | 39 | 53 | 4 | 4 |
+| `adversarial_choice_payload_control_flow` | 94 | 131 | 9 | 9 |
+| `adversarial_multi_file_helper_chain` | 16 | 30 | 4 | 4 |
+| `fulfilment_ledger_runtime` | 0 | 71 | 0 | 4 |
 
 ## Baseline execution and inventories
 
@@ -201,3 +205,46 @@ The complete Oracle-module filter passed 133/133, including the 110 selected-fil
 The actual ledger runtime also passed 1/1 with `cargo run --quiet --features boracle -- tests --case fulfilment_ledger_runtime --terse`.
 
 The independent proof/domain audit accepted the duplicate deletion and strict keep decisions without code findings. Its two additional precision corrections were applied: historical aggregate/call-result “write-through” names actually construct `Define`, then detect later unpaired source mutation. Their provenance assertions remain; the separate destination matrix owns genuine `Update`. These names supply no evidence of an additional write-through path.
+
+## Measured outcome and checkpoint provenance
+
+The final reconciliation preserves all 665 baseline ledger rows: 655 definitions remain, nine deletions map to proven surviving owners and one obsolete fixture-only test is removed. Every original ID matched the baseline; every keeper and mapped survivor exists in the accepted tree. The adjacent Stage 0 typed-root survivor is explicitly outside the ten-file measurement scope. No unresolved deletion candidate or unaccounted ID remains.
+
+The selected Rust files remove 278 noncomment lines. Expanding existing header regressions adds 114 lines within the whole Rust test-directory scope, so its net reduction is 164 lines rather than 278. Existing integration extensions add 65 Moth lines; the single admitted programme adds 71. The expectation corpus removes 25 duplicated presence rows and adds four ledger expectation lines. These counts describe authored footprint, not coverage quality or runtime performance.
+
+| Accepted checkpoint | Completed phase and independent audit |
+|---|---|
+| `5428ba8bb` | Phase 0 inventories and ownership baseline; evidence precision corrections accepted. |
+| `b1b7ffeee` | Phase 1 presence/order consolidation; evaluator ownership audit clean. |
+| `1fa015f3f` | Phase 2 richer existing integrations; semantic and backend-artefact audits clean. |
+| `d040ed97e` | Phase 3 ledger admission and header fix; admission audit clean, required imported-template diagnostic correction independently verified. |
+| `bd1f6c348` | Phase 4 frontend keep decisions; stage-invariant audit clean. |
+| `b4f4e8f2f` | Phase 4 parser/TIR subsets; AST ownership audit clean. |
+| `c38041263` | Phase 4 JavaScript jump subset; backend ownership audit clean. |
+| `dd991580f` | Phase 4 filesystem consolidation; platform/identity audit clean. |
+| `2d977ed23` | Phase 4 HIR consolidation and diagnostic keep decisions; invariant audit clean after inventory precision correction. |
+| `46ff0a759` | Phase 4 Oracle duplicate and numeric keep decisions; proof/domain audit clean after inventory precision corrections. |
+
+At `46ff0a759`, `cargo run --quiet -- tests --audit` regenerated 2,396 cases / 2,787 backend executions. `just test-honesty-audit` scanned 1,520 files, including 820 test-owning files: zero hard, source-audit or feature-lane findings, zero ledger-integrity findings and 208 suite advisories. `cargo run --quiet -- build docs --release` built 81 outputs. The complete runtime suite last passed at `d040ed97e`; later checkpoints change only unit tests and evidence. The required final integrated `just validate-full` gate is reserved for final closeout and is not yet claimed here.
+
+Raw recount data remains in ignored `tmp/test-footprint/final-measurements.json`, including exact counting implementation, source hashes and all owner reconciliations. Recounting uses `tokei --output json --types Rust src crates/moth-lexical crates/moth-mon xtask/src`, filtered to the declared test-directory scope, and the physical Moth/TOML rules above. The tracked tables and ID ledger preserve the outcome independently of temporary reports.
+
+### Supported targets and retained rejection owners
+
+The ledger owns exact HTML success only. Its manifest has no HTML-Wasm block, and no full-ledger Wasm run is claimed. Focused existing owners retain the target boundaries below; TOML `reason` values pin diagnostic keys, while separate typed-HIR tests own the Rust reason enums.
+
+| Existing owner | Retained HTML-Wasm diagnostic |
+|---|---|
+| `html_wasm_collection_runtime_coverage` | `MOTH-RULE-0058`, unsupported external function; no function identity or reason key asserted in TOML. |
+| `fixed_width_struct_field_js_runs_wasm_gated` | `MOTH-RULE-0064`, `unsupported_backend_feature.fixed_width_scalar_values`. |
+| `fixed_width_choice_payload_js_runs_wasm_gated` | `MOTH-RULE-0064`, `unsupported_backend_feature.fixed_width_scalar_values`. |
+| `uint_wasm_recoverable_rejected` | `MOTH-RULE-0064`, `unsupported_backend_feature.recoverable_numeric_failure`. |
+| `error_values_html_wasm_unsupported` | `MOTH-RULE-0064`, `unsupported_backend_feature.error_values`. |
+| `custom_error_fallible_control_flow_html_wasm_unsupported` | `MOTH-RULE-0064`, `unsupported_backend_feature.fallible_control_flow`. |
+| `mutable_parameter_wasm_rejected` | `MOTH-RULE-0064`, `unsupported_backend_feature.mutable_function_parameters`. |
+
+The collection integration fixture reaches `.set`, not the ledger's `.push`. `collection_helpers_keep_receiver_parameter_access_modes` separately asserts that growable and fixed `push` have no Wasm lowering. The fixed-width cases protect their narrow scalar domains; they are not evidence that every aggregate, or this ledger, hits that reason. No single focused failure demonstrates the ledger's first Wasm diagnostic or exercises its stock invariant on that target.
+
+Fresh `cargo run --quiet -- tests --case <id> --terse` commands at `46ff0a759` passed 2/2 each for `html_wasm_collection_runtime_coverage`, `mutable_parameter_wasm_rejected` and `custom_error_fallible_control_flow_html_wasm_unsupported`, covering their HTML success and exact expected Wasm rejection.
+
+The independent Phase 5 audit accepted the report without findings after independently recounting source/metadata, reconciling all 665 IDs and inspecting the seven focused target expectations. It confirmed the global literal-marker qualification and the 81 + 33 added header-fixture lines. Final integrated validation and roadmap retirement remain the separate closeout gate.
