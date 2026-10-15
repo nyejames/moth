@@ -16764,3 +16764,10 @@ path = "capture_file_visible_names_rejected"
 tags = ["integration", "bindings", "aliases", "traits", "diagnostics", "name-resolution"]
 contract = "language.bindings.file_visible_names_cannot_be_shadowed"
 role = "boundary"
+
+[[case]]
+id = "fulfilment_ledger_runtime"
+path = "fulfilment_ledger_runtime"
+tags = ["integration", "language", "runtime", "adversarial", "control-flow", "collections", "borrows", "results"]
+contract = "language.scenarios.fulfilment_stock_conservation"
+role = "primary"

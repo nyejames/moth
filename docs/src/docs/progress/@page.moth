@@ -239,7 +239,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Collections]
             [: Supported]
-            [$md: Broad literal, mutation, indexing, loop, fixed-capacity, failure and diagnostics coverage. @https://github.com/nyejames/moth/tree/main/tests/cases/aggregate_late_u64_collection_runtime (aggregate_late_u64_collection_runtime) covers body-local numeric leaf inference. Concrete element mismatch fixtures reject storage widening.]
+            [$md: Broad literal, mutation, indexing, loop, fixed-capacity, failure and diagnostics coverage, including multiline qualified choice constructors retained through header discovery. A deterministic fulfilment ledger checks stock conservation across repeated updates, partial requests, returns and caught helper errors. @https://github.com/nyejames/moth/tree/main/tests/cases/aggregate_late_u64_collection_runtime (aggregate_late_u64_collection_runtime) covers body-local numeric leaf inference. Concrete element mismatch fixtures reject storage widening.]
             [: JS / HTML]
             [$md: Growable [$html:<code>{T}</code>] and fixed [$html:<code>{N T}</code>] collections retain distinct types. Positive literals and visible [$html:<code>#I32</code>] constants supply fixed capacities. Numeric element inference follows @../collections/#collection-literals (Collection literals), while positions and lengths use I32. Growable push remains infallible and returns no value. Fixed push, get, set and remove retain their documented failure contracts. HTML-Wasm rejects collection lowering, including every collection holding a fixed scalar.]
         ]

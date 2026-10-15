@@ -44,7 +44,7 @@ fn entry_runtime_fragment_count_accumulates_across_multiple_runtime_templates() 
 #[test]
 fn entry_runtime_fragment_count_ignores_assigned_templates() {
     let headers = parse_single_file_headers(
-        "buffer ~= [:initial content]\nbuffer = [:updated content]\n[:fragment]\n",
+        "buffer ~= [:initial content]\nbuffer = [:updated content]\nvalues = {\n[:nested collection]\n}\ngrouped = (\n[:nested group]\n)\n[:fragment]\n",
     );
 
     assert_eq!(
@@ -71,8 +71,37 @@ fn entry_runtime_fragment_count_is_zero_when_parsed_as_non_entry_file() {
 
 #[test]
 fn start_function_retains_segmented_source_runs_in_order_with_eof() {
-    let (headers, string_table) =
-        parse_single_file_headers_with_table("before = 1\nanswer #= 2\nafter = 3\n");
+    let source_text = "before = {\n\
+                           (\n\
+                               Status::Ready(1)\n\
+                           ),\n\
+                       }\n\
+                       answer #= 2\n\
+                       after = {\n\
+                           \"ready\" = Status::Ready(\n\
+                               3\n\
+                           ),\n\
+                       }\n\
+                       icon = (\n\
+                           @assets/icon.svg\n\
+                       )\n\
+                       Status :: Ready | value I32 |,;\n";
+    let (headers, string_table) = parse_single_file_headers_with_table(source_text);
+    assert_eq!(headers.headers.len(), 3);
+    assert!(
+        headers
+            .headers
+            .iter()
+            .any(|header| matches!(header.kind, HeaderKind::Constant { .. })),
+        "the constant after the collection must remain a declaration"
+    );
+    assert!(
+        headers
+            .headers
+            .iter()
+            .any(|header| matches!(header.kind, HeaderKind::Choice { .. })),
+        "the choice after the grouped file expression must remain a declaration"
+    );
     let start_header = start_function_header(&headers);
     assert!(
         start_header.tokens.is_empty(),
@@ -92,18 +121,34 @@ fn start_function_retains_segmented_source_runs_in_order_with_eof() {
     let ranges = view.ranges().collect::<Vec<_>>();
     assert_eq!(
         ranges.len(),
-        2,
-        "the compile-time header should split the two start-body runs"
+        3,
+        "the constant and choice headers should split the start-body runs"
     );
-    assert!(ranges[0].end() < ranges[1].start());
+    assert!(
+        ranges
+            .windows(2)
+            .all(|pair| pair[0].end() < pair[1].start())
+    );
 
     let mut body = header_body_tokens(&headers, start_header);
     let mut symbols = Vec::new();
     let mut contains_answer = false;
     let mut last_tag = None;
+    let mut delimiter_tags = Vec::new();
+    let mut path_count = 0;
     while let Some(token) = body.advance() {
         let tag = token.tag();
         last_tag = Some(tag);
+        if matches!(
+            tag,
+            TokenTag::OPEN_PARENTHESIS
+                | TokenTag::CLOSE_PARENTHESIS
+                | TokenTag::OPEN_CURLY
+                | TokenTag::CLOSE_CURLY
+        ) {
+            delimiter_tags.push(tag);
+        }
+        path_count += usize::from(tag == TokenTag::PATH);
         if tag == TokenTag::SYMBOL
             && let Some(symbol) = token.string_id()
         {
@@ -115,7 +160,31 @@ fn start_function_retains_segmented_source_runs_in_order_with_eof() {
             break;
         }
     }
-    assert_eq!(symbols, ["before", "after"]);
+    assert_eq!(
+        symbols,
+        [
+            "before", "Status", "Ready", "after", "Status", "Ready", "icon"
+        ]
+    );
+    assert_eq!(
+        delimiter_tags,
+        [
+            TokenTag::OPEN_CURLY,
+            TokenTag::OPEN_PARENTHESIS,
+            TokenTag::OPEN_PARENTHESIS,
+            TokenTag::CLOSE_PARENTHESIS,
+            TokenTag::CLOSE_PARENTHESIS,
+            TokenTag::CLOSE_CURLY,
+            TokenTag::OPEN_CURLY,
+            TokenTag::OPEN_PARENTHESIS,
+            TokenTag::CLOSE_PARENTHESIS,
+            TokenTag::CLOSE_CURLY,
+            TokenTag::OPEN_PARENTHESIS,
+            TokenTag::CLOSE_PARENTHESIS,
+        ],
+        "nested expression delimiters must remain intact in authored order"
+    );
+    assert_eq!(path_count, 1, "the file value must remain a runtime token");
     assert!(
         !contains_answer,
         "the constant declaration must not leak into the start body"
@@ -125,4 +194,17 @@ fn start_function_retains_segmented_source_runs_in_order_with_eof() {
         Some(TokenTag::EOF),
         "segmented start syntax must retain the source EOF sentinel"
     );
+
+    let duplicate_source = format!("{source_text}Status :: Other,;\n");
+    let errors = expect_header_error(
+        parse_single_file_headers_with_entry(&duplicate_source, "src/@page.moth", "src/@page.moth"),
+        "a real duplicate after the closed expressions must still be rejected",
+    );
+    let duplicate_span = source_span_for(&duplicate_source, "Status", 3);
+    assert!(errors.diagnostics.iter().any(|diagnostic| {
+        matches!(
+            diagnostic.payload,
+            DiagnosticPayload::DuplicateDeclaration { .. }
+        ) && diagnostic.primary_span == Some(duplicate_span)
+    }));
 }
