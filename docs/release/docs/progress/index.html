@@ -535,7 +535,7 @@ td {
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Control flow</td>
  <td style="padding: 0.1em 0.5em; "> Supported</td>
- <td style="padding: 0.1em 0.5em; "><p> Broad branch, loop, break, continue and match coverage. <a href="https://github.com/nyejames/moth/tree/main/tests/cases/fixed_numeric_range_runtime">fixed_numeric_range_runtime</a> covers exact integer and binary-float ranges on HTML and recoverable-failure rejection on HTML-Wasm. Constant and source-order range fixtures cover folding and evaluation order.</p></td>
+ <td style="padding: 0.1em 0.5em; "><p> Broad branch, loop, break, continue and match coverage, including linked nested-helper returns and loop continuation with exact computed output. <a href="https://github.com/nyejames/moth/tree/main/tests/cases/fixed_numeric_range_runtime">fixed_numeric_range_runtime</a> covers exact integer and binary-float ranges on HTML and recoverable-failure rejection on HTML-Wasm. Constant and source-order range fixtures cover folding and evaluation order.</p></td>
  <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
  <td style="padding: 0.1em 0.5em; "><p> Exact numeric range domains and I32 indices follow <a href="../loops/#range-loops">Range loops</a>. HTML-JS delivers dynamic zero-step and float no-progress failures through the enclosing failure lane. HTML-Wasm rejects recoverable range failure rather than replacing it with a trap.</p></td>
         </tr>
@@ -591,7 +591,7 @@ td {
 <tr style="border-bottom: 1px dotted grey;">
              <td style="padding: 0.1em 0.5em; "> Choices</td>
  <td style="padding: 0.1em 0.5em; "> Supported</td>
- <td style="padding: 0.1em 0.5em; "> Broad declaration, constructor, dependency, return, assignment, match, payload, JS carrier-shape and structural equality coverage.</td>
+ <td style="padding: 0.1em 0.5em; "> Broad declaration, constructor, dependency, return, assignment, match, payload, JS carrier-shape and structural equality coverage. Targeted adversarial traces observe every loop variant, small/large nested-handler outcomes and successful/caught-error choice results.</td>
  <td style="padding: 0.1em 0.5em; "> JS / HTML</td>
  <td style="padding: 0.1em 0.5em; "> Unit and record-payload variants are supported. Payload fields are immutable. Accepted incomplete work includes direct payload field access with narrowing, nested payload patterns and recursive choices.</td>
         </tr>

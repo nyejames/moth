@@ -1,4 +1,4 @@
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains = ["control_flow if=gt5 nested=between match=forty-two sum=10 total=10"]
+rendered_output_exact = "control_flow if=gt5 nested=between match=forty-two sum=10 total=21"

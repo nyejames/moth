@@ -3,9 +3,9 @@ entry = "."
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_contains = ["adversarial_choice_payload_control_flow summary=fail nested=inner_ok formatted=ok interop=ok"]
+rendered_output_exact = "adversarial_choice_payload_control_flow summary=fail nested=inner_ok formatted=ok interop=ok handles=small,big,failed,waiting trace=pending;success:1:num;success:2:num;failure:too big:99; counts=1,1,1,1 recovered=failure:zero:0 error=zero:0 recoveries=1"
 
 [[backends.html.artifact_assertions]]
 path = "index.html"
 kind = "html"
-must_contain = [".tag === 0", ".tag === 1", ".tag === 2", "{ tag: 0, \"value\": ", "{ tag: 1, \"reason\": ", "while (", "if ("]
+must_contain = ["{ tag: 0, \"value\": ", "{ tag: 1, \"reason\": "]

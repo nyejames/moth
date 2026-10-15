@@ -85,3 +85,17 @@ Both `value_if_*` cases retain their unique presence marker and their complete o
 The selected HTML runtime commands each passed 1/1. `just validate` passed formatting, default Clippy, feature coverage, source/dependency audits, workspace tests including 6,128 compiler tests, all 2,786 integration executions and the docs check. All commands selected pinned Node `24.21.0`. Canonical case count and Rust test counts remain unchanged.
 
 The independent presence/order audit accepted the phase without findings after tracing both assertion fields into the same runtime-output evaluator.
+
+## Phase 2 existing integration owners
+
+| Case and unchanged contract | Newly observed failure surface | Moth LOC before / after |
+|---|---|---:|
+| `control_flow`, `language.control_flow.if_nested_match_execution` | Nested helper returns produce `2,4,9,6` inside a loop, skipping input `4`. Exact output preserves the original branch/match results and sum `10`, with linked total `21`. | 39 / 53 |
+| `adversarial_choice_payload_control_flow`, `language.choices.payload_control_flow_chain_executes` | Exact output observes small/large/failure/pending handlers, payloads from every loop iteration, separate counts, original nested/imported results and actual `zero:0` recovery exactly once. | 94 / 131 |
+| `adversarial_multi_file_helper_chain`, `language.modules.transitive_helper_chain_executes` | Exact `A-hello-B\|C-world-D\|missing-again-B` observes two input-dependent prefixes and absent-option recovery through the original three-source chain. | 16 / 30 |
+
+Each changed case passed its selected HTML runtime command immediately after its fixture handoff. The complete canonical integration run passed 2,786/2,786 with 2,395 cases. `cargo run --quiet -- check docs --terse` reported no errors or warnings. Expectation LOC remains `4`, `9` and `4` respectively. No Rust test, manifest role, backend/profile or diagnostic expectation changed.
+
+The choice case keeps its two named-payload constructor snippets because the compared unit carrier owner does not prove those field structures. The removed tag comparisons and generic `if (` snippets survive in `choice_match_lowers_to_structured_if_with_choice_tags`; `emits_structured_if_without_dispatcher` owns conditional strategy. `literal_match_uses_dispatcher_when_cfg_contains_cycle` retains dispatcher `while (true)` and switch structure. Runtime output does not replace these backend contracts.
+
+Fresh independent semantic and backend-ownership audits both accepted Phase 2 without findings. The changed progress route also rebuilt through `cargo run --quiet -- build docs --release`, producing 81 outputs.

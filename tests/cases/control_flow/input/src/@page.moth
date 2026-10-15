@@ -1,5 +1,17 @@
 -- Exercise control-flow semantics and surface outcomes in the final HTML artifact.
 
+calculate_score |input_value I32| -> I32:
+    if input_value < 3:
+        return input_value * 2
+    else
+        if input_value is 3:
+            return input_value * 3
+        else
+            return input_value + 1
+        ;
+    ;
+;
+
 x = 10
 if_result ~= "unset"
 if x > 5:
@@ -34,8 +46,11 @@ loop 1 to 5 |i|:
 ;
 
 total ~= 0
-loop 1 to 5 |num|:
-    total = total + num
+loop 1 to 6 |number|:
+    if number is 4:
+        continue
+    ;
+    total = total + calculate_score(number)
 ;
 
 [:control_flow if=[if_result] nested=[nested_result] match=[match_result] sum=[sum] total=[total]]
