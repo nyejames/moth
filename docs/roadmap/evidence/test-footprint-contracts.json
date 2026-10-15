@@ -3552,7 +3552,8 @@
       "fixture_dependencies_and_lane": "Shared JS tests/support.rs plus inline HIR, NumericProofs::default(), direct_js(false); nested-diamond rows execute emitted JS",
       "existing_owner": "src/backends/js/tests/control_flow.rs",
       "default_decision": "keep: distinct local invariant or failure path, no equivalent surviving assertion established",
-      "required_validation": "cargo test -p moth --lib control_flow",
+      "required_validation": "cargo test -p moth --lib backends::js::tests::control_flow::",
+      "review_outcome": "Phase 4: merge the explicit-destination-binding subset into jump_args_lower_block_to_block_value_transfer, retaining 17 definitions and 2360 noncomment LOC. Structured/dispatcher and distinct transport shapes remain unchanged.",
       "tests": [
         {
           "test_id": "emits_structured_if_without_dispatcher",
@@ -3664,9 +3665,9 @@
           "line": 2147,
           "fixture": "Two-block acyclic direct jump; local 0 initialized to 42, passed to destination local 1 (`alias_param`).",
           "asserted_contract": "Destination receives a fresh `__moth_binding(__jump_arg_0)` binding; no other assertion.",
-          "decision": "merge_candidate",
+          "decision": "merged",
           "surviving_test_id": "jump_args_lower_block_to_block_value_transfer",
-          "overlap_status": "likely overlap - inspect"
+          "overlap_status": "confirmed overlap"
         },
         {
           "test_id": "dispatcher_with_native_fallible_return_packs_success_at_abi",

@@ -136,3 +136,11 @@ Two parser/TIR subsets merge into unchanged stronger same-file survivors:
 Parser definitions fall from 46 to 44 and noncomment LOC from 2,350 to 2,296. All 46 frozen-body and 54 slot-composition definitions remain at 4,328 and 2,720 LOC. Their identity, lifetime, resource, schema, replay, routing and malformed-state contracts stay distinct.
 
 Filtered parser and frozen runs passed 44/44 and 46/46. Slot composition passed 53/53 in default configuration, and its `benchmark_counters`-gated layout case passed 1/1. Existing `template_slots_nested_runtime` and `template_slot_wrapper_runtime` HTML smoke commands each passed 1/1. Formatting passed. The independent AST-cluster audit proved both assertion subsets and accepted all retained local owners without findings.
+
+### JavaScript backend
+
+`jump_args_define_explicit_destination_binding` merges into unchanged `jump_args_lower_block_to_block_value_transfer`. Both construct the same acyclic two-block, one-argument transfer. The survivor retains the explicit destination's fresh binding and additionally checks one source-read capture and structured lowering without a dispatcher. Different small literals and display names add no separate boundary.
+
+The file falls from 18 to 17 definitions and 2,428 to 2,360 noncomment LOC. All cyclic fallback, branch/match merge, swap, rebinding and nested-diamond owners remain. The complete registered control-flow module passed 17/17; actual `dispatcher_loop_match_result_fallback` and `control_flow` runtime commands each passed 1/1. Formatting passed.
+
+The independent backend-cluster audit traced the explicit jump transfer consumer, proved the removed assertion subset and accepted every retained strategy owner without findings.
