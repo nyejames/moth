@@ -232,7 +232,7 @@ impl<'a> ConstValueResolver<'a> {
                     .visit_child_ids(&mut |child| pending.push(child))
                     .map_err(|error| {
                         ConstResolutionError::TemplateClassification(TemplateError::Infrastructure(
-                            Box::new(error),
+                            error.into(),
                         ))
                     })?;
                 // Reverse only newly scheduled children to retain authored depth-first order.
@@ -242,16 +242,16 @@ impl<'a> ConstValueResolver<'a> {
                 };
                 expression = store.view(next).map_err(|error| {
                     ConstResolutionError::TemplateClassification(TemplateError::Infrastructure(
-                        Box::new(error),
+                        error.into(),
                     ))
                 })?;
             }
         }
         self.pending_references.clear();
         let view = self.expression_builder.view(expression).map_err(|error| {
-            ConstResolutionError::TemplateClassification(TemplateError::Infrastructure(Box::new(
-                error,
-            )))
+            ConstResolutionError::TemplateClassification(TemplateError::Infrastructure(
+                error.into(),
+            ))
         })?;
         validate_references(view, environment, &mut self.pending_references)?;
         let resolved = fold_expression_with_constants(
@@ -279,9 +279,9 @@ impl<'a> ConstValueResolver<'a> {
             }
         })?;
         let view = self.expression_builder.view(resolved).map_err(|error| {
-            ConstResolutionError::TemplateClassification(TemplateError::Infrastructure(Box::new(
-                error,
-            )))
+            ConstResolutionError::TemplateClassification(TemplateError::Infrastructure(
+                error.into(),
+            ))
         })?;
         match view.operation() {
             ExpressionOperationView::Constant(value) => {

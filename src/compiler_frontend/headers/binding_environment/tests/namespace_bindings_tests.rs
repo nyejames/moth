@@ -1817,7 +1817,7 @@ fn differing_evidence_records_with_one_identity_fail_before_projection() {
     })
     .expect_err("differing evidence records with one identity must fail before AST projection");
 
-    let error = messages.infrastructure_error().expect(
+    let error = messages.primary_infrastructure_error().expect(
         "differing evidence records with one identity must fail with an infrastructure error",
     );
     assert!(
@@ -2842,7 +2842,7 @@ fn retained_local_source_edge_must_reference_prepared_compiler_slot() {
     .expect_err("a retained local edge with no source slot must fail closed");
 
     let error = messages
-        .infrastructure_error()
+        .primary_infrastructure_error()
         .expect("missing retained source identity should be an infrastructure error");
     assert!(
         error.msg.contains("missing source identity"),
@@ -2917,7 +2917,7 @@ fn retained_local_source_edge_rejects_wrong_valid_in_module_identity() {
     .expect_err("a wrong but valid in-module local edge must fail closed");
 
     let error = messages
-        .infrastructure_error()
+        .primary_infrastructure_error()
         .expect("contradictory local source identity should be an infrastructure error");
     assert!(
         error

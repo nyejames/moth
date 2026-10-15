@@ -264,9 +264,9 @@ fn fold_final_view_fixture(
         TemplatePreparationMode::Value,
     )?;
     if !matches!(prepared.outcome, TemplatePreparationOutcome::Foldable) {
-        return Err(TemplateError::Infrastructure(Box::new(
-            CompilerError::compiler_error("test view was not foldable"),
-        )));
+        return Err(TemplateError::Infrastructure(
+            CompilerError::compiler_error("test view was not foldable").into(),
+        ));
     }
     let mut fold_context = build_test_fold_context(string_table, expressions, const_values);
     // Existing final-view text assertions do not own semantic provenance.
@@ -1396,6 +1396,7 @@ fn final_view_fold_zero_iteration_loop_rejects_missing_body_authority() {
     let TemplateError::Infrastructure(error) = error else {
         panic!("missing loop-body authority should remain on the infrastructure lane");
     };
+    let error = &error.primary;
     assert!(
         error.msg.contains("TIR preparation: node"),
         "expected a stable preparation node error, got: {}",
@@ -1951,6 +1952,7 @@ fn final_view_fold_validates_present_aggregate_wrapper_without_body_output() {
     let TemplateError::Infrastructure(error) = error else {
         panic!("missing aggregate-wrapper authority should remain on the infrastructure lane");
     };
+    let error = &error.primary;
     assert!(
         error.msg.contains("TIR preparation: node"),
         "expected a stable aggregate-wrapper authority error, got: {}",

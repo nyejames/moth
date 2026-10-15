@@ -5,7 +5,19 @@ mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-IMPORT-0015"]
 
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-IMPORT-0015"
+path = "input/@page.moth"
+line = 1
+count = 1
+
 [backends.html_wasm]
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-IMPORT-0015"]
+
+[[backends.html_wasm.diagnostic_assertions]]
+code = "MOTH-IMPORT-0015"
+path = "input/@page.moth"
+line = 1
+count = 1

@@ -331,7 +331,7 @@ fn then_value_without_active_target_is_hir_invariant_failure() {
     .expect_err("ThenValue outside active value-block target should fail HIR lowering");
 
     let error = err
-        .infrastructure_error()
+        .primary_infrastructure_error()
         .expect("HIR lowering failure should be wrapped for rendering");
     assert_eq!(&error.error_type, &ErrorType::HirTransformation);
     assert!(

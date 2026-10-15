@@ -146,6 +146,7 @@ fn assert_stale_template_directive_argument_is_infrastructure(source: &str) {
     let TemplateError::Infrastructure(error) = error else {
         panic!("stale directive argument authority must remain an infrastructure failure");
     };
+    let error = &error.primary;
     assert!(
         error.msg.contains("missing same-store template"),
         "unexpected infrastructure error: {error:?}"
@@ -638,6 +639,7 @@ fn assert_internal_template_error_contains(error: TemplateError, expected_messag
     let TemplateError::Infrastructure(error) = error else {
         panic!("malformed template authority should remain an infrastructure error");
     };
+    let error = &error.primary;
     assert!(
         error.msg.contains(expected_message),
         "error message should contain {expected_message:?}, got: {}",

@@ -423,6 +423,130 @@ fn provider_created_package_registry_survives_into_module() {
 }
 
 #[test]
+fn reexported_js_final_calls_retain_provider_runtime_candidate() {
+    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
+    let temp = tempfile::tempdir().expect("should create temp dir");
+    let dir = temp.path().to_path_buf();
+    fs::create_dir(dir.join("components")).expect("should create components directory");
+    fs::write(
+        dir.join("config.moth"),
+        "project #= (\n    name = \"js_reexport_probe\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(
+        dir.join("@page.moth"),
+        "@components animate_canvas, observed\nanimate_canvas(\"canvas\")\n[:[observed()]]\n",
+    )
+    .expect("should write page");
+    fs::write(
+        dir.join("components/@components.moth"),
+        "export:\n    @background-animation.js animate_canvas, observed\n;\n",
+    )
+    .expect("should write facade");
+    fs::write(
+        dir.join("components/background-animation.js"),
+        "/** @moth.sig animate_canvas |canvas_id String| -> */\nexport function animate_canvas(canvas_id) {}\n/** @moth.sig observed || -> String */\nexport function observed() { return \"canvas:1\"; }\n",
+    )
+    .expect("should write provider");
+
+    let mut config = Config::new(dir.clone());
+    let style_directives = StyleDirectiveRegistry::built_ins();
+    let mut string_table = StringTable::new();
+    let mut frontend_surface = builder_surface_with_html_js_provider();
+    let modules = compile_project_frontend(
+        &mut config,
+        BuildProfile::Dev,
+        None,
+        &style_directives,
+        &mut frontend_surface,
+        &mut string_table,
+    )
+    .expect("legal JS re-export should compile before entry glue assembly");
+
+    let components = modules
+        .successful_module_views()
+        .find(|module| {
+            module
+                .metadata
+                .entry_point
+                .ends_with("components/@components.moth")
+        })
+        .expect("export-only components artifact should exist");
+    let provider_candidate = components
+        .link_facts
+        .external_import_candidates
+        .iter()
+        .find(|candidate| candidate.runtime_asset.is_some())
+        .expect("components should retain the provider runtime asset");
+    let asset = provider_candidate
+        .runtime_asset
+        .as_ref()
+        .expect("selected provider candidate has an asset");
+    assert_eq!(
+        asset.canonical_source_path,
+        dir.join("components/background-animation.js")
+            .canonicalize()
+            .expect("provider source should exist"),
+    );
+    assert_eq!(asset.asset_kind, "js");
+
+    let page = modules
+        .successful_module_views()
+        .find(|module| module.metadata.entry_point.ends_with("@page.moth"))
+        .expect("calling page artifact should exist");
+    let start = page
+        .executable
+        .hir
+        .start_function
+        .expect("page should have executable root");
+    let calls =
+        crate::compiler_frontend::hir::reachability::collect_reachability_from_function_link_facts(
+            &page.link_facts.functions,
+            &[start],
+        )
+        .expect("final page call facts should be valid")
+        .reachable_external_calls;
+    assert_eq!(
+        calls.len(),
+        2,
+        "both re-exported calls must survive lowering"
+    );
+    for call in calls {
+        let registry = &page.link_facts.external_package_registry;
+        assert!(
+            registry.get_function_by_id(call.function_id).is_some(),
+            "final external callable must be registered",
+        );
+        let package_id = registry
+            .resolve_function_package_id(call.function_id)
+            .expect("final external callable must have a registered owner");
+        assert_eq!(package_id, provider_candidate.package_id);
+        assert!(
+            page.link_facts
+                .external_package_registry
+                .get_package_by_id(package_id)
+                .is_some(),
+            "final callable owner must be registered",
+        );
+    }
+    assert!(
+        page.link_facts
+            .external_import_candidates
+            .iter()
+            .any(
+                |candidate| candidate.package_id == provider_candidate.package_id
+                    && candidate
+                        .runtime_asset
+                        .as_ref()
+                        .is_some_and(|page_asset| page_asset.origin == asset.origin
+                            && page_asset.asset_kind == asset.asset_kind
+                            && page_asset.canonical_source_path == asset.canonical_source_path)
+            ),
+        "first lost fact: final page external calls demand the registered provider package, but its runtime candidate is absent",
+    );
+}
+
+#[test]
 fn provider_runtime_assets_deduped_for_repeated_imports() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _temp = tempfile::tempdir().expect("should create temp dir");
@@ -1012,9 +1136,8 @@ fn provider_backed_opaque_type_from_different_package_is_rejected() {
     )
     .expect("diagnosed modules are retained in the typed frontend outcome");
     let project_source = frontend.project_source_database.take();
-    let messages = frontend
-        .into_render_messages_with_frozen_identity(&mut string_table, project_source, None)
-        .expect("cross-package diagnostics should install frozen render identity");
+    let messages =
+        frontend.into_render_messages_with_frozen_identity(&mut string_table, project_source, None);
 
     assert!(
         messages.error_diagnostics().any(|diagnostic| {

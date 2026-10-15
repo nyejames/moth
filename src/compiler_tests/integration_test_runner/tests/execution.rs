@@ -117,9 +117,11 @@ impl EntryFixture {
         .expect("entry frontend should complete without infrastructure failure");
         if frontend.has_diagnosed_or_blocked() {
             let source_database = frontend.project_source_database.take();
-            let messages = frontend
-                .into_render_messages_with_frozen_identity(&mut string_table, source_database, None)
-                .expect("frontend diagnostics must retain their frozen source identity");
+            let messages = frontend.into_render_messages_with_frozen_identity(
+                &mut string_table,
+                source_database,
+                None,
+            );
             let rendered = crate::compiler_frontend::compiler_messages::render::terse::
                 format_terse_compiler_messages(&messages);
             let source = fs::read_to_string(&self.root_source).expect("fixture source must exist");
@@ -156,9 +158,11 @@ impl EntryFixture {
         .expect("HTML entry frontend should complete without infrastructure failure");
         if frontend.has_diagnosed_or_blocked() {
             let source_database = frontend.project_source_database.take();
-            let messages = frontend
-                .into_render_messages_with_frozen_identity(&mut string_table, source_database, None)
-                .expect("frontend diagnostics must retain their frozen source identity");
+            let messages = frontend.into_render_messages_with_frozen_identity(
+                &mut string_table,
+                source_database,
+                None,
+            );
             let rendered = crate::compiler_frontend::compiler_messages::render::terse::
                 format_terse_compiler_messages(&messages);
             panic!(

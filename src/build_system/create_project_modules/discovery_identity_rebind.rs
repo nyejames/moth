@@ -121,12 +121,16 @@ pub(super) fn rebind_discovery_failure(
             rebind_discovery_batch(batch, source_ids)?,
         )),
         PremergeFailure::Infrastructure(mut error) => {
-            rebind_discovery_compiler_error(&mut error, source_ids)?;
+            for cause in error.unfrozen_iter_mut() {
+                rebind_discovery_compiler_error(cause, source_ids)?;
+            }
             Ok(PremergeFailure::Infrastructure(error))
         }
         PremergeFailure::Mixed { batch, mut error } => {
             let batch = rebind_discovery_batch(batch, source_ids)?;
-            rebind_discovery_compiler_error(&mut error, source_ids)?;
+            for cause in error.unfrozen_iter_mut() {
+                rebind_discovery_compiler_error(cause, source_ids)?;
+            }
             Ok(PremergeFailure::Mixed { batch, error })
         }
     }

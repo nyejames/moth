@@ -21,7 +21,8 @@ use super::{
 use crate::builder_surface::SourceFileKind;
 use crate::compiler_frontend::builtins::error_codes::BuiltinErrorCode;
 use crate::compiler_frontend::compiler_errors::{
-    CompilerError, CompilerMessages, ErrorType, RenderFrozenContext, RenderTypeContext,
+    CompilerError, CompilerErrorMetadataKey, CompilerMessages, ErrorType, RenderFrozenContext,
+    RenderTypeContext,
 };
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, dev_server, invalid_config_message, terminal, terse,
@@ -599,7 +600,7 @@ fn compiler_messages_counts_and_order_come_from_structured_diagnostics() {
 
     let diagnostics = messages.diagnostics.to_vec();
     assert_eq!(diagnostics, vec![warning, error]);
-    assert!(messages.infrastructure_error().is_none());
+    assert!(messages.infrastructure_errors().is_none());
 }
 
 #[test]
@@ -633,7 +634,7 @@ fn compiler_messages_with_warnings_keep_typed_diagnostics_off_error_mirrors() {
     assert_eq!(messages.error_count(), 1);
     assert_eq!(messages.warning_count(), 1);
     assert_eq!(messages.diagnostics.to_vec(), vec![warning, error]);
-    assert!(messages.infrastructure_error().is_none());
+    assert!(messages.infrastructure_errors().is_none());
 }
 
 #[test]
@@ -661,9 +662,253 @@ fn compiler_messages_with_infrastructure_error_preserve_warning_production_order
     assert_eq!(messages.warning_count(), 1);
     assert_eq!(messages.diagnostics.to_vec(), vec![warning]);
     let error = messages
-        .infrastructure_error()
+        .primary_infrastructure_error()
         .expect("outer infrastructure failure must be preserved");
     assert_eq!(error.msg.as_str(), "backend failed after warnings");
+}
+
+fn assert_infrastructure_causes(messages: &CompilerMessages, expected: &[CompilerError]) {
+    let causes = messages
+        .infrastructure_errors()
+        .expect("infrastructure causes should remain")
+        .iter()
+        .collect::<Vec<_>>();
+    assert_eq!(causes.len(), expected.len());
+    for (cause, expected) in causes.into_iter().zip(expected) {
+        assert_eq!(cause.error_type, expected.error_type);
+        assert_eq!(cause.msg, expected.msg);
+        assert_eq!(cause.host_path, expected.host_path);
+        assert_eq!(cause.source_span, expected.source_span);
+        assert_eq!(cause.metadata, expected.metadata);
+    }
+    assert_eq!(
+        messages.error_count(),
+        1,
+        "causes describe one aborted compilation"
+    );
+}
+
+#[test]
+fn infrastructure_setter_and_message_append_preserve_every_ordered_cause() {
+    for (first_type, second_type) in [
+        (ErrorType::Compiler, ErrorType::File),
+        (ErrorType::File, ErrorType::Compiler),
+        (ErrorType::File, ErrorType::File),
+    ] {
+        let mut span_builder = ExtendedSpanBuilder::new();
+        let mut make_error = |index, error_type| {
+            let mut error = CompilerError::new(
+                format!("cause {index}"),
+                Some(exact_span(
+                    SourceId::from_index(1),
+                    index,
+                    1,
+                    &mut span_builder,
+                )),
+                error_type,
+            );
+            error.host_path = Some(format!("cause_{index}.moth").into());
+            error.new_metadata_entry(
+                CompilerErrorMetadataKey::CompilationStage,
+                format!("stage {index}"),
+            );
+            error
+        };
+        let expected = [
+            make_error(0, first_type.clone()),
+            make_error(1, second_type.clone()),
+            make_error(2, second_type),
+            make_error(3, first_type),
+        ];
+        let mut messages = CompilerMessages::empty(StringTable::new());
+        messages.set_infrastructure_error(expected[0].clone());
+        messages.set_infrastructure_error(expected[1].clone());
+        assert_infrastructure_causes(&messages, &expected[..2]);
+
+        let mut incoming = CompilerMessages::from_error(expected[2].clone(), StringTable::new());
+        incoming.set_infrastructure_error(expected[3].clone());
+        messages.append_messages_preserving_context(incoming);
+        assert_infrastructure_causes(&messages, &expected);
+    }
+}
+
+#[test]
+fn infrastructure_causes_keep_colliding_source_owners_through_append_and_freeze() {
+    let fixtures = [
+        (
+            Path::new("/project/first.moth"),
+            "project source",
+            "first.moth",
+        ),
+        (
+            Path::new("/package/second.moth"),
+            "package source",
+            "second.moth",
+        ),
+    ];
+    let source = SourceId::from_index(1);
+    let mut messages = CompilerMessages::empty(StringTable::new());
+    let mut weak_alias = None;
+    for (path, text, logical_path) in fixtures {
+        let mut string_table = StringTable::new();
+        let mut source_database =
+            SourceDatabase::build(std::iter::once(path), path, None, &mut string_table)
+                .expect("source owner should build");
+        assert_eq!(
+            source_database
+                .get_by_canonical_path(path)
+                .expect("source should exist")
+                .id,
+            source,
+            "independent owners must exercise the same numeric SourceId"
+        );
+        source_database
+            .retain_text(source, text.to_owned())
+            .expect("source snapshot should be retained");
+        let mut span_builder = ExtendedSpanBuilder::new();
+        let error = CompilerError::new(
+            text,
+            Some(exact_span(source, 0, 1, &mut span_builder)),
+            ErrorType::File,
+        );
+        let mut incoming = CompilerMessages::from_error(error, string_table);
+        let source_database = Arc::new(source_database);
+        if weak_alias.is_none() {
+            weak_alias = Some(Arc::downgrade(&source_database));
+        }
+        incoming.set_source_database(source_database);
+        assert_eq!(
+            incoming
+                .infrastructure_errors()
+                .expect("cause should remain")
+                .source_database_for_cause(0)
+                .expect("cause should retain its producing owner")
+                .retained_text(source),
+            Some(text)
+        );
+        // Premerge sources share the canonical merged string domain. Independently issued
+        // tables cross this boundary only after freezing their own identity contexts.
+        incoming
+            .freeze_source_contexts()
+            .expect("a weak-only alias must not block freeze");
+        let identity = incoming
+            .infrastructure_errors()
+            .expect("cause should remain")
+            .frozen_identity_for_cause(0)
+            .expect("cause should retain its frozen producing owner");
+        assert_eq!(
+            identity
+                .line_index(source)
+                .expect("source snapshot should remain")
+                .line_text(0),
+            Some(text)
+        );
+        assert_eq!(
+            identity.render_path(
+                identity
+                    .source_logical_path(source)
+                    .expect("source path should remain"),
+                &mut Vec::new(),
+            ),
+            logical_path
+        );
+        messages.append_messages_preserving_context(incoming);
+    }
+    messages
+        .freeze_source_contexts()
+        .expect("already frozen cause owners should remain valid");
+    let causes = messages
+        .infrastructure_errors()
+        .expect("both causes should remain");
+    assert_eq!(
+        causes
+            .iter()
+            .map(|cause| cause.msg.as_str())
+            .collect::<Vec<_>>(),
+        vec!["project source", "package source"]
+    );
+    for (index, (_, text, logical_path)) in fixtures.into_iter().enumerate() {
+        let identity = causes
+            .frozen_identity_for_cause(index)
+            .expect("cause should retain its frozen producing owner");
+        assert_eq!(
+            identity
+                .line_index(source)
+                .expect("source snapshot should remain")
+                .line_text(0),
+            Some(text)
+        );
+        assert_eq!(
+            identity.render_path(
+                identity
+                    .source_logical_path(source)
+                    .expect("source path should remain"),
+                &mut Vec::new(),
+            ),
+            logical_path
+        );
+    }
+    assert_eq!(messages.error_count(), 1);
+    drop(weak_alias);
+}
+
+#[test]
+fn failed_freeze_retains_warnings_causes_and_source_contents_before_appending_failure() {
+    let mut messages = colliding_owner_messages(
+        "warning-name",
+        "WarningType",
+        Path::new("/project/main.moth"),
+        "original source contents",
+        "foreign warning contents",
+    );
+    for diagnostic in &mut messages.diagnostics {
+        diagnostic.severity = DiagnosticSeverity::Warning;
+    }
+    let diagnostics = messages.diagnostic_slice().to_vec();
+    let original_causes = [
+        CompilerError::file_error(Path::new("original.moth"), "original file failure"),
+        CompilerError::compiler_error("original compiler failure"),
+    ];
+    for cause in &original_causes {
+        messages.set_infrastructure_error(cause.clone());
+    }
+    // An alias outside the message vessel makes move-only freezing fail on every platform.
+    let external_alias = Arc::clone(&messages.render_source_contexts[0].source_database);
+    messages.set_source_database(Arc::clone(&external_alias));
+    let freeze_error = messages
+        .freeze_source_contexts()
+        .expect_err("external alias must block freeze");
+    assert_eq!(messages.diagnostic_slice(), diagnostics);
+    assert_infrastructure_causes(&messages, &original_causes);
+    let mut expected = original_causes.to_vec();
+    expected.push(freeze_error.clone());
+    messages.set_infrastructure_error(freeze_error);
+    assert_infrastructure_causes(&messages, &expected);
+    assert_eq!(messages.warning_count(), 2);
+    assert_eq!(messages.diagnostic_slice(), diagnostics);
+    assert_eq!(
+        messages.string_table.resolve(StringId::from_index(0)),
+        "warning-name"
+    );
+    let causes = messages
+        .infrastructure_errors()
+        .expect("original causes should remain paired");
+    for index in 0..original_causes.len() {
+        assert_eq!(
+            causes
+                .source_database_for_cause(index)
+                .expect("original cause should keep its source owner after failed freeze")
+                .retained_text(SourceId::from_index(1)),
+            Some("original source contents")
+        );
+    }
+    assert_eq!(
+        messages
+            .source_database_for_diagnostic(0)
+            .expect("warning should keep its original source owner")
+            .retained_text(SourceId::from_index(1)),
+        Some("original source contents")
+    );
 }
 
 #[test]
@@ -869,7 +1114,7 @@ fn not_exported_by_public_surface_remaps_path_and_surface_name_after_aggregation
         .expect("frozen source identity should build")
     };
     messages.set_source_database(Arc::new(source_database));
-    let messages = messages
+    messages
         .freeze_source_contexts()
         .expect("aggregation should freeze the attached source context");
     assert!(
@@ -1560,7 +1805,7 @@ fn assert_mixed_freeze_keeps_originating_owners(
     let first_len = first.diagnostic_slice().len();
     let mut messages = first;
     messages.append_messages_preserving_context(second);
-    let messages = messages
+    messages
         .freeze_source_contexts()
         .expect("mixed frozen and transitional owners should freeze together");
 
@@ -1597,16 +1842,18 @@ fn assert_mixed_freeze_keeps_originating_owners(
 fn freeze_keeps_existing_frozen_owners_when_later_rows_still_need_conversion() {
     let primary = Path::new("/project/main.moth");
 
-    assert_mixed_freeze_keeps_originating_owners(
-        colliding_owner_messages(
-            "frozen-name",
-            "FrozenType",
-            primary,
-            "frozen_primary_alpha",
-            "frozen_foreign_omega",
-        )
+    let mut frozen = colliding_owner_messages(
+        "frozen-name",
+        "FrozenType",
+        primary,
+        "frozen_primary_alpha",
+        "frozen_foreign_omega",
+    );
+    frozen
         .freeze_source_contexts()
-        .expect("frozen owner should freeze before mixed aggregation"),
+        .expect("frozen owner should freeze before mixed aggregation");
+    assert_mixed_freeze_keeps_originating_owners(
+        frozen,
         colliding_owner_messages(
             "mutable-name",
             "MutableType",
@@ -1623,6 +1870,16 @@ fn freeze_keeps_existing_frozen_owners_when_later_rows_still_need_conversion() {
             second_foreign_line: "mutable_foreign_delta",
         },
     );
+    let mut frozen = colliding_owner_messages(
+        "frozen-name",
+        "FrozenType",
+        primary,
+        "frozen_primary_alpha",
+        "frozen_foreign_omega",
+    );
+    frozen
+        .freeze_source_contexts()
+        .expect("frozen owner should freeze before mixed aggregation");
     assert_mixed_freeze_keeps_originating_owners(
         colliding_owner_messages(
             "mutable-name",
@@ -1631,15 +1888,7 @@ fn freeze_keeps_existing_frozen_owners_when_later_rows_still_need_conversion() {
             "mutable_primary_gamma",
             "mutable_foreign_delta",
         ),
-        colliding_owner_messages(
-            "frozen-name",
-            "FrozenType",
-            primary,
-            "frozen_primary_alpha",
-            "frozen_foreign_omega",
-        )
-        .freeze_source_contexts()
-        .expect("frozen owner should freeze before mixed aggregation"),
+        frozen,
         MixedFreezeExpectation {
             first_name: "mutable-name",
             second_name: "frozen-name",

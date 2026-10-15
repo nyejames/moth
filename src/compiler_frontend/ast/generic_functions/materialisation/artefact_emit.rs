@@ -27,7 +27,7 @@ use crate::compiler_frontend::ast::module_ast::environment::{
 };
 use crate::compiler_frontend::ast::module_ast::scope_context::ReceiverMethodEntry;
 use crate::compiler_frontend::ast::statements::functions::{
-    FunctionParameter, FunctionSignature, ReturnChannel, ReturnSlot,
+    FunctionParameter, FunctionSignature, MaterialisedFunctionSignature, ReturnChannel, ReturnSlot,
 };
 use crate::compiler_frontend::ast::type_resolution::{
     ResolvedFunctionSignature, intern_resolved_function_signature,
@@ -35,7 +35,9 @@ use crate::compiler_frontend::ast::type_resolution::{
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTypeIdentity, GenericDeclarationOrigin,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::{
+    CompilerError, CompilerMessages, InfrastructureErrors,
+};
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_parameters::TypeParameterId;
@@ -58,7 +60,7 @@ use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, GeneratedFunctionIdentity, ModuleRootRole,
     StableModuleOriginIdentity,
 };
-use crate::compiler_frontend::source::{FrozenIdentityContext, FrozenIdentityHandle};
+use crate::compiler_frontend::source::FrozenIdentityHandle;
 use crate::compiler_frontend::symbols::path_interner::{
     PathId, PathIdRemap, PathInternerFork, PathTable,
 };
@@ -167,19 +169,6 @@ impl ModuleMaterialisationContext {
             CompilerMessages::from_error_ref(error, &input.requester_context.string_table)
         })?;
         artefact.materialise_ast(self, input)
-    }
-    pub(crate) fn install_frozen_identity(
-        &self,
-        identity: Arc<FrozenIdentityContext>,
-    ) -> Result<(), CompilerError> {
-        self.frozen_identity_handle.install(Arc::clone(&identity))?;
-        for artefact in &self.artefacts {
-            artefact
-                .body
-                .frozen_identity_handle
-                .install(Arc::clone(&identity))?;
-        }
-        Ok(())
     }
 
     /// Attach the complete identity tables that issued this context's retained identities.
@@ -307,12 +296,12 @@ pub(super) fn check_materialisation_row_identity(
 /// user-facing diagnostic. This mirrors the constant-store conversion in `stable_types`.
 fn expression_construction_failure_into_compiler_error(
     failure: ExpressionConstructionFailure,
-) -> CompilerError {
+) -> Box<InfrastructureErrors> {
     match failure {
         ExpressionConstructionFailure::Diagnostic(diagnostic) => {
             CompilerError::compiler_error(format!(
                 "Generated constant expression violated an expression store invariant: {diagnostic:?}"
-            ))
+            )).into()
         }
         ExpressionConstructionFailure::Invariant(error) => error,
     }
@@ -434,7 +423,11 @@ impl GenericTemplateArtefact {
             path_fork_ref,
             Some(materialised_body),
         )
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table_ref))?;
+        .map_err(|errors| {
+            let mut messages = CompilerMessages::empty(string_table_ref.clone());
+            messages.append_infrastructure_errors(errors);
+            messages
+        })?;
 
         let (build_result, instance_path) = emit_materialised_sidecar(
             phase_context,
@@ -523,7 +516,7 @@ impl GenericTemplateArtefact {
         string_table: &mut StringTable,
         path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
         mut materialised_self_body: Option<MaterialisedBody>,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), Box<InfrastructureErrors>> {
         let external_package_registry = services.external_registry;
         let template_ir_store = services.template_ir_store;
         let module_resources = Rc::clone(&services.module_resources);
@@ -561,7 +554,8 @@ impl GenericTemplateArtefact {
                     _ => {
                         return Err(CompilerError::compiler_error(
                             "Materialised generic nominal has no struct or choice definition",
-                        ));
+                        )
+                        .into());
                     }
                 })
             } else {
@@ -742,22 +736,27 @@ impl GenericTemplateArtefact {
                 }
                 return Err(CompilerError::compiler_error(
                     "Generic receiver method has no retained materialisation artefact",
-                ));
+                )
+                .into());
             }
-            let (signature, function_type_id, returns, error_return) =
-                method.signature.materialise(
-                    &method_path,
-                    &mut StableFunctionMaterialisationContext {
-                        generic_parameter_type_ids: &[],
-                        nominal_source: self,
-                        type_environment: &mut environment.type_environment,
-                        const_values: &mut *services.const_values,
-                        path_fork,
-                        external_package_registry,
-                        module_resources: Rc::clone(&module_resources),
-                        string_table,
-                    },
-                )?;
+            let MaterialisedFunctionSignature {
+                signature,
+                function_type_id,
+                success_return_type_ids: returns,
+                error_return_type_id: error_return,
+            } = method.signature.materialise(
+                &method_path,
+                &mut StableFunctionMaterialisationContext {
+                    generic_parameter_type_ids: &[],
+                    nominal_source: self,
+                    type_environment: &mut environment.type_environment,
+                    const_values: &mut *services.const_values,
+                    path_fork,
+                    external_package_registry,
+                    module_resources: Rc::clone(&module_resources),
+                    string_table,
+                },
+            )?;
             let receiver = materialised_receiver_key(&signature, &environment.type_environment)
                 .or_else(|_| {
                     Ok::<ReceiverKey, CompilerError>(method.receiver.materialise(string_table))
@@ -864,7 +863,8 @@ impl GenericTemplateArtefact {
                         _ => {
                             return Err(CompilerError::compiler_error(
                                 "Generic receiver template owner is not a nominal type",
-                            ));
+                            )
+                            .into());
                         }
                     }
                     .ok_or_else(|| {
@@ -896,7 +896,7 @@ impl GenericTemplateArtefact {
                 if generic_parameter_type_ids.len() != nested.generic_parameters.len() {
                     return Err(CompilerError::compiler_error(
                         "Generic receiver template parameter count disagrees with its nominal owner",
-                    ));
+                    ).into());
                 }
                 for (parameter, type_id) in nested
                     .generic_parameters
@@ -999,7 +999,11 @@ impl GenericTemplateArtefact {
                 }
                 (registration.list_id, generic_parameter_type_ids)
             };
-            let (signature, function_type_id, _, _) = nested.signature.materialise(
+            let MaterialisedFunctionSignature {
+                signature,
+                function_type_id,
+                ..
+            } = nested.signature.materialise(
                 &nested_path,
                 &mut StableFunctionMaterialisationContext {
                     generic_parameter_type_ids: &generic_parameter_type_ids,
@@ -1091,7 +1095,8 @@ impl GenericTemplateArtefact {
         if materialised_self_body.is_some() {
             return Err(CompilerError::compiler_error(
                 "generated materialisation did not install its root generic body",
-            ));
+            )
+            .into());
         }
         // Callable signatures can intern private result/member types that were never spelled in
         // this body's source visibility. Publish their canonical HIR shells only after signatures
@@ -1116,7 +1121,7 @@ impl GenericTemplateArtefact {
         services: &mut GeneratedValueMaterialisationServices<'_>,
         string_table: &mut StringTable,
         path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), Box<InfrastructureErrors>> {
         for identity in self
             .nominals
             .iter()
@@ -1303,7 +1308,7 @@ impl StableFunctionSignature {
         &self,
         function_path: &PathId,
         context: &mut StableFunctionMaterialisationContext<'_, N>,
-    ) -> Result<(FunctionSignature, TypeId, Vec<TypeId>, Option<TypeId>), CompilerError> {
+    ) -> Result<MaterialisedFunctionSignature, Box<InfrastructureErrors>> {
         let mut parameters = Vec::with_capacity(self.parameters.len());
         for parameter in &self.parameters {
             let type_id = intern_materialisation_type_blueprint(
@@ -1401,7 +1406,12 @@ impl StableFunctionSignature {
         };
         let function_type_id =
             intern_resolved_function_signature(&signature, context.type_environment);
-        Ok((signature, function_type_id, success_type_ids, error_return))
+        Ok(MaterialisedFunctionSignature {
+            signature,
+            function_type_id,
+            success_return_type_ids: success_type_ids,
+            error_return_type_id: error_return,
+        })
     }
 }
 
@@ -1415,8 +1425,13 @@ impl super::stable_types::StableCallableBinding {
         nominal_source: &N,
         string_table: &mut StringTable,
         path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
-    ) -> Result<AstImportedFunctionContract, CompilerError> {
-        let (signature, function_type_id, returns, error_return) = self.signature.materialise(
+    ) -> Result<AstImportedFunctionContract, Box<InfrastructureErrors>> {
+        let MaterialisedFunctionSignature {
+            signature,
+            function_type_id,
+            success_return_type_ids: returns,
+            error_return_type_id: error_return,
+        } = self.signature.materialise(
             &local_path,
             &mut StableFunctionMaterialisationContext {
                 generic_parameter_type_ids: &[],

@@ -47,7 +47,7 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable}
 use crate::compiler_frontend::tokenizer::tokens::{
     SourceTokens, TokenCursor, TokenIndex, TokenRange, TokenRef, TokenTag,
 };
-use crate::compiler_frontend::utilities::token_scan::{ScannedToken, TokenFactView};
+use crate::compiler_frontend::utilities::token_scan::{NestingDepth, ScannedToken, TokenFactView};
 use rustc_hash::FxHashSet;
 use std::sync::Arc;
 
@@ -130,6 +130,9 @@ fn parse_headers_in_file_inner(
         ));
     }
 
+    // Declaration handlers consume their own balanced regions. Track only runtime tokens left
+    // to this walk, where a physical newline inside an expression is not a file boundary.
+    let mut runtime_nesting = NestingDepth::default();
     loop {
         let current_index = cursor.position();
         let current = cursor.current().ok_or_else(|| {
@@ -137,6 +140,29 @@ fn parse_headers_in_file_inner(
                 "header cursor exceeded its source token owner",
             ))
         })?;
+        let current_tag = current.tag();
+        if !runtime_nesting.is_top_level() && current_tag != TokenTag::EOF {
+            if current_tag == TokenTag::TEMPLATE_HEAD {
+                // Imported roots discard runtime bodies, so validate nested template balance here.
+                cursor.advance();
+                let range = capture_runtime_template_range_from_cursor(
+                    current,
+                    cursor,
+                    file_id,
+                    context.string_table,
+                )?;
+                state
+                    .record_start_body_source_range_from_source_tokens(range, canonical)
+                    .map_err(HeaderParseFailure::Infrastructure)?;
+                continue;
+            }
+            state
+                .record_start_body_token_ref(current)
+                .map_err(HeaderParseFailure::Infrastructure)?;
+            runtime_nesting.step_tag(current_tag);
+            cursor.advance();
+            continue;
+        }
         let follower_index = current_index.index().checked_add(1).ok_or_else(|| {
             HeaderParseFailure::Infrastructure(CompilerError::compiler_error(
                 "header token follower index overflowed its source range",
@@ -146,7 +172,6 @@ fn parse_headers_in_file_inner(
             .and_then(|index| canonical.token(index).ok());
         let at_boundary = statement_boundary_at_source(canonical, current_index.index());
         let current_span = current.source_span();
-        let current_tag = current.tag();
         let item = classify_current_item_ref(current, follower, at_boundary);
         cursor.advance();
         match item {
@@ -224,6 +249,7 @@ fn parse_headers_in_file_inner(
             }
 
             HeaderFileItem::StartBodyToken => {
+                runtime_nesting.step_tag(current_tag);
                 record_start_body_token_from_source(state, canonical, file_id, current_index)?;
             }
         }

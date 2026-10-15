@@ -29,10 +29,6 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 ## Sequenced work
 
-- [Fix JS import linking](./plans/js-import-linking-and-failure-reporting-plan.md)
-
-- [Test footprint audit and cleanup](./plans/test-footprint-audit-and-plan.md)
-
 - [Typed semantic expressions and dense compiler foundations](./plans/typed-semantic-expressions-plan.md) - **Phase 4 onwards will resume after plans above** The checkpoint retains `expression-refactor` source `534aea1a5`, including accepted R1, R2.0–R2.4 and P2 isolation. Historical R2.4 matched comparisons, local `just validate-full` and all 14 scaling series qualify `6b855aab9`, not the main squash tree, with grouped-not dev HIR at n^0.88 under n^1.25. Fresh Windows Canvas/frontend proof remains pending. Phases 5–8 remain unstarted and require explicit reactivation. Later type/folding, Wiring and Core-evaluation scopes remain unchanged. Package work consumes only merged prerequisites.
 
 - [Compiler source, token and diagnostic data layout](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md) - Resume Phase 4 onward on `diagnostic-data-layout-changes` only after explicit reactivation. Consume merged exact numeric and MON capabilities, compact typed expressions, dense HIR/native result channels, V1 retirement, the bounded Wiring foundation and Core constant evaluation. Run the fresh owner/lifetime inventory, verify transferred diagnostic capabilities and preserve the locked packed-span and diagnostic decisions. The plan's reactivation gate remains authoritative.
@@ -229,6 +225,23 @@ After the canvas reachability refactor:
 - JS-backed external package APIs
 - Wasm implementations for JS-backed packages such as `@web/canvas`
 - current reachability is artefact-planning correctness, not general JS tree shaking or minification
+
+## Source-package JavaScript provider identity
+
+Build-system provider discovery and HTML JavaScript linking own this deferred implementation
+slice. Different source boundaries that provide different bytes at the same logical `binding.js`
+path still collide. The [retained collision report](./evidence/js-import-linking-and-failure-reporting-review.md#independent-provider-identity-collision)
+owns the reproducer and baseline comparison, which establishes a pre-existing defect.
+
+Carry the existing canonical stable source-package identity through the provider request, binding
+identity, runtime-import identity and provider resource origin/output placement. Reuse the
+injective package-prefix owner, preserving project-local output policy, alias independence and
+distinct byte sources. Skipping duplicate registration cannot preserve both implementations.
+
+Acceptance requires distinct providers for project/package and two-package same-path inputs,
+correct canonical ID resolution, exact runtime values from both providers, normal output-conflict
+reporting and deterministic provider/wrapper order across legal creation and registration orders.
+This work remains deferred and does not reactivate paused programmes.
 
 ---
 

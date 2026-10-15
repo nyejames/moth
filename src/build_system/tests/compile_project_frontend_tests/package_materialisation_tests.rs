@@ -291,9 +291,8 @@ fn directory_graph_retains_diagnostics_from_later_independent_source_packages() 
     )
     .expect("diagnosed source packages are retained in the typed frontend outcome");
     let project_source = frontend.project_source_database.take();
-    let messages = frontend
-        .into_render_messages_with_frozen_identity(&mut string_table, project_source, None)
-        .expect("source-package diagnostics should install frozen render identity");
+    let messages =
+        frontend.into_render_messages_with_frozen_identity(&mut string_table, project_source, None);
 
     assert!(
         messages.error_count() >= 2,
@@ -427,9 +426,11 @@ fn project_consumers_blocked_by_diagnosed_source_package_are_not_infrastructure_
         );
 
         let project_source = frontend.project_source_database.take();
-        let messages = frontend
-            .into_render_messages_with_frozen_identity(&mut string_table, project_source, None)
-            .expect("package diagnostics should install frozen render identity");
+        let messages = frontend.into_render_messages_with_frozen_identity(
+            &mut string_table,
+            project_source,
+            None,
+        );
         assert_eq!(
             messages.error_count(),
             1,
@@ -1348,9 +1349,8 @@ fn generated_materialisation_preserves_exact_request_span_in_recursive_diagnosti
     )
     .expect("diagnosed recursive materialisation should remain a retained frontend outcome");
     let project_source = frontend.project_source_database.take();
-    let messages = frontend
-        .into_render_messages_with_frozen_identity(&mut string_table, project_source, None)
-        .expect("generated diagnostics should install frozen render identity");
+    let messages =
+        frontend.into_render_messages_with_frozen_identity(&mut string_table, project_source, None);
 
     let diagnostic = messages
         .error_diagnostics()
@@ -1467,13 +1467,11 @@ html #= ()\n",
         "project and package databases should begin with colliding SourceId values"
     );
 
-    let messages = frontend
-        .into_render_messages_with_frozen_identity(
-            &mut string_table,
-            project_source_files.take(),
-            None,
-        )
-        .expect("imported generic diagnostics should install frozen render identity");
+    let messages = frontend.into_render_messages_with_frozen_identity(
+        &mut string_table,
+        project_source_files.take(),
+        None,
+    );
     let (diagnostic_index, diagnostic) = messages
         .diagnostics()
         .enumerate()
@@ -1677,13 +1675,11 @@ export:
 
     let project_path = fs::canonicalize(project_path).expect("project path should canonicalize");
     let package_path = fs::canonicalize(package_path).expect("package path should canonicalize");
-    let messages = frontend
-        .into_render_messages_with_frozen_identity(
-            &mut string_table,
-            project_source_files.take(),
-            None,
-        )
-        .expect("nested imported generic diagnostics should install frozen identities");
+    let messages = frontend.into_render_messages_with_frozen_identity(
+        &mut string_table,
+        project_source_files.take(),
+        None,
+    );
     let (diagnostic_index, diagnostic) = messages
         .diagnostics()
         .enumerate()
@@ -2840,9 +2836,11 @@ fn exported_private_chain_witness_rendering_is_stable_across_repeated_compilatio
         );
         let project_source = frontend.project_source_database.clone();
         let mut string_table = StringTable::new();
-        let messages = frontend
-            .into_render_messages_with_frozen_identity(&mut string_table, project_source, None)
-            .expect("the diagnosed project must produce render messages");
+        let messages = frontend.into_render_messages_with_frozen_identity(
+            &mut string_table,
+            project_source,
+            None,
+        );
         messages
             .diagnostics()
             .enumerate()
@@ -2967,9 +2965,8 @@ fn source_package_warning_retained_by_frontend_outcome() {
     );
 
     let project_source = frontend.project_source_database.take();
-    let messages = frontend
-        .into_render_messages_with_frozen_identity(&mut string_table, project_source, None)
-        .expect("source-package warnings should install frozen render identity");
+    let messages =
+        frontend.into_render_messages_with_frozen_identity(&mut string_table, project_source, None);
     assert!(
         messages.warning_count() >= 1,
         "render boundary should retain the source-package warning"
@@ -3130,13 +3127,11 @@ fn source_package_diagnostic_uses_package_snapshot_for_colliding_logical_path() 
         FrontendCompilationMode::Canonical,
     )
     .expect("the package diagnostic should remain a retained frontend outcome");
-    let messages = frontend
-        .into_render_messages_with_frozen_identity(
-            &mut string_table,
-            project_source_files.take(),
-            None,
-        )
-        .expect("package diagnostics should install frozen render identity");
+    let messages = frontend.into_render_messages_with_frozen_identity(
+        &mut string_table,
+        project_source_files.take(),
+        None,
+    );
     let rendered = render_compiler_messages_html(&messages, &project_root);
 
     assert!(

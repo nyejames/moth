@@ -14,7 +14,7 @@ use crate::compiler_frontend::canonical_type_identity::{
     ExportedGenericParameterIdentity, ExternalOpaqueTypeIdentity, GenericDeclarationOrigin,
     canonical_builtin_for_key, intern_canonical_builtin, project_type_id_to_canonical_identity,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
@@ -238,7 +238,7 @@ pub(super) fn materialised_struct_fields(
     services: &mut GeneratedValueMaterialisationServices<'_>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<Option<Vec<Declaration>>, CompilerError> {
+) -> Result<Option<Vec<Declaration>>, Box<InfrastructureErrors>> {
     if !matches!(
         type_environment.get(type_id),
         Some(TypeDefinition::Struct(_))
@@ -255,12 +255,14 @@ pub(super) fn materialised_struct_fields(
     else {
         return Err(CompilerError::compiler_error(
             "Materialised struct has a non-struct nominal blueprint",
-        ));
+        )
+        .into());
     };
     if fields.len() != blueprint_fields.len() {
         return Err(CompilerError::compiler_error(
             "Materialised struct field count disagrees with its stable blueprint",
-        ));
+        )
+        .into());
     }
     let mut declarations = Vec::with_capacity(fields.len());
     for (field, blueprint_field) in fields.iter().zip(blueprint_fields) {
@@ -270,7 +272,8 @@ pub(super) fn materialised_struct_fields(
         if !field_name_matches {
             return Err(CompilerError::compiler_error(
                 "Materialised struct field name disagrees with its stable blueprint",
-            ));
+            )
+            .into());
         }
         let field_span = blueprint_field.span;
         let value = if let Some(default) = blueprint_field.folded_default.as_ref() {

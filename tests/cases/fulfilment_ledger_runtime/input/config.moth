@@ -1,0 +1,5 @@
+project #= (
+    name = "fulfilment_ledger_runtime",
+    entry_root = "src",
+)
+html #= ()

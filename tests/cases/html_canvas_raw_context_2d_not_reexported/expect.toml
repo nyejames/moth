@@ -4,3 +4,9 @@ entry = "."
 mode = "failure"
 warnings = "forbid"
 diagnostic_codes = ["MOTH-IMPORT-0011"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-IMPORT-0011"
+path = "input/@page.moth"
+line = 1
+count = 1

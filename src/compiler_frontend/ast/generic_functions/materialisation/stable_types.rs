@@ -25,7 +25,7 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTraitIdentity, CanonicalTypeIdentity, ExportedGenericParameterIdentity,
     GenericDeclarationOrigin, NominalOriginResolver,
 };
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceVariantPayloadDefinition, FieldDefinition,
@@ -676,15 +676,18 @@ pub(super) fn import_canonical_folded_value(
 
 /// Converts a constant-store failure raised while projecting stable folded values.
 ///
-/// WHY: `Infrastructure` already carries the compiler error that produced it. A `Diagnostic` means the
+/// WHY: `Infrastructure` already carries every compiler error that produced it. A `Diagnostic` means the
 /// store rejected a projected node; stable folded input is validated upstream, so it is reported as an
 /// invariant break rather than a user-facing diagnostic.
-pub(super) fn const_store_error_into_compiler_error(error: ConstValueStoreError) -> CompilerError {
+pub(super) fn const_store_error_into_compiler_error(
+    error: ConstValueStoreError,
+) -> Box<InfrastructureErrors> {
     match error {
-        ConstValueStoreError::Infrastructure(error) => *error,
+        ConstValueStoreError::Infrastructure(errors) => errors,
         ConstValueStoreError::Diagnostic(diagnostic) => CompilerError::compiler_error(format!(
             "Imported folded value violated a constant store invariant: {diagnostic:?}"
-        )),
+        ))
+        .into(),
     }
 }
 fn insert_literal(

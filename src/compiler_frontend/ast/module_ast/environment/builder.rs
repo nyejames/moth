@@ -32,7 +32,9 @@ use crate::compiler_frontend::builtins::error_type::builtin_error_type_path;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity, intern_canonical_builtin,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::{
+    CompilerError, CompilerMessages, InfrastructureErrors,
+};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
@@ -725,7 +727,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             TemplateError::Diagnostic(diagnostic) => {
                 self.diagnostic_messages(diagnostic, string_table)
             }
-            TemplateError::Infrastructure(error) => self.error_messages(*error, string_table),
+            TemplateError::Infrastructure(error) => self.error_messages(error, string_table),
         })?;
 
         // Reuse the completed public-surface owner, including methods exported with their nominal
@@ -1192,11 +1194,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
     pub(crate) fn error_messages(
         &self,
-        error: CompilerError,
+        error: impl Into<Box<InfrastructureErrors>>,
         string_table: &StringTable,
     ) -> CompilerMessages {
-        CompilerMessages::from_error_with_warnings(error, self.warnings.clone(), string_table)
-            .with_type_context_for_all_diagnostics(self.type_environment.clone())
+        let mut messages =
+            CompilerMessages::from_diagnostics(self.warnings.clone(), string_table.clone());
+        messages.append_infrastructure_errors(error.into());
+        messages.with_type_context_for_all_diagnostics(self.type_environment.clone())
     }
 
     pub(crate) fn diagnostic_messages(

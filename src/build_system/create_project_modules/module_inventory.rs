@@ -183,7 +183,7 @@ fn resolve_directory_dependency_path(
             if let Err(error) = failure.attach_path_table_if_missing(Arc::new(
                 directory_dependency_resolution.path_fork().snapshot_table(),
             )) {
-                return PremergeFailure::Infrastructure(error);
+                return PremergeFailure::Infrastructure(error.into());
             }
             failure
         })
@@ -1054,7 +1054,7 @@ fn insert_resolved_dependency_edges(
 /// Reaching this helper means the graph and discovery disagree on which normal entry roots exist,
 /// which is a proven invariant violation rather than a user-facing failure.
 fn graph_inventory_mismatch_error(reason: String) -> PremergeFailure {
-    PremergeFailure::Infrastructure(CompilerError::compiler_error(reason))
+    PremergeFailure::Infrastructure(CompilerError::compiler_error(reason).into())
 }
 
 /// Group module-job drafts by the populated graph's compile waves and attach each stable origin.

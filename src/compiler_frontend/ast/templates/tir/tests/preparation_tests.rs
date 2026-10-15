@@ -340,7 +340,7 @@ fn preparation_continues_after_runtime_dependence_to_malformed_authority() {
     let TemplateError::Infrastructure(error) = error else {
         panic!("missing TIR authority should remain an infrastructure error");
     };
-    assert!(error.msg.contains("TIR preparation: node"));
+    assert!(error.primary.msg.contains("TIR preparation: node"));
 }
 
 #[test]
@@ -396,7 +396,7 @@ fn preparation_reenters_nested_template_payload_authority() {
     let TemplateError::Infrastructure(error) = error else {
         panic!("nested authority failure must remain infrastructure");
     };
-    assert!(error.msg.contains("TIR preparation: node"));
+    assert!(error.primary.msg.contains("TIR preparation: node"));
 }
 
 #[test]
@@ -468,7 +468,7 @@ fn preparation_classifies_nested_value_cycle_as_runtime() {
     let TemplateError::Infrastructure(error) = error else {
         panic!("nested value cycles must stay on the infrastructure lane, got {error:?}");
     };
-    assert_eq!(error.error_type, ErrorType::Compiler);
+    assert_eq!(error.primary.error_type, ErrorType::Compiler);
 }
 
 /// Exact-view child cycles are internal authority failures, not runtime values.
@@ -514,7 +514,7 @@ fn preparation_rejects_exact_child_cycle_as_internal_error() {
     let TemplateError::Infrastructure(error) = error else {
         panic!("exact-view child cycles must stay on the infrastructure lane, got {error:?}");
     };
-    assert_eq!(error.error_type, ErrorType::Compiler);
+    assert_eq!(error.primary.error_type, ErrorType::Compiler);
 }
 
 #[test]
@@ -556,7 +556,7 @@ fn preparation_validates_runtime_slot_plan_authority() {
     let TemplateError::Infrastructure(error) = error else {
         panic!("missing slot plan must remain infrastructure");
     };
-    assert!(error.msg.contains("TIR preparation: slot plan"));
+    assert!(error.primary.msg.contains("TIR preparation: slot plan"));
 }
 
 #[test]
@@ -789,9 +789,9 @@ fn preparation_reports_missing_wrapper_root_without_a_separate_slot_layout_walk(
         panic!("missing wrapper root should remain an infrastructure error");
     };
     assert!(
-        error.msg.contains("TIR preparation: node"),
+        error.primary.msg.contains("TIR preparation: node"),
         "preparation should own missing wrapper-root validation, got: {}",
-        error.msg
+        error.primary.msg
     );
 }
 
@@ -900,7 +900,7 @@ fn preparation_validates_wrapper_set_authority() {
     let TemplateError::Infrastructure(error) = error else {
         panic!("missing wrapper set must remain infrastructure");
     };
-    assert!(error.msg.contains("TIR preparation: wrapper set"));
+    assert!(error.primary.msg.contains("TIR preparation: wrapper set"));
 }
 
 fn prepare_slot_plan_view(
@@ -932,9 +932,9 @@ fn assert_preparation_authority_error(
         panic!("contribution-source authority must stay infrastructure, got {error:?}");
     };
     assert!(
-        error.msg.contains(marker),
+        error.primary.msg.contains(marker),
         "expected {marker:?} in {}",
-        error.msg
+        error.primary.msg
     );
 }
 

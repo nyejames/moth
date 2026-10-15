@@ -126,9 +126,7 @@ fn materialised_diagnostic_renders_owned_requester_and_donor_snapshots_after_ser
         )
         .expect("the generated source diagnosis should return its complete transaction");
         assert!(frontend.has_diagnosed_or_blocked());
-        frontend
-            .into_render_messages_with_frozen_identity(&mut strings, source_files.take(), None)
-            .expect("the transaction should move its captured snapshots into the report")
+        frontend.into_render_messages_with_frozen_identity(&mut strings, source_files.take(), None)
     };
     fs::write(&requester_path, "requester disk replacement\n")
         .expect("the requester should be replaced");

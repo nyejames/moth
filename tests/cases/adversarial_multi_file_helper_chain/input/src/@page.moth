@@ -1,4 +1,6 @@
 @helper/compose compose
 
-message = compose("hello")
-io.line([: [message]])
+message = compose("hello", 1)
+alternate = compose("world", 2)
+recovered = compose("again", -1)
+[:[message]|[alternate]|[recovered]]

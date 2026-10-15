@@ -54,8 +54,12 @@ pub(crate) fn generate_module_glue(
     html_output_path: &Path,
     release_build: bool,
 ) -> Result<ModuleGlueResult, CompilerError> {
-    let referenced_exports =
-        exports::collect_referenced_exports(referenced_external_functions, registry)?;
+    let referenced_exports = exports::collect_referenced_exports(
+        module,
+        external_imports,
+        referenced_external_functions,
+        registry,
+    )?;
     if referenced_exports.is_empty() {
         return Ok(ModuleGlueResult {
             glue_output_files: Vec::new(),

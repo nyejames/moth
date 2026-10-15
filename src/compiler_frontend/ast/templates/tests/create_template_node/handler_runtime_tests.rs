@@ -1852,6 +1852,7 @@ fn const_required_validation_reports_missing_effective_node_as_internal_error() 
     let TemplateError::Infrastructure(error) = error else {
         panic!("missing effective node should remain an infrastructure error");
     };
+    let error = &error.primary;
     assert!(
         error.msg.contains("does not exist in the module store"),
         "error message should mention missing node, got: {}",
@@ -1968,6 +1969,7 @@ fn const_required_validation_ignores_referenced_child_expression_overlay() {
     let TemplateError::Infrastructure(error) = error else {
         panic!("exact-view child cycles must stay on the infrastructure lane, got {error:?}");
     };
+    let error = &error.primary;
     assert_eq!(
         error.error_type,
         crate::compiler_frontend::compiler_errors::ErrorType::Compiler

@@ -198,22 +198,11 @@ fn execute_check(
             let facade_messages = validate_frontend_facade_boundaries(&frontend)
                 .err()
                 .map(ProjectAssemblyError::into_owned_messages);
-            match frontend.into_render_messages_with_frozen_identity(
+            frontend.into_render_messages_with_frozen_identity(
                 &mut string_table,
                 project_source_files.take(),
                 facade_messages,
-            ) {
-                Ok(messages) => messages,
-                Err(error) => {
-                    return CheckOutcome {
-                        messages: CompilerMessages::from_error(
-                            error,
-                            std::mem::take(&mut string_table),
-                        ),
-                        status: CommandStatus::Failure,
-                    };
-                }
-            }
+            )
         }
         Err(mut messages) => {
             attach_source_database_if_missing(&mut messages, project_source_files.as_ref());

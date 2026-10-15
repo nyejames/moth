@@ -372,6 +372,11 @@ Precompiled is a storage state, not another backing kind. A precompiled Moth Was
 
 Each source dependency compiles in its own package graph, with its own config, private project globals, source index, immutable module artefacts, external facade and compatibility facts. Its private implementation never joins the consuming project graph or sees the consumer's `@project`.
 
+Provider-target resolution keeps the declaring source's index, boundary-local `ModuleId`, namespace
+vector and exact registered package prefix paired within the same compilation boundary. A package
+module ID never indexes the project's namespaces. Canonical paths supply IO handles within the
+selected index, not a build-global fallback for a missing boundary-local target.
+
 Dependencies use the selected builder's frontend capability surface and the directly linked compilation's exact canonical numeric types. Compatibility records the Core/Builder interfaces actually used, their exact type identities and applicable language/ABI versions, not just a builder name. An artefact using removed profile-selected source types is incompatible and must be rebuilt or rejected, never numerically adapted.
 
 An external facade may expose no declaration whose public semantic facts or reachable executable implementation depends directly or transitively on private project globals. This includes constants/defaults, types, generic templates/bounds, trait evidence, receivers, all access/effect/lifetime summaries, generated code and compile-time-derived implementation facts. An exported function calling a private project-dependent helper is also prohibited.
@@ -704,6 +709,10 @@ A standalone JavaScript request may explicitly select all HIR functions. The sta
 Build-wide provider emission deduplicates runtime assets, module specifiers and shared provider files. Entry-level glue contains only wrappers, import preambles and import-map entries required by the selected JavaScript bundle.
 
 Direct builder bindings and provider-created bindings share stable binding identity and runtime asset policy. No per-entry scan recreates source dependencies.
+
+Imported JavaScript parser failures remain typed source diagnostics. They retain the Moth import request's source span and the JavaScript module path in their payload. Parser-local JavaScript byte ranges do not replace the importer's compiler source identity.
+
+Selected JavaScript module exports require a definition and applicable lowering in their issuing registry and matching entry metadata with a JavaScript runtime asset. Glue preparation checks these closed inputs before source emission. Missing candidates, absent assets and wrong asset kinds identify inconsistent validated metadata, while valid non-module helper lowerings need no wrapper or provider asset.
 
 ### Resource emission
 

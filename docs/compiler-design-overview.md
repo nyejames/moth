@@ -197,6 +197,10 @@ Builders consume this typed outcome. They add no error-fragment channel and neve
 - Expected operational IO, provider and host failures use `InfrastructureFailure`, outside the diagnostic store. A failure retaining compact compiler IDs carries their matching frozen identity context. Pre-source or non-source failures may instead carry ordinary filesystem/host context without compact IDs. Each failure has one context shape, never both.
 - A proven compiler invariant violation uses `compiler_bug!`. It ends the owning compilation and carries self-contained bounded report facts before suspect worker state is discarded. Malformed input, capacity limits and unavailable capabilities never justify a bug panic.
 
+The current typed `CompilerError` carrier remains a bounded exception, not delivery of these final
+lanes. The data-layout authority's `Current CompilerError migration` section owns its ordered cold
+causes, identity transport and shared terminal, terse and dev-server presentation.
+
 Runtime program `Error` values and entry-startup failures belong to the program's execution contract, not these compiler failure lanes. Statically invalid numeric work and undischarged exported failure are source diagnostics.
 
 Diagnostic schemas own stable codes and typed facts. Codes are not repurposed when prose changes. Stages preserve exact source spans, symbols and semantic reasons rather than pre-rendering messages. Type-display snapshots retain only what rendering needs, not complete type environments solely for diagnostics. Renderers resolve facts without mutating the report.
@@ -1037,6 +1041,10 @@ The compiler records backend-neutral facts for each source and generated functio
 Generated-function requests accompany module link data as materialisation dependencies. They remain distinct from runtime-dependency fingerprint contents. Non-executable fragments and root metadata carry their own resource/site-root/provenance facts in the metadata lane.
 
 These per-function facts are the linking authority. Module-wide summaries are derived indexes only. Reachability follows stable call edges recorded from already-specialised HIR, without rescanning HIR for link facts, folding constants, choosing branches, mutating HIR, inspecting borrow facts or choosing targets/output. Some target checks also inspect the paired semantic type environment rather than reconstructing types from syntax.
+
+Module runtime-import candidates combine source-owned provider availability, builder runtime metadata and packages demanded by final executable external-call facts after summary convergence. Generated sidecars resolve their selected root's final demand before publication through the same canonical projection. Candidates remain availability, not entry liveness, and include no validation-only executable demand.
+
+Within one issuing external registry, candidate projection reconciles the canonical provider record with every matching builder runtime record. These records must agree on asset presence, stable origin, asset kind, canonical byte source and required runtime module/import-name sets. Authored spans supply provenance rather than runtime identity. Compatible references preserve canonical provider provenance. Conflicting runtime facts fail as an internal invariant instead of choosing a provider-first or duplicate-record fallback. Valid inline/Core/runtime helpers may have no provider asset.
 
 ## Target-contract validation
 

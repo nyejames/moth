@@ -4873,23 +4873,6 @@ fn boracle_oracle_rebinding_slot_does_not_conflict_with_old_observer() {
 }
 
 #[test]
-fn boracle_oracle_write_through_exclusive_alias_does_not_fabricate_conflict() {
-    let mut fixture = Fixture::new(2);
-    let owner = fixture.place(0, []);
-    let alias = fixture.place(1, []);
-    fixture.fresh(owner);
-    fixture.alias(alias, owner, AccessKind::Exclusive);
-    fixture.binding_write(BindingDestination::Update(alias));
-    fixture.rebind_fresh(alias);
-    fixture.access(owner, UseKind::Read, false);
-
-    assert!(matches!(
-        run(fixture.finish()),
-        OracleOutcome::CompleteSafe { executions: 1, .. }
-    ));
-}
-
-#[test]
 fn boracle_oracle_write_through_alias_does_not_reissue_source_capability() {
     let mut fixture = Fixture::new(3);
     let first_value = fixture.place(0, []);

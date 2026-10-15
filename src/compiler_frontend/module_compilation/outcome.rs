@@ -17,7 +17,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 ///
 /// `Success` carries the complete unmerged semantic result plus its local string-table and
 /// path-interner deltas. `Diagnosed` carries the user-facing diagnostics the renderer surfaces.
-/// An infrastructure failure is `Err(CompilerError)` at the call boundary instead.
+/// An infrastructure failure is a boxed cause aggregate at the call boundary instead.
 pub(crate) enum ModuleCompilationOutcome {
     // `ModuleSemanticResult` carries the full unmerged module (HIR, type environment and borrow
     // facts) and is far larger than `ModuleDiagnostics`, so the success payload is boxed to keep

@@ -160,9 +160,10 @@ pub(super) fn publish_compiled_module(
                     std::mem::take(string_table),
                 ))
             }
-            error => PremergeFailure::Infrastructure(CompilerError::compiler_error(format!(
-                "module path merge failed: {error:?}"
-            ))),
+            error => PremergeFailure::Infrastructure(
+                CompilerError::compiler_error(format!("module path merge failed: {error:?}"))
+                    .into(),
+            ),
         })?;
     let ModuleSemanticResult {
         mut module,
@@ -199,7 +200,7 @@ pub(super) fn publish_compiled_module(
         generated_delta,
         resource_source_associations,
     })
-    .map_err(PremergeFailure::Infrastructure)
+    .map_err(PremergeFailure::from)
 }
 
 /// Add one newly published module's generic templates to the boundary materialisation registry.
@@ -336,7 +337,7 @@ impl From<PremergeFailure> for BoundaryPremergeFailure {
 
 impl From<CompilerError> for BoundaryPremergeFailure {
     fn from(error: CompilerError) -> Self {
-        Self::project(PremergeFailure::Infrastructure(error))
+        Self::project(PremergeFailure::from(error))
     }
 }
 
@@ -350,7 +351,7 @@ impl From<SourceDatabaseError> for BoundaryPremergeFailure {
                 ),
             )),
             SourceDatabaseError::Infrastructure(error) => {
-                Self::project(PremergeFailure::Infrastructure(error))
+                Self::project(PremergeFailure::from(error))
             }
         }
     }
@@ -365,8 +366,8 @@ impl From<SourceDatabaseError> for BoundaryPremergeFailure {
 ///       finalization itself fails there is no snapshot to attach, so the original failure
 ///       stays authoritative and the finish failure is surfaced deterministically beside it:
 ///       a diagnosed batch keeps its diagnostics and table by move and carries the finish
-///       failure on the mixed outer infrastructure lane, while an infrastructure error keeps
-///       its type and metadata and chains the finish message.
+///       failure on the mixed outer infrastructure lane, while an infrastructure aggregate
+///       appends the finish cause with its own type, message and metadata unchanged.
 /// WHY: the builder is consumed by the failed finish, yet the original failure still owns
 ///      diagnostics and tables no later stage can rebuild. Dropping either side would lose
 ///      the user's failure or the freeze failure silently; both stay observable in the one
@@ -382,16 +383,10 @@ fn finalize_package_failure(
         }
     }
 }
-/// Chain a failed source finalization beside an existing typed failure.
+/// Append a source-finalization cause without replacing or rewriting earlier failures.
 ///
-/// WHAT: keeps the semantic failure authoritative without cloning any diagnostic batch
-///       or string table: a diagnosed batch keeps its diagnostics by move and carries the
-///       finish failure on the mixed outer infrastructure lane, while an infrastructure
-///       error keeps its type and metadata and chains the finish message behind
-///       its own.
-/// WHY: the builder is consumed by the failed finish, yet the original failure still
-///      owns diagnostics and tables no later stage can rebuild. Every Stage 0 tail
-///      shares this so a finish failure never replaces the failure it raced with.
+/// The builder is consumed by a failed finish, but the original diagnostic batch and every
+/// infrastructure cause still belong to the aborted compilation and must reach its final tail.
 pub(super) fn append_finish_failure(
     failure: PremergeFailure,
     finish_error: CompilerError,
@@ -399,40 +394,15 @@ pub(super) fn append_finish_failure(
     match failure {
         PremergeFailure::Diagnosed(batch) => PremergeFailure::Mixed {
             batch,
-            error: Box::new(finish_error),
+            error: finish_error.into(),
         },
-        PremergeFailure::Mixed {
-            batch,
-            error: original,
-        } => {
-            // Both sides stay observable: the original render identity wins, and the
-            // finish message chains deterministically behind the original message.
-            let mut chained = original;
-            chained.msg = format!(
-                "{original_msg}; package source finalization also failed: {finish_msg}",
-                original_msg = chained.msg,
-                finish_msg = finish_error.msg,
-            );
-            for (key, value) in finish_error.metadata {
-                chained.metadata.entry(key).or_insert(value);
-            }
-            PremergeFailure::Mixed {
-                batch,
-                error: chained,
-            }
+        PremergeFailure::Mixed { batch, mut error } => {
+            error.push(finish_error);
+            PremergeFailure::Mixed { batch, error }
         }
-        PremergeFailure::Infrastructure(mut original) => {
-            // Both sides stay observable: the original failure remains authoritative, and
-            // the finish message chains deterministically behind the original message.
-            original.msg = format!(
-                "{original_msg}; package source finalization also failed: {finish_msg}",
-                original_msg = original.msg,
-                finish_msg = finish_error.msg,
-            );
-            for (key, value) in finish_error.metadata {
-                original.metadata.entry(key).or_insert(value);
-            }
-            PremergeFailure::Infrastructure(original)
+        PremergeFailure::Infrastructure(mut errors) => {
+            errors.push(finish_error);
+            PremergeFailure::Infrastructure(errors)
         }
     }
 }
@@ -740,7 +710,7 @@ pub(super) fn discover_source_package_inventories(
         package_sources.adopt_pending_span_builders();
         if let Err(error) = package_retain_result {
             return Err(finalize_package_failure(
-                PremergeFailure::Infrastructure(error),
+                PremergeFailure::from(error),
                 package_sources,
             ));
         }
@@ -763,7 +733,7 @@ pub(super) fn discover_source_package_inventories(
             return Err(finalize_package_failure(
                 PremergeFailure::Infrastructure(CompilerError::compiler_error(format!(
                     "Source package @{dependency_prefix} has no module rooted at its indexed entry root"
-                ))),
+                )).into()),
                 package_sources,
             ));
         };
@@ -836,7 +806,7 @@ pub(super) fn prepare_source_package_check_only_jobs(
             (Ok(()), Err(error)) => {
                 let inventory = inventories.swap_remove(index);
                 return Err(finalize_package_failure(
-                    PremergeFailure::Infrastructure(error),
+                    PremergeFailure::from(error),
                     inventory.source_files,
                 ));
             }
@@ -1054,9 +1024,9 @@ pub(super) fn compile_source_package_inventories(
         let (result, finalized_source) = match (result, finish_outcome) {
             (result, Ok(finished)) => (result, finished),
             (Ok(_), Err(finish_error)) => {
-                return Err(BoundaryPremergeFailure::project(
-                    PremergeFailure::Infrastructure(finish_error),
-                ));
+                return Err(BoundaryPremergeFailure::project(PremergeFailure::from(
+                    finish_error,
+                )));
             }
             (Err(failure), Err(finish_error)) => {
                 return Err(BoundaryPremergeFailure::project(append_finish_failure(
@@ -1185,19 +1155,20 @@ fn compile_directory_frontend_in_premerge_lane(
     };
     let project_path_resolver = project_setup.resolver;
     let project_registration_index = project_setup.source_tree_index.source_registration_index();
-    let cached_source = match project_source_files.take() {
-        Some(cached) => match Arc::try_unwrap(cached) {
-            Ok(database) => database,
-            Err(_) => {
-                return Err(BoundaryPremergeFailure::project(
+    let cached_source =
+        match project_source_files.take() {
+            Some(cached) => match Arc::try_unwrap(cached) {
+                Ok(database) => database,
+                Err(_) => {
+                    return Err(BoundaryPremergeFailure::project(
                     PremergeFailure::Infrastructure(CompilerError::compiler_error(
                         "project source database was unexpectedly shared before registration",
-                    )),
+                    ).into()),
                 ));
-            }
-        },
-        None => SourceDatabase::empty(),
-    };
+                }
+            },
+            None => SourceDatabase::empty(),
+        };
     let mut project_sources = SourceDatabaseBuilder::new(cached_source);
     let result = (|| -> Result<ProjectFrontendCompilation, BoundaryPremergeFailure> {
         project_sources
@@ -1326,9 +1297,9 @@ fn compile_directory_frontend_in_premerge_lane(
         match (project_check_only_result, project_retain_result) {
             (Ok(()), Ok(())) => {}
             (Ok(()), Err(error)) => {
-                return Err(BoundaryPremergeFailure::project(
-                    PremergeFailure::Infrastructure(error),
-                ));
+                return Err(BoundaryPremergeFailure::project(PremergeFailure::from(
+                    error,
+                )));
             }
             (Err(failure), Ok(())) => {
                 return Err(BoundaryPremergeFailure::project(failure));
@@ -1480,9 +1451,9 @@ fn compile_directory_frontend_in_premerge_lane(
     let (result, finalized) = match (result, finish_outcome) {
         (result, Ok(finished)) => (result, Arc::new(finished)),
         (Ok(_), Err(finish_error)) => {
-            return Err(BoundaryPremergeFailure::project(
-                PremergeFailure::Infrastructure(finish_error),
-            ));
+            return Err(BoundaryPremergeFailure::project(PremergeFailure::from(
+                finish_error,
+            )));
         }
         (Err(directory_failure), Err(finish_error)) => {
             let combined = append_finish_failure(*directory_failure.failure, finish_error);

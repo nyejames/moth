@@ -23,8 +23,9 @@ use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages,
 use crate::compiler_frontend::compiler_messages::render::dev_server::render_compiler_messages_html;
 use crate::compiler_frontend::compiler_messages::render::terse;
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticLabelMessage, DiagnosticPayload, DiagnosticSeverity, InvalidConfigReason,
-    InvalidDependencyClauseReason, InvalidGenericInstantiationReason,
+    DiagnosticKind, DiagnosticLabelMessage, DiagnosticPayload, DiagnosticSeverity,
+    InvalidConfigReason, InvalidDependencyClauseReason, InvalidGenericInstantiationReason,
+    SyntaxDiagnosticKind,
 };
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::definitions::ChoiceVariantPayloadDefinition;

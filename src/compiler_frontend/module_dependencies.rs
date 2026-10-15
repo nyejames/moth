@@ -575,10 +575,10 @@ pub(in crate::compiler_frontend) fn resolve_module_dependencies(
                             let batch = PremergeDiagnosticBatch::from_bag(diagnostic_bag, table);
                             PremergeFailure::Mixed {
                                 batch,
-                                error: Box::new(error),
+                                error: error.into(),
                             }
                         } else {
-                            PremergeFailure::Infrastructure(error)
+                            PremergeFailure::from(error)
                         };
                         return Err(failure);
                     }

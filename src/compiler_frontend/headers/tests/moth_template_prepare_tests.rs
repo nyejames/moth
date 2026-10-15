@@ -517,7 +517,7 @@ impl MothTemplateScopeFixture {
             if let Some(diagnostic) = messages.first_error() {
                 return diagnostic.clone();
             }
-            if let Some(error) = messages.infrastructure_error() {
+            if let Some(error) = messages.primary_infrastructure_error() {
                 panic!("dependency sorting infrastructure failure: {}", error.msg)
             }
             panic!("dependency sorting failed without a diagnostic")
@@ -561,7 +561,7 @@ impl MothTemplateScopeFixture {
             if let Some(diagnostic) = messages.first_error() {
                 return diagnostic.clone();
             }
-            if let Some(error) = messages.infrastructure_error() {
+            if let Some(error) = messages.primary_infrastructure_error() {
                 panic!("AST failed with infrastructure error: {}", error.msg)
             }
             panic!("AST failed without a diagnostic")

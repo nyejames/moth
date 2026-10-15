@@ -18,6 +18,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::paths::resource_identity::PortableResourcePath;
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
+use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternError};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::html_project::external_js::package_registration::{
@@ -120,6 +121,7 @@ impl ExternalImportProvider for JsExternalImportProvider {
         let mut diagnostics = convert_js_parser_diagnostics(
             &parsed.diagnostics,
             js_source_path,
+            request.source_span,
             context.string_table,
         );
 
@@ -221,6 +223,7 @@ fn reject_receiver_methods_in_project_local_js(
 fn convert_js_parser_diagnostics(
     parser_diagnostics: &[JsParserDiagnostic],
     js_source_path: PathId,
+    import_span: Option<SourceSpan>,
     string_table: &mut StringTable,
 ) -> Vec<CompilerDiagnostic> {
     let mut diagnostics = Vec::with_capacity(parser_diagnostics.len());
@@ -230,7 +233,7 @@ fn convert_js_parser_diagnostics(
         diagnostics.push(CompilerDiagnostic::invalid_external_module(
             js_source_path,
             InvalidExternalModuleReason::ParserDiagnostic { parser_detail },
-            None,
+            import_span,
         ));
     }
 

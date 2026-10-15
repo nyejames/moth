@@ -173,9 +173,11 @@ pub(crate) fn compile_single_file_boracle_frontend(
             }
             // The canonical scheduler retains failed package reports and blocks their consumer.
             // Render only after the synthetic source owner has finalised its span tables.
-            let messages = compilation
-                .into_render_messages_with_frozen_identity(string_table, project_source_files, None)
-                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+            let messages = compilation.into_render_messages_with_frozen_identity(
+                string_table,
+                project_source_files,
+                None,
+            );
             Err(messages)
         }
     }
@@ -227,37 +229,34 @@ fn compile_single_file_frontend_with_target(
         }
     };
     if extension_text != LANGUAGE_SOURCE_EXTENSION {
-        let interned_path = match discovery_path_fork
-            .try_intern_filesystem_path(&config.entry_dir, string_table)
-        {
-            Ok(path) => path,
-            Err(PathInternError::NonUtf8(non_utf8)) => {
-                return Err(BoundaryPremergeFailure::from(
-                    non_utf8_filesystem_name_error(&non_utf8.path, "single-file entry path"),
-                ));
-            }
-            Err(PathInternError::TableFull) => {
-                // Authored exhaustion of the compact path table: the typed capacity diagnostic
-                // travels without a path snapshot, because the exhausted table owns no further
-                // PathId to render.
-                return Err(
-                    PremergeFailure::Diagnosed(PremergeDiagnosticBatch::from_diagnostic(
-                        CompilerDiagnostic::source_table_capacity(
-                            SourceSpanCapacityResource::LogicalPath,
+        let interned_path =
+            match discovery_path_fork.try_intern_filesystem_path(&config.entry_dir, string_table) {
+                Ok(path) => path,
+                Err(PathInternError::NonUtf8(non_utf8)) => {
+                    return Err(BoundaryPremergeFailure::from(
+                        non_utf8_filesystem_name_error(&non_utf8.path, "single-file entry path"),
+                    ));
+                }
+                Err(PathInternError::TableFull) => {
+                    // Authored exhaustion of the compact path table: the typed capacity diagnostic
+                    // travels without a path snapshot, because the exhausted table owns no further
+                    // PathId to render.
+                    return Err(PremergeFailure::Diagnosed(
+                        PremergeDiagnosticBatch::from_diagnostic(
+                            CompilerDiagnostic::source_table_capacity(
+                                SourceSpanCapacityResource::LogicalPath,
+                            ),
+                            std::mem::take(string_table),
                         ),
-                        std::mem::take(string_table),
-                    ))
-                    .into(),
-                );
-            }
-            Err(PathInternError::BaseMismatch { .. }) => {
-                return Err(PremergeFailure::Infrastructure(
-                    CompilerError::compiler_error(
-                        "logical path merge base is not a structural prefix of the destination table",
-                    ),
-                ).into());
-            }
-        };
+                    )
+                    .into());
+                }
+                Err(PathInternError::BaseMismatch { .. }) => {
+                    return Err(PremergeFailure::Infrastructure(CompilerError::compiler_error(
+                    "logical path merge base is not a structural prefix of the destination table",
+                ).into()).into());
+                }
+            };
         let extension = string_table.intern(extension_text);
         let diagnostic =
             CompilerDiagnostic::invalid_source_file_entry(interned_path, extension, None);
@@ -269,7 +268,7 @@ fn compile_single_file_frontend_with_target(
         if let Err(error) =
             batch.attach_path_table_if_missing(Arc::new(discovery_path_fork.snapshot_table()))
         {
-            return Err(PremergeFailure::Infrastructure(error).into());
+            return Err(PremergeFailure::Infrastructure(error.into()).into());
         }
         return Err(PremergeFailure::Diagnosed(batch).into());
     }
@@ -679,7 +678,7 @@ fn compile_single_file_frontend_with_target(
     let (result, finalized) = match (result, finish_outcome) {
         (result, Ok(finished)) => (result, Arc::new(finished)),
         (Ok(_), Err(finish_error)) => {
-            return Err(PremergeFailure::Infrastructure(finish_error).into());
+            return Err(PremergeFailure::Infrastructure(finish_error.into()).into());
         }
         (Err(failure), Err(finish_error)) => {
             return Err(BoundaryPremergeFailure {

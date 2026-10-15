@@ -758,7 +758,7 @@ fn content_source_preparation_failures_name_the_logical_source() {
 
 /// A canonical content target can differ from the authored spelling when a symlink is involved.
 /// If that target fails before preparation, final registration still adds its logical path; the
-/// diagnosed source owner must retain that path in the same table as the discovery fork.
+/// failure cause owner must retain that path in the same table as the discovery fork.
 #[cfg(unix)]
 #[test]
 fn aborted_content_walk_retains_unvisited_canonical_source_identity() {
@@ -783,8 +783,10 @@ fn aborted_content_walk_retains_unvisited_canonical_source_identity() {
 
     assert!(messages.has_infrastructure_error());
     let source_database = messages
-        .source_database_for_diagnostic(0)
-        .expect("the diagnosed boundary should retain its source database");
+        .infrastructure_errors()
+        .expect("the aborted walk should retain its infrastructure causes")
+        .source_database_for_cause(0)
+        .expect("the failure cause should retain its source database");
     let canonical_real_path =
         fs::canonicalize(&real_path).expect("the canonical target should resolve");
     let source = source_database
@@ -794,9 +796,11 @@ fn aborted_content_walk_retains_unvisited_canonical_source_identity() {
         source_database.paths().contains(source.logical_path),
         "the retained source logical path must belong to the finalized path table",
     );
-    let rendered_path = messages
-        .diagnostic_render_context(0)
-        .render_path(source.logical_path);
+    let rendered_path = source_database.paths().render_portable(
+        source.logical_path,
+        &messages.string_table,
+        &mut Vec::new(),
+    );
     assert_eq!(
         rendered_path, "real.md",
         "the finalized source database should render the canonical target path",
@@ -860,7 +864,7 @@ fn unreadable_content_value_surfaces_its_own_read_failure() {
     // preparation boundary. Reporting the slot's own "no retained text" state instead would
     // replace the user-facing read failure with an internal compiler error.
     let error = messages
-        .infrastructure_error()
+        .primary_infrastructure_error()
         .expect("the read failure should be reported");
     assert_eq!(error.error_type, ErrorType::File);
 }

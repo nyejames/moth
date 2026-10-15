@@ -242,6 +242,7 @@ fn template_head_expression_preserves_infrastructure_failure() {
     let TemplateError::Infrastructure(error) = error else {
         panic!("stale template authority must remain an infrastructure failure");
     };
+    let error = &error.primary;
     assert!(
         error.msg.contains("missing same-store template"),
         "unexpected infrastructure error: {error:?}"
@@ -326,6 +327,7 @@ fn template_head_path_lookup_preserves_infrastructure_failure() {
     let TemplateError::Infrastructure(error) = error else {
         panic!("template-head path corruption must remain an infrastructure failure");
     };
+    let error = &error.primary;
     assert!(
         error.msg.contains("absent PathSyntaxId marker")
             || error.msg.contains("no payload")

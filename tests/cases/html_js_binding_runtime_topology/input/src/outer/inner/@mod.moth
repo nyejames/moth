@@ -1,0 +1,6 @@
+export:
+    @binding.js record_event as note, choose, observed, generated_label, read_limit, limit, unused_live
+    @private_only.js private_only
+    @branch_only.js branch_only
+    @assertion_only.js assertion_only
+;

@@ -128,7 +128,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     pub(in crate::compiler_frontend::ast::module_ast::environment::builder) fn project_imported_constant_declarations(
         &mut self,
         string_table: &mut StringTable,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), Box<InfrastructureErrors>> {
         let imported = self
             .binding_environment
             .imported_declarations_by_local_path
@@ -173,7 +173,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         declaration_provenance: &SyntheticInterfaceProvenance,
         origin: &OriginDeclarationId,
         string_table: &mut StringTable,
-    ) -> Result<Declaration, CompilerError> {
+    ) -> Result<Declaration, Box<InfrastructureErrors>> {
         let type_id = self.intern_imported_canonical_type(&constant.type_identity)?;
         let mut synthetic_interface_provenance = declaration_provenance.clone();
         if is_project_globals_origin(origin) {
@@ -239,7 +239,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         folded: &PublicFoldedValue,
         expected_type_id: TypeId,
         string_table: &mut StringTable,
-    ) -> Result<ConstValueId, CompilerError> {
+    ) -> Result<ConstValueId, Box<InfrastructureErrors>> {
         // Public folded values intentionally omit declaration spans, so imported projections
         // have no authored range to carry into a consumer-local resource table.
         self.with_owned_const_values(|builder, const_values| {
@@ -322,7 +322,7 @@ pub(crate) fn materialize_public_folded_value<M: FoldedValueMaterialiser>(
     const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     span: Option<SourceSpan>,
-) -> Result<ConstValueId, CompilerError> {
+) -> Result<ConstValueId, Box<InfrastructureErrors>> {
     import_folded_value(
         materialiser,
         folded,
@@ -347,15 +347,16 @@ struct ImportedRootMetadata {
 
 /// Converts a constant-store failure raised while projecting an imported value.
 ///
-/// WHY: `Infrastructure` already carries the compiler error that produced it. A `Diagnostic` means the
-/// store rejected a projected node; imported folded input is validated upstream, so it is reported as
-/// an invariant break rather than a user-facing diagnostic.
-fn const_store_error_into_compiler_error(error: ConstValueStoreError) -> CompilerError {
+/// WHY: `Infrastructure` already carries the complete compiler failure aggregate that produced it.
+/// A `Diagnostic` means the store rejected a projected node; imported folded input is validated
+/// upstream, so it is reported as an invariant break rather than a user-facing diagnostic.
+fn const_store_error_into_compiler_error(error: ConstValueStoreError) -> Box<InfrastructureErrors> {
     match error {
-        ConstValueStoreError::Infrastructure(error) => *error,
+        ConstValueStoreError::Infrastructure(errors) => errors,
         ConstValueStoreError::Diagnostic(diagnostic) => CompilerError::compiler_error(format!(
             "Imported folded value violated a constant store invariant: {diagnostic:?}"
-        )),
+        ))
+        .into(),
     }
 }
 

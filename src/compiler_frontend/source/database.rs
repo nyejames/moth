@@ -85,16 +85,30 @@ impl SourceDatabase {
     /// The counters describe the exact storage that crosses the freeze boundary; construction-only
     /// reverse lookup and load-failure state are intentionally excluded.
     pub(crate) fn retention_metrics(&self) -> SourceDatabaseRetentionMetrics {
-        SourceDatabaseRetentionMetrics {
-            source_snapshot_bytes: self.loaded.iter().map(|record| record.text.len()).sum(),
-            extended_span_rows: self
-                .loaded
-                .iter()
-                .filter_map(|record| record.extended_spans.as_ref())
-                .map(ExtendedSpanTable::len)
-                .sum(),
-            source_identity_slots: self.slots.len(),
-        }
+        source_retention_metrics(&self.loaded, self.slots.len())
+    }
+}
+
+#[cfg(feature = "data_layout_memory_probe")]
+impl FrozenSourceDatabase {
+    pub(crate) fn retention_metrics(&self) -> SourceDatabaseRetentionMetrics {
+        source_retention_metrics(&self.loaded, self.slots.len())
+    }
+}
+
+#[cfg(feature = "data_layout_memory_probe")]
+fn source_retention_metrics(
+    loaded: &[SourceRecord],
+    source_identity_slots: usize,
+) -> SourceDatabaseRetentionMetrics {
+    SourceDatabaseRetentionMetrics {
+        source_snapshot_bytes: loaded.iter().map(|record| record.text.len()).sum(),
+        extended_span_rows: loaded
+            .iter()
+            .filter_map(|record| record.extended_spans.as_ref())
+            .map(ExtendedSpanTable::len)
+            .sum(),
+        source_identity_slots,
     }
 }
 

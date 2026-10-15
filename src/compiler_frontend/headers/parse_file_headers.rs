@@ -8,7 +8,9 @@
 
 use crate::builder_surface::external_import_providers::resolution_table::ExternalImportResolutionTable;
 use crate::compiler_frontend::arena::{HeaderStats, TokenStats};
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::{
+    CompilerError, CompilerMessages, InfrastructureErrors,
+};
 use crate::compiler_frontend::compiler_messages::{
     CommonSyntaxMistakeReason, CompilerDiagnostic, DiagnosticBag, InvalidConfigReason,
     InvalidDeclarationReason,
@@ -303,12 +305,26 @@ pub(crate) fn prepare_file_from_tokens(
 #[derive(Debug)]
 pub(crate) enum HeaderPreparationFailure {
     Diagnosed(DiagnosticBag),
-    Infrastructure(CompilerError),
+    Infrastructure(Box<InfrastructureErrors>),
 }
 
 impl From<DiagnosticBag> for HeaderPreparationFailure {
     fn from(diagnostics: DiagnosticBag) -> Self {
         Self::Diagnosed(diagnostics)
+    }
+}
+
+impl From<CompilerMessages> for HeaderPreparationFailure {
+    fn from(messages: CompilerMessages) -> Self {
+        let CompilerMessages {
+            infrastructure_errors,
+            diagnostics,
+            ..
+        } = messages;
+        match infrastructure_errors {
+            Some(errors) => Self::Infrastructure(errors),
+            None => Self::Diagnosed(DiagnosticBag::from_diagnostics(diagnostics)),
+        }
     }
 }
 
@@ -344,7 +360,8 @@ pub fn prepare_header_syntax(
                 return Err(HeaderPreparationFailure::Infrastructure(
                     CompilerError::compiler_error(
                         "multiple canonical source token streams were prepared for one SourceId",
-                    ),
+                    )
+                    .into(),
                 ));
             }
         }
@@ -353,9 +370,12 @@ pub fn prepare_header_syntax(
         runtime_fragment_count = runtime_fragment_count
             .checked_add(output.runtime_fragment_count)
             .ok_or_else(|| {
-                HeaderPreparationFailure::Infrastructure(CompilerError::compiler_error(
-                    "runtime fragment count overflowed header aggregation",
-                ))
+                HeaderPreparationFailure::Infrastructure(
+                    CompilerError::compiler_error(
+                        "runtime fragment count overflowed header aggregation",
+                    )
+                    .into(),
+                )
             })?;
         has_non_trivial_root_body |= output.has_non_trivial_root_body;
     }
@@ -583,7 +603,8 @@ fn collect_source_build_config_contracts(
             return Err(HeaderPreparationFailure::Infrastructure(
                 CompilerError::compiler_error(
                     "config marker scan source token owner does not match its file identity",
-                ),
+                )
+                .into(),
             ));
         }
 
@@ -605,11 +626,11 @@ fn collect_source_build_config_contracts(
 
             if let Some((location, adjacent)) =
                 find_config_qualifier_marker_in_header(header, source_tokens, string_table)
-                    .map_err(HeaderPreparationFailure::Infrastructure)?
+                    .map_err(|error| HeaderPreparationFailure::Infrastructure(error.into()))?
             {
                 let mut diagnostic = report_marker(location, adjacent);
                 capture(output.file_id, &mut diagnostic)
-                    .map_err(HeaderPreparationFailure::Infrastructure)?;
+                    .map_err(|error| HeaderPreparationFailure::Infrastructure(error.into()))?;
                 diagnostics.push(diagnostic);
                 continue;
             }
@@ -627,7 +648,7 @@ fn collect_source_build_config_contracts(
                     header.name_span,
                 );
                 capture(output.file_id, &mut diagnostic)
-                    .map_err(HeaderPreparationFailure::Infrastructure)?;
+                    .map_err(|error| HeaderPreparationFailure::Infrastructure(error.into()))?;
                 diagnostics.push(diagnostic);
                 continue;
             };
@@ -637,19 +658,26 @@ fn collect_source_build_config_contracts(
 
             let normalized = if let Some(range) = declaration.initializer_range {
                 let source = source_tokens.ok_or_else(|| {
-                    HeaderPreparationFailure::Infrastructure(CompilerError::compiler_error(
-                        "source config initializer has no canonical source token owner",
-                    ))
+                    HeaderPreparationFailure::Infrastructure(
+                        CompilerError::compiler_error(
+                            "source config initializer has no canonical source token owner",
+                        )
+                        .into(),
+                    )
                 })?;
                 let mut cursor = source.cursor(range).map_err(|error| {
-                    HeaderPreparationFailure::Infrastructure(CompilerError::compiler_error(
-                        format!("source config initializer range is invalid: {error:?}"),
-                    ))
+                    HeaderPreparationFailure::Infrastructure(
+                        CompilerError::compiler_error(format!(
+                            "source config initializer range is invalid: {error:?}"
+                        ))
+                        .into(),
+                    )
                 })?;
                 let token = cursor.advance().ok_or_else(|| {
-                    HeaderPreparationFailure::Infrastructure(CompilerError::compiler_error(
-                        "source config initializer range is empty",
-                    ))
+                    HeaderPreparationFailure::Infrastructure(
+                        CompilerError::compiler_error("source config initializer range is empty")
+                            .into(),
+                    )
                 })?;
                 if range.len() == 1 {
                     normalize_source_build_config_contract_from_token(
@@ -682,11 +710,11 @@ fn collect_source_build_config_contracts(
                 Ok(contract) => contracts.push(contract),
                 Err(HeaderParseFailure::Diagnostic(mut diagnostic)) => {
                     capture(output.file_id, &mut diagnostic)
-                        .map_err(HeaderPreparationFailure::Infrastructure)?;
+                        .map_err(|error| HeaderPreparationFailure::Infrastructure(error.into()))?;
                     diagnostics.push(diagnostic);
                 }
                 Err(HeaderParseFailure::Infrastructure(error)) => {
-                    return Err(HeaderPreparationFailure::Infrastructure(error));
+                    return Err(HeaderPreparationFailure::Infrastructure(error.into()));
                 }
             }
         }
@@ -759,7 +787,7 @@ pub(in crate::compiler_frontend) fn bind_module_headers(
                 HeaderPreparationFailure::Diagnosed(DiagnosticBag::from(diagnostic))
             }
             HeaderParseFailure::Infrastructure(error) => {
-                HeaderPreparationFailure::Infrastructure(error)
+                HeaderPreparationFailure::Infrastructure(error.into())
             }
         })?;
     }
@@ -773,15 +801,7 @@ pub(in crate::compiler_frontend) fn bind_module_headers(
         string_table,
         path_fork,
     })
-    .map_err(|messages| {
-        if let Some(error) = messages.infrastructure_error().cloned() {
-            HeaderPreparationFailure::Infrastructure(error)
-        } else {
-            HeaderPreparationFailure::Diagnosed(DiagnosticBag::from_diagnostics(
-                messages.into_diagnostics(),
-            ))
-        }
-    })?;
+    .map_err(HeaderPreparationFailure::from)?;
 
     canonicalize_local_ordering_hints(
         &mut headers,

@@ -6,6 +6,7 @@ use super::runtime_modules::emit_build_runtime_modules;
 use super::source::{generate_fallible_wrapper, generate_infallible_wrapper};
 use super::*;
 use crate::build_system::build::FileKind;
+use crate::compiler_frontend::compiler_errors::ErrorType;
 use crate::compiler_frontend::external_packages::{
     ExternalAbiType, ExternalFunctionDef, ExternalFunctionId, ExternalFunctionLowerings,
     ExternalJsLowering, ExternalPackageId, ExternalPackageRegistry, ExternalReturnSlot,
@@ -18,7 +19,7 @@ use crate::projects::html_project::external_js::runtime_module_registry::{
     CoreJsRuntimeModule, RUNTIME_ERROR_CODE_EXPORTS,
 };
 use crate::projects::html_project::tests::test_support::{
-    create_test_module, js_runtime_asset_import,
+    create_test_module, js_runtime_asset_import, non_js_runtime_asset_import,
 };
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 use std::collections::HashSet;
@@ -118,6 +119,186 @@ fn generate_module_glue_empty_when_export_registered_but_not_referenced() {
     assert!(result.glue_output_files.is_empty());
     assert!(result.bundle_import_preamble.is_none());
     assert!(result.import_map_html.is_none());
+}
+
+#[test]
+fn generate_module_glue_rejects_unknown_functions_in_deterministic_order() {
+    let mut string_table = StringTable::new();
+    let module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
+    let first_function_id = ExternalFunctionId::Synthetic(404);
+    let second_function_id = ExternalFunctionId::Synthetic(405);
+    let registry = ExternalPackageRegistry::new();
+
+    for function_ids in [
+        [first_function_id, second_function_id],
+        [second_function_id, first_function_id],
+    ] {
+        let error = generate_module_glue(
+            &module,
+            &[],
+            &HashSet::from(function_ids),
+            &registry,
+            Path::new("index.html"),
+            false,
+        )
+        .err()
+        .expect("unknown emitted callable must fail before glue emission");
+
+        assert_eq!(error.error_type, ErrorType::Compiler);
+        for detail in [
+            "HTML JS glue preparation",
+            "validated runtime metadata is inconsistent",
+            "@page.moth",
+            "Synthetic(404)",
+            "no definition in the supplied registry",
+        ] {
+            assert!(
+                error.msg.contains(detail),
+                "missing {detail:?}: {}",
+                error.msg
+            );
+        }
+        assert!(!error.msg.contains("Synthetic(405)"));
+    }
+}
+
+#[test]
+fn generate_module_glue_rejects_missing_js_lowering_but_accepts_nonmodule_lowerings() {
+    let mut string_table = StringTable::new();
+    let module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
+
+    for lowering in [
+        None,
+        Some(ExternalJsLowering::InlineExpression("42".to_owned())),
+        Some(ExternalJsLowering::RuntimeFunction(
+            "core_helper".to_owned(),
+        )),
+    ] {
+        let needs_lowering = lowering.is_none();
+        let mut registry = ExternalPackageRegistry::new();
+        let function_id = registry
+            .register_function(ExternalFunctionDef {
+                name: "get_value".to_owned(),
+                parameters: Vec::new(),
+                returns: Vec::new(),
+                error_return_type: None,
+                lowerings: ExternalFunctionLowerings {
+                    js: lowering,
+                    wasm: None,
+                },
+            })
+            .expect("test function should register");
+
+        let result = generate_module_glue(
+            &module,
+            &[],
+            &HashSet::from([function_id]),
+            &registry,
+            Path::new("index.html"),
+            false,
+        );
+        if needs_lowering {
+            let error = result.err().expect("missing JS lowering must fail");
+            assert_eq!(error.error_type, ErrorType::Compiler);
+            for detail in [
+                "HTML JS glue preparation",
+                "validated runtime metadata is inconsistent",
+                "@page.moth",
+                "get_value",
+                "@test/default",
+                "no applicable JavaScript lowering",
+            ] {
+                assert!(
+                    error.msg.contains(detail),
+                    "missing {detail:?}: {}",
+                    error.msg
+                );
+            }
+            assert!(error.msg.contains(&format!("{function_id:?}")));
+        } else {
+            let glue = result.expect("non-module JS lowerings need no provider asset");
+            assert!(glue.glue_output_files.is_empty());
+            assert!(glue.bundle_import_preamble.is_none());
+            assert!(glue.import_map_html.is_none());
+        }
+    }
+}
+
+#[test]
+fn generate_module_glue_rejects_incomplete_selected_runtime_metadata() {
+    let mut string_table = StringTable::new();
+    let module = create_test_module(PathBuf::from("@page.moth"), &mut string_table);
+    let (mut registry, function_id, package_id) =
+        create_registry_with_export("get_value", "getValue");
+    let other_package_id = registry
+        .register_package(
+            "test/other",
+            crate::builder_surface::PackageOrigin::ProjectLocal,
+        )
+        .expect("unrelated package should register");
+
+    for (reason, runtime_asset) in [
+        ("no matching entry runtime-import candidate", None),
+        ("candidate has no runtime asset", Some(None)),
+        (
+            "asset kind 'wasm', expected 'js'",
+            Some(Some(non_js_runtime_asset_import(
+                "wasm",
+                PathBuf::from("/project/lib.wasm"),
+            ))),
+        ),
+    ] {
+        let mut external_imports: Vec<_> = runtime_asset
+            .into_iter()
+            .map(|runtime_asset| ModuleExternalImport {
+                package_id,
+                runtime_asset,
+                required_runtime_imports: Vec::new(),
+            })
+            .collect();
+        // An available asset from another package cannot fill the selected package's gap.
+        external_imports.push(ModuleExternalImport {
+            package_id: other_package_id,
+            runtime_asset: Some(js_runtime_asset_import(
+                Path::new("other.js"),
+                PathBuf::from("/project/other.js"),
+            )),
+            required_runtime_imports: Vec::new(),
+        });
+        let error = generate_module_glue(
+            &module,
+            &external_imports,
+            &HashSet::from([function_id]),
+            &registry,
+            Path::new("index.html"),
+            false,
+        )
+        .err()
+        .expect("inconsistent selected runtime metadata must fail before source emission");
+
+        assert_eq!(error.error_type, ErrorType::Compiler);
+        for detail in [
+            "HTML JS glue preparation",
+            "validated runtime metadata is inconsistent",
+            "@page.moth",
+            "get_value",
+            "getValue",
+            "test/pkg",
+            reason,
+        ] {
+            assert!(
+                error.msg.contains(detail),
+                "missing {detail:?}: {}",
+                error.msg
+            );
+        }
+        assert!(error.msg.contains(&format!("{function_id:?}")));
+        assert!(error.msg.contains(&format!("{package_id:?}")));
+        crate::compiler_frontend::compiler_messages::render::assert_compiler_bug_views(
+            error,
+            "validated runtime metadata is inconsistent",
+        );
+    }
 }
 
 #[test]
@@ -1166,7 +1347,7 @@ fn emit_build_runtime_modules_rejects_unregistered_specifier() {
         Err(error) => error,
     };
     let error = error
-        .infrastructure_error()
+        .primary_infrastructure_error()
         .expect("runtime module failure should be an infrastructure error");
 
     assert!(

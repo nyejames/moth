@@ -1,0 +1,11 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "success=accepted:1 recovery=caught error=73:fixture failure constant=4294967295 live-u32=4294967295 alternate=907 generated=generated:1 state=records=namespace,alias;choices=ok,fail;generated=1;limits=1"
+artifacts_must_not_exist = [
+    "_moth/js/outer/inner/private_only.js",
+    "_moth/js/outer/inner/branch_only.js",
+    "_moth/js/outer/inner/assertion_only.js",
+]

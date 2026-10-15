@@ -543,7 +543,7 @@ fn duplicate_local_declarations_in_same_scope_fail() {
     )
     .expect_err("duplicate symbol should fail");
     let error = error
-        .infrastructure_error()
+        .primary_infrastructure_error()
         .expect("HIR lowering failure should be wrapped for rendering");
     assert!(
         error

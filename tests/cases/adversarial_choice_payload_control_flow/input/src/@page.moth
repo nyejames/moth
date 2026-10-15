@@ -37,15 +37,38 @@ describe_task |t TaskResult| -> String:
     ;
 ;
 
+small_handled = handle_result(make_result(1))
+large_handled = handle_result(default_success)
+failure_handled = handle_result(make_result(3))
+pending_handled = handle_result(make_result(0))
+
 -- Loop containing match with payload captures
 summary ~= ""
+trace ~= ""
+pending_count ~= 0
+success_one_count ~= 0
+success_two_count ~= 0
+failure_count ~= 0
 i ~= 0
 loop i < 4:
     current = make_result(i)
     if current is:
-        Success(value, label) => summary = "ok"
-        Failure(reason, code) => summary = "fail"
-        Pending => summary = "pending"
+        Success(value, label) =>
+            summary = "ok"
+            trace = [:[trace]success:[value]:[label];]
+            if value is:
+                1 => success_one_count += 1
+                2 => success_two_count += 1
+                else =>
+            ;
+        Failure(reason, code) =>
+            summary = "fail"
+            trace = [:[trace]failure:[reason]:[code];]
+            failure_count += 1
+        Pending =>
+            summary = "pending"
+            trace = [:[trace]pending;]
+            pending_count += 1
     ;
     i = i + 1
 ;
@@ -74,10 +97,25 @@ read_task |n I32| -> TaskResult, Error!:
     return TaskResult::Success(n, "ok")
 ;
 
-interop_result = read_task(5) catch:
-
+recovery_count ~= 0
+recovery_error ~= ""
+interop_result = read_task(5) catch |err|:
+    recovery_count += 1
+    recovery_error = [:[err.message]:[err.code]]
     then TaskResult::Failure("err", 0)
+;
 
+recovered_result = read_task(0) catch |err|:
+    recovery_count += 1
+    recovery_error = [:[err.message]:[err.code]]
+    then TaskResult::Failure(err.message, 0)
+;
+
+recovered_summary ~= ""
+if recovered_result is:
+    Success(value, label) => recovered_summary = [:success:[value]:[label]]
+    Failure(reason, code) => recovered_summary = [:failure:[reason]:[code]]
+    Pending => recovered_summary = "pending"
 ;
 -- Extract label from choice into a function to avoid borrow checker issues with captures
 extract_label |t TaskResult| -> String:
@@ -90,4 +128,4 @@ extract_label |t TaskResult| -> String:
 
 interop_label = extract_label(interop_result)
 
-[:adversarial_choice_payload_control_flow summary=[summary] nested=[nested_result] formatted=[formatted] interop=[interop_label]]
+[:adversarial_choice_payload_control_flow summary=[summary] nested=[nested_result] formatted=[formatted] interop=[interop_label] handles=[small_handled],[large_handled],[failure_handled],[pending_handled] trace=[trace] counts=[pending_count],[success_one_count],[success_two_count],[failure_count] recovered=[recovered_summary] error=[recovery_error] recoveries=[recovery_count]]

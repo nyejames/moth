@@ -10,7 +10,9 @@ use crate::build_system::output::OutputOwner;
 use crate::build_system::path_validation::check_if_valid_path;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
+use crate::compiler_frontend::compiler_errors::{
+    CompilerError, CompilerErrorMetadataKey, CompilerMessages,
+};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::projects::dev_server::DevServerOptions;
 use crate::projects::dev_server::build_loop::{ProjectBuildExecutor, dev_server_error_messages};
@@ -164,10 +166,14 @@ pub(crate) fn resolve_dev_runtime_paths(
     let bootstrap =
         bootstrap_project_build(builder, entry_target.to_path_buf(), build_config_inputs)?;
     let Some(validated_output_settings) = bootstrap.validated_directory_output_settings else {
-        return Err(dev_server_error_messages(
-            entry_target,
+        let mut error = CompilerError::compiler_error(
             "Directory output settings were not available after bootstrap validation.",
-        ));
+        );
+        error.new_metadata_entry(
+            CompilerErrorMetadataKey::CompilationStage,
+            "Dev server bootstrap".to_string(),
+        );
+        return Err(CompilerMessages::from_error(error, StringTable::new()));
     };
     let owner = OutputOwner {
         builder: builder.backend.builder_kind(),
@@ -194,12 +200,8 @@ pub(crate) fn validate_dev_entry_path(entry_path: &str) -> Result<PathBuf, Compi
             )
         })?
     } else {
-        check_if_valid_path(entry_path).map_err(|error| {
-            CompilerMessages::from_error(
-                error.with_error_type(ErrorType::DevServer),
-                StringTable::new(),
-            )
-        })?
+        check_if_valid_path(entry_path)
+            .map_err(|error| CompilerMessages::from_error(error, StringTable::new()))?
     };
 
     if resolved_path.is_dir() {
@@ -209,8 +211,7 @@ pub(crate) fn validate_dev_entry_path(entry_path: &str) -> Result<PathBuf, Compi
                 let error = CompilerError::file_error(
                     &resolved_path,
                     format!("Failed to canonicalize dev entry path: {error}"),
-                )
-                .with_error_type(ErrorType::DevServer);
+                );
 
                 Err(CompilerMessages::from_error(error, StringTable::new()))
             }
@@ -241,8 +242,7 @@ pub(crate) fn validate_dev_entry_path(entry_path: &str) -> Result<PathBuf, Compi
             let error = CompilerError::file_error(
                 &resolved_path,
                 format!("Failed to canonicalize dev entry path: {error}"),
-            )
-            .with_error_type(ErrorType::DevServer);
+            );
 
             Err(CompilerMessages::from_error(error, StringTable::new()))
         }

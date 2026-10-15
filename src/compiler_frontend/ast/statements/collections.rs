@@ -721,7 +721,7 @@ fn intern_concrete_shape(
 }
 
 fn internal_literal_error(message: &'static str) -> ExpressionParseError {
-    ExpressionParseError::Infrastructure(Box::new(CompilerError::compiler_error(message)))
+    ExpressionParseError::Infrastructure(CompilerError::compiler_error(message).into())
 }
 
 /// Rejects a literal whose closing `}` was never reached, before any constructor is built.

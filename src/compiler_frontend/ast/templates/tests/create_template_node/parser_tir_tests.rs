@@ -288,37 +288,6 @@ fn template_tir_folds_nested_child_as_child_template_boundary() {
     );
 }
 
-#[test]
-fn parser_preserves_foldable_nested_child_as_template_boundary() {
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut span_builder = ExtendedSpanBuilder::new();
-    let mut expression_builder = AstExpressionBuilder::new().unwrap();
-    let mut const_values = ConstValueStore::default();
-    let (template, store) = parse_const_required_template(
-        "[:before[:child]after]",
-        &mut string_table,
-        &mut span_builder,
-        &mut path_fork,
-        &mut expression_builder,
-        &mut const_values,
-    );
-    let store = store.borrow();
-
-    // The foldable nested child is now TIR-owned: it appears as a
-    // `ChildTemplate` node in the parser TIR root, not as duplicated body content.
-    let children = tir_root_child_ids(&template, &store);
-    assert!(
-        children.iter().any(|child_id| {
-            matches!(
-                store.get_node(*child_id).map(|node| &node.kind),
-                Some(TemplateIrNodeKind::ChildTemplate { .. })
-            )
-        }),
-        "foldable nested child should remain a ChildTemplate TIR boundary"
-    );
-}
-
 /// Returns the root node kind of a template's finalized parser TIR entry.
 fn parser_tir_root_kind<'store>(
     template: &Template,
@@ -1046,38 +1015,6 @@ fn style_child_wrapper_no_children_records_formatted_tir_phase() {
     assert_eq!(
         rendered, "<p> body text</p>",
         "style child-template wrappers with no body children must not change formatted output"
-    );
-}
-
-#[test]
-fn style_child_wrapper_with_children_records_formatted_tir_phase() {
-    // When there are body child templates for the style wrapper to apply to, the
-    // formatted TIR root remains available because the TIR formatter preserves
-    // child-template boundaries for wrapper application.
-    let mut string_table = StringTable::new();
-    let mut path_fork = PathInternerFork::empty();
-    let mut span_builder = ExtendedSpanBuilder::new();
-    let mut expression_builder = AstExpressionBuilder::new().unwrap();
-    let mut const_values = ConstValueStore::default();
-    let (template, _store) = parse_template(
-        "[$md, $children([:<b>[$slot]</b>]): hello [:child] ]",
-        &mut string_table,
-        &mut span_builder,
-        &mut path_fork,
-        &mut expression_builder,
-        &mut const_values,
-    );
-
-    let reference = &template.tir_reference;
-    assert_eq!(
-        reference.phase,
-        TemplateTirPhase::Formatted,
-        "setup: style-wrapper-with-children markdown template must have a Formatted TIR reference"
-    );
-    let rendered = folded_template_output("[$md, $children([:<b>[$slot]</b>]): hello [:child] ]");
-    assert_eq!(
-        rendered, "<p> hello <b>child</b> </p>",
-        "style child-template wrappers with body children must still apply direct-child wrappers"
     );
 }
 

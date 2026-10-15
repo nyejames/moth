@@ -168,6 +168,16 @@ impl HirModuleLinkFacts {
             .map(|index| &self.blocks[index])
     }
 
+    /// Borrow every retained executable external call in deterministic block and call-site order.
+    ///
+    /// Candidate metadata needs all functions' direct demand, without selecting entry roots or
+    /// rescanning HIR. Repeated calls remain distinct so their source provenance is preserved.
+    pub(crate) fn direct_external_calls(&self) -> impl Iterator<Item = &ReachableExternalCall> {
+        self.blocks
+            .iter()
+            .flat_map(|block| block.direct_facts.reachable_external_calls.iter())
+    }
+
     /// Return the validated HIR call targets with their owning function identities.
     ///
     /// WHAT: exposes the existing per-function link-fact call extraction to transient build
@@ -384,7 +394,7 @@ pub(crate) enum ReachableMapUseKind {
     Operation(HirMapOp),
 }
 
-/// A reachable external call at the HIR statement that invokes it.
+/// A reachable external call at its HIR statement or Invoke terminator.
 ///
 /// WHY: backend validation needs the stable function ID and exact diagnostic location without
 ///       rescanning HIR after reachability has been selected.

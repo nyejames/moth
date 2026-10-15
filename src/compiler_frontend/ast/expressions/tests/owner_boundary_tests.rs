@@ -219,7 +219,7 @@ fn completed_input_rechecks_owners_before_any_edge_access() {
         panic!("a mutated completed input must reject its foreign edge");
     };
     // A local out-of-range first edge must not conceal the foreign second edge.
-    assert_eq!(error.msg, "expression handle from another owner");
+    assert_eq!(error.primary.msg, "expression handle from another owner");
     assert_eq!(storage_state(&second), before);
 
     let mut input = second

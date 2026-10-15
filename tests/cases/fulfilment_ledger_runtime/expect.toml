@@ -1,0 +1,4 @@
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "ledger:request4=4/full;request8=6/partial;request1=19:empty;return3;request2=2/full;request0=17:invalid;accepted=3,partial=1,rejected=2;available=1,shipped=12,returned=3;snapshot=10/0/0"
