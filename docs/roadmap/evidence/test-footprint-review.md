@@ -224,8 +224,9 @@ The selected Rust files remove 278 noncomment lines. Expanding existing header r
 | `dd991580f` | Phase 4 filesystem consolidation; platform/identity audit clean. |
 | `2d977ed23` | Phase 4 HIR consolidation and diagnostic keep decisions; invariant audit clean after inventory precision correction. |
 | `46ff0a759` | Phase 4 Oracle duplicate and numeric keep decisions; proof/domain audit clean after inventory precision corrections. |
+| `5a3fff880` | Phase 5 measured outcome and target limitations; independent recount and owner-reconciliation audit clean. |
 
-At `46ff0a759`, `cargo run --quiet -- tests --audit` regenerated 2,396 cases / 2,787 backend executions. `just test-honesty-audit` scanned 1,520 files, including 820 test-owning files: zero hard, source-audit or feature-lane findings, zero ledger-integrity findings and 208 suite advisories. `cargo run --quiet -- build docs --release` built 81 outputs. The complete runtime suite last passed at `d040ed97e`; later checkpoints change only unit tests and evidence. The required final integrated `just validate-full` gate is reserved for final closeout and is not yet claimed here.
+At `46ff0a759`, `cargo run --quiet -- tests --audit` regenerated 2,396 cases / 2,787 backend executions. `just test-honesty-audit` scanned 1,520 files, including 820 test-owning files: zero hard, source-audit or feature-lane findings, zero ledger-integrity findings and 208 suite advisories. `cargo run --quiet -- build docs --release` built 81 outputs. Phase 3's complete runtime pass belongs to `d040ed97e`. The final integrated run is recorded separately below.
 
 Raw recount data remains in ignored `tmp/test-footprint/final-measurements.json`, including exact counting implementation, source hashes and all owner reconciliations. Recounting uses `tokei --output json --types Rust src crates/moth-lexical crates/moth-mon xtask/src`, filtered to the declared test-directory scope, and the physical Moth/TOML rules above. The tracked tables and ID ledger preserve the outcome independently of temporary reports.
 
@@ -247,4 +248,29 @@ The collection integration fixture reaches `.set`, not the ledger's `.push`. `co
 
 Fresh `cargo run --quiet -- tests --case <id> --terse` commands at `46ff0a759` passed 2/2 each for `html_wasm_collection_runtime_coverage`, `mutable_parameter_wasm_rejected` and `custom_error_fallible_control_flow_html_wasm_unsupported`, covering their HTML success and exact expected Wasm rejection.
 
-The independent Phase 5 audit accepted the report without findings after independently recounting source/metadata, reconciling all 665 IDs and inspecting the seven focused target expectations. It confirmed the global literal-marker qualification and the 81 + 33 added header-fixture lines. Final integrated validation and roadmap retirement remain the separate closeout gate.
+The independent Phase 5 audit accepted the report without findings after independently recounting source/metadata, reconciling all 665 IDs and inspecting the seven focused target expectations. It confirmed the global literal-marker qualification and the 81 + 33 added header-fixture lines. Final integrated validation and roadmap retirement are recorded in closeout rather than attributed to this earlier phase.
+
+## Final integrated validation and closeout
+
+`PATH="/Users/aneirinjames/.nvm/versions/node/v24.21.0/bin:$PATH" just validate-full` passed on `5a3fff880` plus the uncommitted plan-retirement candidate. The candidate deletes the completed plan and removes its roadmap bullet, leaving later programmes paused. No executable source differs from accepted implementation checkpoint `46ff0a759`.
+
+| Final gate family | Observed outcome |
+|---|---|
+| Routine and workspace formatting, default and standard-feature Clippy | Passed. |
+| Feature coverage, source audit and first-party dependency audit | Zero findings. |
+| Workspace tests | Passed, including 6,120 compiler tests and 853 xtask tests. |
+| Canonical integration runtime | 2,787/2,787 passed. |
+| Documentation source check | Passed. |
+| Executing feature matrix | All ten standard lanes passed. |
+| Test-honesty audit | Zero hard or integrity findings, 208 suite advisories. |
+| Non-recording benchmark CI | All 148 standard cases preflighted and the quick CLI/frontend measurements completed. |
+| Scaling | All 14 series within their existing budgets. |
+| No-timer release artifact | Clean, 10,350,416 bytes. |
+
+Boracle remains opt-in and its separately executed gate is recorded above. The unchanged measured campaign, stress schedules, Linux-only raw-byte paths and Windows-only paths were not executed locally. The ledger remains HTML-only, and Candidate B remains unadmitted. No performance improvement is inferred from a passing budget.
+
+Three fresh final review lanes passed without required findings: production header ownership and diagnostics, verification contracts and scenario admission, and evidence/status consistency. They traced downstream consumers and retained owners rather than treating passing counts as semantic proof. The positive nested-template assertion's coverage limit remains explicit above. No final-lane correction was required.
+
+The fresh cross-scope integration audit passed. Its initial P2 proposal for a general discarded-runtime brace/group EOF check was withdrawn after comparing `bf84a6c6` with the candidate: the pure-EOF behaviour predates this patch, and Stage 2 explicitly does not validate executable bodies. The existing nested-template capture contract is different and remains protected. Adding a parallel expression validator would exceed this work's scope.
+
+A temporary real-project probe also rejected an unclosed collection with `MOTH-SYNTAX-0017`, expected `}`, at `components/@components.moth:5:3`. Each dependency module's own root is active during its compilation, so that result does not isolate the per-file `ImportedModuleRoot` role. The probe inputs were removed. No required correction remains, and executable sources are unchanged from the full-gate run.
