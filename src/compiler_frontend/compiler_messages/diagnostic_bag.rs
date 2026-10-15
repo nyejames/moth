@@ -10,7 +10,7 @@
 //! never be observed through two owners at once.
 
 use super::compiler_errors::{
-    CompilerError, CompilerMessages, RenderPathContext, RenderTypeContext,
+    CompilerError, CompilerMessages, InfrastructureErrors, RenderPathContext, RenderTypeContext,
 };
 use super::module_diagnostics::ModuleDiagnostics;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, DiagnosticSeverity};
@@ -118,23 +118,20 @@ pub(crate) struct PremergeDiagnosticBatch {
 
 /// Shared premerge failure lane preserving diagnosed vs infrastructure outcomes.
 ///
-/// WHAT: carries a move-only diagnosed [`PremergeDiagnosticBatch`], a typed infrastructure
-/// [`CompilerError`], or both when a source-finalization failure races a semantic failure.
-/// The mixed form exists only for that double-failure tail: the diagnosed batch stays
-/// authoritative for user output while the finish failure stays observable on the outer
-/// infrastructure lane instead of being dropped or fabricated into a user diagnostic.
-/// The rare mixed `CompilerError` is boxed so the failure lane stays under the large-error
-/// threshold.
+/// WHAT: carries a move-only diagnosed [`PremergeDiagnosticBatch`], an owned infrastructure
+/// aggregate, or both when source finalization races a semantic failure. The mixed form keeps
+/// the diagnosed batch authoritative for user output while preserving every operational cause
+/// on the outer lane. Infrastructure aggregates are boxed to keep the common failure lane small.
 /// WHY: premerge producers must return one lane that keeps authored-source rejection
 /// separate from malformed retained state; the final merge boundary owns the single
 /// conversion into `CompilerMessages`.
 #[derive(Debug)]
 pub(crate) enum PremergeFailure {
     Diagnosed(PremergeDiagnosticBatch),
-    Infrastructure(CompilerError),
+    Infrastructure(Box<InfrastructureErrors>),
     Mixed {
         batch: PremergeDiagnosticBatch,
-        error: Box<CompilerError>,
+        error: Box<InfrastructureErrors>,
     },
 }
 
@@ -146,7 +143,7 @@ impl From<PremergeDiagnosticBatch> for PremergeFailure {
 
 impl From<CompilerError> for PremergeFailure {
     fn from(error: CompilerError) -> Self {
-        Self::Infrastructure(error)
+        Self::Infrastructure(error.into())
     }
 }
 
@@ -198,19 +195,23 @@ impl PremergeFailure {
 
     /// Convert the premerge lane into the final boundary vessel exactly once.
     ///
-    /// WHAT: moves a diagnosed batch into `CompilerMessages`, carries an infrastructure
-    /// `CompilerError` on the outer lane, or carries both for a mixed double-failure,
-    /// without cloning diagnostics.
+    /// WHAT: moves a diagnosed batch into `CompilerMessages`, carries every infrastructure cause
+    /// on the outer lane, or carries both for a mixed double-failure, without cloning diagnostics
+    /// or infrastructure causes.
     /// WHY: only true final build/package/check/benchmark boundaries own this conversion;
     /// intermediate stages return the failure lane itself so `StringId` remap and source
     /// attachment each happen exactly once at the merge boundary.
     pub(crate) fn into_messages(self, string_table: &StringTable) -> CompilerMessages {
         match self {
             Self::Diagnosed(batch) => batch.into_messages(),
-            Self::Infrastructure(error) => CompilerMessages::from_error_ref(error, string_table),
+            Self::Infrastructure(errors) => {
+                let mut messages = CompilerMessages::empty(string_table.clone());
+                messages.append_infrastructure_errors(errors);
+                messages
+            }
             Self::Mixed { batch, error } => {
                 let mut messages = batch.into_messages();
-                messages.set_infrastructure_error(*error);
+                messages.append_infrastructure_errors(error);
                 messages
             }
         }
@@ -248,7 +249,7 @@ impl From<super::compiler_errors::CompilerMessages> for PremergeFailure {
         match ModuleDiagnostics::from_messages(messages) {
             Ok(diagnostics) => match diagnostics.into_batch() {
                 Ok(batch) => Self::Diagnosed(batch),
-                Err(error) => Self::Infrastructure(error),
+                Err(error) => Self::Infrastructure(error.into()),
             },
             Err(error) => Self::Infrastructure(error),
         }
@@ -437,7 +438,7 @@ impl PremergeDiagnosticBatch {
         let (bag, string_table, render_type_contexts, render_path_contexts) = self.into_parts();
         CompilerMessages {
             diagnostics: bag.into_diagnostics(),
-            infrastructure_error: None,
+            infrastructure_errors: None,
             string_table: Box::new(string_table),
             render_frozen_contexts: Vec::new(),
             render_source_contexts: Vec::new(),

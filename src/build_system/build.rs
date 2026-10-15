@@ -112,13 +112,10 @@ fn finalize_backend_failure_messages(
     if let Some(source_database) = project_source_database {
         messages.set_source_database(source_database);
     }
-    match messages.freeze_source_contexts() {
-        Ok(messages) => messages,
-        Err(error) => CompilerMessages::from_error(
-            error,
-            crate::compiler_frontend::symbols::string_interning::StringTable::new(),
-        ),
+    if let Err(freeze_error) = messages.freeze_source_contexts() {
+        messages.set_infrastructure_error(freeze_error);
     }
+    messages
 }
 
 // -------------------------
@@ -1639,14 +1636,12 @@ impl BuildResult {
     ///       owned generated spans.
     /// WHY: late build/dev diagnostics may need to be appended before the single final freeze, so
     ///      shared source databases are deduplicated by that one handoff rather than frozen twice.
-    pub(crate) fn take_warning_messages_before_freeze(
-        &mut self,
-    ) -> Result<Option<CompilerMessages>, CompilerError> {
+    pub(crate) fn take_warning_messages_before_freeze(&mut self) -> Option<CompilerMessages> {
         if self.warnings.is_empty() {
             let _ = std::mem::take(&mut self.string_table);
             self.warning_source_contexts.clear();
             self.source_database.take();
-            return Ok(None);
+            return None;
         }
 
         let warnings = std::mem::take(&mut self.warnings);
@@ -1658,19 +1653,19 @@ impl BuildResult {
         if let Some(source_database) = source_database {
             messages.set_source_database(source_database);
         }
-        Ok(Some(messages))
+        Some(messages)
     }
 
     /// Move successful-build warnings into their one final frozen render owner.
     ///
     /// The output writer consumes the mutable build table first; this method is the terminal
     /// report publication point. Clean builds release the table and source snapshots immediately.
-    pub(crate) fn take_warning_messages(
-        &mut self,
-    ) -> Result<Option<CompilerMessages>, CompilerError> {
-        self.take_warning_messages_before_freeze()?
-            .map(|messages| messages.freeze_source_contexts())
-            .transpose()
+    pub(crate) fn take_warning_messages(&mut self) -> Option<CompilerMessages> {
+        let mut messages = self.take_warning_messages_before_freeze()?;
+        if let Err(freeze_error) = messages.freeze_source_contexts() {
+            messages.set_infrastructure_error(freeze_error);
+        }
+        Some(messages)
     }
     /// Aggregate a late output-plan/write failure with warnings before freezing one source owner.
     ///
@@ -1680,29 +1675,22 @@ impl BuildResult {
     pub(crate) fn take_output_failure_messages(
         &mut self,
         late_messages: CompilerMessages,
-    ) -> Result<CompilerMessages, CompilerError> {
-        let mut messages = if self.warnings.is_empty() {
-            let string_table = std::mem::take(&mut self.string_table);
-            let source_contexts = std::mem::take(&mut self.warning_source_contexts);
-            let source_database = self.source_database.take();
-            let mut messages = CompilerMessages::from_diagnostics(Vec::new(), string_table);
-            messages.install_source_contexts(source_contexts, 0);
-            messages.append_messages_preserving_context(late_messages);
-            if let Some(source_database) = source_database {
-                messages.set_source_database(source_database);
-            }
-            messages
-        } else {
-            let mut messages = self.take_warning_messages_before_freeze()?.ok_or_else(|| {
-                CompilerError::compiler_error(
-                    "warning report owner disappeared during output failure handoff",
-                )
-            })?;
-            messages.append_messages_preserving_context(late_messages);
-            messages
-        };
+    ) -> CompilerMessages {
+        let warnings = std::mem::take(&mut self.warnings);
+        let string_table = std::mem::take(&mut self.string_table);
+        let source_contexts = std::mem::take(&mut self.warning_source_contexts);
+        let source_database = self.source_database.take();
+        let mut messages = CompilerMessages::from_diagnostics(warnings, string_table);
+        messages.install_source_contexts(source_contexts, 0);
+        messages.append_messages_preserving_context(late_messages);
+        if let Some(source_database) = source_database {
+            messages.set_source_database(source_database);
+        }
         messages.extend_project_source_context_to_diagnostics();
-        messages.freeze_source_contexts()
+        if let Err(freeze_error) = messages.freeze_source_contexts() {
+            messages.set_infrastructure_error(freeze_error);
+        }
+        messages
     }
 }
 
@@ -1766,15 +1754,11 @@ pub fn build_project(
         }
     };
     if frontend_compilation.has_diagnosed_or_blocked() {
-        let messages = frontend_compilation
-            .into_render_messages_with_frozen_identity(
-                &mut string_table,
-                project_source_files.take(),
-                None,
-            )
-            .map_err(|error| {
-                CompilerMessages::from_error(error, std::mem::take(&mut string_table))
-            })?;
+        let messages = frontend_compilation.into_render_messages_with_frozen_identity(
+            &mut string_table,
+            project_source_files.take(),
+            None,
+        );
         return Err(messages);
     }
     let project_compilation = match ProjectCompilation::from_frontend(frontend_compilation) {

@@ -108,10 +108,7 @@ fn build_project_returns_result_without_writing_files() {
     assert!(!result.project.output_files.is_empty());
     assert_path_missing(&root.join("index.html"));
     assert!(
-        result
-            .take_warning_messages()
-            .expect("clean report handoff should succeed")
-            .is_none(),
+        result.take_warning_messages().is_none(),
         "clean build should publish no warning report"
     );
     assert_eq!(
@@ -244,8 +241,8 @@ fn build_result_warning_handoff_resolves_generated_donor_source_context() {
 
     let messages = result
         .take_warning_messages()
-        .expect("warning report handoff should succeed")
         .expect("spanful warning should produce a report");
+    assert!(!messages.has_infrastructure_error(), "{messages:?}");
     let diagnostic = messages
         .diagnostics()
         .next()
@@ -364,8 +361,8 @@ fn build_result_warning_handoff_keeps_related_package_label_out_of_default_conte
 
     let messages = result
         .take_warning_messages()
-        .expect("warning report handoff should succeed")
         .expect("spanful warning should produce a report");
+    assert!(!messages.has_infrastructure_error(), "{messages:?}");
     let diagnostic = messages
         .diagnostics()
         .next()
@@ -1691,7 +1688,7 @@ fn build_directory_project_requires_artifact_root_in_configured_entry_root() {
     };
     assert_has_config_error(&messages);
     assert!(
-        messages.infrastructure_error().is_none(),
+        messages.infrastructure_errors().is_none(),
         "missing homepage should stay as a typed config diagnostic"
     );
 }
@@ -2563,9 +2560,8 @@ fn late_output_failure_keeps_authored_setting_source_owner() {
     )
     .expect_err("a foreign output owner should produce a late diagnostic");
 
-    let messages = second_build
-        .take_output_failure_messages(late_messages)
-        .expect("late output report should freeze");
+    let messages = second_build.take_output_failure_messages(late_messages);
+    assert!(!messages.has_infrastructure_error(), "{messages:?}");
     let diagnostic = messages
         .error_diagnostics()
         .next()

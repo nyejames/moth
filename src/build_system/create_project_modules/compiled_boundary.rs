@@ -13,7 +13,7 @@
 //! `ModuleId` values inside [`CompiledModuleArtifact`], or mutate package root metadata.
 
 use crate::compiler_frontend::compiler_errors::{
-    CompilerError, CompilerMessages, RenderFrozenContext,
+    CompilerError, CompilerMessages, RenderSourceContext,
 };
 use crate::compiler_frontend::compiler_messages::module_diagnostics::ModuleDiagnostics;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, PremergeDiagnosticBatch};
@@ -24,9 +24,11 @@ use crate::compiler_frontend::public_interface::PublicSemanticInterface;
 use crate::compiler_frontend::semantic_identity::{
     GeneratedDeclarationIdentity, ModuleRootRole, StablePackageIdentity,
 };
-use crate::compiler_frontend::source::{FrozenIdentityContext, SourceDatabase};
+use crate::compiler_frontend::source::SourceDatabase;
 #[cfg(feature = "data_layout_memory_probe")]
-use crate::compiler_frontend::source::{FrozenIdentityHandle, SourceDatabaseRetentionMetrics};
+use crate::compiler_frontend::source::{
+    FrozenIdentityContext, FrozenIdentityHandle, SourceDatabaseRetentionMetrics,
+};
 use crate::compiler_frontend::symbols::path_interner::PathTable;
 use crate::compiler_frontend::symbols::string_interning::{FrozenStringTable, StringTable};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -339,23 +341,6 @@ impl CompiledGraphBoundary {
         self.generated.install_path_table(Arc::clone(&path_table));
         self.modules
             .install_identity_tables(path_table, source_string_table);
-    }
-
-    pub(crate) fn install_frozen_identity(
-        &self,
-        identity: Option<Arc<FrozenIdentityContext>>,
-    ) -> Result<(), CompilerError> {
-        for module in self.successful_module_views() {
-            if let Some(context) = module.metadata.materialisation_context.as_ref() {
-                let identity = identity.as_ref().ok_or_else(|| {
-                    CompilerError::compiler_error(
-                        "successful module retained materialisation state without a frozen source identity",
-                    )
-                })?;
-                context.install_frozen_identity(Arc::clone(identity))?;
-            }
-        }
-        Ok(())
     }
 }
 
@@ -1071,6 +1056,58 @@ impl FrozenRenderRetentionMetrics {
         self.extended_span_rows += metrics.extended_span_rows;
         self.source_identity_slots += metrics.source_identity_slots;
     }
+
+    /// Count only owners still reachable from the report, including live sources on freeze failure.
+    fn add_report_source_owners(&mut self, messages: &CompilerMessages) {
+        let mut identities = FxHashSet::<*const FrozenIdentityContext>::default();
+        let mut add_identity = |identity: &FrozenIdentityContext| {
+            if identities.insert(identity as *const FrozenIdentityContext) {
+                self.add_source(identity.retention_metrics());
+            }
+        };
+        for context in &messages.render_frozen_contexts {
+            add_identity(&context.identity);
+        }
+        if let Some(errors) = messages.infrastructure_errors() {
+            for identity in errors.frozen_identities() {
+                add_identity(identity);
+            }
+        }
+        for diagnostic in messages.diagnostic_slice() {
+            if let Some(identity) = diagnostic
+                .primary_frozen_identity_handle
+                .as_ref()
+                .and_then(FrozenIdentityHandle::get)
+            {
+                add_identity(identity);
+            }
+            for label in &diagnostic.labels {
+                if let Some(identity) = label
+                    .frozen_identity_handle
+                    .as_ref()
+                    .and_then(FrozenIdentityHandle::get)
+                {
+                    add_identity(identity);
+                }
+            }
+        }
+        self.retained_identity_contexts = identities.len();
+        let mut live_sources = FxHashSet::<*const SourceDatabase>::default();
+        let cause_sources = messages
+            .infrastructure_errors()
+            .into_iter()
+            .flat_map(|errors| errors.source_databases());
+        for source in messages
+            .render_source_contexts
+            .iter()
+            .map(|context| &context.source_database)
+            .chain(cause_sources)
+        {
+            if live_sources.insert(Arc::as_ptr(source)) {
+                self.add_source(source.retention_metrics());
+            }
+        }
+    }
     /// Count distinct path-table owners reachable from the returned diagnostic report.
     ///
     /// WHAT: walks the exact owner set the diagnostic renderer can still dereference after the
@@ -1095,6 +1132,11 @@ impl FrozenRenderRetentionMetrics {
         };
         for frozen_context in &messages.render_frozen_contexts {
             add_identity(&frozen_context.identity);
+        }
+        if let Some(errors) = messages.infrastructure_errors() {
+            for identity in errors.frozen_identities() {
+                add_identity(identity);
+            }
         }
         for diagnostic in messages.diagnostic_slice() {
             if let Some(identity) = diagnostic
@@ -1121,6 +1163,11 @@ impl FrozenRenderRetentionMetrics {
         }
         for source_context in &messages.render_source_contexts {
             add(source_context.source_database.paths());
+        }
+        if let Some(errors) = messages.infrastructure_errors() {
+            for source in errors.source_databases() {
+                add(source.paths());
+            }
         }
     }
 }
@@ -1223,26 +1270,25 @@ impl ProjectFrontendCompilation {
 
     /// Build the frozen-identity render-boundary message set for this outcome.
     ///
-    /// WHAT: merges every retained local table exactly once into the caller aggregate,
-    ///       freezes that aggregate with the project snapshot as the root identity, shares
-    ///       the frozen strings with each package snapshot, and installs one frozen range
-    ///       per nonempty diagnostic span. Order is project warnings, package warnings,
-    ///       project diagnosed, package diagnosed, then transient batches.
-    /// WHY: production build/check/benchmark render against exact snapshots with no table
-    ///      clones and no filesystem rereads; `diagnostic_render_context` resolves every
-    ///      covered row through its frozen strings.
+    /// WHAT: merges every retained local table exactly once into the caller aggregate, pairs
+    ///       each diagnostic range and infrastructure cause with its issuing source owner, then
+    ///       freezes through the shared message owner. Order is project warnings, package warnings,
+    ///       project diagnosed, package diagnosed, then transient batches and trailing messages.
+    ///       Freeze failures append to the original vessel; live source/string owners remain intact.
+    /// WHY: production build/check/benchmark render against exact snapshots without source/table
+    ///      copies or filesystem rereads, and finalisation cannot replace an earlier failure.
     pub(crate) fn into_render_messages_with_frozen_identity(
         self,
         string_table: &mut StringTable,
         project_source: Option<Arc<SourceDatabase>>,
         trailing_project_messages: Option<CompilerMessages>,
-    ) -> Result<CompilerMessages, CompilerError> {
+    ) -> CompilerMessages {
         self.into_render_messages_with_optional_retention(
             string_table,
             project_source,
             trailing_project_messages,
         )
-        .map(|(messages, _)| messages)
+        .0
     }
 
     #[cfg(feature = "data_layout_memory_probe")]
@@ -1251,7 +1297,7 @@ impl ProjectFrontendCompilation {
         string_table: &mut StringTable,
         project_source: Option<Arc<SourceDatabase>>,
         trailing_project_messages: Option<CompilerMessages>,
-    ) -> Result<(CompilerMessages, FrozenRenderRetentionMetrics), CompilerError> {
+    ) -> (CompilerMessages, FrozenRenderRetentionMetrics) {
         self.into_render_messages_with_optional_retention(
             string_table,
             project_source,
@@ -1264,7 +1310,7 @@ impl ProjectFrontendCompilation {
         string_table: &mut StringTable,
         project_source: Option<Arc<SourceDatabase>>,
         trailing_project_messages: Option<CompilerMessages>,
-    ) -> Result<(CompilerMessages, FrozenRenderRetentionMetrics), CompilerError> {
+    ) -> (CompilerMessages, FrozenRenderRetentionMetrics) {
         // The second tuple member is a unit in normal builds. Retention scans and source
         // accounting exist only in the data-layout probe feature, while production rendering
         // still shares this one ownership-preserving implementation.
@@ -1366,14 +1412,14 @@ impl ProjectFrontendCompilation {
             let _ = std::mem::take(&mut messages.string_table);
             #[cfg(feature = "data_layout_memory_probe")]
             {
-                return Ok((
+                return (
                     messages,
                     FrozenRenderRetentionMetrics::from_ledger(ledger_snapshot),
-                ));
+                );
             }
             #[cfg(not(feature = "data_layout_memory_probe"))]
             {
-                return Ok((messages, ()));
+                return (messages, ());
             }
         }
 
@@ -1391,157 +1437,82 @@ impl ProjectFrontendCompilation {
         #[cfg(not(feature = "data_layout_memory_probe"))]
         let retention = ();
 
+        // These artefacts are consumed by this terminal report conversion. Their materialisation
+        // handles have no later artefact reader; only explicit primary/label handles retained by
+        // diagnostics need installation, which the shared freeze owner performs by exact domain.
+        let project_domain = project.structure.stable_package_identity().cloned();
         let project_source = project_source.or(project_source_database);
-        // Consume owners without cloning. An unexpectedly shared Arc is a caller bug.
-        let project_database = match project_source {
-            Some(source) => Arc::try_unwrap(source).map_err(|_| {
-                CompilerError::compiler_error(
-                    "project source database was unexpectedly shared at the frozen render tail",
-                )
-            })?,
-            None => SourceDatabase::empty(),
-        };
-        #[cfg(feature = "data_layout_memory_probe")]
-        let project_source_metrics = project_database.retention_metrics();
-
-        let mut package_databases: Vec<Option<SourceDatabase>> =
-            Vec::with_capacity(package_source_arcs.len());
-        #[cfg(feature = "data_layout_memory_probe")]
-        let mut package_source_metrics: Vec<Option<SourceDatabaseRetentionMetrics>> =
-            Vec::with_capacity(package_source_arcs.len());
-        for source in package_source_arcs {
-            match source {
-                Some(source) => {
-                    #[cfg(feature = "data_layout_memory_probe")]
-                    let source_metrics = source.retention_metrics();
-                    let database = Arc::try_unwrap(source).map_err(|_| {
-                        CompilerError::compiler_error(
-                            "package source database was unexpectedly shared at the frozen render tail",
-                        )
-                    })?;
-                    package_databases.push(Some(database));
-                    #[cfg(feature = "data_layout_memory_probe")]
-                    package_source_metrics.push(Some(source_metrics));
-                }
-                None => {
-                    package_databases.push(None);
-                    #[cfg(feature = "data_layout_memory_probe")]
-                    package_source_metrics.push(None);
-                }
-            }
+        if let (Some(errors), Some(source)) = (
+            messages.infrastructure_errors.as_mut(),
+            project_source.as_ref(),
+        ) {
+            // All unpaired causes came from the explicitly project-owned trailing vessel.
+            // Earlier package/foreign pairings already retained by the aggregate take precedence.
+            errors.set_source_database(Arc::clone(source));
         }
-        // Freeze only after every local table has been appended/remapped above.
-        let frozen_root = Arc::new(FrozenIdentityContext::from_parts(
-            *std::mem::take(&mut messages.string_table),
-            project_database,
-        ));
-        let mut package_identities: Vec<Option<Arc<FrozenIdentityContext>>> =
-            Vec::with_capacity(package_databases.len());
-        for database in package_databases {
-            match database {
-                Some(database) => {
-                    package_identities.push(Some(Arc::new(
-                        FrozenIdentityContext::from_shared_strings(
-                            frozen_root.shared_strings(),
-                            database,
-                        ),
+
+        let mut can_freeze = true;
+        let mut source_contexts = Vec::new();
+        for (range, package_index) in frozen_spans {
+            let (source, domain) = match package_index {
+                Some(index) => match (package_source_arcs.get(index), source_packages.get(index)) {
+                    (Some(source), Some(package)) => {
+                        (source.as_ref(), Some(package.package_identity.clone()))
+                    }
+                    _ => {
+                        messages.set_infrastructure_error(CompilerError::compiler_error(format!(
+                            "diagnostic range references missing source package identity index {index}",
+                        )));
+                        can_freeze = false;
+                        continue;
+                    }
+                },
+                None => (project_source.as_ref(), None),
+            };
+            if let Some(source) = source {
+                source_contexts.push(RenderSourceContext {
+                    diagnostic_range: range,
+                    source_database: Arc::clone(source),
+                    domain,
+                });
+            } else {
+                // Keep the merged string table live for unpaired rows. No project fallback may
+                // reinterpret a package span through an unrelated source with the same numeric ID.
+                if diagnostic_range_requires_source_identity(messages.diagnostic_slice(), &range) {
+                    messages.set_infrastructure_error(CompilerError::compiler_error(format!(
+                        "diagnostic range {range:?} has no finalized source identity",
                     )));
                 }
-                None => package_identities.push(None),
+                can_freeze = false;
             }
         }
-        project.install_frozen_identity(Some(Arc::clone(&frozen_root)))?;
-        if let Some(domain) = project.structure.stable_package_identity() {
-            messages.install_frozen_identity_handles_for_domain(domain, &frozen_root)?;
-        }
-        for (package, identity) in source_packages.iter().zip(package_identities.iter()) {
-            package
-                .boundary
-                .install_frozen_identity(identity.as_ref().map(Arc::clone))?;
-            if let Some(identity) = identity {
-                messages.install_frozen_identity_handles_for_domain(
-                    &package.package_identity,
-                    identity,
-                )?;
-            }
-        }
-        messages.ensure_frozen_identity_handles_installed()?;
-        let mut frozen_contexts = Vec::with_capacity(frozen_spans.len());
-        for (range, domain) in frozen_spans {
-            if range.is_empty() {
-                continue;
-            }
-            let identity = match domain {
-                Some(package_index) => {
-                    let package_identity = package_identities
-                        .get(package_index)
-                        .ok_or_else(|| {
-                            CompilerError::compiler_error(format!(
-                                "diagnostic range references missing source package identity index {package_index}",
-                            ))
-                        })?;
-                    let Some(identity) = package_identity else {
-                        if diagnostic_range_requires_source_identity(
-                            messages.diagnostic_slice(),
-                            &range,
-                        ) {
-                            return Err(CompilerError::compiler_error(format!(
-                                "source-package diagnostic range {range:?} has no frozen source identity",
-                            )));
-                        }
-                        continue;
-                    };
-                    Arc::clone(identity)
-                }
-                None => Arc::clone(&frozen_root),
-            };
-            frozen_contexts.push(RenderFrozenContext {
-                diagnostic_range: range,
-                identity,
+        // Domain-only rows supply donor handles even when their source has no ordinary diagnostic
+        // range. The freeze owner retains these only when a report-visible handle needs them.
+        if let Some(source) = project_source {
+            source_contexts.push(RenderSourceContext {
+                diagnostic_range: 0..0,
+                source_database: source,
+                domain: project_domain,
             });
         }
-        messages.install_frozen_identity_contexts(frozen_contexts, 0);
+        for (package, source) in source_packages.iter().zip(package_source_arcs) {
+            if let Some(source) = source {
+                source_contexts.push(RenderSourceContext {
+                    diagnostic_range: 0..0,
+                    source_database: source,
+                    domain: Some(package.package_identity.clone()),
+                });
+            }
+        }
+        messages.install_source_contexts(source_contexts, 0);
+        if can_freeze && let Err(error) = messages.freeze_source_contexts() {
+            messages.set_infrastructure_error(error);
+        }
         #[cfg(feature = "data_layout_memory_probe")]
         {
-            // A range row is not a context count: repeated rows may share one context, and a
-            // donor-only handle can retain a context without contributing an ordinary range.
-            let mut retained_contexts = FxHashSet::<*const FrozenIdentityContext>::default();
-            for frozen_context in &messages.render_frozen_contexts {
-                retained_contexts.insert(Arc::as_ptr(&frozen_context.identity));
-            }
-            for diagnostic in messages.diagnostic_slice() {
-                if let Some(handle) = diagnostic.primary_frozen_identity_handle.as_ref()
-                    && let Some(identity) = handle.get()
-                {
-                    retained_contexts.insert(identity as *const FrozenIdentityContext);
-                }
-                for label in &diagnostic.labels {
-                    if let Some(handle) = label.frozen_identity_handle.as_ref()
-                        && let Some(identity) = handle.get()
-                    {
-                        retained_contexts.insert(identity as *const FrozenIdentityContext);
-                    }
-                }
-            }
-            retention.retained_identity_contexts = retained_contexts.len();
-
-            if retained_contexts.contains(&Arc::as_ptr(&frozen_root)) {
-                retention.add_source(project_source_metrics);
-            }
-            for (identity, source_metrics) in
-                package_identities.iter().zip(package_source_metrics.iter())
-            {
-                if let (Some(identity), Some(source_metrics)) = (identity, source_metrics)
-                    && retained_contexts.contains(&Arc::as_ptr(identity))
-                {
-                    retention.add_source(*source_metrics);
-                }
-            }
-            // Path-table ownership mirrors the identity scan above: the returned report, not the
-            // dropped build boundary, is the retention owner. A range row shares its owner's
-            // table, so deduplication by table pointer keeps repeated rows from inflating counts.
+            retention.add_report_source_owners(&messages);
             retention.add_report_path_tables(&messages);
         }
-        Ok((messages, retention))
+        (messages, retention)
     }
 }

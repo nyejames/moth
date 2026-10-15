@@ -43,9 +43,8 @@ fn directory_graph_retains_independent_diagnostics_without_blocked_consumer_casc
     )
     .expect("diagnosed modules are retained in the typed frontend outcome");
     let project_source = frontend.project_source_database.take();
-    let messages = frontend
-        .into_render_messages_with_frozen_identity(&mut string_table, project_source, None)
-        .expect("frontend diagnostics should install frozen render identity");
+    let messages =
+        frontend.into_render_messages_with_frozen_identity(&mut string_table, project_source, None);
 
     assert_eq!(
         messages.error_count(),
@@ -175,7 +174,7 @@ fn selected_preload_read_failure_stays_in_the_existing_file_error_lane() {
         Err(error) => error,
     };
     let error_value = error
-        .infrastructure_error()
+        .primary_infrastructure_error()
         .expect("selected preload failure should remain an infrastructure file error");
     assert_eq!(&error_value.error_type, &ErrorType::File);
     assert!(
@@ -288,9 +287,8 @@ fn project_facade_rejects_own_project_globals_dependency_before_semantic_use() {
     )
     .expect("a facade dependency diagnostic should remain a retained frontend outcome");
     let project_source = frontend.project_source_database.take();
-    let messages = frontend
-        .into_render_messages_with_frozen_identity(&mut string_table, project_source, None)
-        .expect("facade diagnostics should install frozen render identity");
+    let messages =
+        frontend.into_render_messages_with_frozen_identity(&mut string_table, project_source, None);
 
     let matching = messages
         .diagnostics()
@@ -906,7 +904,7 @@ fn unguarded_parallel_compile_registers_into_an_active_timing_session() {
                 // The concurrent fixture must fail for the infrastructure file-error reason, not
                 // carry a user diagnostic: the invalid-UTF-8 source is unreadable, not invalid.
                 let error_value = thread_error
-                    .infrastructure_error()
+                    .primary_infrastructure_error()
                     .expect("concurrent failure should remain an infrastructure file error");
                 assert_eq!(&error_value.error_type, &ErrorType::File);
                 assert!(

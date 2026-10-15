@@ -112,3 +112,53 @@ The normal Node harness still selects only `index.html` and rejects import maps.
 Location-red output is retained at ignored `tmp/js-import-linking-location-red.log`. The producer handoff accidentally removed an existing `StringTable` import; parent diff inspection restored it before compilation.
 
 Fresh runtime/emission and typed-provenance auditors accepted Phase 3 as clean, with no required correction. Runtime review traced assertions into their consuming owners and reused existing dormant-provider root controls; diagnostic review traced source identity through provider failure, premerge transport and synthetic rebind. The current routed test-admission authority is `docs/src/developer-docs/style-guide/testing.mtf`, not an absent `docs/testing-standards.md`. Disposable multi-page smoke sources and outputs were removed after review; its permanent build test retains the reproducible source shape.
+
+## Typed failure transport and reporting checkpoint
+
+The candidate after `160782190` keeps one cold ordered `InfrastructureErrors` box beside typed diagnostics. Every cause retains its type, raw message, host path, span and metadata. Explicit cause ranges keep live or frozen source owners paired through append and finalisation. Independent frozen identity domains retain their own strings. The common message vessel remains at most 128 bytes and counts the aggregate as one infrastructure event.
+
+### Producer inventory and classification
+
+The inventory inspected constructors and every production `.with_error_type(...)` group on this branch, prioritising these boundaries:
+
+| Path and producer | Actual cause | Final class and disposition |
+|---|---|---|
+| `build_system/path_validation.rs::check_if_valid_path`, `create_project_modules/source_loading.rs::source_read_error` | Missing paths and source read failures | `File`, operational, preserved |
+| `create_project_modules/resource_inputs.rs`, `build_system/project_config.rs`, `output/{writer,manifest}.rs` and `build_system/utils.rs` filesystem producers | Resource/config reads, canonicalisation, output inspection and writes | `File`, operational, preserved |
+| `create_project_modules/discovery_provider_imports.rs::resolve_provider_prefix_to_canonical_path` | Provider-prefix canonicalisation | `File`, operational, preserved |
+| Same module's `invoke_provider_and_record_resolution` | Provider's returned failure | Preserve the provider's typed carrier and class |
+| `html_project/external_js/js_import_provider.rs::resolve_external_import` | JS read failure versus authored JS errors | `File` for IO, typed import diagnostics for source errors |
+| JS package registration, checked runtime-glue exports and module/link assembly | Inconsistent validated compiler or builder metadata | `Compiler`, compiler defect |
+| HIR validation/transformation and `backends/error_types.rs::lir_transformation_error` | Generated HIR/LIR invariants | `HirTransformation` or `Backend(LirTransformation)`, compiler defect |
+| `backends/wasm/{backend,emit/**}.rs` | Wasm emission and generated-binary invariants | `Backend(WasmGeneration)`, compiler defect; capability rejection stays typed |
+| `dev_server/server.rs::validate_dev_entry_path` | Missing paths and failed canonicalisation | Preserve `File` rather than overwrite it with `DevServer` |
+| `dev_server/build_loop.rs::ProjectBuildExecutor::build` | Non-UTF-8 host entry path | Path-bearing `File`, operational |
+| `dev_server/server.rs::resolve_dev_runtime_paths`, `build_loop.rs::build_once` | Successful bootstrap/build lacks required output settings or entry page | `Compiler`, builder invariant, with warnings retained |
+| `dev_server/server.rs` bind/current-directory/entry-kind producers | Host or invocation failure | `DevServer`, operational |
+| `dev_server/watch.rs` and Node `node_harness.rs` | Watch and render-harness process failures | Existing warning/IO or `RenderHarnessError` owners, unchanged |
+
+`Config` had no production owner and was removed. Authored config mistakes remain typed diagnostics and config IO remains `File`. No compiler-owned process-spawn/status producer required a new tooling variant. Remaining backend subtype precision in `emit/vec_helpers.rs` and `hir_to_lir/terminator.rs` already yields compiler-defect classification and stays outside this task.
+
+### Transport, render and runtime evidence
+
+The final render tail now returns its original message vessel even when move-only freezing fails. It appends the freeze cause rather than replacing prior causes or warnings. Source snapshots move through the shared freeze owner, and retention probes count owners reachable from the returned report, including live owners after failure. Connected header, premerge, template, expression, import and materialisation adapters move the complete cold aggregate. A small AST-owned named signature result replaces two four-field tuple results without adding copies or allocations.
+
+| Check | Revision/profile | Observed result |
+|---|---|---|
+| Message/render tests, compiled-tail tests and dev-server tests | `160782190` plus Phase 4 candidate, default | 155, 15 and 91 passed respectively |
+| Actual checked-glue metadata failure; header and mixed-premerge regressions; TIR tests | Same candidate, default | 1, 1, 1 and 6 passed; each metadata fault exercises all three renderers |
+| Source loading, providers and build orchestration | Same candidate, default | 5, 20 and 53 passed |
+| Memory-probe final-tail regression | Same candidate, `data_layout_memory_probe` | 1 passed; failed freezing preserves both causes, warning and exact live source owner |
+| Template, package-materialisation and import-projection suites after corrections | Same candidate, default | 32, 29 and 7 passed |
+| `just boracle` | Same candidate | Clippy passed; 46 borrow, 5 last-use and 260 Boracle tests passed |
+| `just validate` | Final Phase 4 code candidate, workspace-unified features | Passed: main unit lane 6126, compiler integration 2786/2786, docs clean, source/dependency audits zero findings |
+| Missing-input CLI, terminal and terse, with `MOTH_BENCH_STATUS=1` | Phase 4 executable, dev | Both exit 1, report operational failure and stage, emit no benchmark status record; terse keeps one five-field infrastructure record |
+| Unsupported-JS CLI comparison | Same executable, dev | Exit 1, typed `MOTH-IMPORT-0022` at `@page.moth:1:1`, no infrastructure banner, normal benchmark record |
+| Managed Chromium, checked metadata error page | Production renderer capture served statically at port 9877 | One infrastructure card, compiler-bug introduction, original registry detail and fixed clickable report URL |
+| Managed Chromium, live `moth dev` at port 9876 | Disposable minimal project | Invalid UTF-8 source triggers one operational card with file/path/stage details and no report link; restoring source recovers `canvas:1`, no browser errors |
+
+The static metadata capture proves presentation, not live recovery. The separate operational probe exercises real failed rebuild and recovery. Browser wait helpers twice timed out across navigation despite subsequent visible DOM observations; those tool failures were reported and were not counted as verification. Fresh observation and screenshots supplied the stated UI evidence. Tabs, services, temporary Rust capture changes, temporary module visibility and smoke sources were removed.
+
+Five fresh audit lanes reviewed cold ownership, premerge/discovery transport, AST adapters, presentation/status and producer/dev-server classification. One required finding migrated an existing infrastructure-only content failure test from a fabricated diagnostic-zero source lookup to its explicit cause owner. A fresh focused verifier accepted that correction and the named signature result. Validation also caught two Boracle-only scalar adapters, mechanical Clippy issues and a direct test clock; each was corrected without suppression. The final missing-entry regression uses the production build cycle once, preserving a warning and asserting the published failure classification.
+
+Infrastructure renderers still show host paths, messages and metadata rather than source-span excerpts. Paired source provenance remains available in the cold carrier. Acquisition-race rollback received source review but no concurrent race execution; external strong-owner failure and weak aliases have deterministic coverage. These limits do not claim the paused final failure-lane or host-isolation migration.

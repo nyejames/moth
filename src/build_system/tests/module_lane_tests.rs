@@ -921,9 +921,8 @@ fn generated_sidecar_warnings_survive_render_and_success_only_compilation() {
     let mut string_table = StringTable::new();
     let _path_fork = PathInternerFork::empty();
     let frontend = frontend_with_sidecar_warnings(&mut string_table);
-    let messages = frontend
-        .into_render_messages_with_frozen_identity(&mut string_table, None, None)
-        .expect("synthetic lane warnings should install frozen render identity");
+    let messages =
+        frontend.into_render_messages_with_frozen_identity(&mut string_table, None, None);
     let rendered_codes = messages
         .warnings()
         .map(|warning| warning.kind.code().to_owned())

@@ -147,7 +147,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     pub(in crate::compiler_frontend::ast::module_ast::environment::builder) fn project_imported_nominal_declarations(
         &mut self,
         string_table: &mut StringTable,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), Box<InfrastructureErrors>> {
         let reachable_origins = self.reachable_imported_type_origins();
         let mut imported_nominals = self
             .binding_environment
@@ -176,7 +176,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 _ => {
                     return Err(CompilerError::compiler_error(
                         "Imported nominal projection received a non-nominal declaration",
-                    ));
+                    )
+                    .into());
                 }
             };
             let generic_parameter_list_id =
@@ -207,7 +208,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 _ => {
                     return Err(CompilerError::compiler_error(
                         "Imported nominal projection received a non-nominal declaration",
-                    ));
+                    )
+                    .into());
                 }
             };
 
@@ -231,7 +233,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 _ => {
                     return Err(CompilerError::compiler_error(
                         "Imported nominal member projection received a non-nominal declaration",
-                    ));
+                    )
+                    .into());
                 }
             }
         }
@@ -449,7 +452,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         type_id: TypeId,
         semantics: &PublicStructSemantics,
         string_table: &mut StringTable,
-    ) -> Result<(), CompilerError> {
+    ) -> Result<(), Box<InfrastructureErrors>> {
         let nominal_path = self
             .type_environment
             .struct_definition_for(type_id)

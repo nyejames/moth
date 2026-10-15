@@ -1310,6 +1310,7 @@ fn prepared_fold_dynamic_ast_template_validates_malformed_root_authority() {
     let TemplateError::Infrastructure(error) = error else {
         panic!("malformed dynamic template root should remain on the infrastructure lane");
     };
+    let error = &error.primary;
     assert!(
         error.msg.contains("does not exist in the module store"),
         "expected dynamic-template root authority failure, got: {}",
@@ -1349,6 +1350,7 @@ fn prepared_fold_rejects_direct_sequence_node_cycle_as_infrastructure() {
     else {
         panic!("direct node cycle must remain on the infrastructure lane");
     };
+    let error = &error.primary;
     assert!(
         error.msg.contains("recursively referenced directly"),
         "expected a direct-cycle authority error, got: {}",

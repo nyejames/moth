@@ -37,7 +37,6 @@
 //! - **HirTransformation / Backend** — compiler-internal lowering failures.
 //! - **Compiler** — internal bugs (not user's fault).
 //! - **File** — filesystem errors.
-//! - **Config** — configuration file issues.
 //! - **DevServer** — development server infrastructure failures.
 //!
 //! ## Design Principles
@@ -104,14 +103,9 @@ pub struct CompilerMessages {
     /// instead of consulting parallel message stores.
     pub(crate) diagnostics: Vec<CompilerDiagnostic>,
 
-    /// Outer infrastructure failure carried beside the diagnostic stream.
-    ///
-    /// WHAT: holds the single typed `CompilerError` for internal/tooling/filesystem failures
-    ///       without converting it into a user-facing diagnostic payload.
-    /// WHY: an infrastructure failure aborts the owning compilation yet must stay observable at
-    ///      existing command/render/test boundaries. Storing the rare, large failure behind a
-    ///      pointer keeps this transitional boundary compact without boxing common diagnostics.
-    pub(crate) infrastructure_error: Option<Box<CompilerError>>,
+    /// Ordered infrastructure causes beside the diagnostic stream. Several causes still describe
+    /// one aborted compilation. Cold ownership keeps common diagnostics and this vessel compact.
+    pub(crate) infrastructure_errors: Option<Box<InfrastructureErrors>>,
 
     /// Interned diagnostic strings owned by this boundary.
     ///
@@ -182,11 +176,143 @@ pub(crate) struct RenderPathContext {
     pub(crate) path_table: Arc<PathTable>,
 }
 
+/// Rare failure causes and their explicitly paired source owners. Cause ranges, unlike diagnostic
+/// ranges, remain meaningful when a failed compilation produced no diagnostic at all.
+#[derive(Debug)]
+pub(crate) struct InfrastructureErrors {
+    pub(crate) primary: CompilerError,
+    pub(crate) additional: Vec<CompilerError>,
+    source_contexts: Vec<InfrastructureSourceContext>,
+}
+
+#[derive(Debug)]
+struct InfrastructureSourceContext {
+    cause_range: Range<usize>,
+    owner: InfrastructureSourceOwner,
+}
+
+#[derive(Debug)]
+enum InfrastructureSourceOwner {
+    Source(Arc<SourceDatabase>),
+    Frozen(Arc<FrozenIdentityContext>),
+}
+
+impl InfrastructureErrors {
+    pub(crate) fn new(primary: CompilerError) -> Self {
+        Self {
+            primary,
+            additional: Vec::new(),
+            source_contexts: Vec::new(),
+        }
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &CompilerError> {
+        std::iter::once(&self.primary).chain(self.additional.iter())
+    }
+
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub(crate) fn frozen_identities(&self) -> impl Iterator<Item = &Arc<FrozenIdentityContext>> {
+        self.source_contexts
+            .iter()
+            .filter_map(|context| match &context.owner {
+                InfrastructureSourceOwner::Frozen(identity) => Some(identity),
+                InfrastructureSourceOwner::Source(_) => None,
+            })
+    }
+
+    #[cfg(feature = "data_layout_memory_probe")]
+    pub(crate) fn source_databases(&self) -> impl Iterator<Item = &Arc<SourceDatabase>> {
+        self.source_contexts
+            .iter()
+            .filter_map(|context| match &context.owner {
+                InfrastructureSourceOwner::Source(source) => Some(source),
+                InfrastructureSourceOwner::Frozen(_) => None,
+            })
+    }
+
+    /// Frozen causes already belong to an immutable identity domain and must not be rebound.
+    pub(crate) fn unfrozen_iter_mut(&mut self) -> impl Iterator<Item = &mut CompilerError> {
+        let contexts = &self.source_contexts;
+        std::iter::once(&mut self.primary)
+            .chain(self.additional.iter_mut())
+            .enumerate()
+            .filter_map(move |(index, error)| {
+                let frozen = contexts.iter().any(|context| {
+                    context.cause_range.contains(&index)
+                        && matches!(context.owner, InfrastructureSourceOwner::Frozen(_))
+                });
+                (!frozen).then_some(error)
+            })
+    }
+
+    pub(crate) fn push(&mut self, error: CompilerError) {
+        self.additional.push(error);
+    }
+
+    pub(crate) fn append(&mut self, other: Self) {
+        let shift = 1 + self.additional.len();
+        self.additional.push(other.primary);
+        self.additional.extend(other.additional);
+        self.source_contexts
+            .extend(other.source_contexts.into_iter().map(|mut context| {
+                context.cause_range.start += shift;
+                context.cause_range.end += shift;
+                context
+            }));
+    }
+
+    pub(crate) fn set_source_database(&mut self, source_database: Arc<SourceDatabase>) {
+        // Attach only unpaired causes. A later project fallback must not replace a package owner.
+        for index in 0..1 + self.additional.len() {
+            if !self
+                .source_contexts
+                .iter()
+                .any(|context| context.cause_range.contains(&index))
+            {
+                self.source_contexts.push(InfrastructureSourceContext {
+                    cause_range: index..index + 1,
+                    owner: InfrastructureSourceOwner::Source(Arc::clone(&source_database)),
+                });
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn source_database_for_cause(&self, index: usize) -> Option<&SourceDatabase> {
+        self.source_contexts.iter().find_map(|context| {
+            if context.cause_range.contains(&index)
+                && let InfrastructureSourceOwner::Source(source) = &context.owner
+            {
+                return Some(source.as_ref());
+            }
+            None
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn frozen_identity_for_cause(&self, index: usize) -> Option<&FrozenIdentityContext> {
+        self.source_contexts.iter().find_map(|context| {
+            if context.cause_range.contains(&index)
+                && let InfrastructureSourceOwner::Frozen(identity) = &context.owner
+            {
+                return Some(identity.as_ref());
+            }
+            None
+        })
+    }
+}
+
+impl From<CompilerError> for Box<InfrastructureErrors> {
+    fn from(error: CompilerError) -> Self {
+        Box::new(InfrastructureErrors::new(error))
+    }
+}
+
 impl CompilerMessages {
     pub fn empty(string_table: StringTable) -> Self {
         Self {
             diagnostics: Vec::new(),
-            infrastructure_error: None,
+            infrastructure_errors: None,
             string_table: Box::new(string_table),
             render_frozen_contexts: Vec::new(),
             render_source_contexts: Vec::new(),
@@ -201,7 +327,7 @@ impl CompilerMessages {
     ) -> Self {
         Self {
             diagnostics,
-            infrastructure_error: None,
+            infrastructure_errors: None,
             string_table: Box::new(string_table),
             render_frozen_contexts: Vec::new(),
             render_source_contexts: Vec::new(),
@@ -271,53 +397,39 @@ impl CompilerMessages {
         Ok(())
     }
 
-    /// Whether this boundary carries the legacy outer infrastructure failure.
     pub(crate) fn has_infrastructure_error(&self) -> bool {
-        self.infrastructure_error.is_some()
+        self.infrastructure_errors.is_some()
     }
 
-    /// Borrow the legacy outer infrastructure failure, if present.
-    ///
-    /// WHAT: exposes the typed `CompilerError` without converting it into a diagnostic.
-    /// WHY: renderers, tests and status summaries inspect the outer failure's message,
-    ///      source span or host path, type and metadata directly.
-    pub(crate) fn infrastructure_error(&self) -> Option<&CompilerError> {
-        self.infrastructure_error.as_deref()
+    /// Explicit first-cause access for consumers whose contract concerns only the primary failure.
+    #[cfg(test)]
+    pub(crate) fn primary_infrastructure_error(&self) -> Option<&CompilerError> {
+        self.infrastructure_errors
+            .as_ref()
+            .map(|errors| &errors.primary)
     }
 
-    /// Store the outer infrastructure failure without converting it into a user diagnostic.
-    ///
-    /// WHAT: chains a second failure behind the first while preserving the first available source
-    ///       span and host path.
-    /// WHY: aggregation can observe a deterministic double-failure tail. `CompilerError` owns
-    ///      only its typed provenance, so no diagnostic string table or render context is merged
-    ///      here.
+    pub(crate) fn infrastructure_errors(&self) -> Option<&InfrastructureErrors> {
+        self.infrastructure_errors.as_deref()
+    }
+
+    /// Append one cause without merging its message or provenance into an unrelated failure.
     pub(crate) fn set_infrastructure_error(&mut self, error: CompilerError) {
-        match &mut self.infrastructure_error {
-            Some(existing) => {
-                existing.msg = format!(
-                    "{existing_msg}; {incoming_msg}",
-                    existing_msg = existing.msg,
-                    incoming_msg = error.msg,
-                );
-                if existing.source_span.is_none() {
-                    existing.source_span = error.source_span;
-                }
-                if existing.host_path.is_none() {
-                    existing.host_path = error.host_path;
-                }
-                for (key, value) in error.metadata {
-                    existing.metadata.entry(key).or_insert(value);
-                }
-            }
-            None => {
-                self.infrastructure_error = Some(Box::new(error));
-            }
+        match self.infrastructure_errors.as_mut() {
+            Some(errors) => errors.push(error),
+            None => self.infrastructure_errors = Some(error.into()),
+        }
+    }
+
+    pub(crate) fn append_infrastructure_errors(&mut self, errors: Box<InfrastructureErrors>) {
+        match self.infrastructure_errors.as_mut() {
+            Some(existing) => existing.append(*errors),
+            None => self.infrastructure_errors = Some(errors),
         }
     }
 
     pub fn has_errors(&self) -> bool {
-        self.infrastructure_error.is_some()
+        self.infrastructure_errors.is_some()
             || self
                 .diagnostics
                 .iter()
@@ -330,7 +442,7 @@ impl CompilerMessages {
             .iter()
             .filter(|d| d.severity == DiagnosticSeverity::Error)
             .count()
-            + usize::from(self.infrastructure_error.is_some())
+            + usize::from(self.infrastructure_errors.is_some())
     }
 
     /// Count diagnostics with `Warning` severity.
@@ -404,11 +516,6 @@ impl CompilerMessages {
         }
     }
 
-    /// Consume the boundary container and return its ordered diagnostics.
-    pub(crate) fn into_diagnostics(self) -> Vec<CompilerDiagnostic> {
-        self.diagnostics
-    }
-
     /// Iterate over diagnostics with `Error` severity.
     #[cfg(test)]
     pub(crate) fn error_diagnostics(&self) -> impl Iterator<Item = &CompilerDiagnostic> {
@@ -437,7 +544,7 @@ impl CompilerMessages {
     pub fn from_diagnostic(diagnostic: CompilerDiagnostic, string_table: StringTable) -> Self {
         Self {
             diagnostics: vec![diagnostic],
-            infrastructure_error: None,
+            infrastructure_errors: None,
             string_table: Box::new(string_table),
             render_frozen_contexts: Vec::new(),
             render_source_contexts: Vec::new(),
@@ -462,7 +569,7 @@ impl CompilerMessages {
     pub fn from_error(error: CompilerError, string_table: StringTable) -> Self {
         Self {
             diagnostics: Vec::new(),
-            infrastructure_error: Some(Box::new(error)),
+            infrastructure_errors: Some(error.into()),
             string_table: Box::new(string_table),
             render_frozen_contexts: Vec::new(),
             render_source_contexts: Vec::new(),
@@ -495,7 +602,7 @@ impl CompilerMessages {
     ) -> Self {
         Self {
             diagnostics: warning_diagnostics,
-            infrastructure_error: Some(Box::new(error)),
+            infrastructure_errors: Some(error.into()),
             string_table: Box::new(string_table.clone()),
             render_frozen_contexts: Vec::new(),
             render_source_contexts: Vec::new(),
@@ -519,7 +626,7 @@ impl CompilerMessages {
         diagnostics.push(diagnostic);
         Self {
             diagnostics,
-            infrastructure_error: None,
+            infrastructure_errors: None,
             string_table: Box::new(string_table.clone()),
             render_frozen_contexts: Vec::new(),
             render_source_contexts: Vec::new(),
@@ -534,26 +641,17 @@ impl CompilerMessages {
         Self::from_error(CompilerError::file_error(path, msg), string_table.clone())
     }
 
-    /// Associate the current diagnostics with the source snapshot database that produced them.
-    ///
-    /// The range is deliberately captured at the time of attachment: a single message set may
-    /// later aggregate diagnostics from several independent project/package databases.
-    ///
-    /// Infrastructure-only failures have no diagnostic row, but their source owner is still useful
-    /// to boundary callers inspecting retained source slots. Reserve index zero as a source-context
-    /// sentinel for that shape; ordinary diagnostic ranges continue to cover exactly the current
-    /// stream.
+    /// Pair the producing source owner with current diagnostics and previously unpaired causes.
+    /// Infrastructure ownership uses cause indices, never a fabricated diagnostic-zero row.
+    /// Unfrozen sources use the boundary's canonical merged string domain. Independently issued
+    /// source/string domains must freeze with their own table before their messages are appended.
     pub(crate) fn set_source_database(&mut self, source_database: Arc<SourceDatabase>) {
-        let diagnostic_end = self.diagnostics.len();
-        if diagnostic_end != 0 {
+        if let Some(errors) = self.infrastructure_errors.as_mut() {
+            errors.set_source_database(Arc::clone(&source_database));
+        }
+        if !self.diagnostics.is_empty() {
             self.render_source_contexts.push(RenderSourceContext {
-                diagnostic_range: 0..diagnostic_end,
-                source_database,
-                domain: None,
-            });
-        } else if self.infrastructure_error.is_some() {
-            self.render_source_contexts.push(RenderSourceContext {
-                diagnostic_range: 0..1,
+                diagnostic_range: 0..self.diagnostics.len(),
                 source_database,
                 domain: None,
             });
@@ -592,179 +690,220 @@ impl CompilerMessages {
                 source_context
             }));
     }
-    /// Install precomputed frozen identity contexts for diagnostics appended at `diagnostic_offset`.
-    ///
-    /// WHAT: offsets each incoming frozen range by the diagnostic offset, mirroring
-    /// `install_source_contexts`.
-    /// WHY: frozen rows are range-aligned exactly like the transitional source rows, so the same
-    /// offset keeps each identity row tied to its diagnostics whether warnings or failures are
-    /// appended around them.
-    pub(crate) fn install_frozen_identity_contexts(
-        &mut self,
-        frozen_contexts: impl IntoIterator<Item = RenderFrozenContext>,
-        diagnostic_offset: usize,
-    ) {
-        self.render_frozen_contexts
-            .extend(frozen_contexts.into_iter().map(|mut frozen_context| {
-                frozen_context.diagnostic_range.start += diagnostic_offset;
-                frozen_context.diagnostic_range.end += diagnostic_offset;
-                frozen_context
-            }));
-    }
-    /// Convert remaining transitional source rows into frozen identity rows without copying source
-    /// or diagnostic storage, and without discarding frozen rows already present.
-    ///
-    /// Existing frozen identity rows stay at the front so first-match lookup still prefers the
-    /// earlier owner. The first newly frozen source row consumes the aggregate string table;
-    /// subsequent rows share that frozen string allocation while moving only their own source
-    /// database. Empty package rows are retained only when an explicitly owned diagnostic span
-    /// needs their domain. They supply the corresponding frozen handle but never become default
-    /// render ranges.
-    pub(crate) fn freeze_source_contexts(mut self) -> Result<Self, CompilerError> {
+    /// Freeze explicit source owners by move. Validate domains and acquire exclusive source
+    /// ownership before moving identity tables. Failed acquisition restores every source pairing.
+    pub(crate) fn freeze_source_contexts(&mut self) -> Result<(), CompilerError> {
         let mut required_handle_domains = HashSet::new();
         for diagnostic in &self.diagnostics {
-            if let Some(handle) = diagnostic.primary_frozen_identity_handle.as_ref()
-                && let Some(domain) = handle.domain()
-            {
-                required_handle_domains.insert(domain.clone());
-            }
-            for label in &diagnostic.labels {
-                if let Some(handle) = label.frozen_identity_handle.as_ref()
-                    && let Some(domain) = handle.domain()
-                {
+            let handles = diagnostic.primary_frozen_identity_handle.iter().chain(
+                diagnostic
+                    .labels
+                    .iter()
+                    .filter_map(|label| label.frozen_identity_handle.as_ref()),
+            );
+            for handle in handles {
+                if let Some(domain) = handle.domain() {
                     required_handle_domains.insert(domain.clone());
+                    if handle.get().is_none()
+                        && !self
+                            .render_source_contexts
+                            .iter()
+                            .any(|context| context.domain.as_ref() == Some(domain))
+                    {
+                        return Err(CompilerError::compiler_error(
+                            "diagnostic reached the frozen render boundary without its donor identity",
+                        ));
+                    }
                 }
             }
         }
 
-        let source_contexts = std::mem::take(&mut self.render_source_contexts)
-            .into_iter()
-            .filter(|context| {
-                !context.diagnostic_range.is_empty()
-                    || context
-                        .domain
-                        .as_ref()
-                        .is_some_and(|domain| required_handle_domains.contains(domain))
-            })
-            .collect::<Vec<_>>();
-        if source_contexts.is_empty() {
-            self.ensure_frozen_identity_handles_installed()?;
-            return Ok(self);
+        // Count all aliases held by this vessel, including cause contexts. External aliases
+        // would prevent a move-only freeze; reject them while every original owner is intact.
+        let mut ownership =
+            HashMap::<*const SourceDatabase, (&Arc<SourceDatabase>, usize, bool)>::new();
+        let diagnostic_sources = self.render_source_contexts.iter().map(|context| {
+            let needed = !context.diagnostic_range.is_empty()
+                || context
+                    .domain
+                    .as_ref()
+                    .is_some_and(|domain| required_handle_domains.contains(domain));
+            (&context.source_database, needed)
+        });
+        let cause_sources = self.infrastructure_errors.iter().flat_map(|errors| {
+            errors
+                .source_contexts
+                .iter()
+                .filter_map(|context| match &context.owner {
+                    InfrastructureSourceOwner::Source(source) => Some((source, true)),
+                    InfrastructureSourceOwner::Frozen(_) => None,
+                })
+        });
+        for (source, needed) in diagnostic_sources.chain(cause_sources) {
+            let entry = ownership
+                .entry(Arc::as_ptr(source))
+                .or_insert((source, 0, false));
+            entry.1 += 1;
+            entry.2 |= needed;
         }
+        for (source, owned_count, needed) in ownership.values() {
+            if *needed && Arc::strong_count(source) != *owned_count {
+                return Err(CompilerError::compiler_error(
+                    "source database was unexpectedly shared at the frozen render handoff",
+                ));
+            }
+        }
+        let required_databases = ownership
+            .into_iter()
+            .filter_map(|(key, (_, _, needed))| needed.then_some(key))
+            .collect::<HashSet<_>>();
 
         let mut database_owners = HashMap::<*const SourceDatabase, Arc<SourceDatabase>>::new();
-        let mut context_rows = Vec::with_capacity(source_contexts.len());
-        for source_context in source_contexts {
-            let RenderSourceContext {
-                diagnostic_range,
-                source_database,
-                domain,
-            } = source_context;
-            let database_key = Arc::as_ptr(&source_database);
+        let mut diagnostic_rows = Vec::new();
+        for context in std::mem::take(&mut self.render_source_contexts) {
+            let key = Arc::as_ptr(&context.source_database);
             database_owners
-                .entry(database_key)
-                .or_insert(source_database);
-            context_rows.push((diagnostic_range, domain, database_key));
+                .entry(key)
+                .or_insert(context.source_database);
+            diagnostic_rows.push((context.diagnostic_range, context.domain, key));
         }
-
-        let mut identity_by_database =
-            HashMap::<*const SourceDatabase, Arc<FrozenIdentityContext>>::new();
-        let mut frozen_root: Option<Arc<FrozenIdentityContext>> = None;
-        let mut frozen_contexts = Vec::with_capacity(context_rows.len());
-        for (diagnostic_range, domain, database_key) in context_rows {
-            let identity = if let Some(identity) = identity_by_database.get(&database_key) {
-                Arc::clone(identity)
-            } else {
-                let source_database = database_owners.remove(&database_key).ok_or_else(|| {
-                    CompilerError::compiler_error(
-                        "source database owner disappeared at the frozen render handoff",
-                    )
-                })?;
-                let database = Arc::try_unwrap(source_database).map_err(|_| {
-                    CompilerError::compiler_error(
-                        "source database was unexpectedly shared at the frozen render handoff",
-                    )
-                })?;
-                let identity = match frozen_root.as_ref() {
-                    Some(root) => Arc::new(FrozenIdentityContext::from_shared_strings(
-                        root.shared_strings(),
-                        database,
-                    )),
-                    None => {
-                        let identity = Arc::new(FrozenIdentityContext::from_parts(
-                            *std::mem::take(&mut self.string_table),
-                            database,
-                        ));
-                        frozen_root = Some(Arc::clone(&identity));
-                        identity
+        let mut cause_rows = Vec::new();
+        if let Some(errors) = self.infrastructure_errors.as_mut() {
+            for context in std::mem::take(&mut errors.source_contexts) {
+                match context.owner {
+                    InfrastructureSourceOwner::Source(source) => {
+                        let key = Arc::as_ptr(&source);
+                        database_owners.entry(key).or_insert(source);
+                        cause_rows.push((context.cause_range, key));
                     }
-                };
-                identity_by_database.insert(database_key, Arc::clone(&identity));
-                identity
-            };
-            frozen_contexts.push((diagnostic_range, domain, identity));
-        }
-
-        for (diagnostic_range, domain, identity) in &frozen_contexts {
-            if domain.is_some() {
-                // Package domains identify one source owner even when the owned span is a
-                // related label on a diagnostic whose default range belongs to the project.
-                for diagnostic in &self.diagnostics {
-                    if let Some(handle) = diagnostic.primary_frozen_identity_handle.as_ref()
-                        && handle.get().is_none()
-                        && handle.domain() == domain.as_ref()
-                    {
-                        handle.install(Arc::clone(identity))?;
-                    }
-                    for label in &diagnostic.labels {
-                        if let Some(handle) = label.frozen_identity_handle.as_ref()
-                            && handle.get().is_none()
-                            && handle.domain() == domain.as_ref()
-                        {
-                            handle.install(Arc::clone(identity))?;
-                        }
-                    }
-                }
-            } else {
-                // Domain-less handles remain tied to their genuine default source range. In
-                // particular, a project row cannot satisfy a foreign package handle.
-                for diagnostic in self
-                    .diagnostics
-                    .iter()
-                    .skip(diagnostic_range.start)
-                    .take(diagnostic_range.end.saturating_sub(diagnostic_range.start))
-                {
-                    if let Some(handle) = diagnostic.primary_frozen_identity_handle.as_ref()
-                        && handle.get().is_none()
-                        && handle.domain() == domain.as_ref()
-                    {
-                        handle.install(Arc::clone(identity))?;
-                    }
-                    for label in &diagnostic.labels {
-                        if let Some(handle) = label.frozen_identity_handle.as_ref()
-                            && handle.get().is_none()
-                            && handle.domain() == domain.as_ref()
-                        {
-                            handle.install(Arc::clone(identity))?;
-                        }
+                    InfrastructureSourceOwner::Frozen(identity) => {
+                        errors.source_contexts.push(InfrastructureSourceContext {
+                            cause_range: context.cause_range,
+                            owner: InfrastructureSourceOwner::Frozen(identity),
+                        });
                     }
                 }
             }
         }
 
-        self.render_frozen_contexts
-            .extend(
-                frozen_contexts
-                    .into_iter()
-                    .filter_map(|(diagnostic_range, _, identity)| {
-                        (!diagnostic_range.is_empty()).then_some(RenderFrozenContext {
-                            diagnostic_range,
-                            identity,
-                        })
-                    }),
-            );
-        self.ensure_frozen_identity_handles_installed()?;
-        Ok(self)
+        // Acquire every required source before freezing any identity. Weak aliases are legal:
+        // try_unwrap dissociates them on success. If an upgrade races this acquisition, restore
+        // all source rows and preserve the original vessel instead of panicking or losing a source.
+        enum AcquiredSource {
+            Shared(Arc<SourceDatabase>),
+            Exclusive(SourceDatabase),
+        }
+        let mut acquired = Vec::with_capacity(database_owners.len());
+        let mut pending = database_owners.into_iter();
+        while let Some((key, source)) = pending.next() {
+            if !required_databases.contains(&key) {
+                acquired.push((key, AcquiredSource::Shared(source)));
+                continue;
+            }
+            match Arc::try_unwrap(source) {
+                Ok(database) => acquired.push((key, AcquiredSource::Exclusive(database))),
+                Err(source) => {
+                    let mut restored = pending.collect::<HashMap<_, _>>();
+                    restored.insert(key, source);
+                    for (key, owner) in acquired {
+                        let source = match owner {
+                            AcquiredSource::Shared(source) => source,
+                            AcquiredSource::Exclusive(database) => Arc::new(database),
+                        };
+                        restored.insert(key, source);
+                    }
+                    self.render_source_contexts
+                        .extend(diagnostic_rows.into_iter().map(
+                            |(diagnostic_range, domain, key)| RenderSourceContext {
+                                diagnostic_range,
+                                domain,
+                                source_database: Arc::clone(&restored[&key]),
+                            },
+                        ));
+                    if let Some(errors) = self.infrastructure_errors.as_mut() {
+                        for (cause_range, key) in cause_rows {
+                            errors.source_contexts.push(InfrastructureSourceContext {
+                                cause_range,
+                                owner: InfrastructureSourceOwner::Source(Arc::clone(
+                                    &restored[&key],
+                                )),
+                            });
+                        }
+                    }
+                    return Err(CompilerError::compiler_error(
+                        "source database became shared at the frozen render handoff",
+                    ));
+                }
+            }
+        }
+
+        diagnostic_rows.retain(|(range, domain, _)| {
+            !range.is_empty()
+                || domain
+                    .as_ref()
+                    .is_some_and(|domain| required_handle_domains.contains(domain))
+        });
+        let mut identities = HashMap::new();
+        let mut frozen_root: Option<Arc<FrozenIdentityContext>> = None;
+        for (key, owner) in acquired {
+            let AcquiredSource::Exclusive(database) = owner else {
+                continue;
+            };
+            let identity = match &frozen_root {
+                Some(root) => Arc::new(FrozenIdentityContext::from_shared_strings(
+                    root.shared_strings(),
+                    database,
+                )),
+                None => {
+                    let identity = Arc::new(FrozenIdentityContext::from_parts(
+                        *std::mem::take(&mut self.string_table),
+                        database,
+                    ));
+                    frozen_root = Some(Arc::clone(&identity));
+                    identity
+                }
+            };
+            identities.insert(key, identity);
+        }
+
+        if let Some(errors) = self.infrastructure_errors.as_mut() {
+            for (cause_range, key) in cause_rows {
+                errors.source_contexts.push(InfrastructureSourceContext {
+                    cause_range,
+                    owner: InfrastructureSourceOwner::Frozen(Arc::clone(&identities[&key])),
+                });
+            }
+        }
+        // Publish the moved owners before installing shared handles. Even a concurrent handle
+        // installation error must leave all diagnostic and cause source ownership in this vessel.
+        for (diagnostic_range, _, key) in &diagnostic_rows {
+            if !diagnostic_range.is_empty() {
+                self.render_frozen_contexts.push(RenderFrozenContext {
+                    diagnostic_range: diagnostic_range.clone(),
+                    identity: Arc::clone(&identities[key]),
+                });
+            }
+        }
+        for (diagnostic_range, domain, key) in diagnostic_rows {
+            let identity = &identities[&key];
+            for (index, diagnostic) in self.diagnostics.iter().enumerate() {
+                if domain.is_none() && !diagnostic_range.contains(&index) {
+                    continue;
+                }
+                let handles = diagnostic.primary_frozen_identity_handle.iter().chain(
+                    diagnostic
+                        .labels
+                        .iter()
+                        .filter_map(|label| label.frozen_identity_handle.as_ref()),
+                );
+                for handle in handles {
+                    if handle.get().is_none() && handle.domain() == domain.as_ref() {
+                        handle.install(Arc::clone(identity))?;
+                    }
+                }
+            }
+        }
+        self.ensure_frozen_identity_handles_installed()
     }
 
     pub(crate) fn with_type_context_for_all_diagnostics(
@@ -834,7 +973,7 @@ impl CompilerMessages {
     pub(crate) fn append_messages_preserving_context(&mut self, messages: CompilerMessages) {
         let CompilerMessages {
             mut diagnostics,
-            infrastructure_error,
+            infrastructure_errors,
             string_table,
             mut render_frozen_contexts,
             mut render_source_contexts,
@@ -892,8 +1031,8 @@ impl CompilerMessages {
             self.render_type_contexts.push(type_context);
         }
 
-        if let Some(error) = infrastructure_error {
-            self.set_infrastructure_error(*error);
+        if let Some(errors) = infrastructure_errors {
+            self.append_infrastructure_errors(errors);
         }
     }
     /// Remap premerge facts into another mutable string-table domain.
@@ -1006,40 +1145,11 @@ impl CompilerMessages {
         .with_optional_path_table(self.path_table_for_diagnostic(diagnostic_index))
     }
 
-    /// Install late-bound generic donor owners for one stable package domain.
-    ///
-    /// A diagnosed module can fail before its declaring module's materialisation context reaches
-    /// the successful-boundary installation walk. Labels still carry the donor's package identity,
-    /// so the final render tail installs the exact frozen context without guessing from a colliding
-    /// `SourceId` or the diagnostic's requester domain.
-    pub(crate) fn install_frozen_identity_handles_for_domain(
-        &self,
-        domain: &StablePackageIdentity,
-        identity: &Arc<FrozenIdentityContext>,
-    ) -> Result<(), CompilerError> {
-        for diagnostic in &self.diagnostics {
-            if let Some(handle) = diagnostic.primary_frozen_identity_handle.as_ref()
-                && handle.domain() == Some(domain)
-            {
-                handle.install(Arc::clone(identity))?;
-            }
-            for label in &diagnostic.labels {
-                let Some(handle) = label.frozen_identity_handle.as_ref() else {
-                    continue;
-                };
-                if handle.domain() == Some(domain) {
-                    handle.install(Arc::clone(identity))?;
-                }
-            }
-        }
-        Ok(())
-    }
-
     /// Reject any donor label that reached the final boundary without an owning identity.
     ///
     /// Unknown domains are compiler bugs, not permission to reinterpret a donor span through the
     /// requester or project-root context.
-    pub(crate) fn ensure_frozen_identity_handles_installed(&self) -> Result<(), CompilerError> {
+    fn ensure_frozen_identity_handles_installed(&self) -> Result<(), CompilerError> {
         for diagnostic in &self.diagnostics {
             if diagnostic
                 .primary_frozen_identity_handle
@@ -1416,7 +1526,6 @@ impl CompilerError {
 #[derive(PartialEq, Debug, Clone)]
 pub enum ErrorType {
     File,
-    Config,
     Compiler,
     DevServer,
     HirTransformation,

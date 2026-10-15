@@ -1016,10 +1016,11 @@ fn consume_deferred_expression_suffix(
             Ok(DeferredExpressionSuffix::Propagate { span })
         }
         TokenTag::CATCH | TokenTag::QUESTION_MARK => Err(ExpressionParseError::Infrastructure(
-            Box::new(CompilerError::compiler_error(
+            CompilerError::compiler_error(
                 "numeric-dependent expression followed by catch/option propagation cannot be \
-                     retained yet; the suffix needs the resolved result shape",
-            )),
+                 retained yet; the suffix needs the resolved result shape",
+            )
+            .into(),
         )),
         _ => Ok(DeferredExpressionSuffix::None),
     }

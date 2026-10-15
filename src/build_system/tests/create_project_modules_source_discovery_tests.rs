@@ -326,7 +326,7 @@ fn stage0_missing_source_load_preserves_file_error_shape() {
     .expect_err("missing source read should fail");
 
     let error = messages
-        .infrastructure_error()
+        .primary_infrastructure_error()
         .expect("expected infrastructure file error");
     assert!(
         error
@@ -369,7 +369,9 @@ fn stage0_serial_missing_source_load_retains_siblings_and_finalizes_failures() {
     };
 
     let source_files = messages
-        .source_database_for_diagnostic(0)
+        .infrastructure_errors()
+        .expect("source loading should retain its infrastructure causes")
+        .source_database_for_cause(0)
         .expect("mixed source loading should publish its finalized source context");
     let first_missing_id = source_files
         .get_by_canonical_path(&first_missing)
@@ -395,7 +397,7 @@ fn stage0_serial_missing_source_load_retains_siblings_and_finalizes_failures() {
     assert!(source_files.source_load_error(second_missing_id).is_some());
 
     let error = messages
-        .infrastructure_error()
+        .primary_infrastructure_error()
         .expect("the first read failure should retain the infrastructure error lane");
     let host_path = error
         .host_path
@@ -434,7 +436,9 @@ fn stage0_parallel_missing_source_load_retains_siblings_and_finalizes_failures()
     };
 
     let source_files = messages
-        .source_database_for_diagnostic(0)
+        .infrastructure_errors()
+        .expect("parallel source loading should retain its infrastructure causes")
+        .source_database_for_cause(0)
         .expect("parallel source loading should publish its finalized source context");
     for (index, path) in source_paths.iter().enumerate() {
         let source_id = source_files
@@ -461,7 +465,7 @@ fn stage0_parallel_missing_source_load_retains_siblings_and_finalizes_failures()
     }
 
     let error = messages
-        .infrastructure_error()
+        .primary_infrastructure_error()
         .expect("the parallel read failure should retain the infrastructure error lane");
     let host_path = error
         .host_path
@@ -1159,7 +1163,7 @@ fn directory_provider_dependency_missing_target_reports_structured_diagnostic_wi
         "missing provider target should surface a structured import diagnostic"
     );
     assert!(
-        messages.infrastructure_error().is_none(),
+        messages.infrastructure_errors().is_none(),
         "missing provider target must not surface a filesystem infrastructure error"
     );
     let diagnostic = first_error_diagnostic(&messages);

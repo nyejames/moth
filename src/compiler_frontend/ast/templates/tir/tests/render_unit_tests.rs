@@ -5,6 +5,12 @@
 // WHY: these focused tests protect the current module-local TIR owner and
 // render-unit identity invariants.
 
+use crate::compiler_frontend::ast::const_eval::ConstantFoldError;
+use crate::compiler_frontend::ast::const_values::store::ConstValueStoreError;
+use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
+use crate::compiler_frontend::ast::expressions::eval_expression::ExpressionTypingError;
+use crate::compiler_frontend::ast::expressions::expression_store::ExpressionConstructionFailure;
+use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::{
     Style, TemplateSegmentOrigin, TemplateType,
 };
@@ -20,14 +26,18 @@ use crate::compiler_frontend::ast::templates::tir::refs::{
 };
 use crate::compiler_frontend::ast::templates::tir::render_unit::{
     build_aggregate_wrapper_candidate_root_from_tir_nodes,
-    build_conditional_body_candidate_root_from_tir_nodes,
+    build_conditional_body_candidate_root_from_tir_nodes, tir_formatter_messages_to_template_error,
 };
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::ast::templates::tir::summary::TemplateIrSummary;
 use crate::compiler_frontend::ast::templates::tir::view::TemplateTirPhase;
 use crate::compiler_frontend::ast::templates::tir::wrapper_sets::wrapper_reference_for_template;
 use crate::compiler_frontend::ast::templates::tir::{head_prefix_tir_nodes, sequence_children};
+use crate::compiler_frontend::compiler_errors::{
+    CompilerError, CompilerErrorMetadataKey, CompilerMessages,
+};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
+use std::path::Path;
 
 fn push_text_node(
     store: &mut TemplateIrStore,
@@ -249,4 +259,46 @@ fn head_prefix_rejects_missing_child_and_accepts_empty_prefix() {
             .is_empty(),
         "empty prefix should produce no head-prefix nodes"
     );
+}
+
+#[test]
+fn formatter_infrastructure_aggregate_survives_ast_error_adapters() {
+    let mut primary = CompilerError::compiler_error("formatter infrastructure cause");
+    primary.new_metadata_entry(
+        CompilerErrorMetadataKey::CompilationStage,
+        "formatter".to_owned(),
+    );
+    let mut secondary = CompilerError::file_error(
+        Path::new("formatter-input.moth"),
+        "formatter secondary cause",
+    );
+    secondary.new_metadata_entry(
+        CompilerErrorMetadataKey::CompilationStage,
+        "read input".to_owned(),
+    );
+    let expected = [primary.clone(), secondary.clone()];
+    let mut messages = CompilerMessages::from_error(primary, StringTable::new());
+    messages.set_infrastructure_error(secondary);
+
+    // Template folding and stored values re-enter expression construction through these adapters.
+    let template_error = tir_formatter_messages_to_template_error(messages);
+    let fold_error = ConstantFoldError::from(template_error);
+    let typing_error = ExpressionTypingError::from(fold_error);
+    let expression_error = ExpressionParseError::from(typing_error);
+    let template_error = TemplateError::from(expression_error);
+    let store_error = ConstValueStoreError::from(template_error);
+    let construction_error = ExpressionConstructionFailure::from(store_error);
+    let expression_error = ExpressionParseError::from(construction_error);
+    let errors = expression_error
+        .at_boundary_without_numeric_retention("the formatter adapter test")
+        .expect_err("both formatter causes must remain infrastructure failures");
+
+    let actual = errors.iter().collect::<Vec<_>>();
+    assert_eq!(actual.len(), expected.len());
+    for (actual, expected) in actual.into_iter().zip(expected) {
+        assert_eq!(actual.msg, expected.msg);
+        assert_eq!(actual.error_type, expected.error_type);
+        assert_eq!(actual.host_path, expected.host_path);
+        assert_eq!(actual.metadata, expected.metadata);
+    }
 }

@@ -129,6 +129,14 @@ pub struct FunctionSignature {
     pub returns: Vec<ReturnSlot>,
 }
 
+/// Transient consumer-local signature facts, with ordered success slots separate from the error.
+pub(crate) struct MaterialisedFunctionSignature {
+    pub(crate) signature: FunctionSignature,
+    pub(crate) function_type_id: TypeId,
+    pub(crate) success_return_type_ids: Vec<TypeId>,
+    pub(crate) error_return_type_id: Option<TypeId>,
+}
+
 #[derive(Clone, Copy)]
 pub(crate) enum SignatureTypeFallbackPolicy {
     StrictCapacity,

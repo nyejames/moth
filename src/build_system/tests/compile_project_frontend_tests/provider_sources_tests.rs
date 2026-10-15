@@ -1136,9 +1136,8 @@ fn provider_backed_opaque_type_from_different_package_is_rejected() {
     )
     .expect("diagnosed modules are retained in the typed frontend outcome");
     let project_source = frontend.project_source_database.take();
-    let messages = frontend
-        .into_render_messages_with_frozen_identity(&mut string_table, project_source, None)
-        .expect("cross-package diagnostics should install frozen render identity");
+    let messages =
+        frontend.into_render_messages_with_frozen_identity(&mut string_table, project_source, None);
 
     assert!(
         messages.error_diagnostics().any(|diagnostic| {

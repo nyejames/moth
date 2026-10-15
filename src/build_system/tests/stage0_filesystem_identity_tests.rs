@@ -44,7 +44,7 @@ mod non_utf8_filesystem_identity {
 
     fn assert_file_infrastructure_error(messages: &CompilerMessages) {
         let error = messages
-            .infrastructure_error()
+            .primary_infrastructure_error()
             .expect("expected an infrastructure file error");
         assert_eq!(
             error.error_type,
@@ -240,7 +240,7 @@ mod non_utf8_single_file_identity {
     use std::os::unix::ffi::OsStringExt;
     fn assert_file_infrastructure_error(messages: &CompilerMessages) {
         let error = messages
-            .infrastructure_error()
+            .primary_infrastructure_error()
             .expect("expected an infrastructure file error");
         assert_eq!(
             error.error_type,
@@ -320,7 +320,7 @@ mod non_utf8_windows_single_file_identity {
     use std::os::windows::ffi::OsStringExt;
     fn assert_file_infrastructure_error(messages: &CompilerMessages) {
         let error = messages
-            .infrastructure_error()
+            .primary_infrastructure_error()
             .expect("expected an infrastructure file error");
         assert_eq!(
             error.error_type,
@@ -505,7 +505,7 @@ mod source_package_boundary_indexes_tests {
             .expect_err("nonexistent root should fail canonicalization");
         let messages = failure.into_messages(&string_table);
         let error = messages
-            .infrastructure_error()
+            .primary_infrastructure_error()
             .expect("expected an infrastructure file error");
         assert_eq!(error.error_type, ErrorType::File);
         assert!(
@@ -627,7 +627,7 @@ mod source_package_boundary_indexes_tests {
             .expect_err("unreadable package root should fail boundary indexing");
         let messages = failure.into_messages(&string_table);
         let error = messages
-            .infrastructure_error()
+            .primary_infrastructure_error()
             .expect("expected an infrastructure file error");
         assert_eq!(error.error_type, ErrorType::File);
     }
@@ -756,7 +756,7 @@ mod non_utf8_package_boundary_candidate_tests {
 
     fn assert_non_utf8_file_error(messages: &CompilerMessages) {
         let error = messages
-            .infrastructure_error()
+            .primary_infrastructure_error()
             .expect("expected an infrastructure file error");
         assert_eq!(
             error.error_type,
@@ -1276,7 +1276,7 @@ mod module_identity_tests {
         use crate::compiler_frontend::compiler_errors::ErrorType;
 
         let error = messages
-            .infrastructure_error()
+            .primary_infrastructure_error()
             .expect("expected an infrastructure file error");
         assert_eq!(
             error.error_type,

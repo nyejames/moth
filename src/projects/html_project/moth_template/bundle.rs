@@ -370,7 +370,7 @@ pub(super) fn prepare_file_value_bundle(
             ),
             string_table,
         );
-        return Err(finish_source_owner(messages, source_builder, string_table));
+        return Err(finish_source_owner(messages, source_builder));
     };
 
     let mut resolved_file_references = ResolvedFileReferenceTable::new();
@@ -394,7 +394,7 @@ pub(super) fn prepare_file_value_bundle(
                     )),
                     string_table,
                 );
-                return Err(finish_source_owner(messages, source_builder, string_table));
+                return Err(finish_source_owner(messages, source_builder));
             }
         };
         let path_syntax = resolved.path_syntax;
@@ -406,7 +406,7 @@ pub(super) fn prepare_file_value_bundle(
         ) {
             Ok(outcome) => outcome,
             Err(messages) => {
-                return Err(finish_source_owner(messages, source_builder, string_table));
+                return Err(finish_source_owner(messages, source_builder));
             }
         };
         if let ResolvedFileReferenceOutcome::Diagnostic(diagnostic) = &mut outcome {
@@ -419,7 +419,7 @@ pub(super) fn prepare_file_value_bundle(
             outcome,
         }) {
             let messages = CompilerMessages::from_error_ref(error, string_table);
-            return Err(finish_source_owner(messages, source_builder, string_table));
+            return Err(finish_source_owner(messages, source_builder));
         }
     }
 
@@ -592,7 +592,7 @@ fn finalize_known_sources(
 
     if let Some(error) = transfer_error {
         let messages = CompilerMessages::from_error_ref(error, string_table);
-        return Err(finish_source_owner(messages, source_builder, string_table));
+        return Err(finish_source_owner(messages, source_builder));
     }
 
     // Registration may append logical paths for candidates queued before an aborted discovery
@@ -626,7 +626,7 @@ fn finalize_known_sources(
     };
 
     if let Some(messages) = reseed_error {
-        return Err(finish_source_owner(messages, source_builder, string_table));
+        return Err(finish_source_owner(messages, source_builder));
     }
 
     let rebound: Result<_, CompilerError> = (|| {
@@ -667,29 +667,27 @@ fn finalize_known_sources(
         }),
         Err(error) => {
             let messages = CompilerMessages::from_error_ref(error, string_table);
-            Err(finish_source_owner(messages, source_builder, string_table))
+            Err(finish_source_owner(messages, source_builder))
         }
     }
 }
 
-/// Finish the exclusive source owner and attach the finalized context to one terminal message
-/// set. If span installation itself fails, preserve that infrastructure failure and the original
-/// diagnostics as the ordered message payload.
+/// Finish the exclusive source owner and attach its finalized context to one terminal message set.
+/// If span installation fails, append that cause without replacing earlier causes, diagnostics,
+/// string tables, or foreign frozen identity contexts.
 fn finish_source_owner(
     mut messages: CompilerMessages,
     source_builder: SourceDatabaseBuilder,
-    string_table: &StringTable,
 ) -> CompilerMessages {
     match source_builder.finish() {
         Ok(source_files) => {
             messages.set_source_database(Arc::new(source_files));
             messages
         }
-        Err(install_error) => CompilerMessages::from_error_with_warnings(
-            install_error,
-            messages.into_diagnostics(),
-            string_table,
-        ),
+        Err(install_error) => {
+            messages.set_infrastructure_error(install_error);
+            messages
+        }
     }
 }
 
@@ -750,7 +748,7 @@ fn finalize_discovery_failure(
         Ok(source_id) => source_id,
         Err(mut messages) => {
             messages.prepend_diagnostics_preserving_context(prior_warnings);
-            return finish_source_owner(messages, source_builder, string_table);
+            return finish_source_owner(messages, source_builder);
         }
     };
     match &mut failure {
@@ -778,7 +776,7 @@ fn finalize_discovery_failure(
             CompilerMessages::from_error_with_warnings(error, prior_warnings, string_table)
         }
     };
-    finish_source_owner(messages, source_builder, string_table)
+    finish_source_owner(messages, source_builder)
 }
 
 /// Record one physically resolved content target in the candidate set and queue it.

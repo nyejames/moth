@@ -252,8 +252,10 @@ fn compile_prepared_config_source(
             classify_header_diagnostics(bag, request.file_id),
             string_table.clone(),
         ),
-        HeaderPreparationFailure::Infrastructure(error) => {
-            CompilerMessages::from_error_ref(error, string_table)
+        HeaderPreparationFailure::Infrastructure(errors) => {
+            let mut messages = CompilerMessages::empty(string_table.clone());
+            messages.append_infrastructure_errors(errors);
+            messages
         }
     })?;
     let bound_headers = bind_module_headers(
@@ -271,8 +273,10 @@ fn compile_prepared_config_source(
             classify_header_diagnostics(bag, request.file_id),
             string_table.clone(),
         ),
-        HeaderPreparationFailure::Infrastructure(error) => {
-            CompilerMessages::from_error_ref(error, string_table)
+        HeaderPreparationFailure::Infrastructure(errors) => {
+            let mut messages = CompilerMessages::empty(string_table.clone());
+            messages.append_infrastructure_errors(errors);
+            messages
         }
     })?;
 

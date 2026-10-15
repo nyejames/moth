@@ -294,6 +294,10 @@ fn generate_module_glue_rejects_incomplete_selected_runtime_metadata() {
         }
         assert!(error.msg.contains(&format!("{function_id:?}")));
         assert!(error.msg.contains(&format!("{package_id:?}")));
+        crate::compiler_frontend::compiler_messages::render::assert_compiler_bug_views(
+            error,
+            "validated runtime metadata is inconsistent",
+        );
     }
 }
 
@@ -1343,7 +1347,7 @@ fn emit_build_runtime_modules_rejects_unregistered_specifier() {
         Err(error) => error,
     };
     let error = error
-        .infrastructure_error()
+        .primary_infrastructure_error()
         .expect("runtime module failure should be an infrastructure error");
 
     assert!(

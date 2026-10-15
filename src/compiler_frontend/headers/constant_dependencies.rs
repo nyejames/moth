@@ -142,7 +142,7 @@ pub(crate) fn add_constant_initializer_dependencies(
                 .expect("header body range has no prepared source-path identity"),
         ) {
             Ok(v) => v,
-            Err(error) => return Err(HeaderPreparationFailure::Infrastructure(error)),
+            Err(error) => return Err(HeaderPreparationFailure::Infrastructure(error.into())),
         };
 
         let current_path = header.declaration_path;
@@ -172,7 +172,7 @@ pub(crate) fn add_constant_initializer_dependencies(
                     // violation - not a user-facing source diagnostic.
                     let Some(position) = constant_positions.get(&path) else {
                         return Err(HeaderPreparationFailure::Infrastructure(
-                            missing_constant_position_error(&path, path_fork, string_table),
+                            missing_constant_position_error(&path, path_fork, string_table).into(),
                         ));
                     };
                     let current_source_file = module_symbols

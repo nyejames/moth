@@ -3,8 +3,11 @@
 //! WHAT: produces single-line machine-friendly diagnostic records.
 //! WHY: CI, test runners, and IDEs often prefer compact output without ASCII art or colours.
 
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::{CompilerMessages, InfrastructureErrors};
 use crate::compiler_frontend::compiler_messages::DiagnosticKind;
+use crate::compiler_frontend::compiler_messages::render::infrastructure::{
+    ISSUE_URL, InfrastructureClass, format_error_guidance_lines, infrastructure_class,
+};
 use crate::compiler_frontend::compiler_messages::render::{
     DiagnosticRenderContext, display_column_number, display_line_number,
     relative_display_path_from_root, terse_payload_message,
@@ -12,6 +15,8 @@ use crate::compiler_frontend::compiler_messages::render::{
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticSeverity, InfrastructureDiagnosticKind,
 };
+use crate::compiler_frontend::utilities::basic::portable_path_text;
+use std::fmt::Write;
 
 #[cfg(test)]
 pub(crate) fn format_terse_diagnostics_with_context(
@@ -29,12 +34,12 @@ pub(crate) fn format_terse_compiler_messages(messages: &CompilerMessages) -> Vec
     // after every error diagnostic and before warnings/notes — mirroring the severity-bucket
     // display order without fabricating a user diagnostic.
     let mut lines = Vec::new();
-    let mut outer_emitted = messages.infrastructure_error().is_none();
+    let mut outer_emitted = messages.infrastructure_errors().is_none();
     for diagnostic_index in messages.diagnostic_display_order() {
         let diagnostic = &messages.diagnostic_slice()[diagnostic_index];
         if !outer_emitted && diagnostic.severity != DiagnosticSeverity::Error {
-            if let Some(error) = messages.infrastructure_error() {
-                lines.push(format_terse_compiler_error(error));
+            if let Some(errors) = messages.infrastructure_errors() {
+                lines.push(format_terse_infrastructure_errors(errors));
             }
             outer_emitted = true;
         }
@@ -43,35 +48,54 @@ pub(crate) fn format_terse_compiler_messages(messages: &CompilerMessages) -> Vec
             messages.diagnostic_render_context(diagnostic_index),
         ));
     }
-    if !outer_emitted && let Some(error) = messages.infrastructure_error() {
-        lines.push(format_terse_compiler_error(error));
+    if !outer_emitted && let Some(errors) = messages.infrastructure_errors() {
+        lines.push(format_terse_infrastructure_errors(errors));
     }
     lines
 }
 
-/// Format the outer infrastructure failure as one terse error record.
-///
-/// An infrastructure error owns only an optional host path and message at this boundary. The
-/// empty location field is intentional: no source frame or line/column pair is synthesized.
-pub(crate) fn format_terse_compiler_error(error: &CompilerError) -> String {
+/// Render every cause in one five-field record, with no invented source location.
+fn format_terse_infrastructure_errors(errors: &InfrastructureErrors) -> String {
     let code = DiagnosticKind::Infrastructure(InfrastructureDiagnosticKind::InfrastructureFailure)
         .descriptor()
         .code;
-    let display_path = error
+    let display_path = errors
+        .primary
         .host_path
         .as_deref()
-        .map(|host_path| {
-            let resolved =
-                std::fs::canonicalize(host_path).unwrap_or_else(|_| host_path.to_path_buf());
-            let root = std::env::current_dir().unwrap_or_default();
-            relative_display_path_from_root(&resolved, &root)
+        .map(|path| {
+            relative_display_path_from_root(path, &std::env::current_dir().unwrap_or_default())
         })
         .unwrap_or_default();
 
+    let mut message = String::new();
+    let mut has_compiler_bug = false;
+    for (index, error) in errors.iter().enumerate() {
+        if index == 0 {
+            message.push_str("Primary cause: ");
+        } else {
+            let _ = write!(message, " Additional cause {index}: ");
+        }
+        let class = infrastructure_class(&error.error_type);
+        let _ = write!(message, "{}", class.introduction());
+        if class == InfrastructureClass::CompilerBug && !has_compiler_bug {
+            let _ = write!(message, " {ISSUE_URL}");
+            has_compiler_bug = true;
+        }
+        let _ = write!(message, " Details: {}", error.msg);
+        if index != 0
+            && let Some(path) = error.host_path.as_deref()
+        {
+            let _ = write!(message, " Path: {}", portable_path_text(path));
+        }
+        for guidance in format_error_guidance_lines(error) {
+            let _ = write!(message, " {guidance}");
+        }
+    }
     format!(
         "E|{code}|{}||{}",
         sanitize_terse_field(&display_path),
-        sanitize_terse_field(&error.msg)
+        sanitize_terse_field(&message)
     )
 }
 

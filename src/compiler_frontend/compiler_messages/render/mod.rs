@@ -5,11 +5,15 @@
 //! prose, terminal output, terse records, or dev-server HTML.
 
 pub(crate) mod dev_server;
+pub(crate) mod infrastructure;
 pub(crate) mod terminal;
 pub(crate) mod terse;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+pub(crate) use tests::infrastructure_tests::assert_compiler_bug_views;
 
 mod borrow;
 mod calls;

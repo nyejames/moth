@@ -8,10 +8,11 @@
 
 use super::module_diagnostics::ModuleDiagnostics;
 use crate::compiler_frontend::compiler_errors::{
-    CompilerError, CompilerErrorMetadataKey, CompilerMessages, ErrorType,
+    CompilerError, CompilerErrorMetadataKey, CompilerMessages, ErrorType, InfrastructureErrors,
 };
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticKind, DiagnosticPayload, DiagnosticSeverity, NameNamespace,
+    PremergeDiagnosticBatch, PremergeFailure,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -148,12 +149,8 @@ fn diagnosed_render_context_survives_round_trip_and_remap() {
 }
 
 #[test]
-fn single_infrastructure_error_round_trips_into_compiler_error() {
-    // WHAT: a boundary message set carrying exactly one outer-lane infrastructure failure
-    //       recovers the originating `CompilerError` losslessly: message, span, ErrorType and
-    //       metadata.
-    // WHY: an infrastructure failure must become `Err(CompilerError)` at the semantic boundary,
-    //      not a diagnosed result, so it cannot be mistaken for a user-facing source failure.
+fn infrastructure_aggregate_round_trips_into_compiler_errors() {
+    // Both causes cross the classifier by ownership, including the primary's host metadata.
 
     let string_table = StringTable::new();
     let error = infrastructure_compiler_error();
@@ -163,10 +160,31 @@ fn single_infrastructure_error_round_trips_into_compiler_error() {
     let expected_error_type = error.error_type.clone();
     let expected_metadata = error.metadata.clone();
 
-    let messages = CompilerMessages::from_error(error, string_table);
+    let mut messages = CompilerMessages::from_error(error, string_table);
+    let mut secondary = CompilerError::file_error(
+        &PathBuf::from("module/secondary.moth"),
+        "secondary infrastructure cause",
+    );
+    secondary.new_metadata_entry(
+        CompilerErrorMetadataKey::CompilationStage,
+        "read".to_owned(),
+    );
+    messages.set_infrastructure_error(secondary.clone());
 
-    let recovered_error = ModuleDiagnostics::from_messages(messages)
-        .expect_err("an outer infrastructure failure should classify as Err(CompilerError)");
+    let recovered_errors = ModuleDiagnostics::from_messages(messages)
+        .expect_err("infrastructure failures should remain on the aggregate lane");
+    assert_eq!(
+        recovered_errors
+            .iter()
+            .map(|error| error.msg.as_str())
+            .collect::<Vec<_>>(),
+        [expected_msg.as_str(), "secondary infrastructure cause"]
+    );
+    let recovered_secondary = &recovered_errors.additional[0];
+    assert_eq!(recovered_secondary.error_type, secondary.error_type);
+    assert_eq!(recovered_secondary.host_path, secondary.host_path);
+    assert_eq!(recovered_secondary.metadata, secondary.metadata);
+    let recovered_error = &recovered_errors.primary;
 
     assert_eq!(
         recovered_error.msg, expected_msg,
@@ -203,10 +221,23 @@ fn mixed_user_and_infrastructure_sequence_is_invariant_failure() {
     let infra_error = infrastructure_compiler_error();
 
     let mut messages = CompilerMessages::from_error(infra_error, string_table);
+    messages.set_infrastructure_error(CompilerError::compiler_error(
+        "secondary infrastructure cause",
+    ));
     messages.extend_diagnostics(vec![user_diagnostic]);
 
-    let invariant_error = ModuleDiagnostics::from_messages(messages)
-        .expect_err("a mixed sequence should be a compiler invariant failure");
+    let errors = ModuleDiagnostics::from_messages(messages)
+        .expect_err("a mixed sequence should append an invariant without losing original causes");
+    assert_eq!(errors.iter().count(), 3);
+    assert_eq!(
+        errors.primary.msg,
+        "doc fragment #2 has invalid source span"
+    );
+    assert_eq!(
+        errors.iter().nth(1).expect("secondary cause").msg,
+        "secondary infrastructure cause"
+    );
+    let invariant_error = errors.iter().last().expect("malformed-sequence invariant");
 
     assert_eq!(
         invariant_error.error_type,
@@ -233,6 +264,7 @@ fn empty_failure_is_invariant_failure() {
 
     let invariant_error = ModuleDiagnostics::from_messages(messages)
         .expect_err("an empty failure should be a compiler invariant failure");
+    let invariant_error = &invariant_error.primary;
 
     assert_eq!(
         invariant_error.error_type,
@@ -256,15 +288,28 @@ fn infrastructure_error_preserves_host_path_through_reaggregation() {
     let error = infrastructure_compiler_error();
     let expected_path = error.host_path.clone();
 
-    let messages = CompilerMessages::from_error(error, StringTable::new());
-    let recovered_error = ModuleDiagnostics::from_messages(messages)
-        .expect_err("an outer infrastructure failure should classify as Err(CompilerError)");
-    assert_eq!(recovered_error.host_path, expected_path);
+    let mut messages = CompilerMessages::from_error(error, StringTable::new());
+    messages.set_infrastructure_error(CompilerError::compiler_error(
+        "secondary infrastructure cause",
+    ));
+    let PremergeFailure::Infrastructure(recovered_error) = PremergeFailure::from(messages) else {
+        panic!("infrastructure causes must survive premerge classification");
+    };
+    assert_eq!(recovered_error.primary.host_path, expected_path);
 
-    let packaged = CompilerMessages::from_error(recovered_error, StringTable::new());
+    let packaged =
+        PremergeFailure::Infrastructure(recovered_error).into_messages(&StringTable::new());
     assert_eq!(
         packaged
-            .infrastructure_error()
+            .infrastructure_errors()
+            .expect("aggregate retained")
+            .iter()
+            .count(),
+        2
+    );
+    assert_eq!(
+        packaged
+            .primary_infrastructure_error()
             .expect("the packaged outer failure must be preserved")
             .host_path,
         expected_path
@@ -289,24 +334,30 @@ fn warning_plus_infrastructure_error_recovers_original_and_preserves_host_path()
             namespace: NameNamespace::Value,
         },
     );
-    let messages = CompilerMessages::from_error_with_warnings(error, vec![warning], &warning_table);
+    let mut messages =
+        CompilerMessages::from_error_with_warnings(error, vec![warning], &warning_table);
+    messages.set_infrastructure_error(CompilerError::compiler_error(
+        "secondary infrastructure cause",
+    ));
 
     assert_eq!(messages.diagnostics.len(), 1);
-    assert!(messages.infrastructure_error().is_some());
+    assert!(messages.infrastructure_errors().is_some());
     assert_eq!(messages.warning_count(), 1);
 
     let recovered_error = ModuleDiagnostics::from_messages(messages)
         .expect_err("warning + one infrastructure failure should recover the CompilerError");
     assert_eq!(
-        recovered_error.msg,
+        recovered_error.primary.msg,
         "doc fragment #2 has invalid source span"
     );
-    assert_eq!(recovered_error.host_path, expected_path);
+    assert_eq!(recovered_error.primary.host_path, expected_path);
+    assert_eq!(recovered_error.iter().count(), 2);
 
-    let packaged = CompilerMessages::from_error(recovered_error, StringTable::new());
+    let packaged =
+        PremergeFailure::Infrastructure(recovered_error).into_messages(&StringTable::new());
     assert_eq!(
         packaged
-            .infrastructure_error()
+            .primary_infrastructure_error()
             .expect("the packaged outer failure must be preserved")
             .host_path,
         expected_path
@@ -366,6 +417,7 @@ fn warning_only_failure_is_invariant_failure() {
     let messages = CompilerMessages::from_diagnostics(vec![warning], string_table);
     let invariant_error = ModuleDiagnostics::from_messages(messages)
         .expect_err("a warning-only failure should be a compiler invariant failure");
+    let invariant_error = &invariant_error.primary;
     assert_eq!(invariant_error.error_type, ErrorType::Compiler);
     assert!(
         invariant_error
@@ -373,5 +425,41 @@ fn warning_only_failure_is_invariant_failure() {
             .contains("no user-facing error diagnostic"),
         "the invariant message should describe the missing user error, got: {}",
         invariant_error.msg
+    );
+}
+
+#[test]
+fn mixed_premerge_failure_preserves_diagnostics_and_all_infrastructure_causes() {
+    let mut string_table = StringTable::new();
+    let diagnostic = user_rule_diagnostic(string_table.intern("unknown_name"));
+    let batch = PremergeDiagnosticBatch::from_parts(
+        vec![diagnostic.clone()],
+        string_table,
+        Vec::new(),
+        Vec::new(),
+    );
+    let mut errors: Box<InfrastructureErrors> = infrastructure_compiler_error().into();
+    errors.push(CompilerError::compiler_error(
+        "finalization secondary cause",
+    ));
+
+    let messages = PremergeFailure::Mixed {
+        batch,
+        error: errors,
+    }
+    .into_messages(&StringTable::new());
+    assert_eq!(messages.diagnostics.len(), 1);
+    assert_eq!(messages.diagnostics[0].payload, diagnostic.payload);
+    assert_eq!(
+        messages
+            .infrastructure_errors()
+            .expect("mixed causes retained")
+            .iter()
+            .map(|error| error.msg.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "doc fragment #2 has invalid source span",
+            "finalization secondary cause"
+        ]
     );
 }

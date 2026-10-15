@@ -40,7 +40,9 @@ use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::ast::templates::tir::view::{
     TemplateTirPhase, TirView, TirViewIdentity, structural_transition_context,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::{
+    CompilerError, CompilerMessages, InfrastructureErrors,
+};
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::source::SourceSpan;
@@ -994,7 +996,7 @@ fn output_to_tir_nodes(
                                 CompilerMessages::from_diagnostic_ref(diagnostic, string_table)
                             }
                             ConstValueStoreError::Infrastructure(error) => {
-                                compiler_error_messages(*error, string_table)
+                                compiler_error_messages(error, string_table)
                             }
                         })?;
                     let expression = formatter_store
@@ -1083,6 +1085,11 @@ fn representative_span_for_run(
 //  Diagnostics
 // -------------------------
 
-fn compiler_error_messages(error: CompilerError, string_table: &StringTable) -> CompilerMessages {
-    CompilerMessages::from_error_ref(error, string_table)
+fn compiler_error_messages(
+    error: impl Into<Box<InfrastructureErrors>>,
+    string_table: &StringTable,
+) -> CompilerMessages {
+    let mut messages = CompilerMessages::empty(string_table.clone());
+    messages.append_infrastructure_errors(error.into());
+    messages
 }

@@ -63,7 +63,7 @@ pub(super) fn build_module_symbols(
                 validate_declared_name(header, file_output.file_role, string_table, path_fork)
             {
                 capture(file_output.file_id, &mut diagnostic)
-                    .map_err(HeaderPreparationFailure::Infrastructure)?;
+                    .map_err(|error| HeaderPreparationFailure::Infrastructure(error.into()))?;
                 diagnostic_bag.push(diagnostic);
                 continue;
             }

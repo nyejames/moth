@@ -1109,5 +1109,5 @@ fn declared_parameter_type(
 }
 
 fn infrastructure(message: &str) -> ExpressionParseError {
-    ExpressionParseError::Infrastructure(Box::new(CompilerError::compiler_error(message)))
+    ExpressionParseError::Infrastructure(CompilerError::compiler_error(message).into())
 }

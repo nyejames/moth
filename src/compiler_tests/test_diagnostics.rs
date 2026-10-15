@@ -38,9 +38,9 @@ pub fn assert_exact_diagnostic_codes(messages: &CompilerMessages, expected: &[&s
 #[track_caller]
 pub fn assert_no_infrastructure_errors(messages: &CompilerMessages) {
     assert!(
-        messages.infrastructure_error().is_none(),
+        messages.infrastructure_errors().is_none(),
         "expected no infrastructure errors, found: {:?}",
-        messages.infrastructure_error()
+        messages.infrastructure_errors()
     );
 }
 
@@ -64,9 +64,15 @@ pub fn assert_exact_infrastructure_error(messages: &CompilerMessages, expected_t
         "expected no user-facing error diagnostics, found: {user_errors:?}"
     );
 
-    let Some(error) = messages.infrastructure_error() else {
+    let Some(errors) = messages.infrastructure_errors() else {
         panic!("expected one outer infrastructure error, found none");
     };
+    assert_eq!(
+        errors.iter().count(),
+        1,
+        "expected exactly one infrastructure cause"
+    );
+    let error = &errors.primary;
     assert_eq!(
         &error.error_type, expected_type,
         "infrastructure error type mismatch"
@@ -87,7 +93,7 @@ pub fn assert_output_rejection(messages: &CompilerMessages, expected_reason: &st
     assert_exact_infrastructure_error(messages, &ErrorType::File);
 
     let error = messages
-        .infrastructure_error()
+        .primary_infrastructure_error()
         .expect("exact infrastructure failure must be present");
     // An absent reason is a defect in the production seam, not a reason value to compare
     // against: without it the test would silently degrade to "some File error happened".
@@ -180,6 +186,15 @@ mod tests {
         );
         let messages = CompilerMessages::from_error(error, table);
         assert_exact_infrastructure_error(&messages, &ErrorType::File);
+        let mut messages = messages;
+        messages.set_infrastructure_error(
+            crate::compiler_frontend::compiler_errors::CompilerError::compiler_error(
+                "later failure",
+            ),
+        );
+        assert_panics_with("expected exactly one infrastructure cause", || {
+            assert_exact_infrastructure_error(&messages, &ErrorType::File);
+        });
     }
 
     #[test]

@@ -95,7 +95,7 @@ fn project_compilation(modules: Vec<Module>) -> ProjectCompilation {
 
 fn first_invalid_config_reason(messages: &CompilerMessages) -> &InvalidConfigReason {
     assert!(
-        messages.infrastructure_error().is_none(),
+        messages.primary_infrastructure_error().is_none(),
         "project policy failures should stay as typed config diagnostics"
     );
 

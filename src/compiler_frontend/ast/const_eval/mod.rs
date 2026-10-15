@@ -22,7 +22,7 @@ use crate::compiler_frontend::ast::statements::value_production::types::ValueBlo
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
 use crate::compiler_frontend::builtins::casts::{BuiltinCastLiteral, apply_builtin_cast_policy};
-use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticLabel, DiagnosticLabelMessage,
     DiagnosticPayload, InvalidCastReason,
@@ -48,7 +48,7 @@ use std::borrow::Cow;
 #[derive(Debug)]
 pub(crate) enum ConstantFoldError {
     Diagnostic(CompilerDiagnostic),
-    Infrastructure(Box<CompilerError>),
+    Infrastructure(Box<InfrastructureErrors>),
 }
 #[derive(Debug)]
 pub(crate) enum ConstantFoldOutcome {
@@ -85,7 +85,13 @@ impl From<CompilerDiagnostic> for ConstantFoldError {
 
 impl From<CompilerError> for ConstantFoldError {
     fn from(error: CompilerError) -> Self {
-        ConstantFoldError::Infrastructure(Box::new(error))
+        ConstantFoldError::Infrastructure(error.into())
+    }
+}
+
+impl From<Box<InfrastructureErrors>> for ConstantFoldError {
+    fn from(errors: Box<InfrastructureErrors>) -> Self {
+        Self::Infrastructure(errors)
     }
 }
 

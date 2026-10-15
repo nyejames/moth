@@ -107,29 +107,6 @@ fn multi_page_html_build_result() -> BuildResult {
     }
 }
 
-fn html_build_result_without_entry_page() -> BuildResult {
-    BuildResult {
-        project: Project {
-            output_files: vec![OutputFile::new(
-                PathBuf::from("index.html"),
-                FileKind::Html(String::from("<html><body>Hello</body></html>")),
-            )],
-            entry_page_rel: None,
-            cleanup_policy: CleanupPolicy::html(),
-            warnings: vec![],
-            deferred_resources: Vec::new(),
-            resource_inputs: ResourceInputRegistry::new(),
-        },
-        config: Config::new(PathBuf::from("main.moth")),
-        warnings: vec![],
-        string_table: StringTable::new(),
-        source_database: None,
-        warning_source_contexts: Vec::new(),
-        output_owner: test_build_output_owner(),
-        directory_output_plan: None,
-    }
-}
-
 fn html_build_result_with_warning() -> BuildResult {
     let mut string_table = StringTable::new();
     let warning = naming_convention_warning(string_table.get_or_intern("dev_warning".to_string()));
@@ -423,7 +400,9 @@ fn build_without_declared_entry_page_is_treated_as_failure() {
     let root = _temp.path().to_path_buf();
 
     let state = Arc::new(DevServerState::new(root.join("dev")));
-    let mut executor = FakeExecutor::new(vec![Ok(html_build_result_without_entry_page())]);
+    let mut warning_build = html_build_result_with_warning();
+    warning_build.project.entry_page_rel = None;
+    let mut executor = FakeExecutor::new(vec![Ok(warning_build)]);
 
     let report = run_single_build_cycle(&state, &mut executor, &root, &Vec::new());
     assert!(!report.build_ok);
@@ -433,10 +412,33 @@ fn build_without_declared_entry_page_is_treated_as_failure() {
         .lock()
         .expect("build state should not be poisoned");
     assert!(!build_state.last_build_ok);
-    assert!(
-        build_state
-            .last_build_messages_summary
-            .contains("did not declare a dev entry page")
+    let summary = &build_state.last_build_messages_summary;
+    assert!(summary.contains("did not declare a dev entry page"));
+    assert!(summary.contains("COMPILER BUG:"));
+    assert!(!summary.contains("OPERATIONAL FAILURE:"));
+    assert_eq!(
+        summary
+            .lines()
+            .filter(|line| line.starts_with("E|MOTH-INFRA-0001|"))
+            .count(),
+        1,
+    );
+    assert_eq!(
+        summary
+            .lines()
+            .filter(|line| line.starts_with("W|"))
+            .count(),
+        1,
+    );
+    assert_eq!(summary.lines().count(), 2);
+    let html = build_state
+        .last_error_html
+        .as_ref()
+        .expect("failed publication should retain the error page");
+    assert_eq!(
+        html.matches("data-diagnostic-code=\"MOTH-INFRA-0001\"")
+            .count(),
+        1,
     );
 }
 
@@ -573,17 +575,6 @@ fn rebuild_loop_stops_at_max_consecutive_rebuilds() {
 }
 
 #[test]
-fn dev_server_error_messages_use_dev_server_error_type() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let messages = dev_server_error_messages(Path::new("x.moth"), "oops");
-    assert_eq!(messages.error_count(), 1);
-    let error = messages
-        .infrastructure_error()
-        .expect("dev-server failure should be wrapped for rendering");
-    assert_eq!(&error.error_type, &ErrorType::DevServer);
-}
-
-#[test]
 fn successful_build_with_warnings_preserves_structured_success_messages() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let _temp = tempfile::tempdir().expect("should create temp dir");
@@ -668,6 +659,28 @@ fn rebuild_loop_success_with_warnings_updates_summary() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn project_build_executor_preserves_non_utf8_entry_path_as_file_failure() {
+    use std::ffi::OsString;
+    use std::os::unix::ffi::OsStringExt;
+
+    let entry_file = PathBuf::from(OsString::from_vec(b"entry-\xff.moth".to_vec()));
+    let mut executor = ProjectBuildExecutor::new(
+        ProjectBuilder::new(Box::new(HtmlProjectBuilder::new())),
+        BuildConfigInputSet::new(),
+    );
+    let messages = match executor.build(&entry_file, &[]) {
+        Ok(_) => panic!("an unrepresentable entry path must not reach compilation"),
+        Err(messages) => messages,
+    };
+    let error = messages
+        .primary_infrastructure_error()
+        .expect("invalid host encoding must retain its filesystem failure");
+    assert_eq!(error.error_type, ErrorType::File);
+    assert_eq!(error.host_path.as_deref(), Some(entry_file.as_path()));
+}
+
 #[test]
 fn project_build_executor_preserves_warnings_when_output_write_fails() {
     let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
@@ -711,7 +724,7 @@ fn project_build_executor_preserves_warnings_when_output_write_fails() {
     let warnings: Vec<_> = messages.warnings().collect();
     assert_eq!(warnings.len(), 1);
     let error = messages
-        .infrastructure_error()
+        .primary_infrastructure_error()
         .expect("output write failure should be wrapped for rendering");
     assert_eq!(
         error.host_path.as_deref(),

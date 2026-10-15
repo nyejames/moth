@@ -71,7 +71,7 @@ impl From<ConstValueStoreError> for ExpressionConstructionFailure {
     fn from(error: ConstValueStoreError) -> Self {
         match error {
             ConstValueStoreError::Diagnostic(diagnostic) => Self::Diagnostic(diagnostic),
-            ConstValueStoreError::Infrastructure(error) => Self::Invariant(*error),
+            ConstValueStoreError::Infrastructure(error) => Self::Invariant(error),
         }
     }
 }

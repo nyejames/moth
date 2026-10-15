@@ -2138,9 +2138,8 @@ fn completed_service_diagnoses_retained_generic_assertion_and_custom_catch_sites
         for (source, assertion) in [(assertion_source, true), (catch_source, false)] {
             let (frontend, mut strings) = compile_owned_service_fixture(source, single_file, &[]);
             assert!(frontend.has_diagnosed_or_blocked());
-            let messages = frontend
-                .into_render_messages_with_frozen_identity(&mut strings, None, None)
-                .expect("the completed diagnosis owns its source and required type context");
+            let messages =
+                frontend.into_render_messages_with_frozen_identity(&mut strings, None, None);
             let diagnostics = messages.error_diagnostics().collect::<Vec<_>>();
             assert_eq!(diagnostics.len(), 1);
             let diagnostic = diagnostics[0];

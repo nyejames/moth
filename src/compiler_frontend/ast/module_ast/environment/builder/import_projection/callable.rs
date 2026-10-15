@@ -10,7 +10,7 @@ use super::*;
 
 use crate::compiler_frontend::ast::module_ast::environment::builder::import_projection::nominal::imported_nominal_path;
 use crate::compiler_frontend::ast::statements::functions::{
-    FunctionParameter, FunctionSignature, ReturnChannel, ReturnSlot,
+    FunctionParameter, FunctionSignature, MaterialisedFunctionSignature, ReturnChannel, ReturnSlot,
 };
 use crate::compiler_frontend::ast::type_resolution::intern_resolved_function_signature;
 use crate::compiler_frontend::canonical_type_identity::GenericDeclarationOrigin;
@@ -53,7 +53,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?,
             };
 
-            let (signature, function_type_id, returns, error_return) = self
+            let MaterialisedFunctionSignature {
+                signature,
+                function_type_id,
+                success_return_type_ids: returns,
+                error_return_type_id: error_return,
+            } = self
                 .project_imported_callable_signature(
                     &local_path,
                     &function.parameters,
@@ -61,7 +66,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     function.error_return.as_ref(),
                     string_table,
                 )
-                .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+                .map_err(|error| self.error_messages(error, string_table))?;
             let declaration = Declaration {
                 id: local_path,
                 type_id: function_type_id,
@@ -280,7 +285,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     .path_fork
                     .try_intern_child(imported_type_path, method_name)
                     .expect("imported receiver method path table exhausted");
-                let (signature, _, returns, error_return) = self
+                let MaterialisedFunctionSignature {
+                    signature,
+                    success_return_type_ids: returns,
+                    error_return_type_id: error_return,
+                    ..
+                } = self
                     .project_imported_callable_signature(
                         &method_path,
                         &method.parameters,
@@ -288,7 +298,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         method.error_return.as_ref(),
                         string_table,
                     )
-                    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+                    .map_err(|error| self.error_messages(error, string_table))?;
                 self.resolved_function_signatures_by_path.insert(
                     method_path,
                     ResolvedFunctionSignature {
@@ -481,7 +491,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         return_surfaces: &[PublicReturnTypeSlot],
         error_surface: Option<&CanonicalTypeIdentity>,
         string_table: &mut StringTable,
-    ) -> Result<(FunctionSignature, TypeId, Vec<TypeId>, Option<TypeId>), CompilerError> {
+    ) -> Result<MaterialisedFunctionSignature, Box<InfrastructureErrors>> {
         let mut parameters = Vec::with_capacity(parameter_surfaces.len());
         for (index, parameter) in parameter_surfaces.iter().enumerate() {
             let type_id = self.intern_imported_canonical_type(&parameter.type_identity)?;
@@ -544,7 +554,12 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         };
         let function_type_id =
             intern_resolved_function_signature(&signature, &mut self.type_environment);
-        Ok((signature, function_type_id, return_type_ids, error_return))
+        Ok(MaterialisedFunctionSignature {
+            signature,
+            function_type_id,
+            success_return_type_ids: return_type_ids,
+            error_return_type_id: error_return,
+        })
     }
 }
 

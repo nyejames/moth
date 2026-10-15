@@ -37,7 +37,9 @@ use crate::compiler_frontend::builtins::casts::targets::BuiltinCastFallibility;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::{
+    CompilerError, CompilerMessages, InfrastructureErrors,
+};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidFallibleHandlingReason,
 };
@@ -548,12 +550,14 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
     /// type information attached for diagnostic rendering.
     pub(in crate::compiler_frontend::ast) fn error_messages(
         &self,
-        error: CompilerError,
+        error: impl Into<Box<InfrastructureErrors>>,
         warnings: &[CompilerDiagnostic],
         string_table: &StringTable,
     ) -> CompilerMessages {
-        CompilerMessages::from_error_with_warnings(error, warnings.to_owned(), string_table)
-            .with_type_context_for_all_diagnostics(self.environment.type_environment.clone())
+        let mut messages =
+            CompilerMessages::from_diagnostics(warnings.to_owned(), string_table.clone());
+        messages.append_infrastructure_errors(error.into());
+        messages.with_type_context_for_all_diagnostics(self.environment.type_environment.clone())
     }
 
     /// Converts a [`TemplateNormalizationError`] into [`CompilerMessages`], routing
@@ -574,7 +578,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 .with_type_context_for_all_diagnostics(self.environment.type_environment.clone())
             }
             TemplateNormalizationError::Infrastructure(error) => {
-                self.error_messages(*error, warnings, string_table)
+                self.error_messages(error, warnings, string_table)
             }
         }
     }
@@ -595,7 +599,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
                 .with_type_context_for_all_diagnostics(self.environment.type_environment.clone())
             }
             ConstValueStoreError::Infrastructure(error) => {
-                self.error_messages(*error, warnings, string_table)
+                self.error_messages(error, warnings, string_table)
             }
         }
     }

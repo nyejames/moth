@@ -346,22 +346,18 @@ impl CaseExecutionResult {
             return;
         };
 
-        match build_result.take_warning_messages() {
-            Ok(messages) => {
-                self.messages = messages;
-            }
-            Err(error) => {
-                self.passed = false;
-                self.failure_kind = Some(FailureKind::HarnessFailed);
-                self.failure_reason = Some(
-                    "Failed to finalize successful-build diagnostics before integration reporting."
-                        .to_owned(),
-                );
-                self.messages = Some(CompilerMessages::from_error(
-                    error,
-                    crate::compiler_frontend::symbols::string_interning::StringTable::new(),
-                ));
-            }
+        self.messages = build_result.take_warning_messages();
+        if self
+            .messages
+            .as_ref()
+            .is_some_and(CompilerMessages::has_infrastructure_error)
+        {
+            self.passed = false;
+            self.failure_kind = Some(FailureKind::HarnessFailed);
+            self.failure_reason = Some(
+                "Failed to finalize successful-build diagnostics before integration reporting."
+                    .to_owned(),
+            );
         }
     }
 }

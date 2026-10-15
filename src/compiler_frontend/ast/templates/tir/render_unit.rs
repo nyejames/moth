@@ -156,11 +156,18 @@ fn conditional_body_candidate_span(
 /// WHY: the formatter emits structured diagnostics; this helper provides the
 ///      narrow bridge from formatter messages back to template-stage errors without
 ///      converting the outer failure into a user diagnostic.
-fn tir_formatter_messages_to_template_error(messages: CompilerMessages) -> TemplateError {
-    if let Some(error) = messages.infrastructure_error() {
-        return TemplateError::Infrastructure(Box::new(error.clone()));
+pub(super) fn tir_formatter_messages_to_template_error(
+    messages: CompilerMessages,
+) -> TemplateError {
+    let CompilerMessages {
+        infrastructure_errors,
+        diagnostics,
+        ..
+    } = messages;
+    if let Some(errors) = infrastructure_errors {
+        return TemplateError::Infrastructure(errors);
     }
-    for diagnostic in messages.into_diagnostics() {
+    for diagnostic in diagnostics {
         if diagnostic.severity == DiagnosticSeverity::Error {
             return diagnostic.into();
         }

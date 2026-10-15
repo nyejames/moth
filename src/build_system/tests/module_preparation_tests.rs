@@ -1873,12 +1873,13 @@ fn assert_malformed_chunks_rejected(
         0,
     ) {
         Err(PremergeFailure::Infrastructure(error)) => error,
-        Err(PremergeFailure::Mixed { error, .. }) => *error,
+        Err(PremergeFailure::Mixed { error, .. }) => error,
         Err(PremergeFailure::Diagnosed(_)) => {
             panic!("malformed chunk payload should be an infrastructure failure, not diagnostics")
         }
         Ok(_) => panic!("malformed chunk payload should be rejected, but merge succeeded"),
     };
+    let error = &error.primary;
 
     assert!(
         error.msg.contains(expected_fragment),

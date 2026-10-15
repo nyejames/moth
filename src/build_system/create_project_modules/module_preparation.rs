@@ -489,8 +489,9 @@ impl ModulePreparationContext<'_> {
             return Err(PremergeFailure::Infrastructure(
                 CompilerError::compiler_error(format!(
                     "module preparation path fork must carry the authoritative source-table \
-                     prefix: expected {expected} paths, got {actual}"
-                )),
+                 prefix: expected {expected} paths, got {actual}"
+                ))
+                .into(),
             ));
         }
         Ok(())
@@ -660,9 +661,10 @@ impl ModulePreparationContext<'_> {
                 return Err(PremergeFailure::Infrastructure(
                     CompilerError::compiler_error(format!(
                         "file preparation chunk path fork base length mismatch: destination \
-                         base length {destination_base_len}, chunk inherited base length \
-                         {chunk_base_len}"
-                    )),
+                     base length {destination_base_len}, chunk inherited base length \
+                     {chunk_base_len}"
+                    ))
+                    .into(),
                 ));
             }
         }
@@ -699,7 +701,7 @@ impl ModulePreparationContext<'_> {
                     }
                     error => PremergeFailure::Infrastructure(CompilerError::compiler_error(
                         format!("file preparation path merge failed: {error:?}"),
-                    )),
+                    ).into()),
                 })?;
 
             let path_remap_is_identity = path_remap.is_identity();
@@ -745,7 +747,7 @@ impl ModulePreparationContext<'_> {
                         warnings.append(&mut output.warnings);
                         prepared_outputs
                             .insert(prepared_file.file_index, prepared_file.source_id, output)
-                            .map_err(PremergeFailure::Infrastructure)?;
+                            .map_err(PremergeFailure::from)?;
                     }
                     Err(FileFrontendPrepareFailure::Diagnosed(mut error)) => {
                         if prepared_file.string_domain == PreparedFileStringDomain::ChunkLocal {
@@ -774,7 +776,7 @@ impl ModulePreparationContext<'_> {
                         diagnostics.push(diagnostic);
                     }
                     Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
-                        return Err(PremergeFailure::Infrastructure(error));
+                        return Err(PremergeFailure::Infrastructure(error.into()));
                     }
                 }
             }
@@ -797,14 +799,14 @@ impl ModulePreparationContext<'_> {
             if let Err(error) =
                 batch.attach_path_table_if_missing(Arc::new(path_fork.snapshot_table()))
             {
-                return Err(PremergeFailure::Infrastructure(error));
+                return Err(PremergeFailure::Infrastructure(error.into()));
             }
             batch.prepend_diagnostics(warnings);
             return Err(PremergeFailure::Diagnosed(batch));
         }
         prepared_outputs
             .ensure_filled()
-            .map_err(PremergeFailure::Infrastructure)?;
+            .map_err(PremergeFailure::from)?;
         let ordered_slots = prepared_outputs.into_ordered_outputs();
         let mut filled_outputs: Vec<FileFrontendPrepareOutput> = ordered_slots
             .into_iter()
@@ -829,7 +831,7 @@ impl ModulePreparationContext<'_> {
                         if let Err(error) =
                             batch.attach_path_table_if_missing(Arc::new(path_fork.snapshot_table()))
                         {
-                            return Err(PremergeFailure::Infrastructure(error));
+                            return Err(PremergeFailure::Infrastructure(error.into()));
                         }
                         batch.prepend_diagnostics(warnings);
                         PremergeFailure::Diagnosed(batch)
@@ -1143,12 +1145,12 @@ impl ModuleSyntaxDiscovery<'_, '_> {
                 if let Err(error) =
                     batch.attach_path_table_if_missing(Arc::new(self.path_fork.snapshot_table()))
                 {
-                    return Err(PremergeFailure::Infrastructure(error));
+                    return Err(PremergeFailure::Infrastructure(error.into()));
                 }
                 return Err(PremergeFailure::Diagnosed(batch));
             }
             Err(FileFrontendPrepareFailure::Infrastructure(error)) => {
-                return Err(PremergeFailure::Infrastructure(error));
+                return Err(PremergeFailure::Infrastructure(error.into()));
             }
         };
 
@@ -1210,7 +1212,7 @@ impl ModuleSyntaxDiscovery<'_, '_> {
                         if let Err(error) = batch
                             .attach_path_table_if_missing(Arc::new(self.path_fork.snapshot_table()))
                         {
-                            return Err(PremergeFailure::Infrastructure(error));
+                            return Err(PremergeFailure::Infrastructure(error.into()));
                         }
                         batch.prepend_diagnostics(self.warnings);
                         PremergeFailure::Diagnosed(batch)

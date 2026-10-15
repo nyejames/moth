@@ -14,12 +14,16 @@ use crate::compiler_frontend::ast::module_ast::environment::AstModuleEnvironment
 use crate::compiler_frontend::ast::module_ast::finalization::{
     AstFinalizer, MaterialisationContextRetention,
 };
-use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
+use crate::compiler_frontend::ast::statements::functions::{
+    FunctionSignature, MaterialisedFunctionSignature,
+};
 use crate::compiler_frontend::builtins::casts::evidence::builtin_cast_proves_core_trait;
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalEvidenceIdentity, CanonicalTraitIdentity, CanonicalTypeIdentity,
 };
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::{
+    CompilerError, CompilerMessages, InfrastructureErrors,
+};
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_bindings::GenericTypeBindings;
@@ -221,7 +225,11 @@ where
         path_fork,
         &mut value_services,
     )
-    .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+    .map_err(|errors| {
+        let mut messages = CompilerMessages::empty(string_table.clone());
+        messages.append_infrastructure_errors(errors);
+        messages
+    })?;
 
     let request = GenericFunctionInstantiationRequest::generated(
         identity.declaration(),
@@ -321,7 +329,7 @@ fn install_generated_request_evidence<PrimarySource>(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
     services: &mut super::stable_types::GeneratedValueMaterialisationServices<'_>,
-) -> Result<(), CompilerError>
+) -> Result<(), Box<InfrastructureErrors>>
 where
     PrimarySource: MaterialisationNominalSource,
 {
@@ -450,7 +458,8 @@ where
         {
             return Err(CompilerError::compiler_error(
                 "Generated request selected evidence absent from the requester context",
-            ));
+            )
+            .into());
         }
         let evidence_kind =
             requester_evidence.map_or(TraitEvidenceKind::Builtin, |evidence| evidence.kind);
@@ -587,7 +596,8 @@ where
                 ) {
                     return Err(CompilerError::compiler_error(
                         "Generated evidence method retained an invalid executable target",
-                    ));
+                    )
+                    .into());
                 }
                 imported_contracts.push((
                     method_path,
@@ -603,7 +613,8 @@ where
             } else {
                 return Err(CompilerError::compiler_error(
                     "Generated evidence method has no frozen executable target",
-                ));
+                )
+                .into());
             }
         }
 
@@ -615,7 +626,8 @@ where
         let Some(generated_target_type_id) = generated_target_type_id else {
             return Err(CompilerError::compiler_error(
                 "Generated evidence row was installed without an interned target type",
-            ));
+            )
+            .into());
         };
 
         let source_file = requester_evidence
@@ -689,7 +701,7 @@ fn install_generated_requester_template<N: MaterialisationNominalSource>(
     nominal_source: &N,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
-) -> Result<(), CompilerError> {
+) -> Result<(), Box<InfrastructureErrors>> {
     if environment
         .lookups
         .generic_function_templates_by_path
@@ -758,7 +770,8 @@ fn install_generated_requester_template<N: MaterialisationNominalSource>(
         if parameters.parameters.len() != template.generic_parameters.len() {
             return Err(CompilerError::compiler_error(
                 "Generated requester generic receiver parameter count disagrees with its owner",
-            ));
+            )
+            .into());
         }
         let registered = environment
             .type_environment
@@ -825,7 +838,7 @@ fn install_generated_requester_template<N: MaterialisationNominalSource>(
         }
         generic_parameter_type_ids.push(type_id);
     }
-    let (signature, _, _, _) = template.signature.materialise(
+    let MaterialisedFunctionSignature { signature, .. } = template.signature.materialise(
         &method_path,
         &mut super::artefact_emit::StableFunctionMaterialisationContext {
             generic_parameter_type_ids: &generic_parameter_type_ids,

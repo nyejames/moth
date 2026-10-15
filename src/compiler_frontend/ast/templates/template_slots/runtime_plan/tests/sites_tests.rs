@@ -50,6 +50,7 @@ fn assert_authority_error(
         result.expect_err(format!("{context} must surface as a broken-authority error").as_str());
     match error {
         TemplateError::Infrastructure(error) => {
+            let error = &error.primary;
             assert!(
                 error.msg.contains(owner_marker),
                 "{context} should be rejected by the {owner_marker} owner, got: {}",
@@ -235,7 +236,7 @@ fn missing_structural_authority_propagates_through_runtime_slot_site_planner() {
 
     match error {
         TemplateError::Infrastructure(error) => {
-            assert_eq!(error.error_type, ErrorType::Compiler);
+            assert_eq!(error.primary.error_type, ErrorType::Compiler);
         }
         TemplateError::Diagnostic(_) => {
             panic!("missing structural authority must not become a user diagnostic");

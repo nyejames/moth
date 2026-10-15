@@ -44,7 +44,9 @@ use crate::compiler_frontend::ast::templates::tir::{
 use crate::compiler_frontend::ast::templates::top_level_templates::FoldedConstTemplateResult;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::builtins::error_type::resolve_builtin_error_type_typed;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
+use crate::compiler_frontend::compiler_errors::{
+    CompilerError, CompilerMessages, InfrastructureErrors,
+};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, GenericSubstitutionDiagnostic, InvalidTemplateStructureReason,
 };
@@ -1389,9 +1391,15 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
 
     /// Wraps an internal [`CompilerError`] into [`CompilerMessages`], preserving current
     /// warnings and the module type environment for render-time type-name resolution.
-    fn error_messages(&self, error: CompilerError, string_table: &StringTable) -> CompilerMessages {
-        CompilerMessages::from_error_with_warnings(error, self.warnings.clone(), string_table)
-            .with_type_context_for_all_diagnostics(self.environment.type_environment.clone())
+    fn error_messages(
+        &self,
+        error: impl Into<Box<InfrastructureErrors>>,
+        string_table: &StringTable,
+    ) -> CompilerMessages {
+        let mut messages =
+            CompilerMessages::from_diagnostics(self.warnings.clone(), string_table.clone());
+        messages.append_infrastructure_errors(error.into());
+        messages.with_type_context_for_all_diagnostics(self.environment.type_environment.clone())
     }
 
     /// Wraps a user-facing [`CompilerDiagnostic`] into [`CompilerMessages`], preserving current
@@ -1420,7 +1428,7 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             TemplateError::Diagnostic(diagnostic) => {
                 self.diagnostic_messages(diagnostic, string_table)
             }
-            TemplateError::Infrastructure(error) => self.error_messages(*error, string_table),
+            TemplateError::Infrastructure(error) => self.error_messages(error, string_table),
         }
     }
 

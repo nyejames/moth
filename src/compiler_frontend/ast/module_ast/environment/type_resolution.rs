@@ -1273,7 +1273,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         Ok(diagnostic) => ExpressionParseError::Diagnostic(
                             member_shell_diagnostic_for_context(diagnostic, member_context),
                         ),
-                        Err(error) => ExpressionParseError::Infrastructure(Box::new(error)),
+                        Err(error) => ExpressionParseError::Infrastructure(error),
                     }
                 })?;
                 declarations.push(declaration);

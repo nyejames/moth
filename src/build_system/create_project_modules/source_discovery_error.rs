@@ -91,13 +91,13 @@ impl SourceDiscoveryError {
                 let table = std::mem::take(string_table);
                 let mut batch = PremergeDiagnosticBatch::from_diagnostic(diagnostic, table);
                 if let Err(error) = batch.attach_path_table_if_missing(path_table) {
-                    return PremergeFailure::Infrastructure(error);
+                    return PremergeFailure::Infrastructure(error.into());
                 }
                 PremergeFailure::Diagnosed(batch)
             }
             SourceDiscoveryError::Premerge(mut failure) => {
                 if let Err(error) = failure.attach_path_table_if_missing(path_table) {
-                    return PremergeFailure::Infrastructure(error);
+                    return super::compilation::append_finish_failure(failure, error);
                 }
                 failure
             }
@@ -107,7 +107,9 @@ impl SourceDiscoveryError {
                      explicitly instead of converting through into_failure"
                 )
             }
-            SourceDiscoveryError::Infrastructure(error) => PremergeFailure::Infrastructure(error),
+            SourceDiscoveryError::Infrastructure(error) => {
+                PremergeFailure::Infrastructure(error.into())
+            }
         }
     }
 }

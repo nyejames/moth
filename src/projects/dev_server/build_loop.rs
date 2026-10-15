@@ -11,7 +11,9 @@ use crate::build_system::output::{
 use crate::command_timing_scope;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
+use crate::compiler_frontend::compiler_errors::{
+    CompilerError, CompilerErrorMetadataKey, CompilerMessages, ErrorType,
+};
 use crate::compiler_frontend::display_messages::print_compiler_messages;
 use crate::projects::dev_server::error_page::{
     format_compiler_messages, render_compiler_error_page, render_runtime_error_page,
@@ -103,10 +105,11 @@ impl DevBuildExecutor for ProjectBuildExecutor {
         flags: &[Flag],
     ) -> Result<BuildResult, CompilerMessages> {
         let entry_path = entry_file.to_str().ok_or_else(|| {
-            dev_server_error_messages(
+            let error = CompilerError::file_error(
                 entry_file,
                 "Dev server entry path contains invalid UTF-8 and cannot be compiled.",
-            )
+            );
+            CompilerMessages::from_error(error, Default::default())
         })?;
 
         build::build_project(&self.builder, entry_path, flags, &self.build_config_inputs)
@@ -142,15 +145,7 @@ impl DevBuildExecutor for ProjectBuildExecutor {
                 &mut build_result.string_table,
             )
         });
-        output_result.map_err(|messages| {
-            match build_result.take_output_failure_messages(messages) {
-                Ok(messages) => messages,
-                Err(error) => CompilerMessages::from_error(
-                    error,
-                    crate::compiler_frontend::symbols::string_interning::StringTable::new(),
-                ),
-            }
-        })
+        output_result.map_err(|messages| build_result.take_output_failure_messages(messages))
     }
 }
 
@@ -438,36 +433,12 @@ fn build_once(
                 if let Some(source_database) = config_source_database {
                     messages.set_source_database(source_database);
                 }
-                let warning_messages = match build_result.take_warning_messages_before_freeze() {
-                    Ok(warnings) => warnings,
-                    Err(error) => {
-                        let messages = CompilerMessages::from_error(
-                            error,
-                            crate::compiler_frontend::symbols::string_interning::StringTable::new(),
-                        );
-                        return BuildOutcome {
-                            build_succeeded: false,
-                            build_duration,
-                            entry_page_rel: None,
-                            html_site_config: None,
-                            diagnostics_summary: format_compiler_messages(&messages),
-                            success_messages: None,
-                            failed_build: Some(BuildFailure::CompilerMessages(messages)),
-                            watch_scope: Some(watch_scope),
-                            output_dir: Some(output_dir),
-                        };
-                    }
-                };
-                if let Some(warnings) = warning_messages {
+                if let Some(warnings) = build_result.take_warning_messages_before_freeze() {
                     messages.append_messages_preserving_context(warnings);
                 }
-                let messages = match messages.freeze_source_contexts() {
-                    Ok(messages) => messages,
-                    Err(error) => CompilerMessages::from_error(
-                        error,
-                        crate::compiler_frontend::symbols::string_interning::StringTable::new(),
-                    ),
-                };
+                if let Err(error) = messages.freeze_source_contexts() {
+                    messages.set_infrastructure_error(error);
+                }
                 return BuildOutcome {
                     build_succeeded: false,
                     build_duration,
@@ -497,12 +468,7 @@ fn build_once(
         };
 
         let success_messages = match build_result.take_warning_messages() {
-            Ok(messages) => messages,
-            Err(error) => {
-                let messages = CompilerMessages::from_error(
-                    error,
-                    crate::compiler_frontend::symbols::string_interning::StringTable::new(),
-                );
+            Some(messages) if messages.has_errors() => {
                 return BuildOutcome {
                     build_succeeded: false,
                     build_duration,
@@ -515,6 +481,7 @@ fn build_once(
                     output_dir: Some(output_dir),
                 };
             }
+            messages => messages,
         };
         BuildOutcome {
             build_succeeded: true,
@@ -528,22 +495,21 @@ fn build_once(
             output_dir: Some(output_dir),
         }
     } else {
-        let mut messages = dev_server_error_messages(
-            entry_file,
+        // A successful dev build promises a page for the host to serve, including custom builders.
+        let mut error = CompilerError::compiler_error(
             "Build completed, but the project builder did not declare a dev entry page.",
         );
-        match build_result.take_warning_messages() {
-            Ok(Some(mut warnings)) => {
-                warnings.append_messages_preserving_context(messages);
-                messages = warnings;
-            }
-            Ok(None) => {}
-            Err(error) => {
-                messages = CompilerMessages::from_error(
-                    error,
-                    crate::compiler_frontend::symbols::string_interning::StringTable::new(),
-                );
-            }
+        error.new_metadata_entry(
+            CompilerErrorMetadataKey::CompilationStage,
+            "Dev entry publication".to_string(),
+        );
+        let mut messages = CompilerMessages::from_error(error, Default::default());
+        if let Some(mut warnings) = build_result.take_warning_messages_before_freeze() {
+            warnings.append_messages_preserving_context(messages);
+            messages = warnings;
+        }
+        if let Err(error) = messages.freeze_source_contexts() {
+            messages.set_infrastructure_error(error);
         }
         let diagnostics_summary = format_compiler_messages(&messages);
         BuildOutcome {
@@ -577,6 +543,7 @@ fn dev_server_project_root(entry_file: &Path) -> PathBuf {
     }
 }
 
+/// Constructs a host-operation failure. Typed compiler and filesystem failures bypass this helper.
 pub fn dev_server_error_messages(path: &Path, msg: impl Into<String>) -> CompilerMessages {
     let error = CompilerError::file_error(path, msg.into()).with_error_type(ErrorType::DevServer);
     CompilerMessages::from_error(error, Default::default())

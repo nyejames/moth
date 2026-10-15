@@ -14,9 +14,9 @@
 
 ```text
 STATUS: active on link-fixes-and-test-cleanup
-CURRENT_SLICE: topology and entry-liveness coverage accepted; failure-reporting inventory next
+CURRENT_SLICE: typed failure transport and three-view reporting accepted
 BLOCKERS: none
-NEXT_ACTION: preserve typed infrastructure causes and render cause-derived failure classes
+NEXT_ACTION: execute the bounded adjacent-defect campaign and record each disposition
 ```
 
 The reviewed main includes the typed-expression/native-result Phase 4 checkpoint. Its plan explicitly pauses before Phase 5. The affected source still collects ordinary-module provider candidates by source-file ownership and still loses later error types during infrastructure aggregation. The original missing-asset path remains present. Establish an executed failing baseline before changing it. [S1] [S2] [S5] [S6]
@@ -293,10 +293,10 @@ The current `CompilerError` remains the rare outer carrier beside typed diagnost
 | `DevServer` | Operational host/bind/watch failure, unless an internal defect was incorrectly relabelled on the way out |
 | `Config` | Inventory actual producers. Authored configuration errors belong to typed diagnostics and config IO belongs to operational failure. Remove this variant if it has no production owner. |
 
-- [ ] Inventory constructors and reclassification wrappers with repository search, recording path/function, actual cause and final class. Prioritise build, provider, output, frontend load, backend invocation and dev-server boundaries. Search results from an old branch are not an inventory.
-- [ ] Correct proven misclassifications before their new banner ships. A source path that does not exist, permission denial, tool spawn failure, port bind failure or provider invocation failure is not proof of a Moth bug. A validated missing link record or invalid compiler-generated Wasm is an invariant failure.
-- [ ] Preserve the original class when adding stage/host context. Audit `.with_error_type(...)` and broad adapter helpers in `src/projects/dev_server/server.rs` and `build_loop.rs` so an internal compiler failure cannot become merely a dev-server operation failure.
-- [ ] Keep this bounded to the affected outer carrier and its classification boundary. Report unrelated producer cleanup separately. An unresolved classification on a changed path is a blocker, not permission to guess or launch the full layout migration.
+- [x] Inventory constructors and reclassification wrappers with repository search, recording path/function, actual cause and final class. Prioritise build, provider, output, frontend load, backend invocation and dev-server boundaries. Search results from an old branch are not an inventory.
+- [x] Correct proven misclassifications before their new banner ships. A source path that does not exist, permission denial, tool spawn failure, port bind failure or provider invocation failure is not proof of a Moth bug. A validated missing link record or invalid compiler-generated Wasm is an invariant failure.
+- [x] Preserve the original class when adding stage/host context. Audit `.with_error_type(...)` and broad adapter helpers in `src/projects/dev_server/server.rs` and `build_loop.rs` so an internal compiler failure cannot become merely a dev-server operation failure.
+- [x] Keep this bounded to the affected outer carrier and its classification boundary. Report unrelated producer cleanup separately. An unresolved classification on a changed path is a blocker, not permission to guess or launch the full layout migration.
 
 ### 4.2 Preserve mixed failures before rendering them
 
@@ -304,11 +304,11 @@ The current `CompilerMessages::set_infrastructure_error` concatenates messages, 
 
 Use one cold aggregate beside the diagnostic stream. The preferred concrete change is to keep the existing outer optional box but let it hold a crate-private `InfrastructureErrors` with `primary: CompilerError` and `additional: Vec<CompilerError>`. The vector is empty for the normal single-failure case. It stores actual causes, not pre-rendered strings or another diagnostic lane.
 
-- [ ] Keep each cause's message, type, optional host path, source provenance and metadata intact. Preserve production order with the first cause as primary. Append another aggregate's causes in order rather than nesting aggregates.
-- [ ] Update construction, append/freeze transport, render access and tests together. A primary-cause accessor remains useful where a consumer explicitly needs the first cause. Renderers must iterate the whole aggregate.
-- [ ] Keep `CompilerMessages`' current compact-size invariant and existing infrastructure-event count/status policy. Several related causes still represent one aborted compilation, not additional user diagnostics.
-- [ ] Keep the matching message/report context through existing transport. Never splice one cause's span into another cause's host path or invent a source frame from an unpaired compact ID.
-- [ ] Test compiler->operational, operational->compiler and same-class sequences, both through the setter and a real aggregate append path. The first cause and every additional cause must keep their own facts and classification.
+- [x] Keep each cause's message, type, optional host path, source provenance and metadata intact. Preserve production order with the first cause as primary. Append another aggregate's causes in order rather than nesting aggregates.
+- [x] Update construction, append/freeze transport, render access and tests together. A primary-cause accessor remains useful where a consumer explicitly needs the first cause. Renderers must iterate the whole aggregate.
+- [x] Keep `CompilerMessages`' current compact-size invariant and existing infrastructure-event count/status policy. Several related causes still represent one aborted compilation, not additional user diagnostics.
+- [x] Keep the matching message/report context through existing transport. Never splice one cause's span into another cause's host path or invent a source frame from an unpaired compact ID.
+- [x] Test compiler->operational, operational->compiler and same-class sequences, both through the setter and a real aggregate append path. The first cause and every additional cause must keep their own facts and classification.
 
 This small cold collection fixes information loss. It is not the final failure architecture. The eventual failure-lane migration still owns separate operational results, self-contained compiler-bug reports and worker unwinding. Do not introduce those mechanisms here.
 
@@ -350,13 +350,13 @@ For a single failure, emit one introduction. Include the fixed report URL in a t
 
 Extend the existing `display_messages_tests.rs`, `diagnostic_model_tests.rs` and command-status tests where they own the assertions. Add a small local table for exhaustive type classification rather than many duplicate fixtures.
 
-- [ ] Every internal category renders the compiler-defect introduction and report URL through terminal, terse and dev-server paths.
-- [ ] Missing/read/write/path errors and host operation failures render as operational, preserving the cause without compiler-blame text.
-- [ ] Normal malformed import, config and type diagnostics keep their codes/source labels and have neither infrastructure introduction.
-- [ ] Mixed-cause aggregation preserves both categories, messages, paths and guidance in order. Inspect final rendered output, not merely the classification helper.
-- [ ] Hostile details containing `<`, `&`, quotes, pipes and line breaks remain safe HTML and one valid terse record. Preserve meaningful developer text after sanitisation.
-- [ ] Infrastructure errors still cause failure status and suppress the benchmark diagnostic-count record. Error/warning ordering and the raw stored messages are unchanged by rendering.
-- [ ] Use portable injected IO errors for permission-denied coverage rather than assuming `chmod` fails under a privileged test runner. Exercise at least one real failing filesystem/host boundary where an existing harness permits it. Add no production fault-injection switch.
+- [x] Every internal category renders the compiler-defect introduction and report URL through terminal, terse and dev-server paths.
+- [x] Missing/read/write/path errors and host operation failures render as operational, preserving the cause without compiler-blame text.
+- [x] Normal malformed import, config and type diagnostics keep their codes/source labels and have neither infrastructure introduction.
+- [x] Mixed-cause aggregation preserves both categories, messages, paths and guidance in order. Inspect final rendered output, not merely the classification helper.
+- [x] Hostile details containing `<`, `&`, quotes, pipes and line breaks remain safe HTML and one valid terse record. Preserve meaningful developer text after sanitisation.
+- [x] Infrastructure errors still cause failure status and suppress the benchmark diagnostic-count record. Error/warning ordering and the raw stored messages are unchanged by rendering.
+- [x] Use portable injected IO errors for permission-denied coverage rather than assuming `chmod` fails under a privileged test runner. Exercise at least one real failing filesystem/host boundary where an existing harness permits it. Add no production fault-injection switch.
 
 **Exit gate:** the same internal metadata failure is clearly labelled a compiler bug in all three views, genuine operational failures are not blamed on the compiler and mixed failures retain their individual provenance.
 

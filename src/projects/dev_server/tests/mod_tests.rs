@@ -5,6 +5,7 @@ use crate::build_system::build::{BackendBuilder, Project, ProjectBuilder};
 use crate::builder_surface::BuilderSurface;
 use crate::compiler_frontend::Flag;
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
+use crate::compiler_frontend::compiler_errors::ErrorType;
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidDependencyClauseReason,
 };
@@ -113,6 +114,25 @@ fn entry_path_validation_accepts_moth_files() {
     .expect("valid moth path should pass validation");
 
     assert!(validated.ends_with("main.moth"));
+}
+
+#[test]
+fn entry_path_validation_preserves_missing_file_cause() {
+    let directory = tempfile::tempdir().expect("should create temp dir");
+    let missing_path = directory.path().join("missing.moth");
+    let messages = validate_dev_entry_path(
+        missing_path
+            .to_str()
+            .expect("temp path should be valid UTF-8"),
+    )
+    .expect_err("missing dev entry must fail at path validation");
+
+    let error = messages
+        .primary_infrastructure_error()
+        .expect("missing entry should retain its filesystem failure");
+    assert_eq!(error.error_type, ErrorType::File);
+    assert_eq!(error.host_path.as_deref(), Some(missing_path.as_path()));
+    assert_eq!(messages.error_count(), 1);
 }
 
 #[test]
@@ -273,7 +293,7 @@ fn resolve_dev_runtime_paths_return_style_directive_merge_failures() {
 
     assert_eq!(messages.error_count(), 1);
     let error = messages
-        .infrastructure_error()
+        .primary_infrastructure_error()
         .expect("directive conflict should be wrapped for rendering");
     assert!(error.msg.contains("cannot override") || error.msg.contains("already exists"));
 }

@@ -124,12 +124,13 @@ pub(crate) fn resolve_file_value(
                             .borrow_mut()
                             .intern_origin(origin.clone(), span))
                     })?;
-                    let value = const_values.insert_resolved(
-                        builtin_type_ids::STRING, ConstValuePayload::String(value), span,
-                    ).map_err(|error| match error {
-                        crate::compiler_frontend::ast::const_values::store::ConstValueStoreError::Diagnostic(error) => ExpressionParseError::from(error),
-                        crate::compiler_frontend::ast::const_values::store::ConstValueStoreError::Infrastructure(error) => ExpressionParseError::from(*error),
-                    })?;
+                    let value = const_values
+                        .insert_resolved(
+                            builtin_type_ids::STRING,
+                            ConstValuePayload::String(value),
+                            span,
+                        )
+                        .map_err(ExpressionParseError::from)?;
                     return Ok(expression_builder.append_expression(
                         ExpressionOp::Constant(value),
                         span,
@@ -214,12 +215,13 @@ pub(crate) fn structural_string(
     span: Option<SourceSpan>,
     value_mode: &ValueMode,
 ) -> Result<OwnedExpr, ExpressionParseError> {
-    let value = const_values.insert_resolved(
-        builtin_type_ids::STRING, ConstValuePayload::String(ConstStringValue::Pieces(pieces)), span,
-    ).map_err(|error| match error {
-        crate::compiler_frontend::ast::const_values::store::ConstValueStoreError::Diagnostic(error) => ExpressionParseError::from(error),
-        crate::compiler_frontend::ast::const_values::store::ConstValueStoreError::Infrastructure(error) => ExpressionParseError::from(*error),
-    })?;
+    let value = const_values
+        .insert_resolved(
+            builtin_type_ids::STRING,
+            ConstValuePayload::String(ConstStringValue::Pieces(pieces)),
+            span,
+        )
+        .map_err(ExpressionParseError::from)?;
     Ok(expression_builder.append_expression(
         ExpressionOp::Constant(value),
         span,

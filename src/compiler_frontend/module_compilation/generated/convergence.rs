@@ -615,8 +615,8 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
         )
     )?;
     if let Some(report) = refreshed {
-        *function_link_facts = collect_module_function_link_facts(hir_module)
-            .map_err(PremergeFailure::Infrastructure)?;
+        *function_link_facts =
+            collect_module_function_link_facts(hir_module).map_err(PremergeFailure::from)?;
         borrow_analysis = report;
     }
     for node_id in convergence_model.generated_node_ids() {
@@ -648,7 +648,7 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
         if let Some(report) = refreshed {
             sidecar.module.link_facts.functions =
                 collect_module_function_link_facts(&sidecar.module.executable.hir)
-                    .map_err(PremergeFailure::Infrastructure)?;
+                    .map_err(PremergeFailure::from)?;
             sidecar.module.executable.borrow_analysis = report;
         }
         retain_live_call_summaries(
@@ -670,7 +670,7 @@ pub(in crate::compiler_frontend::module_compilation) fn run_generated_summary_co
         reachable_generated_sidecars(function_link_facts, generated_transaction);
     generated_transaction
         .retain_reachable_sidecars(&reachable_sidecars)
-        .map_err(PremergeFailure::Infrastructure)?;
+        .map_err(PremergeFailure::from)?;
     // Only executable sidecars survive this transaction. Rebuild their availability facts from
     // the final selected root, after failure-lane rewrites and validation-only demand removal.
     for node_id in convergence_model.generated_node_ids() {
