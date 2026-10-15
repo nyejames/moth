@@ -151,9 +151,9 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Structured diagnostics]
             [: Supported]
-            [: Broad dependency, config, project-structure, syntax, type, rule, borrow, backend-feature and warning coverage plus targeted compiler-owned reason and primary/secondary source-remapping assertions. Synthetic discovery failures retain earlier and failed source snapshots under final identities without repeating preparation.]
+            [: Broad dependency, config, project-structure, syntax, type, rule, borrow, backend-feature and warning coverage plus targeted compiler-owned reason and primary/secondary source-remapping assertions. Synthetic discovery failures retain earlier and failed source snapshots under final identities without repeating preparation. Targeted mixed-cause transport, source/frozen ownership, failed-freeze retention and terminal/terse/dev classification coverage.]
             [: Frontend]
-            [: User-facing failures use typed [$html:<code>CompilerDiagnostic</code>] payloads with stable codes and optional qualified reason keys. Integration expectations consume that identity and fixture-relative source locations without reconstructing payload taxonomy. Infrastructure and invariant failures use [$html:<code>CompilerError</code>]. Type diagnostics are [$html:<code>TypeId</code>]-first at semantic boundaries.]
+            [: User-facing failures use typed [$html:<code>CompilerDiagnostic</code>] payloads with stable codes, optional qualified reason keys and fixture-relative source expectations. Type diagnostics remain [$html:<code>TypeId</code>]-first. The cold infrastructure aggregate in [$html:<code>CompilerMessages</code>] preserves each [$html:<code>CompilerError</code>]'s type, message, host path, span and metadata with explicit source/frozen owner ranges. Render finalisation preserves the original report and appends any freeze failure. Terminal, five-field terse [$html:<code>MOTH-INFRA-0001</code>] and dev renderers preserve one infrastructure event and distinguish operational failures from compiler defects, requesting bug reports only for defects. The final panic and host-isolation migration remains undelivered.]
         ]
 
         [data:
@@ -175,7 +175,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Assertions]
             [: Partial]
-            [: Broad parser, diagnostics, HIR lowering, backend artifact and integration coverage. Dynamic default-message failures execute on HTML and instantiated HTML-Wasm with distinct Error and trap observations.]
+            [: Broad parser, diagnostics, HIR lowering, backend artefact and integration coverage. Dynamic default-message failures execute on HTML and instantiated HTML-Wasm with distinct Error and trap observations. Targeted final generated-demand coverage retains active message providers and removes literal-true validation-only sidecars and assets.]
             [: Frontend / HIR / JS / HTML / HTML-Wasm]
             [: [$html:<code>assert</code>] is a statement-only language intrinsic. It is always checked, unrecoverable and accepts named/default typed messages. JavaScript and HTML evaluate reachable runtime messages lazily on the failure edge; HTML-Wasm accepts default, fully folded and unreachable literal-true runtime messages but rejects reachable runtime construction. Literal-true messages are fully type/generic/evidence checked and normalized, then replaced with typed [$html:<code>none</code>] before HIR, so no TIR, runtime handoff, generated request or executable fact is published. Message construction cannot escape its evaluation through [$html:<code>!</code>], [$html:<code>?</code>], return, break or continue. Authored propagation locations remain distinct from ordinary call mapping. [$html:<code>assert(false)</code>] is statically terminal.]
         ]
@@ -790,7 +790,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Module-root export/re-export syntax]
             [: Supported]
-            [: Targeted authored export, flat direct-selection re-export, alias, source/external symbol, privacy, duplicate, placement and strict-block rejection coverage.]
+            [: Targeted authored export, flat direct-selection re-export, alias, source/external symbol, privacy, duplicate, placement and strict-block rejection coverage. Pure one/two-hop Moth facades retain external Call/Invoke runtime demand without callable Moth wrappers or dormant-root activation.]
             [: A module root's single strict [$html:<code>export:</code>] block exposes public authored declarations and flat dependency re-exports. Legacy inline [$html:<code>export</code>] forms, bare namespace exports, wildcard exports, function alias values and automatic method re-export through type aliases are rejected.]
         ]
 

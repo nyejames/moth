@@ -197,6 +197,10 @@ Builders consume this typed outcome. They add no error-fragment channel and neve
 - Expected operational IO, provider and host failures use `InfrastructureFailure`, outside the diagnostic store. A failure retaining compact compiler IDs carries their matching frozen identity context. Pre-source or non-source failures may instead carry ordinary filesystem/host context without compact IDs. Each failure has one context shape, never both.
 - A proven compiler invariant violation uses `compiler_bug!`. It ends the owning compilation and carries self-contained bounded report facts before suspect worker state is discarded. Malformed input, capacity limits and unavailable capabilities never justify a bug panic.
 
+The current typed `CompilerError` carrier remains a bounded exception, not delivery of these final
+lanes. The data-layout authority's `Current CompilerError migration` section owns its ordered cold
+causes, identity transport and shared terminal, terse and dev-server presentation.
+
 Runtime program `Error` values and entry-startup failures belong to the program's execution contract, not these compiler failure lanes. Statically invalid numeric work and undischarged exported failure are source diagnostics.
 
 Diagnostic schemas own stable codes and typed facts. Codes are not repurposed when prose changes. Stages preserve exact source spans, symbols and semantic reasons rather than pre-rendering messages. Type-display snapshots retain only what rendering needs, not complete type environments solely for diagnostics. Renderers resolve facts without mutating the report.

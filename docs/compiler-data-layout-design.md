@@ -1853,11 +1853,76 @@ Compiler bugs are not another `Result` variant. They panic.
 
 ### Current `CompilerError` migration
 
-The implementation keeps expected operational failures in the typed outer `CompilerError` lane
-while user-caused failures use plain `CompilerDiagnostic` values. This is the transitional
-boundary: the infrastructure result described above is the Phase 5 target, once infrastructure and
-compiler-bug context ownership are settled per `Lane 2`'s context contract and `Lane 3`'s
-self-contained bug facts.
+The implementation keeps expected operational failures and proven internal failures in the typed
+outer `CompilerError` lane while user-caused failures use plain `CompilerDiagnostic` values. This
+transitional carrier does not implement the separate `InfrastructureFailure` result, `compiler_bug!`
+panic boundary or tooling host isolation. The data-layout programme still owns that migration under
+`Lane 2`'s context contract and `Lane 3`'s self-contained bug facts.
+
+`CompilerMessages` keeps one optional boxed `InfrastructureErrors` beside the plain diagnostic
+stream. Its primary cause and ordered additional causes retain each original message, `ErrorType`,
+optional host path, source provenance and metadata without concatenation or field merging.
+Appending an aggregate flattens its causes in production order and keeps the first cause primary.
+This cold allocation never boxes the high-volume user diagnostic lane or widens its common records.
+
+Cause-indexed ranges pair retained source facts with explicit `Source(Arc<SourceDatabase>)` or
+`Frozen(Arc<FrozenIdentityContext>)` owners, independently of diagnostic ranges. Append shifts cause
+ranges with their causes. Fallback source attachment fills only unpaired causes, never replaces a
+package owner and never rebinds frozen facts through a mutable identity table. A bare compact ID or
+coincident path cannot establish source ownership.
+
+`freeze_source_contexts` moves source and string ownership rather than deep-cloning tables. It
+validates domains and acquires every required source before moving identity data, restoring source
+pairings if acquisition fails. If a later freeze step fails, the vessel still retains all diagnostic
+and cause owners. Terminal handoffs append the freeze failure and return the original
+`CompilerMessages`, preserving prior diagnostics, causes and context rather than replacing them.
+
+#### Current failure presentation
+
+One owner under `compiler_messages/render/infrastructure.rs` derives presentation exhaustively from
+`ErrorType`. `Compiler`, `HirTransformation` and `Backend(LirTransformation)` or
+`Backend(WasmGeneration)` identify compiler/build-system defects. `File` and `DevServer` identify
+operational failures. Classification follows the cause, not the subsystem, stored flags or message
+text. Adding stage or host context preserves the original class. Authored configuration and target
+capability mistakes remain typed diagnostics, not either introduction.
+
+The shared compiler-defect introduction precedes the unchanged original detail:
+
+```text
+COMPILER BUG: Moth encountered an internal compiler or build-system error.
+This is a Moth toolchain defect, not a source-code error. Please report it at:
+https://github.com/nyejames/moth/issues
+
+Details:
+<original failure message>
+```
+
+Operational failures use:
+
+```text
+OPERATIONAL FAILURE: Moth could not complete a filesystem, host or tooling operation.
+
+Details:
+<original failure message>
+```
+
+All three views use that shared classification, introduction and guidance policy. Rendering leaves
+stored messages unchanged, retains actionable host paths, OS/process details and stage/guidance facts
+and performs no network lookup or repository scan. A third-party operation failure alone supplies no
+evidence of a Moth defect. Renderers never invent source frames from unpaired compact IDs.
+
+| View | Contract |
+|---|---|
+| Terminal | Show every cause in order, with separately labelled additional causes and a neutral filesystem heading for `File`. |
+| Dev-server HTML | Keep all causes in one infrastructure card with `data-diagnostic-code="MOTH-INFRA-0001"`. Escape all error-derived text and use the fixed clickable report URL above for compiler defects. |
+| Terse | Emit one `E\|MOTH-INFRA-0001\|path\|\|message` record with exactly five fields. Label and classify every cause in order. The path field belongs only to the primary cause, with additional paths inside their cause sections. Sanitisation removes delimiter pipes and physical newlines. Include the fixed report URL once per record containing a compiler defect. |
+
+One cause receives one introduction. Multiple causes still represent one aborted compilation and one
+infrastructure event, never extra user diagnostics. Preserve failure status, normal error/warning
+display order and diagnostic counts. Any infrastructure failure suppresses the benchmark
+diagnostic-count record.
+
+#### Remaining migration
 
 Every current `CompilerError` construction site must be audited and assigned to one lane before the
 type is deleted:

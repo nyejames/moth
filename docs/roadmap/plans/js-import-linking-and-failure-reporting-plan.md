@@ -14,9 +14,9 @@
 
 ```text
 STATUS: active on link-fixes-and-test-cleanup
-CURRENT_SLICE: bounded adjacent campaign accepted, including the registered-provider namespace correction
+CURRENT_SLICE: permanent contracts, delivered status and generated documentation reconciled and audit-accepted
 BLOCKERS: none for the required same-project and reporting contracts; independent provider-identity collision deferred in the evidence report
-NEXT_ACTION: reconcile permanent contracts and status, then run the final integrated gate and Slice review on this branch
+NEXT_ACTION: run the final integrated gate and independent Slice review, then retire this plan on the selected branch
 ```
 
 The reviewed main includes the typed-expression/native-result Phase 4 checkpoint. Its plan explicitly pauses before Phase 5. The affected source still collects ordinary-module provider candidates by source-file ownership and still loses later error types during infrastructure aggregation. The original missing-asset path remains present. Establish an executed failing baseline before changing it. [S1] [S2] [S5] [S6]
@@ -384,12 +384,12 @@ Each row records: case, actual command, revision/profile, fixture, result, expec
 
 ## 6. Validate, document and land
 
-- [ ] Run focused tests after each coherent task. Keep the first red result and the corresponding green result. Ensure every filter selects the intended nonzero test set.
+- [x] Run focused tests after each coherent task. Keep the first red result and the corresponding green result. Ensure every filter selects the intended nonzero test set.
 - [x] Rebuild the unchanged website in dev and release with the patched compiler. Verify `background-animation.js`, the actual glue import and the HTML import chain. A browser check of the animation is useful additional evidence, not a replacement for deterministic automated execution.
-- [ ] If another website bug blocks the full build, record it separately. Keep the compiler regression green and make no claim that the whole site passes until it does. The website remains unchanged.
-- [ ] Review the real provider/table path, output deduplication, final generated call facts, classification wrappers and aggregate transport. Check no new AST dependency, HIR mutation or eager asset read was introduced.
-- [ ] Run `cargo fmt --all` for Rust changes and the targeted Cargo/integration commands below. Run affected feature lanes when their owners changed, including the opt-in Boracle check if this patch touches its prefix or feature-gated compilation path.
-- [ ] Update narrowly stale comments, authorised permanent contracts and delivered-status entries. Update `index.md` only for an added/moved owner or a fundamental responsibility change. Rebuild generated documentation through the compiler when required.
+- [x] If another website bug blocks the full build, record it separately. Keep the compiler regression green and make no claim that the whole site passes until it does. The website remains unchanged.
+- [x] Review the real provider/table path, output deduplication, final generated call facts, classification wrappers and aggregate transport. Check no new AST dependency, HIR mutation or eager asset read was introduced.
+- [x] Run `cargo fmt --all` for Rust changes and the targeted Cargo/integration commands below. Run affected feature lanes when their owners changed, including the opt-in Boracle check if this patch touches its prefix or feature-gated compilation path.
+- [x] Update narrowly stale comments, authorised permanent contracts and delivered-status entries. Update `index.md` only for an added/moved owner or a fundamental responsibility change. Rebuild generated documentation through the compiler when required.
 - [ ] Run `just validate-full` on the final integrated tree before its main commit. Record all failures and their classification. A previous branch's CI result is not evidence for the new tree. Never suppress a required gate or claim unexecuted platform coverage.
 - [ ] Produce one cohesive main commit with explicit changed paths, baseline/final revisions, test evidence and the Task 5 report. Use the repository's allowed landing workflow without rewriting main history. Leave all other paused programmes paused.
 
