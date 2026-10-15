@@ -125,3 +125,14 @@ The independent ledger-admission audit accepted the scenario without findings. F
 Keep all 74 original `frontend_pipeline_tests.rs` IDs at 4,698 noncomment LOC. Its shared `failure_project` helper already centralises useful repeated setup. The similar implicit-failure fixtures assert different producer facts, CFG joins, success/error arity, recursion, write-back, float guards and borrow outcomes. Integration output cannot replace those handoff facts, and no equivalent same-boundary rows justified a table conversion or deletion. `cargo test -p moth --lib compiler_frontend::tests::frontend_pipeline_tests -- --format terse` passed 74/74.
 
 The independent frontend-cluster audit accepted retention without required correction. This preserves existing coverage rather than proving stable-origin joins through the harness's empty origin lookup or HIR narrowing from an AST-signature assertion. The documentation checkpoint built 81 outputs.
+
+### AST templates and generics
+
+Two parser/TIR subsets merge into unchanged stronger same-file survivors:
+
+- `parser_preserves_foldable_nested_child_as_template_boundary` → `parser_tir_records_finalized_child_template_as_child_template_node`. The identical const-required fixture retains the child boundary plus exact sibling order, child reference and parent/child summaries.
+- `style_child_wrapper_with_children_records_formatted_tir_phase` → `formatter_children_wrapper_composition_keeps_formatted_reference`. The identical wrapper fixture retains exact formatted output and `Formatted` phase, plus the composed-phase check.
+
+Parser definitions fall from 46 to 44 and noncomment LOC from 2,350 to 2,296. All 46 frozen-body and 54 slot-composition definitions remain at 4,328 and 2,720 LOC. Their identity, lifetime, resource, schema, replay, routing and malformed-state contracts stay distinct.
+
+Filtered parser and frozen runs passed 44/44 and 46/46. Slot composition passed 53/53 in default configuration, and its `benchmark_counters`-gated layout case passed 1/1. Existing `template_slots_nested_runtime` and `template_slot_wrapper_runtime` HTML smoke commands each passed 1/1. Formatting passed. The independent AST-cluster audit proved both assertion subsets and accepted all retained local owners without findings.

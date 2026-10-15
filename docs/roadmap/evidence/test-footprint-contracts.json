@@ -469,6 +469,7 @@
       "existing_owner": "src/compiler_frontend/ast/generic_functions/tests/frozen_body_tests.rs",
       "default_decision": "keep: distinct local invariant or failure path, no equivalent surviving assertion established",
       "required_validation": "cargo test -p moth --lib frozen_body_tests",
+      "review_outcome": "Phase 4: retain all 46 definitions and 4328 noncomment LOC. Donor identity, source/resource rebasing, lifetime release and malformed-owner transitions remain distinct.",
       "tests": [
         {
           "test_id": "frozen_content_value_captures_and_reinterns_resource_pieces",
@@ -757,6 +758,7 @@
       "existing_owner": "src/compiler_frontend/ast/templates/tir/tests/slot_composition_tests.rs",
       "default_decision": "keep: distinct local invariant or failure path, no equivalent surviving assertion established",
       "required_validation": "cargo test -p moth --lib slot_composition_tests",
+      "review_outcome": "Phase 4: retain all 54 definitions and 2720 noncomment LOC. Schema, routing, replay, composition and malformed-state owners remain distinct; existing local builders suffice.",
       "tests": [
         {
           "test_id": "schema_from_default_slot_only",
@@ -1093,6 +1095,7 @@
       "existing_owner": "src/compiler_frontend/ast/templates/tests/create_template_node/parser_tir_tests.rs",
       "default_decision": "keep: distinct local invariant or failure path, no equivalent surviving assertion established",
       "required_validation": "cargo test -p moth --lib parser_tir_tests",
+      "review_outcome": "Phase 4: merge two exact subsets into the named stronger same-file survivors, leaving 44 definitions and 2296 noncomment LOC. Const-required parsing, child boundary/order/summaries and formatted/composed phases remain protected.",
       "tests": [
         {
           "test_id": "parser_tir_owns_contiguous_literal_body_text",
@@ -1121,7 +1124,7 @@
         {
           "test_id": "parser_preserves_foldable_nested_child_as_template_boundary",
           "asserted_contract": "const-required child source retains ChildTemplate boundary; assertion is a subset of test 39.",
-          "decision": "merge_candidate",
+          "decision": "merged",
           "line": 292,
           "surviving_test_id": "parser_tir_records_finalized_child_template_as_child_template_node",
           "overlap_status": "confirmed overlap"
@@ -1213,7 +1216,7 @@
         {
           "test_id": "style_child_wrapper_with_children_records_formatted_tir_phase",
           "asserted_contract": "same fixture/output as test 31; subset of 31.",
-          "decision": "merge_candidate",
+          "decision": "merged",
           "line": 1053,
           "surviving_test_id": "formatter_children_wrapper_composition_keeps_formatted_reference",
           "overlap_status": "confirmed overlap"

@@ -1,6 +1,6 @@
 # Moth test footprint audit and conservative improvement plan
 
-Status: active, Phase 4 frontend pipeline accepted, next AST templates and generics
+Status: active, Phase 4 AST templates and generics accepted, next JavaScript backend
 Repository: `nyejames/moth`, branch `expression-refactor`, commit `1343c64ecbc5433b546c3ad31cf5c175cf51f184`
 Policy companion: `docs/src/developer-docs/style-guide/testing.mtf` (revised replacement supplied separately)
 
