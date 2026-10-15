@@ -144,3 +144,16 @@ Filtered parser and frozen runs passed 44/44 and 46/46. Slot composition passed 
 The file falls from 18 to 17 definitions and 2,428 to 2,360 noncomment LOC. All cyclic fallback, branch/match merge, swap, rebinding and nested-diamond owners remain. The complete registered control-flow module passed 17/17; actual `dispatcher_loop_match_result_fallback` and `control_flow` runtime commands each passed 1/1. Formatting passed.
 
 The independent backend-cluster audit traced the explicit jump transfer consumer, proved the removed assertion subset and accepted every retained strategy owner without findings.
+
+### Stage 0 filesystem identity
+
+| Original ID | Surviving owner | Retained boundary |
+|---|---|---|
+| `invalid_candidate_without_valid_normal_module_root_returns_file_error` | `package_boundary_traversal_rejects_non_utf8_name` | Same Linux-only raw filename, package-boundary traversal and File/non-UTF-8 failure before contents are read. Valid-root-plus-invalid-name precedence remains separate. |
+| `facade_outside_entry_root_is_not_classified_as_a_support_root` | `discovers_project_package_facade_outside_entry_root_containment` | Both exact counts move into the richer facade identity, ancestry, graph-exclusion and stats owner. |
+| `nested_module_files_transfer_to_nested_module_not_ancestor` | `root_and_nested_files_receive_correct_nearest_owner` | Exact ancestor and nested owned-path sets imply both removed exclusions and preserve the destination owner. |
+| `rejects_multiple_normal_module_roots_in_one_directory` | Adjacent `source_tree_index_rejects_duplicate_normal_module_root_files` | Typed `MultipleModuleRootFiles`, canonical directory and two candidates retain the fixed diagnostic-code check. Cosmetic root suffixes and unused config entry-root spelling do not alter this direct-discovery boundary. |
+
+Definitions fall from 75 to 71 and noncomment LOC from 2,971 to 2,894. Distinct physical/logical identity, permissions, canonicalisation, error-lane and platform contracts remain unchanged. The registered module passed 62/62 on macOS, and the adjacent typed-root owner passed 1/1. Actual `adversarial_multi_file_helper_chain` and `multi_file_module` commands each passed 1/1. Formatting passed. Linux-only raw-byte and Windows-only paths were compared but not executed locally.
+
+The independent filesystem audit accepted all four comparisons and retained owners without findings. The typed duplicate-root survivor fixes the reason, while remaining mixed/support-root tests and diagnostic-schema owners retain the shared `MOTH-CONFIG-0001` code contract. Static gate equivalence does not claim Linux or Windows execution.

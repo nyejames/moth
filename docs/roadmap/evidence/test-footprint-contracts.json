@@ -3694,6 +3694,7 @@
       "existing_owner": "src/build_system/tests/stage0_filesystem_identity_tests.rs",
       "default_decision": "keep: distinct local invariant or failure path, no equivalent surviving assertion established",
       "required_validation": "cargo test -p moth --lib stage0_filesystem_identity_tests",
+      "review_outcome": "Phase 4: merge four proven fixture/assertion subsets, retaining 71 definitions and 2894 noncomment LOC. Move exact support-root/facade counts into the richer facade owner. Raw-name pair has matching Linux gates; preserve valid-root precedence and all other platform/failure identities.",
       "tests": [
         {
           "test_id": "source_tree_rejects_non_utf8_file_name",
@@ -3826,9 +3827,9 @@
           "line": 803,
           "fixture": "Linux: package helper creates `pkg/<raw [0xC3,0x28]>` with empty contents; registered ProjectLocal prefix `pkg`.",
           "asserted_contract": "Boundary indexing fails with File/non-UTF-8 error even without a valid normal root.",
-          "decision": "merge_candidate",
+          "decision": "merged",
           "surviving_test_id": "package_boundary_traversal_rejects_non_utf8_name",
-          "overlap_status": "likely overlap - inspect"
+          "overlap_status": "confirmed overlap"
         },
         {
           "test_id": "valid_normal_module_root_plus_invalid_candidate_still_returns_file_error",
@@ -3905,18 +3906,19 @@
           "line": 1294,
           "fixture": "Same project-root `+package.moth` plus `src/@page.moth` fixture as facade-discovery test.",
           "asserted_contract": "Support-role count is zero; exactly one ProjectPackageFacade is discovered.",
-          "decision": "merge_candidate",
+          "decision": "merged",
           "surviving_test_id": "discovers_project_package_facade_outside_entry_root_containment",
-          "overlap_status": "likely overlap - inspect"
+          "overlap_status": "confirmed overlap"
         },
         {
           "test_id": "rejects_multiple_normal_module_roots_in_one_directory",
           "line": 1322,
           "fixture": "Project `src/` contains `@page.moth` and `@mod.moth`; direct SourceTreeIndex discovery.",
           "asserted_contract": "Failure’s first diagnostic code is `MOTH-CONFIG-0001`.",
-          "decision": "merge_candidate",
+          "decision": "merged",
           "surviving_test_id": "source_tree_index_rejects_duplicate_normal_module_root_files",
-          "overlap_status": "likely overlap - inspect"
+          "surviving_owner": "src/build_system/tests/create_project_modules_source_tree_index_tests.rs",
+          "overlap_status": "confirmed overlap"
         },
         {
           "test_id": "rejects_mixed_normal_and_support_roots_in_one_directory",
@@ -4028,9 +4030,9 @@
           "line": 1997,
           "fixture": "Same shared nested fixture as root-and-nested ownership test.",
           "asserted_contract": "Alpha does not own `inner/deep.moth` or `deep.moth`; nested module boundary transfers ownership.",
-          "decision": "merge_candidate",
+          "decision": "merged",
           "surviving_test_id": "root_and_nested_files_receive_correct_nearest_owner",
-          "overlap_status": "likely overlap - inspect"
+          "overlap_status": "confirmed overlap"
         },
         {
           "test_id": "registered_bd_and_md_kinds_are_included",

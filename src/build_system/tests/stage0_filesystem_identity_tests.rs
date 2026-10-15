@@ -739,10 +739,10 @@ mod source_package_boundary_indexes_tests {
     }
 }
 
-/// Linux preparation tests for non-UTF-8 direct-child normal module-root candidates.
+/// Linux preparation test for non-UTF-8 direct-child normal module-root candidates.
 ///
 /// Directory, single-file and config compilation all delegate source-package boundary indexing
-/// to `build_source_package_boundary_indexes`, so these tests cover the shared traversal owner
+/// to `build_source_package_boundary_indexes`, so this test covers the shared traversal owner
 /// instead of duplicating the same assertion at each orchestration boundary. macOS rejects the
 /// invalid-byte fixture before the traversal can inspect it.
 #[cfg(target_os = "linux")]
@@ -797,26 +797,6 @@ mod non_utf8_package_boundary_candidate_tests {
         fs::write(&bad_file, b"").expect("should write non-UTF-8 named file");
 
         (temp, package_root)
-    }
-
-    #[test]
-    fn invalid_candidate_without_valid_normal_module_root_returns_file_error() {
-        let (root, package_root) = package_with_non_utf8_child();
-
-        let mut source_packages = SourcePackageRegistry::new();
-        source_packages.register_filesystem_root(
-            "pkg",
-            package_root,
-            crate::builder_surface::PackageOrigin::ProjectLocal,
-        );
-
-        let mut string_table = StringTable::new();
-        let failure = build_indexes(&source_packages, &mut string_table)
-            .expect_err("non-UTF-8 candidate should fail boundary indexing");
-        let messages = failure.into_messages(&string_table);
-
-        assert_non_utf8_file_error(&messages);
-        drop(root);
     }
 
     #[test]
@@ -1154,6 +1134,21 @@ mod module_identity_tests {
         let (index, project_root, _entry_root) = discover_index(&root, "src");
         let table = index.module_identities();
 
+        let support_count = table
+            .module_ids()
+            .filter(|id| table.record(*id).role() == ModuleRootRole::Support)
+            .count();
+        assert_eq!(
+            support_count, 0,
+            "facade outside entry root must not be a support root"
+        );
+
+        let facade_count = table
+            .module_ids()
+            .filter(|id| table.record(*id).role() == ModuleRootRole::ProjectPackageFacade)
+            .count();
+        assert_eq!(facade_count, 1, "exactly one facade should be discovered");
+
         let facade_dir = project_root;
         let facade_id = table
             .module_id_for_directory(&facade_dir)
@@ -1288,69 +1283,6 @@ mod module_identity_tests {
             "error message should mention {expected_text:?}: {}",
             error.msg,
         );
-    }
-
-    #[test]
-    fn facade_outside_entry_root_is_not_classified_as_a_support_root() {
-        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
-        let root = _tmp_root.path().to_path_buf();
-        let src = root.join("src");
-        fs::create_dir_all(&src).expect("should create entry root");
-        fs::write(src.join("@page.moth"), "").expect("should write entry module");
-        fs::write(root.join("+package.moth"), "").expect("should write project facade");
-
-        let (index, _project_root, _entry_root) = discover_index(&root, "src");
-        let table = index.module_identities();
-
-        let support_count = table
-            .module_ids()
-            .filter(|id| table.record(*id).role() == ModuleRootRole::Support)
-            .count();
-        assert_eq!(
-            support_count, 0,
-            "facade outside entry root must not be a support root"
-        );
-
-        let facade_count = table
-            .module_ids()
-            .filter(|id| table.record(*id).role() == ModuleRootRole::ProjectPackageFacade)
-            .count();
-        assert_eq!(facade_count, 1, "exactly one facade should be discovered");
-    }
-
-    #[test]
-    fn rejects_multiple_normal_module_roots_in_one_directory() {
-        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
-        let root = _tmp_root.path().to_path_buf();
-        let src = root.join("src");
-        fs::create_dir_all(&src).expect("should create entry root");
-        fs::write(src.join("@page.moth"), "").expect("should write first root");
-        fs::write(src.join("@mod.moth"), "").expect("should write second root");
-
-        let entry_root = root.join("src");
-        let mut config = Config::new(root.clone());
-        config.entry_root = PathBuf::from("src");
-        let canonical_root = fs::canonicalize(&root).expect("project root should canonicalize");
-        let canonical_entry_root =
-            fs::canonicalize(&entry_root).expect("entry root should canonicalize");
-        let mut string_table = StringTable::new();
-
-        let failure = super::source_tree_index::SourceTreeIndex::discover(
-            canonical_entry_root,
-            super::source_tree_index::SourceTreeProjectContext {
-                project_root: &canonical_root,
-                validated_output_settings: None,
-            },
-            &config,
-            &SourcePackageRegistry::default(),
-            &crate::builder_surface::SourceFileKindRegistry::default(),
-            &crate::builder_surface::external_import_providers::registry::ExternalImportProviderRegistry::default(),
-            &mut string_table,
-        )
-        .expect_err("multiple normal module roots should be rejected");
-        let messages = failure.into_messages(&string_table);
-
-        assert_eq!(first_diagnostic_code(&messages), "MOTH-CONFIG-0001");
     }
 
     #[test]
@@ -1990,31 +1922,6 @@ mod owned_source_inventory_tests {
         assert_ne!(
             entry_root_identity, inner_root_identity,
             "two @page.moth root files in different modules must keep distinct identities"
-        );
-    }
-
-    #[test]
-    fn nested_module_files_transfer_to_nested_module_not_ancestor() {
-        let _tmp_root = tempfile::tempdir().expect("should create temp dir");
-        let root = _tmp_root.path().to_path_buf();
-        build_nested_module_tree(&root);
-
-        let index =
-            discover_index_with_kinds(&root, "src", "my-project", &html_source_file_kinds());
-        let table = index.module_identities();
-
-        let alpha_id = table
-            .module_ids()
-            .find(|id| table.record(*id).logical_module_path() == Path::new("alpha"))
-            .expect("alpha module should exist");
-
-        // `alpha/inner/deep.moth` is beneath alpha on the filesystem but belongs to inner because
-        // the nearest-module walk finds the inner root first.
-        let alpha_paths = owned_relative_paths(&index, alpha_id);
-        assert!(
-            !alpha_paths.contains(&"inner/deep.moth".to_owned())
-                && !alpha_paths.contains(&"deep.moth".to_owned()),
-            "files beneath a nested module root must transfer to the nested module: {alpha_paths:?}"
         );
     }
 
