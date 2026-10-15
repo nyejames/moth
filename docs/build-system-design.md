@@ -705,6 +705,8 @@ Build-wide provider emission deduplicates runtime assets, module specifiers and 
 
 Direct builder bindings and provider-created bindings share stable binding identity and runtime asset policy. No per-entry scan recreates source dependencies.
 
+Imported JavaScript parser failures remain typed source diagnostics. They retain the Moth import request's source span and the JavaScript module path in their payload. Parser-local JavaScript byte ranges do not replace the importer's compiler source identity.
+
 Selected JavaScript module exports require a definition and applicable lowering in their issuing registry and matching entry metadata with a JavaScript runtime asset. Glue preparation checks these closed inputs before source emission. Missing candidates, absent assets and wrong asset kinds identify inconsistent validated metadata, while valid non-module helper lowerings need no wrapper or provider asset.
 
 ### Resource emission

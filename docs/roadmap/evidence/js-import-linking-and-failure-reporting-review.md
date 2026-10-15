@@ -75,3 +75,40 @@ The initial whole-block-removal mutation failed compilation because warnings are
 A source-only recovery-handler removal case was investigated but not added: pending catch routes are already absent from initial rooted reachability, so that shape would pass even without the final refresh. The newly reachable handler case above exercises the actual missing-publication boundary without fabricated stale state.
 
 Fresh focused verification accepted the final-publication regression and qualified compiler authority as clean. The independent frontend, HTML and final-publication review lanes leave no required phase finding. The generated test does not expose an intermediate candidate snapshot or claim cross-registry correctness; construction-path inspection and the failed publication mutation establish its admission.
+
+## Topology, entry liveness and typed source-location checkpoint
+
+The unchanged minimal primary remains separate from one cohesive `html_js_binding_runtime_topology` boundary scenario. Its exact Node result observes module-instance state, alias/namespace calls, fallible success and caught error code/message, full-width U32 consumption, executed generic demand and distinguishable same-basename providers. Dormant providers remain semantically validated without runtime assets.
+
+| Required contract | Primary evidence owner | Observation |
+|---|---|---|
+| Direct import | Existing `build_dependency_tests` direct-import primary | One selected provider and correct relative glue |
+| Pure one/two-hop facades | Minimal primary and cohesive companion | Actual execution without intermediate callable Moth bodies |
+| Alias/namespace and repeated legal paths | Cohesive companion | Exact shared state and exactly-once effects |
+| Call/Invoke, success and caught failure | Cohesive companion; Phase 2 lowered facts test | Exact successful/caught values, error code 73 and message |
+| Mixed constants/live functions; constant-only absence | Companion and existing `external_const_u32_{mixed,static}_emission` controls | Full-width U32 survives; constant-only emits no provider/glue |
+| Private/inactive work | Companion and existing canvas-unused control | Private, false-branch and true-assertion providers absent |
+| Executed/validation-only generation | Companion and Phase 2 generated service regression | Runtime executed once; final service excludes validation-only sidecar/assets |
+| Distinct same-basename providers | Companion and build artifact test | Distinguishable runtime values and distinct logical resources |
+| Multiple entries | Shared-support build artifact test and disposable browser smoke | One provider; two page-specific wrapper selections and valid relative imports; `/` renders `root`, `/about/` renders `about` |
+| Invalid selection/annotation | Existing unsupported-JS, canvas export, privacy-bypass and missing-symbol negatives | Exact typed codes and authored import locations |
+| Runtime import map | Extended existing fallible-JS runtime-helper artifact test | Pure facade, actual runtime module/provider and exact parsed mapping |
+
+The first new unsupported-JS location assertion failed before the narrow producer fix: `MOTH-IMPORT-0022` was present but path and line were `<no source position>`. `JsExternalImportProvider` now preserves the request's authored Moth import span when converting parser diagnostics. The payload still names the JS module; no JS-byte-range/Moth-source splice, new source registration, error-code change or infrastructure relabelling was introduced.
+
+| Validation | Revision/profile | Result |
+|---|---|---|
+| `cargo run --quiet -- tests --case html_js_binding_runtime_topology --backend html --terse` | `1dae29ce2` plus Phase 3 candidate, dev | 1/1 exact runtime result |
+| Existing minimal, constant-only/mixed, canvas-unused, canvas-export and missing-symbol commands | Same candidate, HTML/dev | Each 1/1; privacy-bypass with both backends 2/2 |
+| Unsupported-JS and generic-signature focused commands after span fix | Same candidate, HTML/dev | Each 1/1 |
+| `cargo run --quiet -- check tests/cases/unsupported_external_js_import_rejected/input --terse` | Same candidate, dev | Expected exit 1; `E\|MOTH-IMPORT-0022\|@page.moth\|1:1\|...`, one source error, zero warnings, no infrastructure banner |
+| `cargo test -p moth --lib provider_sources_tests` | Same candidate, test/dev | 20 passed |
+| `cargo test -p moth --lib build_dependency_tests` | Same candidate, test/dev | 25 passed, including actual minimal fixture materialisation |
+| `cargo fmt --all -- --check` | Same candidate | Passed |
+| `target/debug/moth build tmp/js-linking-multiple-pages` and managed Chromium at port 9875 | Before span-only fix, same Phase 3 topology candidate/dev | 5 outputs; both routes render distinct intended text, no browser errors; tab/server closed |
+
+The normal Node harness still selects only `index.html` and rejects import maps. Both-page artifact checks are permanent; separate browser route execution supplies additional runtime evidence without expanding that harness. The import-map row claims artifact verification only, not Node or browser execution. Existing writer tests retain deferred-read/preflight/stale-output ownership; the minimal handoff test additionally compares actual materialised provider, glue and HTML bytes.
+
+Location-red output is retained at ignored `tmp/js-import-linking-location-red.log`. The producer handoff accidentally removed an existing `StringTable` import; parent diff inspection restored it before compilation.
+
+Fresh runtime/emission and typed-provenance auditors accepted Phase 3 as clean, with no required correction. Runtime review traced assertions into their consuming owners and reused existing dormant-provider root controls; diagnostic review traced source identity through provider failure, premerge transport and synthetic rebind. The current routed test-admission authority is `docs/src/developer-docs/style-guide/testing.mtf`, not an absent `docs/testing-standards.md`. Disposable multi-page smoke sources and outputs were removed after review; its permanent build test retains the reproducible source shape.

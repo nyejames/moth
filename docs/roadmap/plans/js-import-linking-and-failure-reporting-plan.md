@@ -14,9 +14,9 @@
 
 ```text
 STATUS: active on link-fixes-and-test-cleanup
-CURRENT_SLICE: runtime-import handoff accepted; topology coverage next
+CURRENT_SLICE: topology and entry-liveness coverage accepted; failure-reporting inventory next
 BLOCKERS: none
-NEXT_ACTION: cover topology, runtime liveness and per-entry output contracts
+NEXT_ACTION: preserve typed infrastructure causes and render cause-derived failure classes
 ```
 
 The reviewed main includes the typed-expression/native-result Phase 4 checkpoint. Its plan explicitly pauses before Phase 5. The affected source still collects ordinary-module provider candidates by source-file ownership and still loses later error types during infrastructure aggregation. The original missing-asset path remains present. Establish an executed failing baseline before changing it. [S1] [S2] [S5] [S6]

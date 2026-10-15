@@ -233,6 +233,119 @@ fn deferred_resource_text(project: &mut Project, relative_path: &str) -> String 
     String::from_utf8(bytes.to_vec()).expect("deferred JS resource text should be UTF-8")
 }
 
+/// Check the selected raw exports and wrapper cardinality without freezing build-local IDs.
+#[track_caller]
+fn assert_glue_exports(glue: &str, expected: &[(&str, &[&str])]) {
+    let mut actual_imports = BTreeMap::new();
+    for line in glue.lines().filter(|line| line.starts_with("import { ")) {
+        let (bindings, path) = line
+            .strip_prefix("import { ")
+            .and_then(|line| line.split_once(" } from \""))
+            .expect("glue imports should be named ES module imports");
+        let path = path
+            .strip_suffix("\";")
+            .expect("glue import should end after its module specifier");
+        let mut exports = bindings
+            .split(", ")
+            .map(|binding| {
+                binding
+                    .split_once(" as __moth_external_fn")
+                    .expect("raw exports should bind generated external names")
+                    .0
+            })
+            .collect::<Vec<_>>();
+        exports.sort_unstable();
+        assert!(
+            actual_imports.insert(path, exports).is_none(),
+            "one provider module should have only one import statement: {glue}"
+        );
+    }
+
+    let expected_imports = expected
+        .iter()
+        .map(|(path, exports)| {
+            let mut exports = exports.to_vec();
+            exports.sort_unstable();
+            (*path, exports)
+        })
+        .collect::<BTreeMap<_, _>>();
+    assert_eq!(
+        actual_imports, expected_imports,
+        "glue should import exactly the page's demanded provider exports"
+    );
+    assert_eq!(
+        glue.matches("export function __moth_glue_fn").count(),
+        expected
+            .iter()
+            .map(|(_, exports)| exports.len())
+            .sum::<usize>(),
+        "each demanded external function should have exactly one wrapper: {glue}"
+    );
+}
+
+/// Resolve the page's import to the emitted module and compare its actual exported names.
+#[track_caller]
+fn assert_page_imports_glue(page: &str, relative_glue_path: &str, glue: &str) {
+    let import_suffix = format!(" }} from \"{relative_glue_path}\";");
+    let matching_lines = page
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.ends_with(&import_suffix))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        matching_lines.len(),
+        1,
+        "the page must import its emitted glue once"
+    );
+    let mut imported = matching_lines[0]
+        .strip_prefix("import { ")
+        .and_then(|line| line.strip_suffix(&import_suffix))
+        .expect("page glue preamble should use a named import")
+        .split(", ")
+        .collect::<Vec<_>>();
+    imported.sort_unstable();
+    let mut exported = glue
+        .lines()
+        .filter_map(|line| line.strip_prefix("export function "))
+        .map(|line| {
+            line.split_once('(')
+                .expect("exported wrapper should have a parameter list")
+                .0
+        })
+        .collect::<Vec<_>>();
+    exported.sort_unstable();
+    assert_eq!(
+        imported, exported,
+        "the page's imported names must match exactly its glue's emitted wrappers"
+    );
+}
+
+/// Deferred records, not eager JS outputs, own the authored provider files.
+#[track_caller]
+fn assert_deferred_provider_sources(project: &mut Project, expected: &[(&str, &Path)]) {
+    let mut paths = project
+        .deferred_resources
+        .iter()
+        .map(|resource| portable_path_text(&resource.relative_output_path))
+        .collect::<Vec<_>>();
+    paths.sort();
+    let mut expected_paths = expected.iter().map(|(path, _)| *path).collect::<Vec<_>>();
+    expected_paths.sort_unstable();
+    assert_eq!(
+        paths, expected_paths,
+        "only selected provider assets should be planned, once each"
+    );
+    for (path, source) in expected {
+        BuiltOutputs::index(project)
+            .none_matching("eager provider asset", |output| output == *path);
+        assert_eq!(
+            deferred_resource_text(project, path),
+            fs::read_to_string(source).expect("authored provider source should be readable"),
+            "the whole authored module should be retained at '{path}'"
+        );
+    }
+}
+
 mod built_outputs_tests {
     use super::*;
     use crate::compiler_tests::test_support::assert_panics_with;
@@ -492,12 +605,229 @@ fn build_html_project_local_js_import_emits_generated_glue() {
 }
 
 #[test]
+fn build_html_project_reexport_fixture_emits_provider_and_exact_wrappers() {
+    // Keep the original real-bug source shared with its executable integration owner.
+    let root =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/cases/html_js_reexport_linking/input");
+    let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
+    let mut result = build_project(
+        &builder,
+        root.to_str().expect("fixture path should be UTF-8"),
+        &[],
+        &BuildConfigInputSet::new(),
+    )
+    .expect("the pure re-export fixture should build");
+
+    let provider_path = "_moth/js/components/background-animation.js";
+    let source = root.join("src/components/background-animation.js");
+    assert_deferred_provider_sources(&mut result.project, &[(provider_path, source.as_path())]);
+    let outputs = BuiltOutputs::index(&result.project);
+    let glue_path = outputs.exactly_one_path("generated glue module", |path| {
+        path.starts_with(GLUE_MODULE_PREFIX)
+    });
+    let page = html_text(outputs.at("index.html"));
+    assert_page_imports_glue(
+        page,
+        &format!("./{glue_path}"),
+        js_text(outputs.at(glue_path)),
+    );
+    assert_glue_exports(
+        js_text(outputs.at(glue_path)),
+        &[(
+            "../components/background-animation.js",
+            &["animate_canvas", "observed"],
+        )],
+    );
+
+    // Exercise the real fixture-to-writer handoff once. Conflict/preflight and stale-output
+    // behavior remain owned by the output writer's focused tests.
+    let temp = tempfile::tempdir().expect("should create output directory");
+    let output_root = temp.path().join("output");
+    write_project_outputs(
+        &result.project,
+        &always_write_options(output_root.clone(), None),
+    )
+    .expect("the planned re-export outputs should materialise");
+    assert_eq!(
+        fs::read(output_root.join(provider_path)).expect("provider output should exist"),
+        fs::read(&source).expect("authored provider source should be readable")
+    );
+    assert_eq!(
+        fs::read_to_string(output_root.join(glue_path)).expect("glue output should exist"),
+        js_text(outputs.at(glue_path))
+    );
+    assert_eq!(
+        fs::read_to_string(output_root.join("index.html")).expect("page output should exist"),
+        page
+    );
+}
+
+#[test]
+fn build_html_project_shared_support_provider_keeps_page_wrappers_isolated() {
+    let temp = tempfile::tempdir().expect("should create temp dir");
+    let root = temp.path();
+    let src = root.join("src");
+    let shared = src.join("shared");
+    let about = src.join("about");
+    fs::create_dir_all(&shared).expect("should create support package");
+    fs::create_dir_all(&about).expect("should create second page");
+    fs::write(
+        root.join("config.moth"),
+        "project #= (\n    name = \"shared_pages\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
+    )
+    .expect("should write config");
+    fs::write(
+        src.join("@page.moth"),
+        "@shared root_value\n[:[root_value()]]\n",
+    )
+    .expect("should write homepage");
+    fs::write(
+        about.join("@page.moth"),
+        "@shared about_value\n[:[about_value()]]\n",
+    )
+    .expect("should write about page");
+    fs::write(
+        shared.join("+package.moth"),
+        "export:\n    @binding.js root_value, about_value, unused_value\n;\n",
+    )
+    .expect("should write shared support facade");
+    let source = shared.join("binding.js");
+    fs::write(
+        &source,
+        "/** @moth.sig root_value || -> String */\nexport function rootValue() { return \"root\"; }\n/** @moth.sig about_value || -> String */\nexport function aboutValue() { return \"about\"; }\n/** @moth.sig unused_value || -> String */\nexport function unusedValue() { return \"unused\"; }\n",
+    )
+    .expect("should write shared provider");
+
+    let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
+    let mut result = build_project(
+        &builder,
+        root.to_str().expect("temp dir should be UTF-8"),
+        &[],
+        &BuildConfigInputSet::new(),
+    )
+    .expect("both pages should consume the scoped support facade");
+    assert_deferred_provider_sources(
+        &mut result.project,
+        &[("_moth/js/shared/binding.js", source.as_path())],
+    );
+
+    let outputs = BuiltOutputs::index(&result.project);
+    let glue_paths = outputs
+        .paths()
+        .into_iter()
+        .filter(|path| path.starts_with(GLUE_MODULE_PREFIX))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        glue_paths.len(),
+        2,
+        "each page needs its own wrapper selection"
+    );
+    assert_eq!(
+        outputs
+            .paths()
+            .into_iter()
+            .filter(|path| path.ends_with(".html"))
+            .collect::<Vec<_>>(),
+        vec!["about/index.html", "index.html"]
+    );
+    let mut selected_paths = Vec::new();
+    for (page_path, relative_prefix, export) in [
+        ("index.html", "./", "rootValue"),
+        ("about/index.html", "../", "aboutValue"),
+    ] {
+        let page = html_text(outputs.at(page_path));
+        let selected = glue_paths
+            .iter()
+            .filter(|path| page.contains(&format!("from \"{relative_prefix}{path}\"")))
+            .copied()
+            .collect::<Vec<_>>();
+        assert_eq!(
+            selected.len(),
+            1,
+            "'{page_path}' must import its actual emitted glue"
+        );
+        let glue_path = selected[0];
+        assert_page_imports_glue(
+            page,
+            &format!("{relative_prefix}{glue_path}"),
+            js_text(outputs.at(glue_path)),
+        );
+        assert_glue_exports(
+            js_text(outputs.at(glue_path)),
+            &[("../shared/binding.js", &[export])],
+        );
+        selected_paths.push(glue_path);
+    }
+    assert_ne!(selected_paths[0], selected_paths[1]);
+}
+
+#[test]
+fn build_html_project_binding_topology_emits_only_demanded_wrappers_and_whole_assets() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/cases/html_js_binding_runtime_topology/input");
+    let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
+    let mut result = build_project(
+        &builder,
+        root.to_str().expect("fixture path should be UTF-8"),
+        &[],
+        &BuildConfigInputSet::new(),
+    )
+    .expect("the binding topology fixture should build");
+
+    let inner_source = root.join("src/outer/inner/binding.js");
+    let alternate_source = root.join("src/alternate/binding.js");
+    assert_deferred_provider_sources(
+        &mut result.project,
+        &[
+            ("_moth/js/outer/inner/binding.js", inner_source.as_path()),
+            ("_moth/js/alternate/binding.js", alternate_source.as_path()),
+        ],
+    );
+    let outputs = BuiltOutputs::index(&result.project);
+    outputs.none_matching("eager dormant provider asset", |path| {
+        ["private_only.js", "branch_only.js", "assertion_only.js"]
+            .iter()
+            .any(|name| path.ends_with(name))
+    });
+    outputs.none_matching("runtime helper module", |path| {
+        path.starts_with("_moth/js/runtime/")
+    });
+    let glue_path = outputs.exactly_one_path("generated glue module", |path| {
+        path.starts_with(GLUE_MODULE_PREFIX)
+    });
+    let page = html_text(outputs.at("index.html"));
+    assert_page_imports_glue(
+        page,
+        &format!("./{glue_path}"),
+        js_text(outputs.at(glue_path)),
+    );
+    assert!(!page.contains("<script type=\"importmap\">"));
+    assert_glue_exports(
+        js_text(outputs.at(glue_path)),
+        &[
+            (
+                "../outer/inner/binding.js",
+                &[
+                    "recordEvent",
+                    "chooseOutcome",
+                    "observeState",
+                    "generatedLabel",
+                    "readLimit",
+                ],
+            ),
+            ("../alternate/binding.js", &["alternateValue"]),
+        ],
+    );
+}
+
+#[test]
 fn build_html_project_fallible_js_with_runtime_helper_emits_runtime_import_map() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
     let src = root.join("src");
-    fs::create_dir_all(&src).expect("should create src");
+    let facade = src.join("drawing");
+    fs::create_dir_all(&facade).expect("should create facade");
     fs::write(
         root.join("config.moth"),
         "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
@@ -505,17 +835,22 @@ fn build_html_project_fallible_js_with_runtime_helper_emits_runtime_import_map()
     .expect("should write config");
     fs::write(
         src.join("@page.moth"),
-        "@drawing.js get_number\nvalue = get_number() catch:\n    then 0\n;\n",
+        "@drawing get_number\nvalue = get_number() catch:\n    then 0\n;\n",
     )
     .expect("should write page");
     fs::write(
-        src.join("drawing.js"),
+        facade.join("@mod.moth"),
+        "export:\n    @provider.js get_number\n;\n",
+    )
+    .expect("should write pure re-export facade");
+    fs::write(
+        facade.join("provider.js"),
         "import { mothOk } from \"@moth/runtime\";\n/**\n * @moth.sig get_number || -> I32, Error!\n */\nexport function getNumber() { return mothOk(7); }\n",
     )
     .expect("should write js");
 
     let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
-    let result = build_project(
+    let mut result = build_project(
         &builder,
         root.to_str().expect("temp dir should be UTF-8"),
         &[],
@@ -523,18 +858,45 @@ fn build_html_project_fallible_js_with_runtime_helper_emits_runtime_import_map()
     )
     .expect("fallible project-local JS import should build through generated glue");
 
+    let source = facade.join("provider.js");
+    assert_deferred_provider_sources(
+        &mut result.project,
+        &[("_moth/js/drawing/provider.js", source.as_path())],
+    );
+
     let outputs = BuiltOutputs::index(&result.project);
     // Exactly one runtime module at its registered path, not merely some path ending in it.
     let runtime = js_text(outputs.at(RUNTIME_MODULE_PATH));
     assert!(
-        runtime.contains("mothOk"),
+        runtime.contains("export function mothOk"),
         "the registered runtime module should define the helper the provider imports"
     );
 
     let html = html_text(outputs.at("index.html"));
-    assert!(html.contains("<script type=\"importmap\">"));
-    assert!(html.contains("\"@moth/runtime\""));
-    assert!(html.contains("\"./_moth/js/runtime/moth-runtime.js\""));
+    // This artifact contract is separate from Node: the normal harness rejects import maps.
+    let map = html
+        .split_once("<script type=\"importmap\">")
+        .and_then(|(_, remaining)| remaining.split_once("</script>"))
+        .map(|(map, _)| map)
+        .expect("the page should contain a runtime import map");
+    let map: serde_json::Value =
+        serde_json::from_str(map).expect("import map should be valid JSON");
+    assert_eq!(
+        map,
+        serde_json::json!({ "imports": { "@moth/runtime": "./_moth/js/runtime/moth-runtime.js" } })
+    );
+    let glue_path = outputs.exactly_one_path("generated glue module", |path| {
+        path.starts_with(GLUE_MODULE_PREFIX)
+    });
+    assert_page_imports_glue(
+        html,
+        &format!("./{glue_path}"),
+        js_text(outputs.at(glue_path)),
+    );
+    assert_glue_exports(
+        js_text(outputs.at(glue_path)),
+        &[("../drawing/provider.js", &["getNumber"])],
+    );
 }
 
 #[test]

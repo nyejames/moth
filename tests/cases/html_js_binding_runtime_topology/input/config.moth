@@ -1,0 +1,5 @@
+project #= (
+    name = "js_binding_runtime_topology",
+    entry_root = "src",
+)
+html #= ()

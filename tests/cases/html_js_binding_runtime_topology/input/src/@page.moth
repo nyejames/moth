@@ -1,0 +1,39 @@
+@outer as api
+@outer note as record_alias, choose as choose_alias, limit as binding_limit, read_limit, generated_label
+@alternate alternate_value
+
+unused_private ||:
+    api.private_only()
+;
+
+generated_call type Value |value Value| -> String:
+    return generated_label()
+;
+
+validation_message type Value |value Value| -> String:
+    return api.assertion_only()
+;
+
+api.note("namespace")
+record_alias("alias")
+successful = choose_alias("ok") catch then "unexpected failure"
+
+caught_code ~U32 = 0
+caught_message ~= "unset"
+recovered = api.choose("fail") catch |err|:
+    caught_code = copy err.code
+    caught_message = copy err.message
+    then "caught"
+;
+
+limit_value U32 = read_limit(binding_limit)
+generated = generated_call(42)
+alternate = alternate_value()
+
+if false:
+    api.branch_only()
+;
+assert(true, api.assertion_only())
+assert(true, validation_message("validation only"))
+
+[:success=[successful] recovery=[recovered] error=[caught_code]:[caught_message] constant=[binding_limit] live-u32=[limit_value] alternate=[alternate] generated=[generated] state=[api.observed()]]
