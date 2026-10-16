@@ -344,7 +344,7 @@ fn build_wrapper_context_fixture(
             TemplateTirPhase::Finalized,
             empty_overlay,
         );
-        let wrapper_set_id = tir.push_or_reuse_wrapper_set(vec![wrapper_ref]);
+        let wrapper_set_id = tir.push_or_reuse_wrapper_set(&[wrapper_ref]);
         let context = allocate_wrapper_context_overlay(
             &mut tir,
             wrapper_set_id,
@@ -413,7 +413,7 @@ fn build_expression_wrapper_fixture(
             TemplateTirPhase::Finalized,
             wrapper_context,
         );
-        let wrapper_set_id = tir.push_or_reuse_wrapper_set(vec![wrapper_ref]);
+        let wrapper_set_id = tir.push_or_reuse_wrapper_set(&[wrapper_ref]);
 
         let parent_context = if let Some(outer_expression) = outer_expression {
             let wrapper_context_overlay_id = tir
@@ -516,7 +516,7 @@ fn build_slot_resolution_wrapper_fixture(
             TemplateTirPhase::Finalized,
             wrapper_context,
         );
-        let wrapper_set_id = tir.push_or_reuse_wrapper_set(vec![wrapper_ref]);
+        let wrapper_set_id = tir.push_or_reuse_wrapper_set(&[wrapper_ref]);
         let context = allocate_wrapper_context_overlay(
             &mut tir,
             wrapper_set_id,
@@ -569,12 +569,11 @@ fn build_nested_virtual_wrapper_fixture(
         let nested_child_template_id = build_text_template(&mut tir, string_table, "nested");
         let inner_wrapper_template_id =
             build_slot_wrapper_template(&mut tir, string_table, "inner-before", "inner-after");
-        let inner_wrapper_set_id =
-            tir.push_or_reuse_wrapper_set(vec![TemplateWrapperReference::new(
-                inner_wrapper_template_id,
-                TemplateTirPhase::Finalized,
-                empty_context,
-            )]);
+        let inner_wrapper_set_id = tir.push_or_reuse_wrapper_set(&[TemplateWrapperReference::new(
+            inner_wrapper_template_id,
+            TemplateTirPhase::Finalized,
+            empty_context,
+        )]);
 
         let outer_expression = string_table.intern("outer-structural");
         let outer_structural_expression =
@@ -674,12 +673,11 @@ fn build_nested_virtual_wrapper_fixture(
             TemplateIrNodeKind::DynamicExpression { site_id, .. } => *site_id,
             other => panic!("expected outer dynamic-expression node, got {other:?}"),
         };
-        let outer_wrapper_set_id =
-            tir.push_or_reuse_wrapper_set(vec![TemplateWrapperReference::new(
-                outer_wrapper_template_id,
-                TemplateTirPhase::Finalized,
-                empty_context,
-            )]);
+        let outer_wrapper_set_id = tir.push_or_reuse_wrapper_set(&[TemplateWrapperReference::new(
+            outer_wrapper_template_id,
+            TemplateTirPhase::Finalized,
+            empty_context,
+        )]);
 
         (
             parent_template_id,
@@ -1012,7 +1010,7 @@ fn wrapper_context_fold_applies_inherited_wrapper_set_innermost_to_outermost() {
             TemplateTirPhase::Finalized,
             TemplateViewContext::default(),
         );
-        let wrapper_set_id = tir.push_or_reuse_wrapper_set(vec![inner_ref, outer_ref]);
+        let wrapper_set_id = tir.push_or_reuse_wrapper_set(&[inner_ref, outer_ref]);
         let context = allocate_wrapper_context_overlay(
             &mut tir,
             wrapper_set_id,

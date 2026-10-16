@@ -149,8 +149,7 @@ fn concrete_payload_text(
                 match piece {
                     ConstStringPiece::Text(part) => text.push_str(strings.resolve(*part)),
                     ConstStringPiece::Resource(_) | ConstStringPiece::SiteRoot => {
-                        let operation =
-                            strings.get_or_intern(requirement.operation_name().to_owned());
+                        let operation = strings.intern(requirement.operation_name());
                         return Err(CompilerDiagnostic::compile_time_evaluation_error(
                             CompileTimeEvaluationErrorReason::StructuralStringRequiresFinalText,
                             Some(operation),

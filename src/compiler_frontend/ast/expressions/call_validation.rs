@@ -128,8 +128,7 @@ impl<'a> CallDiagnosticName<'a> {
                     .map(|name| string_table.resolve(name))
                     .unwrap_or("<choice>");
                 let variant_name = string_table.resolve(variant_name);
-                let rendered_name = format!("{choice_name}::{variant_name}");
-                Some(string_table.intern(&rendered_name))
+                Some(string_table.get_or_intern(format!("{choice_name}::{variant_name}")))
             }
         }
     }

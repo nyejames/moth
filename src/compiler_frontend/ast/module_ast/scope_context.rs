@@ -925,7 +925,7 @@ impl ScopeContext {
         };
 
         let scope_id = CONTROL_FLOW_SCOPE_COUNTER.fetch_add(1, Ordering::Relaxed);
-        let scope_component = string_table.intern(&format!("__scope_{scope_id}"));
+        let scope_component = string_table.get_or_intern(format!("__scope_{scope_id}"));
         let scope = path_fork
             .try_intern_child(self.scope, scope_component)
             .expect("path table exhausted while creating child scope");

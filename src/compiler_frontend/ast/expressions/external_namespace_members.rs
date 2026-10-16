@@ -286,7 +286,7 @@ pub(super) fn project_external_constant(
         ) => {
             // Keep all host u64 bits at registration, but only materialise valid U32 values.
             let Some(materialised) = FixedScalarValue::unsigned(FixedScalar::U32, value) else {
-                let literal_text = string_table.intern(&value.to_string());
+                let literal_text = string_table.get_or_intern(value.to_string());
                 return Err(CompilerDiagnostic::invalid_number_literal(
                     literal_text,
                     NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::U32),

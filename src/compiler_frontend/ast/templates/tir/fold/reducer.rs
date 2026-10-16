@@ -919,7 +919,7 @@ fn fold_tir_dynamic_expression(
         fold_context.expression_builder,
         fold_context.const_values,
     )? {
-        for piece in &pieces {
+        for piece in pieces {
             match piece {
                 ConstStringPiece::Text(text) => {
                     output_state.append_text(fold_context.string_table.resolve(*text));
@@ -956,16 +956,16 @@ fn fold_tir_dynamic_expression(
 /// scalar string-coercion helper to render unresolved anchors.
 /// WHY: structural strings and scalar values share the language-level `String` type, but only the
 /// TIR reducer owns ordered template output and can preserve anchor boundaries.
-fn structural_string_pieces(
+fn structural_string_pieces<'constants>(
     expression: ExprId,
     expressions: &mut AstExpressionBuilder,
-    constants: &ConstValueStore,
-) -> Result<Option<Vec<ConstStringPiece>>, TemplateError> {
+    constants: &'constants ConstValueStore,
+) -> Result<Option<&'constants [ConstStringPiece]>, TemplateError> {
     let view = expressions.view(expression)?;
     match view.operation() {
         ExpressionOperationView::Constant(id) => match constants.payload(id) {
             Some(ConstValuePayload::String(value)) => match value {
-                ConstStringValue::Pieces(pieces) => Ok(Some(pieces.clone())),
+                ConstStringValue::Pieces(pieces) => Ok(Some(pieces.as_slice())),
                 ConstStringValue::Text(_) => Ok(None),
             },
             Some(ConstValuePayload::Coerced(inner)) => {
@@ -1066,7 +1066,6 @@ fn fold_child_template_with_insertion(
     let store = fold_input.view.store();
     let child_template = store
         .get_template(reference.root)
-        .cloned()
         .ok_or_else(|| missing_template_diagnostic(reference.root))?;
     reject_slot_insert_template(&child_template.kind)?;
 

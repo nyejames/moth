@@ -4,9 +4,9 @@
 
 ```text
 STATUS: ACTIVE on expression-refactor (Phase 5 reactivated by the user)
-CURRENT_SLICE: Phase 5. P5a descriptors, P5b direct type resolution and P5c constant handles accepted.
+CURRENT_SLICE: Phase 5. P5a descriptors, P5b direct type resolution, P5c constant handles and P5d ownership-only clones and string moves accepted.
 BLOCKERS: Fresh Windows proof remains pending.
-NEXT_ACTION: P5d ownership-only TIR clones, static-if AST clone and owned string interning.
+NEXT_ACTION: P5e matched re-profile against the Phase 5 baseline, results record and Phase 5 exit.
 ```
 
 The main squash checkpoint retains expression-refactor source `534aea1a5`,

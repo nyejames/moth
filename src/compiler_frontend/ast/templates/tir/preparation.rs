@@ -142,7 +142,7 @@ impl Default for PreparationFacts {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 struct PreparationTraversalRole {
     virtual_wrapper: bool,
     in_aggregate_wrapper: bool,
@@ -370,7 +370,7 @@ impl PreparationWalk<'_> {
                     }
                 }
             }
-            let mut node_role = role.clone();
+            let mut node_role = role;
             let runtime_slot_plan_facts = if let Some(slot_plan_id) = runtime_slot_plan {
                 node_role.active_slot_plan = Some(slot_plan_id);
                 let facts = self.walk_slot_plan(slot_plan_id, view, &node_role)?;
@@ -493,7 +493,7 @@ impl PreparationWalk<'_> {
                         child_template_id,
                         &child_view,
                         loop_binding_paths,
-                        role.clone(),
+                        *role,
                     )?;
                     facts.merge(child_facts);
                     if view
@@ -543,7 +543,7 @@ impl PreparationWalk<'_> {
                                 *source,
                                 &source_view,
                                 loop_binding_paths,
-                                role.clone(),
+                                *role,
                             )?);
                         }
                     }
@@ -568,12 +568,8 @@ impl PreparationWalk<'_> {
                 }
                 TemplateIrNodeKind::InsertContribution { template } => {
                     let helper_view = view.structural_helper(*template)?;
-                    let mut facts = self.walk_template(
-                        *template,
-                        &helper_view,
-                        loop_binding_paths,
-                        role.clone(),
-                    )?;
+                    let mut facts =
+                        self.walk_template(*template, &helper_view, loop_binding_paths, *role)?;
                     facts.has_slot_insertions = true;
                     self.record_role_runtime(
                         &mut facts,
@@ -588,16 +584,18 @@ impl PreparationWalk<'_> {
                     body,
                 } => {
                     let mut facts = PreparationFacts::const_value();
-                    let effective_selector = effective_branch_selector_for_view(
+                    let effective_selector_override = effective_branch_selector_for_view(
                         view,
                         self.expressions,
                         selector,
                         *selector_site_id,
                     )?;
+                    let effective_selector =
+                        effective_selector_override.as_ref().unwrap_or(selector);
                     let (body_binding_paths, selector_const, selector_facts) = self
                         .const_required_branch_selector(
                             view,
-                            &effective_selector,
+                            effective_selector,
                             node.span,
                             loop_binding_paths,
                             role,
@@ -637,21 +635,22 @@ impl PreparationWalk<'_> {
                     aggregate_wrapper,
                     ..
                 } => {
-                    let effective_header = effective_loop_header_for_view(
+                    let effective_header_override = effective_loop_header_for_view(
                         view,
                         self.expressions,
                         header,
                         *header_sites,
                     )?;
+                    let effective_header = effective_header_override.as_ref().unwrap_or(header);
                     let mut facts = self.walk_loop_header(
                         view,
-                        &effective_header,
+                        effective_header,
                         node.span,
                         loop_binding_paths,
                         role,
                     )?;
                     let body_binding_paths =
-                        loop_body_const_evaluation_bindings(&effective_header, loop_binding_paths);
+                        loop_body_const_evaluation_bindings(effective_header, loop_binding_paths);
                     let body_facts = self.walk_node(*body, view, &body_binding_paths, role)?;
                     if !body_facts.const_evaluable
                         && matches!(self.mode, TemplatePreparationMode::ConstRequired)
@@ -667,7 +666,7 @@ impl PreparationWalk<'_> {
                     if let Some(aggregate_wrapper) = aggregate_wrapper {
                         let aggregate_role = PreparationTraversalRole {
                             in_aggregate_wrapper: true,
-                            ..role.clone()
+                            ..*role
                         };
                         facts.merge(self.walk_node(
                             *aggregate_wrapper,
@@ -808,7 +807,7 @@ impl PreparationWalk<'_> {
                 }
             }
 
-            let mut plan_role = role.clone();
+            let mut plan_role = *role;
             plan_role.active_slot_plan = Some(slot_plan_id);
             let mut facts = PreparationFacts::const_value();
             for source in &slot_plan.contribution_sources {
@@ -971,7 +970,7 @@ impl PreparationWalk<'_> {
                     reference.root,
                     &nested_view,
                     nested_template_binding_paths,
-                    role.clone(),
+                    *role,
                 )?;
                 let const_evaluable = facts.const_evaluable;
                 nested_facts.merge(facts);

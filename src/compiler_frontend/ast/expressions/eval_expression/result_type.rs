@@ -706,7 +706,7 @@ fn missing_operand_error(
     string_table: &mut StringTable,
 ) -> ExpressionTypingError {
     CompilerDiagnostic::missing_operator_operand(
-        string_table.get_or_intern(operator.to_str().to_owned()),
+        string_table.intern(operator.to_str()),
         position,
         span,
     )

@@ -499,7 +499,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 .name
                 .as_deref()
                 .map(|name| string_table.intern(name))
-                .unwrap_or_else(|| string_table.intern(&format!("parameter_{index}")));
+                .unwrap_or_else(|| string_table.get_or_intern(format!("parameter_{index}")));
             let value_mode = match parameter.access {
                 PublicCallParameterAccess::Shared => ValueMode::ImmutableReference,
                 PublicCallParameterAccess::Mutable => ValueMode::MutableReference,

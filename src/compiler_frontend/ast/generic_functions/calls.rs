@@ -68,6 +68,7 @@ use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable}
 use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use rustc_hash::FxHashMap;
+use std::fmt::Write as _;
 
 /// Input bundle for generic call inference.
 pub(crate) struct GenericFunctionCallParseInput<'a, 'b, 'tokens> {
@@ -1441,12 +1442,14 @@ pub(crate) fn generic_function_instance_path(
     // WHAT: builds an internal-only path for a concrete generic function instance.
     // WHY: instances are emitted into the consuming module's AST/HIR and are not
     //      user-visible, dependency-bindable, or namespace-exposed.
-    let argument_suffix = type_arguments
-        .iter()
-        .map(|type_id| type_id.0.to_string())
-        .collect::<Vec<_>>()
-        .join("_");
-    let component = string_table.intern(&format!("__generic_instance_{argument_suffix}"));
+    let mut component_text = String::from("__generic_instance_");
+    for (index, type_id) in type_arguments.iter().enumerate() {
+        if index > 0 {
+            component_text.push('_');
+        }
+        let _ = write!(component_text, "{}", type_id.0);
+    }
+    let component = string_table.get_or_intern(component_text);
     path_fork
         .try_intern_child(function_path, component)
         .ok_or_else(|| {

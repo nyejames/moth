@@ -691,7 +691,7 @@ fn const_template_projection_preserves_slot_in_child_wrapper() -> Result<(), Tem
             TemplateIrSummary::empty(),
             location,
         );
-        let wrapper_set = builder.store.push_or_reuse_wrapper_set(vec![
+        let wrapper_set = builder.store.push_or_reuse_wrapper_set(&[
             crate::compiler_frontend::ast::templates::tir::refs::TemplateWrapperReference::new(
                 wrapper_template_id,
                 TemplateTirPhase::Composed,

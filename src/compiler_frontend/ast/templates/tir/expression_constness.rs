@@ -35,12 +35,12 @@ pub(crate) fn effective_branch_selector_for_view(
     expressions: &AstExpressionBuilder,
     selector: &TemplateBranchSelector,
     site_id: ExpressionSiteId,
-) -> Result<TemplateBranchSelector, CompilerError> {
+) -> Result<Option<TemplateBranchSelector>, CompilerError> {
     let Some(expression) = view.effective_expression_for_site(expressions, site_id)? else {
-        return Ok(selector.clone());
+        return Ok(None);
     };
 
-    Ok(match selector {
+    Ok(Some(match selector {
         TemplateBranchSelector::Bool(_) => TemplateBranchSelector::Bool(expression.id()),
         TemplateBranchSelector::OptionPresentCapture { pattern, .. } => {
             TemplateBranchSelector::OptionPresentCapture {
@@ -48,7 +48,7 @@ pub(crate) fn effective_branch_selector_for_view(
                 pattern: pattern.clone(),
             }
         }
-    })
+    }))
 }
 
 pub(crate) fn effective_loop_header_for_view(
@@ -56,65 +56,70 @@ pub(crate) fn effective_loop_header_for_view(
     expressions: &AstExpressionBuilder,
     header: &TemplateLoopHeader,
     header_sites: TemplateLoopHeaderExpressionSites,
-) -> Result<TemplateLoopHeader, CompilerError> {
-    Ok(match (header, header_sites) {
+) -> Result<Option<TemplateLoopHeader>, CompilerError> {
+    match (header, header_sites) {
         (
-            TemplateLoopHeader::Conditional { condition },
+            TemplateLoopHeader::Conditional { condition: _ },
             TemplateLoopHeaderExpressionSites::Conditional { condition: site_id },
-        ) => TemplateLoopHeader::Conditional {
-            condition: view
-                .effective_expression_for_site(expressions, site_id)?
-                .map(ExpressionView::id)
-                .unwrap_or(*condition),
-        },
+        ) => Ok(view
+            .effective_expression_for_site(expressions, site_id)?
+            .map(|expression| TemplateLoopHeader::Conditional {
+                condition: expression.id(),
+            })),
         (
             TemplateLoopHeader::Range { bindings, range },
             TemplateLoopHeaderExpressionSites::Range { start, end, step },
         ) => {
-            let mut range = range.as_ref().clone();
-            if let Some(expression) = view.effective_expression_for_site(expressions, start)? {
-                range.start = expression.id();
-            }
-            if let Some(expression) = view.effective_expression_for_site(expressions, end)? {
-                range.end = expression.id();
-            }
-            match (&range.step, step) {
-                (None, None) => {}
+            let effective_start = view.effective_expression_for_site(expressions, start)?;
+            let effective_end = view.effective_expression_for_site(expressions, end)?;
+            let effective_step = match (&range.step, step) {
+                (None, None) => None,
                 (Some(_), Some(step_site_id)) => {
-                    if let Some(expression) =
-                        view.effective_expression_for_site(expressions, step_site_id)?
-                    {
-                        range.step = Some(expression.id());
-                    }
+                    view.effective_expression_for_site(expressions, step_site_id)?
                 }
                 _ => {
                     return Err(CompilerError::compiler_error(
                         "TIR range-loop header/site step shape mismatch.",
                     ));
                 }
+            };
+
+            if effective_start.is_none() && effective_end.is_none() && effective_step.is_none() {
+                return Ok(None);
             }
 
-            TemplateLoopHeader::Range {
-                bindings: bindings.clone(),
-                range: Box::new(range),
+            let mut effective_range = range.as_ref().clone();
+            if let Some(expression) = effective_start {
+                effective_range.start = expression.id();
             }
+            if let Some(expression) = effective_end {
+                effective_range.end = expression.id();
+            }
+            if let Some(expression) = effective_step {
+                effective_range.step = Some(expression.id());
+            }
+
+            Ok(Some(TemplateLoopHeader::Range {
+                bindings: bindings.clone(),
+                range: Box::new(effective_range),
+            }))
         }
         (
-            TemplateLoopHeader::Collection { bindings, iterable },
+            TemplateLoopHeader::Collection {
+                bindings,
+                iterable: _,
+            },
             TemplateLoopHeaderExpressionSites::Collection { iterable: site_id },
-        ) => TemplateLoopHeader::Collection {
-            bindings: bindings.clone(),
-            iterable: view
-                .effective_expression_for_site(expressions, site_id)?
-                .map(ExpressionView::id)
-                .unwrap_or(*iterable),
-        },
-        _ => {
-            return Err(CompilerError::compiler_error(
-                "TIR loop header shape does not match its expression sites.",
-            ));
-        }
-    })
+        ) => Ok(view
+            .effective_expression_for_site(expressions, site_id)?
+            .map(|expression| TemplateLoopHeader::Collection {
+                bindings: bindings.clone(),
+                iterable: expression.id(),
+            })),
+        _ => Err(CompilerError::compiler_error(
+            "TIR loop header shape does not match its expression sites.",
+        )),
+    }
 }
 
 /// Classifies operation views without reconstructing an expression tree. All
