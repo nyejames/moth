@@ -313,7 +313,7 @@ pub(crate) fn invalid_generic_instantiation_message(
 
 pub(crate) fn invalid_receiver_declaration_message(
     reason: InvalidReceiverDeclarationReason,
-    string_table: &dyn StringTableResolver,
+    context: DiagnosticRenderContext<'_>,
 ) -> String {
     use InvalidReceiverDeclarationReason;
 
@@ -345,19 +345,19 @@ pub(crate) fn invalid_receiver_declaration_message(
         }
         InvalidReceiverDeclarationReason::GenericReceiverType {
             function_name: _,
-            type_name: _,
+            type_id: _,
         } => {
             "Receiver methods on instantiated generic receiver types are not supported. Define the method on the generic type declaration using the receiver type's own parameters."
                 .to_string()
         }
         InvalidReceiverDeclarationReason::UnsupportedType {
             function_name,
-            type_name,
+            type_id,
         } => {
             format!(
                 "Function '{}' uses unsupported receiver type '{}'. Source-authored receiver methods must target a user-defined struct or choice.",
-                string_table.resolve(function_name),
-                string_table.resolve(type_name)
+                context.string_table.resolve(function_name),
+                diagnostic_type_name(type_id, context)
             )
         }
         InvalidReceiverDeclarationReason::ReceiverMethodImportOrExportNotAllowed => {

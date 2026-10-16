@@ -46,8 +46,7 @@ use crate::compiler_frontend::ast::statements::fallible_handling::DeferredCatchH
 use crate::compiler_frontend::ast::statements::value_production::try_parse_multi_bind_value_block;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::type_resolution::{
-    TypeResolutionContext, TypeResolutionContextInputs, resolve_diagnostic_type_to_type_id_checked,
-    resolve_parsed_type_annotation,
+    TypeResolutionContext, TypeResolutionContextInputs, resolve_parsed_type_annotation,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
@@ -1569,15 +1568,12 @@ fn resolve_target_explicit_type(
         )?
     };
 
-    if matches!(resolved_annotation.diagnostic_type, DataType::Inferred) {
+    // Only an inferred placeholder has no canonical identity yet, so the target stays
+    // unannotated. Every other resolved annotation already carries its identity, and an
+    // unresolved nominal fails during checked resolution above.
+    let Some(type_id) = resolved_annotation.type_id else {
         return Ok(None);
-    }
-
-    let type_id = resolve_diagnostic_type_to_type_id_checked(
-        &resolved_annotation.diagnostic_type,
-        type_interner.environment_mut_for_derived_types(),
-        target_syntax.span,
-    )?;
+    };
 
     Ok(Some((type_id, resolved_annotation.diagnostic_type)))
 }

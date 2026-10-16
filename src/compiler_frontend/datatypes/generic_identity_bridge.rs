@@ -10,10 +10,12 @@ use super::DataType;
 use super::environment::TypeEnvironment;
 use super::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::external_packages::ExternalTypeId;
-use crate::compiler_frontend::symbols::path_interner::{
-    PathId, PathIdRemap, PathInternerFork, PathTable,
-};
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+#[cfg(any(test, feature = "show_hir"))]
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
+use crate::compiler_frontend::symbols::string_interning::StringId;
+#[cfg(any(test, feature = "show_hir"))]
+use crate::compiler_frontend::symbols::string_interning::StringTable;
 use moth_lexical::numeric::decimal::NumberScale;
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
@@ -97,23 +99,19 @@ impl TypeIdentityKey {
     }
 }
 
-// Display helpers below retain the existing two-argument compatibility surface for
-// callers that have not yet been threaded with a path reader. New callers must use
-// one of the path-aware variants so a `PathId` is never rendered as source text.
+// Display helpers below render a `GenericInstantiationKey` through an explicit path reader.
+// The retained entry point is the fork-based diagnostic surface; a `PathId` is never rendered
+// as source text.
 
+#[cfg(any(test, feature = "show_hir"))]
 trait PathNameResolver {
     fn component(&self, path: PathId) -> Option<StringId>;
 }
 
+#[cfg(any(test, feature = "show_hir"))]
 impl PathNameResolver for PathInternerFork {
     fn component(&self, path: PathId) -> Option<StringId> {
         PathInternerFork::component(self, path)
-    }
-}
-
-impl PathNameResolver for PathTable {
-    fn component(&self, path: PathId) -> Option<StringId> {
-        PathTable::component(self, path)
     }
 }
 
@@ -126,14 +124,7 @@ pub fn display_generic_instantiation_key_with_fork(
     display_generic_instantiation_key_with_resolver(key, path_fork, string_table)
 }
 
-pub fn display_generic_instantiation_key(
-    key: &GenericInstantiationKey,
-    path_table: &PathTable,
-    string_table: &StringTable,
-) -> String {
-    display_generic_instantiation_key_with_resolver(key, path_table, string_table)
-}
-
+#[cfg(any(test, feature = "show_hir"))]
 fn display_generic_instantiation_key_with_resolver<R: PathNameResolver>(
     key: &GenericInstantiationKey,
     path_reader: &R,
@@ -152,6 +143,7 @@ fn display_generic_instantiation_key_with_resolver<R: PathNameResolver>(
     format!("{base_name} of {args}")
 }
 
+#[cfg(any(test, feature = "show_hir"))]
 fn display_type_identity_key_with_resolver<R: PathNameResolver>(
     key: &TypeIdentityKey,
     path_reader: &R,

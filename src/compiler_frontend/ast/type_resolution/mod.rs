@@ -44,7 +44,7 @@ pub(crate) use choice_variants::resolve_choice_variant_payload_types;
 pub(crate) use generic_parameters::{
     GenericParameterScopeBuildInput, build_generic_parameter_scope,
     collect_type_parameter_ids_from_choice_variants, collect_type_parameter_ids_from_declarations,
-    collect_type_parameter_ids_from_type, validate_generic_parameters_used,
+    validate_generic_parameters_used,
 };
 pub(crate) use recursive_types::{
     validate_no_recursive_generic_type, validate_no_recursive_runtime_structs,

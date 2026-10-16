@@ -578,17 +578,17 @@ impl Completion<'_, '_> {
                     )?
                 }
                 NumericRecipe::RangeCounter { range } => {
-                    // The counter's type is the iteration domain of its own completed operands, so
-                    // it resolves here in the binding pass, before any later row that reads it,
-                    // and never by resuming the loop construct (its body may read the counter).
+                    // The counter's type is the iteration domain selected by its own completed
+                    // operands. The shared range policy selected it while building the spec, so it
+                    // resolves here in the binding pass, before any later row that reads it, and
+                    // never by resuming the loop construct (its body may read the counter).
                     let recipe_span = range.span.or(row.binding_span);
                     let spec = self.complete_range_spec(*range)?;
                     let computed =
                         crate::compiler_frontend::ast::statements::loop_headers::range_binding_type(
                             &spec,
                             self.type_interner.environment(),
-                            self.expression_builder,
-                        )?;
+                        );
                     {
                         let mut state = self.state.borrow_mut();
                         accept_forward_binding_result(&mut state, binding, computed, recipe_span)?;

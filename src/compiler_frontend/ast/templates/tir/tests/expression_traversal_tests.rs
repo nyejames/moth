@@ -48,6 +48,7 @@ use crate::compiler_frontend::ast::templates::template_slots::{
 use crate::compiler_frontend::compiler_messages::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::value_mode::ValueMode;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 
@@ -1137,6 +1138,7 @@ fn range_loop_header_positions_are_visited_by_mutation_and_collected_by_site_id(
             end: expression(&mut expressions, &mut const_values, 10),
             end_kind: RangeEndKind::Exclusive,
             step: Some(expression(&mut expressions, &mut const_values, 2)),
+            domain: NumericScalar::Fixed(FixedScalar::I32),
         }),
     };
     let header_sites = store.allocate_loop_header_expression_sites(&header);
@@ -1299,6 +1301,7 @@ fn view_walker_reads_loop_header_overlay() {
                 end: expression(&mut expressions, &mut const_values, 10),
                 end_kind: RangeEndKind::Exclusive,
                 step: Some(expression(&mut expressions, &mut const_values, 2)),
+                domain: NumericScalar::Fixed(FixedScalar::I32),
             }),
         };
         let header_sites = store.allocate_loop_header_expression_sites(&header);

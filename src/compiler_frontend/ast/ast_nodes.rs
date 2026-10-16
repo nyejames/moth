@@ -18,6 +18,7 @@ use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::statements::match_patterns::{MatchArm, MatchPattern};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::datatypes::{DataType, ReceiverKey};
 use crate::compiler_frontend::declaration_syntax::build_config_contract::BuildConfigQualifierSyntax;
 use crate::compiler_frontend::source::SourceSpan;
@@ -192,6 +193,16 @@ pub struct RangeLoopSpec {
     pub end: ExprId,
     pub end_kind: RangeEndKind,
     pub step: Option<ExprId>,
+    /// The iteration domain the range policy selected from these operands.
+    ///
+    /// WHAT: the counter type, operand conversion target, unit-step domain and generated
+    ///       stepping-op domain of this header, already selected and checked by
+    ///       `range_loop_spec_from_completed_operands`.
+    /// WHY: domain selection is a pure function of the operands' canonical types, and those types
+    ///      only exist at AST construction. Carrying the selected domain with the header keeps
+    ///      HIR lowering, the counter declaration and template copies reading one selected fact
+    ///      instead of each re-deriving it from operand types.
+    pub domain: NumericScalar,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -70,10 +70,6 @@ fn generic_type_references_nominal_path(data_type: &DataType, declaration_path: 
             nominal_path == declaration_path
         }
 
-        DataType::Parameters(fields) => fields.iter().any(|field| {
-            generic_type_references_nominal_path(&field.diagnostic_type, declaration_path)
-        }),
-
         _ => false,
     }
 }

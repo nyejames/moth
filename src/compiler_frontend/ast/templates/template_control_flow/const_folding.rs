@@ -21,7 +21,6 @@ use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidTemplateStructureReason,
 };
-use crate::compiler_frontend::datatypes::numeric_operators::range_iteration_domain;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
@@ -114,7 +113,10 @@ impl ConstRangeCursor {
             .step
             .map(|id| const_numeric_expression(expressions.view(id)?, constants))
             .transpose()?;
-        let Some(scalar) = const_range_domain(start, end, step) else {
+        // The header selected its iteration domain from the operand types before any operand
+        // value substitution, and those substitutions preserve operand types, so the spec's
+        // domain is this cursor's exact counter domain.
+        let NumericScalar::Fixed(scalar) = range.domain else {
             return Err(invalid_range_bounds(span));
         };
 
@@ -369,28 +371,6 @@ fn fixed_integer_value(value: FixedScalarValue) -> Option<i128> {
 /// The binary-float payload rounded once to the cursor precision.
 fn fixed_float_value(value: FixedScalarValue, precision: BinaryFloatPrecision) -> Option<f64> {
     value.as_f64().map(|value| precision.round(value))
-}
-
-/// The exact counter domain of one range header, or `None` when the operands have no shared
-/// exact numeric domain.
-///
-/// WHY: const folding, AST typing and HIR lowering share one selector; `Dec`, `Byte` and
-///      integer/float mixtures have no range counter domain. `range_iteration_domain` rejects
-///      every `Dec` operand before consulting the fixed operator table, so a number domain
-///      cannot appear here.
-fn const_range_domain(
-    start: FixedScalarValue,
-    end: FixedScalarValue,
-    step: Option<FixedScalarValue>,
-) -> Option<FixedScalar> {
-    match range_iteration_domain(
-        NumericScalar::Fixed(start.scalar()),
-        NumericScalar::Fixed(end.scalar()),
-        step.map(|value| NumericScalar::Fixed(value.scalar())),
-    )? {
-        NumericScalar::Fixed(scalar) => Some(scalar),
-        NumericScalar::Number(_) => None,
-    }
 }
 
 fn fixed_integer_scalar(scalar: FixedScalar, value: i128) -> Option<FixedScalarValue> {

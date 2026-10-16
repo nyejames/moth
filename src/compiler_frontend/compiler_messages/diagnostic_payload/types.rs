@@ -1081,11 +1081,13 @@ pub enum InvalidReceiverDeclarationReason {
     DuplicateVisibleMethod,
     GenericReceiverType {
         function_name: StringId,
-        type_name: StringId,
+        /// Receiver type identity; rendered through the diagnostic render context.
+        type_id: TypeId,
     },
     UnsupportedType {
         function_name: StringId,
-        type_name: StringId,
+        /// Receiver type identity; rendered through the diagnostic render context.
+        type_id: TypeId,
     },
     ReceiverMethodImportOrExportNotAllowed,
 }

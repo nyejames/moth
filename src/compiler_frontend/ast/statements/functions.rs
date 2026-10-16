@@ -83,10 +83,6 @@ impl ReturnSlot {
             channel: ReturnChannel::Success,
         }
     }
-
-    pub fn data_type(&self) -> &DataType {
-        &self.value
-    }
 }
 
 /// Canonical callable parameter contract. Defaults retain content, not executable roots.

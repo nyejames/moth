@@ -52,7 +52,6 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use std::sync::Arc;
 
-use crate::compiler_frontend::ast::type_resolution::resolve_diagnostic_type_to_type_id_checked;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::generic_parameters::{
     ActiveGenericTypeContext, GenericParameterScope,
@@ -1171,13 +1170,14 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         let error_type = resolve_builtin_error_type_typed(&context, None, string_table)
             .map_err(|error| self.error_messages(error, string_table))?
             .type_id;
+        // Only the diagnostic spelling of the fragment vector stays a `DataType`; the identity
+        // interns directly so no reverse tree walk runs on the executable start path.
         let start_return_type = DataType::collection(DataType::StringSlice);
-        let start_return_type_id = resolve_diagnostic_type_to_type_id_checked(
-            &start_return_type,
-            &mut self.environment.type_environment,
-            None,
-        )
-        .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
+        let builtin_string_type_id = self.environment.type_environment.builtins().string;
+        let start_return_type_id = self
+            .environment
+            .type_environment
+            .intern_collection(builtin_string_type_id, None);
         let start_signature = FunctionSignature {
             parameters: vec![],
             returns: vec![

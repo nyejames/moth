@@ -204,11 +204,7 @@ impl ParsedRangeSpec {
                 parser.path_fork,
             )?;
             // The counter's domain is the spec's selected domain: one policy owns both.
-            let binding_type = range_binding_type(
-                &range,
-                parser.type_interner.environment(),
-                parser.expression_builder,
-            )?;
+            let binding_type = range_binding_type(&range, parser.type_interner.environment());
             let bindings = declare_loop_bindings(binding_names, binding_type, parser)?;
             return Ok(ParsedLoopHeader::Range(ParsedRangeHeader::Concrete {
                 bindings: Box::new(bindings),
@@ -1165,6 +1161,7 @@ pub(crate) fn range_loop_spec_from_completed_operands(
         end: end.id(),
         end_kind,
         step: step.map(OwnedExpr::id),
+        domain,
     })
 }
 
@@ -1885,25 +1882,15 @@ fn token_string_id_at(
 
 /// The exact counter domain of one already-built range loop spec.
 ///
-/// WHAT: applies the shared range domain selection to the spec's completed operands.
+/// WHAT: returns the counter's canonical type from the spec's already-selected iteration domain.
 /// WHY: a retained range header's counter is resolved at the body root, after the shared policy
-///      has built and checked the spec, so both the concrete and the resumed path derive the
-///      counter's type from that one spec instead of selecting a second time.
+///      has built and checked the spec, so both the concrete and the resumed path read that one
+///      selected domain instead of selecting a second time from the spec's operands.
 pub(crate) fn range_binding_type(
     range: &RangeLoopSpec,
     type_environment: &TypeEnvironment,
-    expression_builder: &AstExpressionBuilder,
-) -> LoopHeaderResult<TypeId> {
-    Ok(range_numeric_domain(
-        Some(expression_builder.view(range.start)?),
-        expression_builder.view(range.end)?,
-        range
-            .step
-            .map(|step| expression_builder.view(step))
-            .transpose()?,
-        type_environment,
-    )?
-    .type_id(type_environment))
+) -> TypeId {
+    range.domain.type_id(type_environment)
 }
 
 fn declare_loop_bindings(

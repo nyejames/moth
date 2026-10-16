@@ -24,8 +24,8 @@ use crate::compiler_frontend::ast::statements::functions::{
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::type_resolution::{
-    collect_type_parameter_ids_from_type, intern_resolved_function_signature,
-    resolve_function_signature, validate_generic_parameters_used,
+    intern_resolved_function_signature, resolve_function_signature,
+    validate_generic_parameters_used,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
 use crate::compiler_frontend::compiler_messages::{
@@ -212,18 +212,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
 
             let mut used_generic_parameters = rustc_hash::FxHashSet::default();
-            for parameter in &resolved_signature.signature.parameters {
-                collect_type_parameter_ids_from_type(
-                    &parameter.diagnostic_type,
-                    &mut used_generic_parameters,
-                );
-            }
-            for return_slot in &resolved_signature.signature.returns {
-                collect_type_parameter_ids_from_type(
-                    return_slot.data_type(),
-                    &mut used_generic_parameters,
-                );
-            }
             if let Some(registered_generic_parameters) = registered_generic_parameters.as_ref() {
                 collect_type_parameter_ids_from_signature_type_ids(
                     &resolved_signature.signature,

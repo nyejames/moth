@@ -21,7 +21,7 @@ use crate::compiler_frontend::ast::type_resolution::{
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidDeclarationReason};
-use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::type_syntax::for_each_named_type_in_parsed_ref;
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
@@ -239,11 +239,14 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // WHAT: external types are opaque and cannot be aliased by user code.
         // WHY: aliases to opaque types would let user code pretend it owns a nominal type
         //     that it cannot construct or field-access, leading to confusing semantics.
-        if let DataType::External { type_id } = &resolved_target.diagnostic_type {
+        if let Some(TypeDefinition::External(external)) = resolved_target
+            .type_id
+            .and_then(|type_id| self.type_environment.get(type_id))
+        {
             let type_name = self
                 .context
                 .external_package_registry
-                .get_type_by_id(*type_id)
+                .get_type_by_id(external.type_id)
                 .map(|def| def.name.to_string())
                 .unwrap_or_else(|| "external".to_string());
 

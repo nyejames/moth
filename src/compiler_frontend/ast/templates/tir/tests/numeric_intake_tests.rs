@@ -37,6 +37,7 @@ use crate::compiler_frontend::ast::templates::tir::{
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarationTable};
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -572,6 +573,7 @@ fn bound_range_headers_are_isolated_by_body_domain_and_copies_keep_their_row() {
                 end: i32_expression(&mut outer.expressions, &mut outer.constants, 2),
                 end_kind: RangeEndKind::Exclusive,
                 step: None,
+                domain: NumericScalar::Fixed(FixedScalar::I32),
             },
             {
                 let value = i32_expression(&mut outer.expressions, &mut outer.constants, 0);
@@ -769,6 +771,7 @@ fn bound_range_completion_inspects_each_pending_header_once() {
                             end: i32_expression(&mut body.expressions, &mut body.constants, 2),
                             end_kind: RangeEndKind::Exclusive,
                             step: None,
+                            domain: NumericScalar::Fixed(FixedScalar::I32),
                         },
                         {
                             let value =

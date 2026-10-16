@@ -1,8 +1,8 @@
 //! The `DataType` enum and its intrinsic methods.
 //!
 //! WHAT: carries parsed and diagnostic-only type spellings used before and during AST
-//!       construction. Contains constructors, queries, remapping, display helpers, and
-//!       the reverse bridge from canonical `TypeId` back to diagnostic spellings.
+//!       construction. Contains constructors, queries, remapping and the reverse bridge
+//!       from canonical `TypeId` back to diagnostic spellings.
 //! WHY: separating the data shape from `mod.rs` keeps the module entry point focused
 //!      on orchestration and re-exports.
 //!
@@ -10,14 +10,12 @@
 //! Compatibility policy lives in `type_coercion::compatibility`.
 //! Contextual promotion lives in `type_coercion::contextual`.
 
-use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::external_packages::ExternalTypeId;
-use crate::compiler_frontend::symbols::path_interner::{PathId, PathTable};
-use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::symbols::path_interner::PathId;
+use crate::compiler_frontend::symbols::string_interning::StringId;
 
 use super::definitions::TypeDefinition;
 use super::environment::TypeEnvironment;
-use super::generic_identity_bridge::display_generic_instantiation_key;
 use super::generic_identity_bridge::{
     BuiltinGenericType, GenericBaseType, GenericInstantiationKey,
 };
@@ -83,9 +81,6 @@ pub enum DataType {
     FixedScalar(FixedScalar),
 
     // Reserved or not-yet-wired variants kept for planned language work.
-    #[allow(dead_code)] // Planned: explicit parameter/record type surfaces.
-    Parameters(Vec<Declaration>), // Struct definitions and parameters
-
     Choices {
         nominal_path: PathId,
         type_id: TypeId,
@@ -180,168 +175,6 @@ impl DataType {
             arguments: vec![key_type, value_type],
         }
     }
-
-    // -----------------
-    //  Display
-    // -----------------
-
-    /// Display the DataType with proper string resolution for interned strings.
-    /// This method should be used instead of Display when a StringTable is available.
-    pub fn display_with_table(&self, string_table: &StringTable, path_table: &PathTable) -> String {
-        match self {
-            DataType::Inferred => "Inferred".to_string(),
-            DataType::NamedType(name) => string_table.resolve(*name).to_string(),
-            DataType::NamespacedType { path } => path
-                .iter()
-                .map(|component| string_table.resolve(*component))
-                .collect::<Vec<_>>()
-                .join("."),
-            DataType::TypeParameter { name, .. } => string_table.resolve(*name).to_string(),
-            DataType::GenericInstance { base, arguments } => {
-                display_generic_instance(base, arguments, string_table, path_table)
-            }
-            DataType::Bool => "Bool".to_string(),
-            DataType::StringSlice => "String".to_string(),
-            DataType::Char => "Char".to_string(),
-            DataType::FixedScalar(scalar) => scalar.name().to_string(),
-            DataType::Number(scale) => scale.to_string(),
-            DataType::Parameters(args) => {
-                let mut arg_str = String::new();
-                for arg in args {
-                    let name = path_table.render_portable(arg.id, string_table, &mut Vec::new());
-                    arg_str.push_str(&format!(
-                        "{}: {}, ",
-                        name,
-                        arg.diagnostic_type
-                            .display_with_table(string_table, path_table)
-                    ));
-                }
-                format!("Parameters({arg_str})")
-            }
-            DataType::Struct {
-                nominal_path,
-                const_record,
-                generic_instance_key,
-                ..
-            } => {
-                if let Some(key) = generic_instance_key {
-                    return display_generic_instantiation_key(key, path_table, string_table);
-                }
-                let bare_name = path_table
-                    .try_component(*nominal_path)
-                    .map(|name| string_table.resolve(name))
-                    .unwrap_or("<anonymous struct>");
-                if *const_record {
-                    format!("const record {bare_name}")
-                } else {
-                    bare_name.to_owned()
-                }
-            }
-            DataType::External { type_id } => {
-                // External types are opaque; display uses the stable ID.
-                format!("External({})", type_id.0)
-            }
-
-            DataType::None => "None".to_string(),
-            DataType::True => "True".to_string(),
-            DataType::False => "False".to_string(),
-            DataType::Range => "Range".to_string(),
-            DataType::Option(inner_type) => {
-                if displays_better_in_generic_surface(inner_type) {
-                    format!(
-                        "{}?",
-                        inner_type.display_with_table(string_table, path_table)
-                    )
-                } else {
-                    format!(
-                        "Option({})",
-                        inner_type.display_with_table(string_table, path_table)
-                    )
-                }
-            }
-            DataType::Choices {
-                nominal_path,
-                generic_instance_key,
-                ..
-            } => {
-                if let Some(key) = generic_instance_key {
-                    return display_generic_instantiation_key(key, path_table, string_table);
-                }
-                path_table
-                    .try_component(*nominal_path)
-                    .map(|name| string_table.resolve(name).to_owned())
-                    .unwrap_or_else(|| "<choice>".to_owned())
-            }
-        }
-    }
-}
-
-// -----------------------------------------------------------
-//  Display Helpers
-// -----------------------------------------------------------
-
-fn displays_better_in_generic_surface(data_type: &DataType) -> bool {
-    matches!(
-        data_type,
-        DataType::TypeParameter { .. } | DataType::GenericInstance { .. } | DataType::Option(_)
-    )
-}
-
-fn display_generic_instance(
-    base: &GenericBaseType,
-    arguments: &[DataType],
-    string_table: &StringTable,
-    path_table: &PathTable,
-) -> String {
-    if let GenericBaseType::Builtin(BuiltinGenericType::Collection { fixed_capacity }) = base
-        && let [single_argument] = arguments
-    {
-        let element_display = single_argument.display_with_table(string_table, path_table);
-        return match fixed_capacity {
-            Some(capacity) => format!("{{{capacity} {element_display}}}"),
-            None => format!("{{{element_display}}}"),
-        };
-    }
-
-    if let GenericBaseType::Builtin(BuiltinGenericType::Map) = base
-        && let [key_argument, value_argument] = arguments
-    {
-        let key_display = key_argument.display_with_table(string_table, path_table);
-        let value_display = value_argument.display_with_table(string_table, path_table);
-        return format!("{{{key_display} = {value_display}}}");
-    }
-
-    let base_display = display_generic_base(base, string_table, path_table);
-    if arguments.is_empty() {
-        return base_display;
-    }
-
-    let arguments_display = arguments
-        .iter()
-        .map(|argument| argument.display_with_table(string_table, path_table))
-        .collect::<Vec<_>>()
-        .join(", ");
-
-    format!("{base_display} of {arguments_display}")
-}
-fn display_generic_base(
-    base: &GenericBaseType,
-    string_table: &StringTable,
-    path_table: &PathTable,
-) -> String {
-    match base {
-        GenericBaseType::Named(name) => string_table.resolve(*name).to_owned(),
-        GenericBaseType::ResolvedNominal(path) => path_table
-            .try_component(*path)
-            .map(|name| string_table.resolve(name))
-            .unwrap_or("<generic>")
-            .to_owned(),
-        GenericBaseType::External(type_id) => format!("External({})", type_id.0),
-        GenericBaseType::Builtin(BuiltinGenericType::Collection { .. }) => {
-            String::from("Collection")
-        }
-        GenericBaseType::Builtin(BuiltinGenericType::Map) => String::from("Map"),
-    }
 }
 
 // -----------------------------------------------------------
@@ -397,14 +230,6 @@ impl PartialEq for DataType {
             (DataType::FixedScalar(left), DataType::FixedScalar(right)) => left == right,
             (DataType::Number(left), DataType::Number(right)) => left == right,
             (DataType::Option(a), DataType::Option(b)) => a == b,
-            // For Args, Struct, Function, and Choices, we compare by name/structure
-            // but not by the actual Arg values since they contain Expressions
-            (DataType::Parameters(a), DataType::Parameters(b)) => {
-                a.len() == b.len()
-                    && a.iter()
-                        .zip(b.iter())
-                        .all(|(arg_a, arg_b)| arg_a.id == arg_b.id)
-            }
             (
                 DataType::Struct {
                     nominal_path: path_a,

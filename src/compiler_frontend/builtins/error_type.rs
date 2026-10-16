@@ -153,9 +153,12 @@ fn resolve_builtin_named_type(
         )));
     };
 
-    if declaration.diagnostic_type == DataType::Inferred {
+    // The manifest registers the builtin error declaration before its nominal type identity
+    // exists, so a placeholder id here means this symbol resolved before registration. The
+    // display spelling cannot express that: a struct shell still spells `runtime_struct(NONE)`.
+    if declaration.type_id == builtin_type_ids::NONE {
         return Err(CompilerError::compiler_error(format!(
-            "Builtin type '{type_name}' resolved to an inferred placeholder at {span:?}.",
+            "Builtin type '{type_name}' resolved to a declaration without a canonical type identity at {span:?}.",
         )));
     }
 

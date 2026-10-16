@@ -18,11 +18,13 @@ use crate::compiler_frontend::ast::statements::match_patterns::{
     MatchArm, MatchPattern, PatternValue,
 };
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::tests::ast_fixture_support::{
     make_test_variable, node, test_if_branch_metadata,
 };
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 /// Nesting depth that overflows a one MiB thread if the visitors recurse once per body.
 const DEEP_IF_DEPTH: usize = 8192;
@@ -211,6 +213,7 @@ fn mixed_statement_tree_visits_rows_in_source_order() {
                 end,
                 end_kind: RangeEndKind::Exclusive,
                 step: Some(step),
+                domain: NumericScalar::Fixed(FixedScalar::I32),
             }),
             body: vec![expression_statement(loop_value)],
         },

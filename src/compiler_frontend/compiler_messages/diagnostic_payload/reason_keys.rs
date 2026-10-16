@@ -242,15 +242,14 @@ macro_rules! define_reasoned_diagnostic_registry {
                 remap: {
                     if let InvalidReceiverDeclarationReason::GenericReceiverType {
                         function_name,
-                        type_name,
+                        ..
                     }
                     | InvalidReceiverDeclarationReason::UnsupportedType {
                         function_name,
-                        type_name,
+                        ..
                     } = reason
                     {
                         *function_name = remap.get(*function_name);
-                        *type_name = remap.get(*type_name);
                     }
                 }
                 descriptor: { "MOTH-RULE-0041", "Invalid receiver declaration", Error }

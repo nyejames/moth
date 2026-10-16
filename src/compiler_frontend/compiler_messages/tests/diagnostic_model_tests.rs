@@ -2076,7 +2076,7 @@ fn remap_string_ids_updates_compile_time_evaluation_operation() {
 }
 
 #[test]
-fn remap_string_ids_updates_receiver_declaration_names() {
+fn remap_string_ids_updates_receiver_declaration_function_names() {
     use crate::compiler_frontend::compiler_messages::InvalidReceiverDeclarationReason;
 
     let mut local_table = StringTable::new();
@@ -2085,12 +2085,13 @@ fn remap_string_ids_updates_receiver_declaration_names() {
         .try_intern_portable_path("main.moth", &mut local_table)
         .expect("test path fits");
     let function_name = local_table.intern("describe");
-    let type_name = local_table.intern("Option of Label");
+    // The receiver type crosses this boundary as semantic identity, so no string remap can stale it.
+    let type_id = builtin_type_ids::fixed_scalar(FixedScalar::I32);
 
     let diagnostic = CompilerDiagnostic::invalid_receiver_declaration(
         InvalidReceiverDeclarationReason::UnsupportedType {
             function_name,
-            type_name,
+            type_id,
         },
         span(source_path),
     );
@@ -2111,7 +2112,7 @@ fn remap_string_ids_updates_receiver_declaration_names() {
         reason:
             InvalidReceiverDeclarationReason::UnsupportedType {
                 function_name,
-                type_name,
+                type_id: remapped_type_id,
             },
     } = &bag.diagnostics()[0].payload
     else {
@@ -2121,7 +2122,7 @@ fn remap_string_ids_updates_receiver_declaration_names() {
         );
     };
     assert_eq!(merged_table.resolve(*function_name), "describe");
-    assert_eq!(merged_table.resolve(*type_name), "Option of Label");
+    assert_eq!(*remapped_type_id, type_id);
 }
 
 #[test]

@@ -7,6 +7,8 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticPayload, InvalidDeclarationReason,
 };
 use crate::compiler_frontend::datatypes::DataType;
+use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_parameters::{
     GenericParameterList, GenericParameterScope, TypeParameterId,
 };
@@ -33,6 +35,7 @@ pub(crate) struct GenericParameterScopeBuildInput<'a> {
     pub(crate) visible_external_symbols: &'a FxHashMap<StringId, ExternalSymbolId>,
     pub(crate) declaration_table: &'a TopLevelDeclarationTable,
     pub(crate) generic_declarations_by_path: &'a FxHashMap<PathId, GenericDeclarationKind>,
+    pub(crate) type_environment: &'a TypeEnvironment,
     pub(crate) string_table: &'a StringTable,
 }
 
@@ -48,6 +51,7 @@ pub(crate) fn build_generic_parameter_scope(
         visible_external_symbols,
         declaration_table,
         generic_declarations_by_path,
+        type_environment,
         string_table,
     } = input;
 
@@ -65,7 +69,12 @@ pub(crate) fn build_generic_parameter_scope(
     }
 
     for (name, path) in visible_source_bindings {
-        if path_is_visible_type(path, declaration_table, generic_declarations_by_path) {
+        if path_is_visible_type(
+            path,
+            declaration_table,
+            generic_declarations_by_path,
+            type_environment,
+        ) {
             forbidden_names.insert(*name);
         }
     }
@@ -107,6 +116,7 @@ fn path_is_visible_type(
     path: &PathId,
     declaration_table: &TopLevelDeclarationTable,
     generic_declarations_by_path: &FxHashMap<PathId, GenericDeclarationKind>,
+    type_environment: &TypeEnvironment,
 ) -> bool {
     if let Some(kind) = generic_declarations_by_path.get(path) {
         return matches!(
@@ -115,12 +125,14 @@ fn path_is_visible_type(
         );
     }
 
+    // Nominal identities are registered before any generic-parameter scope is built, so the
+    // declaration's canonical type answers this question without reading a display spelling.
     declaration_table
         .get_by_path(path)
         .is_some_and(|declaration| {
             matches!(
-                declaration.diagnostic_type,
-                DataType::Struct { .. } | DataType::Choices { .. }
+                type_environment.get(declaration.type_id),
+                Some(TypeDefinition::Struct(_) | TypeDefinition::Choice(_))
             )
         })
 }
@@ -171,10 +183,6 @@ pub(crate) fn collect_type_parameter_ids_from_type(
 
         // Record-like shapes — fields and variants.
         DataType::Struct { .. } | DataType::Choices { .. } => {}
-
-        DataType::Parameters(fields) => {
-            collect_type_parameter_ids_from_declarations(fields, used_parameters);
-        }
 
         _ => {}
     }

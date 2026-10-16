@@ -4,7 +4,9 @@
 //! WHY: headers are already dependency-sorted; constants are parsed linearly. Struct defaults
 //! can reference constants, so constants are resolved before struct fields.
 
-use super::builder::{AstModuleEnvironmentBuilder, DeclarationPassLanes};
+use super::builder::{
+    AstModuleEnvironmentBuilder, DeclarationPassLanes, field_definitions_from_declarations,
+};
 use crate::compiler_frontend::ast::ast_nodes::{Declaration, DeclarationShell, DeclarationValue};
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
@@ -405,8 +407,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
             // Write final canonical struct field definitions into the identity-only
             // TypeEnvironment registration.
-            let field_definitions =
-                self.field_definitions_from_declarations(&resolved_fields, string_table)?;
+            let field_definitions = field_definitions_from_declarations(&resolved_fields);
 
             if let Some(&type_id) = self.nominal_type_ids_by_path.get(&header.declaration_path) {
                 self.type_environment
@@ -542,8 +543,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 let payload = match &variant.payload {
                     ChoiceVariantPayload::Unit => ChoiceVariantPayloadDefinition::Unit,
                     ChoiceVariantPayload::Record { fields } => {
-                        let field_definitions =
-                            self.field_definitions_from_declarations(fields, string_table)?;
+                        let field_definitions = field_definitions_from_declarations(fields);
                         ChoiceVariantPayloadDefinition::Record {
                             fields: field_definitions,
                         }
@@ -919,8 +919,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     if let Some(&struct_type_id) =
                         self.nominal_type_ids_by_path.get(&header.declaration_path)
                     {
-                        let field_definitions = self
-                            .field_definitions_from_declarations(&resolved_fields, string_table)?;
+                        let field_definitions =
+                            field_definitions_from_declarations(&resolved_fields);
                         self.type_environment
                             .update_struct_fields(struct_type_id, field_definitions);
                     }
@@ -982,11 +982,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             let payload = match &variant.payload {
                                 ChoiceVariantPayload::Unit => ChoiceVariantPayloadDefinition::Unit,
                                 ChoiceVariantPayload::Record { fields } => {
-                                    let field_definitions = self
-                                        .field_definitions_from_declarations(
-                                            fields,
-                                            string_table,
-                                        )?;
+                                    let field_definitions =
+                                        field_definitions_from_declarations(fields);
                                     ChoiceVariantPayloadDefinition::Record {
                                         fields: field_definitions,
                                     }

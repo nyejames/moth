@@ -34,10 +34,12 @@ use crate::compiler_frontend::compiler_errors::ErrorType;
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::value_mode::ValueMode;
+use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
 /// Runs the production walk from one statement and returns the first error in source order.
 fn validate_node(node: &AstNode, context: &TypeValidationContext) -> Result<(), CompilerError> {
@@ -329,6 +331,7 @@ fn owned_runtime_slot_handoff_validates_all_expression_payload_routes() {
                                 .id(),
                             end_kind: RangeEndKind::Exclusive,
                             step: None,
+                            domain: NumericScalar::Fixed(FixedScalar::I32),
                         }),
                     },
                     body: empty_loop_body(),
@@ -477,6 +480,7 @@ fn owned_runtime_loop_header_type_ids_are_validated_before_inactive_elision() {
                     .id(),
                 end_kind: RangeEndKind::Exclusive,
                 step: None,
+                domain: NumericScalar::Fixed(FixedScalar::I32),
             }),
         },
         TemplateLoopHeader::Range {
@@ -492,6 +496,7 @@ fn owned_runtime_loop_header_type_ids_are_validated_before_inactive_elision() {
                 end: orphan_bool_expression(&mut expressions),
                 end_kind: RangeEndKind::Exclusive,
                 step: None,
+                domain: NumericScalar::Fixed(FixedScalar::I32),
             }),
         },
         TemplateLoopHeader::Range {
@@ -510,6 +515,7 @@ fn owned_runtime_loop_header_type_ids_are_validated_before_inactive_elision() {
                     .id(),
                 end_kind: RangeEndKind::Exclusive,
                 step: Some(orphan_bool_expression(&mut expressions)),
+                domain: NumericScalar::Fixed(FixedScalar::I32),
             }),
         },
         TemplateLoopHeader::Range {
@@ -528,6 +534,7 @@ fn owned_runtime_loop_header_type_ids_are_validated_before_inactive_elision() {
                     .id(),
                 end_kind: RangeEndKind::Exclusive,
                 step: None,
+                domain: NumericScalar::Fixed(FixedScalar::I32),
             }),
         },
         TemplateLoopHeader::Collection {

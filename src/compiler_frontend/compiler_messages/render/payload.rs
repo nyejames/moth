@@ -417,7 +417,7 @@ fn render_payload_message(
             invalid_this_usage_message(*reason, string_table)
         }
         DiagnosticPayload::InvalidReceiverDeclaration { reason } => {
-            invalid_receiver_declaration_message(*reason, string_table)
+            invalid_receiver_declaration_message(*reason, context)
         }
         DiagnosticPayload::InvalidControlFlowStatement { reason } => {
             invalid_control_flow_statement_message(*reason)

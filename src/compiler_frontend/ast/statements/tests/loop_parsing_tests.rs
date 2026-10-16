@@ -18,6 +18,7 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
+use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::source::{ExtendedSpanBuilder, LocalSpan, SourceId};
 use crate::compiler_frontend::tests::ast_fixture_support::function_body_by_name;
 use crate::compiler_frontend::tests::parse_support::{
@@ -299,6 +300,9 @@ fn range_item_type_uses_canonical_fixed_integer_promotion() {
             DataType::FixedScalar(FixedScalar::I32)
         )
     }));
+    // The spec carries the selected iteration domain: the counter type and the domain must
+    // agree, because HIR lowers the loop from the spec's domain alone.
+    assert_eq!(range.domain, NumericScalar::Fixed(FixedScalar::I32));
     assert_eq!(
         expression_type_id(&ast, range.start),
         builtin_type_ids::fixed_scalar(FixedScalar::I8)
@@ -320,7 +324,10 @@ fn range_item_type_promotes_mixed_i32_u32_to_i64() {
     );
     let body = loop_function_body(&ast, &path_fork, &string_table);
 
-    let NodeKind::RangeLoop { bindings, .. } = &body[2].kind else {
+    let NodeKind::RangeLoop {
+        bindings, range, ..
+    } = &body[2].kind
+    else {
         panic!("expected mixed fixed integer range loop");
     };
 
@@ -330,6 +337,7 @@ fn range_item_type_promotes_mixed_i32_u32_to_i64() {
             DataType::FixedScalar(FixedScalar::I64)
         )
     }));
+    assert_eq!(range.domain, NumericScalar::Fixed(FixedScalar::I64));
 }
 
 #[test]
@@ -364,6 +372,7 @@ fn omitted_range_start_zero_uses_promoted_fixed_domain() {
             DataType::FixedScalar(FixedScalar::I32)
         )
     }));
+    assert_eq!(range.domain, NumericScalar::Fixed(FixedScalar::U64));
 }
 
 #[test]
@@ -404,7 +413,10 @@ fn range_item_type_promotes_f16_with_explicit_step_to_f32() {
     );
     let body = loop_function_body(&ast, &path_fork, &string_table);
 
-    let NodeKind::RangeLoop { bindings, .. } = &body[3].kind else {
+    let NodeKind::RangeLoop {
+        bindings, range, ..
+    } = &body[3].kind
+    else {
         panic!("expected fixed float range loop");
     };
 
@@ -414,6 +426,7 @@ fn range_item_type_promotes_f16_with_explicit_step_to_f32() {
             DataType::FixedScalar(FixedScalar::F32)
         )
     }));
+    assert_eq!(range.domain, NumericScalar::Fixed(FixedScalar::F32));
 }
 
 #[test]

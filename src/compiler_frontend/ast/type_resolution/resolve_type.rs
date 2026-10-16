@@ -427,10 +427,7 @@ pub(crate) fn resolve_diagnostic_type_to_type_id_opt(
             _ => None,
         },
         DataType::External { type_id } => Some(type_environment.intern_external(*type_id)),
-        DataType::Parameters(_)
-        | DataType::Inferred
-        | DataType::NamedType(_)
-        | DataType::NamespacedType { .. } => None,
+        DataType::Inferred | DataType::NamedType(_) | DataType::NamespacedType { .. } => None,
     }
 }
 
@@ -513,26 +510,6 @@ pub(crate) fn resolve_type(
             // Struct and choice types no longer carry field/variant payloads in DataType.
             // They are already fully resolved when created; no NamedType placeholders remain.
             Ok(data_type.to_owned())
-        }
-        DataType::Parameters(parameters) => {
-            let mut resolved_parameters = Vec::with_capacity(parameters.len());
-            for parameter in parameters {
-                let mut resolved_parameter = parameter.to_owned();
-                resolved_parameter.diagnostic_type = resolve_type(
-                    &parameter.diagnostic_type,
-                    parameter.binding_span.or(span),
-                    context,
-                    string_table,
-                )?;
-                resolved_parameter.type_id = resolve_diagnostic_type_to_type_id_checked(
-                    &resolved_parameter.diagnostic_type,
-                    context.type_environment,
-                    parameter.binding_span.or(span),
-                )?;
-                resolved_parameters.push(resolved_parameter);
-            }
-
-            Ok(DataType::Parameters(resolved_parameters))
         }
         _ => Ok(data_type.to_owned()),
     }

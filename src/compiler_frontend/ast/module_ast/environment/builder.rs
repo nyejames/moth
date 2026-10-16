@@ -23,7 +23,6 @@ use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::type_resolution::{
     GenericParameterScopeBuildInput, ResolvedFunctionSignature, ResolvedTypeAlias,
     TypeResolutionContext, TypeResolutionContextInputs, build_generic_parameter_scope,
-    resolve_diagnostic_type_to_type_id_checked,
 };
 use crate::compiler_frontend::ast::{
     AstChoiceDefinition, AstImportedFunctionContract, AstImportedStructDefinition,
@@ -849,6 +848,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             visible_external_symbols: &visibility.visible_external_symbols,
             declaration_table: self.declaration_table.as_ref(),
             generic_declarations_by_path: &self.generic_declarations_by_path,
+            type_environment: &self.type_environment,
             string_table,
         })
         .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))
@@ -984,8 +984,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 }
             }
 
-            let field_definitions =
-                self.field_definitions_from_declarations(&fields, string_table)?;
+            let field_definitions = field_definitions_from_declarations(&fields);
             Rc::make_mut(&mut self.resolved_struct_fields_by_path).insert(*path, fields);
 
             let struct_def = StructTypeDefinition {
@@ -1157,41 +1156,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         Ok(())
     }
 
-    /// Convert resolved AST member declarations into canonical type-environment fields.
-    ///
-    /// WHAT: struct fields and choice payload fields are resolved as AST `Declaration`s first,
-    /// then written into `TypeEnvironment` as compact semantic member definitions.
-    /// WHY: keeping the conversion on the environment builder centralizes diagnostic mapping
-    /// at the AST environment boundary without closure-specific error conversions.
-    pub(crate) fn field_definitions_from_declarations(
-        &mut self,
-        fields: &[Declaration],
-        string_table: &StringTable,
-    ) -> Result<Box<[FieldDefinition]>, CompilerMessages> {
-        let mut definitions = Vec::with_capacity(fields.len());
-
-        for field in fields {
-            let type_id = match resolve_diagnostic_type_to_type_id_checked(
-                &field.diagnostic_type,
-                &mut self.type_environment,
-                field.binding_span,
-            ) {
-                Ok(type_id) => type_id,
-                Err(diagnostic) => {
-                    return Err(self.diagnostic_messages(diagnostic, string_table));
-                }
-            };
-
-            definitions.push(FieldDefinition {
-                name: field.id,
-                type_id,
-                span: field.binding_span,
-            });
-        }
-
-        Ok(definitions.into_boxed_slice())
-    }
-
     pub(crate) fn error_messages(
         &self,
         error: impl Into<Box<InfrastructureErrors>>,
@@ -1227,4 +1191,27 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             Err(error) => self.error_messages(error, string_table),
         }
     }
+}
+
+/// Convert resolved AST member declarations into canonical type-environment fields.
+///
+/// WHAT: struct fields and choice payload fields are resolved as AST `Declaration`s first,
+///       then converted into the compact semantic member definitions the `TypeEnvironment`
+///       stores.
+/// WHY: member resolution already interned every field's canonical type, so this conversion
+///      is a plain read of that identity that cannot fail.
+pub(crate) fn field_definitions_from_declarations(
+    fields: &[Declaration],
+) -> Box<[FieldDefinition]> {
+    let mut definitions = Vec::with_capacity(fields.len());
+
+    for field in fields {
+        definitions.push(FieldDefinition {
+            name: field.id,
+            type_id: field.type_id,
+            span: field.binding_span,
+        });
+    }
+
+    definitions.into_boxed_slice()
 }
