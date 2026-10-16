@@ -1,0 +1,8 @@
+needs_text |value Wire of String| -> String:
+    return value
+;
+
+render || -> String:
+    fixed #= "constant"
+    return needs_text(fixed)
+;

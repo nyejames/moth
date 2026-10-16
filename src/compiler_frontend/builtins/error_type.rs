@@ -10,6 +10,7 @@ use crate::compiler_frontend::ast::ast_nodes::{
     AstNode, Declaration, DeclarationShell, DeclarationValue, NodeKind,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::compiler_messages::ParameterContractKind;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::folded_value::PublicFoldedValue;
@@ -52,6 +53,10 @@ pub(crate) struct BuiltinErrorManifest {
 
 pub(crate) fn is_reserved_builtin_symbol(name: &str) -> bool {
     matches!(name, ERROR_TYPE_NAME)
+}
+
+pub(crate) fn is_reserved_parameter_contract_symbol(name: &str) -> bool {
+    ParameterContractKind::from_spelling(name).is_some()
 }
 
 pub(crate) fn builtin_error_type_path(

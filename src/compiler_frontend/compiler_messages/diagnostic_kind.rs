@@ -79,6 +79,7 @@ pub enum SyntaxDiagnosticKind {
     UnexpectedTokenInDeclaration,
     InvalidTypeAnnotation,
     InvalidGenericApplication,
+    InvalidParameterContract,
     InvalidCollectionType,
     InvalidMapType,
     InvalidMapLiteral,
@@ -110,6 +111,7 @@ pub enum TypeDiagnosticKind {
     EmptyCollectionTypeAmbiguity,
     UnsupportedOperatorTypes,
     IncompatibleChoiceComparison,
+    InvalidRouteOutput,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

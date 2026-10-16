@@ -4497,6 +4497,7 @@ impl SyntaxDiagnosticKind {
             Self::UnexpectedTokenInDeclaration,
             Self::InvalidTypeAnnotation,
             Self::InvalidGenericApplication,
+            Self::InvalidParameterContract,
             Self::InvalidCollectionType,
             Self::InvalidMapType,
             Self::InvalidMapLiteral,
@@ -4532,6 +4533,7 @@ impl TypeDiagnosticKind {
             Self::EmptyCollectionTypeAmbiguity,
             Self::UnsupportedOperatorTypes,
             Self::IncompatibleChoiceComparison,
+            Self::InvalidRouteOutput,
         ]
         .into_iter()
     }

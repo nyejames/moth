@@ -1,0 +1,3 @@
+read |values {Wire of String}|:
+    return
+;

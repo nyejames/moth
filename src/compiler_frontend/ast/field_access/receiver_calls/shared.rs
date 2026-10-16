@@ -15,8 +15,9 @@ use crate::compiler_frontend::ast::statements::fallible_handling::{
     call_success_is_optional, non_fallible_handler_reason,
     token_stream_starts_typed_propagation_suffix,
 };
-use crate::compiler_frontend::ast::statements::functions::FunctionParameter;
-use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ReturnSlot};
+use crate::compiler_frontend::ast::statements::functions::{
+    FunctionParameter, FunctionSignature, ParameterContract, ReturnSlot,
+};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
 use crate::compiler_frontend::datatypes::ids::TypeId;
@@ -140,6 +141,7 @@ fn declaration_for_trait_bound_parameter(
     id: PathId,
     type_id: TypeId,
     value_mode: ValueMode,
+    contract: ParameterContract,
     span: Option<SourceSpan>,
     binding_span: Option<SourceSpan>,
 ) -> FunctionParameter {
@@ -149,6 +151,7 @@ fn declaration_for_trait_bound_parameter(
         value_mode,
         default: None,
         binding_span: binding_span.or(span),
+        contract,
     }
 }
 
@@ -174,6 +177,7 @@ pub(super) fn signature_from_trait_requirement(
         receiver_name,
         receiver_type_id,
         receiver_mode,
+        ParameterContract::Value,
         requirement.span,
         // Synthetic receiver has no authored binding token.
         None,
@@ -185,10 +189,14 @@ pub(super) fn signature_from_trait_requirement(
             trait_definition.this_type,
             receiver_type_id,
         );
+        let contract = parameter
+            .contract
+            .with_trait_this_replaced(trait_definition.this_type, receiver_type_id);
         parameters.push(declaration_for_trait_bound_parameter(
             parameter.name,
             type_id,
             parameter.value_mode,
+            contract,
             parameter.span,
             parameter.span,
         ));

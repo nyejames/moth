@@ -66,6 +66,7 @@ fn public_parameter() -> PublicParameterTypeSlot {
         )),
         access: PublicCallParameterAccess::Shared,
         folded_default: None,
+        contract: crate::compiler_frontend::public_interface::PublicParameterContract::Value,
     }
 }
 

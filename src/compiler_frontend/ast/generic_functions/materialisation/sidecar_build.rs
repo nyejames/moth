@@ -15,7 +15,7 @@ use crate::compiler_frontend::ast::module_ast::finalization::{
     AstFinalizer, MaterialisationContextRetention,
 };
 use crate::compiler_frontend::ast::statements::functions::{
-    FunctionSignature, MaterialisedFunctionSignature,
+    FunctionSignature, MaterialisedFunctionSignature, ParameterContract,
 };
 use crate::compiler_frontend::builtins::casts::evidence::builtin_cast_proves_core_trait;
 use crate::compiler_frontend::canonical_type_identity::{
@@ -1252,6 +1252,27 @@ fn install_generated_requester_bound_trait<N: MaterialisationNominalSource>(
             .parameters
             .iter()
             .map(|parameter| {
+                let contract = match parameter.contract {
+                    ParameterContract::Value => ParameterContract::Value,
+                    ParameterContract::Wire => ParameterContract::Wire,
+                    ParameterContract::Route { input } => ParameterContract::Route {
+                        input: input
+                            .map(|type_id| {
+                                intern_generated_trait_requirement_slot(
+                                    type_id,
+                                    source.this_type,
+                                    this_type,
+                                    requester_context,
+                                    &mut environment.type_environment,
+                                    external_registry,
+                                    nominal_source,
+                                    string_table,
+                                    path_fork,
+                                )
+                            })
+                            .transpose()?,
+                    },
+                };
                 Ok(ResolvedTraitParameter {
                     name: parameter.name,
                     value_mode: parameter.value_mode,
@@ -1267,6 +1288,7 @@ fn install_generated_requester_bound_trait<N: MaterialisationNominalSource>(
                         path_fork,
                     )?,
                     span: parameter.span,
+                    contract,
                 })
             })
             .collect::<Result<Vec<_>, CompilerError>>()?;

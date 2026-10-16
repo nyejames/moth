@@ -53,7 +53,7 @@ use crate::compiler_frontend::ast::statements::fallible_handling::{
     parse_fallible_handling_suffix_for_call_expression,
     token_stream_starts_typed_propagation_suffix, validate_postfix_propagation_contract,
 };
-use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
+use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ParameterContract};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, ValueReceiverContext};
@@ -1407,6 +1407,9 @@ pub(crate) fn substitute_function_signature(
     let mut concrete = signature.clone();
     for parameter in &mut concrete.parameters {
         parameter.type_id = type_environment.substitute_type_id(parameter.type_id, mapping);
+        if let ParameterContract::Route { input: Some(input) } = &mut parameter.contract {
+            *input = type_environment.substitute_type_id(*input, mapping);
+        }
     }
     for slot in &mut concrete.returns {
         slot.type_id = slot

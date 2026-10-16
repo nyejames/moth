@@ -1,0 +1,9 @@
+export:
+    Message ::
+        Done,
+    ;
+
+    accept_route |route Route of String -> Message| -> String:
+        return "route received"
+    ;
+;

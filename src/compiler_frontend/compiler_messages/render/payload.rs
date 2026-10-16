@@ -238,6 +238,9 @@ fn render_payload_message(
         DiagnosticPayload::InvalidGenericApplication { reason } => {
             invalid_generic_application_message(*reason).to_owned()
         }
+        DiagnosticPayload::InvalidParameterContract { reason } => {
+            invalid_parameter_contract_message(*reason)
+        }
         DiagnosticPayload::UnexpectedEndOfFile { expected_delimiter } => {
             if let Some(expected_delimiter) = expected_delimiter {
                 format!(
@@ -406,6 +409,7 @@ fn render_payload_message(
                 ReservedNameOwner::Keyword => "keyword",
                 ReservedNameOwner::CoreTrait => "core trait",
                 ReservedNameOwner::ImplicitStart => "compiler-owned entry point",
+                ReservedNameOwner::ParameterContract => "compiler-owned parameter contract",
             };
             format!(
                 "Reserved name collision: '{}' is a reserved {}",
@@ -522,6 +526,9 @@ fn render_payload_message(
         }
         DiagnosticPayload::IncompatibleChoiceComparison { reason, lhs, rhs } => {
             incompatible_choice_comparison_message(reason, *lhs, *rhs, context)
+        }
+        DiagnosticPayload::InvalidRouteOutput { reason, output } => {
+            invalid_route_output_message(reason, *output, context)
         }
         DiagnosticPayload::InvalidCallShape {
             reason,
@@ -756,6 +763,15 @@ fn invalid_trait_conformance_message(
         } => {
             format!(
                 "'{target}' cannot conform{trait_text} because parameter {parameter_index} of '{}' has a different value mode.",
+                string_table.resolve(*requirement_name)
+            )
+        }
+        InvalidTraitConformanceReason::ParameterContractMismatch {
+            requirement_name,
+            parameter_index,
+        } => {
+            format!(
+                "'{target}' cannot conform{trait_text} because parameter {parameter_index} of '{}' uses a different parameter contract; a Wire, Route or value parameter must match the trait requirement exactly.",
                 string_table.resolve(*requirement_name)
             )
         }

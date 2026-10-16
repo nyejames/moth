@@ -122,6 +122,14 @@ pub(super) struct StableFunctionSignature {
     pub(super) returns: Box<[MaterialisationTypeBlueprint]>,
     pub(super) error_return: Option<MaterialisationTypeBlueprint>,
 }
+#[derive(Clone)]
+pub(super) enum StableParameterContract {
+    Value,
+    Wire,
+    Route {
+        input: Option<MaterialisationTypeBlueprint>,
+    },
+}
 
 #[derive(Clone)]
 pub(super) struct StableFunctionParameter {
@@ -129,7 +137,34 @@ pub(super) struct StableFunctionParameter {
     pub(super) value_mode: ValueMode,
     pub(super) folded_default: Option<PublicFoldedValue>,
     pub(super) parameter_type: MaterialisationTypeBlueprint,
+    pub(super) contract: StableParameterContract,
     pub(super) span: Option<SourceSpan>,
+}
+
+impl StableParameterContract {
+    /// Blueprint this contract contributes beyond the parameter's own type.
+    ///
+    /// WHAT: returns the blueprint for a `Route` input, or `None` for every other contract.
+    /// WHY: one owner keeps the sidecar's nominal closure from skipping the Route input.
+    pub(super) fn input_blueprint(&self) -> Option<&MaterialisationTypeBlueprint> {
+        match self {
+            StableParameterContract::Route { input } => input.as_ref(),
+            StableParameterContract::Value | StableParameterContract::Wire => None,
+        }
+    }
+}
+
+impl StableFunctionParameter {
+    /// Every blueprint this parameter's contract touches.
+    ///
+    /// WHAT: yields the parameter's own blueprint, then any contract-owned blueprint.
+    /// WHY: the sidecar nominal closure must retain a blueprint for every type the accepted
+    ///      signature names, including a Route input.
+    pub(super) fn semantic_type_blueprints(
+        &self,
+    ) -> impl Iterator<Item = &MaterialisationTypeBlueprint> {
+        std::iter::once(&self.parameter_type).chain(self.contract.input_blueprint())
+    }
 }
 
 #[derive(Clone)]

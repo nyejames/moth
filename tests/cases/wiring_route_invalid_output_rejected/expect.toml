@@ -1,0 +1,13 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-TYPE-0006"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-TYPE-0006"
+reason = "invalid_route_output.not_choice_or_generic"
+path = "input/@page.moth"
+line = 1
+column = 22

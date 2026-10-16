@@ -15,7 +15,7 @@ use super::visibility::collect_namespace_source_paths;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionBody;
 use crate::compiler_frontend::ast::module_ast::environment::AstModuleEnvironment;
-use crate::compiler_frontend::ast::statements::functions::ReturnChannel;
+use crate::compiler_frontend::ast::statements::functions::{ParameterContract, ReturnChannel};
 use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTraitIdentity, CanonicalTypeIdentity,
 };
@@ -152,6 +152,38 @@ struct StablePrivateTraitParameter {
     value_mode: ValueMode,
     parameter_type: StableTraitTypeBlueprint,
     span: Option<crate::compiler_frontend::source::SourceSpan>,
+    contract: StablePrivateTraitParameterContract,
+}
+
+#[derive(Clone)]
+enum StablePrivateTraitParameterContract {
+    Value,
+    Wire,
+    Route {
+        input: Option<StableTraitTypeBlueprint>,
+    },
+}
+
+impl StablePrivateTraitParameterContract {
+    /// Trait-type blueprint this contract contributes beyond the parameter's own type.
+    fn input_blueprint(&self) -> Option<&StableTraitTypeBlueprint> {
+        match self {
+            StablePrivateTraitParameterContract::Route { input } => input.as_ref(),
+            StablePrivateTraitParameterContract::Value
+            | StablePrivateTraitParameterContract::Wire => None,
+        }
+    }
+}
+
+impl StablePrivateTraitParameter {
+    /// Every trait-type blueprint this requirement parameter touches.
+    ///
+    /// WHAT: yields the parameter's own blueprint, then any contract-owned blueprint.
+    /// WHY: the private-trait sidecar closure must retain a blueprint for every type the frozen
+    ///      requirement names, including a Route input.
+    fn semantic_type_blueprints(&self) -> impl Iterator<Item = &StableTraitTypeBlueprint> {
+        std::iter::once(&self.parameter_type).chain(self.contract.input_blueprint())
+    }
 }
 
 #[derive(Clone)]
@@ -217,9 +249,9 @@ impl StablePrivateEvidence {
 impl StableFunctionSignature {
     fn collect_nominal_identities(&self, identities: &mut FxHashSet<CanonicalTypeIdentity>) {
         for parameter in &self.parameters {
-            parameter
-                .parameter_type
-                .collect_nominal_identities(identities);
+            for blueprint in parameter.semantic_type_blueprints() {
+                blueprint.collect_nominal_identities(identities);
+            }
             if let Some(default) = &parameter.folded_default {
                 default.visit_type_identities(&mut |identity| {
                     collect_reachable_nominal_identities(identity, identities);
@@ -331,6 +363,29 @@ pub(super) fn install_private_semantic_closure(
                             path_fork,
                         )?,
                         span: parameter.span,
+                        contract: match &parameter.contract {
+                            StablePrivateTraitParameterContract::Value => ParameterContract::Value,
+                            StablePrivateTraitParameterContract::Wire => ParameterContract::Wire,
+                            StablePrivateTraitParameterContract::Route { input } => {
+                                ParameterContract::Route {
+                                    input: input
+                                        .as_ref()
+                                        .map(|input| {
+                                            intern_stable_trait_type(
+                                                input,
+                                                this_type,
+                                                nominal_source,
+                                                &mut environment.type_environment,
+                                                external_package_registry,
+                                                template_ir_store,
+                                                string_table,
+                                                path_fork,
+                                            )
+                                        })
+                                        .transpose()?,
+                                }
+                            }
+                        },
                     })
                 })
                 .collect::<Result<Vec<_>, CompilerError>>()?;
@@ -583,6 +638,26 @@ impl ModuleMaterialisationCapture {
                                     definition.this_type,
                                 )?,
                                 span: parameter.span,
+                                contract: match parameter.contract {
+                                    ParameterContract::Value => {
+                                        StablePrivateTraitParameterContract::Value
+                                    }
+                                    ParameterContract::Wire => {
+                                        StablePrivateTraitParameterContract::Wire
+                                    }
+                                    ParameterContract::Route { input } => {
+                                        StablePrivateTraitParameterContract::Route {
+                                            input: input
+                                                .map(|type_id| {
+                                                    self.stable_trait_type(
+                                                        type_id,
+                                                        definition.this_type,
+                                                    )
+                                                })
+                                                .transpose()?,
+                                        }
+                                    }
+                                },
                             })
                         })
                         .collect::<Result<Box<[_]>, CompilerError>>()?;
@@ -952,8 +1027,10 @@ impl ModuleMaterialisationCapture {
         for trait_definition in &semantic_closure.traits {
             for requirement in &trait_definition.requirements {
                 for parameter in &requirement.parameters {
-                    if let StableTraitTypeBlueprint::Type(blueprint) = &parameter.parameter_type {
-                        blueprint.collect_nominal_identities(&mut identities);
+                    for blueprint in parameter.semantic_type_blueprints() {
+                        if let StableTraitTypeBlueprint::Type(blueprint) = blueprint {
+                            blueprint.collect_nominal_identities(&mut identities);
+                        }
                     }
                 }
                 for returned in &requirement.returns {

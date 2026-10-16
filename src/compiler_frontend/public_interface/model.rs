@@ -31,6 +31,30 @@ use crate::compiler_frontend::value_mode::ValueMode;
 //  Public semantic leaf vocabulary
 // ===========================================================================
 
+/// Contract that remains attached to one public callable parameter.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum PublicParameterContract {
+    Value,
+    Wire,
+    Route {
+        input: Option<CanonicalTypeIdentity>,
+    },
+}
+
+impl PublicParameterContract {
+    /// Canonical identity this contract contributes beyond the parameter's own type.
+    ///
+    /// WHAT: returns the projected `Route` input, or `None` for every other contract.
+    /// WHY: one owner keeps public collectors, validators and projectors from re-deriving the
+    ///      same projection and silently skipping the Route input.
+    pub(crate) fn input_type_identity(&self) -> Option<&CanonicalTypeIdentity> {
+        match self {
+            PublicParameterContract::Route { input } => input.as_ref(),
+            PublicParameterContract::Value | PublicParameterContract::Wire => None,
+        }
+    }
+}
+
 /// One parameter slot in a public function or receiver-method semantic record.
 ///
 /// WHAT: a draft/public semantic leaf type that crosses the draft boundary inside
@@ -40,6 +64,7 @@ use crate::compiler_frontend::value_mode::ValueMode;
 pub(crate) struct PublicParameterTypeSlot {
     pub(crate) name: Option<String>,
     pub(crate) type_identity: CanonicalTypeIdentity,
+    pub(crate) contract: PublicParameterContract,
     /// Source-level access selected by the resolved signature.
     ///
     /// WHAT: retains shared or mutable parameter access before HIR and borrow validation. This
@@ -57,6 +82,19 @@ pub(crate) struct PublicParameterTypeSlot {
     /// normally has no default and remains `None`. Choice payload fields remain
     /// default-free.
     pub(crate) folded_default: Option<PublicFoldedValue>,
+}
+
+impl PublicParameterTypeSlot {
+    /// Every canonical identity this slot's contract touches.
+    ///
+    /// WHAT: yields the slot's own type identity, then any contract-owned identity.
+    /// WHY: import origin collection, public closure enqueueing and projection must all see the
+    ///      Route input; this owner is the single traversal decision.
+    pub(crate) fn semantic_type_identities(
+        &self,
+    ) -> impl Iterator<Item = &CanonicalTypeIdentity> + '_ {
+        std::iter::once(&self.type_identity).chain(self.contract.input_type_identity())
+    }
 }
 
 /// One return slot in a public function or receiver-method semantic record.
@@ -138,6 +176,25 @@ pub(crate) enum PublicTraitReceiverAccess {
     Mutable,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum PublicTraitParameterContract {
+    Value,
+    Wire,
+    Route {
+        input: Option<TraitSurfaceTypeIdentity>,
+    },
+}
+
+impl PublicTraitParameterContract {
+    /// Trait-surface identity this contract contributes beyond the parameter's own type.
+    pub(crate) fn input_type_identity(&self) -> Option<&TraitSurfaceTypeIdentity> {
+        match self {
+            PublicTraitParameterContract::Route { input } => input.as_ref(),
+            PublicTraitParameterContract::Value | PublicTraitParameterContract::Wire => None,
+        }
+    }
+}
+
 /// One non-receiver parameter in a trait requirement surface.
 ///
 /// `name` is the owned authored parameter name, or `None` when the source signature omits it.
@@ -146,6 +203,19 @@ pub(crate) struct PublicTraitRequirementParameter {
     pub(crate) name: Option<String>,
     pub(crate) value_mode: ValueMode,
     pub(crate) type_identity: TraitSurfaceTypeIdentity,
+    pub(crate) contract: PublicTraitParameterContract,
+}
+
+impl PublicTraitRequirementParameter {
+    /// Every trait-surface identity this requirement parameter touches.
+    ///
+    /// WHAT: yields the parameter's own type identity, then any contract-owned identity.
+    /// WHY: trait closure and validation must visit the same identities the surface publishes.
+    pub(crate) fn semantic_type_identities(
+        &self,
+    ) -> impl Iterator<Item = &TraitSurfaceTypeIdentity> + '_ {
+        std::iter::once(&self.type_identity).chain(self.contract.input_type_identity())
+    }
 }
 
 /// One return slot in a trait requirement surface.

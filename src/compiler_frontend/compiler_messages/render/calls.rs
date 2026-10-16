@@ -91,6 +91,15 @@ pub(crate) fn invalid_call_shape_message(
         InvalidCallShapeReason::NamedArgumentsNotSupported => {
             "Named arguments are not supported for this call. Use positional arguments only.".to_string()
         }
+        InvalidCallShapeReason::WireArgumentOrigin => {
+            format!("{prefix} requires an unprojected named local binding or an unchanged compatible `Wire` parameter.")
+        }
+        InvalidCallShapeReason::WireArgumentMutableMarker => {
+            format!("{prefix} does not accept the `~` mutable-access marker for a `Wire` parameter.")
+        }
+        InvalidCallShapeReason::RouteArgumentsUnsupported => {
+            "Route arguments are not supported yet.".to_owned()
+        }
         InvalidCallShapeReason::MutableAccessRequired {
             parameter_name,
             parameter_index,

@@ -129,6 +129,7 @@ fn resolved_free_signature(int_type_id: TypeId) -> ResolvedFunctionSignature {
         value_mode: ValueMode::default(),
         default: None,
         binding_span: None,
+        contract: crate::compiler_frontend::ast::statements::functions::ParameterContract::Value,
     };
     let return_slot = ReturnSlot {
         type_id: Some(int_type_id),
@@ -150,6 +151,7 @@ fn receiver_signature(int_type_id: TypeId) -> FunctionSignature {
         value_mode: ValueMode::default(),
         default: None,
         binding_span: None,
+        contract: crate::compiler_frontend::ast::statements::functions::ParameterContract::Value,
     };
     FunctionSignature {
         parameters: vec![parameter],

@@ -47,7 +47,7 @@ use crate::compiler_frontend::ast::numeric_construction::{
 use crate::compiler_frontend::ast::numeric_known_shape::{
     KnownShape, KnownShapeId, pin_numeric_shape,
 };
-use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
+use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ParameterContract};
 use crate::compiler_frontend::ast::templates::template_folding::TirFoldContext;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::ast::type_resolution::ResolvedTypeAlias;
@@ -457,6 +457,23 @@ pub(crate) struct EnclosingCallableContract {
     pub(crate) success_types: Vec<TypeId>,
     pub(crate) authored_success_slot_count: usize,
     pub(crate) error_type: Option<TypeId>,
+    pub(crate) parameter_contracts: Vec<(PathId, ParameterContract)>,
+}
+
+impl EnclosingCallableContract {
+    /// Contract of the enclosing callable's own parameter with this path.
+    ///
+    /// WHAT: returns the parameter's contract when this path names a parameter of the callable
+    ///       whose body is being parsed, or `None` for every other binding.
+    /// WHY: `Wire` forwarding must distinguish the callable's own `Wire` parameter from an
+    ///      ordinary parameter and from a body local; the installed signature contracts are the
+    ///      one owner of that fact.
+    pub(crate) fn parameter_contract(&self, parameter_path: PathId) -> Option<ParameterContract> {
+        self.parameter_contracts
+            .iter()
+            .find(|(path, _)| *path == parameter_path)
+            .map(|(_, contract)| *contract)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

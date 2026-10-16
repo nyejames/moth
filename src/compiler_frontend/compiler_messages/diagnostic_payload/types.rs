@@ -643,6 +643,66 @@ pub enum GenericApplicationErrorReason {
     MissingArgumentAfterComma,
     NestedApplication,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ParameterContractKind {
+    Wire,
+    Route,
+}
+
+impl ParameterContractKind {
+    /// Every authored parameter-contract kind, in spelling order.
+    pub const ALL: [ParameterContractKind; 2] =
+        [ParameterContractKind::Wire, ParameterContractKind::Route];
+
+    /// The one compiler-owned head spelling for this contract kind.
+    ///
+    /// WHAT: the single definition of the `Wire` and `Route` literals used by the contract
+    ///       parser, the reserved-name registry, declaration validation and diagnostics.
+    /// WHY: the spelling is syntax with one owner; copies drift and let one site accept a name
+    ///      the others reject.
+    pub const fn spelling(self) -> &'static str {
+        match self {
+            ParameterContractKind::Wire => "Wire",
+            ParameterContractKind::Route => "Route",
+        }
+    }
+
+    /// The contract kind for one authored head spelling, if it is compiler-owned.
+    pub fn from_spelling(spelling: &str) -> Option<ParameterContractKind> {
+        ParameterContractKind::ALL
+            .into_iter()
+            .find(|kind| kind.spelling() == spelling)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum InvalidParameterContractReason {
+    MissingSpecification {
+        contract: ParameterContractKind,
+    },
+    InvalidPosition {
+        contract: ParameterContractKind,
+    },
+    WireArrowNotAllowed,
+    RouteOutputMissing,
+    RouteRepeatedArrow,
+    NestedContract {
+        outer: ParameterContractKind,
+        inner: ParameterContractKind,
+    },
+    MutableParameter {
+        contract: ParameterContractKind,
+    },
+    ParameterDefault {
+        contract: ParameterContractKind,
+    },
+    ReceiverContract {
+        contract: ParameterContractKind,
+    },
+    MultipleSpecificationTypes {
+        contract: ParameterContractKind,
+    },
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PathKind {
@@ -1051,6 +1111,7 @@ pub enum ReservedNameOwner {
     Keyword,
     CoreTrait,
     ImplicitStart,
+    ParameterContract,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -1178,6 +1239,10 @@ pub enum InvalidTraitConformanceReason {
         requirement_name: StringId,
         parameter_index: usize,
     },
+    ParameterContractMismatch {
+        requirement_name: StringId,
+        parameter_index: usize,
+    },
     ParameterTypeMismatch {
         requirement_name: StringId,
         parameter_index: usize,
@@ -1214,6 +1279,9 @@ impl InvalidTraitConformanceReason {
                 requirement_name, ..
             }
             | Self::ParameterModeMismatch {
+                requirement_name, ..
+            }
+            | Self::ParameterContractMismatch {
                 requirement_name, ..
             }
             | Self::ParameterTypeMismatch {
@@ -1773,6 +1841,13 @@ pub enum IncompatibleChoiceComparisonReason {
     },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum InvalidRouteOutputReason {
+    /// The signature's resolved `Route` output is neither a choice type nor a generic parameter,
+    /// so no variant could ever satisfy the future-input contract.
+    NotChoiceOrGeneric,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum InvalidCallShapeReason {
     MissingArgument {
@@ -1797,6 +1872,11 @@ pub enum InvalidCallShapeReason {
     PositionalAfterNamed,
 
     NamedArgumentsNotSupported,
+    WireArgumentOrigin,
+
+    WireArgumentMutableMarker,
+
+    RouteArgumentsUnsupported,
 
     MutableAccessRequired {
         parameter_name: Option<StringId>,

@@ -1,0 +1,13 @@
+entry = "."
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0054"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0054"
+reason = "invalid_call_shape.route_arguments_unsupported"
+path = "input/@page.moth"
+line = 9
+column = 19

@@ -19,7 +19,7 @@ use super::model::{
 use super::type_projection::{
     ProjectedReceiverMethodSignature, RootIndex, origin_category_mismatch_error,
     project_defaults_provenance, project_folded_default, project_parameter_access,
-    project_return_slots,
+    project_parameter_contract, project_return_slots,
 };
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
 use crate::compiler_frontend::ast::{
@@ -331,6 +331,11 @@ pub(crate) fn project_receiver_method_signatures(
                     type_identity,
                     access,
                     folded_default,
+                    contract: project_parameter_contract(
+                        declaration.contract,
+                        type_environment,
+                        canonical_context,
+                    )?,
                 })
             })
             .collect::<Result<Vec<_>, CompilerError>>()?;

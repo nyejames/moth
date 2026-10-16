@@ -13,10 +13,12 @@
 //! direct trait binding and reads `remaining_names` to prove every trait root joined.
 
 use super::model::{
-    PublicTraitReceiverAccess, PublicTraitRequirementParameter, PublicTraitRequirementReturn,
-    PublicTraitRequirementSurface, PublicTraitSemantics, TraitSurfaceTypeIdentity,
+    PublicTraitParameterContract, PublicTraitReceiverAccess, PublicTraitRequirementParameter,
+    PublicTraitRequirementReturn, PublicTraitRequirementSurface, PublicTraitSemantics,
+    TraitSurfaceTypeIdentity,
 };
 use super::type_projection::project_trait_source_fact_to_canonical_identity;
+use crate::compiler_frontend::ast::statements::functions::ParameterContract;
 use crate::compiler_frontend::ast::{
     ResolvedPublicTraitRoot, ResolvedTraitRequirementFact, ResolvedTraitSourceFact,
     TraitReceiverAccessKind,
@@ -362,10 +364,27 @@ fn project_trait_requirement(
                 type_environment,
                 context,
             )?;
+            let contract = match parameter.contract {
+                ParameterContract::Value => PublicTraitParameterContract::Value,
+                ParameterContract::Wire => PublicTraitParameterContract::Wire,
+                ParameterContract::Route { input } => PublicTraitParameterContract::Route {
+                    input: input
+                        .map(|type_id| {
+                            project_trait_surface_type_identity(
+                                type_id,
+                                owning_this_type,
+                                type_environment,
+                                context,
+                            )
+                        })
+                        .transpose()?,
+                },
+            };
             Ok(PublicTraitRequirementParameter {
                 name,
                 value_mode: parameter.value_mode,
                 type_identity,
+                contract,
             })
         })
         .collect::<Result<Vec<_>, CompilerError>>()?;

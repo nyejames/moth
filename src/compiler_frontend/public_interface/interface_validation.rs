@@ -9,9 +9,9 @@
 
 use super::model::{
     PublicDeclarationSemantics, PublicEvidenceRecord, PublicFunctionCategory,
-    PublicReceiverMethodCategory, PublicReceiverMethodSemantics, PublicSemanticInterface,
-    PublicTraitReceiverAccess, PublicTraitRequirementReturn, PublicTraitRequirementSurface,
-    TraitSurfaceTypeIdentity,
+    PublicParameterContract, PublicReceiverMethodCategory, PublicReceiverMethodSemantics,
+    PublicSemanticInterface, PublicTraitParameterContract, PublicTraitReceiverAccess,
+    PublicTraitRequirementReturn, PublicTraitRequirementSurface, TraitSurfaceTypeIdentity,
 };
 use crate::compiler_frontend::ast::statements::functions::ReturnChannel;
 use crate::compiler_frontend::builtins::casts::targets::{
@@ -19,11 +19,14 @@ use crate::compiler_frontend::builtins::casts::targets::{
 };
 use crate::compiler_frontend::builtins::casts::traits::BUILTIN_CAST_TRAIT_ROWS;
 use crate::compiler_frontend::canonical_type_identity::{
-    CanonicalBuiltinType, CanonicalCoreTraitIdentity, CanonicalTraitIdentity, CanonicalTypeIdentity,
+    CanonicalBuiltinType, CanonicalCoreTraitIdentity, CanonicalEvidenceIdentity,
+    CanonicalTraitIdentity, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
-use crate::compiler_frontend::public_call_summary::validate_public_call_summary;
+use crate::compiler_frontend::public_call_summary::{
+    PublicCallParameterAccess, validate_public_call_summary,
+};
 use crate::compiler_frontend::semantic_identity::{
     FunctionOriginKind, OriginDeclarationId, OriginFunctionId, OriginTypeCategory, OriginTypeId,
 };
@@ -490,7 +493,7 @@ fn canonical_builtin_for_cast_target(target: BuiltinCastTarget) -> CanonicalBuil
 }
 
 fn validate_evidence_method_shape(
-    evidence_identity: &crate::compiler_frontend::canonical_type_identity::CanonicalEvidenceIdentity,
+    evidence_identity: &CanonicalEvidenceIdentity,
     requirement: &PublicTraitRequirementSurface,
     method: &PublicReceiverMethodSemantics,
 ) -> Result<(), CompilerError> {
@@ -511,10 +514,10 @@ fn validate_evidence_method_shape(
         (requirement.receiver_access, receiver.access),
         (
             PublicTraitReceiverAccess::Immutable,
-            crate::compiler_frontend::public_call_summary::PublicCallParameterAccess::Shared
+            PublicCallParameterAccess::Shared
         ) | (
             PublicTraitReceiverAccess::Mutable,
-            crate::compiler_frontend::public_call_summary::PublicCallParameterAccess::Mutable
+            PublicCallParameterAccess::Mutable
         )
     );
     if !receiver_access_matches {
@@ -527,14 +530,15 @@ fn validate_evidence_method_shape(
     }
     for (required, actual) in requirement.parameters.iter().zip(method_parameters) {
         let access_matches = match actual.access {
-            crate::compiler_frontend::public_call_summary::PublicCallParameterAccess::Shared => {
-                !required.value_mode.is_mutable()
-            }
-            crate::compiler_frontend::public_call_summary::PublicCallParameterAccess::Mutable => {
-                required.value_mode.is_mutable()
-            }
+            PublicCallParameterAccess::Shared => !required.value_mode.is_mutable(),
+            PublicCallParameterAccess::Mutable => required.value_mode.is_mutable(),
         };
         if !access_matches
+            || !trait_parameter_contract_matches(
+                &required.contract,
+                &receiver.type_identity,
+                &actual.contract,
+            )
             || !trait_surface_type_matches(
                 &required.type_identity,
                 &receiver.type_identity,
@@ -609,9 +613,31 @@ fn trait_surface_type_matches(
         TraitSurfaceTypeIdentity::Concrete(required) => actual == required.as_ref(),
     }
 }
+fn trait_parameter_contract_matches(
+    required: &PublicTraitParameterContract,
+    receiver: &CanonicalTypeIdentity,
+    actual: &PublicParameterContract,
+) -> bool {
+    match (required, actual) {
+        (PublicTraitParameterContract::Value, PublicParameterContract::Value)
+        | (PublicTraitParameterContract::Wire, PublicParameterContract::Wire) => true,
+        (
+            PublicTraitParameterContract::Route { input: required },
+            PublicParameterContract::Route { input: actual },
+        ) => match (required, actual) {
+            (None, None) => true,
+            (Some(TraitSurfaceTypeIdentity::SelfType), Some(actual)) => actual == receiver,
+            (Some(TraitSurfaceTypeIdentity::Concrete(required)), Some(actual)) => {
+                required.as_ref() == actual
+            }
+            _ => false,
+        },
+        _ => false,
+    }
+}
 
 fn evidence_shape_error(
-    evidence_identity: &crate::compiler_frontend::canonical_type_identity::CanonicalEvidenceIdentity,
+    evidence_identity: &CanonicalEvidenceIdentity,
     requirement: &PublicTraitRequirementSurface,
     method: &PublicReceiverMethodSemantics,
 ) -> CompilerError {
@@ -678,10 +704,7 @@ fn validate_declaration_category(
 fn collect_expected_callable_summaries(
     origin: &OriginDeclarationId,
     semantics: &PublicDeclarationSemantics,
-    expected: &mut FxHashMap<
-        OriginFunctionId,
-        Vec<crate::compiler_frontend::public_call_summary::PublicCallParameterAccess>,
-    >,
+    expected: &mut FxHashMap<OriginFunctionId, Vec<PublicCallParameterAccess>>,
 ) -> Result<(), CompilerError> {
     match semantics {
         PublicDeclarationSemantics::Function(function) => {
@@ -728,10 +751,7 @@ fn collect_expected_callable_summaries(
 fn collect_expected_receiver_summaries(
     receiver_origin: &OriginTypeId,
     methods: &[super::model::PublicReceiverMethodSemantics],
-    expected: &mut FxHashMap<
-        OriginFunctionId,
-        Vec<crate::compiler_frontend::public_call_summary::PublicCallParameterAccess>,
-    >,
+    expected: &mut FxHashMap<OriginFunctionId, Vec<PublicCallParameterAccess>>,
 ) -> Result<(), CompilerError> {
     for method in methods {
         if method.method_origin.receiver() != Some(receiver_origin) {
@@ -750,10 +770,7 @@ fn collect_expected_receiver_summaries(
 fn insert_expected_summary(
     origin: &OriginFunctionId,
     parameters: &[super::model::PublicParameterTypeSlot],
-    expected: &mut FxHashMap<
-        OriginFunctionId,
-        Vec<crate::compiler_frontend::public_call_summary::PublicCallParameterAccess>,
-    >,
+    expected: &mut FxHashMap<OriginFunctionId, Vec<PublicCallParameterAccess>>,
 ) -> Result<(), CompilerError> {
     let parameter_access = parameters
         .iter()
@@ -832,8 +849,10 @@ fn visit_declaration_type_identities(
         PublicDeclarationSemantics::Trait(trait_semantics) => {
             for requirement in &trait_semantics.requirements {
                 for parameter in &requirement.parameters {
-                    if let TraitSurfaceTypeIdentity::Concrete(identity) = &parameter.type_identity {
-                        identity.visit(visitor);
+                    for identity in parameter.semantic_type_identities() {
+                        if let TraitSurfaceTypeIdentity::Concrete(identity) = identity {
+                            identity.visit(visitor);
+                        }
                     }
                 }
                 for returned in &requirement.returns {
@@ -853,7 +872,9 @@ fn visit_callable_type_identities(
     visitor: &mut impl FnMut(&CanonicalTypeIdentity),
 ) {
     for parameter in parameters {
-        parameter.type_identity.visit(visitor);
+        for identity in parameter.semantic_type_identities() {
+            identity.visit(visitor);
+        }
         if let Some(default) = &parameter.folded_default {
             default.visit_type_identities(visitor);
         }

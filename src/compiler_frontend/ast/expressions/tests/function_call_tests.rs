@@ -19,6 +19,7 @@ use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_store::{
     ExpressionOperationView, OwnedExpr,
 };
+use crate::compiler_frontend::ast::statements::functions::ParameterContract;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarationTable};
 use crate::compiler_frontend::compiler_messages::{
@@ -191,6 +192,7 @@ fn parse_args_with_parameter_names(
             expected_type: ExpectedParameterType::UnknownExternal,
             access_mode: ExpectedAccessMode::Shared,
             default_value: None,
+            contract: ParameterContract::Value,
         })
         .collect::<Vec<_>>();
 
@@ -582,6 +584,7 @@ fn final_validation_consumes_retained_slots_for_defaults_and_access_policy() {
             expected_type: ExpectedParameterType::Known(i32_type_id),
             access_mode: ExpectedAccessMode::Mutable,
             default_value: None,
+            contract: ParameterContract::Value,
         },
         ParameterExpectation {
             name: Some(string_table.intern("second")),
@@ -590,12 +593,14 @@ fn final_validation_consumes_retained_slots_for_defaults_and_access_policy() {
             default_value: Some(ParameterDefault::Folded(const_values.insert_resolved(i32_type_id, crate::compiler_frontend::ast::const_values::store::ConstValuePayload::FixedScalar(
                 FixedScalarValue::signed(FixedScalar::I32, 2).expect("2 is an I32 value"),
             ), None).expect("fixture default"))),
+            contract: ParameterContract::Value,
         },
         ParameterExpectation {
             name: Some(string_table.intern("third")),
             expected_type: ExpectedParameterType::Known(i32_type_id),
             access_mode: ExpectedAccessMode::Shared,
             default_value: None,
+            contract: ParameterContract::Value,
         },
     ];
 
@@ -678,6 +683,7 @@ fn whole_numeric_call_arguments_use_f64_parameter_destinations() {
         )),
         access_mode: ExpectedAccessMode::Shared,
         default_value: None,
+        contract: ParameterContract::Value,
     }];
     let (arguments, expression_builder, const_values) = parse_owned_args_with_receiving_context(
         "identity(18_446_744_073_709_551_615)",

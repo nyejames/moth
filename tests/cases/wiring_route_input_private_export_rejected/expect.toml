@@ -1,0 +1,15 @@
+entry = "."
+
+# The exported `accept` reaches its private `Request` nominal only through the
+# `Route` input, which must still be part of the exported signature surface.
+
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-RULE-0082"]
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0082"
+path = "input/@page.moth"
+line = 10
+count = 1

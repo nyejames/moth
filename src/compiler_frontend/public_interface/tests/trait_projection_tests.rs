@@ -95,6 +95,7 @@ fn param(
         name: path(name, string_table, path_fork),
         value_mode,
         type_id,
+        contract: crate::compiler_frontend::ast::statements::functions::ParameterContract::Value,
     }
 }
 

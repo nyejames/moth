@@ -138,6 +138,7 @@ fn param_declaration(
         value_mode: ValueMode::default(),
         default: None,
         binding_span: None,
+        contract: crate::compiler_frontend::ast::statements::functions::ParameterContract::Value,
     }
 }
 

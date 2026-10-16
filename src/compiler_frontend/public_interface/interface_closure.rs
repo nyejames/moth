@@ -435,7 +435,9 @@ impl ClosureWork {
 
     fn enqueue_function_dependencies(&mut self, function: &PublicFunctionSemantics) {
         for parameter in &function.parameters {
-            self.enqueue_type(&parameter.type_identity);
+            for identity in parameter.semantic_type_identities() {
+                self.enqueue_type(identity);
+            }
             if let Some(default) = &parameter.folded_default {
                 self.enqueue_folded_value(default);
             }
@@ -478,7 +480,9 @@ impl ClosureWork {
 
     fn enqueue_receiver_method_dependencies(&mut self, method: &PublicReceiverMethodSemantics) {
         for parameter in &method.parameters {
-            self.enqueue_type(&parameter.type_identity);
+            for identity in parameter.semantic_type_identities() {
+                self.enqueue_type(identity);
+            }
             if let Some(default) = &parameter.folded_default {
                 self.enqueue_folded_value(default);
             }
@@ -494,8 +498,10 @@ impl ClosureWork {
     fn enqueue_trait_dependencies(&mut self, trait_semantics: &PublicTraitSemantics) {
         for requirement in &trait_semantics.requirements {
             for parameter in &requirement.parameters {
-                if let TraitSurfaceTypeIdentity::Concrete(identity) = &parameter.type_identity {
-                    self.enqueue_type(identity);
+                for identity in parameter.semantic_type_identities() {
+                    if let TraitSurfaceTypeIdentity::Concrete(identity) = identity {
+                        self.enqueue_type(identity);
+                    }
                 }
             }
             for return_slot in &requirement.returns {

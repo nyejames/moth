@@ -1,0 +1,3 @@
+read |Wire String| -> String:
+    return "text"
+;

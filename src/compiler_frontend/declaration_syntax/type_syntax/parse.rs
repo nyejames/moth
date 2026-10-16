@@ -7,13 +7,16 @@
 
 use super::*;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{DiagnosticToken, InvalidTypeAnnotationReason};
+use crate::compiler_frontend::compiler_messages::{
+    DiagnosticToken, GenericApplicationErrorReason, InvalidParameterContractReason,
+    InvalidTypeAnnotationReason, ParameterContractKind,
+};
 use crate::compiler_frontend::datatypes::parsed::ParsedCollectionCapacity;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::DeclarationCursor;
 use crate::compiler_frontend::numeric_text::parse::materialize_fixed_scalar;
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringIdRemap, StringTable};
 use crate::compiler_frontend::tokenizer::tokens::{
     SourceTokens, TokenCursor, TokenIndex, TokenPayloadOrigin, TokenRange, TokenRangeError,
     TokenRef, TokenTag, TokenViewError,
@@ -384,6 +387,278 @@ fn parse_type_atom(
     }
 }
 
+#[derive(Clone, Debug)]
+pub(crate) enum ParsedParameterContractSyntax {
+    Value,
+    Wire,
+    Route {
+        input: Option<ParsedTypeRef>,
+        output_span: Option<SourceSpan>,
+    },
+}
+
+impl ParsedParameterContractSyntax {
+    pub(crate) fn remap_string_ids(&mut self, remap: &StringIdRemap) {
+        if let Self::Route {
+            input: Some(input), ..
+        } = self
+        {
+            input.remap_string_ids(remap);
+        }
+    }
+
+    pub(crate) fn kind(&self) -> Option<ParameterContractKind> {
+        match self {
+            Self::Value => None,
+            Self::Wire => Some(ParameterContractKind::Wire),
+            Self::Route { .. } => Some(ParameterContractKind::Route),
+        }
+    }
+}
+
+fn parameter_contract_kind_at_cursor(
+    token_stream: &DeclarationCursor<'_>,
+    string_table: &mut StringTable,
+) -> TypeParseResult<Option<ParameterContractKind>> {
+    if token_stream.current_tag() != TokenTag::SYMBOL {
+        return Ok(None);
+    }
+    let Some(name) = token_stream
+        .current_string_id_in(string_table)
+        .map_err(HeaderParseFailure::Infrastructure)?
+    else {
+        return Err(CompilerError::compiler_error(
+            "parameter contract head symbol has no string payload",
+        )
+        .into());
+    };
+    Ok(ParameterContractKind::from_spelling(
+        string_table.resolve(name),
+    ))
+}
+
+/// Parse an ordinary parameter annotation or the parameter-only `Wire`/`Route` contract form.
+///
+/// WHAT: dispatches the compiler-owned `of` heads before ordinary type parsing and retains the
+///       ordinary value type separately from any route input.
+/// WHY: generic application remains the existing ordinary type syntax; contracts are signature
+///       metadata and must not become parsed or resolved types.
+pub(crate) fn parse_parameter_contract_or_type_annotation_cursor(
+    token_stream: &mut DeclarationCursor<'_>,
+    parameter_name: Option<StringId>,
+    context: TypeAnnotationContext,
+    string_table: &mut StringTable,
+) -> TypeParseResult<(ParsedTypeRef, ParsedParameterContractSyntax)> {
+    let Some(contract_kind) = parameter_contract_kind_at_cursor(token_stream, string_table)? else {
+        return Ok((
+            parse_type_annotation_cursor(token_stream, context, string_table)?,
+            ParsedParameterContractSyntax::Value,
+        ));
+    };
+    let head_span = current_source_span(token_stream);
+    if parameter_name.is_some_and(|name| string_table.resolve(name) == "this") {
+        return Err(HeaderParseFailure::Diagnostic(
+            CompilerDiagnostic::invalid_parameter_contract(
+                InvalidParameterContractReason::ReceiverContract {
+                    contract: contract_kind,
+                },
+                head_span,
+            ),
+        ));
+    }
+
+    token_stream.advance();
+    if token_stream.current_tag() != TokenTag::OF {
+        return Err(HeaderParseFailure::Diagnostic(
+            CompilerDiagnostic::invalid_parameter_contract(
+                InvalidParameterContractReason::MissingSpecification {
+                    contract: contract_kind,
+                },
+                head_span,
+            ),
+        ));
+    }
+    token_stream.advance();
+    while token_stream.current_tag() == TokenTag::NEWLINE {
+        token_stream.advance();
+    }
+    if missing_contract_type(token_stream.current_tag()) {
+        return Err(HeaderParseFailure::Diagnostic(
+            CompilerDiagnostic::invalid_parameter_contract(
+                InvalidParameterContractReason::MissingSpecification {
+                    contract: contract_kind,
+                },
+                current_source_span(token_stream),
+            ),
+        ));
+    }
+    if let Some(inner) = parameter_contract_kind_at_cursor(token_stream, string_table)? {
+        return Err(HeaderParseFailure::Diagnostic(
+            CompilerDiagnostic::invalid_parameter_contract(
+                InvalidParameterContractReason::NestedContract {
+                    outer: contract_kind,
+                    inner,
+                },
+                current_source_span(token_stream),
+            ),
+        ));
+    }
+
+    let first_type_span = current_source_span(token_stream);
+    let first_type = parse_type_annotation_cursor(token_stream, context, string_table)?;
+    if matches!(first_type, ParsedTypeRef::Applied { .. }) {
+        let application_span = match &first_type {
+            ParsedTypeRef::Applied { span, .. } => *span,
+            _ => first_type_span,
+        };
+        return Err(HeaderParseFailure::Diagnostic(
+            CompilerDiagnostic::invalid_generic_application(
+                GenericApplicationErrorReason::NestedApplication,
+                application_span,
+            ),
+        ));
+    }
+
+    match contract_kind {
+        ParameterContractKind::Wire => {
+            if token_stream.current_tag() == TokenTag::ARROW {
+                return Err(HeaderParseFailure::Diagnostic(
+                    CompilerDiagnostic::invalid_parameter_contract(
+                        InvalidParameterContractReason::WireArrowNotAllowed,
+                        current_source_span(token_stream),
+                    ),
+                ));
+            }
+            if token_can_start_type_specification(token_stream.current_tag()) {
+                return Err(HeaderParseFailure::Diagnostic(
+                    CompilerDiagnostic::invalid_parameter_contract(
+                        InvalidParameterContractReason::MultipleSpecificationTypes {
+                            contract: contract_kind,
+                        },
+                        current_source_span(token_stream),
+                    ),
+                ));
+            }
+            Ok((first_type, ParsedParameterContractSyntax::Wire))
+        }
+        ParameterContractKind::Route if token_stream.current_tag() == TokenTag::ARROW => {
+            token_stream.advance();
+            while token_stream.current_tag() == TokenTag::NEWLINE {
+                token_stream.advance();
+            }
+            if token_stream.current_tag() == TokenTag::ARROW {
+                return Err(HeaderParseFailure::Diagnostic(
+                    CompilerDiagnostic::invalid_parameter_contract(
+                        InvalidParameterContractReason::RouteRepeatedArrow,
+                        current_source_span(token_stream),
+                    ),
+                ));
+            }
+            if missing_contract_type(token_stream.current_tag()) {
+                return Err(HeaderParseFailure::Diagnostic(
+                    CompilerDiagnostic::invalid_parameter_contract(
+                        InvalidParameterContractReason::RouteOutputMissing,
+                        current_source_span(token_stream),
+                    ),
+                ));
+            }
+            if let Some(inner) = parameter_contract_kind_at_cursor(token_stream, string_table)? {
+                return Err(HeaderParseFailure::Diagnostic(
+                    CompilerDiagnostic::invalid_parameter_contract(
+                        InvalidParameterContractReason::NestedContract {
+                            outer: contract_kind,
+                            inner,
+                        },
+                        current_source_span(token_stream),
+                    ),
+                ));
+            }
+            let output_span = current_source_span(token_stream);
+            let output_type = parse_type_annotation_cursor(token_stream, context, string_table)?;
+            if matches!(output_type, ParsedTypeRef::Applied { .. }) {
+                let application_span = match &output_type {
+                    ParsedTypeRef::Applied { span, .. } => *span,
+                    _ => output_span,
+                };
+                return Err(HeaderParseFailure::Diagnostic(
+                    CompilerDiagnostic::invalid_generic_application(
+                        GenericApplicationErrorReason::NestedApplication,
+                        application_span,
+                    ),
+                ));
+            }
+            if token_stream.current_tag() == TokenTag::ARROW {
+                return Err(HeaderParseFailure::Diagnostic(
+                    CompilerDiagnostic::invalid_parameter_contract(
+                        InvalidParameterContractReason::RouteRepeatedArrow,
+                        current_source_span(token_stream),
+                    ),
+                ));
+            }
+            if token_can_start_type_specification(token_stream.current_tag()) {
+                return Err(HeaderParseFailure::Diagnostic(
+                    CompilerDiagnostic::invalid_parameter_contract(
+                        InvalidParameterContractReason::MultipleSpecificationTypes {
+                            contract: contract_kind,
+                        },
+                        current_source_span(token_stream),
+                    ),
+                ));
+            }
+            Ok((
+                output_type,
+                ParsedParameterContractSyntax::Route {
+                    input: Some(first_type),
+                    output_span,
+                },
+            ))
+        }
+        ParameterContractKind::Route => {
+            if token_can_start_type_specification(token_stream.current_tag()) {
+                return Err(HeaderParseFailure::Diagnostic(
+                    CompilerDiagnostic::invalid_parameter_contract(
+                        InvalidParameterContractReason::MultipleSpecificationTypes {
+                            contract: contract_kind,
+                        },
+                        current_source_span(token_stream),
+                    ),
+                ));
+            }
+            Ok((
+                first_type,
+                ParsedParameterContractSyntax::Route {
+                    input: None,
+                    output_span: first_type_span,
+                },
+            ))
+        }
+    }
+}
+
+fn missing_contract_type(tag: TokenTag) -> bool {
+    matches!(
+        tag,
+        TokenTag::COMMA
+            | TokenTag::TYPE_PARAMETER_BRACKET
+            | TokenTag::ARROW
+            | TokenTag::ASSIGN
+            | TokenTag::NEWLINE
+            | TokenTag::END
+            | TokenTag::EOF
+            | TokenTag::COLON
+    )
+}
+
+fn parameter_contract_head(
+    parsed_type: &ParsedTypeRef,
+    string_table: &StringTable,
+) -> Option<(ParameterContractKind, Option<SourceSpan>)> {
+    let ParsedTypeRef::Named { name, span } = parsed_type else {
+        return None;
+    };
+    ParameterContractKind::from_spelling(string_table.resolve(*name)).map(|kind| (kind, *span))
+}
+
 fn parse_type_postfixes(
     token_stream: &mut DeclarationCursor<'_>,
     parsed_type: ParsedTypeRef,
@@ -391,6 +666,14 @@ fn parse_type_postfixes(
     string_table: &mut StringTable,
     allow_generic_application: bool,
 ) -> TypeParseResult<ParsedTypeRef> {
+    if let Some((contract, span)) = parameter_contract_head(&parsed_type, string_table) {
+        return Err(HeaderParseFailure::Diagnostic(
+            CompilerDiagnostic::invalid_parameter_contract(
+                InvalidParameterContractReason::InvalidPosition { contract },
+                span,
+            ),
+        ));
+    }
     let with_generic_arguments = parse_generic_arguments(
         token_stream,
         parsed_type,
@@ -768,6 +1051,16 @@ fn try_parse_map_side(
     string_table: &mut StringTable,
     span: Option<SourceSpan>,
 ) -> TypeParseResult<ParsedTypeRef> {
+    // Preserve contract diagnostics before the capacity fallback treats the head as a size.
+    if tokens
+        .token_string_id_in(0, string_table)?
+        .is_some_and(|name| {
+            ParameterContractKind::from_spelling(string_table.resolve(name)).is_some()
+        })
+    {
+        return Ok(parse_type_slice(tokens, context, string_table)?.parsed_type);
+    }
+
     if let Some(parsed) = parse_type_slice_exact(tokens, context, string_table)? {
         return Ok(parsed);
     }
@@ -1098,9 +1391,20 @@ fn comma_separates_signature_member(
     let Some(next) = following.current().map(TokenRef::tag) else {
         return false;
     };
-    next.is_builtin_scalar_type_name()
+    token_can_start_type_specification(next)
+}
+
+/// Whether a token can begin an authored type specification.
+///
+/// WHAT: the one token set a type annotation may start with in signature, generic-argument and
+///       declaration positions.
+/// WHY: contract heads must report a second specification for every spelling the type grammar can
+///      start with; a symbol-only test lets `Wire of String I32` or `Wire of String {I32}` fall
+///      through to the generic unexpected-token error instead of the contract diagnostic.
+fn token_can_start_type_specification(tag: TokenTag) -> bool {
+    tag.is_builtin_scalar_type_name()
         || matches!(
-            next,
+            tag,
             TokenTag::SYMBOL
                 | TokenTag::OPEN_CURLY
                 | TokenTag::TRAIT_THIS
@@ -1116,6 +1420,14 @@ fn parse_generic_type_argument(
 ) -> TypeParseResult<ParsedTypeRef> {
     let argument_span = current_source_span(token_stream);
     let parsed_argument = parse_type_atom(token_stream, context, string_table)?;
+    if let Some((contract, span)) = parameter_contract_head(&parsed_argument, string_table) {
+        return Err(HeaderParseFailure::Diagnostic(
+            CompilerDiagnostic::invalid_parameter_contract(
+                InvalidParameterContractReason::InvalidPosition { contract },
+                span,
+            ),
+        ));
+    }
 
     reject_trait_this_composition(&parsed_argument, context, argument_span)?;
 

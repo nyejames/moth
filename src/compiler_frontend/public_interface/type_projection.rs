@@ -37,7 +37,7 @@ use super::direct_projection::FoldedValueJoinContext;
 use super::model::{
     PublicChoiceVariantSurface, PublicFieldTypeSlot, PublicFunctionCategory,
     PublicFunctionSemantics, PublicGenericParameterSurface, PublicGenericTemplateDescriptor,
-    PublicParameterTypeSlot, PublicReturnTypeSlot,
+    PublicParameterContract, PublicParameterTypeSlot, PublicReturnTypeSlot,
 };
 use crate::compiler_frontend::ast::ReceiverMethodEntry;
 use crate::compiler_frontend::ast::ResolvedTraitSourceFact;
@@ -45,7 +45,7 @@ use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValueStore};
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
 use crate::compiler_frontend::ast::statements::functions::{
-    FunctionParameter, FunctionSignature, ReturnChannel, ReturnSlot,
+    FunctionParameter, FunctionSignature, ParameterContract, ReturnChannel, ReturnSlot,
 };
 use crate::compiler_frontend::ast::{
     ResolvedPublicTypeRoot, ResolvedPublicTypeRootKind, ResolvedPublicTypeRootTable,
@@ -823,6 +823,11 @@ pub(super) fn project_free_function_semantics(
                 type_identity,
                 access,
                 folded_default,
+                contract: project_parameter_contract(
+                    declaration.contract,
+                    type_environment,
+                    context,
+                )?,
             })
         })
         .collect::<Result<Vec<_>, CompilerError>>()?;
@@ -1256,6 +1261,24 @@ pub(super) fn project_parameter_access(parameter: &FunctionParameter) -> PublicC
         PublicCallParameterAccess::Mutable
     } else {
         PublicCallParameterAccess::Shared
+    }
+}
+
+pub(super) fn project_parameter_contract(
+    contract: ParameterContract,
+    type_environment: &TypeEnvironment,
+    context: &CanonicalTypeProjectionContext,
+) -> Result<PublicParameterContract, CompilerError> {
+    match contract {
+        ParameterContract::Value => Ok(PublicParameterContract::Value),
+        ParameterContract::Wire => Ok(PublicParameterContract::Wire),
+        ParameterContract::Route { input } => Ok(PublicParameterContract::Route {
+            input: input
+                .map(|type_id| {
+                    project_type_id_to_canonical_identity(type_id, type_environment, context)
+                })
+                .transpose()?,
+        }),
     }
 }
 

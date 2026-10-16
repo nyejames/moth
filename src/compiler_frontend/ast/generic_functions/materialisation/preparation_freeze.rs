@@ -8,7 +8,8 @@ use super::sidecar_build::bootstrap_call_summary_from_signature;
 use super::stable_types::{
     GenericTemplateArtefact, MaterialisationNominalOriginResolver, MaterialisationNominalSource,
     StableCallableBinding, StableFunctionParameter, StableFunctionSignature,
-    StableGenericCallableContract, StableGenericParameter, StableNominalBinding, StableReceiverKey,
+    StableGenericCallableContract, StableGenericParameter, StableNominalBinding,
+    StableParameterContract, StableReceiverKey,
 };
 use super::visibility::{
     StableExternalSymbol, StableFileVisibility, StableNamespaceBinding, StableReceiverMethod,
@@ -22,7 +23,7 @@ use crate::compiler_frontend::ast::module_ast::environment::{
     AstModuleLookups, ResolvedPublicTraitRoot,
 };
 use crate::compiler_frontend::ast::module_ast::scope_context::Stage0ResolutionFacts;
-use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
+use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ParameterContract};
 use crate::compiler_frontend::ast::type_resolution::{
     ResolvedFunctionSignature, ResolvedTypeAlias,
 };
@@ -1070,6 +1071,17 @@ impl ModuleMaterialisationCapture {
                         .transpose()?,
                     parameter_type: self
                         .materialisation_type_blueprint(parameter.type_id, parameter_slots)?,
+                    contract: match parameter.contract {
+                        ParameterContract::Value => StableParameterContract::Value,
+                        ParameterContract::Wire => StableParameterContract::Wire,
+                        ParameterContract::Route { input } => StableParameterContract::Route {
+                            input: input
+                                .map(|type_id| {
+                                    self.materialisation_type_blueprint(type_id, parameter_slots)
+                                })
+                                .transpose()?,
+                        },
+                    },
                     span: parameter.binding_span,
                 })
             })

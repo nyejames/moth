@@ -8,7 +8,9 @@
 //! and public export resolution).
 
 use crate::compiler_frontend::builtins::casts::traits::for_each_core_cast_trait_name;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, ReservedNameOwner};
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, ParameterContractKind, ReservedNameOwner,
+};
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
 use crate::compiler_frontend::headers::binding_environment::NamespaceRecordSource;
 use crate::compiler_frontend::headers::binding_environment::diagnostics;
@@ -51,6 +53,8 @@ pub(crate) enum VisibleNameBinding {
     ///      without dependencies and must not be shadowed by declarations, aliases,
     ///      dependencies, or namespace records.
     ReservedCoreCastTraitName,
+    /// Compiler-owned Wire/Route parameter-contract heads reserved against visible bindings.
+    ReservedParameterContractName,
 }
 
 /// Stored entry for a registered visible name, including the binding and its authored span.
@@ -97,6 +101,19 @@ impl VisibleNameRegistry {
         });
     }
 
+    pub(crate) fn reserve_parameter_contract_names(&mut self, string_table: &mut StringTable) {
+        for kind in ParameterContractKind::ALL {
+            let name_id = string_table.intern(kind.spelling());
+            self.names.insert(
+                name_id,
+                VisibleNameEntry {
+                    binding: VisibleNameBinding::ReservedParameterContractName,
+                    span: None,
+                },
+            );
+        }
+    }
+
     /// Attempt to register a visible name while retaining its exact authored span.
     ///
     /// WHY: same target from two sources (e.g., re-binding the same symbol) is harmless. Different
@@ -114,12 +131,16 @@ impl VisibleNameRegistry {
             if can_coexist(&entry.binding, &binding) {
                 return Ok(());
             }
-            if matches!(entry.binding, VisibleNameBinding::ReservedCoreCastTraitName) {
-                let mut diagnostic = CompilerDiagnostic::reserved_name_collision(
-                    local_name,
-                    ReservedNameOwner::CoreTrait,
-                    span,
-                );
+            let reserved_owner = match &entry.binding {
+                VisibleNameBinding::ReservedCoreCastTraitName => Some(ReservedNameOwner::CoreTrait),
+                VisibleNameBinding::ReservedParameterContractName => {
+                    Some(ReservedNameOwner::ParameterContract)
+                }
+                _ => None,
+            };
+            if let Some(owner) = reserved_owner {
+                let mut diagnostic =
+                    CompilerDiagnostic::reserved_name_collision(local_name, owner, span);
                 diagnostic.primary_span = span;
                 return Err(diagnostic);
             }

@@ -21,7 +21,7 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
 use crate::compiler_frontend::ast::numeric_known_shape::KnownShapeId;
 use rustc_hash::FxHashMap;
 
-use crate::compiler_frontend::ast::statements::functions::FunctionParameter;
+use crate::compiler_frontend::ast::statements::functions::{FunctionParameter, ParameterContract};
 use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidCallShapeReason, TypeMismatchContext, ValueReceiverContext,
@@ -279,6 +279,7 @@ pub(crate) struct ParameterExpectation {
     pub expected_type: ExpectedParameterType,
     pub access_mode: ExpectedAccessMode,
     pub default_value: Option<ParameterDefault>,
+    pub contract: ParameterContract,
 }
 
 enum CallTypeValidation<'a> {
@@ -320,6 +321,7 @@ pub(crate) fn expectations_from_user_parameters(
                 ExpectedAccessMode::Shared
             },
             default_value: parameter.default.map(ParameterDefault::Folded),
+            contract: parameter.contract,
         })
         .collect()
 }
@@ -369,6 +371,7 @@ fn parameter_expectation_from_external(
             ExternalAccessKind::Mutable => ExpectedAccessMode::Mutable,
         },
         default_value: None,
+        contract: ParameterContract::Value,
     }
 }
 
@@ -430,6 +433,7 @@ fn parameter_expectation_from_constructor_field(
             ConstructorFieldAccessMode::Mutable => ExpectedAccessMode::Mutable,
         },
         default_value: field.default_value,
+        contract: ParameterContract::Value,
     }
 }
 
@@ -681,15 +685,22 @@ fn resolve_call_arguments_with_type_policy(
             }
         };
 
-        if let CallTypeValidation::Validate(compatibility_cache) = &mut type_validation
-            && !is_call_argument_type_compatible(
-                expected_type_id,
-                actual_type_id,
-                passing_mode,
-                type_environment,
-                compatibility_cache,
-            )
-        {
+        let types_match = match (&mut type_validation, expectation.contract) {
+            (CallTypeValidation::Validate(_), ParameterContract::Wire) => {
+                actual_type_id == expected_type_id
+            }
+            (CallTypeValidation::Validate(compatibility_cache), _) => {
+                is_call_argument_type_compatible(
+                    expected_type_id,
+                    actual_type_id,
+                    passing_mode,
+                    type_environment,
+                    compatibility_cache,
+                )
+            }
+            (CallTypeValidation::Skip, _) => true,
+        };
+        if !types_match {
             let mismatch_context = match diagnostics.kind {
                 CallSurfaceKind::StructConstructor | CallSurfaceKind::ChoiceConstructor => {
                     TypeMismatchContext::ConstructorArgument

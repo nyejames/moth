@@ -16,6 +16,7 @@
 
 use crate::ast_log;
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
@@ -26,6 +27,7 @@ use crate::compiler_frontend::ast::expressions::call_validation::{
     CallDiagnosticName, ExpectedParameterType, ParameterExpectation,
 };
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
+use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExprId, ExpressionOperationView, ExpressionView, OwnedExpr,
 };
@@ -37,12 +39,14 @@ use crate::compiler_frontend::ast::expressions::parse_expression_input::{
     ExpressionParseInput, ExpressionParseResources,
 };
 use crate::compiler_frontend::ast::generic_functions::numeric_origins::set_forward_destinations;
+use crate::compiler_frontend::ast::module_ast::scope_context::ScopeDeclarationRef;
 use crate::compiler_frontend::ast::numeric_construction::{
     DeferredCallArgument, DeferredCallArgumentShape, deferred_numeric_expression,
 };
 use crate::compiler_frontend::ast::numeric_known_shape::{
     fragment_shape, register_shape_witness, union_shape_classes,
 };
+use crate::compiler_frontend::ast::statements::functions::ParameterContract;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticToken,
@@ -801,6 +805,27 @@ fn parse_call_arguments_inner(
         let parameter_expectation = parameter_slot
             .and_then(|slot| routed_expectations.and_then(|items| items.get(slot.index())));
 
+        if parameter_expectation.is_some_and(|expectation| {
+            matches!(expectation.contract, ParameterContract::Route { .. })
+        }) {
+            return Err(CompilerDiagnostic::invalid_call_shape(
+                InvalidCallShapeReason::RouteArgumentsUnsupported,
+                None,
+                current_span(token_stream),
+            )
+            .into());
+        }
+        if parameter_expectation
+            .is_some_and(|expectation| expectation.contract == ParameterContract::Wire)
+            && access_mode == CallAccessMode::Mutable
+        {
+            return Err(CompilerDiagnostic::invalid_call_shape(
+                InvalidCallShapeReason::WireArgumentMutableMarker,
+                None,
+                marker_span,
+            )
+            .into());
+        }
         // A construction-shape slot keeps its literal unresolved until completion, and its ready
         // and retained arguments join the slot's numeric class.
         let construction_shape =
@@ -857,6 +882,12 @@ fn parse_call_arguments_inner(
                 ExpectedParameterType::GenericParameter(_)
             )
         });
+        // The argument's authored extent is needed by the Wire-origin check below. The expression
+        // parse consumes the argument's trailing newlines, so the token position cannot describe
+        // the argument: capture the first token's span and compare the parsed expression's span
+        // against it instead.
+        let argument_source_span = token_stream.current_span();
+        let argument_is_bare_symbol = token_stream.current_tag() == TokenTag::SYMBOL;
         // Only an argument list that can retain a deferral treats its arguments as owners of their
         // own complete fragment. Every other surface keeps raising non-owning deferrals, so a
         // nested parse that swallowed enclosing structure can never be consumed as a whole
@@ -895,6 +926,25 @@ fn parse_call_arguments_inner(
         let producer_start = context.numeric_state().forward_producer_checkpoint();
         let argument = match create_expression_with_trailing_newline_policy(input) {
             Ok(value) => {
+                if parameter_expectation
+                    .is_some_and(|expectation| expectation.contract == ParameterContract::Wire)
+                {
+                    let argument_view = expression_builder.view_owned(value)?;
+                    if !wire_argument_origin_is_eligible(
+                        argument_view,
+                        argument_is_bare_symbol,
+                        argument_source_span,
+                        context,
+                        path_fork,
+                    ) {
+                        return Err(CompilerDiagnostic::invalid_call_shape(
+                            InvalidCallShapeReason::WireArgumentOrigin,
+                            None,
+                            argument_view.span(),
+                        )
+                        .into());
+                    }
+                }
                 validate_argument_value_policy(
                     const_values,
                     string_table,
@@ -946,6 +996,23 @@ fn parse_call_arguments_inner(
                 // Only the argument's own complete fragment may be retained: a nested parse that
                 // swallowed enclosing argument structure would otherwise lose that structure.
                 let deferral = error.take_numeric_deferral("a call argument")?;
+                // Deferred expressions have no completed operation view; only one pending
+                // authored binding can still be the direct Wire source.
+                if parameter_expectation
+                    .is_some_and(|expectation| expectation.contract == ParameterContract::Wire)
+                    && !(argument_is_bare_symbol
+                        && matches!(
+                            deferral.items.as_slice(),
+                            [ExpressionRpnItem::PendingNumericBinding { is_copy: false, .. }]
+                        ))
+                {
+                    return Err(CompilerDiagnostic::invalid_call_shape(
+                        InvalidCallShapeReason::WireArgumentOrigin,
+                        None,
+                        deferral.span,
+                    )
+                    .into());
+                }
                 // A known non-numeric parameter is the exact receiver of its argument's direct origin,
                 // so its shape constrains the origin's numeric leaves before body-root defaults. A
                 // numeric parameter already registers through its literal destination.
@@ -1178,6 +1245,68 @@ fn with_following_separator_span<E>(
             }
         }
     }
+}
+
+/// Whether one parsed `Wire` argument names an eligible authored binding.
+///
+/// WHAT: accepts exactly one authored symbol whose parsed value is a single `Reference` naming
+///       either a `Wire` parameter of the enclosing callable or a runtime body-local binding that
+///       is not a compile-time constant.
+/// WHY: a `Wire` argument transmits an existing value binding, so its source must be a binding
+///      rather than a computed value, must be runtime state rather than compile-time content, and
+///      must not be an ordinary parameter (which carries no transmitted binding). The argument's
+///      authored extent is its first token's span compared against the parsed expression's span,
+///      because the expression parse consumes trailing newlines and a token-position count would
+///      reject a call whose argument list spans lines.
+fn wire_argument_origin_is_eligible(
+    argument_view: ExpressionView<'_>,
+    argument_is_bare_symbol: bool,
+    argument_source_span: SourceSpan,
+    context: &ScopeContext,
+    path_fork: &PathInternerFork,
+) -> bool {
+    if !argument_is_bare_symbol || argument_view.span() != Some(argument_source_span) {
+        return false;
+    }
+
+    let ExpressionOperationView::Reference(path) = argument_view.operation() else {
+        return false;
+    };
+
+    if let Some(contract) = context
+        .enclosing_callable
+        .as_ref()
+        .and_then(|callable| callable.parameter_contract(path))
+    {
+        // A parameter of the callable being parsed is not an authored body binding: only the
+        // callable's own `Wire` parameter forwards the capability. Ordinary and `Route`
+        // parameters stop here instead of reaching the local-binding arm through their
+        // default-less `Absent` value.
+        return contract == ParameterContract::Wire;
+    }
+
+    path_fork.component(path).is_some_and(|name| {
+        context
+            .get_reference(&name)
+            .is_some_and(|reference| match reference {
+                ScopeDeclarationRef::Local {
+                    declaration,
+                    binding_span,
+                } => {
+                    declaration.id == path
+                        && binding_span.is_some()
+                        && declaration.binding_span.is_some()
+                        && matches!(
+                            &declaration.value,
+                            DeclarationValue::Initializer(_) | DeclarationValue::Absent
+                        )
+                        && !context.is_explicit_compile_time_constant(&declaration)
+                }
+                ScopeDeclarationRef::Shared(_) | ScopeDeclarationRef::PendingNumeric { .. } => {
+                    false
+                }
+            })
+    })
 }
 
 /// Returns whether the current argument is exactly `none` before its call delimiter.

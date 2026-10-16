@@ -1,0 +1,5 @@
+project #= (
+    name = "wiring_wire_underlying_alias_runtime",
+    entry_root = "src",
+)
+html #= ()

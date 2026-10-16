@@ -503,12 +503,14 @@ fn collect_type_parameter_ids_from_signature_type_ids(
     used_parameters: &mut rustc_hash::FxHashSet<TypeParameterId>,
 ) {
     for parameter in &signature.parameters {
-        collect_type_parameter_ids_from_type_id(
-            parameter.type_id,
-            type_environment,
-            canonical_by_local,
-            used_parameters,
-        );
+        for type_id in parameter.semantic_type_ids() {
+            collect_type_parameter_ids_from_type_id(
+                type_id,
+                type_environment,
+                canonical_by_local,
+                used_parameters,
+            );
+        }
     }
 
     for return_slot in &signature.returns {

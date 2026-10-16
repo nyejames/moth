@@ -5,7 +5,7 @@
 //! WHY: trait declarations and evidence have a focused lookup surface separate from value and
 //!      nominal type declarations.
 
-use crate::compiler_frontend::ast::statements::functions::ReturnChannel;
+use crate::compiler_frontend::ast::statements::functions::{ParameterContract, ReturnChannel};
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -48,7 +48,20 @@ pub(crate) struct ResolvedTraitParameter {
     pub(crate) name: PathId,
     pub(crate) value_mode: ValueMode,
     pub(crate) type_id: TypeId,
+    pub(crate) contract: ParameterContract,
     pub(crate) span: Option<SourceSpan>,
+}
+
+impl ResolvedTraitParameter {
+    /// Every canonical type id this requirement parameter touches.
+    ///
+    /// WHAT: yields the parameter's ordinary value type and its contract-owned type (the `Route`
+    ///       input) in a stable order.
+    /// WHY: exported-trait surface validation and conformance must reason about the same type set
+    ///      as the authored requirement; one owner keeps the Route input from being skipped.
+    pub(crate) fn semantic_type_ids(&self) -> impl Iterator<Item = TypeId> + '_ {
+        self.contract.semantic_type_ids(self.type_id)
+    }
 }
 
 /// One requirement return slot.

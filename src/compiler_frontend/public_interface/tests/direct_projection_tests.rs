@@ -606,6 +606,7 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
         value_mode: ValueMode::MutableReference,
         default: None,
         binding_span: None,
+        contract: crate::compiler_frontend::ast::statements::functions::ParameterContract::Value,
     };
     let method_signature = FunctionSignature {
         parameters: vec![receiver],
@@ -922,6 +923,7 @@ fn free_function_retains_folded_parameter_defaults_in_authored_order() {
                     value_mode: declaration.value_mode,
                     default: declaration.value.default(),
                     binding_span: declaration.binding_span,
+                    contract: crate::compiler_frontend::ast::statements::functions::ParameterContract::Value,
                 }
             })
             .collect(),
@@ -1271,6 +1273,8 @@ fn receiver_method_retains_folded_parameter_defaults() {
                 value_mode: ValueMode::ImmutableOwned,
                 default: None,
                 binding_span: None,
+                contract:
+                    crate::compiler_frontend::ast::statements::functions::ParameterContract::Value,
             },
             FunctionParameter {
                 id: path("label", &mut string_table, &mut path_fork),
@@ -1278,6 +1282,8 @@ fn receiver_method_retains_folded_parameter_defaults() {
                 value_mode: ValueMode::ImmutableOwned,
                 default: Some(fallback_default),
                 binding_span: None,
+                contract:
+                    crate::compiler_frontend::ast::statements::functions::ParameterContract::Value,
             },
         ],
         returns: vec![],

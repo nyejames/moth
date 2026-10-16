@@ -89,6 +89,8 @@ fn evidence_interface(requirement_names: &[&str]) -> PublicSemanticInterface {
                 type_identity: CanonicalTypeIdentity::SourceNominal(target_origin.clone()),
                 access: PublicCallParameterAccess::Shared,
                 folded_default: None,
+                contract:
+                    crate::compiler_frontend::public_interface::PublicParameterContract::Value,
             }],
             returns: Vec::new(),
             error_return: None,
@@ -882,6 +884,8 @@ fn rejects_reusable_evidence_method_on_another_receiver() {
                     type_identity: CanonicalTypeIdentity::SourceNominal(other_origin),
                     access: PublicCallParameterAccess::Shared,
                     folded_default: None,
+                    contract:
+                        crate::compiler_frontend::public_interface::PublicParameterContract::Value,
                 }],
                 returns: Vec::new(),
                 error_return: None,

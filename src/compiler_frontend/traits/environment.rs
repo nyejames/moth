@@ -5,7 +5,7 @@
 //! WHY: source and compiler-owned trait contracts receive stable identities and share one
 //!      deterministic name-resolution path.
 
-use crate::compiler_frontend::ast::statements::functions::ReturnChannel;
+use crate::compiler_frontend::ast::statements::functions::{ParameterContract, ReturnChannel};
 use crate::compiler_frontend::builtins::casts::targets::{
     BuiltinCastFallibility, BuiltinCastTarget,
 };
@@ -510,11 +510,13 @@ pub(crate) fn requirement_parameter_from_type(
     value_mode: ValueMode,
     type_id: TypeId,
     span: Option<SourceSpan>,
+    contract: ParameterContract,
 ) -> ResolvedTraitParameter {
     ResolvedTraitParameter {
         name,
         value_mode,
         type_id,
+        contract,
         span,
     }
 }

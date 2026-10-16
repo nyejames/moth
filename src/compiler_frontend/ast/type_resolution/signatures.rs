@@ -3,21 +3,23 @@
 use super::ResolvedFunctionSignature;
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::statements::functions::{
-    FunctionParameter, FunctionSignature, ReturnChannel, ReturnSlot, UnresolvedFunctionSignature,
+    FunctionParameter, FunctionSignature, ParameterContract, ReturnChannel, ReturnSlot,
+    UnresolvedFunctionSignature,
 };
 use crate::compiler_frontend::ast::type_resolution::{
     TypeResolutionContext, TypeResolutionResult, resolve_parsed_type_annotation,
     reusable_type_id_for_parsed_ref,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, InvalidReceiverDeclarationReason, InvalidThisUsageReason,
-    InvalidTypeAnnotationReason, TypeAnnotationContext,
+    CompilerDiagnostic, InvalidReceiverDeclarationReason, InvalidRouteOutputReason,
+    InvalidThisUsageReason, InvalidTypeAnnotationReason, TypeAnnotationContext,
 };
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::ids::{FunctionTypeKey, GenericParameterListId, TypeId};
+use crate::compiler_frontend::declaration_syntax::type_syntax::ParsedParameterContractSyntax;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -123,13 +125,44 @@ pub(crate) fn resolve_function_signature(
                 parameter.binding_span,
             ));
         };
-
+        let contract = match &parameter.contract_syntax {
+            ParsedParameterContractSyntax::Value => ParameterContract::Value,
+            ParsedParameterContractSyntax::Wire => ParameterContract::Wire,
+            ParsedParameterContractSyntax::Route { input, output_span } => {
+                if !route_output_is_choice_or_generic(
+                    type_id,
+                    type_resolution_context.type_environment,
+                ) {
+                    return Err(CompilerDiagnostic::invalid_route_output(
+                        InvalidRouteOutputReason::NotChoiceOrGeneric,
+                        type_id,
+                        output_span.or(parameter.binding_span),
+                    ));
+                }
+                let input = input
+                    .as_ref()
+                    .map(|input_syntax| {
+                        resolve_parsed_type_annotation(
+                            input_syntax,
+                            parameter.binding_span,
+                            type_resolution_context,
+                            string_table,
+                            scope_context,
+                        )
+                        .map(|input| input.type_id)
+                    })
+                    .transpose()?
+                    .flatten();
+                ParameterContract::Route { input }
+            }
+        };
         let resolved_parameter = FunctionParameter {
             id: parameter.id,
             type_id,
             value_mode: parameter.value_mode,
             default: parameter.default,
             binding_span: parameter.binding_span,
+            contract,
         };
         if path_fork.component(resolved_parameter.id) == Some(this_name) {
             if receiver.is_some() {
@@ -337,4 +370,14 @@ fn unsupported_receiver_type_diagnostic(
         },
         span,
     )
+}
+fn route_output_is_choice_or_generic(type_id: TypeId, type_environment: &TypeEnvironment) -> bool {
+    match type_environment.get(type_id) {
+        Some(TypeDefinition::Choice(_)) | Some(TypeDefinition::GenericParameter(_)) => true,
+        Some(TypeDefinition::GenericInstance(instance)) => type_environment
+            .type_id_for_nominal_id(instance.base)
+            .and_then(|base_type_id| type_environment.get(base_type_id))
+            .is_some_and(|definition| matches!(definition, TypeDefinition::Choice(_))),
+        _ => false,
+    }
 }

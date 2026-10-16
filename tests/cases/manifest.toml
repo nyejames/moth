@@ -16785,3 +16785,423 @@ path = "fulfilment_ledger_runtime"
 tags = ["integration", "language", "runtime", "adversarial", "control-flow", "collections", "borrows", "results"]
 contract = "language.scenarios.fulfilment_stock_conservation"
 role = "primary"
+
+[[case]]
+id = "wiring_wire_runtime"
+path = "wiring_wire_runtime"
+tags = ["integration", "wiring", "runtime", "html-wasm"]
+contract = "language.wiring.wire_runtime_identity_and_reads"
+role = "primary"
+
+[[case]]
+id = "wiring_route_arrow_and_return_arrow"
+path = "wiring_route_arrow_and_return_arrow"
+tags = ["integration", "wiring", "routes", "diagnostics"]
+contract = "language.wiring.route_parameter_arrow_and_return_arrow"
+role = "primary"
+
+[[case]]
+id = "wiring_generic_wire_runtime"
+path = "wiring_generic_wire_runtime"
+tags = ["integration", "wiring", "generics", "runtime"]
+contract = "language.wiring.generic_wire_forwarding"
+role = "primary"
+
+[[case]]
+id = "wiring_import_export"
+path = "wiring_import_export"
+tags = ["integration", "wiring", "dependencies", "runtime"]
+contract = "language.wiring.cross_module_wire_export"
+role = "primary"
+
+[[case]]
+id = "wiring_imported_route_d7"
+path = "wiring_imported_route_d7"
+tags = ["integration", "wiring", "routes", "dependencies", "diagnostics"]
+contract = "language.wiring.route_parameter_arrow_and_return_arrow"
+role = "boundary"
+
+[[case]]
+id = "wiring_wire_underlying_alias_runtime"
+path = "wiring_wire_underlying_alias_runtime"
+tags = ["integration", "wiring", "aliases", "runtime"]
+contract = "language.wiring.underlying_type_alias_in_wire"
+role = "primary"
+
+[[case]]
+id = "wiring_wire_ordinary_parameter_rejected"
+path = "wiring_wire_ordinary_parameter_rejected"
+tags = ["integration", "wiring", "diagnostics"]
+contract = "language.wiring.wire_origins_require_local_bindings"
+role = "primary"
+
+[[case]]
+id = "wiring_wire_constant_rejected"
+path = "wiring_wire_constant_rejected"
+tags = ["integration", "wiring", "diagnostics"]
+contract = "language.wiring.wire_origins_require_local_bindings"
+role = "boundary"
+
+[[case]]
+id = "wiring_wire_field_projection_rejected"
+path = "wiring_wire_field_projection_rejected"
+tags = ["integration", "wiring", "diagnostics"]
+contract = "language.wiring.wire_origins_require_local_bindings"
+role = "boundary"
+
+[[case]]
+id = "wiring_wire_index_rejected"
+path = "wiring_wire_index_rejected"
+tags = ["integration", "wiring", "collections", "diagnostics"]
+contract = "language.wiring.wire_origins_require_local_bindings"
+role = "boundary"
+
+[[case]]
+id = "wiring_wire_literal_rejected"
+path = "wiring_wire_literal_rejected"
+tags = ["integration", "wiring", "diagnostics"]
+contract = "language.wiring.wire_origins_require_local_bindings"
+role = "boundary"
+
+[[case]]
+id = "wiring_wire_call_result_rejected"
+path = "wiring_wire_call_result_rejected"
+tags = ["integration", "wiring", "diagnostics"]
+contract = "language.wiring.wire_origins_require_local_bindings"
+role = "boundary"
+
+[[case]]
+id = "wiring_wire_constructor_rejected"
+path = "wiring_wire_constructor_rejected"
+tags = ["integration", "wiring", "diagnostics"]
+contract = "language.wiring.wire_origins_require_local_bindings"
+role = "boundary"
+
+[[case]]
+id = "wiring_wire_computed_rejected"
+path = "wiring_wire_computed_rejected"
+tags = ["integration", "wiring", "diagnostics"]
+contract = "language.wiring.wire_origins_require_local_bindings"
+role = "boundary"
+
+[[case]]
+id = "wiring_wire_mutable_marker_rejected"
+path = "wiring_wire_mutable_marker_rejected"
+tags = ["integration", "wiring", "diagnostics"]
+contract = "language.wiring.wire_argument_rejects_mutable_marker"
+role = "primary"
+
+[[case]]
+id = "wiring_wire_parameter_assignment_rejected"
+path = "wiring_wire_parameter_assignment_rejected"
+tags = ["integration", "wiring", "diagnostics", "immutability"]
+contract = "language.wiring.wire_parameters_are_immutable"
+role = "primary"
+
+[[case]]
+id = "wiring_contract_struct_field_rejected"
+path = "wiring_contract_struct_field_rejected"
+tags = ["integration", "wiring", "diagnostics", "structs"]
+contract = "language.wiring.contracts_only_parameter_position"
+role = "primary"
+
+[[case]]
+id = "wiring_contract_choice_payload_rejected"
+path = "wiring_contract_choice_payload_rejected"
+tags = ["integration", "wiring", "diagnostics", "choices"]
+contract = "language.wiring.contracts_only_parameter_position"
+role = "boundary"
+
+[[case]]
+id = "wiring_contract_local_rejected"
+path = "wiring_contract_local_rejected"
+tags = ["integration", "wiring", "diagnostics", "bindings"]
+contract = "language.wiring.contracts_only_parameter_position"
+role = "boundary"
+
+[[case]]
+id = "wiring_contract_return_rejected"
+path = "wiring_contract_return_rejected"
+tags = ["integration", "wiring", "diagnostics", "functions"]
+contract = "language.wiring.contracts_only_parameter_position"
+role = "boundary"
+
+[[case]]
+id = "wiring_contract_type_alias_rejected"
+path = "wiring_contract_type_alias_rejected"
+tags = ["integration", "wiring", "diagnostics", "aliases"]
+contract = "language.wiring.contracts_only_parameter_position"
+role = "boundary"
+
+[[case]]
+id = "wiring_contract_collection_element_rejected"
+path = "wiring_contract_collection_element_rejected"
+tags = ["integration", "wiring", "diagnostics", "collections"]
+contract = "language.wiring.contracts_only_parameter_position"
+role = "boundary"
+
+[[case]]
+id = "wiring_contract_map_value_rejected"
+path = "wiring_contract_map_value_rejected"
+tags = ["integration", "wiring", "diagnostics", "maps"]
+contract = "language.wiring.contracts_only_parameter_position"
+role = "boundary"
+
+[[case]]
+id = "wiring_contract_generic_argument_rejected"
+path = "wiring_contract_generic_argument_rejected"
+tags = ["integration", "wiring", "diagnostics", "generics"]
+contract = "language.wiring.contracts_only_parameter_position"
+role = "boundary"
+
+[[case]]
+id = "wiring_contract_receiver_rejected"
+path = "wiring_contract_receiver_rejected"
+tags = ["integration", "wiring", "diagnostics", "receiver-methods"]
+contract = "language.wiring.contracts_only_parameter_position"
+role = "boundary"
+
+[[case]]
+id = "wiring_wire_bare_head_rejected"
+path = "wiring_wire_bare_head_rejected"
+tags = ["integration", "wiring", "diagnostics"]
+contract = "language.wiring.invalid_contract_syntax"
+role = "primary"
+
+[[case]]
+id = "wiring_route_bare_head_rejected"
+path = "wiring_route_bare_head_rejected"
+tags = ["integration", "wiring", "diagnostics"]
+contract = "language.wiring.invalid_contract_syntax"
+role = "boundary"
+
+[[case]]
+id = "wiring_wire_missing_spec_rejected"
+path = "wiring_wire_missing_spec_rejected"
+tags = ["integration", "wiring", "diagnostics"]
+contract = "language.wiring.invalid_contract_syntax"
+role = "boundary"
+
+[[case]]
+id = "wiring_route_missing_spec_rejected"
+path = "wiring_route_missing_spec_rejected"
+tags = ["integration", "wiring", "diagnostics"]
+contract = "language.wiring.invalid_contract_syntax"
+role = "boundary"
+
+[[case]]
+id = "wiring_wire_arrow_rejected"
+path = "wiring_wire_arrow_rejected"
+tags = ["integration", "wiring", "diagnostics"]
+contract = "language.wiring.invalid_contract_syntax"
+role = "boundary"
+
+[[case]]
+id = "wiring_route_repeated_arrow_rejected"
+path = "wiring_route_repeated_arrow_rejected"
+tags = ["integration", "wiring", "diagnostics"]
+contract = "language.wiring.invalid_contract_syntax"
+role = "boundary"
+
+[[case]]
+id = "wiring_route_missing_output_rejected"
+path = "wiring_route_missing_output_rejected"
+tags = ["integration", "wiring", "diagnostics"]
+contract = "language.wiring.invalid_contract_syntax"
+role = "boundary"
+
+[[case]]
+id = "wiring_nested_contract_rejected"
+path = "wiring_nested_contract_rejected"
+tags = ["integration", "wiring", "diagnostics"]
+contract = "language.wiring.invalid_contract_syntax"
+role = "boundary"
+
+[[case]]
+id = "wiring_nested_generic_contract_rejected"
+path = "wiring_nested_generic_contract_rejected"
+tags = ["integration", "wiring", "diagnostics", "generics"]
+contract = "language.wiring.invalid_contract_syntax"
+role = "boundary"
+
+[[case]]
+id = "wiring_route_invalid_output_rejected"
+path = "wiring_route_invalid_output_rejected"
+tags = ["integration", "wiring", "diagnostics", "routes"]
+contract = "language.wiring.route_output_must_be_choice_or_generic"
+role = "primary"
+
+[[case]]
+id = "wiring_wire_default_rejected"
+path = "wiring_wire_default_rejected"
+tags = ["integration", "wiring", "diagnostics", "defaults"]
+contract = "language.wiring.contract_defaults_forbidden"
+role = "primary"
+
+[[case]]
+id = "wiring_route_default_rejected"
+path = "wiring_route_default_rejected"
+tags = ["integration", "wiring", "diagnostics", "defaults"]
+contract = "language.wiring.contract_defaults_forbidden"
+role = "boundary"
+
+[[case]]
+id = "wiring_wire_mutable_parameter_rejected"
+path = "wiring_wire_mutable_parameter_rejected"
+tags = ["integration", "wiring", "diagnostics", "immutability"]
+contract = "language.wiring.contract_parameters_immutable"
+role = "primary"
+
+[[case]]
+id = "wiring_reserved_type_collision_rejected"
+path = "wiring_reserved_type_collision_rejected"
+tags = ["integration", "wiring", "diagnostics", "name-resolution"]
+contract = "language.wiring.contract_heads_are_reserved"
+role = "primary"
+
+[[case]]
+id = "wiring_reserved_choice_collision_rejected"
+path = "wiring_reserved_choice_collision_rejected"
+tags = ["integration", "wiring", "diagnostics", "name-resolution"]
+contract = "language.wiring.contract_heads_are_reserved"
+role = "boundary"
+
+[[case]]
+id = "wiring_reserved_alias_collision_rejected"
+path = "wiring_reserved_alias_collision_rejected"
+tags = ["integration", "wiring", "diagnostics", "aliases", "name-resolution"]
+contract = "language.wiring.contract_heads_are_reserved"
+role = "boundary"
+
+[[case]]
+id = "wiring_reserved_import_alias_collision_rejected"
+path = "wiring_reserved_import_alias_collision_rejected"
+tags = ["integration", "wiring", "diagnostics", "dependencies", "name-resolution"]
+contract = "language.wiring.contract_heads_are_reserved"
+role = "boundary"
+
+[[case]]
+id = "wiring_wire_multiline_runtime"
+path = "wiring_wire_multiline_runtime"
+tags = ["integration", "wiring", "runtime", "templates"]
+contract = "language.wiring.wire_multiline_call_and_forwarding"
+role = "primary"
+
+[[case]]
+id = "wiring_wire_numeric_binding_runtime"
+path = "wiring_wire_numeric_binding_runtime"
+tags = ["integration", "wiring", "runtime", "numbers"]
+contract = "language.wiring.wire_numeric_binding_identity"
+role = "primary"
+
+[[case]]
+id = "wiring_trait_contract_conformance_runtime"
+path = "wiring_trait_contract_conformance_runtime"
+tags = ["integration", "wiring", "traits", "runtime"]
+contract = "language.wiring.trait_requirement_contract_conformance"
+role = "primary"
+
+[[case]]
+id = "wiring_route_input_only_generic_success"
+path = "wiring_route_input_only_generic_success"
+tags = ["integration", "wiring", "generics", "routes"]
+contract = "language.wiring.route_input_only_generic_signature"
+role = "primary"
+
+[[case]]
+id = "wiring_route_input_only_imported_success"
+path = "wiring_route_input_only_imported_success"
+tags = ["integration", "wiring", "routes", "dependencies"]
+contract = "language.wiring.route_input_only_imported_signature"
+role = "primary"
+
+[[case]]
+id = "wiring_private_trait_route_input_sidecar_success"
+path = "wiring_private_trait_route_input_sidecar_success"
+tags = ["integration", "wiring", "traits", "dependencies", "runtime"]
+contract = "language.wiring.private_trait_route_input_closure"
+role = "primary"
+
+[[case]]
+id = "wiring_route_input_private_export_rejected"
+path = "wiring_route_input_private_export_rejected"
+tags = ["integration", "wiring", "routes", "diagnostics", "visibility"]
+contract = "language.wiring.exported_route_input_privacy"
+role = "primary"
+
+[[case]]
+id = "wiring_wire_optional_exactness_rejected"
+path = "wiring_wire_optional_exactness_rejected"
+tags = ["integration", "wiring", "diagnostics", "types"]
+contract = "language.wiring.wire_underlying_types_are_exact"
+role = "primary"
+
+[[case]]
+id = "wiring_wire_copy_argument_rejected"
+path = "wiring_wire_copy_argument_rejected"
+tags = ["integration", "wiring", "diagnostics", "copies"]
+contract = "language.wiring.wire_origins_require_local_bindings"
+role = "boundary"
+
+[[case]]
+id = "wiring_wire_body_constant_rejected"
+path = "wiring_wire_body_constant_rejected"
+tags = ["integration", "wiring", "diagnostics", "constants"]
+contract = "language.wiring.wire_origins_require_local_bindings"
+role = "boundary"
+
+[[case]]
+id = "wiring_trait_contract_requirement_wire_rejected"
+path = "wiring_trait_contract_requirement_wire_rejected"
+tags = ["integration", "wiring", "traits", "diagnostics"]
+contract = "language.wiring.trait_requirement_contract_conformance"
+role = "boundary"
+
+[[case]]
+id = "wiring_trait_contract_implementation_wire_rejected"
+path = "wiring_trait_contract_implementation_wire_rejected"
+tags = ["integration", "wiring", "traits", "diagnostics"]
+contract = "language.wiring.trait_requirement_contract_conformance"
+role = "boundary"
+
+[[case]]
+id = "wiring_trait_contract_export_mismatch_rejected"
+path = "wiring_trait_contract_export_mismatch_rejected"
+tags = ["integration", "wiring", "traits", "diagnostics", "visibility"]
+contract = "language.wiring.trait_requirement_contract_conformance"
+role = "boundary"
+
+[[case]]
+id = "wiring_trait_requirement_receiver_contract_rejected"
+path = "wiring_trait_requirement_receiver_contract_rejected"
+tags = ["integration", "wiring", "traits", "diagnostics"]
+contract = "language.wiring.contracts_only_parameter_position"
+role = "boundary"
+
+[[case]]
+id = "wiring_reserved_wire_parameter_name_rejected"
+path = "wiring_reserved_wire_parameter_name_rejected"
+tags = ["integration", "wiring", "diagnostics", "name-resolution", "parameters"]
+contract = "language.wiring.contract_heads_are_reserved"
+role = "boundary"
+
+[[case]]
+id = "wiring_reserved_route_parameter_name_rejected"
+path = "wiring_reserved_route_parameter_name_rejected"
+tags = ["integration", "wiring", "diagnostics", "name-resolution", "parameters"]
+contract = "language.wiring.contract_heads_are_reserved"
+role = "boundary"
+
+[[case]]
+id = "wiring_contract_multiple_specification_types_rejected"
+path = "wiring_contract_multiple_specification_types_rejected"
+tags = ["integration", "wiring", "diagnostics"]
+contract = "language.wiring.invalid_contract_syntax"
+role = "boundary"
+
+[[case]]
+id = "wiring_contract_nested_bare_head_rejected"
+path = "wiring_contract_nested_bare_head_rejected"
+tags = ["integration", "wiring", "diagnostics"]
+contract = "language.wiring.invalid_contract_syntax"
+role = "boundary"

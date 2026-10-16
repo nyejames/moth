@@ -9,10 +9,7 @@ fn collect_semantic_type_origins(
     match semantics {
         PublicDeclarationSemantics::Function(function) => {
             for parameter in &function.parameters {
-                collect_canonical_type_origins(&parameter.type_identity, origins);
-                if let Some(default) = &parameter.folded_default {
-                    collect_folded_type_origins(default, origins);
-                }
+                collect_parameter_type_origins(parameter, origins);
             }
             for returned in &function.returns {
                 collect_canonical_type_origins(&returned.type_identity, origins);
@@ -58,16 +55,31 @@ fn collect_receiver_method_type_origins(
     origins: &mut FxHashSet<OriginTypeId>,
 ) {
     for parameter in &method.parameters {
-        collect_canonical_type_origins(&parameter.type_identity, origins);
-        if let Some(default) = &parameter.folded_default {
-            collect_folded_type_origins(default, origins);
-        }
+        collect_parameter_type_origins(parameter, origins);
     }
     for returned in &method.returns {
         collect_canonical_type_origins(&returned.type_identity, origins);
     }
     if let Some(error) = &method.error_return {
         collect_canonical_type_origins(error, origins);
+    }
+}
+
+/// Collect the origins of one public parameter slot, including its contract-owned type.
+///
+/// WHAT: walks the slot's own identity and any `Route` input through the slot's traversal owner,
+///       then its folded default.
+/// WHY: a projected imported callable must declare a consumer-local nominal for every type its
+///      signature names, and the Route input is part of that signature.
+fn collect_parameter_type_origins(
+    parameter: &crate::compiler_frontend::public_interface::PublicParameterTypeSlot,
+    origins: &mut FxHashSet<OriginTypeId>,
+) {
+    for identity in parameter.semantic_type_identities() {
+        collect_canonical_type_origins(identity, origins);
+    }
+    if let Some(default) = &parameter.folded_default {
+        collect_folded_type_origins(default, origins);
     }
 }
 

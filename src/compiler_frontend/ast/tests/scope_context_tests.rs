@@ -240,6 +240,7 @@ fn child_contexts_preserve_callable_identity_independently_of_scope_kind() {
             success_types: vec![string_type_id],
             authored_success_slot_count: 1,
             error_type: Some(string_type_id),
+            parameter_contracts: Vec::new(),
         });
         context.enclosing_callable = Some(Rc::clone(&contract));
         context.expected_result_type_ids = vec![builtin_type_ids::BOOL];

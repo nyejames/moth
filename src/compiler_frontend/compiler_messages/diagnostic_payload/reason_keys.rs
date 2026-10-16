@@ -86,6 +86,13 @@ macro_rules! define_reasoned_diagnostic_registry {
                 remap: {}
                 descriptor: { "MOTH-SYNTAX-0015", "Invalid generic application", Error }
             },
+            Syntax::InvalidParameterContract => {
+                payload: InvalidParameterContract;
+                fields: { reason: InvalidParameterContractReason }
+                bindings: {}
+                remap: {}
+                descriptor: { "MOTH-SYNTAX-0038", "Invalid parameter contract", Error }
+            },
             Syntax::InvalidDependencyClause => {
                 payload: InvalidDependencyClause;
                 fields: { clause_kind: DependencyClauseKind, reason: InvalidDependencyClauseReason }
@@ -482,6 +489,16 @@ macro_rules! define_reasoned_diagnostic_registry {
                 }
                 descriptor: { "MOTH-TYPE-0005", "Incompatible choice comparison", Error }
             },
+            Type::InvalidRouteOutput => {
+                payload: InvalidRouteOutput;
+                fields: {
+                    reason: InvalidRouteOutputReason,
+                    output: TypeId
+                }
+                bindings: {}
+                remap: {}
+                descriptor: { "MOTH-TYPE-0006", "Invalid route output type", Error }
+            },
             Rule::InvalidCallShape => {
                 payload: InvalidCallShape;
                 fields: {
@@ -522,7 +539,10 @@ macro_rules! define_reasoned_diagnostic_registry {
                         }
                         InvalidCallShapeReason::ExtraPositionalArgument { .. }
                         | InvalidCallShapeReason::PositionalAfterNamed
-                        | InvalidCallShapeReason::NamedArgumentsNotSupported => {}
+                        | InvalidCallShapeReason::NamedArgumentsNotSupported
+                        | InvalidCallShapeReason::WireArgumentOrigin
+                        | InvalidCallShapeReason::WireArgumentMutableMarker
+                        | InvalidCallShapeReason::RouteArgumentsUnsupported => {}
                         InvalidCallShapeReason::NamedArgumentNotFound {
                             name,
                             known_parameters,
@@ -890,6 +910,18 @@ define_stable_reason_keys! {
     &GenericApplicationErrorReason::MissingArgumentAfterComma => "invalid_generic_application.missing_argument_after_comma",
     &GenericApplicationErrorReason::NestedApplication => "invalid_generic_application.nested_application",
     },
+    InvalidParameterContractReason => {
+    &InvalidParameterContractReason::MissingSpecification { .. } => "invalid_parameter_contract.missing_specification",
+    &InvalidParameterContractReason::InvalidPosition { .. } => "invalid_parameter_contract.invalid_position",
+    &InvalidParameterContractReason::WireArrowNotAllowed => "invalid_parameter_contract.wire_arrow_not_allowed",
+    &InvalidParameterContractReason::RouteOutputMissing => "invalid_parameter_contract.route_output_missing",
+    &InvalidParameterContractReason::RouteRepeatedArrow => "invalid_parameter_contract.route_repeated_arrow",
+    &InvalidParameterContractReason::NestedContract { .. } => "invalid_parameter_contract.nested_contract",
+    &InvalidParameterContractReason::MutableParameter { .. } => "invalid_parameter_contract.mutable_parameter",
+    &InvalidParameterContractReason::ParameterDefault { .. } => "invalid_parameter_contract.parameter_default",
+    &InvalidParameterContractReason::ReceiverContract { .. } => "invalid_parameter_contract.receiver_contract",
+    &InvalidParameterContractReason::MultipleSpecificationTypes { .. } => "invalid_parameter_contract.multiple_specification_types",
+    },
 
     InvalidDependencyClauseReason => {
     &InvalidDependencyClauseReason::MissingPath => "invalid_dependency_clause.missing_path",
@@ -1202,6 +1234,7 @@ define_stable_reason_keys! {
     &InvalidTraitConformanceReason::ReceiverMutabilityMismatch { .. } => "invalid_trait_conformance.receiver_mutability_mismatch",
     &InvalidTraitConformanceReason::ParameterCountMismatch { .. } => "invalid_trait_conformance.parameter_count_mismatch",
     &InvalidTraitConformanceReason::ParameterModeMismatch { .. } => "invalid_trait_conformance.parameter_mode_mismatch",
+    &InvalidTraitConformanceReason::ParameterContractMismatch { .. } => "invalid_trait_conformance.parameter_contract_mismatch",
     &InvalidTraitConformanceReason::ParameterTypeMismatch { .. } => "invalid_trait_conformance.parameter_type_mismatch",
     &InvalidTraitConformanceReason::ReturnCountMismatch { .. } => "invalid_trait_conformance.return_count_mismatch",
     &InvalidTraitConformanceReason::ReturnTypeMismatch { .. } => "invalid_trait_conformance.return_type_mismatch",
@@ -1415,6 +1448,10 @@ define_stable_reason_keys! {
     &IncompatibleChoiceComparisonReason::PayloadEqualityNotSupported { .. } => "incompatible_choice_comparison.payload_equality_not_supported",
     },
 
+    InvalidRouteOutputReason => {
+    &InvalidRouteOutputReason::NotChoiceOrGeneric => "invalid_route_output.not_choice_or_generic",
+    },
+
     InvalidCallShapeReason => {
     &InvalidCallShapeReason::MissingArgument { .. } => "invalid_call_shape.missing_argument",
     &InvalidCallShapeReason::ExtraPositionalArgument { .. } => "invalid_call_shape.extra_positional_argument",
@@ -1427,6 +1464,9 @@ define_stable_reason_keys! {
     &InvalidCallShapeReason::MutableAccessOnNonPlace { .. } => "invalid_call_shape.mutable_access_on_non_place",
     &InvalidCallShapeReason::MutableAccessOnImmutablePlace { .. } => "invalid_call_shape.mutable_access_on_immutable_place",
     &InvalidCallShapeReason::ImmutablePlaceMutableAccessRequired { .. } => "invalid_call_shape.immutable_place_mutable_access_required",
+    &InvalidCallShapeReason::WireArgumentOrigin => "invalid_call_shape.wire_argument_origin",
+    &InvalidCallShapeReason::WireArgumentMutableMarker => "invalid_call_shape.wire_argument_mutable_marker",
+    &InvalidCallShapeReason::RouteArgumentsUnsupported => "invalid_call_shape.route_arguments_unsupported",
     },
 
     InvalidReturnShapeReason => {

@@ -1,0 +1,32 @@
+Message ::
+    Done,
+;
+
+CONSUMER must:
+    read_text |This, value Wire of String| -> String
+    accept |This, route Route of String -> Message| -> String
+;
+
+Label = |
+    text String,
+|
+
+read_text |this Label, value Wire of String| -> String:
+    return value
+;
+
+accept |this Label, route Route of String -> Message| -> String:
+    return "accepted"
+;
+
+Label must CONSUMER
+
+run_consumer type T is CONSUMER |item T, value Wire of String| -> String:
+    return item.read_text(value)
+;
+
+label = Label("label")
+text = "trait"
+result = label.read_text(text)
+dispatched = run_consumer(label, text)
+[:trait-contract [result] [dispatched]]

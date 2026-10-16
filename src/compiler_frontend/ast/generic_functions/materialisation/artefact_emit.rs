@@ -11,7 +11,7 @@ use super::sidecar_build::{GeneratedSidecarRequest, emit_materialised_sidecar};
 use super::stable_types::{
     GeneratedFoldedValueMaterialiser, GeneratedValueMaterialisationServices,
     GenericTemplateArtefact, MaterialisationNominalSource, StableFunctionSignature,
-    StableFunctionTarget, const_store_error_into_compiler_error,
+    StableFunctionTarget, StableParameterContract, const_store_error_into_compiler_error,
     generated_file_value_resolution_services, import_canonical_folded_value,
 };
 use super::{MaterialisedGenericAst, ModuleMaterialisationInput};
@@ -27,7 +27,8 @@ use crate::compiler_frontend::ast::module_ast::environment::{
 };
 use crate::compiler_frontend::ast::module_ast::scope_context::ReceiverMethodEntry;
 use crate::compiler_frontend::ast::statements::functions::{
-    FunctionParameter, FunctionSignature, MaterialisedFunctionSignature, ReturnChannel, ReturnSlot,
+    FunctionParameter, FunctionSignature, MaterialisedFunctionSignature, ParameterContract,
+    ReturnChannel, ReturnSlot,
 };
 use crate::compiler_frontend::ast::type_resolution::{
     ResolvedFunctionSignature, intern_resolved_function_signature,
@@ -1317,6 +1318,26 @@ impl StableFunctionSignature {
                 context.string_table,
                 context.path_fork,
             )?;
+            let contract = match &parameter.contract {
+                StableParameterContract::Value => ParameterContract::Value,
+                StableParameterContract::Wire => ParameterContract::Wire,
+                StableParameterContract::Route { input } => ParameterContract::Route {
+                    input: input
+                        .as_ref()
+                        .map(|input| {
+                            intern_materialisation_type_blueprint(
+                                input,
+                                context.generic_parameter_type_ids,
+                                context.nominal_source,
+                                context.type_environment,
+                                context.external_package_registry,
+                                context.string_table,
+                                context.path_fork,
+                            )
+                        })
+                        .transpose()?,
+                },
+            };
             let name = context.string_table.intern(&parameter.name);
             let parameter_path = context
                 .path_fork
@@ -1354,6 +1375,7 @@ impl StableFunctionSignature {
                 value_mode: parameter.value_mode,
                 default,
                 binding_span: parameter_span,
+                contract,
             });
         }
         let mut returns =

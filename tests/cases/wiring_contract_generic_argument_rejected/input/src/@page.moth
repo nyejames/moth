@@ -1,0 +1,3 @@
+render type T |value Box of Wire of T| -> T:
+    return value
+;

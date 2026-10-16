@@ -7,9 +7,10 @@
 //! reconstruction.
 
 use super::*;
+use crate::compiler_frontend::ast::statements::functions::ParameterContract;
 use crate::compiler_frontend::canonical_type_identity::CanonicalTraitIdentity;
 use crate::compiler_frontend::public_interface::{
-    PublicTraitReceiverAccess, TraitSurfaceTypeIdentity,
+    PublicTraitParameterContract, PublicTraitReceiverAccess, TraitSurfaceTypeIdentity,
 };
 use crate::compiler_frontend::semantic_identity::{OriginFunctionId, OriginTraitId};
 use crate::compiler_frontend::traits::definitions::{
@@ -173,6 +174,16 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 .unwrap_or_else(|| string_table.get_or_intern(format!("parameter_{index}")));
             let type_id =
                 self.project_imported_trait_surface_type(&parameter.type_identity, this_type)?;
+            let contract = match &parameter.contract {
+                PublicTraitParameterContract::Value => ParameterContract::Value,
+                PublicTraitParameterContract::Wire => ParameterContract::Wire,
+                PublicTraitParameterContract::Route { input } => ParameterContract::Route {
+                    input: input
+                        .as_ref()
+                        .map(|input| self.project_imported_trait_surface_type(input, this_type))
+                        .transpose()?,
+                },
+            };
             parameters.push(ResolvedTraitParameter {
                 name: self
                     .path_fork
@@ -181,6 +192,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 value_mode: parameter.value_mode,
                 type_id,
                 span: None,
+                contract,
             });
         }
 

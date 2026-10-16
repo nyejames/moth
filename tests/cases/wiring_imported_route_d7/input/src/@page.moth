@@ -1,0 +1,5 @@
+@helper as provider
+
+render || -> String:
+    return provider.accept_route("ignored")
+;

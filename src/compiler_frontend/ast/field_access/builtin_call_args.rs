@@ -20,6 +20,7 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
 use crate::compiler_frontend::ast::numeric_known_shape::{
     KnownShape, KnownShapeId, materialise_known_shape,
 };
+use crate::compiler_frontend::ast::statements::functions::ParameterContract;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::builtins::member_rules::BuiltinArgumentSlots;
 use crate::compiler_frontend::compiler_errors::CompilerError;
@@ -121,6 +122,7 @@ pub(super) fn builtin_argument_expectations(
             expected_type,
             access_mode: ExpectedAccessMode::Shared,
             default_value: None,
+            contract: ParameterContract::Value,
         })
         .collect()
 }

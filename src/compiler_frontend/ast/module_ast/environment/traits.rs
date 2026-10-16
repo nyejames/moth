@@ -35,6 +35,7 @@ use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::signature_members::{
     FunctionReturnSyntax, FunctionSignatureSyntax, ReturnSlotSyntax, SignatureMemberSyntax,
 };
+use crate::compiler_frontend::declaration_syntax::type_syntax::ParsedParameterContractSyntax;
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::source::SourceSpan;
@@ -504,6 +505,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 parameter.value_mode,
                 parameter.type_id,
                 parameter.binding_span,
+                parameter.contract,
             ));
         }
 
@@ -826,14 +828,16 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     ) -> Result<(), CompilerMessages> {
         for requirement in requirements {
             for parameter in &requirement.parameters {
-                self.validate_public_trait_type(
-                    trait_name,
-                    parameter.type_id,
-                    public_root_file,
-                    parameter.span,
-                    trait_environment,
-                    string_table,
-                )?;
+                for type_id in parameter.semantic_type_ids() {
+                    self.validate_public_trait_type(
+                        trait_name,
+                        type_id,
+                        public_root_file,
+                        parameter.span,
+                        trait_environment,
+                        string_table,
+                    )?;
+                }
             }
 
             for return_slot in &requirement.returns {
@@ -934,6 +938,12 @@ fn signature_member_with_trait_this(
 ) -> SignatureMemberSyntax {
     let mut member = member.clone();
     member.type_annotation = parsed_type_with_trait_this(&member.type_annotation, this_name);
+    if let ParsedParameterContractSyntax::Route {
+        input: Some(input), ..
+    } = &mut member.contract
+    {
+        *input = parsed_type_with_trait_this(input, this_name);
+    }
     member
 }
 

@@ -86,6 +86,7 @@ fn parameter(
         value_mode,
         default: None,
         binding_span,
+        contract: crate::compiler_frontend::ast::statements::functions::ParameterContract::Value,
     }
 }
 

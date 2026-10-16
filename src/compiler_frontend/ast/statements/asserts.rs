@@ -39,6 +39,7 @@ use crate::compiler_frontend::ast::generic_functions::GenericRequestRange;
 use crate::compiler_frontend::ast::numeric_construction::{
     BodyDraft, DeferredCallArgument, NumericContinuation,
 };
+use crate::compiler_frontend::ast::statements::functions::ParameterContract;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
@@ -242,12 +243,14 @@ pub(crate) fn parse_assert_statement(
             expected_type: ExpectedParameterType::Known(bool_type_id),
             access_mode: ExpectedAccessMode::Shared,
             default_value: None,
+            contract: ParameterContract::Value,
         },
         ParameterExpectation {
             name: Some(message_name),
             expected_type: ExpectedParameterType::Known(message_type_id),
             access_mode: ExpectedAccessMode::Shared,
             default_value: Some(ParameterDefault::Folded(default_message)),
+            contract: ParameterContract::Value,
         },
     ];
 

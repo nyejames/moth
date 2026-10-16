@@ -10,11 +10,13 @@ use super::*;
 
 use crate::compiler_frontend::ast::module_ast::environment::builder::import_projection::nominal::imported_nominal_path;
 use crate::compiler_frontend::ast::statements::functions::{
-    FunctionParameter, FunctionSignature, MaterialisedFunctionSignature, ReturnChannel, ReturnSlot,
+    FunctionParameter, FunctionSignature, MaterialisedFunctionSignature, ParameterContract,
+    ReturnChannel, ReturnSlot,
 };
 use crate::compiler_frontend::ast::type_resolution::intern_resolved_function_signature;
 use crate::compiler_frontend::canonical_type_identity::GenericDeclarationOrigin;
 use crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget;
+use crate::compiler_frontend::public_interface::PublicParameterContract;
 use crate::compiler_frontend::semantic_identity::{GeneratedDeclarationIdentity, OriginFunctionId};
 
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -510,6 +512,16 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 }
                 None => None,
             };
+            let contract = match &parameter.contract {
+                PublicParameterContract::Value => ParameterContract::Value,
+                PublicParameterContract::Wire => ParameterContract::Wire,
+                PublicParameterContract::Route { input } => ParameterContract::Route {
+                    input: input
+                        .as_ref()
+                        .map(|input| self.intern_imported_canonical_type(input))
+                        .transpose()?,
+                },
+            };
             parameters.push(FunctionParameter {
                 id: self
                     .path_fork
@@ -519,6 +531,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 value_mode,
                 default,
                 binding_span: None,
+                contract,
             });
         }
 

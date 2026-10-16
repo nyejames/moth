@@ -42,6 +42,7 @@ use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::signature_members::{
     FunctionSignatureSyntax, ReturnChannelSyntax, ReturnSlotSyntax, SignatureMemberSyntax,
 };
+use crate::compiler_frontend::declaration_syntax::type_syntax::ParsedParameterContractSyntax;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -88,6 +89,63 @@ pub(crate) struct UnresolvedFunctionParameter {
     pub(crate) value_mode: ValueMode,
     pub(crate) default: Option<ConstValueId>,
     pub(crate) binding_span: Option<SourceSpan>,
+    pub(crate) contract_syntax: ParsedParameterContractSyntax,
+}
+
+/// Semantic parameter contract kept separate from the parameter's ordinary value type.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ParameterContract {
+    Value,
+    Wire,
+    Route { input: Option<TypeId> },
+}
+
+impl ParameterContract {
+    /// Type id that this contract contributes beyond the parameter's ordinary value type.
+    ///
+    /// WHAT: returns the resolved `Route` input type, or `None` for every other contract.
+    /// WHY: one traversal owner keeps every semantic walk over parameter types from re-deriving
+    ///      the same projection and silently skipping the Route input.
+    pub fn extra_type_id(&self) -> Option<TypeId> {
+        match self {
+            ParameterContract::Route { input } => *input,
+            ParameterContract::Value | ParameterContract::Wire => None,
+        }
+    }
+
+    /// Every type id this contract binds, given the parameter's ordinary value type.
+    ///
+    /// WHAT: yields the ordinary value type first, then any contract-owned type.
+    /// WHY: callers that collect, validate or project parameter types must see the Route input
+    ///      too; this is the single traversal owner for that decision.
+    pub fn semantic_type_ids(&self, value_type_id: TypeId) -> impl Iterator<Item = TypeId> {
+        std::iter::once(value_type_id).chain(self.extra_type_id())
+    }
+
+    /// This contract with the trait self type replaced by a receiver's concrete type.
+    ///
+    /// WHAT: substitutes the self type inside a `Route` input with the same equality rule the
+    ///       parameter's own type uses.
+    /// WHY: a requirement's contracts must be compared and instantiated exactly like its
+    ///      parameter types, so both substitutions live on one owner.
+    pub fn with_trait_this_replaced(
+        self,
+        trait_this_type: TypeId,
+        receiver_type_id: TypeId,
+    ) -> ParameterContract {
+        match self {
+            ParameterContract::Route { input } => ParameterContract::Route {
+                input: input.map(|input| {
+                    if input == trait_this_type {
+                        receiver_type_id
+                    } else {
+                        input
+                    }
+                }),
+            },
+            ParameterContract::Value | ParameterContract::Wire => self,
+        }
+    }
 }
 
 /// Canonical callable parameter contract. Defaults retain content, not executable roots.
@@ -98,6 +156,7 @@ pub struct FunctionParameter {
     pub value_mode: ValueMode,
     pub default: Option<ConstValueId>,
     pub binding_span: Option<SourceSpan>,
+    pub contract: ParameterContract,
 }
 
 /// Short-lived signature shell that owns parsed annotations until type resolution finishes.
@@ -114,6 +173,18 @@ pub struct FunctionSignature {
 }
 
 impl FunctionParameter {
+    /// Every canonical type id this parameter's contract touches.
+    ///
+    /// WHAT: yields the parameter's ordinary value type and its contract-owned type (the `Route`
+    ///       input) in a stable order.
+    /// WHY: generic-usage checks, import origin collection, exported-surface validation and the
+    ///      private sidecar closure all reason about "the types in this signature". Routing every
+    ///      one of them through this owner stops a new contract type from being silently ignored
+    ///      by each walker separately.
+    pub(crate) fn semantic_type_ids(&self) -> impl Iterator<Item = TypeId> + '_ {
+        self.contract.semantic_type_ids(self.type_id)
+    }
+
     /// Body-scope binding row for this parameter.
     ///
     /// WHAT: rebuilds the `Declaration` that a function or start body frame stores for the parameter.
@@ -258,6 +329,7 @@ pub(crate) fn function_signature_from_syntax_with_unresolved_types(
             value_mode: declaration.value_mode,
             default: declaration.value.default(),
             binding_span: declaration.binding_span,
+            contract_syntax: parameter.contract.clone(),
         });
     }
 

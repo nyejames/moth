@@ -16,6 +16,7 @@ use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
+use crate::compiler_frontend::builtins::error_type::is_reserved_parameter_contract_symbol;
 use crate::compiler_frontend::compiler_messages::{
     InvalidAssignmentTargetReason, InvalidThisUsageReason, NameNamespace, ReservedNameOwner,
 };
@@ -178,6 +179,18 @@ impl ScopeContext {
             return Some(CompilerDiagnostic::reserved_name_collision(
                 name,
                 ReservedNameOwner::CoreTrait,
+                span,
+            ));
+        }
+
+        // `Wire` and `Route` are compiler-owned parameter-contract heads. Every binding kind that
+        // shares this check (parameters, loop, match, multi-bind, catch and body-local
+        // declarations) must reserve them, because the contract spelling is only meaningful in
+        // parameter position and a same-named binding would make the signature ambiguous.
+        if is_reserved_parameter_contract_symbol(string_table.resolve(name)) {
+            return Some(CompilerDiagnostic::reserved_name_collision(
+                name,
+                ReservedNameOwner::ParameterContract,
                 span,
             ));
         }
@@ -356,7 +369,6 @@ impl ScopeContext {
     }
 
     /// Resolve callable metadata for a source declaration.
-    ///
     /// Callable contracts belong to the immutable module signature table.
     pub(crate) fn source_callable_signature(
         &self,

@@ -86,6 +86,11 @@ fn enclosing_callable_contract(
         success_types: signature.success_return_type_ids(),
         authored_success_slot_count,
         error_type: signature.error_return_type_id(),
+        parameter_contracts: signature
+            .parameters
+            .iter()
+            .map(|parameter| (parameter.id, parameter.contract))
+            .collect(),
     })
 }
 

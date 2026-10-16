@@ -195,14 +195,16 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         string_table: &StringTable,
     ) -> Result<(), CompilerMessages> {
         for parameter in &signature.parameters {
-            self.validate_public_type_id(
-                exported_name,
-                parameter.type_id,
-                public_root_file,
-                parameter.binding_span,
-                trait_environment,
-                string_table,
-            )?;
+            for type_id in parameter.semantic_type_ids() {
+                self.validate_public_type_id(
+                    exported_name,
+                    type_id,
+                    public_root_file,
+                    parameter.binding_span,
+                    trait_environment,
+                    string_table,
+                )?;
+            }
         }
 
         for return_slot in &signature.returns {

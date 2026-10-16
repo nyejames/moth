@@ -1,0 +1,9 @@
+Message ::
+    Done,
+;
+
+consume |before String, callback Route of String -> Message, after I32| -> String:
+    return before
+;
+
+consume("prefix", Message::Done, 3)
