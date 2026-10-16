@@ -3,10 +3,10 @@
 ## Status
 
 ```text
-STATUS: ACTIVE on expression-refactor (Phase 5 reactivated by the user)
-CURRENT_SLICE: Phase 5. P5a descriptors, P5b direct type resolution, P5c constant handles and P5d ownership-only clones and string moves accepted.
+STATUS: ACTIVE on expression-refactor (Phase 6 next)
+CURRENT_SLICE: Phase 5 complete: descriptors, direct type resolution, constant handles and ownership-only clones accepted with matched evidence.
 BLOCKERS: Fresh Windows proof remains pending.
-NEXT_ACTION: P5e matched re-profile against the Phase 5 baseline, results record and Phase 5 exit.
+NEXT_ACTION: Phase 6 Wiring foundation: slice the parameter-contract parse, Wire formation and Route formation work.
 ```
 
 The main squash checkpoint retains expression-refactor source `534aea1a5`,
@@ -537,33 +537,35 @@ contracts rather than restarting this representation migration.
 Representation adoption is mandatory. Optional optimisation mechanisms require
 current evidence and can be declined with their investigation recorded.
 
-- [ ] Consolidate callable/constructor preparation into the existing descriptor
+- [x] Consolidate callable/constructor preparation into the existing descriptor
   owner: parameter types/access/contracts, receiver facts, results and default
   IDs. Let parsing, inference, validation and materialisation borrow the same
   resolved facts instead of resolving or cloning full signatures repeatedly.
-- [ ] Build routed argument/parameter order once. Validate, resolve and fold
+- [x] Build routed argument/parameter order once. Validate, resolve and fold
   defaults once at their declaration under existing rules, even when no caller
   selects them. At a call, select/materialise/apply the already-validated default
   ID only for an omitted slot. Use borrowed field/variant views
   rather than rebuilding constructor metadata or cloning every variant.
-- [ ] At rewritten boundaries, resolve `ParsedTypeRef` directly to canonical
+- [x] At rewritten boundaries, resolve `ParsedTypeRef` directly to canonical
   `TypeId` where no owned `DataType` tree is needed. Keep authored syntax in its
   real owner and diagnostic display in its own path. Avoid reverse type-tree
   allocation on successful executable paths.
-- [ ] Preserve existing type interning, compatibility/substitution caches,
+- [x] Preserve existing type interning, compatibility/substitution caches,
   nominal sealing and recursive witness rules. Reuse resolved operation/domain
   metadata in folding and HIR instead of re-deriving it from result types.
-- [ ] Make constant lookup return a reusable handle and classification. Local
+- [x] Make constant lookup return a reusable handle and classification. Local
   environments refer to constants by ID over the existing shared module base.
   Avoid per-generic rehydration of all module constants and constant-store to
   AST to HIR graph expansion merely to cross an API.
-- [ ] Remove no-change TIR operand clones, double list copies and whole authored
+- [x] Remove no-change TIR operand clones, double list copies and whole authored
   AST clones used only to compare/discard a specialised view. Reuse unchanged
   roots and construct changed nodes once under the selected lifetime policy.
-- [ ] Borrow text while appending and move completed owned Strings through the
+  The static-if transaction copy stays: skipping it needed a second AST walker
+  for about 0.06 ms on docs (benchmark record, Phase 5 entry).
+- [x] Borrow text while appending and move completed owned Strings through the
   existing ownership-taking interner. Do not allocate a String merely to pass
   it to an API that borrows and then copies it again.
-- [ ] Re-profile after each material change. Investigate further ideas, such as
+- [x] Re-profile after each material change. Investigate further ideas, such as
   numeric factor reuse or narrow memoisation, only when remaining attribution
   and complete semantic keys justify them. Keep key lifetime, config,
   imported-constant and directive invalidation explicit. Do not repeat the

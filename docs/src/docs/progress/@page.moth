@@ -48,8 +48,8 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
     integration target results, ten feature lanes and all 14 scaling series.
     Grouped-not dev HIR fits n^0.88 under n^1.25 in that evidence.
     Fresh Windows Canvas/frontend proof remains pending.
-    Phase 5 type/folding reductions are active on `expression-refactor`, with
-    Phases 6–8 following in order.
+    Phase 5 type/folding reductions are complete on `expression-refactor`. Phases 6–8
+    follow in order.
 
     Use this together with `tests/cases/manifest.toml` when changing language features.
 
@@ -700,7 +700,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Frontend Arena + Semantic Invariant Optimisation]
             [: Partial]
             [: Broad benchmark, profiling, adversarial-fixture, scope-frame, capacity-estimate and historical validation coverage. Focused typed-store tests cover checked extents, owner isolation, compaction, detached generic preparation and owned service/diagnostic lifetimes.]
-            [: Implemented pieces include token/header statistics, conservative capacity estimates, scope-frame arenas and seeding, external registry clone reduction, dense HIR and phase-owned typed expression stores. Phase 4 completes the typed-store, result and lifetime cutover. Repeated type/default/fold work is being reduced by the active Phase 5, while broader template/render-plan, bump-allocation and persistent-cache work remains deferred.]
+            [: Implemented pieces include token/header statistics, conservative capacity estimates, scope-frame arenas and seeding, external registry clone reduction, dense HIR and phase-owned typed expression stores. Phase 4 completes the typed-store, result and lifetime cutover. Phase 5 shares call-site descriptors and the generated registry, resolves authored types directly to TypeIds and reuses selected range domains, which cuts generic-scaling check time by 17–28%. Broader template/render-plan, bump-allocation and persistent-cache work remains deferred.]
         ]
 
         [data:

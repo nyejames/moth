@@ -376,7 +376,6 @@ pub(crate) fn signature_member_to_declaration(
                 const_values,
                 string_table,
                 fallback_policy,
-                &diagnostic,
             )?
             .unwrap_or(builtin_type_ids::NONE);
             (type_id, false)
@@ -689,11 +688,13 @@ fn should_fallback_signature_type(
     }
 }
 
-/// Resolve any useful partial semantic shape while preserving syntax for a deferred declaration.
+/// Resolve any useful partial semantic shape after the authored annotation failed with a
+/// deferrable diagnostic, while its syntax stays retained for the later strict pass.
 ///
 /// Unknown nominal names have no TypeId yet. A collection with an unresolved capacity still has
 /// a useful element type, so use its growable shape for shell/default parsing and let the later
-/// strict pass resolve the authored capacity.
+/// strict pass resolve the authored capacity. The caller has already resolved `type_annotation`
+/// in this context, so only its collection element is worth resolving again.
 fn resolve_signature_type_fallback(
     type_annotation: &ParsedTypeRef,
     span: Option<SourceSpan>,
@@ -702,30 +703,23 @@ fn resolve_signature_type_fallback(
     const_values: &ConstValueStore,
     string_table: &mut StringTable,
     fallback_policy: SignatureTypeFallbackPolicy,
-    failure: &CompilerDiagnostic,
 ) -> SignatureResult<Option<TypeId>> {
-    // The first parse already attempted every lookup for an unknown name. This fallback can only
-    // defer it, so retrying the same syntax repeats lookups before the later scoped pass.
-    if matches!(&failure.payload, DiagnosticPayload::UnknownName { .. }) {
+    let ParsedTypeRef::Collection { element, .. } = type_annotation else {
         return Ok(None);
-    }
-
-    match resolve_signature_type_annotation(
-        type_annotation,
+    };
+    let element_type_id = match resolve_signature_type_annotation(
+        element,
         span,
         expression_context,
         type_interner,
         const_values,
         string_table,
     ) {
-        Ok(annotation) => Ok(annotation.type_id),
+        Ok(annotation) => annotation.type_id,
         Err(ExpressionParseError::Diagnostic(diagnostic))
             if should_fallback_signature_type(&diagnostic, fallback_policy) =>
         {
-            let ParsedTypeRef::Collection { element, .. } = type_annotation else {
-                return Ok(None);
-            };
-            let Some(element_type_id) = resolve_signature_type_fallback(
+            resolve_signature_type_fallback(
                 element,
                 span,
                 expression_context,
@@ -733,19 +727,18 @@ fn resolve_signature_type_fallback(
                 const_values,
                 string_table,
                 fallback_policy,
-                &diagnostic,
             )?
-            else {
-                return Ok(None);
-            };
-            Ok(Some(
-                type_interner
-                    .environment_mut_for_derived_types()
-                    .intern_collection(element_type_id, None),
-            ))
         }
-        Err(error) => Err(error),
-    }
+        Err(error) => return Err(error),
+    };
+    let Some(element_type_id) = element_type_id else {
+        return Ok(None);
+    };
+    Ok(Some(
+        type_interner
+            .environment_mut_for_derived_types()
+            .intern_collection(element_type_id, None),
+    ))
 }
 
 /// Parse the default-value expression for a single signature parameter.

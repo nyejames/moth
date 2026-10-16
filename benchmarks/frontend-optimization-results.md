@@ -6151,3 +6151,71 @@ without required findings. It checks visibility/binding and constant-projection
 handoffs, validation/continuation/JS interactions, retained regression owners,
 benchmark qualification and pause status. It doesn't approve unstarted later
 phases or a future merge tree.
+
+## Typed-expression Phase 5 repeated type and folding work
+
+Phase 5 runs from baseline `a24230c87` to the P5e resolution correction on
+`expression-refactor`. The matched comparison uses macOS arm64, Rust 1.99.0 and
+release `detailed_timers` binaries for both trees, alternating baseline and
+candidate five times per case with `RAYON_NUM_THREADS=1`, `MOTH_TIMERS=bench`
+and counters disabled. Both binaries check the same current inputs. Counters
+come from separate `detailed_timers benchmark_counters` builds with
+`MOTH_COUNTERS=summary`. Raw logs stay under `tmp/p5/`.
+
+### Stage timing medians (ms)
+
+| Case | check total | AST environment | AST emit | generated materialise |
+|---|---:|---:|---:|---:|
+| docs | 204.97 → 202.45 | 88.58 → 87.46 | 34.60 → 34.41 | — |
+| type stress | 6.03 → 5.85 | 0.29 → 0.28 | 0.72 → 0.67 | — |
+| fold stress | 5.33 → 5.18 | 1.41 → 1.37 | 0.28 → 0.26 | — |
+| environment stress | 4.13 → 4.15 | 0.31 → 0.29 | 0.28 → 0.26 | — |
+| template stress | 7.39 → 7.20 | 0.79 → 0.77 | 0.55 → 0.54 | — |
+| generic scaling 20 | 22.24 → 15.94 | 0.20 → 0.18 | 1.20 → 1.10 | 12.46 → 6.39 |
+| generic scaling 40 | 45.88 → 34.16 | 0.25 → 0.24 | 2.09 → 1.95 | 27.22 → 15.53 |
+| generic scaling 80 | 107.54 → 84.31 | 0.36 → 0.35 | 3.83 → 3.55 | 64.10 → 41.47 |
+| generic scaling 160 | 301.56 → 250.87 | 0.58 → 0.58 | 7.24 → 6.74 | 173.19 → 126.33 |
+| constant chain 512 | 5.68 → 5.68 | 2.27 → 2.30 | 0.08 → 0.08 | — |
+| code highlighter stress | 3.46 → 3.53 | 0.81 → 0.85 | 0.05 → 0.05 | — |
+| one-module kitchen sink | 9.46 → 8.95 | 0.38 → 0.36 | 0.52 → 0.48 | 0.39 → 0.20 |
+
+Generic scaling gains come from sharing the generated external registry and
+building call expectations once per call. Sub-millisecond rows move within
+run-to-run spread; a 15-pair rerun puts fold stress at 5.25 → 5.22 ms.
+
+### Counters
+
+| Counter | docs | type stress | environment stress | generic scaling 160 |
+|---|---:|---:|---:|---:|
+| external package registry clones | 3 → 3 | 1 → 1 | 1 → 1 | 801 → 1 |
+| external function definition clones | 624 → 624 | 208 → 208 | 208 → 208 | 166,608 → 208 |
+| external ABI parameter clones | 1,365 → 1,365 | 455 → 455 | 455 → 455 | 364,455 → 455 |
+| constructor field views | 3 → 3 | 52 → 45 | 3 → 3 | 800 → 800 |
+| visible type lookups | 11 → 11 | 48 → 48 | 123 → 121 | 347 → 347 |
+| scope contexts | 5,030 → 5,032 | 391 → 391 | 262 → 262 | 4,835 → 4,835 |
+| type-resolution calls | 530 → 501 | 545 → 388 | 319 → 289 | 2,125 → 2,286 |
+
+Type-resolution calls now count each recursive authored-type node rather than
+each `DataType` resolution, so that row is not a like-for-like work measure.
+Direct `ParsedTypeRef` resolution first raised visible lookups and scope
+contexts. Final member and signature passes now reuse the TypeId their shell
+pass just resolved, unless generic, applied or capacity syntax needs the fuller
+context, which restores both counts. TIR fold, constant and HIR constant
+counters are unchanged.
+
+### Retained and declined work
+
+- Retained: shared call-site descriptors and registry; direct
+  `ParsedTypeRef` → `TypeId` resolution with `DataType` deleted; AST-selected
+  range domains consumed by HIR, const template folding and failure
+  classification; ownership-only TIR clone and string-interning fixes. Type
+  deletion and TIR ownership changes are performance-neutral simplifications.
+- Constant lookups already return `ConstValueId` handles over a shared module
+  base, and HIR lowers constants directly from the module store.
+- Declined: per-detach, per-instance and HIR per-use constant memos (new memo
+  tables); a resolver validate+fold fusion that kept the old walk as fallback
+  for about 0.28 ms on docs; an `Rc` store wrapper replacing O(1) store takes; a
+  sorted closure merge relying on `PathId` order across fork remaps; a static-if
+  pre-scan duplicating the specialisation walker for about 0.06 ms; a counted
+  handoff-injection move and a moved copy cursor that added invariants or
+  changed error-path state without measured cost.
