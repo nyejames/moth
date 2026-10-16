@@ -22,7 +22,7 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidMapTypeReason, InvalidTypeAnnotationReason,
 };
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
-use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
+use crate::compiler_frontend::datatypes::parsed::{ParsedCollectionCapacity, ParsedTypeRef};
 use crate::compiler_frontend::declaration_syntax::type_syntax::TypeAnnotationContext;
 use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counter};
 use crate::compiler_frontend::source::SourceSpan;
@@ -42,6 +42,64 @@ pub(crate) fn resolve_parsed_type_annotation(
 ) -> TypeResolutionResult<ResolvedTypeAnnotation> {
     let type_id = resolve_parsed_type_ref(source_ref, span, context, string_table, scope_context)?;
     Ok(ResolvedTypeAnnotation { type_id })
+}
+
+/// Reuse a parser-resolved identity when the later phase has no additional resolution work.
+///
+/// WHAT: returns a retained `TypeId` only when its parsed syntax needs neither generic-context
+///       resolution, generic-bound validation, nor deferred constant-capacity folding.
+/// WHY: signature and member parsing already resolves ordinary annotations; resolving the same
+///      retained names again during environment registration repeats visible type lookups.
+pub(crate) fn reusable_type_id_for_parsed_ref(
+    source_ref: &ParsedTypeRef,
+    candidate: Option<TypeId>,
+    context: &TypeResolutionContext<'_>,
+) -> Option<TypeId> {
+    let type_id = candidate?;
+    if type_id == context.type_environment.builtins().none
+        || context.type_environment.get(type_id).is_none()
+        || parsed_type_ref_needs_late_resolution(source_ref, context)
+    {
+        return None;
+    }
+
+    Some(type_id)
+}
+
+fn parsed_type_ref_needs_late_resolution(
+    source_ref: &ParsedTypeRef,
+    context: &TypeResolutionContext<'_>,
+) -> bool {
+    match source_ref {
+        ParsedTypeRef::Inferred | ParsedTypeRef::This { .. } => true,
+        ParsedTypeRef::Named { name, .. } => context
+            .generic_parameters
+            .is_some_and(|scope| scope.contains_name(*name)),
+        ParsedTypeRef::Qualified { .. } => false,
+        ParsedTypeRef::Applied { .. } => true,
+        ParsedTypeRef::BuiltinBool { .. }
+        | ParsedTypeRef::BuiltinString { .. }
+        | ParsedTypeRef::BuiltinChar { .. }
+        | ParsedTypeRef::BuiltinFixedScalar { .. }
+        | ParsedTypeRef::BuiltinNumber { .. } => false,
+        ParsedTypeRef::Collection {
+            element,
+            fixed_capacity,
+            ..
+        } => {
+            matches!(
+                fixed_capacity,
+                Some(ParsedCollectionCapacity::BareConstant { .. })
+            ) || parsed_type_ref_needs_late_resolution(element, context)
+        }
+        ParsedTypeRef::Map { key, value, .. } => {
+            parsed_type_ref_needs_late_resolution(key, context)
+                || parsed_type_ref_needs_late_resolution(value, context)
+        }
+        ParsedTypeRef::Optional { inner, .. } => {
+            parsed_type_ref_needs_late_resolution(inner, context)
+        }
+    }
 }
 
 fn parsed_type_ref_span(source_ref: &ParsedTypeRef) -> Option<SourceSpan> {

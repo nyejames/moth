@@ -7,6 +7,7 @@ use crate::compiler_frontend::ast::statements::functions::{
 };
 use crate::compiler_frontend::ast::type_resolution::{
     TypeResolutionContext, TypeResolutionResult, resolve_parsed_type_annotation,
+    reusable_type_id_for_parsed_ref,
 };
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidReceiverDeclarationReason, InvalidThisUsageReason,
@@ -83,22 +84,31 @@ pub(crate) fn resolve_function_signature(
 
     for (parameter_index, parameter) in signature.parameters.iter().enumerate() {
         let type_id = if let Some(type_syntax) = &parameter.type_syntax {
-            resolve_parsed_type_annotation(
+            let type_id = if let Some(type_id) = reusable_type_id_for_parsed_ref(
                 type_syntax,
-                parameter.binding_span,
+                Some(parameter.type_id),
                 type_resolution_context,
-                string_table,
-                scope_context,
-            )?
-            .type_id
-            .filter(|type_id| *type_id != builtin_type_ids::NONE)
-            .ok_or_else(|| {
-                CompilerDiagnostic::invalid_type_annotation(
-                    TypeAnnotationContext::SignatureParameter,
-                    InvalidTypeAnnotationReason::NoneNotAllowed,
+            ) {
+                Some(type_id)
+            } else {
+                resolve_parsed_type_annotation(
+                    type_syntax,
                     parameter.binding_span,
-                )
-            })?
+                    type_resolution_context,
+                    string_table,
+                    scope_context,
+                )?
+                .type_id
+            };
+            type_id
+                .filter(|type_id| *type_id != builtin_type_ids::NONE)
+                .ok_or_else(|| {
+                    CompilerDiagnostic::invalid_type_annotation(
+                        TypeAnnotationContext::SignatureParameter,
+                        InvalidTypeAnnotationReason::NoneNotAllowed,
+                        parameter.binding_span,
+                    )
+                })?
         } else if parameter.type_id != builtin_type_ids::NONE
             && type_resolution_context
                 .type_environment
@@ -161,14 +171,22 @@ pub(crate) fn resolve_function_signature(
     let mut resolved_returns = Vec::with_capacity(signature.returns.len());
     for return_slot in &signature.returns {
         let type_id = if let Some(type_syntax) = &return_slot.type_syntax {
-            resolve_parsed_type_annotation(
+            if let Some(type_id) = reusable_type_id_for_parsed_ref(
                 type_syntax,
-                function_span,
+                return_slot.type_id,
                 type_resolution_context,
-                string_table,
-                scope_context,
-            )?
-            .type_id
+            ) {
+                Some(type_id)
+            } else {
+                resolve_parsed_type_annotation(
+                    type_syntax,
+                    function_span,
+                    type_resolution_context,
+                    string_table,
+                    scope_context,
+                )?
+                .type_id
+            }
         } else {
             return_slot.type_id
         }

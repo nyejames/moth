@@ -376,6 +376,7 @@ pub(crate) fn signature_member_to_declaration(
                 const_values,
                 string_table,
                 fallback_policy,
+                &diagnostic,
             )?
             .unwrap_or(builtin_type_ids::NONE);
             (type_id, false)
@@ -701,7 +702,14 @@ fn resolve_signature_type_fallback(
     const_values: &ConstValueStore,
     string_table: &mut StringTable,
     fallback_policy: SignatureTypeFallbackPolicy,
+    failure: &CompilerDiagnostic,
 ) -> SignatureResult<Option<TypeId>> {
+    // The first parse already attempted every lookup for an unknown name. This fallback can only
+    // defer it, so retrying the same syntax repeats lookups before the later scoped pass.
+    if matches!(&failure.payload, DiagnosticPayload::UnknownName { .. }) {
+        return Ok(None);
+    }
+
     match resolve_signature_type_annotation(
         type_annotation,
         span,
@@ -725,6 +733,7 @@ fn resolve_signature_type_fallback(
                 const_values,
                 string_table,
                 fallback_policy,
+                &diagnostic,
             )?
             else {
                 return Ok(None);

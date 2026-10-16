@@ -3,7 +3,7 @@
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::type_resolution::{
-    TypeResolutionContext, resolve_parsed_type_annotation,
+    TypeResolutionContext, resolve_parsed_type_annotation, reusable_type_id_for_parsed_ref,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
@@ -127,22 +127,33 @@ fn resolve_struct_field_type_shells(
         let mut resolved_field = field.to_owned();
 
         resolved_field.type_id = if let Some(type_syntax) = &field.type_syntax {
-            resolve_parsed_type_annotation(
+            let type_id = if let Some(type_id) = reusable_type_id_for_parsed_ref(
                 type_syntax,
-                field.binding_span,
+                Some(field.type_id),
                 type_resolution_context,
-                string_table,
-                scope_context,
-            )?
-            .type_id
-            .filter(|type_id| *type_id != type_resolution_context.type_environment.builtins().none)
-            .ok_or_else(|| {
-                CompilerDiagnostic::invalid_type_annotation(
-                    TypeAnnotationContext::DeclarationTarget,
-                    InvalidTypeAnnotationReason::NoneNotAllowed,
+            ) {
+                Some(type_id)
+            } else {
+                resolve_parsed_type_annotation(
+                    type_syntax,
                     field.binding_span,
-                )
-            })?
+                    type_resolution_context,
+                    string_table,
+                    scope_context,
+                )?
+                .type_id
+            };
+            type_id
+                .filter(|type_id| {
+                    *type_id != type_resolution_context.type_environment.builtins().none
+                })
+                .ok_or_else(|| {
+                    CompilerDiagnostic::invalid_type_annotation(
+                        TypeAnnotationContext::DeclarationTarget,
+                        InvalidTypeAnnotationReason::NoneNotAllowed,
+                        field.binding_span,
+                    )
+                })?
         } else if field.type_id != type_resolution_context.type_environment.builtins().none
             && type_resolution_context
                 .type_environment

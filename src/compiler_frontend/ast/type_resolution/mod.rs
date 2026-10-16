@@ -47,7 +47,7 @@ pub(crate) use context::{
     ResolvedTypeAlias, ResolvedTypeAnnotation, TypeResolutionContext, TypeResolutionContextInputs,
 };
 pub(crate) use maps::validate_map_key_type;
-pub(crate) use resolve_type::resolve_parsed_type_annotation;
+pub(crate) use resolve_type::{resolve_parsed_type_annotation, reusable_type_id_for_parsed_ref};
 pub(crate) use signatures::{intern_resolved_function_signature, resolve_function_signature};
 pub(crate) use struct_fields::{
     StructFieldResolutionError, resolve_struct_constructor_shell_types, resolve_struct_field_types,

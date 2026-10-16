@@ -65,12 +65,12 @@ pub(super) fn resolve_named_type_from_context(
     context: &mut TypeResolutionContext<'_>,
     string_table: &StringTable,
 ) -> TypeResolutionResult<Option<TypeId>> {
-    increment_ast_counter(AstCounter::VisibleTypeLookupAttempts);
-
     // 1) Generic parameter scope.
     if let Some(generic_scope) = context.generic_parameters
         && let Some(parameter) = generic_scope.resolve(type_name)
     {
+        increment_ast_counter(AstCounter::VisibleTypeLookupAttempts);
+
         if let Some(canonical_id) = parameter.canonical_id
             && let Some(substitutions) = context.generic_substitutions
             && let Some(concrete_type_id) = substitutions.get(&canonical_id).copied()
@@ -92,6 +92,9 @@ pub(super) fn resolve_named_type_from_context(
     if let Some(alias) = aliases::visible_type_alias_annotation(type_name, context) {
         return Ok(Some(alias.target_type_id));
     }
+
+    // Alias hits belong only to the alias counter, matching the previous fallback boundary.
+    increment_ast_counter(AstCounter::VisibleTypeLookupAttempts);
 
     // 3) Visible source declarations (path-based first, then name fallback).
     increment_ast_counter(AstCounter::VisibleSourceTypeLookupAttempts);
@@ -183,8 +186,6 @@ pub(super) fn resolve_namespaced_type_from_context(
     span: Option<SourceSpan>,
     context: &mut TypeResolutionContext<'_>,
 ) -> TypeResolutionResult<Option<TypeId>> {
-    increment_ast_counter(AstCounter::VisibleTypeLookupAttempts);
-
     let Some(root_name) = path.first().copied() else {
         return Err(CompilerDiagnostic::invalid_type_annotation(
             TypeAnnotationContext::DeclarationTarget,
@@ -203,6 +204,9 @@ pub(super) fn resolve_namespaced_type_from_context(
     {
         return Ok(Some(alias.target_type_id));
     }
+
+    // Qualified alias hits likewise do not enter the visible-member lookup.
+    increment_ast_counter(AstCounter::VisibleTypeLookupAttempts);
 
     let Some(visible_namespace_records) = context.visible_namespace_records else {
         return Err(CompilerDiagnostic::unknown_type_name(final_name, span));
