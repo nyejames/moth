@@ -6,13 +6,12 @@ use crate::compiler_frontend::ast::type_resolution::TypeResolutionResult;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticPayload, InvalidDeclarationReason,
 };
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_parameters::{
     GenericParameterList, GenericParameterScope, TypeParameterId,
 };
-use crate::compiler_frontend::datatypes::ids::GenericParameterId;
+use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId, builtin_type_ids};
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
 use crate::compiler_frontend::external_packages::ExternalSymbolId;
 use crate::compiler_frontend::headers::binding_environment::SourceDeclarationTarget;
@@ -21,6 +20,98 @@ use crate::compiler_frontend::source::{SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use rustc_hash::{FxHashMap, FxHashSet};
+
+// ---------------------------
+//  Type Parameter Collection
+// ---------------------------
+
+pub(crate) fn collect_type_parameter_ids_from_type(
+    type_id: TypeId,
+    canonical_by_local: &FxHashMap<TypeParameterId, GenericParameterId>,
+    type_environment: &TypeEnvironment,
+    used_parameters: &mut FxHashSet<TypeParameterId>,
+) {
+    if type_id == builtin_type_ids::NONE {
+        return;
+    }
+
+    match type_environment.get(type_id) {
+        Some(TypeDefinition::GenericParameter(parameter)) => {
+            if let Some((local_id, _)) = canonical_by_local
+                .iter()
+                .find(|(_, canonical_id)| **canonical_id == parameter.id)
+            {
+                used_parameters.insert(*local_id);
+            }
+        }
+
+        Some(TypeDefinition::Constructed(constructed)) => {
+            for argument in &constructed.arguments {
+                collect_type_parameter_ids_from_type(
+                    *argument,
+                    canonical_by_local,
+                    type_environment,
+                    used_parameters,
+                );
+            }
+        }
+
+        Some(TypeDefinition::GenericInstance(instance)) => {
+            for argument in &instance.arguments {
+                collect_type_parameter_ids_from_type(
+                    *argument,
+                    canonical_by_local,
+                    type_environment,
+                    used_parameters,
+                );
+            }
+        }
+
+        Some(
+            TypeDefinition::Builtin(_)
+            | TypeDefinition::Struct(_)
+            | TypeDefinition::Choice(_)
+            | TypeDefinition::Function(_)
+            | TypeDefinition::External(_)
+            | TypeDefinition::AnonymousConstRecordMarker,
+        )
+        | None => {}
+    }
+}
+
+pub(crate) fn collect_type_parameter_ids_from_declarations(
+    declarations: &[Declaration],
+    canonical_by_local: &FxHashMap<TypeParameterId, GenericParameterId>,
+    type_environment: &TypeEnvironment,
+    used_parameters: &mut FxHashSet<TypeParameterId>,
+) {
+    for declaration in declarations {
+        collect_type_parameter_ids_from_type(
+            declaration.type_id,
+            canonical_by_local,
+            type_environment,
+            used_parameters,
+        );
+    }
+}
+
+pub(crate) fn collect_type_parameter_ids_from_choice_variants(
+    variants: &[ChoiceVariant],
+    canonical_by_local: &FxHashMap<TypeParameterId, GenericParameterId>,
+    type_environment: &TypeEnvironment,
+    used_parameters: &mut FxHashSet<TypeParameterId>,
+) {
+    for variant in variants {
+        if let ChoiceVariantPayload::Record { fields } = &variant.payload {
+            collect_type_parameter_ids_from_declarations(
+                fields,
+                canonical_by_local,
+                type_environment,
+                used_parameters,
+            );
+        }
+    }
+}
 
 // ----------------------------
 //  Generic Parameter Handling
@@ -156,54 +247,4 @@ pub(crate) fn validate_generic_parameters_used(
     }
 
     Ok(())
-}
-
-// ---------------------------
-//  Type Parameter Collection
-// ---------------------------
-
-pub(crate) fn collect_type_parameter_ids_from_type(
-    data_type: &DataType,
-    used_parameters: &mut FxHashSet<TypeParameterId>,
-) {
-    match data_type {
-        // Direct type-parameter reference.
-        DataType::TypeParameter { id, .. } => {
-            used_parameters.insert(*id);
-        }
-
-        // Container types — recurse into inner types.
-        DataType::GenericInstance { arguments, .. } => {
-            for argument in arguments {
-                collect_type_parameter_ids_from_type(argument, used_parameters);
-            }
-        }
-
-        DataType::Option(inner) => collect_type_parameter_ids_from_type(inner, used_parameters),
-
-        // Record-like shapes — fields and variants.
-        DataType::Struct { .. } | DataType::Choices { .. } => {}
-
-        _ => {}
-    }
-}
-
-pub(crate) fn collect_type_parameter_ids_from_declarations(
-    declarations: &[Declaration],
-    used_parameters: &mut FxHashSet<TypeParameterId>,
-) {
-    for declaration in declarations {
-        collect_type_parameter_ids_from_type(&declaration.diagnostic_type, used_parameters);
-    }
-}
-
-pub(crate) fn collect_type_parameter_ids_from_choice_variants(
-    variants: &[ChoiceVariant],
-    used_parameters: &mut FxHashSet<TypeParameterId>,
-) {
-    for variant in variants {
-        if let ChoiceVariantPayload::Record { fields } = &variant.payload {
-            collect_type_parameter_ids_from_declarations(fields, used_parameters);
-        }
-    }
 }

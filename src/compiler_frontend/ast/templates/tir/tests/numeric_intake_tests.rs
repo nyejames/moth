@@ -35,7 +35,6 @@ use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrStore,
 };
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarationTable};
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
@@ -580,7 +579,7 @@ fn bound_range_headers_are_isolated_by_body_domain_and_copies_keep_their_row() {
                 Declaration {
                     id: outer_counter_path,
                     type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-                    diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+                    type_syntax: None,
                     value_mode: ValueMode::ImmutableOwned,
                     value: DeclarationValue::Initializer(value),
                     binding_span: None,
@@ -779,7 +778,7 @@ fn bound_range_completion_inspects_each_pending_header_once() {
                             Declaration {
                                 id: path,
                                 type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-                                diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+                                type_syntax: None,
                                 value_mode: ValueMode::ImmutableOwned,
                                 value: DeclarationValue::Initializer(value),
                                 binding_span: None,

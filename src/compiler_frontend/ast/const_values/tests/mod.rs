@@ -14,7 +14,6 @@ use crate::compiler_frontend::ast::expressions::expression_types::{
     ConstRecordState, ConstValueKind,
 };
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -117,7 +116,7 @@ impl Fixture {
         Declaration {
             id: self.path("local"),
             type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-            diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+            type_syntax: None,
             value_mode: if mutable {
                 ValueMode::MutableOwned
             } else {

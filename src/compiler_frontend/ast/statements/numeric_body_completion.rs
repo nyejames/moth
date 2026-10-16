@@ -84,7 +84,6 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidAssignmentTargetReason, TypeMismatchContext, ValueReceiverContext,
 };
-use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -527,12 +526,7 @@ impl Completion<'_, '_> {
                         accept_forward_binding_result(&mut state, binding, computed, recipe_span)?;
                     }
                     let value = self.coerce_to_binding_annotation(binding, value)?;
-                    let declaration = declaration_for(
-                        &row,
-                        value,
-                        self.expression_builder,
-                        self.type_interner.environment(),
-                    )?;
+                    let declaration = declaration_for(&row, value, self.expression_builder)?;
                     ResolvedBinding::new(
                         self.expression_builder.view_owned(value)?.value_type_id()?,
                         declaration,
@@ -565,12 +559,7 @@ impl Completion<'_, '_> {
                         accept_forward_binding_result(&mut state, binding, computed, recipe_span)?;
                     }
                     let value = self.coerce_to_binding_annotation(binding, value)?;
-                    let declaration = declaration_for(
-                        &row,
-                        value,
-                        self.expression_builder,
-                        self.type_interner.environment(),
-                    )?;
+                    let declaration = declaration_for(&row, value, self.expression_builder)?;
                     ResolvedBinding::new(
                         self.expression_builder.view_owned(value)?.value_type_id()?,
                         declaration,
@@ -596,7 +585,7 @@ impl Completion<'_, '_> {
                     self.range_specs[binding.as_usize()] = Some(spec);
                     let resolved = ResolvedBinding::new(
                         computed,
-                        absent_declaration(&row, computed, self.type_interner.environment()),
+                        absent_declaration(&row, computed),
                         self.expression_builder,
                     )?;
                     // A template range header bound to this counter installs its finished spec
@@ -609,7 +598,7 @@ impl Completion<'_, '_> {
                     let type_id = self.resolve_multi_bind_slot(binding, producers)?;
                     ResolvedBinding::new(
                         type_id,
-                        absent_declaration(&row, type_id, self.type_interner.environment()),
+                        absent_declaration(&row, type_id),
                         self.expression_builder,
                     )?
                 }
@@ -629,12 +618,7 @@ impl Completion<'_, '_> {
                         )?
                     };
                     let value = self.coerce_to_binding_annotation(binding, value)?;
-                    let declaration = declaration_for(
-                        &row,
-                        value,
-                        self.expression_builder,
-                        self.type_interner.environment(),
-                    )?;
+                    let declaration = declaration_for(&row, value, self.expression_builder)?;
                     ResolvedBinding::new(
                         self.expression_builder.view_owned(value)?.value_type_id()?,
                         declaration,
@@ -656,7 +640,7 @@ impl Completion<'_, '_> {
                     };
                     ResolvedBinding::new(
                         type_id,
-                        absent_declaration(&row, type_id, self.type_interner.environment()),
+                        absent_declaration(&row, type_id),
                         self.expression_builder,
                     )?
                 }
@@ -676,7 +660,7 @@ impl Completion<'_, '_> {
                     };
                     ResolvedBinding::new(
                         type_id,
-                        absent_declaration(&row, type_id, self.type_interner.environment()),
+                        absent_declaration(&row, type_id),
                         self.expression_builder,
                     )?
                 }
@@ -2738,15 +2722,11 @@ impl<'a, 'env> DeferredExpressionCompletion<'env> for Completion<'a, 'env> {
 /// WHY: range counters and inferred multi-bind targets are visible before their owning
 ///      continuation is emitted, but their values are either implicit or installed at another
 ///      authored position; neither needs a fabricated initializer.
-fn absent_declaration(
-    row: &PendingBindingRow,
-    type_id: TypeId,
-    environment: &crate::compiler_frontend::datatypes::environment::TypeEnvironment,
-) -> Declaration {
+fn absent_declaration(row: &PendingBindingRow, type_id: TypeId) -> Declaration {
     Declaration {
         id: row.path,
         type_id,
-        diagnostic_type: diagnostic_type_spelling(type_id, environment),
+        type_syntax: None,
         value_mode: row.value_mode,
         value: DeclarationValue::Absent,
         binding_span: row.binding_span,
@@ -2758,7 +2738,6 @@ fn declaration_for(
     row: &PendingBindingRow,
     value: OwnedExpr,
     expressions: &mut AstExpressionBuilder,
-    environment: &crate::compiler_frontend::datatypes::environment::TypeEnvironment,
 ) -> Result<Declaration, ExpressionParseError> {
     // Reuse unchanged occurrence metadata; changed access belongs to an isolated replacement.
     let expression = expressions.view_owned(value)?;
@@ -2773,7 +2752,7 @@ fn declaration_for(
     Ok(Declaration {
         id: row.path,
         type_id,
-        diagnostic_type: diagnostic_type_spelling(type_id, environment),
+        type_syntax: None,
         value_mode: row.value_mode,
         value: DeclarationValue::Initializer(value.id()),
         binding_span: row.binding_span,

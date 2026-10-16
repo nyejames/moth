@@ -28,7 +28,7 @@ use crate::compiler_frontend::ast::templates::template::TemplateConstValueKind;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::type_resolution::{
     ResolvedTypeAnnotation, TypeResolutionContext, TypeResolutionContextInputs,
-    resolve_diagnostic_type_to_type_id, resolve_parsed_type_annotation,
+    resolve_parsed_type_annotation,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
@@ -36,14 +36,12 @@ use crate::compiler_frontend::compiler_messages::{
     InvalidCollectionTypeReason, InvalidTemplateStructureReason, NameNamespace,
     TypeMismatchContext,
 };
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::signature_members::{
     FunctionSignatureSyntax, ReturnChannelSyntax, ReturnSlotSyntax, SignatureMemberSyntax,
 };
-use crate::compiler_frontend::declaration_syntax::type_syntax::parsed_ref_to_data_type;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -65,24 +63,31 @@ pub enum ReturnChannel {
     Error,
 }
 
-/// Parsed return slot with a value shape, optional resolved type, and channel discriminator.
+/// Signature return slot before its authored type annotation is resolved.
+pub(crate) struct UnresolvedReturnSlot {
+    pub(crate) type_id: Option<TypeId>,
+    /// Authored syntax is needed only while the containing signature is resolved.
+    pub(crate) type_syntax: Option<ParsedTypeRef>,
+    pub(crate) channel: ReturnChannel,
+}
+
+/// Resolved signature return slot with canonical identity and channel.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ReturnSlot {
-    pub value: DataType,
-    /// Canonical `TypeId` for this return slot, populated during type resolution.
-    /// `None` before resolution; `Some` afterwards.
+    /// Canonical `TypeId` for this return slot when the contract is complete.
     pub type_id: Option<TypeId>,
     pub channel: ReturnChannel,
 }
 
-impl ReturnSlot {
-    pub fn success(value: DataType) -> Self {
-        Self {
-            value,
-            type_id: None,
-            channel: ReturnChannel::Success,
-        }
-    }
+/// Callable parameter facts retained only until its authored annotation is resolved.
+pub(crate) struct UnresolvedFunctionParameter {
+    pub(crate) id: PathId,
+    pub(crate) type_id: TypeId,
+    /// Authored syntax is needed only while the containing signature is resolved.
+    pub(crate) type_syntax: Option<ParsedTypeRef>,
+    pub(crate) value_mode: ValueMode,
+    pub(crate) default: Option<ConstValueId>,
+    pub(crate) binding_span: Option<SourceSpan>,
 }
 
 /// Canonical callable parameter contract. Defaults retain content, not executable roots.
@@ -90,10 +95,22 @@ impl ReturnSlot {
 pub struct FunctionParameter {
     pub id: PathId,
     pub type_id: TypeId,
-    pub diagnostic_type: DataType,
     pub value_mode: ValueMode,
     pub default: Option<ConstValueId>,
     pub binding_span: Option<SourceSpan>,
+}
+
+/// Short-lived signature shell that owns parsed annotations until type resolution finishes.
+pub(crate) struct UnresolvedFunctionSignature {
+    pub(crate) parameters: Vec<UnresolvedFunctionParameter>,
+    pub(crate) returns: Vec<UnresolvedReturnSlot>,
+}
+
+/// Resolved callable contract containing canonical types but no authored type syntax.
+#[derive(Clone, Debug, Default)]
+pub struct FunctionSignature {
+    pub parameters: Vec<FunctionParameter>,
+    pub returns: Vec<ReturnSlot>,
 }
 
 impl FunctionParameter {
@@ -107,7 +124,7 @@ impl FunctionParameter {
         Declaration {
             id: self.id,
             type_id: self.type_id,
-            diagnostic_type: self.diagnostic_type.clone(),
+            type_syntax: None,
             value_mode: self.value_mode,
             value: match self.default {
                 Some(default) => DeclarationValue::Default(default),
@@ -117,12 +134,6 @@ impl FunctionParameter {
             config_qualifier: None,
         }
     }
-}
-
-#[derive(Clone, Debug, Default)]
-pub struct FunctionSignature {
-    pub parameters: Vec<FunctionParameter>,
-    pub returns: Vec<ReturnSlot>,
 }
 
 /// Transient consumer-local signature facts, with ordered success slots separate from the error.
@@ -151,21 +162,6 @@ pub(crate) enum SignatureDefaultMode {
 }
 
 impl FunctionSignature {
-    pub fn success_returns(&self) -> Vec<&DataType> {
-        self.returns
-            .iter()
-            .filter(|slot| slot.channel == ReturnChannel::Success)
-            .map(|slot| &slot.value)
-            .collect()
-    }
-
-    pub fn error_return(&self) -> Option<&DataType> {
-        self.returns
-            .iter()
-            .find(|slot| slot.channel == ReturnChannel::Error)
-            .map(|slot| &slot.value)
-    }
-
     /// Canonical TypeIds for success-channel return slots.
     /// Only meaningful after type resolution.
     pub fn success_return_type_ids(&self) -> Vec<TypeId> {
@@ -239,7 +235,7 @@ pub(crate) fn function_signature_from_syntax_with_unresolved_types(
     string_table: &mut StringTable,
     fallback_policy: SignatureTypeFallbackPolicy,
     path_fork: &mut PathInternerFork,
-) -> SignatureResult<FunctionSignature> {
+) -> SignatureResult<UnresolvedFunctionSignature> {
     let mut parameters = Vec::with_capacity(syntax.parameters.len());
     for parameter in &syntax.parameters {
         let declaration = signature_member_to_declaration(
@@ -255,10 +251,10 @@ pub(crate) fn function_signature_from_syntax_with_unresolved_types(
             path_fork,
             TypeMismatchContext::Declaration,
         )?;
-        parameters.push(FunctionParameter {
+        parameters.push(UnresolvedFunctionParameter {
             id: declaration.id,
             type_id: declaration.type_id,
-            diagnostic_type: declaration.diagnostic_type,
+            type_syntax: declaration.type_syntax,
             value_mode: declaration.value_mode,
             default: declaration.value.default(),
             binding_span: declaration.binding_span,
@@ -277,9 +273,51 @@ pub(crate) fn function_signature_from_syntax_with_unresolved_types(
         )?);
     }
 
-    Ok(FunctionSignature {
+    Ok(UnresolvedFunctionSignature {
         parameters,
         returns,
+    })
+}
+
+/// Build an unresolved return slot from parsed syntax.
+fn return_slot_from_syntax(
+    return_slot: &ReturnSlotSyntax,
+    expression_context: &ScopeContext,
+    type_interner: &mut AstTypeInterner<'_>,
+    const_values: &ConstValueStore,
+    string_table: &mut StringTable,
+    fallback_policy: SignatureTypeFallbackPolicy,
+) -> SignatureResult<UnresolvedReturnSlot> {
+    let channel = match return_slot.channel {
+        ReturnChannelSyntax::Success => ReturnChannel::Success,
+        ReturnChannelSyntax::Error => ReturnChannel::Error,
+    };
+
+    let resolved = resolve_signature_type_annotation(
+        &return_slot.value.type_annotation,
+        return_slot.value.span,
+        expression_context,
+        type_interner,
+        const_values,
+        string_table,
+    );
+
+    let type_id = match resolved {
+        Ok(annotation) => annotation.type_id,
+        Err(ExpressionParseError::Diagnostic(diagnostic))
+            if should_fallback_signature_type(&diagnostic, fallback_policy) =>
+        {
+            // Generic return types may be resolved later once the function's
+            // declaration-site generic parameter scope is active.
+            None
+        }
+        Err(diagnostic) => return Err(diagnostic),
+    };
+
+    Ok(UnresolvedReturnSlot {
+        type_id,
+        type_syntax: Some(return_slot.value.type_annotation.clone()),
+        channel,
     })
 }
 
@@ -301,7 +339,7 @@ pub(crate) fn signature_member_to_declaration(
     mismatch_context: TypeMismatchContext,
 ) -> SignatureResult<Declaration> {
     let resolved = resolve_signature_type_annotation(
-        member.type_annotation.clone(),
+        &member.type_annotation,
         member.span,
         expression_context,
         type_interner,
@@ -318,25 +356,29 @@ pub(crate) fn signature_member_to_declaration(
     // Coerce only when the annotation resolved to some other type. Treating every
     // `Some` as a resolved destination would normalise a default against `None`.
     // Generic names and unresolved capacities stay on the later resolution path.
-    let (type_id, data_type, destination_resolved) = match resolved {
+    let (type_id, destination_resolved) = match resolved {
         Ok(annotation) => {
             let type_id = annotation.type_id.unwrap_or(builtin_type_ids::NONE);
             let destination_resolved =
                 annotation.type_id.is_some() && type_id != builtin_type_ids::NONE;
-            (type_id, annotation.diagnostic_type, destination_resolved)
+            (type_id, destination_resolved)
         }
         Err(ExpressionParseError::Diagnostic(diagnostic))
             if should_fallback_signature_type(&diagnostic, fallback_policy) =>
         {
-            // `resolve_diagnostic_type_to_type_id` returns `builtins().none` when
-            // the spelling is unresolved. That is `builtin_type_ids::NONE`, so
-            // this arm stays unresolved even though the stored id is present.
-            let data_type = parsed_ref_to_data_type(&member.type_annotation);
-            let type_id = resolve_diagnostic_type_to_type_id(
-                &data_type,
-                type_interner.environment_mut_for_derived_types(),
-            );
-            (type_id, data_type, false)
+            // Keep a useful semantic shape for constructor parsing while retaining the authored
+            // annotation for the later pass that can resolve its generic name or capacity.
+            let type_id = resolve_signature_type_fallback(
+                &member.type_annotation,
+                member.span,
+                expression_context,
+                type_interner,
+                const_values,
+                string_table,
+                fallback_policy,
+            )?
+            .unwrap_or(builtin_type_ids::NONE);
+            (type_id, false)
         }
         Err(diagnostic) => return Err(diagnostic),
     };
@@ -390,7 +432,7 @@ pub(crate) fn signature_member_to_declaration(
     Ok(Declaration {
         id: member.id,
         type_id,
-        diagnostic_type: data_type,
+        type_syntax: Some(member.type_annotation.clone()),
         value_mode: member.value_mode,
         value,
         binding_span: member_span,
@@ -572,7 +614,7 @@ fn signature_member_error_with_span(
 /// WHY: parameters, struct/choice member shells, and explicit return slots all share
 ///      the same fixed-capacity folding rules and alias visibility model.
 fn resolve_signature_type_annotation(
-    type_annotation: ParsedTypeRef,
+    type_annotation: &ParsedTypeRef,
     span: Option<SourceSpan>,
     expression_context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
@@ -646,6 +688,57 @@ fn should_fallback_signature_type(
     }
 }
 
+/// Resolve any useful partial semantic shape while preserving syntax for a deferred declaration.
+///
+/// Unknown nominal names have no TypeId yet. A collection with an unresolved capacity still has
+/// a useful element type, so use its growable shape for shell/default parsing and let the later
+/// strict pass resolve the authored capacity.
+fn resolve_signature_type_fallback(
+    type_annotation: &ParsedTypeRef,
+    span: Option<SourceSpan>,
+    expression_context: &ScopeContext,
+    type_interner: &mut AstTypeInterner<'_>,
+    const_values: &ConstValueStore,
+    string_table: &mut StringTable,
+    fallback_policy: SignatureTypeFallbackPolicy,
+) -> SignatureResult<Option<TypeId>> {
+    match resolve_signature_type_annotation(
+        type_annotation,
+        span,
+        expression_context,
+        type_interner,
+        const_values,
+        string_table,
+    ) {
+        Ok(annotation) => Ok(annotation.type_id),
+        Err(ExpressionParseError::Diagnostic(diagnostic))
+            if should_fallback_signature_type(&diagnostic, fallback_policy) =>
+        {
+            let ParsedTypeRef::Collection { element, .. } = type_annotation else {
+                return Ok(None);
+            };
+            let Some(element_type_id) = resolve_signature_type_fallback(
+                element,
+                span,
+                expression_context,
+                type_interner,
+                const_values,
+                string_table,
+                fallback_policy,
+            )?
+            else {
+                return Ok(None);
+            };
+            Ok(Some(
+                type_interner
+                    .environment_mut_for_derived_types()
+                    .intern_collection(element_type_id, None),
+            ))
+        }
+        Err(error) => Err(error),
+    }
+}
+
 /// Parse the default-value expression for a single signature parameter.
 #[allow(
     clippy::too_many_arguments,
@@ -705,51 +798,6 @@ fn parse_signature_default_expression(
         },
     );
     create_expression_with_trailing_newline_policy(input)
-}
-
-/// Build a `ReturnSlot` from parsed syntax.
-fn return_slot_from_syntax(
-    return_slot: &ReturnSlotSyntax,
-    expression_context: &ScopeContext,
-    type_interner: &mut AstTypeInterner<'_>,
-    const_values: &ConstValueStore,
-    string_table: &mut StringTable,
-    fallback_policy: SignatureTypeFallbackPolicy,
-) -> SignatureResult<ReturnSlot> {
-    let channel = match return_slot.channel {
-        ReturnChannelSyntax::Success => ReturnChannel::Success,
-        ReturnChannelSyntax::Error => ReturnChannel::Error,
-    };
-
-    let resolved = resolve_signature_type_annotation(
-        return_slot.value.type_annotation.clone(),
-        return_slot.value.span,
-        expression_context,
-        type_interner,
-        const_values,
-        string_table,
-    );
-
-    let (data_type, type_id) = match resolved {
-        Ok(annotation) => (annotation.diagnostic_type, annotation.type_id),
-        Err(ExpressionParseError::Diagnostic(diagnostic))
-            if should_fallback_signature_type(&diagnostic, fallback_policy) =>
-        {
-            // Generic return types may be resolved later once the function's
-            // declaration-site generic parameter scope is active.
-            (
-                parsed_ref_to_data_type(&return_slot.value.type_annotation),
-                None,
-            )
-        }
-        Err(diagnostic) => return Err(diagnostic),
-    };
-
-    Ok(ReturnSlot {
-        value: data_type,
-        type_id,
-        channel,
-    })
 }
 
 #[cfg(test)]

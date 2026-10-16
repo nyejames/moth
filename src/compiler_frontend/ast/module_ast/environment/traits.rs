@@ -7,8 +7,9 @@
 
 use super::builder::{AstModuleEnvironmentBuilder, DeclarationPassLanes};
 use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
 use crate::compiler_frontend::ast::statements::functions::{
-    FunctionSignature, SignatureTypeFallbackPolicy,
+    SignatureTypeFallbackPolicy, UnresolvedFunctionSignature,
     function_signature_from_syntax_with_unresolved_types,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
@@ -450,13 +451,14 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let requirement_span = source_span(header, requirement.span);
         let signature_syntax =
             signature_with_trait_this_as_parameter(&requirement.signature, this_name);
-        let unresolved_signature = self.unresolved_trait_requirement_signature(
-            header,
-            declaration,
-            &signature_syntax,
-            &visibility,
-            string_table,
-        )?;
+        let (unresolved_signature, signature_context) = self
+            .unresolved_trait_requirement_signature(
+                header,
+                declaration,
+                &signature_syntax,
+                &visibility,
+                string_table,
+            )?;
 
         let path_fork = self.path_fork as *const PathInternerFork;
         let mut type_resolution_context =
@@ -468,6 +470,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             &mut type_resolution_context,
             unsafe { &*path_fork },
             string_table,
+            Some(&signature_context),
         )
         .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
 
@@ -541,12 +544,10 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         signature_syntax: &FunctionSignatureSyntax,
         visibility: &Arc<FileVisibility>,
         string_table: &mut StringTable,
-    ) -> Result<FunctionSignature, CompilerMessages> {
+    ) -> Result<(UnresolvedFunctionSignature, ScopeContext), CompilerMessages> {
         // This parse is deliberately the permissive half of a two-step resolution: the caller
-        // re-resolves every parameter and return through `resolve_function_signature` with the
-        // generic parameter scope and trait environment this scope does not carry, overwriting
-        // both `diagnostic_type` and `type_id`. It still takes the caller's file visibility so
-        // the two steps disagree about nothing they can both see.
+        // resolves retained syntax again with the generic parameter scope and trait environment.
+        // Keep the same scope for constant-dependent capacities and file visibility.
         let signature_context = self
             .environment_header_scope(header, string_table)
             .with_file_visibility(Arc::clone(visibility));
@@ -608,7 +609,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             ));
         }
 
-        Ok(signature)
+        Ok((signature, signature_context))
     }
 
     fn validate_trait_conformance_references(

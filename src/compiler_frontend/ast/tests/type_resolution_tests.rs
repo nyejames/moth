@@ -1,8 +1,8 @@
-//! Type-resolution regression tests.
+//! Parsed type-resolution regression tests.
 //!
-//! WHAT: validates diagnostic-type syntax conversion into canonical type identity.
-//! WHY: these paths sit at the boundary between diagnostic type syntax and canonical
-//!      type identity; mistakes here produce misleading errors or silent wrong-types.
+//! WHAT: validates parsed type annotations, canonical semantic identities, and diagnostics.
+//! WHY: these paths sit at the boundary between authored syntax and canonical type identity;
+//!      mistakes here produce misleading errors or silent wrong-types.
 
 use crate::compiler_frontend::ast::ast_nodes::{Declaration, NodeKind};
 use crate::compiler_frontend::ast::ast_nodes::{DeclarationShell, DeclarationValue};
@@ -16,17 +16,14 @@ use crate::compiler_frontend::ast::expressions::expression_types::{
 };
 use crate::compiler_frontend::ast::module_ast::scope_context::{ContextKind, ScopeContext};
 use crate::compiler_frontend::ast::type_resolution::{
-    StructFieldResolutionError, TypeResolutionContext, resolve_diagnostic_type_to_type_id_checked,
-    resolve_diagnostic_type_to_type_id_opt, resolve_parsed_type_annotation,
+    StructFieldResolutionError, TypeResolutionContext, resolve_parsed_type_annotation,
     resolve_struct_field_types, validate_map_key_type,
 };
 use crate::compiler_frontend::ast::{Ast, TopLevelDeclarationTable};
 use crate::compiler_frontend::compiler_messages::{
-    DiagnosticPayload, DiagnosticToken, InvalidCollectionTypeReason, InvalidDeclarationReason,
-    InvalidMapTypeReason, InvalidTypeAnnotationReason, NameNamespace, NamespaceTypeValueMisuseKind,
-    TypeAnnotationContext,
+    DiagnosticPayload, InvalidCollectionTypeReason, InvalidDeclarationReason, InvalidMapTypeReason,
+    NameNamespace, NamespaceTypeValueMisuseKind,
 };
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::definitions::ChoiceVariantPayloadDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
@@ -49,7 +46,6 @@ use crate::compiler_frontend::synthetic_interface_provenance::{
 use crate::compiler_frontend::tests::parse_support::{
     parse_single_file_ast, parse_single_file_ast_diagnostic, parse_single_file_ast_result,
 };
-use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use crate::compiler_frontend::value_mode::ValueMode;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use rustc_hash::FxHashMap;
@@ -147,7 +143,7 @@ fn callable_shell_type_lookup_rejects_bare_and_qualified_annotations() {
         vec![Declaration {
             id: callable_path,
             type_id: builtin_type_ids::NONE,
-            diagnostic_type: DataType::Inferred,
+            type_syntax: None,
             value_mode: ValueMode::ImmutableReference,
             value: DeclarationValue::Shell(DeclarationShell::Function { receiver: None }),
             binding_span: None,
@@ -187,9 +183,14 @@ fn callable_shell_type_lookup_rejects_bare_and_qualified_annotations() {
                 span,
             }
         };
-        let diagnostic =
-            resolve_parsed_type_annotation(annotation, span, &mut context, &mut string_table, None)
-                .expect_err("an explicit callable annotation must not become inferred");
+        let diagnostic = resolve_parsed_type_annotation(
+            &annotation,
+            span,
+            &mut context,
+            &mut string_table,
+            None,
+        )
+        .expect_err("an explicit callable annotation must not become inferred");
 
         assert_eq!(diagnostic.identity().code, "MOTH-RULE-0067");
         assert_eq!(diagnostic.primary_span, span);
@@ -205,119 +206,148 @@ fn callable_shell_type_lookup_rejects_bare_and_qualified_annotations() {
 }
 
 // ---------------------------------------------------------------
-//  Checked / optional diagnostic-type-to-TypeId bridge tests
+//  Parsed annotation diagnostics
 // ---------------------------------------------------------------
-//
-// WHAT: prove that unresolved parse placeholders cannot silently
-//       fall back to builtin `none` in production paths.
-// WHY: the frontend type boundary cleanup removed unchecked
-//      `resolve_diagnostic_type_to_type_id` from constructor
-//      shells; these tests guard against regression.
 
 #[test]
-fn checked_conversion_rejects_inferred_type() {
-    let mut type_environment =
-        crate::compiler_frontend::datatypes::environment::TypeEnvironment::new();
-
-    let error = resolve_diagnostic_type_to_type_id_checked(
-        &DataType::Inferred,
-        &mut type_environment,
-        None,
-    )
-    .expect_err("checked conversion should reject Inferred placeholder");
-
-    assert!(
-        matches!(
-            &error.payload,
-            DiagnosticPayload::InvalidTypeAnnotation {
-                context: TypeAnnotationContext::DeclarationTarget,
-                reason: InvalidTypeAnnotationReason::ExpectedTypeAnnotation { found },
-            } if *found == DiagnosticToken::from_static_tag(TokenTag::EOF)
-        ),
-        "expected InvalidTypeAnnotation for Inferred, got {:?}",
-        error.payload
-    );
-}
-
-#[test]
-fn checked_conversion_rejects_unresolved_namespaced_type() {
+fn parsed_annotation_resolution_preserves_unresolved_authored_name() {
     let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    let mut type_environment =
-        crate::compiler_frontend::datatypes::environment::TypeEnvironment::new();
-
-    let namespace = string_table.intern("missing");
-    let name = string_table.intern("Type");
-
-    let error = resolve_diagnostic_type_to_type_id_checked(
-        &DataType::NamespacedType {
-            path: vec![namespace, name],
-        },
+    let path_fork = PathInternerFork::empty();
+    let const_values = ConstValueStore::default();
+    let declaration_table = Rc::new(TopLevelDeclarationTable::new(Vec::new(), &path_fork));
+    let mut type_environment = TypeEnvironment::new();
+    let mut context = TypeResolutionContext::from_declaration_table(
+        &declaration_table,
         &mut type_environment,
-        None,
-    )
-    .expect_err("checked conversion should reject unresolved namespaced type");
-
-    assert!(
-        matches!(
-            &error.payload,
-            DiagnosticPayload::UnknownName {
-                name: n,
-                namespace: NameNamespace::Type,
-            } if *n == name
-        ),
-        "expected UnknownName(type) for namespaced type, got {:?}",
-        error.payload
+        &const_values,
     );
-}
-
-#[test]
-fn optional_conversion_returns_none_for_unresolved_named_type() {
-    let mut string_table = StringTable::new();
-    let _path_fork = PathInternerFork::empty();
-    let mut type_environment =
-        crate::compiler_frontend::datatypes::environment::TypeEnvironment::new();
     let missing = string_table.intern("Missing");
+    let annotation = ParsedTypeRef::Named {
+        name: missing,
+        span: None,
+    };
 
-    let result = resolve_diagnostic_type_to_type_id_opt(
-        &DataType::NamedType(missing),
+    let diagnostic =
+        resolve_parsed_type_annotation(&annotation, None, &mut context, &mut string_table, None)
+            .expect_err("an unresolved authored name must remain a user-facing type error");
+
+    assert!(matches!(
+        &diagnostic.payload,
+        DiagnosticPayload::UnknownName {
+            name,
+            namespace: NameNamespace::Type,
+        } if *name == missing
+    ));
+}
+
+#[test]
+fn parsed_annotation_resolution_prefers_inner_spans_for_nested_unknown_types() {
+    let source =
+        "outer_collection {MissingCollection} = {1}\nouter_map {String = MissingMap} = {}\n";
+    let mut string_table = StringTable::new();
+    let path_fork = PathInternerFork::empty();
+    let const_values = ConstValueStore::default();
+    let declaration_table = Rc::new(TopLevelDeclarationTable::new(Vec::new(), &path_fork));
+    let mut type_environment = TypeEnvironment::new();
+    let mut context = TypeResolutionContext::from_declaration_table(
+        &declaration_table,
         &mut type_environment,
+        &const_values,
     );
 
+    let collection_name = string_table.intern("MissingCollection");
+    let collection = ParsedTypeRef::Collection {
+        element: Box::new(ParsedTypeRef::Named {
+            name: collection_name,
+            span: Some(expected_source_span(source, "MissingCollection")),
+        }),
+        span: Some(expected_source_span(source, "{MissingCollection}")),
+        fixed_capacity: None,
+    };
+    let collection_diagnostic = resolve_parsed_type_annotation(
+        &collection,
+        Some(expected_source_span(source, "outer_collection")),
+        &mut context,
+        &mut string_table,
+        None,
+    )
+    .expect_err("unknown collection elements should report their authored name");
+
+    assert_eq!(collection_diagnostic.identity().code, "MOTH-RULE-0035");
     assert_eq!(
-        result, None,
-        "optional conversion must return None for unresolved named type"
+        collection_diagnostic.primary_span,
+        Some(expected_source_span(source, "MissingCollection"))
+    );
+
+    let map_value_name = string_table.intern("MissingMap");
+    let map = ParsedTypeRef::Map {
+        key: Box::new(ParsedTypeRef::BuiltinString { span: None }),
+        value: Box::new(ParsedTypeRef::Named {
+            name: map_value_name,
+            span: Some(expected_source_span(source, "MissingMap")),
+        }),
+        span: Some(expected_source_span(source, "{String = MissingMap}")),
+    };
+    let map_diagnostic = resolve_parsed_type_annotation(
+        &map,
+        Some(expected_source_span(source, "outer_map")),
+        &mut context,
+        &mut string_table,
+        None,
+    )
+    .expect_err("unknown map values should report their authored name");
+
+    assert_eq!(map_diagnostic.identity().code, "MOTH-RULE-0035");
+    assert_eq!(
+        map_diagnostic.primary_span,
+        Some(expected_source_span(source, "MissingMap"))
     );
 }
 
 #[test]
-fn optional_conversion_returns_none_for_inferred_type() {
-    let mut type_environment =
-        crate::compiler_frontend::datatypes::environment::TypeEnvironment::new();
-
-    let result = resolve_diagnostic_type_to_type_id_opt(&DataType::Inferred, &mut type_environment);
-
-    assert_eq!(
-        result, None,
-        "optional conversion must return None for Inferred placeholder"
-    );
-}
-
-#[test]
-fn optional_conversion_returns_some_for_resolved_builtin() {
-    let mut type_environment =
-        crate::compiler_frontend::datatypes::environment::TypeEnvironment::new();
-
-    let result = resolve_diagnostic_type_to_type_id_opt(
-        &DataType::FixedScalar(FixedScalar::I32),
+fn parsed_annotation_resolution_rejects_unknown_qualified_type_name() {
+    let source = "source.QualifiedMissing";
+    let mut string_table = StringTable::new();
+    let mut path_fork = PathInternerFork::empty();
+    let namespace_name = string_table.intern("source");
+    let namespace_path = path_fork
+        .try_intern_portable_path("source", &mut string_table)
+        .expect("test path fits");
+    let missing_name = string_table.intern("QualifiedMissing");
+    let const_values = ConstValueStore::default();
+    let declaration_table = Rc::new(TopLevelDeclarationTable::new(Vec::new(), &path_fork));
+    let mut type_environment = TypeEnvironment::new();
+    let mut context = TypeResolutionContext::from_declaration_table(
+        &declaration_table,
         &mut type_environment,
+        &const_values,
     );
+    let namespace_records = FxHashMap::from_iter([(
+        namespace_name,
+        NamespaceRecord::empty(NamespaceRecordSource::SourceFile(namespace_path)),
+    )]);
+    context.visible_namespace_records = Some(&namespace_records);
+    let annotation = ParsedTypeRef::Qualified {
+        path: vec![namespace_name, missing_name],
+        span: Some(expected_source_span(source, "source.QualifiedMissing")),
+    };
 
+    let diagnostic =
+        resolve_parsed_type_annotation(&annotation, None, &mut context, &mut string_table, None)
+            .expect_err("an unknown qualified type name must be rejected");
+
+    assert_eq!(diagnostic.identity().code, "MOTH-RULE-0035");
     assert_eq!(
-        result,
-        Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
-        "optional conversion must return Some for resolved builtin"
+        diagnostic.primary_span,
+        Some(expected_source_span(source, "source.QualifiedMissing"))
     );
+    assert!(matches!(
+        diagnostic.payload,
+        DiagnosticPayload::UnknownName {
+            name,
+            namespace: NameNamespace::Type,
+        } if name == missing_name
+    ));
 }
 
 // ---------------------------------------------------------------
@@ -353,7 +383,7 @@ fn literal_capacity_resolves_to_fixed_collection() {
     };
 
     let resolved = resolve_parsed_type_annotation(
-        parsed,
+        &parsed,
         None,
         &mut resolution_context,
         &mut string_table,
@@ -403,7 +433,7 @@ fn constant_capacity_resolves_to_fixed_collection() {
     let constant_declaration = Declaration {
         id: capacity_path,
         type_id,
-        diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+        type_syntax: None,
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Default(value_id),
         binding_span: None,
@@ -436,7 +466,7 @@ fn constant_capacity_resolves_to_fixed_collection() {
     };
 
     let resolved = resolve_parsed_type_annotation(
-        parsed,
+        &parsed,
         None,
         &mut resolution_context,
         &mut string_table,
@@ -491,7 +521,7 @@ fn nested_fixed_collections_fold_both_capacities() {
     };
 
     let resolved = resolve_parsed_type_annotation(
-        outer,
+        &outer,
         None,
         &mut resolution_context,
         &mut string_table,
@@ -610,7 +640,7 @@ fn struct_field_default_inlines_slot_template_through_module_store() {
     let wrapper_declaration = Declaration {
         id: wrapper_path,
         type_id: builtin_type_ids::STRING,
-        diagnostic_type: DataType::StringSlice,
+        type_syntax: None,
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Default(wrapper_id),
         binding_span: None,
@@ -651,7 +681,7 @@ fn struct_field_default_inlines_slot_template_through_module_store() {
     let field = Declaration {
         id: field_path,
         type_id: builtin_type_ids::STRING,
-        diagnostic_type: DataType::StringSlice,
+        type_syntax: None,
         value_mode: ValueMode::ImmutableReference,
         value: DeclarationValue::Default(field_id),
         binding_span: None,
@@ -669,6 +699,7 @@ fn struct_field_default_inlines_slot_template_through_module_store() {
         &mut resolution_context,
         &mut string_table,
         &path_fork,
+        None,
     )
     .unwrap_or_else(|_| {
         panic!("slot-bearing const template should inline as a valid field default")
@@ -729,7 +760,7 @@ fn struct_field_constant_inlining_preserves_surrounding_provenance() {
     let constant = Declaration {
         id: constant_path,
         type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+        type_syntax: None,
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Default(constant_id),
         binding_span: None,
@@ -796,14 +827,7 @@ fn struct_field_constant_inlining_preserves_surrounding_provenance() {
             .try_intern_child(struct_path, string_table.intern("values"))
             .expect("test path fits"),
         type_id: collection_type_id,
-        diagnostic_type: DataType::GenericInstance {
-            base: crate::compiler_frontend::datatypes::generic_identity_bridge::GenericBaseType::Builtin(
-                crate::compiler_frontend::datatypes::generic_identity_bridge::BuiltinGenericType::Collection {
-                    fixed_capacity: None,
-                },
-            ),
-            arguments: vec![DataType::FixedScalar(FixedScalar::I32)],
-        },
+        type_syntax: None,
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Default(collection_default),
         binding_span: None,
@@ -816,6 +840,7 @@ fn struct_field_constant_inlining_preserves_surrounding_provenance() {
         &mut resolution_context,
         &mut string_table,
         &path_fork,
+        None,
     )
     .unwrap_or_else(|_| panic!("collection field default should resolve"));
 
@@ -1116,7 +1141,7 @@ fn map_type_resolves_for_supported_key() {
     };
 
     let resolved = resolve_parsed_type_annotation(
-        parsed,
+        &parsed,
         None,
         &mut resolution_context,
         &mut string_table,
@@ -1169,7 +1194,7 @@ fn map_type_rejects_unsupported_key() {
     };
 
     let error = resolve_parsed_type_annotation(
-        parsed,
+        &parsed,
         None,
         &mut resolution_context,
         &mut string_table,
@@ -1249,7 +1274,7 @@ fn map_type_rejects_excessive_inline_nesting() {
     };
 
     let error = resolve_parsed_type_annotation(
-        parsed,
+        &parsed,
         None,
         &mut resolution_context,
         &mut string_table,
@@ -1301,7 +1326,7 @@ fn map_type_allows_two_level_nesting() {
     };
 
     let resolved = resolve_parsed_type_annotation(
-        parsed,
+        &parsed,
         None,
         &mut resolution_context,
         &mut string_table,
@@ -1350,7 +1375,7 @@ fn struct_field_default_folds_above_i32_range_under_int64() {
     let limit_declaration = Declaration {
         id: limit_path,
         type_id: builtin_type_ids::fixed_scalar(FixedScalar::I64),
-        diagnostic_type: DataType::FixedScalar(FixedScalar::I64),
+        type_syntax: None,
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Default(limit_default),
         binding_span: None,
@@ -1413,7 +1438,7 @@ fn struct_field_default_folds_above_i32_range_under_int64() {
             .try_intern_child(struct_path, string_table.intern("total"))
             .expect("test path fits"),
         type_id: builtin_type_ids::fixed_scalar(FixedScalar::I64),
-        diagnostic_type: DataType::FixedScalar(FixedScalar::I64),
+        type_syntax: None,
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Default(sum_default),
         binding_span: None,
@@ -1431,6 +1456,7 @@ fn struct_field_default_folds_above_i32_range_under_int64() {
         &mut resolution_context,
         &mut string_table,
         &path_fork,
+        None,
     )
     .unwrap_or_else(|error| match error {
         StructFieldResolutionError::Diagnostic(diagnostic) => {
@@ -1485,7 +1511,7 @@ fn capacity_i32_boundary_is_rejected_above_range() {
         &const_values,
     );
     let resolved = resolve_parsed_type_annotation(
-        parsed(i64::from(i32::MAX)),
+        &parsed(i64::from(i32::MAX)),
         None,
         &mut boundary_context,
         &mut string_table,
@@ -1508,7 +1534,7 @@ fn capacity_i32_boundary_is_rejected_above_range() {
         &const_values,
     );
     let error = resolve_parsed_type_annotation(
-        parsed(i64::from(i32::MAX) + 1),
+        &parsed(i64::from(i32::MAX) + 1),
         None,
         &mut context,
         &mut string_table,

@@ -31,7 +31,6 @@ use crate::compiler_frontend::ast::templates::{
     OwnedRuntimeTemplateBody, OwnedRuntimeTemplateHandoff, OwnedRuntimeTemplateNode,
 };
 use crate::compiler_frontend::compiler_errors::ErrorType;
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
@@ -255,7 +254,7 @@ fn orphan_declaration(expressions: &mut AstExpressionBuilder) -> Declaration {
         Declaration {
             id: PathId::ROOT,
             type_id: TypeId(9999),
-            diagnostic_type: DataType::Bool,
+            type_syntax: None,
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Initializer(value),
             binding_span: None,

@@ -82,8 +82,8 @@ pub(crate) struct AstModuleLookups {
     pub(crate) choice_variant_shells_by_path: Rc<FxHashMap<PathId, Vec<ChoiceVariant>>>,
 
     // Semantic declaration classification.
-    // WHY: expression dispatch must distinguish functions, nominal types, constants, and values
-    // without branching on diagnostic-only `DataType` spelling.
+    // WHY: expression dispatch uses resolved declaration-kind records to distinguish functions,
+    //      nominal types, constants, and values.
     pub(crate) declaration_semantics: Rc<DeclarationSemanticTable>,
 
     // Generic declaration kinds.

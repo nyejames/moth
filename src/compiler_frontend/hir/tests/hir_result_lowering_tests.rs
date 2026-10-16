@@ -20,7 +20,6 @@ use crate::compiler_frontend::ast::statements::value_production::{
     ProducedValues,
     types::{ValueBlock, ValueIfBlock},
 };
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
@@ -1732,13 +1731,7 @@ fn multi_value_then_snapshots_earlier_scalar_before_later_mutation() {
         .try_intern_child(bump, string_table.intern("input"))
         .expect("test parameter path should fit");
     let scalar_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);
-    let bump_target = assignment_target(
-        &mut builder,
-        input,
-        DataType::FixedScalar(FixedScalar::I32),
-        scalar_type,
-        None,
-    );
+    let bump_target = assignment_target(&mut builder, input, scalar_type, None);
     let bump_value = i32_literal(
         &mut builder,
         &mut constants,

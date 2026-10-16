@@ -18,13 +18,12 @@ use crate::compiler_frontend::ast::ResolvedTraitSourceFact;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
 use crate::compiler_frontend::ast::statements::functions::{
-    FunctionParameter, FunctionSignature, ReturnSlot,
+    FunctionParameter, FunctionSignature, ReturnChannel, ReturnSlot,
 };
 use crate::compiler_frontend::ast::type_resolution::{
     ResolvedFunctionSignature, ResolvedTypeAlias,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, StructTypeDefinition,
@@ -127,13 +126,14 @@ fn resolved_free_signature(int_type_id: TypeId) -> ResolvedFunctionSignature {
     let parameter = FunctionParameter {
         id: PathId::ROOT,
         type_id: int_type_id,
-        diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
         value_mode: ValueMode::default(),
         default: None,
         binding_span: None,
     };
-    let mut return_slot = ReturnSlot::success(DataType::FixedScalar(FixedScalar::I32));
-    return_slot.type_id = Some(int_type_id);
+    let return_slot = ReturnSlot {
+        type_id: Some(int_type_id),
+        channel: ReturnChannel::Success,
+    };
     ResolvedFunctionSignature {
         receiver: None,
         signature: FunctionSignature {
@@ -147,7 +147,6 @@ fn receiver_signature(int_type_id: TypeId) -> FunctionSignature {
     let parameter = FunctionParameter {
         id: PathId::ROOT,
         type_id: int_type_id,
-        diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
         value_mode: ValueMode::default(),
         default: None,
         binding_span: None,
@@ -160,7 +159,6 @@ fn receiver_signature(int_type_id: TypeId) -> FunctionSignature {
 
 fn resolved_alias(target_type_id: TypeId) -> ResolvedTypeAlias {
     ResolvedTypeAlias {
-        diagnostic_type: DataType::Inferred,
         target_type_id,
         declaration_span: None,
     }
@@ -170,7 +168,7 @@ fn constant_declaration(type_id: TypeId, decl_path: PathId) -> Declaration {
     Declaration {
         id: decl_path,
         type_id,
-        diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+        type_syntax: None,
         value_mode: ValueMode::default(),
         value: DeclarationValue::PendingConstant,
         binding_span: None,

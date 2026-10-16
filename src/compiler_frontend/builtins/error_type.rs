@@ -10,8 +10,8 @@ use crate::compiler_frontend::ast::ast_nodes::{
     AstNode, Declaration, DeclarationShell, DeclarationValue, NodeKind,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::datatypes::{DataType, builtin_type_ids};
 use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -83,21 +83,11 @@ pub(crate) fn register_builtin_error_types(
     folded_defaults_by_field_path.insert(code_path, u32_field_default(0));
 
     let error_fields = vec![
-        required_field(
-            message_path,
-            DataType::StringSlice,
-            builtin_type_ids::STRING,
-            None,
-        ),
+        required_field(message_path, builtin_type_ids::STRING, None),
         defaulted_u32_field(code_path, None),
     ];
 
-    let declarations = vec![type_declaration(
-        error_path,
-        DataType::runtime_struct(error_path, builtin_type_ids::NONE),
-        builtin_type_ids::NONE,
-        None,
-    )];
+    let declarations = vec![type_declaration(error_path, builtin_type_ids::NONE, None)];
 
     let mut resolved_struct_fields_by_path = FxHashMap::default();
     resolved_struct_fields_by_path.insert(error_path, error_fields);
@@ -167,32 +157,22 @@ fn resolve_builtin_named_type(
     })
 }
 
-fn type_declaration(
-    id: PathId,
-    data_type: DataType,
-    type_id: TypeId,
-    span: Option<SourceSpan>,
-) -> Declaration {
+fn type_declaration(id: PathId, type_id: TypeId, span: Option<SourceSpan>) -> Declaration {
     Declaration {
         id,
         type_id,
-        diagnostic_type: data_type,
+        type_syntax: None,
         value_mode: ValueMode::ImmutableReference,
         value: DeclarationValue::Shell(DeclarationShell::Struct),
         binding_span: span,
         config_qualifier: None,
     }
 }
-fn required_field(
-    id: PathId,
-    data_type: DataType,
-    type_id: TypeId,
-    span: Option<SourceSpan>,
-) -> Declaration {
+fn required_field(id: PathId, type_id: TypeId, span: Option<SourceSpan>) -> Declaration {
     Declaration {
         id,
+        type_syntax: None,
         type_id,
-        diagnostic_type: data_type,
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: span,
@@ -206,7 +186,7 @@ fn defaulted_u32_field(id: PathId, span: Option<SourceSpan>) -> Declaration {
     Declaration {
         id,
         type_id: builtin_type_ids::fixed_scalar(FixedScalar::U32),
-        diagnostic_type: DataType::FixedScalar(FixedScalar::U32),
+        type_syntax: None,
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: span,

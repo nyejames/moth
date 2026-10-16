@@ -70,7 +70,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             let declaration = Declaration {
                 id: local_path,
                 type_id: function_type_id,
-                diagnostic_type: DataType::Inferred,
+                type_syntax: None,
                 value_mode: ValueMode::ImmutableReference,
                 value: DeclarationValue::Shell(DeclarationShell::Function { receiver: None }),
                 binding_span: None,
@@ -495,7 +495,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let mut parameters = Vec::with_capacity(parameter_surfaces.len());
         for (index, parameter) in parameter_surfaces.iter().enumerate() {
             let type_id = self.intern_imported_canonical_type(&parameter.type_identity)?;
-            let diagnostic_type = diagnostic_type_spelling(type_id, &self.type_environment);
             let name = parameter
                 .name
                 .as_deref()
@@ -517,7 +516,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     .try_intern_child(*function_path, name)
                     .expect("imported callable parameter path table exhausted"),
                 type_id,
-                diagnostic_type,
                 value_mode,
                 default,
                 binding_span: None,
@@ -528,18 +526,16 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let mut return_type_ids = Vec::new();
         for returned in return_surfaces {
             let type_id = self.intern_imported_canonical_type(&returned.type_identity)?;
-            let diagnostic_type = diagnostic_type_spelling(type_id, &self.type_environment);
-            let mut slot = ReturnSlot::success(diagnostic_type);
-            slot.type_id = Some(type_id);
-            returns.push(slot);
+            returns.push(ReturnSlot {
+                type_id: Some(type_id),
+                channel: ReturnChannel::Success,
+            });
             return_type_ids.push(type_id);
         }
 
         let error_return = if let Some(error_identity) = error_surface {
             let type_id = self.intern_imported_canonical_type(error_identity)?;
-            let diagnostic_type = diagnostic_type_spelling(type_id, &self.type_environment);
             returns.push(ReturnSlot {
-                value: diagnostic_type,
                 type_id: Some(type_id),
                 channel: ReturnChannel::Error,
             });

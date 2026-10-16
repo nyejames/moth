@@ -9,8 +9,7 @@ use super::environment::{DeclarationId, DeclarationPassLanes, TopLevelDeclaratio
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::ast_nodes::DeclarationShell;
 use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
-use crate::compiler_frontend::datatypes::DataType;
-use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
+use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::binding_mode::BindingMode;
 use crate::compiler_frontend::declaration_syntax::declaration_shell::DeclarationSyntax;
@@ -39,8 +38,8 @@ fn updates_existing_declaration_slot_without_reordering() {
 
     let mut table = TopLevelDeclarationTable::new(
         vec![
-            declaration(&first_path, DataType::Inferred),
-            declaration(&second_path, DataType::Bool),
+            declaration(&first_path, builtin_type_ids::NONE),
+            declaration(&second_path, builtin_type_ids::BOOL),
         ],
         &path_fork,
     );
@@ -48,13 +47,13 @@ fn updates_existing_declaration_slot_without_reordering() {
     let first_id = table
         .declaration_id_by_path(&first_path)
         .expect("existing declaration path should have an ID");
-    assert!(table.replace_by_id(first_id, declaration(&first_path, DataType::StringSlice),));
+    assert!(table.replace_by_id(first_id, declaration(&first_path, builtin_type_ids::STRING),));
 
     let declarations = table.iter().collect::<Vec<_>>();
     assert_eq!(declarations[0].id, first_path);
-    assert_eq!(declarations[0].diagnostic_type, DataType::StringSlice);
+    assert_eq!(declarations[0].type_id, builtin_type_ids::STRING);
     assert_eq!(declarations[1].id, second_path);
-    assert_eq!(declarations[1].diagnostic_type, DataType::Bool);
+    assert_eq!(declarations[1].type_id, builtin_type_ids::BOOL);
 
     let first_name = path_fork
         .component(first_path)
@@ -62,7 +61,7 @@ fn updates_existing_declaration_slot_without_reordering() {
     let by_name = table
         .get_visible_resolved_by_name(first_name, None)
         .expect("name lookup should see updated declaration");
-    assert_eq!(by_name.diagnostic_type, DataType::StringSlice);
+    assert_eq!(by_name.type_id, builtin_type_ids::STRING);
 }
 
 #[test]
@@ -96,7 +95,7 @@ fn stage3_order_assigns_ids_to_value_and_metadata_declarations() {
                 1,
                 &constant_path,
                 OrderedSemanticDeclarationKind::Constant,
-                Some(declaration(&constant_path, DataType::Bool)),
+                Some(declaration(&constant_path, builtin_type_ids::BOOL)),
             ),
             ordered_declaration(
                 2,
@@ -166,7 +165,7 @@ fn pending_constant_state_is_independent_of_declared_type() {
                 &constant_path,
                 OrderedSemanticDeclarationKind::Constant,
                 Some({
-                    let mut declaration = declaration(&constant_path, DataType::Bool);
+                    let mut declaration = declaration(&constant_path, builtin_type_ids::BOOL);
                     declaration.value = DeclarationValue::PendingConstant;
                     declaration
                 }),
@@ -177,7 +176,7 @@ fn pending_constant_state_is_independent_of_declared_type() {
                 &function_path,
                 OrderedSemanticDeclarationKind::Function,
                 Some({
-                    let mut declaration = declaration(&function_path, DataType::Bool);
+                    let mut declaration = declaration(&function_path, builtin_type_ids::BOOL);
                     declaration.value =
                         DeclarationValue::Shell(DeclarationShell::Function { receiver: None });
                     declaration
@@ -277,7 +276,7 @@ fn stage3_order_rejects_missing_and_unexpected_value_rows() {
             0,
             &alias_path,
             OrderedSemanticDeclarationKind::TypeAlias,
-            Some(declaration(&alias_path, DataType::Bool)),
+            Some(declaration(&alias_path, builtin_type_ids::BOOL)),
         )],
         Vec::new(),
         &path_fork,
@@ -321,7 +320,7 @@ fn stage3_order_rejects_non_dense_ids_and_mismatched_value_paths() {
             0,
             &record_path,
             OrderedSemanticDeclarationKind::Constant,
-            Some(declaration(&value_path, DataType::Bool)),
+            Some(declaration(&value_path, builtin_type_ids::BOOL)),
         )],
         Vec::new(),
         &path_fork,
@@ -348,7 +347,7 @@ fn compiler_owned_rows_reject_semantic_path_collisions() {
             OrderedSemanticDeclarationKind::TypeAlias,
             None,
         )],
-        vec![declaration(&path, DataType::Bool)],
+        vec![declaration(&path, builtin_type_ids::BOOL)],
         &path_fork,
     );
 
@@ -470,7 +469,7 @@ fn declaration_lanes_reject_mismatched_and_duplicate_header_associations() {
         0,
         &function_path,
         OrderedSemanticDeclarationKind::Constant,
-        Some(declaration(&function_path, DataType::Bool)),
+        Some(declaration(&function_path, builtin_type_ids::BOOL)),
     )];
     assert!(
         DeclarationPassLanes::from_stage3_order(std::slice::from_ref(&header), &kind_mismatch)
@@ -581,7 +580,7 @@ fn compiler_owned_and_appended_rows_follow_semantic_metadata_holes() {
         ],
         vec![
             function_shell(&start_path),
-            declaration(&builtin_path, DataType::Inferred),
+            declaration(&builtin_path, builtin_type_ids::NONE),
         ],
         &path_fork,
     )
@@ -602,7 +601,10 @@ fn compiler_owned_and_appended_rows_follow_semantic_metadata_holes() {
         3
     );
     let imported_id = table
-        .append_for_construction(declaration(&imported_path, DataType::Bool), &path_fork)
+        .append_for_construction(
+            declaration(&imported_path, builtin_type_ids::BOOL),
+            &path_fork,
+        )
         .expect("import projection should append through the table owner");
     assert_eq!(imported_id.index(), 4);
 }
@@ -618,9 +620,11 @@ fn appending_declaration_updates_path_and_name_indexes() {
         .try_intern_portable_path("appended", &mut string_table)
         .expect("test path fits");
 
-    let mut table =
-        TopLevelDeclarationTable::new(vec![declaration(&first_path, DataType::Bool)], &path_fork);
-    let appended = declaration(&appended_path, DataType::StringSlice);
+    let mut table = TopLevelDeclarationTable::new(
+        vec![declaration(&first_path, builtin_type_ids::BOOL)],
+        &path_fork,
+    );
+    let appended = declaration(&appended_path, builtin_type_ids::STRING);
 
     table
         .append_for_construction(appended, &path_fork)
@@ -631,8 +635,8 @@ fn appending_declaration_updates_path_and_name_indexes() {
         table
             .get_by_path(&appended_path)
             .expect("path index should include appended declaration")
-            .diagnostic_type,
-        DataType::StringSlice
+            .type_id,
+        builtin_type_ids::STRING
     );
     assert_eq!(
         table
@@ -648,7 +652,10 @@ fn appending_declaration_updates_path_and_name_indexes() {
     );
     assert!(
         table
-            .append_for_construction(declaration(&appended_path, DataType::Bool), &path_fork)
+            .append_for_construction(
+                declaration(&appended_path, builtin_type_ids::BOOL),
+                &path_fork
+            )
             .is_none()
     );
 }
@@ -664,32 +671,40 @@ fn flat_table_clone_keeps_replacements_and_appends_independent() {
         .try_intern_portable_path("appended", &mut string_table)
         .expect("test path fits");
 
-    let original =
-        TopLevelDeclarationTable::new(vec![declaration(&shared_path, DataType::Bool)], &path_fork);
+    let original = TopLevelDeclarationTable::new(
+        vec![declaration(&shared_path, builtin_type_ids::BOOL)],
+        &path_fork,
+    );
     let mut generated = original.clone();
 
     let shared_id = generated
         .declaration_id_by_path(&shared_path)
         .expect("copied declaration should have an ID");
-    assert!(generated.replace_by_id(shared_id, declaration(&shared_path, DataType::StringSlice),));
+    assert!(generated.replace_by_id(
+        shared_id,
+        declaration(&shared_path, builtin_type_ids::STRING),
+    ));
     generated
-        .append_for_construction(declaration(&appended_path, DataType::Bool), &path_fork)
+        .append_for_construction(
+            declaration(&appended_path, builtin_type_ids::BOOL),
+            &path_fork,
+        )
         .expect("generated copy should append a local declaration");
 
     assert_eq!(
         original
             .get_by_path(&shared_path)
             .expect("original declaration should remain present")
-            .diagnostic_type,
-        DataType::Bool
+            .type_id,
+        builtin_type_ids::BOOL
     );
     assert!(original.get_by_path(&appended_path).is_none());
     assert_eq!(
         generated
             .get_by_path(&shared_path)
             .expect("generated declaration should remain present")
-            .diagnostic_type,
-        DataType::StringSlice
+            .type_id,
+        builtin_type_ids::STRING
     );
     assert!(generated.get_by_path(&appended_path).is_some());
 }
@@ -728,7 +743,7 @@ fn flat_table_clones_preserve_metadata_ids_and_isolate_mutations() {
                 1,
                 &shared_path,
                 OrderedSemanticDeclarationKind::Constant,
-                Some(declaration(&shared_path, DataType::Bool)),
+                Some(declaration(&shared_path, builtin_type_ids::BOOL)),
             ),
             ordered_declaration(
                 2,
@@ -748,16 +763,22 @@ fn flat_table_clones_preserve_metadata_ids_and_isolate_mutations() {
     let shared_id = first
         .declaration_id_by_path(&shared_path)
         .expect("copied declaration should have an ID");
-    assert!(first.replace_by_id(shared_id, declaration(&shared_path, DataType::StringSlice),));
+    assert!(first.replace_by_id(
+        shared_id,
+        declaration(&shared_path, builtin_type_ids::STRING),
+    ));
     let first_id = first
-        .append_for_construction(declaration(&first_path, DataType::Bool), &path_fork)
+        .append_for_construction(declaration(&first_path, builtin_type_ids::BOOL), &path_fork)
         .expect("first copy should append one declaration");
     assert_eq!(first_id.index(), 3);
 
     let mut nested = first.clone();
-    assert!(nested.replace_by_id(shared_id, declaration(&shared_path, DataType::Inferred),));
+    assert!(nested.replace_by_id(shared_id, declaration(&shared_path, builtin_type_ids::NONE),));
     let nested_id = nested
-        .append_for_construction(declaration(&nested_path, DataType::Bool), &path_fork)
+        .append_for_construction(
+            declaration(&nested_path, builtin_type_ids::BOOL),
+            &path_fork,
+        )
         .expect("nested copy should append one declaration");
     assert_eq!(nested_id.index(), 4);
 
@@ -765,24 +786,24 @@ fn flat_table_clones_preserve_metadata_ids_and_isolate_mutations() {
         first
             .get_by_path(&shared_path)
             .expect("first replacement should remain visible")
-            .diagnostic_type,
-        DataType::StringSlice
+            .type_id,
+        builtin_type_ids::STRING
     );
     assert!(first.get_by_path(&nested_path).is_none());
     assert_eq!(
         sibling
             .get_by_path(&shared_path)
             .expect("sibling should retain the root declaration")
-            .diagnostic_type,
-        DataType::Bool
+            .type_id,
+        builtin_type_ids::BOOL
     );
     assert!(sibling.get_by_path(&first_path).is_none());
     assert_eq!(
         nested
             .get_by_path(&shared_path)
             .expect("nested replacement should be visible")
-            .diagnostic_type,
-        DataType::Inferred
+            .type_id,
+        builtin_type_ids::NONE
     );
     assert!(nested.get_by_path(&first_path).is_some());
     assert!(nested.get_by_path(&nested_path).is_some());
@@ -793,7 +814,7 @@ fn flat_table_clones_preserve_metadata_ids_and_isolate_mutations() {
         assert_eq!(nested.declaration_id_by_path(&path), Some(declaration_id));
         assert!(nested.get_by_id(declaration_id).is_none());
         assert!(nested.get_mut_by_id(declaration_id).is_none());
-        assert!(!nested.replace_by_id(declaration_id, declaration(&path, DataType::Bool)));
+        assert!(!nested.replace_by_id(declaration_id, declaration(&path, builtin_type_ids::BOOL)));
     }
 }
 
@@ -821,8 +842,8 @@ fn declaration_copy_counter_detects_flat_row_clones() {
         .expect("test path fits");
     let root = TopLevelDeclarationTable::new(
         vec![
-            declaration(&first_path, DataType::Bool),
-            declaration(&second_path, DataType::StringSlice),
+            declaration(&first_path, builtin_type_ids::BOOL),
+            declaration(&second_path, builtin_type_ids::STRING),
         ],
         &path_fork,
     );
@@ -860,15 +881,20 @@ fn flat_table_clones_count_existing_and_appended_slots() {
     let local_path = path_fork
         .try_intern_portable_path("local", &mut string_table)
         .expect("test path fits");
-    let root =
-        TopLevelDeclarationTable::new(vec![declaration(&shared_path, DataType::Bool)], &path_fork);
+    let root = TopLevelDeclarationTable::new(
+        vec![declaration(&shared_path, builtin_type_ids::BOOL)],
+        &path_fork,
+    );
     let mut generated = root.clone();
     let shared_id = generated
         .declaration_id_by_path(&shared_path)
         .expect("copied declaration should have an ID");
-    assert!(generated.replace_by_id(shared_id, declaration(&shared_path, DataType::StringSlice),));
+    assert!(generated.replace_by_id(
+        shared_id,
+        declaration(&shared_path, builtin_type_ids::STRING),
+    ));
     generated
-        .append_for_construction(declaration(&local_path, DataType::Bool), &path_fork)
+        .append_for_construction(declaration(&local_path, builtin_type_ids::BOOL), &path_fork)
         .expect("flat table should append a row");
 
     let generated_copy = generated.clone();
@@ -897,17 +923,11 @@ fn assert_counter(
     assert_eq!(actual, Some(expected), "unexpected value for {name}");
 }
 
-fn declaration(path: &PathId, data_type: DataType) -> Declaration {
-    let type_id = match data_type {
-        DataType::Bool => builtin_type_ids::BOOL,
-        DataType::StringSlice => builtin_type_ids::STRING,
-        DataType::Inferred => builtin_type_ids::NONE,
-        _ => panic!("unsupported declaration-table fixture type"),
-    };
+fn declaration(path: &PathId, type_id: TypeId) -> Declaration {
     Declaration {
         id: path.to_owned(),
         type_id,
-        diagnostic_type: data_type,
+        type_syntax: None,
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: None,
@@ -919,7 +939,7 @@ fn function_shell(path: &PathId) -> Declaration {
     Declaration {
         value: DeclarationValue::Shell(DeclarationShell::Function { receiver: None }),
         value_mode: ValueMode::ImmutableReference,
-        ..declaration(path, DataType::Inferred)
+        ..declaration(path, builtin_type_ids::NONE)
     }
 }
 

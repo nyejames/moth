@@ -18,8 +18,8 @@ use crate::compiler_frontend::ast::expressions::expression_store::{AstExpression
 use crate::compiler_frontend::ast::statements::functions::{
     FunctionSignature, ReturnChannel, ReturnSlot,
 };
+use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::{DataType, builtin_type_ids};
 use crate::compiler_frontend::external_packages::{
     CallTarget, ExternalAbiType, ExternalFunctionDef, ExternalFunctionLowerings, ExternalParameter,
     ExternalReturnSlot, ExternalSignatureType,
@@ -43,8 +43,8 @@ use crate::compiler_frontend::public_call_summary::FunctionReturnAliasSummary;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    assignment_target, function_node, make_test_variable, node, param_with_datatype,
-    reference_expr_with_datatype, symbol, test_if_branch_metadata, test_source_location,
+    assignment_target, function_node, immutable_reference_expr, make_test_variable, node,
+    param_with_type_id, symbol, test_if_branch_metadata, test_source_location,
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::{
     assert_borrow_error_kind, assert_invalid_mutable_access_reason, run_borrow_checker,
@@ -426,10 +426,9 @@ fn statement_terminator_and_value_facts_are_populated() {
             ),
             node(
                 NodeKind::If(
-                    reference_expr_with_datatype(
+                    immutable_reference_expr(
                         &mut expression_builder,
                         flag,
-                        DataType::Bool,
                         builtin_type_ids::BOOL,
                         test_source_location(3),
                     ),
@@ -438,7 +437,6 @@ fn statement_terminator_and_value_facts_are_populated() {
                             target: assignment_target(
                                 &mut expression_builder,
                                 x,
-                                DataType::FixedScalar(FixedScalar::I32),
                                 builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                 test_source_location(4),
                             ),
@@ -457,7 +455,6 @@ fn statement_terminator_and_value_facts_are_populated() {
                             target: assignment_target(
                                 &mut expression_builder,
                                 x,
-                                DataType::FixedScalar(FixedScalar::I32),
                                 builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                 test_source_location(5),
                             ),
@@ -671,7 +668,16 @@ fn statement_entry_state_reflects_last_use_reborrow_window() {
             test_source_location(2),
         ),
         node(
-            NodeKind::VariableDeclaration(make_test_variable(sink, reference_expr_with_datatype(&mut expression_builder, first_ref, DataType::FixedScalar(FixedScalar::I32), builtin_type_ids::fixed_scalar(FixedScalar::I32), test_source_location(3)), &expression_builder)),
+            NodeKind::VariableDeclaration(make_test_variable(
+                sink,
+                immutable_reference_expr(
+                    &mut expression_builder,
+                    first_ref,
+                    builtin_type_ids::fixed_scalar(FixedScalar::I32),
+                    test_source_location(3),
+                ),
+                &expression_builder,
+            )),
             test_source_location(3),
         ),
         node(
@@ -2662,10 +2668,9 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
             id: external_id,
             args: vec![CallArgument::positional(
                 {
-                    let value = reference_expr_with_datatype(
+                    let value = immutable_reference_expr(
                         &mut expression_builder,
                         input_name,
-                        DataType::StringSlice,
                         builtin_type_ids::STRING,
                         test_source_location(2),
                     );
@@ -2687,26 +2692,22 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
     let unknown = function_node(
         unknown_name,
         FunctionSignature {
-            parameters: vec![param_with_datatype(
+            parameters: vec![param_with_type_id(
                 input_name,
-                DataType::StringSlice,
                 builtin_type_ids::STRING,
                 false,
                 test_source_location(1),
             )],
             returns: vec![
                 ReturnSlot {
-                    value: DataType::StringSlice,
                     type_id: Some(builtin_type_ids::STRING),
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
-                    value: DataType::StringSlice,
                     type_id: Some(builtin_type_ids::STRING),
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
-                    value: DataType::StringSlice,
                     type_id: Some(builtin_type_ids::STRING),
                     channel: ReturnChannel::Error,
                 },
@@ -2724,17 +2725,14 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
             parameters: vec![],
             returns: vec![
                 ReturnSlot {
-                    value: DataType::StringSlice,
                     type_id: Some(builtin_type_ids::STRING),
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
-                    value: DataType::StringSlice,
                     type_id: Some(builtin_type_ids::STRING),
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
-                    value: DataType::StringSlice,
                     type_id: Some(builtin_type_ids::STRING),
                     channel: ReturnChannel::Error,
                 },
@@ -2778,10 +2776,9 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
                     value: {
                         let arguments = vec![CallArgument::positional(
                             {
-                                let value = reference_expr_with_datatype(
+                                let value = immutable_reference_expr(
                                     &mut expression_builder,
                                     argument_name,
-                                    DataType::StringSlice,
                                     builtin_type_ids::STRING,
                                     test_source_location(6),
                                 );

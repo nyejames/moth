@@ -49,7 +49,7 @@ fn declaration_semantics_preserves_missing_template_authority() {
                 .try_intern_portable_path("value", &mut string_table)
                 .expect("test path fits"),
             type_id: crate::compiler_frontend::datatypes::ids::builtin_type_ids::STRING,
-            diagnostic_type: crate::compiler_frontend::datatypes::DataType::StringSlice,
+            type_syntax: None,
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Initializer(value),
             binding_span: None,

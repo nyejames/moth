@@ -1029,7 +1029,7 @@ fn const_required_template_conditional_loop_reports_runtime_condition() {
                 .try_intern_child(source_path, keep_going)
                 .expect("test path fits"),
             type_id: builtin_type_ids::BOOL,
-            diagnostic_type: DataType::Bool,
+            type_syntax: None,
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
@@ -1100,7 +1100,7 @@ fn const_required_template_loop_reports_non_const_collection_source() {
                 .try_intern_child(source_path, items)
                 .expect("test path fits"),
             type_id: collection_type_id,
-            diagnostic_type: DataType::collection(DataType::StringSlice),
+            type_syntax: None,
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
@@ -1169,7 +1169,7 @@ fn const_required_template_loop_reports_non_const_body() {
                 .try_intern_child(source_path, value)
                 .expect("test path fits"),
             type_id: builtin_type_ids::STRING,
-            diagnostic_type: DataType::StringSlice,
+            type_syntax: None,
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
@@ -1616,7 +1616,7 @@ fn const_required_template_option_capture_reports_runtime_scrutinee_diagnostic()
             .try_intern_child(source_path, maybe_name)
             .expect("test path fits"),
         type_id: maybe_name_type_id,
-        diagnostic_type: DataType::Option(Box::new(DataType::StringSlice)),
+        type_syntax: None,
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: None,
@@ -1679,7 +1679,7 @@ fn const_required_template_if_rejects_runtime_local_condition() {
                 .try_intern_child(source_path, show_banner)
                 .expect("test path fits"),
             type_id: builtin_type_ids::BOOL,
-            diagnostic_type: DataType::Bool,
+            type_syntax: None,
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,

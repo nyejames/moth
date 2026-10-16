@@ -2,10 +2,8 @@
 //!
 //! WHAT: owns resolved trait definitions, stable trait IDs, lookup by canonical path,
 //!      and a unified core-trait registry for compiler-owned metadata.
-//! WHY: trait declarations are compile-time contracts. They must not be registered as
-//!      ordinary `DataType`s or value declarations, but later AST phases still need
-//!      deterministic identity and a single path for resolving both `DISPLAYABLE`
-//!      and the core cast trait names.
+//! WHY: source and compiler-owned trait contracts receive stable identities and share one
+//!      deterministic name-resolution path.
 
 use crate::compiler_frontend::ast::statements::functions::ReturnChannel;
 use crate::compiler_frontend::builtins::casts::targets::{

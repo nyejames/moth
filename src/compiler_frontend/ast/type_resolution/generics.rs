@@ -3,8 +3,8 @@
 //! WHAT: materializes concrete `TypeId`s for user-declared generic structs and choices once
 //!       their base path and resolved type arguments are known, then validates declaration-site
 //!       trait-bound evidence for the interned instance.
-//! WHY: generic nominal instantiation is a self-contained concern that bridges resolved
-//!      diagnostic type arguments to canonical `TypeEnvironment` identity and static bound checks.
+//! WHY: generic nominal instantiation interns canonical argument identities in `TypeEnvironment`
+//!      and runs static bound checks.
 //!
 //! This module owns:
 //! - lazy interning of generic struct and choice instances in `TypeEnvironment`.
@@ -15,7 +15,6 @@
 //! - generic base lookup, named/namespaced type resolution, or trait-name rejection
 //!   (live in `lookup.rs`).
 //! - generic function instantiation (lives in the generic function emission path).
-//! - diagnostic-type-to-`TypeId` conversion helpers (live in `resolve_type.rs`).
 
 use crate::compiler_frontend::ast::generic_bounds::{
     GenericBoundEvidenceContext, validate_nominal_generic_bound_evidence,
@@ -23,107 +22,84 @@ use crate::compiler_frontend::ast::generic_bounds::{
 use crate::compiler_frontend::ast::type_resolution::{
     TypeResolutionResult, context::TypeResolutionContext,
 };
-use crate::compiler_frontend::datatypes::DataType;
-use crate::compiler_frontend::datatypes::generic_identity_bridge::{
-    GenericInstantiationKey, TypeIdentityKey, data_type_to_type_identity_key,
-};
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::headers::module_symbols::GenericDeclarationKind;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 
-use super::resolve_type::resolve_diagnostic_type_to_type_id;
-
 /// Resolves a generic struct or choice annotation with concrete type arguments.
 ///
-/// WHAT: interns a canonical generic instance in `TypeEnvironment` and returns display
-///       spelling for diagnostics and HIR compatibility metadata.
+/// WHAT: interns a canonical generic instance in `TypeEnvironment` from already-resolved argument
+///       identities.
 /// WHY: generic structs/choices must have concrete `TypeId` identity before HIR lowering.
 ///
-/// Returns `Ok(Some(DataType))` on successful instantiation, `Ok(None)` when template data
-/// is not available (call site should fall back to GenericInstance), or `Err` on failure.
+/// Returns `Ok(Some(TypeId))` on successful instantiation, `Ok(None)` when template data is not
+/// available (call site should fall back to its unresolved generic representation), or `Err` on
+/// failure.
 pub(super) fn instantiate_generic_nominal(
     base_path: &PathId,
     kind: &GenericDeclarationKind,
-    arguments: &[DataType],
+    arguments: &mut Vec<TypeId>,
     instance_name: Option<StringId>,
     span: Option<SourceSpan>,
     context: &mut TypeResolutionContext<'_>,
-) -> TypeResolutionResult<Option<DataType>> {
-    // If any argument cannot be keyed (for example, `T` in an unresolved generic
-    // function body), the canonical TypeId instance is still interned while the
-    // bridge `GenericInstantiationKey` is omitted from display-only DataType data.
-    let argument_keys: Option<Vec<TypeIdentityKey>> = arguments
-        .iter()
-        .map(data_type_to_type_identity_key)
-        .collect();
-    let instance_key = argument_keys.map(|arguments| GenericInstantiationKey {
-        base_path: base_path.to_owned(),
-        arguments,
-    });
-
-    let instantiated = match kind {
+) -> TypeResolutionResult<Option<TypeId>> {
+    match kind {
         GenericDeclarationKind::Struct => {
             let Some(fields_map) = context.resolved_struct_fields_by_path else {
-                // Template data unavailable; caller should fall back to GenericInstance.
+                // Template data unavailable; caller should fall back to its unresolved form.
                 return Ok(None);
             };
             if !fields_map.contains_key(base_path) {
                 // Template not yet available (e.g. recursive generic type during its own
-                // resolution). Fall back to GenericInstance so the caller can reject it
-                // with a proper recursive-type diagnostic.
+                // resolution). Fall back so the caller can reject it with a proper diagnostic.
                 return Ok(None);
             }
 
-            let type_id = intern_generic_instance_type_id(base_path, arguments, context);
+            let type_id = intern_generic_instance_type_id(
+                base_path,
+                std::mem::take(arguments).into_boxed_slice(),
+                context,
+            );
             validate_nominal_bound_evidence_for_instantiation(
                 type_id,
                 instance_name,
                 span,
                 context,
             )?;
-            DataType::Struct {
-                nominal_path: base_path.to_owned(),
-                type_id,
-                const_record: false,
-                generic_instance_key: instance_key.to_owned(),
-            }
+            Ok(Some(type_id))
         }
         GenericDeclarationKind::Choice => {
-            let type_id = intern_generic_instance_type_id(base_path, arguments, context);
+            let type_id = intern_generic_instance_type_id(
+                base_path,
+                std::mem::take(arguments).into_boxed_slice(),
+                context,
+            );
             validate_nominal_bound_evidence_for_instantiation(
                 type_id,
                 instance_name,
                 span,
                 context,
             )?;
-
-            DataType::Choices {
-                nominal_path: base_path.to_owned(),
-                type_id,
-                generic_instance_key: instance_key.to_owned(),
-            }
+            Ok(Some(type_id))
         }
         GenericDeclarationKind::Function => unreachable!(
             "generic nominal instantiation reached lookup with a function declaration kind"
         ),
-    };
-
-    Ok(Some(instantiated))
+    }
 }
 
 /// Intern a canonical `TypeId` for a generic nominal instance.
 ///
-/// WHAT: resolves each argument to a semantic `TypeId` and interns the constructor-plus-arguments
-///       shape in `TypeEnvironment`.
+/// WHAT: interns the constructor-plus-resolved-argument identity in `TypeEnvironment`.
 /// WHY: struct and choice instantiation both need the same interning step; this helper removes
 ///      the duplication between the two branches.
 ///
 /// The base path has already been validated as a registered generic nominal by the caller.
 fn intern_generic_instance_type_id(
     base_path: &PathId,
-    arguments: &[DataType],
+    arguments: Box<[TypeId]>,
     context: &mut TypeResolutionContext<'_>,
 ) -> TypeId {
     let type_environment = &mut *context.type_environment;
@@ -131,12 +107,7 @@ fn intern_generic_instance_type_id(
         .nominal_id_for_path(base_path)
         .expect("generic nominal registration must include a nominal identity");
 
-    let arg_type_ids: Box<[TypeId]> = arguments
-        .iter()
-        .map(|arg| resolve_diagnostic_type_to_type_id(arg, type_environment))
-        .collect();
-
-    type_environment.intern_generic_instance(nominal_id, arg_type_ids)
+    type_environment.intern_generic_instance(nominal_id, arguments)
 }
 
 /// Validate declaration-site trait-bound evidence for a freshly interned nominal instance.

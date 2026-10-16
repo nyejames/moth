@@ -55,7 +55,6 @@ use crate::compiler_frontend::compiler_messages::{
 };
 
 use crate::compiler_frontend::build_config::BuildInputName;
-use crate::compiler_frontend::datatypes::datatype::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::parsed::{ParsedCollectionCapacity, ParsedTypeRef};
 use crate::compiler_frontend::declaration_syntax::build_config_contract::{
@@ -639,12 +638,7 @@ pub fn resolve_declaration_syntax(
             type_id: expression_builder
                 .view_owned(parsed_initializer)?
                 .require_single(ValueReceiverContext::Declaration)?,
-            diagnostic_type: diagnostic_type_spelling(
-                expression_builder
-                    .view_owned(parsed_initializer)?
-                    .value_type_id()?,
-                type_interner.environment(),
-            ),
+            type_syntax: None,
             value_mode: value_mode.to_owned(),
             value: DeclarationValue::Initializer(parsed_initializer.id()),
             binding_span: None,
@@ -686,8 +680,9 @@ pub fn resolve_declaration_syntax(
                     .map(|fv| &fv.visible_trait_names),
             })
             .with_active_generic_type_context(context.active_generic_type_context());
+        let semantic_type = declaration_syntax.semantic_type();
         resolve_parsed_type_annotation(
-            declaration_syntax.semantic_type(),
+            &semantic_type,
             declaration_syntax.span,
             &mut type_resolution_context,
             string_table,
@@ -706,7 +701,7 @@ pub fn resolve_declaration_syntax(
             type_id: resolved_annotation
                 .type_id
                 .unwrap_or(builtin_type_ids::NONE),
-            diagnostic_type: resolved_annotation.diagnostic_type,
+            type_syntax: None,
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::PendingConstant,
             binding_span: None,
@@ -751,10 +746,7 @@ pub fn resolve_declaration_syntax(
             type_id: expression_builder
                 .view_owned(value)?
                 .require_single(ValueReceiverContext::Declaration)?,
-            diagnostic_type: diagnostic_type_spelling(
-                expression_builder.view_owned(value)?.value_type_id()?,
-                type_interner.environment(),
-            ),
+            type_syntax: None,
             value_mode: expression_builder.view_owned(value)?.value_mode(),
             value: DeclarationValue::Initializer(value.id()),
             binding_span: None,
@@ -831,7 +823,7 @@ pub fn resolve_declaration_syntax(
                 type_id: resolved_annotation
                     .type_id
                     .unwrap_or(builtin_type_ids::NONE),
-                diagnostic_type: resolved_annotation.diagnostic_type,
+                type_syntax: None,
                 value_mode,
                 value: DeclarationValue::StructDefinition(params),
                 binding_span: None,
@@ -841,8 +833,7 @@ pub fn resolve_declaration_syntax(
 
         _ => {
             // Keep the canonical annotation TypeId beside the expression so
-            // compatibility and coercion do not re-derive semantic identity from
-            // diagnostic `DataType` spelling.
+            // compatibility and coercion use the semantic identity directly.
             //
             // Pass parse-time context only where syntax requires it, such as
             // `none` and empty collection literals. Other expressions resolve
@@ -1093,12 +1084,7 @@ pub fn resolve_declaration_syntax(
         type_id: expression_builder
             .view(parsed_initializer)?
             .value_type_id()?,
-        diagnostic_type: diagnostic_type_spelling(
-            expression_builder
-                .view(parsed_initializer)?
-                .value_type_id()?,
-            type_interner.environment(),
-        ),
+        type_syntax: None,
         value_mode,
         value: DeclarationValue::Initializer(parsed_initializer),
         binding_span: None,

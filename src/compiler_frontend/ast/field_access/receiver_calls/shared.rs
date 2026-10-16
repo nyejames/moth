@@ -19,9 +19,6 @@ use crate::compiler_frontend::ast::statements::functions::FunctionParameter;
 use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ReturnSlot};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
-use crate::compiler_frontend::datatypes::DataType;
-use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
-use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -142,7 +139,6 @@ pub(super) fn method_path_from_evidence(
 fn declaration_for_trait_bound_parameter(
     id: PathId,
     type_id: TypeId,
-    diagnostic_type: DataType,
     value_mode: ValueMode,
     span: Option<SourceSpan>,
     binding_span: Option<SourceSpan>,
@@ -150,7 +146,6 @@ fn declaration_for_trait_bound_parameter(
     FunctionParameter {
         id,
         type_id,
-        diagnostic_type,
         value_mode,
         default: None,
         binding_span: binding_span.or(span),
@@ -162,7 +157,6 @@ pub(super) fn signature_from_trait_requirement(
     trait_definition: &ResolvedTraitDefinition,
     requirement: &ResolvedTraitRequirement,
     receiver_type_id: TypeId,
-    type_environment: &TypeEnvironment,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> FunctionSignature {
@@ -179,7 +173,6 @@ pub(super) fn signature_from_trait_requirement(
     parameters.push(declaration_for_trait_bound_parameter(
         receiver_name,
         receiver_type_id,
-        diagnostic_type_spelling(receiver_type_id, type_environment),
         receiver_mode,
         requirement.span,
         // Synthetic receiver has no authored binding token.
@@ -195,7 +188,6 @@ pub(super) fn signature_from_trait_requirement(
         parameters.push(declaration_for_trait_bound_parameter(
             parameter.name,
             type_id,
-            diagnostic_type_spelling(type_id, type_environment),
             parameter.value_mode,
             parameter.span,
             parameter.span,
@@ -213,7 +205,6 @@ pub(super) fn signature_from_trait_requirement(
             );
 
             ReturnSlot {
-                value: diagnostic_type_spelling(type_id, type_environment),
                 type_id: Some(type_id),
                 channel: return_slot.channel,
             }

@@ -14,8 +14,8 @@ use crate::compiler_frontend::ast::statements::value_production::{
 };
 use std::sync::Arc;
 
+use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::{DataType, builtin_type_ids};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
@@ -88,7 +88,7 @@ fn add_var_extends_visibility_gate_when_gate_is_set() {
     let declaration = Declaration {
         id: variable_path.to_owned(),
         type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+        type_syntax: None,
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: None,
@@ -139,7 +139,7 @@ fn add_compile_time_var_extends_visibility_gate_when_gate_is_set() {
     let declaration = Declaration {
         id: constant_path.to_owned(),
         type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+        type_syntax: None,
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: None,
@@ -431,7 +431,7 @@ fn parent_frame_lookup_finds_ancestor_declaration() {
         Declaration {
             id: variable_path.to_owned(),
             type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-            diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+            type_syntax: None,
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
@@ -484,7 +484,7 @@ fn child_frame_declaration_is_not_visible_to_parent() {
         Declaration {
             id: variable_path.to_owned(),
             type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-            diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+            type_syntax: None,
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
@@ -542,7 +542,7 @@ fn same_frame_duplicate_lookup_returns_latest_declaration() {
         Declaration {
             id: first_path.to_owned(),
             type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-            diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+            type_syntax: None,
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
@@ -555,7 +555,7 @@ fn same_frame_duplicate_lookup_returns_latest_declaration() {
         Declaration {
             id: second_path.to_owned(),
             type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-            diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+            type_syntax: None,
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
@@ -606,7 +606,7 @@ fn no_shadowing_across_ancestor_frames() {
         Declaration {
             id: parent_path.to_owned(),
             type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-            diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+            type_syntax: None,
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
@@ -695,7 +695,7 @@ fn child_scope_local_does_not_leak_into_the_shared_visibility_gate() {
     let declaration = Declaration {
         id: local_path.to_owned(),
         type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+        type_syntax: None,
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: None,
@@ -793,7 +793,7 @@ fn cloned_context_does_not_share_current_frame() {
         Declaration {
             id: path.to_owned(),
             type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-            diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+            type_syntax: None,
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
@@ -841,7 +841,7 @@ fn child_frame_shares_ancestors_but_not_current_frame() {
         Declaration {
             id: parent_path,
             type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-            diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+            type_syntax: None,
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
@@ -861,7 +861,7 @@ fn child_frame_shares_ancestors_but_not_current_frame() {
         Declaration {
             id: child_path,
             type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-            diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+            type_syntax: None,
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
@@ -1043,7 +1043,7 @@ fn pending_numeric_binding_upgrades_in_place_and_keeps_its_name() {
     let declaration = Declaration {
         id: binding_path.to_owned(),
         type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+        type_syntax: None,
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: None,
@@ -1110,7 +1110,7 @@ fn explicit_constant_lookup_uses_content_owner_and_authored_binding_role() {
         let declaration = Declaration {
             id: path,
             type_id: builtin_type_ids::BOOL,
-            diagnostic_type: DataType::Bool,
+            type_syntax: None,
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,

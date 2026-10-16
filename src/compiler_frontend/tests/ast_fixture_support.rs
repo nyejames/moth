@@ -17,8 +17,8 @@ use crate::compiler_frontend::ast::statements::functions::{
 use crate::compiler_frontend::ast::templates::runtime_handoff::{
     OwnedRuntimeSlotApplicationHandoff, OwnedRuntimeTemplateHandoff,
 };
+use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
-use crate::compiler_frontend::datatypes::{DataType, TypeId};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -60,7 +60,7 @@ pub(crate) fn make_test_variable(
         type_id: expression
             .value_type_id()
             .expect("fixture initializer is single-valued"),
-        diagnostic_type: DataType::Inferred,
+        type_syntax: None,
         value_mode: expression.value_mode(),
         value: DeclarationValue::Initializer(value),
         binding_span: None,
@@ -70,7 +70,6 @@ pub(crate) fn make_test_variable(
 
 fn parameter(
     name: PathId,
-    data_type: DataType,
     type_id: TypeId,
     mutable: bool,
     binding_span: Option<SourceSpan>,
@@ -84,33 +83,20 @@ fn parameter(
     FunctionParameter {
         id: name,
         type_id,
-        diagnostic_type: data_type,
         value_mode,
         default: None,
         binding_span,
     }
 }
 
-/// Parameter fixture entry points: use `param_with_datatype` when the diagnostic
-/// type is part of the fixture, and `param_with_type_id` when the canonical
-/// `TypeId` is all the test needs.
-pub(crate) fn param_with_datatype(
-    name: PathId,
-    data_type: DataType,
-    type_id: TypeId,
-    mutable: bool,
-    span: Option<SourceSpan>,
-) -> FunctionParameter {
-    parameter(name, data_type, type_id, mutable, span)
-}
-
+/// Creates a parameter fixture with its resolved semantic type identity.
 pub(crate) fn param_with_type_id(
     name: PathId,
     type_id: TypeId,
     mutable: bool,
     span: Option<SourceSpan>,
 ) -> FunctionParameter {
-    parameter(name, DataType::Inferred, type_id, mutable, span)
+    parameter(name, type_id, mutable, span)
 }
 
 pub(crate) fn function_node(
@@ -124,7 +110,6 @@ pub(crate) fn function_node(
 
 pub(crate) fn success_return_slot(type_id: TypeId) -> ReturnSlot {
     ReturnSlot {
-        value: DataType::Inferred,
         type_id: Some(type_id),
         channel: ReturnChannel::Success,
     }
@@ -160,11 +145,10 @@ fn reference_expr(
     ).expect("fixture reference fits expression store").id()
 }
 
-/// The declaration's diagnostic spelling is independent of the completed expression row.
-pub(crate) fn reference_expr_with_datatype(
+/// Builds an immutable reference expression with its resolved semantic type identity.
+pub(crate) fn immutable_reference_expr(
     builder: &mut AstExpressionBuilder,
     name: PathId,
-    _data_type: DataType,
     type_id: TypeId,
     span: Option<SourceSpan>,
 ) -> ExprId {
@@ -184,7 +168,6 @@ pub(crate) fn reference_expr_with_type_id(
 pub(crate) fn assignment_target(
     builder: &mut AstExpressionBuilder,
     name: PathId,
-    _data_type: DataType,
     type_id: TypeId,
     span: Option<SourceSpan>,
 ) -> PlaceId {

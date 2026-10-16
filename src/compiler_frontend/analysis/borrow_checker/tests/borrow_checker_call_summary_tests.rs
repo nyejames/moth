@@ -27,9 +27,9 @@ use crate::compiler_frontend::compiler_errors::ErrorType;
 use crate::compiler_frontend::compiler_messages::{
     BorrowAccessKind, BorrowDiagnosticKind, DiagnosticPayload, InvalidMutableAccessReason,
 };
+use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::datatypes::{DataType, builtin_type_ids};
 use crate::compiler_frontend::external_packages::test_support::{
     TestExternalAccessKind as ExternalAccessKind, TestExternalReturnAlias as ExternalReturnAlias,
     TestExternalReturnType as ExternalReturnType,
@@ -51,8 +51,8 @@ use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::tests::ast_fixture_support::{
-    assignment_target, fresh_success_returns, function_node, make_test_variable, node,
-    param_with_datatype, reference_expr_with_datatype, symbol, test_source_location,
+    assignment_target, fresh_success_returns, function_node, immutable_reference_expr,
+    make_test_variable, node, param_with_type_id, symbol, test_source_location,
 };
 use crate::compiler_frontend::tests::borrow_fixture_support::{
     assert_borrow_error_kind, assert_infrastructure_error_contains,
@@ -146,23 +146,20 @@ fn public_call_summaries_cover_zero_parameter_and_parameter_effects() {
         summary_target,
         FunctionSignature {
             parameters: vec![
-                param_with_datatype(
+                param_with_type_id(
                     shared_parameter,
-                    DataType::FixedScalar(FixedScalar::I32),
                     builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     false,
                     test_source_location(1),
                 ),
-                param_with_datatype(
+                param_with_type_id(
                     mutable_parameter,
-                    DataType::FixedScalar(FixedScalar::I32),
                     builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     true,
                     test_source_location(1),
                 ),
-                param_with_datatype(
+                param_with_type_id(
                     untouched_mutable_parameter,
-                    DataType::FixedScalar(FixedScalar::I32),
                     builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     true,
                     test_source_location(1),
@@ -175,7 +172,6 @@ fn public_call_summaries_cover_zero_parameter_and_parameter_effects() {
                 target: assignment_target(
                     &mut expression_builder,
                     mutable_parameter,
-                    DataType::FixedScalar(FixedScalar::I32),
                     builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     test_source_location(2),
                 ),
@@ -354,9 +350,8 @@ fn public_call_summary_keeps_mutable_but_unwritten_call_path_read_only() {
     let mutator = function_node(
         mutator_name,
         FunctionSignature {
-            parameters: vec![param_with_datatype(
+            parameters: vec![param_with_type_id(
                 symbol("input", &mut path_fork, &mut string_table),
-                DataType::FixedScalar(FixedScalar::I32),
                 builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 true,
                 test_source_location(1),
@@ -369,9 +364,8 @@ fn public_call_summary_keeps_mutable_but_unwritten_call_path_read_only() {
     let wrapper = function_node(
         wrapper_name,
         FunctionSignature {
-            parameters: vec![param_with_datatype(
+            parameters: vec![param_with_type_id(
                 parameter_name,
-                DataType::FixedScalar(FixedScalar::I32),
                 builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 true,
                 test_source_location(2),
@@ -382,10 +376,9 @@ fn public_call_summary_keeps_mutable_but_unwritten_call_path_read_only() {
             {
                 let arguments = vec![CallArgument::positional(
                     {
-                        let value = reference_expr_with_datatype(
+                        let value = immutable_reference_expr(
                             &mut expression_builder,
                             parameter_name,
-                            DataType::FixedScalar(FixedScalar::I32),
                             builtin_type_ids::fixed_scalar(FixedScalar::I32),
                             test_source_location(3),
                         );
@@ -653,9 +646,8 @@ fn immutable_shared_parameter_optional_transfer_remains_legal() {
     let reader = function_node(
         reader_name,
         FunctionSignature {
-            parameters: vec![param_with_datatype(
+            parameters: vec![param_with_type_id(
                 symbol("input", &mut path_fork, &mut string_table),
-                DataType::FixedScalar(FixedScalar::I32),
                 builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 false,
                 test_source_location(1),
@@ -690,10 +682,9 @@ fn immutable_shared_parameter_optional_transfer_remains_legal() {
                 {
                     let arguments = vec![CallArgument::positional(
                         {
-                            let value = reference_expr_with_datatype(
+                            let value = immutable_reference_expr(
                                 &mut expression_builder,
                                 value_name,
-                                DataType::FixedScalar(FixedScalar::I32),
                                 builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                 test_source_location(3),
                             );
@@ -903,24 +894,21 @@ fn user_function_returning_param_alias_allows_caller_rebinding() {
     let callee = function_node(
         alias_fn,
         FunctionSignature {
-            parameters: vec![param_with_datatype(
+            parameters: vec![param_with_type_id(
                 p,
-                DataType::FixedScalar(FixedScalar::I32),
                 builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 false,
                 test_source_location(1),
             )],
             returns: vec![ReturnSlot {
-                value: DataType::FixedScalar(FixedScalar::I32),
                 type_id: Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
                 channel: ReturnChannel::Success,
             }],
         },
         vec![node(
-            NodeKind::Return(vec![reference_expr_with_datatype(
+            NodeKind::Return(vec![immutable_reference_expr(
                 &mut expression_builder,
                 p,
-                DataType::FixedScalar(FixedScalar::I32),
                 builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 test_source_location(2),
             )]),
@@ -954,10 +942,9 @@ fn user_function_returning_param_alias_allows_caller_rebinding() {
                 NodeKind::VariableDeclaration(make_test_variable(
                     y,
                     {
-                        let arguments: Vec<_> = vec![reference_expr_with_datatype(
+                        let arguments: Vec<_> = vec![immutable_reference_expr(
                             &mut expression_builder,
                             x,
-                            DataType::FixedScalar(FixedScalar::I32),
                             builtin_type_ids::fixed_scalar(FixedScalar::I32),
                             test_source_location(11),
                         )]
@@ -988,7 +975,6 @@ fn user_function_returning_param_alias_allows_caller_rebinding() {
                     target: assignment_target(
                         &mut expression_builder,
                         x,
-                        DataType::FixedScalar(FixedScalar::I32),
                         builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         test_source_location(12),
                     ),
@@ -1075,16 +1061,14 @@ fn fallible_alias_return_propagation_validates_success_alias_metadata() {
         source_fn,
         FunctionSignature {
             parameters: vec![
-                param_with_datatype(
+                param_with_type_id(
                     source_param,
-                    DataType::StringSlice,
                     builtin_type_ids::STRING,
                     false,
                     test_source_location(20),
                 ),
-                param_with_datatype(
+                param_with_type_id(
                     source_unused,
-                    DataType::StringSlice,
                     builtin_type_ids::STRING,
                     false,
                     test_source_location(20),
@@ -1092,22 +1076,19 @@ fn fallible_alias_return_propagation_validates_success_alias_metadata() {
             ],
             returns: vec![
                 ReturnSlot {
-                    value: DataType::StringSlice,
                     type_id: Some(builtin_type_ids::STRING),
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
-                    value: DataType::StringSlice,
                     type_id: Some(builtin_type_ids::STRING),
                     channel: ReturnChannel::Error,
                 },
             ],
         },
         vec![node(
-            NodeKind::Return(vec![reference_expr_with_datatype(
+            NodeKind::Return(vec![immutable_reference_expr(
                 &mut expression_builder,
                 source_unused,
-                DataType::StringSlice,
                 builtin_type_ids::STRING,
                 test_source_location(21),
             )]),
@@ -1132,10 +1113,9 @@ fn fallible_alias_return_propagation_validates_success_alias_metadata() {
             ),
             CallArgument::positional(
                 {
-                    let value = reference_expr_with_datatype(
+                    let value = immutable_reference_expr(
                         &mut expression_builder,
                         forward_param,
-                        DataType::StringSlice,
                         builtin_type_ids::STRING,
                         test_source_location(30),
                     );
@@ -1160,21 +1140,18 @@ fn fallible_alias_return_propagation_validates_success_alias_metadata() {
     let forward = function_node(
         forward_fn,
         FunctionSignature {
-            parameters: vec![param_with_datatype(
+            parameters: vec![param_with_type_id(
                 forward_param,
-                DataType::StringSlice,
                 builtin_type_ids::STRING,
                 false,
                 test_source_location(29),
             )],
             returns: vec![
                 ReturnSlot {
-                    value: DataType::StringSlice,
                     type_id: Some(builtin_type_ids::STRING),
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
-                    value: DataType::StringSlice,
                     type_id: Some(builtin_type_ids::STRING),
                     channel: ReturnChannel::Error,
                 },
@@ -1260,9 +1237,8 @@ fn fresh_user_return_does_not_alias_caller_roots() {
     let callee = function_node(
         fresh_fn,
         FunctionSignature {
-            parameters: vec![param_with_datatype(
+            parameters: vec![param_with_type_id(
                 p,
-                DataType::FixedScalar(FixedScalar::I32),
                 builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 false,
                 test_source_location(1),
@@ -1307,10 +1283,9 @@ fn fresh_user_return_does_not_alias_caller_roots() {
                 NodeKind::VariableDeclaration(make_test_variable(
                     y,
                     {
-                        let arguments: Vec<_> = vec![reference_expr_with_datatype(
+                        let arguments: Vec<_> = vec![immutable_reference_expr(
                             &mut expression_builder,
                             x,
-                            DataType::FixedScalar(FixedScalar::I32),
                             builtin_type_ids::fixed_scalar(FixedScalar::I32),
                             test_source_location(11),
                         )]
@@ -1341,7 +1316,6 @@ fn fresh_user_return_does_not_alias_caller_roots() {
                     target: assignment_target(
                         &mut expression_builder,
                         x,
-                        DataType::FixedScalar(FixedScalar::I32),
                         builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         test_source_location(12),
                     ),
@@ -1449,17 +1423,14 @@ fn multi_return_fallible_external_retains_unknown_alias_summary() {
             parameters: vec![],
             returns: vec![
                 ReturnSlot {
-                    value: DataType::FixedScalar(FixedScalar::I32),
                     type_id: Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
-                    value: DataType::FixedScalar(FixedScalar::I32),
                     type_id: Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
-                    value: DataType::FixedScalar(FixedScalar::I32),
                     type_id: Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
                     channel: ReturnChannel::Error,
                 },
@@ -1498,17 +1469,14 @@ fn multi_return_fallible_external_retains_unknown_alias_summary() {
             parameters: vec![],
             returns: vec![
                 ReturnSlot {
-                    value: DataType::FixedScalar(FixedScalar::I32),
                     type_id: Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
-                    value: DataType::FixedScalar(FixedScalar::I32),
                     type_id: Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
-                    value: DataType::FixedScalar(FixedScalar::I32),
                     type_id: Some(builtin_type_ids::fixed_scalar(FixedScalar::I32)),
                     channel: ReturnChannel::Error,
                 },
@@ -1810,9 +1778,8 @@ fn inferred_alias_return_from_parameter_reference_allows_caller_rebinding() {
     let callee = function_node(
         unknown_fn,
         FunctionSignature {
-            parameters: vec![param_with_datatype(
+            parameters: vec![param_with_type_id(
                 p,
-                DataType::FixedScalar(FixedScalar::I32),
                 builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 false,
                 test_source_location(1),
@@ -1823,10 +1790,9 @@ fn inferred_alias_return_from_parameter_reference_allows_caller_rebinding() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     q,
-                    reference_expr_with_datatype(
+                    immutable_reference_expr(
                         &mut expression_builder,
                         p,
-                        DataType::FixedScalar(FixedScalar::I32),
                         builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         test_source_location(2),
                     ),
@@ -1835,10 +1801,9 @@ fn inferred_alias_return_from_parameter_reference_allows_caller_rebinding() {
                 test_source_location(2),
             ),
             node(
-                NodeKind::Return(vec![reference_expr_with_datatype(
+                NodeKind::Return(vec![immutable_reference_expr(
                     &mut expression_builder,
                     q,
-                    DataType::FixedScalar(FixedScalar::I32),
                     builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     test_source_location(3),
                 )]),
@@ -1873,10 +1838,9 @@ fn inferred_alias_return_from_parameter_reference_allows_caller_rebinding() {
                 NodeKind::VariableDeclaration(make_test_variable(
                     y,
                     {
-                        let arguments: Vec<_> = vec![reference_expr_with_datatype(
+                        let arguments: Vec<_> = vec![immutable_reference_expr(
                             &mut expression_builder,
                             x,
-                            DataType::FixedScalar(FixedScalar::I32),
                             builtin_type_ids::fixed_scalar(FixedScalar::I32),
                             test_source_location(11),
                         )]
@@ -1907,7 +1871,6 @@ fn inferred_alias_return_from_parameter_reference_allows_caller_rebinding() {
                     target: assignment_target(
                         &mut expression_builder,
                         x,
-                        DataType::FixedScalar(FixedScalar::I32),
                         builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         test_source_location(12),
                     ),
@@ -1958,9 +1921,8 @@ fn mutable_user_argument_is_accepted_without_false_shared_conflict() {
     let callee = function_node(
         mut_sink,
         FunctionSignature {
-            parameters: vec![param_with_datatype(
+            parameters: vec![param_with_type_id(
                 p,
-                DataType::FixedScalar(FixedScalar::I32),
                 builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 true,
                 test_source_location(1),
@@ -1996,10 +1958,9 @@ fn mutable_user_argument_is_accepted_without_false_shared_conflict() {
                 {
                     let arguments = vec![CallArgument::positional(
                         {
-                            let value = reference_expr_with_datatype(
+                            let value = immutable_reference_expr(
                                 &mut expression_builder,
                                 x,
-                                DataType::FixedScalar(FixedScalar::I32),
                                 builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                 test_source_location(11),
                             );
@@ -2109,16 +2070,14 @@ fn mutable_user_call_with_fresh_mutable_arg_does_not_alias_existing_place_argume
         mut2,
         FunctionSignature {
             parameters: vec![
-                param_with_datatype(
+                param_with_type_id(
                     a,
-                    DataType::FixedScalar(FixedScalar::I32),
                     builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     true,
                     test_source_location(1),
                 ),
-                param_with_datatype(
+                param_with_type_id(
                     b,
-                    DataType::FixedScalar(FixedScalar::I32),
                     builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     true,
                     test_source_location(1),
@@ -2156,10 +2115,9 @@ fn mutable_user_call_with_fresh_mutable_arg_does_not_alias_existing_place_argume
                     let arguments = vec![
                         CallArgument::positional(
                             {
-                                let value = reference_expr_with_datatype(
+                                let value = immutable_reference_expr(
                                     &mut expression_builder,
                                     x,
-                                    DataType::FixedScalar(FixedScalar::I32),
                                     builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                     test_source_location(11),
                                 );
@@ -2258,10 +2216,9 @@ fn host_mutable_parameter_requires_mutable_access() {
                 {
                     let arguments = vec![CallArgument::positional(
                         {
-                            let value = reference_expr_with_datatype(
+                            let value = immutable_reference_expr(
                                 &mut expression_builder,
                                 x,
-                                DataType::FixedScalar(FixedScalar::I32),
                                 builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                 test_source_location(2),
                             );
@@ -2344,10 +2301,9 @@ fn host_mutable_parameter_accepts_mutable_local_argument() {
                 {
                     let arguments = vec![CallArgument::positional(
                         {
-                            let value = reference_expr_with_datatype(
+                            let value = immutable_reference_expr(
                                 &mut expression_builder,
                                 x,
-                                DataType::FixedScalar(FixedScalar::I32),
                                 builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                 test_source_location(2),
                             );
@@ -2429,10 +2385,9 @@ fn host_shared_parameter_is_shared_only() {
                 {
                     let arguments = vec![CallArgument::positional(
                         {
-                            let value = reference_expr_with_datatype(
+                            let value = immutable_reference_expr(
                                 &mut expression_builder,
                                 x,
-                                DataType::FixedScalar(FixedScalar::I32),
                                 builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                 test_source_location(2),
                             );
@@ -2491,16 +2446,14 @@ fn two_mutable_args_to_same_root_are_rejected() {
         mut2,
         FunctionSignature {
             parameters: vec![
-                param_with_datatype(
+                param_with_type_id(
                     a,
-                    DataType::FixedScalar(FixedScalar::I32),
                     builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     true,
                     test_source_location(1),
                 ),
-                param_with_datatype(
+                param_with_type_id(
                     b,
-                    DataType::FixedScalar(FixedScalar::I32),
                     builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     true,
                     test_source_location(1),
@@ -2538,10 +2491,9 @@ fn two_mutable_args_to_same_root_are_rejected() {
                     let arguments = vec![
                         CallArgument::positional(
                             {
-                                let value = reference_expr_with_datatype(
+                                let value = immutable_reference_expr(
                                     &mut expression_builder,
                                     x,
-                                    DataType::FixedScalar(FixedScalar::I32),
                                     builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                     test_source_location(11),
                                 );
@@ -2552,10 +2504,9 @@ fn two_mutable_args_to_same_root_are_rejected() {
                         ),
                         CallArgument::positional(
                             {
-                                let value = reference_expr_with_datatype(
+                                let value = immutable_reference_expr(
                                     &mut expression_builder,
                                     x,
-                                    DataType::FixedScalar(FixedScalar::I32),
                                     builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                     test_source_location(11),
                                 );
@@ -2578,10 +2529,9 @@ fn two_mutable_args_to_same_root_are_rejected() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     y,
-                    reference_expr_with_datatype(
+                    immutable_reference_expr(
                         &mut expression_builder,
                         x,
-                        DataType::FixedScalar(FixedScalar::I32),
                         builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         test_source_location(12),
                     ),
@@ -2629,16 +2579,14 @@ fn shared_then_mutable_args_to_same_root_are_rejected() {
         read_then_mut,
         FunctionSignature {
             parameters: vec![
-                param_with_datatype(
+                param_with_type_id(
                     read,
-                    DataType::FixedScalar(FixedScalar::I32),
                     builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     false,
                     test_source_location(1),
                 ),
-                param_with_datatype(
+                param_with_type_id(
                     mutate,
-                    DataType::FixedScalar(FixedScalar::I32),
                     builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     true,
                     test_source_location(1),
@@ -2676,10 +2624,9 @@ fn shared_then_mutable_args_to_same_root_are_rejected() {
                     let arguments = vec![
                         CallArgument::positional(
                             {
-                                let value = reference_expr_with_datatype(
+                                let value = immutable_reference_expr(
                                     &mut expression_builder,
                                     x,
-                                    DataType::FixedScalar(FixedScalar::I32),
                                     builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                     test_source_location(11),
                                 );
@@ -2690,10 +2637,9 @@ fn shared_then_mutable_args_to_same_root_are_rejected() {
                         ),
                         CallArgument::positional(
                             {
-                                let value = reference_expr_with_datatype(
+                                let value = immutable_reference_expr(
                                     &mut expression_builder,
                                     x,
-                                    DataType::FixedScalar(FixedScalar::I32),
                                     builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                     test_source_location(11),
                                 );
@@ -2768,10 +2714,9 @@ fn external_alias_args_result_stays_slot_backed_after_rebinding() {
     let returned_call = {
         let arguments = vec![CallArgument::positional(
             {
-                let value = reference_expr_with_datatype(
+                let value = immutable_reference_expr(
                     &mut expression_builder,
                     original,
-                    DataType::FixedScalar(FixedScalar::I32),
                     builtin_type_ids::fixed_scalar(FixedScalar::I32),
                     test_source_location(11),
                 );
@@ -2825,7 +2770,6 @@ fn external_alias_args_result_stays_slot_backed_after_rebinding() {
                     target: assignment_target(
                         &mut expression_builder,
                         returned,
-                        DataType::FixedScalar(FixedScalar::I32),
                         builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         test_source_location(12),
                     ),
@@ -2844,7 +2788,6 @@ fn external_alias_args_result_stays_slot_backed_after_rebinding() {
                     target: assignment_target(
                         &mut expression_builder,
                         original,
-                        DataType::FixedScalar(FixedScalar::I32),
                         builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         test_source_location(13),
                     ),
@@ -3193,9 +3136,8 @@ fn mutable_user_parameter_rejects_immutable_argument_reused_after_call() {
     let callee = function_node(
         mut_user,
         FunctionSignature {
-            parameters: vec![param_with_datatype(
+            parameters: vec![param_with_type_id(
                 p,
-                DataType::FixedScalar(FixedScalar::I32),
                 builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 true,
                 test_source_location(1),
@@ -3231,10 +3173,9 @@ fn mutable_user_parameter_rejects_immutable_argument_reused_after_call() {
                 {
                     let arguments = vec![CallArgument::positional(
                         {
-                            let value = reference_expr_with_datatype(
+                            let value = immutable_reference_expr(
                                 &mut expression_builder,
                                 x,
-                                DataType::FixedScalar(FixedScalar::I32),
                                 builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                 test_source_location(11),
                             );
@@ -3256,10 +3197,9 @@ fn mutable_user_parameter_rejects_immutable_argument_reused_after_call() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     y,
-                    reference_expr_with_datatype(
+                    immutable_reference_expr(
                         &mut expression_builder,
                         x,
-                        DataType::FixedScalar(FixedScalar::I32),
                         builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         test_source_location(12),
                     ),
@@ -3331,10 +3271,9 @@ fn out_of_range_return_alias_metadata_is_reported_at_call_site() {
                 {
                     let arguments = vec![CallArgument::positional(
                         {
-                            let value = reference_expr_with_datatype(
+                            let value = immutable_reference_expr(
                                 &mut expression_builder,
                                 x,
-                                DataType::FixedScalar(FixedScalar::I32),
                                 builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                 test_source_location(11),
                             );
@@ -3397,9 +3336,8 @@ fn same_line_mutable_call_then_reuse_uses_order_keys() {
     let callee = function_node(
         mut_user,
         FunctionSignature {
-            parameters: vec![param_with_datatype(
+            parameters: vec![param_with_type_id(
                 p,
-                DataType::FixedScalar(FixedScalar::I32),
                 builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 true,
                 test_source_location(1),
@@ -3438,10 +3376,9 @@ fn same_line_mutable_call_then_reuse_uses_order_keys() {
                 {
                     let arguments = vec![CallArgument::positional(
                         {
-                            let value = reference_expr_with_datatype(
+                            let value = immutable_reference_expr(
                                 &mut expression_builder,
                                 x,
-                                DataType::FixedScalar(FixedScalar::I32),
                                 builtin_type_ids::fixed_scalar(FixedScalar::I32),
                                 same_line,
                             );
@@ -3463,10 +3400,9 @@ fn same_line_mutable_call_then_reuse_uses_order_keys() {
             node(
                 NodeKind::VariableDeclaration(make_test_variable(
                     y,
-                    reference_expr_with_datatype(
+                    immutable_reference_expr(
                         &mut expression_builder,
                         x,
-                        DataType::FixedScalar(FixedScalar::I32),
                         builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         same_line,
                     ),
@@ -3515,9 +3451,8 @@ fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving
     let rhs_function = function_node(
         rhs_name,
         FunctionSignature {
-            parameters: vec![param_with_datatype(
+            parameters: vec![param_with_type_id(
                 param_calls,
-                DataType::FixedScalar(FixedScalar::I32),
                 builtin_type_ids::fixed_scalar(FixedScalar::I32),
                 true,
                 test_source_location(1),
@@ -3530,7 +3465,6 @@ fn short_circuit_rhs_mutable_call_with_later_merge_use_borrows_instead_of_moving
                     target: assignment_target(
                         &mut expression_builder,
                         param_calls,
-                        DataType::FixedScalar(FixedScalar::I32),
                         builtin_type_ids::fixed_scalar(FixedScalar::I32),
                         test_source_location(2),
                     ),

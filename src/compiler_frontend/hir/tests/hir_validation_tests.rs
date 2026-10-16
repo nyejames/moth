@@ -12,7 +12,6 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::definitions::{FieldDefinition, StructTypeDefinition};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_parameters::TypeParameterId;
@@ -4602,7 +4601,7 @@ fn hir_variant_construct_choice_wrong_field_name_rejected() {
                         .try_intern_portable_path("message", &mut string_table)
                         .expect("test path fits"),
                     type_id: builtin_type_ids::STRING,
-                    diagnostic_type: DataType::Inferred,
+                    type_syntax: None,
                     value_mode: ValueMode::ImmutableOwned,
                     value: DeclarationValue::Absent,
                     binding_span: None,
@@ -4742,7 +4741,7 @@ fn hir_variant_construct_choice_wrong_field_type_rejected() {
                         .try_intern_portable_path("message", &mut string_table)
                         .expect("test path fits"),
                     type_id: builtin_type_ids::STRING,
-                    diagnostic_type: DataType::Inferred,
+                    type_syntax: None,
                     value_mode: ValueMode::ImmutableOwned,
                     value: DeclarationValue::Absent,
                     binding_span: None,

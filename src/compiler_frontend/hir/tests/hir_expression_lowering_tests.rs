@@ -364,7 +364,7 @@ fn loop_binding(
             .try_intern_portable_path(name, string_table)
             .expect("test path fits"),
         type_id,
-        diagnostic_type: crate::compiler_frontend::datatypes::DataType::Inferred,
+        type_syntax: None,
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: None,

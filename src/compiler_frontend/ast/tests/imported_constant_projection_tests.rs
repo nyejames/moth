@@ -21,7 +21,6 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity, intern_canonical_builtin,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::definitions::{FieldDefinition, StructTypeDefinition};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId, builtin_type_ids};
@@ -84,9 +83,9 @@ fn imported_constant_uses_the_next_table_id_and_publishes_it() {
                 Declaration {
                     value: DeclarationValue::Shell(DeclarationShell::Function { receiver: None }),
                     value_mode: ValueMode::ImmutableReference,
-                    ..declaration(&start_path, DataType::Inferred)
+                    ..declaration(&start_path, builtin_type_ids::NONE)
                 },
-                declaration(&builtin_path, DataType::Inferred),
+                declaration(&builtin_path, builtin_type_ids::NONE),
             ],
             &path_fork,
         )
@@ -105,7 +104,7 @@ fn imported_constant_uses_the_next_table_id_and_publishes_it() {
             constants
                 .bind_module_constant(imported_path, folded)
                 .expect("fixture bool binds");
-            let mut declaration = declaration(&imported_path, DataType::Bool);
+            let mut declaration = declaration(&imported_path, builtin_type_ids::BOOL);
             declaration.value = DeclarationValue::Default(folded);
             declaration
         },
@@ -886,16 +885,11 @@ fn metadata_record(
     }
 }
 
-fn declaration(path: &PathId, data_type: DataType) -> Declaration {
-    let type_id = match data_type {
-        DataType::Bool => builtin_type_ids::BOOL,
-        DataType::Inferred => builtin_type_ids::NONE,
-        _ => panic!("unsupported imported-constant fixture type"),
-    };
+fn declaration(path: &PathId, type_id: TypeId) -> Declaration {
     Declaration {
         id: *path,
         type_id,
-        diagnostic_type: data_type,
+        type_syntax: None,
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: None,

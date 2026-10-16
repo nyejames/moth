@@ -59,7 +59,6 @@ use crate::compiler_frontend::datatypes::generic_parameters::{
 use crate::compiler_frontend::datatypes::ids::{
     GenericParameterId, GenericParameterListId, TypeId,
 };
-use crate::compiler_frontend::datatypes::{DataType, diagnostic_type_spelling};
 use crate::compiler_frontend::headers::SyntheticContentPayload;
 use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
@@ -1170,9 +1169,6 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         let error_type = resolve_builtin_error_type_typed(&context, None, string_table)
             .map_err(|error| self.error_messages(error, string_table))?
             .type_id;
-        // Only the diagnostic spelling of the fragment vector stays a `DataType`; the identity
-        // interns directly so no reverse tree walk runs on the executable start path.
-        let start_return_type = DataType::collection(DataType::StringSlice);
         let builtin_string_type_id = self.environment.type_environment.builtins().string;
         let start_return_type_id = self
             .environment
@@ -1182,12 +1178,10 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
             parameters: vec![],
             returns: vec![
                 ReturnSlot {
-                    value: start_return_type,
                     type_id: Some(start_return_type_id),
                     channel: ReturnChannel::Success,
                 },
                 ReturnSlot {
-                    value: diagnostic_type_spelling(error_type, &self.environment.type_environment),
                     type_id: Some(error_type),
                     channel: ReturnChannel::Error,
                 },

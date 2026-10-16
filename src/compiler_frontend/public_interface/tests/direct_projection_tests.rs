@@ -43,7 +43,6 @@ use crate::compiler_frontend::canonical_type_identity::{
 };
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
-use crate::compiler_frontend::datatypes::datatype::DataType;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
 };
@@ -173,7 +172,7 @@ fn field_declaration_with_default(
     Declaration {
         id: path(name, string_table, path_fork),
         type_id,
-        diagnostic_type: DataType::Inferred,
+        type_syntax: None,
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Default(default),
         binding_span: None,
@@ -190,7 +189,7 @@ fn field_declaration_no_default(
     Declaration {
         id: path(name, string_table, path_fork),
         type_id,
-        diagnostic_type: DataType::Inferred,
+        type_syntax: None,
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: None,
@@ -604,7 +603,6 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
     let receiver = FunctionParameter {
         id: path("this", &mut string_table, &mut path_fork),
         type_id: struct_type_id,
-        diagnostic_type: DataType::Inferred,
         value_mode: ValueMode::MutableReference,
         default: None,
         binding_span: None,
@@ -921,7 +919,6 @@ fn free_function_retains_folded_parameter_defaults_in_authored_order() {
                 crate::compiler_frontend::ast::statements::functions::FunctionParameter {
                     id: declaration.id,
                     type_id: declaration.type_id,
-                    diagnostic_type: declaration.diagnostic_type,
                     value_mode: declaration.value_mode,
                     default: declaration.value.default(),
                     binding_span: declaration.binding_span,
@@ -1271,7 +1268,6 @@ fn receiver_method_retains_folded_parameter_defaults() {
             FunctionParameter {
                 id: path("this", &mut string_table, &mut path_fork),
                 type_id: struct_type_id,
-                diagnostic_type: DataType::Inferred,
                 value_mode: ValueMode::ImmutableOwned,
                 default: None,
                 binding_span: None,
@@ -1279,7 +1275,6 @@ fn receiver_method_retains_folded_parameter_defaults() {
             FunctionParameter {
                 id: path("label", &mut string_table, &mut path_fork),
                 type_id: string_id,
-                diagnostic_type: DataType::Inferred,
                 value_mode: ValueMode::ImmutableOwned,
                 default: Some(fallback_default),
                 binding_span: None,

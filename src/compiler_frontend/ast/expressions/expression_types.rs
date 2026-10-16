@@ -15,9 +15,8 @@ use crate::compiler_frontend::traits::ids::{TraitEvidenceId, TraitId};
 /// Value-level classification for const-record semantics.
 ///
 /// WHAT: distinguishes a compile-time const-record value from a normal runtime value.
-/// WHY: const-record status is a value fact, not a type identity. It must not be encoded
-///      in `DataType` because the same struct type can produce both runtime instances and
-///      const-record values depending on the construction context.
+/// WHY: const-record state belongs to values. One struct `TypeId` can describe runtime instances
+///      or const-record values depending on their construction context.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ConstRecordState {
     RuntimeValue,

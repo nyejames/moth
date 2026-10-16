@@ -115,7 +115,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             Rc::make_mut(&mut self.resolved_type_aliases_by_path).insert(
                 local_path,
                 ResolvedTypeAlias {
-                    diagnostic_type: diagnostic_type_spelling(type_id, &self.type_environment),
                     target_type_id: type_id,
                     declaration_span: None,
                 },
@@ -212,7 +211,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         Ok(Declaration {
             id: local_path,
             type_id,
-            diagnostic_type: diagnostic_type_spelling(type_id, &self.type_environment),
+            type_syntax: None,
             value_mode: ValueMode::ImmutableReference,
             value: DeclarationValue::Default(id),
             binding_span: None,

@@ -4,7 +4,6 @@
 //! WHY: host metadata feeds both AST lowering and borrow-check call summaries, so small
 //! regressions here can break multiple frontend stages at once.
 
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::external_packages::{
@@ -1042,14 +1041,6 @@ fn package_surface_iteration_exposes_one_component_paths_only() {
 // ------------------------------------------------------------------
 
 #[test]
-fn string_content_resolves_to_string_datatype() {
-    assert_eq!(
-        ExternalSignatureType::StringContent.to_datatype(),
-        Some(DataType::StringSlice)
-    );
-}
-
-#[test]
 fn fixed_numeric_signatures_project_to_exact_fixed_scalar_ids() {
     let mut type_environment = TypeEnvironment::new();
     let builtin_error_type_id = type_environment.builtins().none;
@@ -1064,7 +1055,6 @@ fn fixed_numeric_signatures_project_to_exact_fixed_scalar_ids() {
     ] {
         let fixed = ExternalSignatureType::Abi(ExternalAbiType::Fixed(scalar));
         let source_type_id = builtin_type_ids::fixed_scalar(scalar);
-        assert_eq!(fixed.to_datatype(), Some(DataType::FixedScalar(scalar)));
         assert_eq!(
             fixed.to_type_id(&mut type_environment, builtin_error_type_id),
             Some(source_type_id),
@@ -1364,23 +1354,6 @@ fn prelude_registers_io_namespace_alias_to_core_io() {
 // ------------------------------------------------------------------
 // Optional external signature tests
 // ------------------------------------------------------------------
-
-/// Verifies that an external `String?` signature maps to the diagnostic option datatype.
-///
-/// WHAT: `ExternalSignatureType::Optional` carries the inner type through the same
-///       conversion path as scalar signatures.
-/// WHY: host boundaries must describe optional returns without inventing backend sentinels.
-#[test]
-fn optional_external_resolves_to_option_datatype() {
-    let optional_string = ExternalSignatureType::Optional(Box::new(ExternalSignatureType::Abi(
-        ExternalAbiType::Utf8Str,
-    )));
-
-    assert_eq!(
-        optional_string.to_datatype(),
-        Some(DataType::Option(Box::new(DataType::StringSlice)))
-    );
-}
 
 /// Verifies that an external `String?` signature interns the canonical option TypeId.
 ///

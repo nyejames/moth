@@ -39,7 +39,6 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalTypeIdentity, ExportedGenericParameterIdentity, GenericDeclarationOrigin,
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
 use crate::compiler_frontend::datatypes::definitions::{
@@ -136,7 +135,6 @@ fn param_declaration(
     FunctionParameter {
         id: path(name, string_table, path_fork),
         type_id,
-        diagnostic_type: DataType::Inferred,
         value_mode: ValueMode::default(),
         default: None,
         binding_span: None,
@@ -163,7 +161,7 @@ fn field_declaration(
     Declaration {
         id: path(name, string_table, path_fork),
         type_id,
-        diagnostic_type: DataType::Inferred,
+        type_syntax: None,
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: None,
@@ -186,7 +184,6 @@ fn field_def(
 
 fn return_slot(type_id: TypeId, channel: ReturnChannel) -> ReturnSlot {
     ReturnSlot {
-        value: DataType::Inferred,
         type_id: Some(type_id),
         channel,
     }
@@ -194,7 +191,6 @@ fn return_slot(type_id: TypeId, channel: ReturnChannel) -> ReturnSlot {
 
 fn unresolved_return_slot(channel: ReturnChannel) -> ReturnSlot {
     ReturnSlot {
-        value: DataType::Inferred,
         type_id: None,
         channel,
     }
@@ -461,7 +457,7 @@ fn field_declaration_with_default(
     Declaration {
         id: path(name, string_table, path_fork),
         type_id,
-        diagnostic_type: DataType::Inferred,
+        type_syntax: None,
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Default(default),
         binding_span: None,

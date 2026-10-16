@@ -32,7 +32,6 @@ use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticLabel, DiagnosticPayload,
     TypeMismatchContext,
 };
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition,
     StructTypeDefinition,
@@ -166,10 +165,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         Declaration {
                             id: header.declaration_path.to_owned(),
                             type_id: struct_type_id,
-                            diagnostic_type: DataType::runtime_struct(
-                                header.declaration_path.to_owned(),
-                                struct_type_id,
-                            ),
+                            type_syntax: None,
                             value_mode: ValueMode::ImmutableReference,
                             value: DeclarationValue::Shell(DeclarationShell::Struct),
                             binding_span: header.name_span,
@@ -213,11 +209,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         Declaration {
                             id: header.declaration_path.to_owned(),
                             type_id: choice_type_id,
-                            diagnostic_type: DataType::Choices {
-                                nominal_path: header.declaration_path.to_owned(),
-                                type_id: choice_type_id,
-                                generic_instance_key: None,
-                            },
+                            type_syntax: None,
                             value_mode: ValueMode::ImmutableReference,
                             value: DeclarationValue::Shell(DeclarationShell::Choice),
                             binding_span: header.name_span,
@@ -382,6 +374,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 SignatureDefaultMode::FoldNow,
                 true,
             )?;
+            let field_context = self
+                .environment_header_scope(header, string_table)
+                .with_file_visibility(Arc::clone(&visibility))
+                .with_resolved_module_constants(Rc::clone(&self.resolved_module_constants))
+                .with_choice_variant_shells_by_path(Rc::clone(&self.choice_variant_shells_by_path));
             let path_fork = self.path_fork as *const PathInternerFork;
             let mut type_resolution_context = self.type_resolution_context_for_with_traits(
                 &visibility,
@@ -395,6 +392,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 &mut type_resolution_context,
                 string_table,
                 unsafe { &*path_fork },
+                Some(&field_context),
             )
             .map_err(|error| match error {
                 StructFieldResolutionError::Diagnostic(diagnostic) => {
@@ -424,7 +422,18 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             // Every generic parameter declared on the struct must appear in at least one
             // field type; unused parameters indicate a declaration error.
             let mut used_parameters = FxHashSet::default();
-            collect_type_parameter_ids_from_declarations(&resolved_fields, &mut used_parameters);
+            let empty_canonical_by_local = FxHashMap::default();
+            let canonical_by_local = self
+                .generic_parameter_lists_by_path
+                .get(&header.declaration_path)
+                .map(|registered| &registered.canonical_by_local)
+                .unwrap_or(&empty_canonical_by_local);
+            collect_type_parameter_ids_from_declarations(
+                &resolved_fields,
+                canonical_by_local,
+                &self.type_environment,
+                &mut used_parameters,
+            );
             validate_generic_parameters_used(
                 generic_parameters,
                 &used_parameters,
@@ -439,9 +448,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 for field in &resolved_fields {
                     validate_no_recursive_generic_type(
                         &header.declaration_path,
-                        &field.diagnostic_type,
+                        field.type_id,
+                        &self.type_environment,
                         field.binding_span,
-                        string_table,
                     )
                     .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
                 }
@@ -488,6 +497,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 SignatureDefaultMode::FoldNow,
                 true,
             )?;
+            let payload_context = self
+                .environment_header_scope(header, string_table)
+                .with_file_visibility(Arc::clone(&visibility))
+                .with_resolved_module_constants(Rc::clone(&self.resolved_module_constants))
+                .with_choice_variant_shells_by_path(Rc::clone(&self.choice_variant_shells_by_path));
             let mut type_resolution_context = self.type_resolution_context_for_with_traits(
                 &visibility,
                 generic_parameter_scope.as_ref(),
@@ -498,14 +512,24 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 &unresolved_variants,
                 &mut type_resolution_context,
                 string_table,
+                Some(&payload_context),
             )
             .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
+            drop(payload_context);
 
             // Every generic parameter declared on the choice must appear in at least one
             // variant payload type; unused parameters indicate a declaration error.
             let mut used_parameters = FxHashSet::default();
+            let empty_canonical_by_local = FxHashMap::default();
+            let canonical_by_local = self
+                .generic_parameter_lists_by_path
+                .get(&header.declaration_path)
+                .map(|registered| &registered.canonical_by_local)
+                .unwrap_or(&empty_canonical_by_local);
             collect_type_parameter_ids_from_choice_variants(
                 &resolved_variants,
+                canonical_by_local,
+                &self.type_environment,
                 &mut used_parameters,
             );
             validate_generic_parameters_used(
@@ -524,9 +548,9 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         for field in fields {
                             validate_no_recursive_generic_type(
                                 &header.declaration_path,
-                                &field.diagnostic_type,
+                                field.type_id,
+                                &self.type_environment,
                                 field.binding_span,
-                                string_table,
                             )
                             .map_err(|diagnostic| {
                                 self.diagnostic_messages(diagnostic, string_table)
@@ -591,11 +615,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 Declaration {
                     id: header.declaration_path.to_owned(),
                     type_id: choice_type_id,
-                    diagnostic_type: DataType::Choices {
-                        nominal_path: header.declaration_path.to_owned(),
-                        type_id: choice_type_id,
-                        generic_instance_key: None,
-                    },
+                    type_syntax: None,
                     value_mode: ValueMode::ImmutableReference,
                     value: DeclarationValue::Shell(DeclarationShell::Choice),
                     binding_span: header.name_span,
@@ -610,8 +630,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         // ----------------------------
         // Ensure no runtime struct contains itself as a field type, directly or indirectly.
         // This check runs after all field types are resolved so the full graph is visible.
-        validate_no_recursive_runtime_structs(&self.resolved_struct_fields_by_path)
-            .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
+        validate_no_recursive_runtime_structs(
+            &self.resolved_struct_fields_by_path,
+            &self.type_environment,
+        )
+        .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
 
         Ok(())
     }
@@ -885,6 +908,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                                 string_table,
                             )
                         })?;
+                    let scope_context = self
+                        .environment_header_scope(header, string_table)
+                        .with_file_visibility(Arc::clone(&visibility))
+                        .with_resolved_module_constants(Rc::clone(&self.resolved_module_constants))
+                        .with_choice_variant_shells_by_path(Rc::clone(
+                            &self.choice_variant_shells_by_path,
+                        ));
 
                     let resolved_fields = {
                         let path_fork = self.path_fork as *const PathInternerFork;
@@ -900,6 +930,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             &mut type_resolution_context,
                             string_table,
                             unsafe { &*path_fork },
+                            Some(&scope_context),
                         )
                     }
                     .map_err(|error| match error {
@@ -954,6 +985,13 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                                 string_table,
                             )
                         })?;
+                    let scope_context = self
+                        .environment_header_scope(header, string_table)
+                        .with_file_visibility(Arc::clone(&visibility))
+                        .with_resolved_module_constants(Rc::clone(&self.resolved_module_constants))
+                        .with_choice_variant_shells_by_path(Rc::clone(
+                            &self.choice_variant_shells_by_path,
+                        ));
 
                     let resolved_variants = {
                         let mut type_resolution_context = self
@@ -966,6 +1004,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                             &unresolved_variants,
                             &mut type_resolution_context,
                             string_table,
+                            Some(&scope_context),
                         )
                     }
                     .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;

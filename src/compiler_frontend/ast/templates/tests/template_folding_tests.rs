@@ -21,7 +21,7 @@ use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrBuilder, TemplateIrStore, TemplateIrSummary, TemplateTirPhase, TemplateTirReference,
     TemplateViewContext,
 };
-use crate::compiler_frontend::datatypes::{DataType, ids::builtin_type_ids};
+use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS;
 use crate::compiler_frontend::symbols::{
     path_interner::{PathId, PathInternerFork},
@@ -477,7 +477,7 @@ fn const_loop_iteration_bindings_preserve_source_provenance() {
     let declaration = |id| Declaration {
         id,
         type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+        type_syntax: None,
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span: None,

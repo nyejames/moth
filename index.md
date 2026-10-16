@@ -100,7 +100,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 - [builtins](src/compiler_frontend/builtins/): compiler-owned types/ops/casts/runtime error metadata.
     - [member_rules.rs](src/compiler_frontend/builtins/member_rules.rs): shared allocation-free collection/map argument, success-slot and fallibility rules for AST construction and HIR validation.
 - [style_directives](src/compiler_frontend/style_directives/): frontend+builder template directive registry.
-- [datatypes](src/compiler_frontend/datatypes/): DataType parse spelling + TypeEnvironment/TypeId semantic identity.
+- [datatypes](src/compiler_frontend/datatypes/): TypeEnvironment/TypeId semantic identity; authored type syntax lives in [parsed.rs](src/compiler_frontend/datatypes/parsed.rs).
     - [number.rs](src/compiler_frontend/datatypes/number.rs): immutable `NumberValue` Dec coefficients, exact receiving materialisation, arbitrary-precision arithmetic and integer/rescale conversion. Shared scale and allocation-free decimal text facts live in `moth-lexical`.
     - [numeric_power.rs](src/compiler_frontend/datatypes/numeric_power.rs): portable binary64 power for constant folding.
 - [type_coercion](src/compiler_frontend/type_coercion/): compatibility/contextual/string coercion.
@@ -131,7 +131,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
         - [lookup.rs](src/compiler_frontend/ast/module_ast/scope_context/lookup.rs): visible declaration lookup, shared new-binding collision checks for bound external symbols and namespaces and reserved-receiver resolution for expressions, statements and place roots.
 - [type_resolution](src/compiler_frontend/ast/type_resolution/): parsed type syntax → TypeId.
     - [context.rs](src/compiler_frontend/ast/type_resolution/context.rs): state.
-    - [resolve_type.rs](src/compiler_frontend/ast/type_resolution/resolve_type.rs): orchestration + diagnostic TypeId bridge.
+    - [resolve_type.rs](src/compiler_frontend/ast/type_resolution/resolve_type.rs): direct authored-syntax → TypeId orchestration.
     - [lookup.rs](src/compiler_frontend/ast/type_resolution/lookup.rs): names/namespaces/trait-name rejection.
     - [aliases.rs](src/compiler_frontend/ast/type_resolution/aliases.rs): completed alias lookup and use-site projection.
     - [collections.rs](src/compiler_frontend/ast/type_resolution/collections.rs): fixed capacity.

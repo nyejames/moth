@@ -565,8 +565,8 @@ fn is_constant_node(
 /// contextual expectation.
 ///
 /// WHAT: compares canonical `TypeId`s through the `TypeEnvironment`.
-/// WHY: semantic type decisions must use `TypeId` equality, not parse-level
-///      `DataType` shape matching.
+/// WHY: compatibility is defined over canonical `TypeId` pairs and queried through the
+///      `TypeEnvironment`.
 fn validate_expression_result_type(
     expected_type: &mut ExpectedType,
     actual_type_id: TypeId,

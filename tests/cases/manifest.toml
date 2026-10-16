@@ -10641,6 +10641,20 @@ contract = "language.bindings.unknown_type_name_rejected"
 role = "primary"
 
 [[case]]
+id = "undeclared_collection_type_application_rejected"
+path = "undeclared_collection_type_application_rejected"
+tags = ["integration", "generics", "diagnostics", "name-resolution"]
+contract = "language.generics.builtin_shapes_use_constructed_syntax"
+role = "primary"
+
+[[case]]
+id = "undeclared_map_type_application_rejected"
+path = "undeclared_map_type_application_rejected"
+tags = ["integration", "generics", "diagnostics", "name-resolution"]
+contract = "language.generics.builtin_shapes_use_constructed_syntax"
+role = "boundary"
+
+[[case]]
 id = "type_used_as_value_rejected"
 path = "type_used_as_value_rejected"
 tags = ["integration", "name-resolution", "namespace-misuse", "diagnostics"]

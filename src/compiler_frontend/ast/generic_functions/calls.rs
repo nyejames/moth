@@ -53,15 +53,13 @@ use crate::compiler_frontend::ast::statements::fallible_handling::{
     parse_fallible_handling_suffix_for_call_expression,
     token_stream_starts_typed_propagation_suffix, validate_postfix_propagation_contract,
 };
-use crate::compiler_frontend::ast::statements::functions::{
-    FunctionParameter, FunctionSignature, ReturnSlot,
-};
+use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, ValueReceiverContext};
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_bindings::{BindingConflict, GenericTypeBindings};
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
-use crate::compiler_frontend::datatypes::{diagnostic_type_spelling, environment::TypeEnvironment};
 #[cfg(feature = "benchmark_counters")]
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::source::SourceSpan;
@@ -248,7 +246,7 @@ fn retain_generic_call(
         GenericCallLane::TemplateValidation => None,
     };
     let call = DeferredCall::Generic(Box::new(DeferredGenericCall {
-        template: template.clone(),
+        template: template_for_deferred_generic_call(template),
         parameter_expectations,
         arguments,
         call_span,
@@ -259,6 +257,21 @@ fn retain_generic_call(
         ticket,
     }));
     Ok(retained_pending_call_operand(call, call_span))
+}
+
+fn template_for_deferred_generic_call(
+    template: &GenericFunctionTemplate,
+) -> GenericFunctionTemplate {
+    GenericFunctionTemplate {
+        function_path: template.function_path,
+        source_file: template.source_file,
+        declaration_identity: template.declaration_identity.clone(),
+        generic_parameter_owner: template.generic_parameter_owner.clone(),
+        generic_parameter_list_id: template.generic_parameter_list_id,
+        signature: template.signature.clone(),
+        body_tokens: template.body_tokens.clone(),
+        declaration_span: template.declaration_span,
+    }
 }
 
 fn parse_ready_instance_call(
@@ -1390,53 +1403,16 @@ pub(crate) fn substitute_function_signature(
     increment_frontend_counter(
         FrontendCounter::CensusGenericCallAndMaterialisationSignatureSubstitutions,
     );
-    FunctionSignature {
-        parameters: signature
-            .parameters
-            .iter()
-            .map(|parameter| substitute_parameter(parameter, mapping, type_environment))
-            .collect(),
-        returns: signature
-            .returns
-            .iter()
-            .map(|slot| substitute_return_slot(slot, mapping, type_environment))
-            .collect(),
+    let mut concrete = signature.clone();
+    for parameter in &mut concrete.parameters {
+        parameter.type_id = type_environment.substitute_type_id(parameter.type_id, mapping);
     }
-}
-
-fn substitute_parameter(
-    parameter: &FunctionParameter,
-    mapping: &FxHashMap<GenericParameterId, TypeId>,
-    type_environment: &mut TypeEnvironment,
-) -> FunctionParameter {
-    let mut parameter = parameter.clone();
-    let type_id = type_environment.substitute_type_id(parameter.type_id, mapping);
-    parameter.type_id = type_id;
-    parameter.diagnostic_type = diagnostic_type_spelling(type_id, type_environment);
-    // Defaults are canonical folded content, not expressions to retag for each instance.
-    parameter
-}
-
-fn substitute_return_slot(
-    slot: &ReturnSlot,
-    mapping: &FxHashMap<GenericParameterId, TypeId>,
-    type_environment: &mut TypeEnvironment,
-) -> ReturnSlot {
-    let Some(type_id) = slot
-        .type_id
-        .map(|type_id| type_environment.substitute_type_id(type_id, mapping))
-    else {
-        return slot.clone();
-    };
-
-    let data_type = diagnostic_type_spelling(type_id, type_environment);
-    let value = data_type;
-
-    ReturnSlot {
-        value,
-        type_id: Some(type_id),
-        channel: slot.channel,
+    for slot in &mut concrete.returns {
+        slot.type_id = slot
+            .type_id
+            .map(|type_id| type_environment.substitute_type_id(type_id, mapping));
     }
+    concrete
 }
 
 fn missing_generic_parameter_names(

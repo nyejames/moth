@@ -13,9 +13,10 @@ use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
 use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::type_resolution::validate_no_recursive_runtime_structs;
 use crate::compiler_frontend::compiler_messages::{DiagnosticPayload, InvalidDeclarationReason};
-use crate::compiler_frontend::datatypes::{
-    BuiltinScalarReceiver, DataType, ReceiverKey, builtin_type_ids,
-};
+use crate::compiler_frontend::datatypes::definitions::StructTypeDefinition;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::ids::NominalTypeId;
+use crate::compiler_frontend::datatypes::{BuiltinScalarReceiver, ReceiverKey, builtin_type_ids};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -221,13 +222,29 @@ fn recursive_runtime_struct_cycles_are_rejected() {
             "every struct path must belong to the caller-owned fork"
         );
     }
+    let mut type_environment = TypeEnvironment::new();
+    let (_, struct_a_type) = type_environment.register_nominal_struct(StructTypeDefinition {
+        id: NominalTypeId(0),
+        path: struct_a,
+        fields: Box::new([]),
+        generic_parameters: None,
+        const_record: false,
+    });
+    let (_, struct_b_type) = type_environment.register_nominal_struct(StructTypeDefinition {
+        id: NominalTypeId(0),
+        path: struct_b,
+        fields: Box::new([]),
+        generic_parameters: None,
+        const_record: false,
+    });
+
     let mut struct_fields = FxHashMap::default();
     struct_fields.insert(
-        struct_a.to_owned(),
+        struct_a,
         vec![Declaration {
             id: struct_a_field_b,
-            type_id: builtin_type_ids::NONE,
-            diagnostic_type: DataType::runtime_struct(struct_b.to_owned(), builtin_type_ids::NONE),
+            type_id: struct_b_type,
+            type_syntax: None,
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
@@ -235,11 +252,11 @@ fn recursive_runtime_struct_cycles_are_rejected() {
         }],
     );
     struct_fields.insert(
-        struct_b.to_owned(),
+        struct_b,
         vec![Declaration {
             id: struct_b_field_a,
-            type_id: builtin_type_ids::NONE,
-            diagnostic_type: DataType::runtime_struct(struct_a, builtin_type_ids::NONE),
+            type_id: struct_a_type,
+            type_syntax: None,
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
@@ -247,7 +264,7 @@ fn recursive_runtime_struct_cycles_are_rejected() {
         }],
     );
 
-    let diagnostic = validate_no_recursive_runtime_structs(&struct_fields)
+    let diagnostic = validate_no_recursive_runtime_structs(&struct_fields, &type_environment)
         .expect_err("recursive runtime struct cycle should be rejected");
     assert!(matches!(
         &diagnostic.payload,
@@ -273,13 +290,22 @@ fn non_recursive_runtime_structs_are_allowed() {
         "struct and field paths must belong to the caller-owned fork"
     );
 
+    let mut type_environment = TypeEnvironment::new();
+    type_environment.register_nominal_struct(StructTypeDefinition {
+        id: NominalTypeId(0),
+        path: struct_a,
+        fields: Box::new([]),
+        generic_parameters: None,
+        const_record: false,
+    });
+
     let mut struct_fields = FxHashMap::default();
     struct_fields.insert(
         struct_a,
         vec![Declaration {
             id: field_ax,
             type_id: builtin_type_ids::fixed_scalar(FixedScalar::I32),
-            diagnostic_type: DataType::FixedScalar(FixedScalar::I32),
+            type_syntax: None,
             value_mode: ValueMode::ImmutableOwned,
             value: DeclarationValue::Absent,
             binding_span: None,
@@ -287,6 +313,6 @@ fn non_recursive_runtime_structs_are_allowed() {
         }],
     );
 
-    validate_no_recursive_runtime_structs(&struct_fields)
+    validate_no_recursive_runtime_structs(&struct_fields, &type_environment)
         .expect("non-recursive runtime structs should pass validation");
 }

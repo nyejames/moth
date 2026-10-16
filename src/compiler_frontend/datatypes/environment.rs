@@ -1,11 +1,12 @@
 //! `TypeEnvironment` — table-backed owner of resolved frontend semantic type identity.
 //!
 //! WHAT: stores all type definitions and guarantees canonical identity through interning.
-//! WHY: AST should carry compact `TypeId`s instead of repeatedly cloning large
-//!      `DataType` payloads.
+//! WHY: AST nodes retain authored `ParsedTypeRef` syntax and refer to resolved types through
+//!      compact `TypeId`s.
 //!
 //! Boundaries:
-//! - Parsed type refs (`ParsedTypeRef`) do NOT belong here.
+//! - Authored `ParsedTypeRef` syntax stays with declarations and signatures; AST type resolution
+//!   interns each resolved semantic type here.
 //! - Backend layout, ABI, drop strategy, and runtime representation do NOT belong here.
 //! - Type compatibility POLICY does NOT belong here (see `type_coercion`).
 
@@ -1016,8 +1017,8 @@ impl TypeEnvironment {
 
     /// Interns an opaque external type exposed by a backend package.
     ///
-    /// WHAT: preserves frontend identity for external types instead of collapsing
-    /// them to `None` during diagnostic-only `DataType -> TypeId` conversion.
+    /// WHAT: interns opaque platform types so their semantic identity remains available
+    ///      through `TypeEnvironment` rather than being reduced to an unsupported spelling.
     /// WHY: external types are opaque but still semantically distinct type identities.
     pub fn intern_external(&mut self, external_type_id: ExternalTypeId) -> TypeId {
         if let Some(existing) = self
@@ -1571,9 +1572,9 @@ impl TypeEnvironment {
     /// Interns the canonical built-in collection type for an element semantic type.
     ///
     /// WHAT: gives collection construction a named owner in `TypeEnvironment`.
-    /// WHY: collection identity is semantic `TypeId` identity; parser-shaped
-    ///      `DataType::collection` must remain a diagnostic spelling instead of the
-    ///      canonical representation.
+    /// WHY: parsed collection syntax resolves directly to this semantic `TypeId` identity;
+    ///      authored `ParsedTypeRef` syntax remains separate from the environment's canonical
+    ///      representation.
     pub fn intern_collection(
         &mut self,
         element_type: TypeId,
@@ -1588,8 +1589,8 @@ impl TypeEnvironment {
     /// Interns the canonical ordered map type for key and value semantic types.
     ///
     /// WHAT: gives map construction a named owner in `TypeEnvironment`.
-    /// WHY: map identity is semantic `TypeId` identity; parser-shaped `DataType::Map`
-    ///      must remain a diagnostic spelling instead of the canonical representation.
+    /// WHY: parsed map syntax resolves directly to these semantic `TypeId`s; the authored
+    ///      `ParsedTypeRef` remains separate from the environment's canonical representation.
     pub fn intern_map(&mut self, key_type: TypeId, value_type: TypeId) -> TypeId {
         self.intern_constructed(
             TypeConstructor::Builtin(BuiltinTypeConstructor::OrderedMap),
@@ -1625,8 +1626,8 @@ impl TypeEnvironment {
     /// Interns the canonical built-in option type for an inner semantic type.
     ///
     /// WHAT: gives option construction a named owner in `TypeEnvironment`.
-    /// WHY: option identity is semantic `TypeId` identity; parser-shaped `DataType::Option`
-    ///      must remain a diagnostic spelling instead of the canonical representation.
+    /// WHY: parsed option syntax resolves directly to this semantic `TypeId`; the authored
+    ///      `ParsedTypeRef` remains separate from the environment's canonical representation.
     pub fn intern_option(&mut self, inner: TypeId) -> TypeId {
         self.intern_constructed(
             TypeConstructor::Builtin(BuiltinTypeConstructor::Option),
@@ -1669,8 +1670,8 @@ impl TypeEnvironment {
     /// Returns true if values of this type can be compared with runtime equality.
     ///
     /// WHAT: scalar equality and choice payload equality are frontend semantic facts.
-    /// WHY: comparison typing needs one canonical query over `TypeId + TypeEnvironment`
-    ///      instead of reconstructing parse-only `DataType` trees.
+    /// WHY: comparison typing queries canonical type identity and runtime-equality facts from
+    ///       this environment.
     pub fn supports_runtime_equality(&self, id: TypeId) -> bool {
         self.supports_runtime_equality_with_visited(id, &mut FxHashSet::default())
     }
@@ -1898,12 +1899,9 @@ impl TypeEnvironment {
 
     /// Returns the receiver-method lookup key for a canonical frontend type.
     ///
-    /// WHAT: derives receiver keys from `TypeId` and the environment-owned type
-    /// definition instead of parse-only `DataType` payloads.
-    /// WHY: AST member lookup should use canonical semantic type identity on the
-    /// hot path. Generic nominal instances resolve to their base constructor key
-    /// so the receiver catalog can store one declaration-site method for every
-    /// concrete instance of that constructor.
+    /// WHAT: derives receiver keys from `TypeId` and the environment-owned type definition.
+    /// WHY: AST member lookup groups generic nominal instances under their base constructor so
+    ///       one declaration-site method serves every concrete instance.
     pub fn receiver_key_for_type_id(&self, id: TypeId) -> Option<ReceiverKey> {
         match self.get(id)? {
             TypeDefinition::Builtin(builtin) => match builtin.key {
@@ -1952,9 +1950,9 @@ impl TypeEnvironment {
 
     /// Converts a `TypeId` to a `TypeIdentityKey` for HIR compatibility.
     ///
-    /// WHAT: reverse-maps a canonical `TypeId` to the identity key used by
-    ///       `GenericInstantiationKey` and HIR generic struct/choice registration.
-    /// WHY: eliminates the `TypeId -> DataType -> TypeIdentityKey` double bridge.
+    /// WHAT: maps `TypeId` to the compatibility key used by `GenericInstantiationKey` and HIR
+    ///       generic struct/choice registration.
+    /// WHY: HIR registration consumes the canonical generic identity owned by this environment.
     pub fn type_id_to_type_identity_key(&self, id: TypeId) -> Option<TypeIdentityKey> {
         match self.get(id)? {
             TypeDefinition::Builtin(builtin) => match builtin.key {

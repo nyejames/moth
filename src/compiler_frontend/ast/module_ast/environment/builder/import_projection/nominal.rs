@@ -257,7 +257,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             let Some(type_id) = self.imported_type_ids_by_origin.get(origin_type).copied() else {
                 continue;
             };
-            let diagnostic_type = diagnostic_type_spelling(type_id, &self.type_environment);
 
             Rc::make_mut(&mut self.nominal_type_ids_by_path).insert(local_path, type_id);
             self.type_environment
@@ -308,7 +307,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     Declaration {
                         id: local_path,
                         type_id,
-                        diagnostic_type,
+                        type_syntax: None,
                         value_mode: ValueMode::ImmutableReference,
                         value: DeclarationValue::Shell(match &record.semantics {
                             PublicDeclarationSemantics::Struct(_) => DeclarationShell::Struct,
@@ -489,7 +488,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             field_declarations.push(Declaration {
                 id: field_path,
                 type_id: field_type_id,
-                diagnostic_type: diagnostic_type_spelling(field_type_id, &self.type_environment),
+                type_syntax: None,
                 value_mode: ValueMode::ImmutableReference,
                 value: default_value,
                 binding_span: None,

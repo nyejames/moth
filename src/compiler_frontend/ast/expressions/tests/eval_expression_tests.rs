@@ -631,7 +631,7 @@ fn string_slice_concatenation_with_variable_is_rejected() {
 }
 
 #[test]
-fn folded_template_preserves_template_diagnostic_type() {
+fn folded_template_preserves_template_type_id() {
     let value = first_start_declaration_expression("value = [:template body]\n");
 
     assert_eq!(value.value_type_id(), builtin_type_ids::STRING);

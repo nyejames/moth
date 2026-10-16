@@ -38,11 +38,11 @@ use crate::compiler_frontend::canonical_type_identity::{
 use crate::compiler_frontend::compiler_errors::{
     CompilerError, CompilerMessages, InfrastructureErrors,
 };
+use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_parameters::TypeParameterId;
 use crate::compiler_frontend::datatypes::ids::TypeId;
-use crate::compiler_frontend::datatypes::{DataType, ReceiverKey, diagnostic_type_spelling};
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::binding_environment::{
     HeaderBindingEnvironment, ImportedFunctionContract, SourceFunctionTarget,
@@ -680,10 +680,7 @@ impl GenericTemplateArtefact {
                 let declaration = Declaration {
                     id: local_path,
                     type_id,
-                    diagnostic_type: diagnostic_type_spelling(
-                        type_id,
-                        &environment.type_environment,
-                    ),
+                    type_syntax: None,
                     value_mode: ValueMode::ImmutableReference,
                     value: DeclarationValue::Initializer(value.id()),
                     binding_span: span,
@@ -764,7 +761,7 @@ impl GenericTemplateArtefact {
             let declaration = Declaration {
                 id: method_path,
                 type_id: function_type_id,
-                diagnostic_type: DataType::Inferred,
+                type_syntax: None,
                 value_mode: ValueMode::ImmutableReference,
                 value: DeclarationValue::Shell(DeclarationShell::Function {
                     receiver: Some(receiver.clone()),
@@ -1080,7 +1077,7 @@ impl GenericTemplateArtefact {
                     Declaration {
                         id: nested_path,
                         type_id: function_type_id,
-                        diagnostic_type: DataType::Inferred,
+                        type_syntax: None,
                         value_mode: ValueMode::ImmutableReference,
                         value: DeclarationValue::Shell(DeclarationShell::Function { receiver }),
                         binding_span: None,
@@ -1354,7 +1351,6 @@ impl StableFunctionSignature {
             parameters.push(FunctionParameter {
                 id: parameter_path,
                 type_id,
-                diagnostic_type: diagnostic_type_spelling(type_id, context.type_environment),
                 value_mode: parameter.value_mode,
                 default,
                 binding_span: parameter_span,
@@ -1373,9 +1369,7 @@ impl StableFunctionSignature {
                 context.string_table,
                 context.path_fork,
             )?;
-            let diagnostic_type = diagnostic_type_spelling(type_id, context.type_environment);
             returns.push(ReturnSlot {
-                value: diagnostic_type,
                 type_id: Some(type_id),
                 channel: ReturnChannel::Success,
             });
@@ -1392,7 +1386,6 @@ impl StableFunctionSignature {
                 context.path_fork,
             )?;
             returns.push(ReturnSlot {
-                value: diagnostic_type_spelling(type_id, context.type_environment),
                 type_id: Some(type_id),
                 channel: ReturnChannel::Error,
             });
@@ -1451,7 +1444,7 @@ impl super::stable_types::StableCallableBinding {
                 Declaration {
                     id: local_path,
                     type_id: function_type_id,
-                    diagnostic_type: DataType::Inferred,
+                    type_syntax: None,
                     value_mode: ValueMode::ImmutableReference,
                     value: DeclarationValue::Shell(DeclarationShell::Function { receiver: None }),
                     binding_span: None,

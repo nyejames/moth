@@ -8,7 +8,6 @@ use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_front
 use super::abi::{ExternalAbiType, ExternalParameter, ExternalReturnAlias, ExternalSignatureType};
 use super::ids::{ExternalConstantId, ExternalFunctionId, ExternalPackageId, ExternalTypeId};
 use super::symbol_path::ExternalSymbolPath;
-use crate::compiler_frontend::datatypes::DataType;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use std::collections::HashMap;
 
@@ -75,13 +74,6 @@ impl Clone for ExternalFunctionDef {
 }
 
 impl ExternalFunctionDef {
-    pub(crate) fn success_return_data_types(&self) -> Vec<DataType> {
-        self.returns
-            .iter()
-            .filter_map(|slot| slot.value_type.to_datatype())
-            .collect()
-    }
-
     pub(crate) fn success_return_type_ids(
         &self,
         type_environment: &mut crate::compiler_frontend::datatypes::environment::TypeEnvironment,
@@ -170,12 +162,13 @@ pub fn external_success_returns(
     success_alias: ExternalReturnAlias,
 ) -> Vec<ExternalReturnSlot> {
     let success_type = success_type.into();
-    match success_type.to_datatype() {
-        Some(_) => vec![ExternalReturnSlot {
+    if success_type.supports_success_return_type() {
+        vec![ExternalReturnSlot {
             value_type: success_type,
             alias: success_alias,
-        }],
-        None => Vec::new(),
+        }]
+    } else {
+        Vec::new()
     }
 }
 

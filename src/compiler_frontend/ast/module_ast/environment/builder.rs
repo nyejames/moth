@@ -46,7 +46,6 @@ use crate::compiler_frontend::datatypes::generic_parameters::{
     GenericParameterList, GenericParameterScope, TypeParameterId,
 };
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, NominalTypeId, TypeId};
-use crate::compiler_frontend::datatypes::{DataType, diagnostic_type_spelling};
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariant;
 use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::headers::binding_environment::{
@@ -1022,7 +1021,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 Declaration {
                     id: *path,
                     type_id: struct_type_id,
-                    diagnostic_type: DataType::runtime_struct(*path, struct_type_id),
+                    type_syntax: None,
                     value_mode: ValueMode::ImmutableReference,
                     value: DeclarationValue::Shell(DeclarationShell::Struct),
                     binding_span: None,

@@ -32,7 +32,6 @@ use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarati
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, DiagnosticPayload, InvalidExpressionReason,
 };
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
@@ -468,7 +467,7 @@ fn constant_identifier_uses_module_store_tir() {
                     .try_intern_components(&[constant_name])
                     .expect("test path fits"),
                 type_id: template_type_id,
-                diagnostic_type: DataType::StringSlice,
+                type_syntax: None,
                 value_mode: ValueMode::ImmutableOwned,
                 value: DeclarationValue::Initializer(template_expression.id()),
                 binding_span: None,

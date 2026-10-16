@@ -16,11 +16,13 @@ use crate::compiler_frontend::ast::module_ast::environment::builder::{
 };
 use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
 use crate::compiler_frontend::ast::type_resolution::{
-    ResolvedTypeAlias, ResolvedTypeAnnotation, resolve_diagnostic_type_to_type_id_checked,
-    resolve_parsed_type_annotation,
+    ResolvedTypeAlias, ResolvedTypeAnnotation, resolve_parsed_type_annotation,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages, ErrorType};
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidDeclarationReason};
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, DiagnosticToken, InvalidDeclarationReason, InvalidTypeAnnotationReason,
+    TypeAnnotationContext,
+};
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::parsed::ParsedTypeRef;
 use crate::compiler_frontend::declaration_syntax::type_syntax::for_each_named_type_in_parsed_ref;
@@ -31,7 +33,8 @@ use crate::compiler_frontend::headers::{
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
+use crate::compiler_frontend::tokenizer::tokens::TokenTag;
 use rustc_hash::FxHashSet;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -161,7 +164,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         header: &Header,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
-        let target = self.alias_target(header, string_table)?.clone();
+        let target = self.alias_target(header, string_table)?;
         let visibility = self.header_visibility(header, string_table)?;
 
         // The use-site scope holds a handle on the alias table, so it must end before the table
@@ -171,16 +174,16 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 .environment_header_scope(header, string_table)
                 .with_file_visibility(Arc::clone(&visibility))
                 .with_resolved_module_constants(Rc::clone(&self.resolved_module_constants));
-            let target_span = parsed_type_span(&target);
+            let target_span = parsed_type_span(target);
             let resolved_target = self.resolve_alias_target(
-                &target,
+                target,
                 target_span,
                 &visibility,
                 &scope_context,
                 string_table,
             )?;
 
-            self.complete_alias(header, &target, resolved_target, string_table)?
+            self.complete_alias(header, target, resolved_target, string_table)?
         };
 
         Rc::make_mut(&mut self.resolved_type_aliases_by_path)
@@ -217,7 +220,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let resolved_target = {
             let mut type_resolution_context = self.type_resolution_context_for(visibility, None);
             resolve_parsed_type_annotation(
-                target.clone(),
+                target,
                 target_span,
                 &mut type_resolution_context,
                 string_table,
@@ -263,18 +266,14 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         }
 
         let target_span = parsed_type_span(target);
-        let target_type_id = match resolved_target.type_id {
-            Some(type_id) => type_id,
-            None => resolve_diagnostic_type_to_type_id_checked(
-                &resolved_target.diagnostic_type,
-                &mut self.type_environment,
-                target_span,
-            )
-            .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?,
+        let Some(target_type_id) = resolved_target.type_id else {
+            return Err(self.diagnostic_messages(
+                unresolved_alias_target_diagnostic(target, target_span),
+                string_table,
+            ));
         };
 
         Ok(ResolvedTypeAlias {
-            diagnostic_type: resolved_target.diagnostic_type,
             target_type_id,
             declaration_span: header.name_span,
         })
@@ -296,5 +295,40 @@ fn parsed_type_span(parsed_type: &ParsedTypeRef) -> Option<SourceSpan> {
         | ParsedTypeRef::Optional { span, .. }
         | ParsedTypeRef::Applied { span, .. } => *span,
         ParsedTypeRef::Inferred => None,
+    }
+}
+
+fn unresolved_alias_target_diagnostic(
+    target: &ParsedTypeRef,
+    span: Option<SourceSpan>,
+) -> CompilerDiagnostic {
+    if let Some(name) = first_authored_type_name(target) {
+        return CompilerDiagnostic::unknown_type_name(name, span);
+    }
+
+    CompilerDiagnostic::invalid_type_annotation(
+        TypeAnnotationContext::DeclarationTarget,
+        InvalidTypeAnnotationReason::ExpectedTypeAnnotation {
+            found: DiagnosticToken::from_static_tag(TokenTag::EOF),
+        },
+        span,
+    )
+}
+
+fn first_authored_type_name(target: &ParsedTypeRef) -> Option<StringId> {
+    match target {
+        ParsedTypeRef::Named { name, .. } => Some(*name),
+        ParsedTypeRef::Qualified { path, .. } => path.last().copied(),
+        ParsedTypeRef::Applied { base, .. } => first_authored_type_name(base),
+        ParsedTypeRef::Inferred
+        | ParsedTypeRef::BuiltinBool { .. }
+        | ParsedTypeRef::BuiltinString { .. }
+        | ParsedTypeRef::BuiltinChar { .. }
+        | ParsedTypeRef::BuiltinFixedScalar { .. }
+        | ParsedTypeRef::BuiltinNumber { .. }
+        | ParsedTypeRef::This { .. }
+        | ParsedTypeRef::Collection { .. }
+        | ParsedTypeRef::Map { .. }
+        | ParsedTypeRef::Optional { .. } => None,
     }
 }

@@ -28,7 +28,6 @@ use crate::compiler_frontend::build_config::{
 };
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, InvalidConfigReason};
-use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
@@ -270,8 +269,6 @@ pub(super) fn resolve_config_declaration(
         })?;
         let expression = expression_builder.view(expression_id)?;
         declaration.type_id = expression.value_type_id()?;
-        declaration.diagnostic_type =
-            diagnostic_type_spelling(declaration.type_id, type_interner.environment());
         declaration.value_mode = expression.value_mode();
         let provenance = expression
             .occurrence_facts()

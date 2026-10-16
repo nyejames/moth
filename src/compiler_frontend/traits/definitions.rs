@@ -2,9 +2,8 @@
 //!
 //! WHAT: stores trait definitions after names, visibility, `This`, and requirement signatures
 //! have been resolved into compiler-owned identities.
-//! WHY: traits are compile-time metadata, not `DataType` declarations. Keeping them here gives
-//! conformance and bounds a focused lookup surface without widening the normal value/type
-//! declaration table.
+//! WHY: trait declarations and evidence have a focused lookup surface separate from value and
+//!      nominal type declarations.
 
 use crate::compiler_frontend::ast::statements::functions::ReturnChannel;
 use crate::compiler_frontend::datatypes::ids::TypeId;

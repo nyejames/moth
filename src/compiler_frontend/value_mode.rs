@@ -3,8 +3,8 @@
 //! WHAT: carries AST-level mutability/reference/owned-vs-borrowed classification for expressions,
 //! declarations, and binding targets.
 //!
-//! WHY: semantic type identity must not carry access or ownership state. `ValueMode` keeps this
-//! data attached to values/bindings while `DataType` remains a pure type description.
+//! WHY: access and ownership classifications belong to values and bindings, while semantic type
+//!      identity is carried separately by `TypeId`.
 //!
 //! This is not the final runtime ownership flag model. Runtime ownership remains a later lowering
 //! concern driven by borrow/last-use analysis.

@@ -31,7 +31,6 @@ use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages}
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidReceiverDeclarationReason,
 };
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_parameters::{
@@ -133,11 +132,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             //  Parse unresolved signature
             // ---------------------------------
 
+            let signature_context = self
+                .environment_header_scope(header, string_table)
+                .with_file_visibility(Arc::clone(&visibility))
+                .with_resolved_module_constants(Rc::clone(&self.resolved_module_constants));
             let unresolved_signature = {
-                let signature_context = self
-                    .environment_header_scope(header, string_table)
-                    .with_file_visibility(Arc::clone(&visibility))
-                    .with_resolved_module_constants(Rc::clone(&self.resolved_module_constants));
                 let owner_tokens = self.token_owner(header.tokens.source()).ok_or_else(|| {
                     self.error_messages(
                         CompilerError::compiler_error(
@@ -208,8 +207,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 // for its type environment; the path fork is not mutated by signature resolution.
                 unsafe { &*path_fork },
                 string_table,
+                Some(&signature_context),
             )
             .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
+            // Release the scope's declaration-table `Rc` before the builder mutates it below.
+            drop(signature_context);
 
             let mut used_generic_parameters = rustc_hash::FxHashSet::default();
             if let Some(registered_generic_parameters) = registered_generic_parameters.as_ref() {
@@ -247,7 +249,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                                 receiver: resolved_signature.receiver.clone(),
                             });
                         function_declaration.type_id = function_type_id;
-                        function_declaration.diagnostic_type = DataType::Inferred;
                         Ok(())
                     } else {
                         Err(CompilerError::compiler_error(

@@ -1,6 +1,5 @@
 //! Unit tests for the `datatypes` module.
 
-mod datatype_invariant_tests;
 mod environment_tests;
 mod fixed_scalar_tests;
 mod generics_tests;

@@ -58,7 +58,6 @@ use crate::compiler_frontend::compiler_messages::{
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
-use crate::compiler_frontend::datatypes::{DataType, diagnostic_type_spelling};
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariant;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::headers::SyntheticContentPayload;
@@ -232,8 +231,8 @@ impl ConstantResolutionSession {
         let mut declaration = match payload {
             Some(SyntheticContentPayload::RenderedHtml(rendered_html)) => Declaration {
                 id: header.declaration_path,
+                type_syntax: None,
                 type_id: builtin_type_ids::STRING,
-                diagnostic_type: DataType::StringSlice,
                 value_mode: ValueMode::ImmutableOwned,
                 value: DeclarationValue::Initializer(
                     expression_builder
@@ -355,8 +354,8 @@ impl ConstantResolutionSession {
                 };
                 Declaration {
                     id: header.declaration_path,
+                    type_syntax: None,
                     type_id: expression_builder.view_owned(value)?.value_type_id()?,
-                    diagnostic_type: DataType::StringSlice,
                     value_mode: expression_builder.view_owned(value)?.value_mode(),
                     value: DeclarationValue::Initializer(value.id()),
                     binding_span: None,
@@ -442,8 +441,6 @@ impl ConstantResolutionSession {
         })?;
         let initializer = expression_builder.view(initializer)?;
         declaration.type_id = initializer.value_type_id()?;
-        declaration.diagnostic_type =
-            diagnostic_type_spelling(declaration.type_id, type_interner.environment());
         declaration.value_mode = initializer.value_mode();
         let initializer_is_compile_time_constant = initializer
             .const_value_kind_with_template_classifier(const_values, &mut |template| {

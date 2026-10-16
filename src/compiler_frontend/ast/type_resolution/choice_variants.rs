@@ -1,23 +1,26 @@
 //! Choice variant payload type resolution for AST type resolution.
 
+use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::type_resolution::{
-    TypeResolutionContext, TypeResolutionResult, resolve_diagnostic_type_to_type_id_checked,
+    TypeResolutionContext, TypeResolutionResult, resolve_parsed_type_annotation,
+};
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, InvalidTypeAnnotationReason, TypeAnnotationContext,
 };
 use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, ChoiceVariantPayload};
 use crate::compiler_frontend::symbols::string_interning::StringTable;
-
-use super::resolve_named_signature_type;
 
 // ----------------------------------
 //  Choice variant payload resolution
 // ----------------------------------
 
-/// Resolve choice payload field types, replacing `NamedType` placeholders in record variants and
-/// assigning checked semantic `TypeId`s to payload fields.
+/// Resolve choice payload `TypeId`s from retained parsed annotations.
+/// Authored syntax stays on each field for diagnostics and later re-resolution.
 pub(crate) fn resolve_choice_variant_payload_types(
     variants: &[ChoiceVariant],
     type_resolution_context: &mut TypeResolutionContext<'_>,
-    string_table: &StringTable,
+    string_table: &mut StringTable,
+    scope_context: Option<&ScopeContext>,
 ) -> TypeResolutionResult<Vec<ChoiceVariant>> {
     let mut resolved_variants = Vec::with_capacity(variants.len());
 
@@ -31,17 +34,40 @@ pub(crate) fn resolve_choice_variant_payload_types(
                 for field in fields {
                     let mut resolved_field = field.to_owned();
 
-                    resolved_field.diagnostic_type = resolve_named_signature_type(
-                        &field.diagnostic_type,
-                        field.binding_span,
-                        type_resolution_context,
-                        string_table,
-                    )?;
-                    resolved_field.type_id = resolve_diagnostic_type_to_type_id_checked(
-                        &resolved_field.diagnostic_type,
-                        type_resolution_context.type_environment,
-                        resolved_field.binding_span,
-                    )?;
+                    resolved_field.type_id = if let Some(type_syntax) = &field.type_syntax {
+                        resolve_parsed_type_annotation(
+                            type_syntax,
+                            field.binding_span,
+                            type_resolution_context,
+                            string_table,
+                            scope_context,
+                        )?
+                        .type_id
+                        .filter(|type_id| {
+                            *type_id != type_resolution_context.type_environment.builtins().none
+                        })
+                        .ok_or_else(|| {
+                            CompilerDiagnostic::invalid_type_annotation(
+                                TypeAnnotationContext::DeclarationTarget,
+                                InvalidTypeAnnotationReason::NoneNotAllowed,
+                                field.binding_span,
+                            )
+                        })?
+                    } else if field.type_id
+                        != type_resolution_context.type_environment.builtins().none
+                        && type_resolution_context
+                            .type_environment
+                            .get(field.type_id)
+                            .is_some()
+                    {
+                        field.type_id
+                    } else {
+                        return Err(CompilerDiagnostic::invalid_type_annotation(
+                            TypeAnnotationContext::DeclarationTarget,
+                            InvalidTypeAnnotationReason::NoneNotAllowed,
+                            field.binding_span,
+                        ));
+                    };
 
                     resolved_fields.push(resolved_field);
                 }

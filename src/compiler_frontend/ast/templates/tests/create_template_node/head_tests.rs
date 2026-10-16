@@ -42,7 +42,6 @@ use crate::compiler_frontend::ast::{
 use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidExpressionReason, InvalidTemplateStructureReason, NameNamespace,
 };
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::definitions::{FieldDefinition, StructTypeDefinition};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{NominalTypeId, TypeId, builtin_type_ids};

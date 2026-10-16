@@ -42,7 +42,6 @@ use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidLoopHeaderReason, InvalidRangeOperandReason, RangeOperandKind,
     ValueReceiverContext,
 };
-use crate::compiler_frontend::datatypes::diagnostic_type_spelling;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::numeric_operators::range_iteration_domain;
@@ -1972,7 +1971,6 @@ fn declare_loop_binding(
 ) -> LoopHeaderResult<Declaration> {
     validate_loop_binding_name(binding_name, parser)?;
 
-    let data_type = diagnostic_type_spelling(type_id, parser.type_interner.environment());
     let binding_span = binding_name.span;
     let declaration = Declaration {
         id: parser
@@ -1980,7 +1978,7 @@ fn declare_loop_binding(
             .try_intern_child(parser.scope_context.scope, binding_name.id)
             .expect("path table exhausted while declaring loop binding"),
         type_id,
-        diagnostic_type: data_type,
+        type_syntax: None,
         value_mode: ValueMode::ImmutableOwned,
         value: DeclarationValue::Absent,
         binding_span,

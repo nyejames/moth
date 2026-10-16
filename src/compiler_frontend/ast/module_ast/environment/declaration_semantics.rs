@@ -2,8 +2,8 @@
 //!
 //! WHAT: records the executable role of each top-level declaration after AST environment
 //! construction has resolved signatures and nominal type identity.
-//! WHY: body parsing needs to decide whether a visible source declaration is callable,
-//! constructible, or value-like without inspecting diagnostic-only `DataType` spelling.
+//! WHY: body parsing dispatches on resolved declaration roles for callables, nominal constructors,
+//!      and values without rediscovering those roles from type spellings.
 
 use crate::compiler_frontend::ast::ast_nodes::{Declaration, DeclarationShell, DeclarationValue};
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;

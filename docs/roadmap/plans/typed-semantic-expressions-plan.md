@@ -4,9 +4,9 @@
 
 ```text
 STATUS: ACTIVE on expression-refactor (Phase 5 reactivated by the user)
-CURRENT_SLICE: Phase 5. P5a call-site descriptor consolidation and shared generated registry accepted.
+CURRENT_SLICE: Phase 5. P5a descriptors and P5b direct type resolution, DataType removal and range-domain reuse accepted.
 BLOCKERS: Fresh Windows proof remains pending.
-NEXT_ACTION: P5b direct type resolution, removal of display-only type trees and range-domain reuse.
+NEXT_ACTION: P5c constant handles: HIR const-store take, import projection batching, resolver double walk.
 ```
 
 The main squash checkpoint retains expression-refactor source `534aea1a5`,

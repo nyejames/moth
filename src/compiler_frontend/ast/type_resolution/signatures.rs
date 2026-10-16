@@ -1,18 +1,21 @@
 //! Function signature resolution for AST type resolution.
 
-use super::{ResolvedFunctionSignature, resolve_named_signature_type};
+use super::ResolvedFunctionSignature;
+use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::statements::functions::{
-    FunctionSignature, ReturnChannel, ReturnSlot,
+    FunctionParameter, FunctionSignature, ReturnChannel, ReturnSlot, UnresolvedFunctionSignature,
 };
 use crate::compiler_frontend::ast::type_resolution::{
-    TypeResolutionContext, TypeResolutionResult, resolve_diagnostic_type_to_type_id_checked,
+    TypeResolutionContext, TypeResolutionResult, resolve_parsed_type_annotation,
 };
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidReceiverDeclarationReason, InvalidThisUsageReason,
+    InvalidTypeAnnotationReason, TypeAnnotationContext,
 };
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::ids::builtin_type_ids;
 use crate::compiler_frontend::datatypes::ids::{FunctionTypeKey, GenericParameterListId, TypeId};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -54,11 +57,12 @@ pub(crate) fn intern_resolved_function_signature(
 /// Resolve a function signature and extract receiver metadata for method cataloging.
 pub(crate) fn resolve_function_signature(
     function_path: &PathId,
-    signature: &FunctionSignature,
+    signature: &UnresolvedFunctionSignature,
     generic_parameter_list_id: Option<GenericParameterListId>,
     type_resolution_context: &mut TypeResolutionContext<'_>,
     path_fork: &PathInternerFork,
     string_table: &mut StringTable,
+    scope_context: Option<&ScopeContext>,
 ) -> TypeResolutionResult<ResolvedFunctionSignature> {
     let this_name = string_table.intern("this");
     let function_name_id = path_fork
@@ -78,21 +82,45 @@ pub(crate) fn resolve_function_signature(
     // --------------------
 
     for (parameter_index, parameter) in signature.parameters.iter().enumerate() {
-        let mut resolved_parameter = parameter.to_owned();
+        let type_id = if let Some(type_syntax) = &parameter.type_syntax {
+            resolve_parsed_type_annotation(
+                type_syntax,
+                parameter.binding_span,
+                type_resolution_context,
+                string_table,
+                scope_context,
+            )?
+            .type_id
+            .filter(|type_id| *type_id != builtin_type_ids::NONE)
+            .ok_or_else(|| {
+                CompilerDiagnostic::invalid_type_annotation(
+                    TypeAnnotationContext::SignatureParameter,
+                    InvalidTypeAnnotationReason::NoneNotAllowed,
+                    parameter.binding_span,
+                )
+            })?
+        } else if parameter.type_id != builtin_type_ids::NONE
+            && type_resolution_context
+                .type_environment
+                .get(parameter.type_id)
+                .is_some()
+        {
+            parameter.type_id
+        } else {
+            return Err(CompilerDiagnostic::invalid_type_annotation(
+                TypeAnnotationContext::SignatureParameter,
+                InvalidTypeAnnotationReason::NoneNotAllowed,
+                parameter.binding_span,
+            ));
+        };
 
-        resolved_parameter.diagnostic_type = resolve_named_signature_type(
-            &parameter.diagnostic_type,
-            parameter.binding_span,
-            type_resolution_context,
-            string_table,
-        )?;
-
-        // Callable contracts own parameter types independently of folded default content.
-        resolved_parameter.type_id = resolve_diagnostic_type_to_type_id_checked(
-            &resolved_parameter.diagnostic_type,
-            type_resolution_context.type_environment,
-            resolved_parameter.binding_span,
-        )?;
+        let resolved_parameter = FunctionParameter {
+            id: parameter.id,
+            type_id,
+            value_mode: parameter.value_mode,
+            default: parameter.default,
+            binding_span: parameter.binding_span,
+        };
         if path_fork.component(resolved_parameter.id) == Some(this_name) {
             if receiver.is_some() {
                 return Err(CompilerDiagnostic::invalid_this_usage(
@@ -131,23 +159,35 @@ pub(crate) fn resolve_function_signature(
     // -----------------
 
     let mut resolved_returns = Vec::with_capacity(signature.returns.len());
-
     for return_slot in &signature.returns {
-        let resolved_value = resolve_named_signature_type(
-            &return_slot.value,
-            function_span,
-            type_resolution_context,
-            string_table,
-        )?;
-
-        let type_id = resolve_diagnostic_type_to_type_id_checked(
-            &resolved_value,
-            type_resolution_context.type_environment,
-            function_span,
-        )?;
+        let type_id = if let Some(type_syntax) = &return_slot.type_syntax {
+            resolve_parsed_type_annotation(
+                type_syntax,
+                function_span,
+                type_resolution_context,
+                string_table,
+                scope_context,
+            )?
+            .type_id
+        } else {
+            return_slot.type_id
+        }
+        .filter(|type_id| {
+            *type_id != builtin_type_ids::NONE
+                && type_resolution_context
+                    .type_environment
+                    .get(*type_id)
+                    .is_some()
+        })
+        .ok_or_else(|| {
+            CompilerDiagnostic::invalid_type_annotation(
+                TypeAnnotationContext::SignatureReturn,
+                InvalidTypeAnnotationReason::NoneNotAllowed,
+                function_span,
+            )
+        })?;
 
         resolved_returns.push(ReturnSlot {
-            value: resolved_value,
             type_id: Some(type_id),
             channel: return_slot.channel,
         });

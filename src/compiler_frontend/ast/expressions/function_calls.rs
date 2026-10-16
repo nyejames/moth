@@ -48,7 +48,6 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::builtins::error_type::resolve_builtin_error_type_typed;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::CompilerDiagnostic;
-use crate::compiler_frontend::datatypes::DataType;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
@@ -776,17 +775,11 @@ fn settle_external_call_facts(
     // ------------------------
     let builtin_error_type = resolve_builtin_error_type_typed(context, call_span, string_table)?;
     validate_external_signature_types_are_registered(external_function, context, call_span)?;
-    let diagnostic_result_types = external_function.success_return_data_types();
     let result_type_ids = external_function.success_return_type_ids(
         type_interner.environment_mut_for_derived_types(),
         builtin_error_type.type_id,
     );
-    validate_external_return_slots_are_visible(
-        external_function,
-        &diagnostic_result_types,
-        &result_type_ids,
-        call_span,
-    )?;
+    validate_external_return_slots_are_visible(external_function, &result_type_ids, call_span)?;
 
     let error_return_type_id = external_function.error_return_type_id(
         type_interner.environment_mut_for_derived_types(),
@@ -1172,15 +1165,17 @@ fn external_call_requires_float_validation(
         .is_some_and(NumericScalar::is_binary_float)
 }
 
-/// Verifies that every declared return slot has a corresponding frontend-visible type.
+/// Verifies every external success-return slot has a frontend-visible semantic type.
 fn validate_external_return_slots_are_visible(
     external_function: &ExternalFunctionDef,
-    diagnostic_result_types: &[DataType],
     result_type_ids: &[TypeId],
     span: Option<SourceSpan>,
 ) -> Result<(), ExpressionParseError> {
-    if external_function.returns.len() != diagnostic_result_types.len()
-        || external_function.returns.len() != result_type_ids.len()
+    if external_function.returns.len() != result_type_ids.len()
+        || external_function
+            .returns
+            .iter()
+            .any(|slot| !slot.value_type.supports_success_return_type())
     {
         return Err(CompilerError::compiler_error(format!(
             "External function '{}' declares a return slot that is not frontend-visible at {:?}.",
