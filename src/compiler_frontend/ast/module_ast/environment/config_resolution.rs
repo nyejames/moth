@@ -101,11 +101,8 @@ pub(super) fn resolve_config_declaration(
             const_values,
             string_table,
         )?;
-        let (contract_required, contract_default) = match &authored_default {
-            AuthoredConfigDefault::Missing => (!contract.is_optional(), None),
-            AuthoredConfigDefault::None { .. } => (false, None),
-            AuthoredConfigDefault::Value { value, .. } => (false, Some(value.clone())),
-        };
+        let contract_required =
+            matches!(&authored_default, AuthoredConfigDefault::Missing) && !contract.is_optional();
         let configured_value = if let Some(entry) = services.explicit_input(&input_name) {
             Some((
                 entry.value().materialise_for(contract),
@@ -125,6 +122,10 @@ pub(super) fn resolve_config_declaration(
         };
 
         if let Some((value, origin, value_location, argument_index)) = configured_value {
+            let contract_default = match authored_default {
+                AuthoredConfigDefault::Missing | AuthoredConfigDefault::None { .. } => None,
+                AuthoredConfigDefault::Value { value, .. } => Some(value),
+            };
             let value = value.map_err(|error| {
                 configured_value_error(
                     error,
@@ -153,7 +154,7 @@ pub(super) fn resolve_config_declaration(
                 input_name.clone(),
                 contract,
                 contract_required,
-                contract_default.clone(),
+                contract_default,
                 Some(value),
                 origin,
                 qualifier.qualifier_span,
@@ -185,7 +186,7 @@ pub(super) fn resolve_config_declaration(
                         input_name.clone(),
                         contract,
                         contract_required,
-                        contract_default.clone(),
+                        None,
                         None,
                         BuildConfigValueOrigin::DeclarationDefault,
                         qualifier.qualifier_span,
@@ -211,7 +212,7 @@ pub(super) fn resolve_config_declaration(
                         input_name.clone(),
                         contract,
                         contract_required,
-                        contract_default.clone(),
+                        None,
                         None,
                         BuildConfigValueOrigin::DeclarationDefault,
                         qualifier.qualifier_span,
@@ -255,7 +256,7 @@ pub(super) fn resolve_config_declaration(
                         input_name.clone(),
                         contract,
                         contract_required,
-                        contract_default,
+                        Some(value.clone()),
                         Some(value),
                         BuildConfigValueOrigin::DeclarationDefault,
                         qualifier.qualifier_span,
