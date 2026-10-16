@@ -808,7 +808,8 @@ fn run_shared_read_steps(
                         push_place_index_visits(expressions, place, value_span, steps);
                     }
 
-                    HirExpressionKind::VariantConstruct { fields, .. } => {
+                    HirExpressionKind::VariantConstruct { fields, .. }
+                    | HirExpressionKind::RouteConstruct { fields, .. } => {
                         steps.push(SharedReadStep::Finish {
                             expression_id,
                             value_span: None,
@@ -1097,7 +1098,8 @@ fn collect_expression_roots(
             | HirExpressionKind::StringLiteral(_)
             | HirExpressionKind::StructuralString { .. } => {}
 
-            HirExpressionKind::VariantConstruct { fields, .. } => {
+            HirExpressionKind::VariantConstruct { fields, .. }
+            | HirExpressionKind::RouteConstruct { fields, .. } => {
                 for field in expressions.variant_fields(*fields).iter().rev() {
                     push_root_step(expressions, &mut pending, field.value);
                 }
@@ -1203,7 +1205,8 @@ pub(super) fn transfer_aggregate_expression_ownership(
                         }
                     }
 
-                    HirExpressionKind::VariantConstruct { fields, .. } => {
+                    HirExpressionKind::VariantConstruct { fields, .. }
+                    | HirExpressionKind::RouteConstruct { fields, .. } => {
                         for field in expressions.variant_fields(*fields).iter().rev() {
                             pending.push(AggregateOwnershipStep::Visit(field.value));
                         }

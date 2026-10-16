@@ -612,6 +612,14 @@ fn fold_signature_default(
                 | ExpressionOperationView::Choice { .. }
                 | ExpressionOperationView::Range { .. }
                 | ExpressionOperationView::Coerce { .. } => {}
+                ExpressionOperationView::RouteConstruct { .. } => {
+                    return Err(CompilerDiagnostic::compile_time_evaluation_error(
+                        CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,
+                        None,
+                        expression.span(),
+                    )
+                    .into());
+                }
                 _ => {
                     return Err(CompilerDiagnostic::compile_time_evaluation_error(
                         CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,

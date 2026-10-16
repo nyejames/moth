@@ -488,6 +488,64 @@ impl<'a> HirValidator<'a> {
                 }
             }
 
+            HirExpressionKind::RouteConstruct {
+                choice_id,
+                variant_index,
+                fields: field_range,
+                future_input,
+            } => {
+                let fields = self.variant_fields(*field_range, anchor)?;
+                let Some(choice) = self.module.choices.get(choice_id.0 as usize) else {
+                    return Err(self.error_with_hir(
+                        format!("Invalid ChoiceId {choice_id:?} in RouteConstruct"),
+                        anchor,
+                    ));
+                };
+                if choice.id != *choice_id || choice.frontend_type_id != expression.ty {
+                    return Err(self.error_with_hir(
+                        "RouteConstruct choice identity does not match its expression type",
+                        anchor,
+                    ));
+                }
+                let Some(variant) = choice.variants.get(*variant_index) else {
+                    return Err(self.error_with_hir(
+                        format!(
+                            "RouteConstruct variant index {variant_index} is out of range for choice {choice_id:?}"
+                        ),
+                        anchor,
+                    ));
+                };
+                // One future input supplies exactly the trailing field, so captures fill every
+                // other field; without an input they fill the whole payload.
+                if fields.len() + usize::from(*future_input) != variant.fields.len() {
+                    return Err(self.error_with_hir(
+                        "RouteConstruct captures must fill every variant field except the one future input",
+                        anchor,
+                    ));
+                }
+                for (actual, expected) in fields.iter().zip(variant.fields.iter()) {
+                    if actual.name != Some(expected.name) {
+                        return Err(self.error_with_hir(
+                            format!(
+                                "RouteConstruct field name {:?} does not match declared prefix name {:?}",
+                                actual.name, expected.name
+                            ),
+                            anchor,
+                        ));
+                    }
+                    let actual_value = self.expression_row(actual.value, anchor)?;
+                    if actual_value.ty != expected.ty {
+                        return Err(self.error_with_hir(
+                            format!(
+                                "RouteConstruct field type mismatch for prefix field {:?}",
+                                expected.name
+                            ),
+                            anchor,
+                        ));
+                    }
+                    self.validate_expression(actual.value, anchor)?;
+                }
+            }
             HirExpressionKind::Load(place) => {
                 let place_type = self.validate_place(place, anchor)?;
                 if expression.ty != place_type {

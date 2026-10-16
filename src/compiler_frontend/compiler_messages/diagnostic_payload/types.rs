@@ -205,6 +205,7 @@ pub enum InvalidMutableAccessReason {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum UnsupportedBackendFeatureReason {
+    ConstructorRoutes,
     HashmapConstruction,
     HashmapOperation,
     RuntimeCasts,
@@ -226,6 +227,7 @@ pub enum UnsupportedBackendFeatureReason {
 impl UnsupportedBackendFeatureReason {
     pub(crate) fn feature_name(self) -> &'static str {
         match self {
+            Self::ConstructorRoutes => "constructor routes",
             Self::HashmapConstruction => "hashmap construction",
             Self::HashmapOperation => "hashmap operation",
             Self::RuntimeCasts => "runtime casts",
@@ -1873,10 +1875,11 @@ pub enum InvalidCallShapeReason {
 
     NamedArgumentsNotSupported,
     WireArgumentOrigin,
-
     WireArgumentMutableMarker,
-
-    RouteArgumentsUnsupported,
+    RouteArgumentNotDirect,
+    RouteForwardingContractMismatch,
+    RouteParameterRead,
+    RouteInputFieldMismatch,
 
     MutableAccessRequired {
         parameter_name: Option<StringId>,

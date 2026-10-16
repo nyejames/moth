@@ -30,6 +30,7 @@ use crate::compiler_frontend::ast::expressions::parse_expression_input::{
 };
 use crate::compiler_frontend::ast::field_access::{RetainedTerminalCall, retained_terminal_call};
 use crate::compiler_frontend::ast::module_ast::scope_context::AuthoredBindingFacts;
+use crate::compiler_frontend::ast::module_ast::scope_context::ScopeDeclarationRef;
 use crate::compiler_frontend::ast::numeric_construction::{
     DeferredCall, DeferredExpression, DeferredExpressionSuffix, DeferredMultiBindTarget,
     DeferredMultiBindValue, MultiBindContinuation, MultiBindProducerFact, NumericConstructionState,
@@ -338,7 +339,10 @@ fn validate_multi_bind_target_identifiers(
             .into());
         }
 
-        if context.get_reference(&target.name).is_none() {
+        if context
+            .get_value_reference(&target.name, target.span)?
+            .is_none()
+        {
             if let Some(diagnostic) =
                 context.check_body_binding_visibility(target.name, target.name_span, string_table)
             {
@@ -868,11 +872,11 @@ fn resolve_known_slot_types(
             continue;
         }
 
-        if let Some(existing_reference) = context.get_reference(&target_syntax.name)
-            && let Some(existing) = existing_reference.ready_declaration()
+        if let Some(existing) = context
+            .get_value_reference(&target_syntax.name, target_syntax.span)?
+            .and_then(|reference| reference.ready_declaration().cloned())
         {
             known.push(Some(existing.type_id));
-            continue;
         }
 
         known.push(None);
@@ -904,16 +908,18 @@ fn register_generic_slot_receivers(
         let MultiBindSlot::Generic(shape) = *slot else {
             continue;
         };
-        let receiver = match explicit_type {
-            Some(type_id) => Some(*type_id),
-            None => context
-                .get_reference(&target_syntax.name)
-                .and_then(|reference| {
-                    reference
-                        .ready_declaration()
-                        .map(|declaration| declaration.type_id)
-                }),
-        };
+        let receiver =
+            match explicit_type {
+                Some(type_id) => Some(*type_id),
+                None => context
+                    .get_reference(&target_syntax.name)
+                    .and_then(|reference| match reference {
+                        ScopeDeclarationRef::Local { declaration, .. } => Some(declaration.type_id),
+                        ScopeDeclarationRef::Shared(declaration) => Some(declaration.type_id),
+                        ScopeDeclarationRef::PendingNumeric { .. }
+                        | ScopeDeclarationRef::RouteParameter(_) => None,
+                    }),
+            };
         let Some(receiver) = receiver else {
             continue;
         };
@@ -1045,7 +1051,9 @@ fn resolve_multi_bind_targets(
         };
         let slot_type = rhs_type.or(explicit_type_id);
 
-        let Some(existing_reference) = context.get_reference(&target_syntax.name) else {
+        let Some(existing_reference) =
+            context.get_value_reference(&target_syntax.name, target_syntax.span)?
+        else {
             if let (Some(explicit_type_id), Some(rhs_type)) = (explicit_type_id, rhs_type)
                 && explicit_type_id != rhs_type
             {

@@ -1,0 +1,5 @@
+project #= (
+    name = "wiring_route_capture_borrow_conflict_rejected",
+    entry_root = "src",
+)
+html #= ()

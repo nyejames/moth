@@ -4863,6 +4863,128 @@ fn hir_variant_construct_choice_wrong_field_type_rejected() {
 }
 
 #[test]
+fn hir_route_construct_with_input_missing_leading_capture_rejected() {
+    let mut path_fork = super::PathInternerFork::empty();
+    let mut string_table = StringTable::new();
+    let (entry_path, start_name) =
+        super::entry_path_and_start_name(&mut path_fork, &mut string_table);
+    let rename_name = string_table.intern("Rename");
+    let record_field = |name: &str,
+                        type_id: TypeId,
+                        path_fork: &mut super::PathInternerFork,
+                        string_table: &mut StringTable| Declaration {
+        id: path_fork
+            .try_intern_portable_path(name, string_table)
+            .expect("test path fits"),
+        type_id,
+        type_syntax: None,
+        value_mode: ValueMode::ImmutableOwned,
+        value: DeclarationValue::Absent,
+        binding_span: None,
+        config_qualifier: None,
+    };
+    let choice_variants = vec![ChoiceVariant {
+        id: rename_name,
+        payload: ChoiceVariantPayload::Record {
+            fields: vec![
+                record_field(
+                    "id",
+                    builtin_type_ids::STRING,
+                    &mut path_fork,
+                    &mut string_table,
+                ),
+                record_field(
+                    "value",
+                    builtin_type_ids::STRING,
+                    &mut path_fork,
+                    &mut string_table,
+                ),
+            ],
+        },
+        span: None,
+    }];
+
+    let start_fn = function_node(
+        start_name,
+        FunctionSignature {
+            parameters: vec![],
+            returns: vec![],
+        },
+        vec![node(NodeKind::Return(vec![]), None)],
+        None,
+    );
+    let ast = build_ast_with_choices(
+        vec![start_fn],
+        entry_path,
+        vec![HirTestChoiceDefinition {
+            nominal_path: path_fork
+                .try_intern_portable_path("TodoMessage", &mut string_table)
+                .expect("test path fits"),
+            variants: choice_variants,
+        }],
+        AstExpressionBuilder::new().unwrap(),
+        ConstValueStore::default(),
+        TypeEnvironment::new(),
+    );
+    let (mut module, type_environment) = lower_ast(
+        ast,
+        &mut string_table,
+        &mut path_fork,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect("lowering should succeed");
+    let entry_block_index = module.functions[module
+        .start_function
+        .expect("normal test module should have start")
+        .0 as usize]
+        .entry
+        .0 as usize;
+    let region = module.blocks[entry_block_index].region;
+    let choice_type = module.choices[0].frontend_type_id;
+
+    // One future input supplies only the trailing `value`, so `id` must be captured.
+    let span = None;
+    let fields = module
+        .expressions
+        .append_variant_fields(&[], span)
+        .expect("empty capture range should fit the expression store");
+    let expr_id = append_hir_expression(
+        &mut module,
+        HirExpressionKind::RouteConstruct {
+            choice_id: ChoiceId(0),
+            variant_index: 0,
+            fields,
+            future_input: true,
+        },
+        choice_type,
+        region,
+        ValueKind::Const,
+    );
+    let statement = HirStatement {
+        id: HirNodeId(9000),
+        kind: HirStatementKind::Expr(expr_id),
+        span,
+    };
+    module.side_table.map_statement(span, &statement);
+    module.side_table.map_value(span, expr_id, span);
+    module.blocks[entry_block_index].statements.push(statement);
+
+    let error = validate_module_for_tests(
+        &module,
+        &string_table,
+        &type_environment,
+        &ExternalPackageRegistry::new(),
+    )
+    .expect_err("validator should reject a one-input route missing a leading capture");
+    assert_eq!(error.error_type, ErrorType::HirTransformation);
+    assert!(
+        error.msg.contains("captures must fill"),
+        "expected the capture-count error, got: {}",
+        error.msg
+    );
+}
+
+#[test]
 fn validator_rejects_collection_expression_with_non_collection_type() {
     let (string_table, mut module, type_environment) = minimal_lowered_hir_module();
     let int_type = builtin_type_ids::fixed_scalar(FixedScalar::I32);

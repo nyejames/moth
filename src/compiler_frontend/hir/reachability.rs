@@ -1141,7 +1141,8 @@ impl<'hir> RuntimeFeatureUseCollector<'hir> {
                 self.collect(direct_facts, *start, expression_span);
                 self.collect(direct_facts, *end, expression_span);
             }
-            HirExpressionKind::VariantConstruct { fields, .. } => {
+            HirExpressionKind::VariantConstruct { fields, .. }
+            | HirExpressionKind::RouteConstruct { fields, .. } => {
                 for field in self.hir.expressions.variant_fields(*fields) {
                     self.collect(direct_facts, field.value, expression_span);
                 }

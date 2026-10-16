@@ -79,7 +79,8 @@ pub(crate) fn rewrite_expression_bottom_up(
                 false
             }
         }
-        HirExpressionKind::VariantConstruct { fields, .. } => {
+        HirExpressionKind::VariantConstruct { fields, .. }
+        | HirExpressionKind::RouteConstruct { fields, .. } => {
             let original = *fields;
             let mut changed_fields = None;
             for index in 0..original.len() {

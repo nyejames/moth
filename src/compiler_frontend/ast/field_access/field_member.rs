@@ -18,7 +18,7 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
     ExpressionOperationView, ExpressionView, OwnedExpr, PlaceProjectionView, SuccessShape,
 };
 use crate::compiler_frontend::ast::expressions::expression_types::ConstRecordState;
-use crate::compiler_frontend::ast::module_ast::scope_context::ScopeContext;
+use crate::compiler_frontend::ast::module_ast::scope_context::{ScopeContext, ScopeDeclarationRef};
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
@@ -176,8 +176,11 @@ fn with_const_record_declaration<T>(
         return visit(declaration);
     }
     let name = path_fork.component(*path)?;
-    let reference = scope.get_reference(&name)?;
-    visit(reference.ready_declaration()?)
+    match scope.get_reference(&name)? {
+        ScopeDeclarationRef::Local { declaration, .. } => visit(&declaration),
+        ScopeDeclarationRef::Shared(declaration) => visit(declaration),
+        ScopeDeclarationRef::PendingNumeric { .. } | ScopeDeclarationRef::RouteParameter(_) => None,
+    }
 }
 
 fn const_record_root_and_field_path(

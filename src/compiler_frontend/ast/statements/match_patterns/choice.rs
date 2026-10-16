@@ -426,7 +426,12 @@ fn parse_variant_name(
 
                 let expected_choice_name = path_fork.component(*choice_nominal_path);
                 if expected_choice_name.is_some_and(|expected| first_name != expected)
-                    && !qualifier_resolves_to_choice(match_context, first_name, choice_nominal_path)
+                    && !qualifier_resolves_to_choice(
+                        match_context,
+                        first_name,
+                        first_span,
+                        choice_nominal_path,
+                    )?
                 {
                     return Err(CompilerDiagnostic::invalid_match_pattern(
                         InvalidMatchPatternReason::QualifierDoesNotMatchScrutinee,
@@ -490,15 +495,15 @@ fn parse_variant_name(
 fn qualifier_resolves_to_choice(
     match_context: &ScopeContext,
     qualifier: StringId,
+    qualifier_span: Option<SourceSpan>,
     choice_nominal_path: &PathId,
-) -> bool {
-    match_context
-        .get_reference(&qualifier)
-        .is_some_and(|reference| {
-            reference
-                .ready_declaration()
-                .is_some_and(|declaration| declaration.id == *choice_nominal_path)
-        })
+) -> ChoicePatternResult<bool> {
+    match match_context.get_value_reference(&qualifier, qualifier_span)? {
+        Some(reference) => Ok(reference
+            .ready_declaration()
+            .is_some_and(|declaration| declaration.id == *choice_nominal_path)),
+        None => Ok(false),
+    }
 }
 
 /// Look up a variant name in the declared choice variant list and return its positional tag.

@@ -11,9 +11,16 @@ use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 
 use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::type_coercion::parse_context::{CastTargetContext, ExpectedType};
 use crate::compiler_frontend::value_mode::ValueMode;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct RouteArgumentContext {
+    pub(crate) output_type: TypeId,
+    pub(crate) input_type: Option<TypeId>,
+}
 
 /// Policy that controls how the expression parser handles trailing tokens
 /// such as closing delimiters and recovery boundaries.
@@ -90,6 +97,7 @@ pub(crate) struct ExpressionParseInput<'a, 'env, 'tokens> {
     ///      evaluator would materialise it at the language default before a later exact receiver
     ///      is known — the early default the bounded inference contract forbids.
     pub(crate) retain_pending_numeric_fragment: bool,
+    pub(crate) route_argument_context: Option<RouteArgumentContext>,
     pub(crate) string_table: &'a mut StringTable,
     pub(crate) path_fork: &'a mut PathInternerFork,
 }
@@ -117,6 +125,7 @@ impl<'a, 'env, 'tokens> ExpressionParseInput<'a, 'env, 'tokens> {
             stop_at_named_entry: false,
             numeric_deferral_owner: false,
             retain_pending_numeric_fragment: false,
+            route_argument_context: None,
             string_table: resources.string_table,
             path_fork: resources.path_fork,
         }
@@ -139,6 +148,14 @@ impl<'a, 'env, 'tokens> ExpressionParseInput<'a, 'env, 'tokens> {
     ///      receiver may select its single static type.
     pub(crate) fn with_retained_pending_numeric_fragment(mut self) -> Self {
         self.retain_pending_numeric_fragment = true;
+        self
+    }
+
+    pub(crate) fn with_route_argument_context(
+        mut self,
+        route_argument_context: RouteArgumentContext,
+    ) -> Self {
+        self.route_argument_context = Some(route_argument_context);
         self
     }
 

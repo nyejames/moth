@@ -145,6 +145,7 @@ pub(crate) use module_ast::environment::{
 pub(crate) use module_ast::environment::{
     ResolvedTraitParameterFact, ResolvedTraitReceiverFact, ResolvedTraitReturnFact,
 };
+pub(crate) use module_ast::scope_context::ScopeDeclarationRef;
 pub use module_ast::scope_context::{ContextKind, ScopeContext};
 pub(crate) use module_ast::scope_context::{FileValueResolutionServices, Stage0ResolutionFacts};
 pub(crate) use receiver_methods::{ReceiverMethodCatalog, ReceiverMethodEntry};

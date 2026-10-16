@@ -86,8 +86,14 @@ pub fn validate_hir_backend_feature_support(
 
     match input.target {
         BackendTarget::Wasm => {
-            // Keep the fixed-value type-shape check first so its diagnostic retains priority over
-            // later Wasm operation gates.
+            // Route recipes have no Wasm representation and must be rejected before lowering.
+            validate_wasm_constructor_routes(
+                input.hir,
+                reachability.backend_selection().blocks(),
+                input.target,
+                string_table,
+            )?;
+            // Keep the fixed-value type-shape check ahead of the remaining Wasm operation gates.
             validate_fixed_width_scalar_values(
                 input.hir,
                 input.type_environment,
@@ -381,6 +387,28 @@ fn validate_wasm_cross_module_calls(
         span,
     );
 
+    Err(BackendFeatureValidationError::Diagnostic(diagnostic))
+}
+
+/// Rejects reachable route recipes before a target-specific lowerer sees them.
+fn validate_wasm_constructor_routes(
+    hir: &HirModule,
+    reachable_blocks: &FxHashSet<BlockId>,
+    target: BackendTarget,
+    string_table: &mut StringTable,
+) -> Result<(), BackendFeatureValidationError> {
+    let Some(occurrence) = first_reachable_constructor_route(hir, reachable_blocks) else {
+        return Ok(());
+    };
+    let backend_name = string_table.intern(match target {
+        BackendTarget::Wasm => "Wasm",
+        BackendTarget::Js => "JavaScript",
+    });
+    let diagnostic = CompilerDiagnostic::unsupported_backend_feature(
+        backend_name,
+        UnsupportedBackendFeatureReason::ConstructorRoutes,
+        occurrence.span,
+    );
     Err(BackendFeatureValidationError::Diagnostic(diagnostic))
 }
 
@@ -1023,6 +1051,7 @@ impl ReachableTypeOccurrences {
 
 struct TypeOccurrenceSearch<'predicate, IsUnsupported> {
     is_unsupported: &'predicate mut IsUnsupported,
+    reject_constructor_routes: bool,
     spanless_fallback: Option<ReachableTypeOccurrence>,
     unsupported_count: usize,
 }
@@ -1031,9 +1060,10 @@ impl<'predicate, IsUnsupported> TypeOccurrenceSearch<'predicate, IsUnsupported>
 where
     IsUnsupported: FnMut(TypeId) -> bool,
 {
-    fn new(is_unsupported: &'predicate mut IsUnsupported) -> Self {
+    fn new(is_unsupported: &'predicate mut IsUnsupported, reject_constructor_routes: bool) -> Self {
         TypeOccurrenceSearch {
             is_unsupported,
+            reject_constructor_routes,
             spanless_fallback: None,
             unsupported_count: 0,
         }
@@ -1086,7 +1116,19 @@ fn first_unsupported_module_occurrence<IsUnsupported>(
 where
     IsUnsupported: FnMut(TypeId) -> bool,
 {
-    let mut search = TypeOccurrenceSearch::new(is_unsupported);
+    first_unsupported_module_occurrence_with_routes(module, reachable_blocks, is_unsupported, false)
+}
+
+fn first_unsupported_module_occurrence_with_routes<IsUnsupported>(
+    module: &HirModule,
+    reachable_blocks: &FxHashSet<BlockId>,
+    is_unsupported: &mut IsUnsupported,
+    reject_constructor_routes: bool,
+) -> ReachableTypeOccurrences
+where
+    IsUnsupported: FnMut(TypeId) -> bool,
+{
+    let mut search = TypeOccurrenceSearch::new(is_unsupported, reject_constructor_routes);
     let mut authored = None;
 
     'blocks: for block in &module.blocks {
@@ -1126,6 +1168,21 @@ where
     search.finish(authored)
 }
 
+/// Finds the first reachable route formation for Wasm's target-specific route gate.
+fn first_reachable_constructor_route(
+    module: &HirModule,
+    reachable_blocks: &FxHashSet<BlockId>,
+) -> Option<ReachableTypeOccurrence> {
+    let mut no_unsupported_types = |_| false;
+    first_unsupported_module_occurrence_with_routes(
+        module,
+        reachable_blocks,
+        &mut no_unsupported_types,
+        true,
+    )
+    .preferred()
+}
+
 /// Finds a reachable function whose return type a type-shape gate rejects.
 ///
 /// WHAT: scans reachable functions in module order after block occurrences.
@@ -1140,7 +1197,7 @@ fn first_unsupported_function_signature_occurrence<IsUnsupported>(
 where
     IsUnsupported: FnMut(TypeId) -> bool,
 {
-    let mut search = TypeOccurrenceSearch::new(is_unsupported);
+    let mut search = TypeOccurrenceSearch::new(is_unsupported, false);
     let mut authored = None;
 
     for function in &module.functions {
@@ -1442,6 +1499,11 @@ where
     IsUnsupported: FnMut(TypeId) -> bool,
 {
     let expression = module.expressions.expression(expression_id);
+    if search.reject_constructor_routes
+        && matches!(expression.kind, HirExpressionKind::RouteConstruct { .. })
+    {
+        return search.record(expression.span);
+    }
     if let Some(occurrence) = search.check(expression.ty, expression.span) {
         return Some(occurrence);
     }
@@ -1484,7 +1546,8 @@ where
             first_unsupported_expression_occurrence(*start, module, search)
                 .or_else(|| first_unsupported_expression_occurrence(*end, module, search))
         }
-        HirExpressionKind::VariantConstruct { fields, .. } => module
+        HirExpressionKind::VariantConstruct { fields, .. }
+        | HirExpressionKind::RouteConstruct { fields, .. } => module
             .expressions
             .variant_fields(*fields)
             .iter()

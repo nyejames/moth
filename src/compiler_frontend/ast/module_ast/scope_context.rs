@@ -101,7 +101,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 pub(crate) use crate::compiler_frontend::ast::receiver_methods::{
     ReceiverMethodCatalog, ReceiverMethodEntry,
 };
-pub(crate) use lookup::ScopeDeclarationRef;
+pub(crate) use lookup::{RouteParameterReference, ScopeDeclarationRef, ValueDeclarationRef};
 
 mod builders;
 mod diagnostic_sinks;

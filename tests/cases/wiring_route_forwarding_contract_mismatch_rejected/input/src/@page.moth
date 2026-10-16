@@ -1,0 +1,11 @@
+A ::
+    Value | id I32, text String |,
+;
+
+receive |route Route of A| -> String:
+    return "received"
+;
+
+forward |route Route of String -> A| -> String:
+    return receive(route)
+;

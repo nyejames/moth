@@ -542,7 +542,10 @@ macro_rules! define_reasoned_diagnostic_registry {
                         | InvalidCallShapeReason::NamedArgumentsNotSupported
                         | InvalidCallShapeReason::WireArgumentOrigin
                         | InvalidCallShapeReason::WireArgumentMutableMarker
-                        | InvalidCallShapeReason::RouteArgumentsUnsupported => {}
+                        | InvalidCallShapeReason::RouteArgumentNotDirect
+                        | InvalidCallShapeReason::RouteForwardingContractMismatch
+                        | InvalidCallShapeReason::RouteParameterRead
+                        | InvalidCallShapeReason::RouteInputFieldMismatch => {}
                         InvalidCallShapeReason::NamedArgumentNotFound {
                             name,
                             known_parameters,
@@ -864,6 +867,7 @@ define_stable_reason_keys! {
     },
 
     UnsupportedBackendFeatureReason => {
+    &UnsupportedBackendFeatureReason::ConstructorRoutes => "unsupported_backend_feature.constructor_routes",
     &UnsupportedBackendFeatureReason::HashmapConstruction => "unsupported_backend_feature.hashmap_construction",
     &UnsupportedBackendFeatureReason::HashmapOperation => "unsupported_backend_feature.hashmap_operation",
     &UnsupportedBackendFeatureReason::RuntimeCasts => "unsupported_backend_feature.runtime_casts",
@@ -1466,7 +1470,10 @@ define_stable_reason_keys! {
     &InvalidCallShapeReason::ImmutablePlaceMutableAccessRequired { .. } => "invalid_call_shape.immutable_place_mutable_access_required",
     &InvalidCallShapeReason::WireArgumentOrigin => "invalid_call_shape.wire_argument_origin",
     &InvalidCallShapeReason::WireArgumentMutableMarker => "invalid_call_shape.wire_argument_mutable_marker",
-    &InvalidCallShapeReason::RouteArgumentsUnsupported => "invalid_call_shape.route_arguments_unsupported",
+    &InvalidCallShapeReason::RouteArgumentNotDirect => "invalid_call_shape.route_argument_not_direct",
+    &InvalidCallShapeReason::RouteForwardingContractMismatch => "invalid_call_shape.route_forwarding_contract_mismatch",
+    &InvalidCallShapeReason::RouteParameterRead => "invalid_call_shape.route_parameter_read",
+    &InvalidCallShapeReason::RouteInputFieldMismatch => "invalid_call_shape.route_input_field_mismatch",
     },
 
     InvalidReturnShapeReason => {

@@ -18,6 +18,7 @@ use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
 use crate::compiler_frontend::ast::expressions::call_arguments::{
     CallArgumentSyntax, ParsedCallArguments, parse_call_arguments_typed_with_numeric_retention,
+    parse_route_capture_arguments,
 };
 use crate::compiler_frontend::ast::expressions::call_validation::{
     CallArgumentResolutionContext, CallDiagnosticContext, CallDiagnosticName, ParameterExpectation,
@@ -28,7 +29,9 @@ use crate::compiler_frontend::ast::expressions::constructor_views::{
     ConstructorField, ParsedConstructorExpression,
 };
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
-use crate::compiler_frontend::ast::expressions::expression::ChoiceConstructInput;
+use crate::compiler_frontend::ast::expressions::expression::{
+    ChoiceConstructInput, RouteConstructInput,
+};
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ConstructorField as CompletedConstructorField, ExpressionOperationView,
@@ -91,6 +94,9 @@ pub(super) fn parse_choice_construct(
     const_values: &mut ConstValueStore,
     path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
+    route_argument_context: Option<
+        crate::compiler_frontend::ast::expressions::parse_expression_input::RouteArgumentContext,
+    >,
 ) -> Result<ParsedConstructorExpression, ExpressionParseError> {
     let type_id = choice_declaration.type_id;
 
@@ -207,6 +213,34 @@ pub(super) fn parse_choice_construct(
     let mut constructor_span = variant_span;
     let has_parens = token_stream.peek_next_tag() == Some(TokenTag::OPEN_PARENTHESIS);
     let mut parsed_payload_arguments = None;
+    if let Some(route_context) = route_argument_context {
+        if generic_declaration_kind.is_some() {
+            return Err(CompilerDiagnostic::invalid_call_shape(
+                crate::compiler_frontend::compiler_messages::InvalidCallShapeReason::RouteArgumentNotDirect,
+                None,
+                variant_span,
+            )
+            .into());
+        }
+        drop(variant_definitions.take());
+        return parse_route_choice_construct(
+            token_stream,
+            choice_declaration,
+            nominal_path,
+            &variant,
+            variant_index,
+            route_context,
+            variant_name,
+            variant_span,
+            has_parens,
+            context,
+            type_interner,
+            expression_builder,
+            const_values,
+            path_fork,
+            string_table,
+        );
+    }
     let mut parsed_payload_expectations = None;
     let mut generic_constructor_seed = None;
     // Unit variants and payloads without parentheses still need contextual bindings before
@@ -371,6 +405,8 @@ pub(super) fn parse_choice_construct(
                             call_span: constructor_span,
                             variant_span,
                             enforce_constant_context: context.kind.allows_const_record_coercion(),
+                            is_route: false,
+                            future_input_type: None,
                         }))),
                         span: constructor_span,
                     },
@@ -496,6 +532,7 @@ pub(super) fn parse_choice_construct(
                     constructor_span,
                     variant_span,
                     enforce_constant_context: context.kind.allows_const_record_coercion(),
+                    route_future_input: None,
                 },
                 raw_args,
                 context,
@@ -507,6 +544,216 @@ pub(super) fn parse_choice_construct(
             )?;
 
             Ok(ParsedConstructorExpression::Value(choice_expr))
+        }
+    }
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "route construction keeps its contract and constructor owners explicit while reusing the ordinary payload validator"
+)]
+fn parse_route_choice_construct(
+    token_stream: &mut AstCursor,
+    choice_declaration: &Declaration,
+    nominal_path: PathId,
+    variant: &ChoiceVariantDefinition,
+    variant_index: usize,
+    route_context: crate::compiler_frontend::ast::expressions::parse_expression_input::RouteArgumentContext,
+    variant_name: StringId,
+    variant_span: Option<SourceSpan>,
+    has_parens: bool,
+    context: &ScopeContext,
+    type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    path_fork: &mut PathInternerFork,
+    string_table: &mut StringTable,
+) -> Result<ParsedConstructorExpression, ExpressionParseError> {
+    if choice_declaration.type_id != route_context.output_type {
+        return Err(CompilerDiagnostic::invalid_call_shape(
+            crate::compiler_frontend::compiler_messages::InvalidCallShapeReason::RouteArgumentNotDirect,
+            None,
+            variant_span,
+        )
+        .into());
+    }
+
+    let diagnostic_name = CallDiagnosticName::ChoiceVariant {
+        choice_name: path_fork.component(nominal_path),
+        variant_name,
+    };
+
+    match &variant.payload {
+        ChoiceVariantPayloadDefinition::Unit => {
+            token_stream.advance();
+            if has_parens {
+                token_stream.advance();
+                let reason = if token_stream.current_tag() == TokenTag::CLOSE_PARENTHESIS {
+                    InvalidChoiceVariantReason::UnitVariantWithParentheses
+                } else {
+                    InvalidChoiceVariantReason::UnitVariantAsConstructor
+                };
+                return Err(CompilerDiagnostic::invalid_choice_variant(
+                    reason,
+                    path_fork.component(choice_declaration.id),
+                    Some(variant_name),
+                    vec![],
+                    variant_span,
+                )
+                .into());
+            }
+            if route_context.input_type.is_some() {
+                return Err(CompilerDiagnostic::invalid_call_shape(
+                    crate::compiler_frontend::compiler_messages::InvalidCallShapeReason::RouteInputFieldMismatch,
+                    None,
+                    variant_span,
+                )
+                .into());
+            }
+            let expression = expression_builder.route_construct(RouteConstructInput {
+                tag: variant_index,
+                fields: Vec::<CompletedConstructorField<OwnedExpr>>::new(),
+                type_id: choice_declaration.type_id,
+                span: variant_span,
+                value_mode: ValueMode::ImmutableOwned,
+                future_input: false,
+            })?;
+            Ok(ParsedConstructorExpression::Value(expression))
+        }
+        ChoiceVariantPayloadDefinition::Record { fields } => {
+            let field_views = ConstructorField::from_choice_payload_fields(fields);
+            let field_expectations = expectations_from_constructor_fields(&field_views, path_fork);
+            let future_input = route_context.input_type.is_some();
+            let capture_count = if let Some(input_type) = route_context.input_type {
+                let Some(trailing_field) = fields.last() else {
+                    return Err(CompilerDiagnostic::invalid_call_shape(
+                        crate::compiler_frontend::compiler_messages::InvalidCallShapeReason::RouteInputFieldMismatch,
+                        None,
+                        variant_span,
+                    )
+                    .into());
+                };
+                if trailing_field.type_id != input_type {
+                    return Err(CompilerDiagnostic::invalid_call_shape(
+                        crate::compiler_frontend::compiler_messages::InvalidCallShapeReason::RouteInputFieldMismatch,
+                        None,
+                        variant_span,
+                    )
+                    .into());
+                }
+                fields.len() - 1
+            } else {
+                fields.len()
+            };
+
+            if future_input && capture_count == 0 && has_parens {
+                return Err(CompilerDiagnostic::invalid_call_shape(
+                    crate::compiler_frontend::compiler_messages::InvalidCallShapeReason::RouteArgumentNotDirect,
+                    None,
+                    variant_span,
+                )
+                .into());
+            }
+            if !has_parens {
+                token_stream.advance();
+                if future_input && capture_count == 0 {
+                    let expression = expression_builder.route_construct(RouteConstructInput {
+                        tag: variant_index,
+                        fields: Vec::<CompletedConstructorField<OwnedExpr>>::new(),
+                        type_id: choice_declaration.type_id,
+                        span: variant_span,
+                        value_mode: ValueMode::MutableOwned,
+                        future_input: true,
+                    })?;
+                    return Ok(ParsedConstructorExpression::Value(expression));
+                }
+                return Err(CompilerDiagnostic::invalid_choice_variant(
+                    InvalidChoiceVariantReason::PayloadVariantMissingArguments,
+                    path_fork.component(choice_declaration.id),
+                    Some(variant_name),
+                    vec![],
+                    variant_span,
+                )
+                .into());
+            }
+
+            token_stream.advance();
+            let constructor_span = Some(token_stream.current_span());
+            let expectations = &field_expectations[..capture_count];
+            let parsed_arguments = if future_input {
+                parse_route_capture_arguments(
+                    token_stream,
+                    context,
+                    type_interner,
+                    expression_builder,
+                    const_values,
+                    string_table,
+                    expectations,
+                    diagnostic_name,
+                    path_fork,
+                )?
+            } else {
+                parse_call_arguments_typed_with_numeric_retention(
+                    token_stream,
+                    context,
+                    type_interner,
+                    expression_builder,
+                    const_values,
+                    string_table,
+                    expectations,
+                    CallArgumentSyntax::Constructor {
+                        callee_name: diagnostic_name,
+                    },
+                    path_fork,
+                )?
+            };
+
+            match parsed_arguments {
+                ParsedCallArguments::Ready(arguments) => {
+                    let expression = finish_choice_payload_construct(
+                        ChoicePayloadConstructInput {
+                            diagnostic_name,
+                            expectations,
+                            variant_index,
+                            choice_type_id: choice_declaration.type_id,
+                            fields: &fields[..capture_count],
+                            constructor_span,
+                            variant_span,
+                            enforce_constant_context: context.kind.allows_const_record_coercion(),
+                            route_future_input: Some(future_input),
+                        },
+                        arguments,
+                        context,
+                        type_interner,
+                        expression_builder,
+                        const_values,
+                        path_fork,
+                        string_table,
+                    )?;
+                    Ok(ParsedConstructorExpression::Value(expression))
+                }
+                ParsedCallArguments::Retained(arguments) => {
+                    let call = DeferredCall::Choice(Box::new(DeferredChoiceCall {
+                        nominal_path,
+                        choice_type_id: choice_declaration.type_id,
+                        variant_index,
+                        variant_name,
+                        expectations: expectations.to_vec(),
+                        arguments,
+                        call_span: constructor_span,
+                        variant_span,
+                        enforce_constant_context: context.kind.allows_const_record_coercion(),
+                        is_route: true,
+                        future_input_type: route_context.input_type,
+                    }));
+                    Ok(ParsedConstructorExpression::RetainedOperand(
+                        ExpressionRpnItem::PendingNumericCall {
+                            call: Box::new(call),
+                            span: constructor_span,
+                        },
+                    ))
+                }
+            }
         }
     }
 }
@@ -549,6 +796,7 @@ struct ChoicePayloadConstructInput<'a> {
     constructor_span: Option<SourceSpan>,
     variant_span: Option<SourceSpan>,
     enforce_constant_context: bool,
+    route_future_input: Option<bool>,
 }
 
 /// Validate one record payload constructor's arguments and build the canonical choice value.
@@ -580,6 +828,7 @@ fn finish_choice_payload_construct(
         constructor_span,
         variant_span,
         enforce_constant_context,
+        route_future_input,
     } = input;
     let type_check_context = type_interner.type_check_context();
     let resolved_args = resolve_call_arguments(
@@ -608,13 +857,17 @@ fn finish_choice_payload_construct(
                 let view = expression_builder.view_owned(value)?;
                 let is_placeholder_reference =
                     if let ExpressionOperationView::Reference(path) = view.operation() {
-                        path_fork.component(path).is_some_and(|name| {
-                            context.get_reference(&name).is_some_and(|reference| {
-                                reference.ready_declaration().is_some_and(|declaration| {
+                        path_fork
+                            .component(path)
+                            .map(|name| context.get_value_reference(&name, view.span()))
+                            .transpose()?
+                            .flatten()
+                            .and_then(|reference| {
+                                reference.ready_declaration().map(|declaration| {
                                     context.is_unresolved_constant_placeholder(declaration)
                                 })
                             })
-                        })
+                            .unwrap_or(false)
                     } else {
                         false
                     };
@@ -679,13 +932,24 @@ fn finish_choice_payload_construct(
         ValueMode::MutableOwned
     };
 
-    Ok(expression_builder.choice_construct(ChoiceConstructInput {
-        tag: variant_index,
-        fields: choice_fields,
-        type_id: choice_type_id,
-        span: variant_span,
-        value_mode,
-    })?)
+    if let Some(future_input) = route_future_input {
+        Ok(expression_builder.route_construct(RouteConstructInput {
+            tag: variant_index,
+            fields: choice_fields,
+            type_id: choice_type_id,
+            span: variant_span,
+            value_mode,
+            future_input,
+        })?)
+    } else {
+        Ok(expression_builder.choice_construct(ChoiceConstructInput {
+            tag: variant_index,
+            fields: choice_fields,
+            type_id: choice_type_id,
+            span: variant_span,
+            value_mode,
+        })?)
+    }
 }
 
 /// One concrete choice payload constructor retained until its numeric-dependent arguments resolve.
@@ -708,6 +972,8 @@ pub(crate) struct DeferredChoiceCall {
     pub(crate) call_span: Option<SourceSpan>,
     pub(crate) variant_span: Option<SourceSpan>,
     pub(crate) enforce_constant_context: bool,
+    pub(crate) is_route: bool,
+    pub(crate) future_input_type: Option<TypeId>,
 }
 
 /// Resume one retained concrete choice payload constructor after its arguments resolve.
@@ -735,6 +1001,8 @@ pub(crate) fn complete_deferred_choice_call<
         call_span,
         variant_span,
         enforce_constant_context,
+        is_route,
+        future_input_type,
     } = deferred;
 
     // Arguments complete before the session services are borrowed: both take the session mutably.
@@ -769,6 +1037,23 @@ pub(crate) fn complete_deferred_choice_call<
         )
         .into());
     };
+    let captured_fields = if let Some(input_type) = future_input_type {
+        let Some(trailing_field) = fields.last() else {
+            return Err(CompilerError::compiler_error(
+                "a retained route constructor lost its future-input payload field",
+            )
+            .into());
+        };
+        if trailing_field.type_id != input_type || expectations.len() >= fields.len() {
+            return Err(CompilerError::compiler_error(
+                "a retained route constructor has an invalid future-input boundary",
+            )
+            .into());
+        }
+        &fields[..expectations.len()]
+    } else {
+        fields
+    };
 
     finish_choice_payload_construct(
         ChoicePayloadConstructInput {
@@ -779,10 +1064,11 @@ pub(crate) fn complete_deferred_choice_call<
             expectations: &expectations,
             variant_index,
             choice_type_id,
-            fields,
+            fields: captured_fields,
             constructor_span: call_span,
             variant_span,
             enforce_constant_context,
+            route_future_input: is_route.then_some(future_input_type.is_some()),
         },
         completed_arguments,
         context,
@@ -879,6 +1165,7 @@ pub(crate) fn complete_generic_choice_instance(
             constructor_span,
             variant_span,
             enforce_constant_context,
+            route_future_input: None,
         },
         arguments,
         context,

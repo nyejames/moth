@@ -7,6 +7,7 @@
 use super::environment::TopLevelDeclarationTable;
 use super::scope_context::{
     ContextKind, EnclosingCallableContract, EnclosingCallableOwner, ScopeContext,
+    ValueDeclarationRef,
 };
 use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
 use crate::compiler_frontend::ast::statements::value_production::{
@@ -156,7 +157,8 @@ fn add_compile_time_var_extends_visibility_gate_when_gate_is_set() {
         "add_compile_time_var must keep the visibility gate synchronized"
     );
     let reference = context
-        .get_reference(&constant_name)
+        .get_value_reference(&constant_name, None)
+        .expect("compile-time local lookup must be valid")
         .expect("compile-time local must resolve after insertion");
     assert!(
         context.is_explicit_compile_time_constant(
@@ -567,7 +569,8 @@ fn same_frame_duplicate_lookup_returns_latest_declaration() {
     );
 
     let resolved = context
-        .get_reference(&name)
+        .get_value_reference(&name, None)
+        .expect("ordinary value lookup must be valid")
         .expect("same-frame name must resolve");
     assert_eq!(
         resolved
@@ -976,8 +979,6 @@ fn numeric_expression_policy_scopes_do_not_copy_body_declarations() {
 
 #[test]
 fn pending_numeric_binding_is_visible_without_a_ready_declaration() {
-    use crate::compiler_frontend::ast::module_ast::scope_context::ScopeDeclarationRef;
-
     let mut string_table = StringTable::new();
     let mut path_fork = PathInternerFork::empty();
     let scope = empty_scope(&mut path_fork, &mut string_table);
@@ -996,12 +997,13 @@ fn pending_numeric_binding_is_visible_without_a_ready_declaration() {
     let binding = insert_pending_binding(&context, name, &mut path_fork);
 
     let reference = context
-        .get_reference(&name)
+        .get_value_reference(&name, None)
+        .expect("ordinary pending lookup must be valid")
         .expect("a pending numeric binding must stay visible to lookup, never read as unknown");
     assert!(
         matches!(
             &reference,
-            ScopeDeclarationRef::PendingNumeric {
+            ValueDeclarationRef::PendingNumeric {
                 binding: found,
                 ..
             } if *found == binding
@@ -1059,7 +1061,8 @@ fn pending_numeric_binding_upgrades_in_place_and_keeps_its_name() {
     assert!(upgraded, "the pending slot must upgrade in place");
 
     let reference = context
-        .get_reference(&name)
+        .get_value_reference(&name, None)
+        .expect("ordinary value lookup must be valid")
         .expect("the upgraded name must keep resolving");
     assert_eq!(
         reference

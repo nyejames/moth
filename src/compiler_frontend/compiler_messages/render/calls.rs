@@ -97,8 +97,17 @@ pub(crate) fn invalid_call_shape_message(
         InvalidCallShapeReason::WireArgumentMutableMarker => {
             format!("{prefix} does not accept the `~` mutable-access marker for a `Wire` parameter.")
         }
-        InvalidCallShapeReason::RouteArgumentsUnsupported => {
-            "Route arguments are not supported yet.".to_owned()
+        InvalidCallShapeReason::RouteArgumentNotDirect => {
+            "A `Route` argument must be a direct choice variant constructor or an unchanged compatible `Route` parameter.".to_owned()
+        }
+        InvalidCallShapeReason::RouteForwardingContractMismatch => {
+            "A route parameter can only be forwarded to a `Route` parameter with exactly matching input and output types.".to_owned()
+        }
+        InvalidCallShapeReason::RouteParameterRead => {
+            "A `Route` parameter is not an ordinary value and can only be forwarded unchanged to a matching `Route` parameter.".to_owned()
+        }
+        InvalidCallShapeReason::RouteInputFieldMismatch => {
+            "The trailing choice payload field must exactly match the route's future input type, and a payload field must remain for that input.".to_owned()
         }
         InvalidCallShapeReason::MutableAccessRequired {
             parameter_name,

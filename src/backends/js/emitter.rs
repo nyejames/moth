@@ -594,7 +594,8 @@ impl<'hir> JsEmitter<'hir> {
 
             HirExpressionKind::Cast { source, .. } => self.expression_uses_maps(*source),
 
-            HirExpressionKind::VariantConstruct { fields, .. } => hir
+            HirExpressionKind::VariantConstruct { fields, .. }
+            | HirExpressionKind::RouteConstruct { fields, .. } => hir
                 .expressions
                 .variant_fields(*fields)
                 .iter()
@@ -799,7 +800,8 @@ fn collect_expression_cast_policies(
             policies.insert(*policy);
             collect_expression_cast_policies(hir, *source, policies);
         }
-        HirExpressionKind::VariantConstruct { fields, .. } => {
+        HirExpressionKind::VariantConstruct { fields, .. }
+        | HirExpressionKind::RouteConstruct { fields, .. } => {
             for field in hir.expressions.variant_fields(*fields) {
                 collect_expression_cast_policies(hir, field.value, policies);
             }

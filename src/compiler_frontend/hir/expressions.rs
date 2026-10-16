@@ -200,6 +200,16 @@ pub enum HirExpressionKind {
         variant_index: usize,
         fields: HirVariantFieldRange,
     },
+    /// Form a constructor route from already-evaluated leading choice payload captures.
+    ///
+    /// WHY: route values retain only captured values; a future input fills the remaining tail
+    ///      when the external route consumer later completes the constructor.
+    RouteConstruct {
+        choice_id: ChoiceId,
+        variant_index: usize,
+        fields: HirVariantFieldRange,
+        future_input: bool,
+    },
 
     /// Extract a payload field from a variant-shaped value.
     ///

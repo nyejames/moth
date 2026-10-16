@@ -16796,8 +16796,8 @@ role = "primary"
 [[case]]
 id = "wiring_route_arrow_and_return_arrow"
 path = "wiring_route_arrow_and_return_arrow"
-tags = ["integration", "wiring", "routes", "diagnostics"]
-contract = "language.wiring.route_parameter_arrow_and_return_arrow"
+tags = ["integration", "wiring", "routes", "runtime"]
+contract = "language.wiring.constructor_route_arguments_runtime"
 role = "primary"
 
 [[case]]
@@ -16818,8 +16818,120 @@ role = "primary"
 id = "wiring_imported_route_d7"
 path = "wiring_imported_route_d7"
 tags = ["integration", "wiring", "routes", "dependencies", "diagnostics"]
-contract = "language.wiring.route_parameter_arrow_and_return_arrow"
+contract = "language.wiring.route_argument_requires_direct_choice"
 role = "boundary"
+
+[[case]]
+id = "wiring_route_partial_outside_rejected"
+path = "wiring_route_partial_outside_rejected"
+tags = ["integration", "wiring", "routes", "diagnostics"]
+contract = "language.wiring.partial_constructor_requires_route_context"
+role = "primary"
+
+[[case]]
+id = "wiring_route_zero_input_partial_rejected"
+path = "wiring_route_zero_input_partial_rejected"
+tags = ["integration", "wiring", "routes", "diagnostics"]
+contract = "language.wiring.zero_input_route_requires_complete_constructor"
+role = "primary"
+
+[[case]]
+id = "wiring_route_wasm_rejected"
+path = "wiring_route_wasm_rejected"
+tags = ["integration", "wiring", "routes", "html-wasm"]
+contract = "language.wiring.constructor_routes_rejected_by_wasm"
+role = "primary"
+
+[[case]]
+id = "wiring_route_return_parameter_rejected"
+path = "wiring_route_return_parameter_rejected"
+tags = ["integration", "wiring", "routes", "diagnostics"]
+contract = "language.wiring.route_parameters_are_not_ordinary_values"
+role = "primary"
+
+[[case]]
+id = "wiring_route_capture_borrow_conflict_rejected"
+path = "wiring_route_capture_borrow_conflict_rejected"
+tags = ["integration", "wiring", "routes", "borrows", "diagnostics"]
+contract = "language.wiring.route_captures_use_ordinary_borrow_rules"
+role = "primary"
+
+[[case]]
+id = "wiring_route_empty_parentheses_rejected"
+path = "wiring_route_empty_parentheses_rejected"
+tags = ["integration", "wiring", "routes", "diagnostics"]
+contract = "language.wiring.one_input_route_rejects_empty_parentheses"
+role = "primary"
+
+[[case]]
+id = "wiring_route_excess_capture_rejected"
+path = "wiring_route_excess_capture_rejected"
+tags = ["integration", "wiring", "routes", "diagnostics"]
+contract = "language.wiring.route_captures_use_positional_prefix"
+role = "boundary"
+
+[[case]]
+id = "wiring_route_forwarding_contract_mismatch_rejected"
+path = "wiring_route_forwarding_contract_mismatch_rejected"
+tags = ["integration", "wiring", "routes", "diagnostics"]
+contract = "language.wiring.route_forwarding_requires_exact_contract"
+role = "primary"
+
+[[case]]
+id = "wiring_route_forwarding_postfix_rejected"
+path = "wiring_route_forwarding_postfix_rejected"
+tags = ["integration", "wiring", "routes", "diagnostics"]
+contract = "language.wiring.route_argument_requires_direct_choice"
+role = "boundary"
+
+[[case]]
+id = "wiring_route_choice_value_not_root_rejected"
+path = "wiring_route_choice_value_not_root_rejected"
+tags = ["integration", "wiring", "routes", "diagnostics"]
+contract = "language.wiring.route_argument_requires_direct_choice"
+role = "boundary"
+
+[[case]]
+id = "wiring_route_input_field_mismatch_rejected"
+path = "wiring_route_input_field_mismatch_rejected"
+tags = ["integration", "wiring", "routes", "diagnostics"]
+contract = "language.wiring.route_input_matches_trailing_field"
+role = "primary"
+
+[[case]]
+id = "wiring_route_missing_capture_rejected"
+path = "wiring_route_missing_capture_rejected"
+tags = ["integration", "wiring", "routes", "diagnostics"]
+contract = "language.wiring.route_captures_use_positional_prefix"
+role = "boundary"
+
+[[case]]
+id = "wiring_route_named_capture_rejected"
+path = "wiring_route_named_capture_rejected"
+tags = ["integration", "wiring", "routes", "diagnostics"]
+contract = "language.wiring.route_captures_use_positional_prefix"
+role = "primary"
+
+[[case]]
+id = "wiring_route_pending_choice_rejected"
+path = "wiring_route_pending_choice_rejected"
+tags = ["integration", "wiring", "routes", "diagnostics"]
+contract = "language.wiring.route_argument_requires_direct_choice"
+role = "primary"
+
+[[case]]
+id = "wiring_route_statement_receiver_rejected"
+path = "wiring_route_statement_receiver_rejected"
+tags = ["integration", "wiring", "routes", "diagnostics"]
+contract = "language.wiring.route_parameters_are_not_ordinary_values"
+role = "boundary"
+
+[[case]]
+id = "wiring_route_wasm_unreachable_accepted"
+path = "wiring_route_wasm_unreachable_accepted"
+tags = ["integration", "wiring", "routes", "html-wasm"]
+contract = "language.wiring.route_wasm_rejection_tracks_reachability"
+role = "primary"
 
 [[case]]
 id = "wiring_wire_underlying_alias_runtime"

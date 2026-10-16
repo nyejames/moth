@@ -1127,7 +1127,8 @@ fn enter_expression<'a>(
             Ok(None)
         }
         ExpressionOperationView::Struct { fields }
-        | ExpressionOperationView::Choice { fields, .. } => {
+        | ExpressionOperationView::Choice { fields, .. }
+        | ExpressionOperationView::RouteConstruct { fields, .. } => {
             open_expression_frame(
                 template_ir_store,
                 state,

@@ -3244,7 +3244,8 @@ fn collect_expression_values(
             collect_expression_values(expressions, *start, out);
             collect_expression_values(expressions, *end, out);
         }
-        HirExpressionKind::VariantConstruct { fields, .. } => {
+        HirExpressionKind::VariantConstruct { fields, .. }
+        | HirExpressionKind::RouteConstruct { fields, .. } => {
             for field in expressions.variant_fields(*fields) {
                 collect_expression_values(expressions, field.value, out);
             }

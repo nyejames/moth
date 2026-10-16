@@ -80,7 +80,9 @@ impl ScopeContext {
             ScopeDeclarationRef::Shared(declaration) => {
                 declaration.id == *path && self.is_explicit_compile_time_constant(declaration)
             }
-            ScopeDeclarationRef::PendingNumeric { .. } => false,
+            ScopeDeclarationRef::PendingNumeric { .. } | ScopeDeclarationRef::RouteParameter(_) => {
+                false
+            }
         };
         is_explicit
             .then(|| const_values.value_for_path(path))

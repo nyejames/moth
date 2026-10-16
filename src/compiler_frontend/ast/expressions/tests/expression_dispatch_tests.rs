@@ -161,6 +161,7 @@ fn hash_in_expression_position_rejected() {
         expression_builder: &mut expression_builder,
         const_values: &mut const_values,
         group_frames: &mut group_frames,
+        route_argument_context: None,
     };
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
@@ -230,6 +231,7 @@ fn hash_before_template_head_allowed() {
         expression_builder: &mut expression_builder,
         const_values: &mut const_values,
         group_frames: &mut group_frames,
+        route_argument_context: None,
     };
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();
@@ -288,6 +290,7 @@ fn negative_token_before_identifier_pushes_unary_negation_operator() {
         expression_builder: &mut expression_builder,
         const_values: &mut const_values,
         group_frames: &mut group_frames,
+        route_argument_context: None,
     };
     let mut type_environment = TypeEnvironment::new();
     let mut compatibility_cache = TypeCompatibilityCache::new();

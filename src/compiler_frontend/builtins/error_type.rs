@@ -5,10 +5,10 @@
 //! WHY: builtin error metadata should be centralized so parser/lowering/backend code cannot drift
 //! on the public error type shape.
 
-use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{
     AstNode, Declaration, DeclarationShell, DeclarationValue, NodeKind,
 };
+use crate::compiler_frontend::ast::{ScopeContext, ScopeDeclarationRef};
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::ParameterContractKind;
 use crate::compiler_frontend::datatypes::builtin_type_ids;
@@ -142,24 +142,31 @@ fn resolve_builtin_named_type(
             "Builtin type '{type_name}' is missing from this compilation context."
         )));
     };
-    let Some(declaration) = reference.ready_declaration() else {
-        return Err(CompilerError::compiler_error(format!(
-            "Builtin type '{type_name}' resolved to a pending numeric binding at {span:?}."
-        )));
+    let type_id = match reference {
+        ScopeDeclarationRef::Local { declaration, .. } => declaration.type_id,
+        ScopeDeclarationRef::Shared(declaration) => declaration.type_id,
+        ScopeDeclarationRef::PendingNumeric { .. } => {
+            return Err(CompilerError::compiler_error(format!(
+                "Builtin type '{type_name}' resolved to a pending numeric binding at {span:?}."
+            )));
+        }
+        ScopeDeclarationRef::RouteParameter(_) => {
+            return Err(CompilerError::compiler_error(format!(
+                "Builtin type '{type_name}' resolved to a Route parameter at {span:?}."
+            )));
+        }
     };
 
     // The manifest registers the builtin error declaration before its nominal type identity
     // exists, so a placeholder id here means this symbol resolved before registration. The
     // display spelling cannot express that: a struct shell still spells `runtime_struct(NONE)`.
-    if declaration.type_id == builtin_type_ids::NONE {
+    if type_id == builtin_type_ids::NONE {
         return Err(CompilerError::compiler_error(format!(
             "Builtin type '{type_name}' resolved to a declaration without a canonical type identity at {span:?}.",
         )));
     }
 
-    Ok(ResolvedBuiltinType {
-        type_id: declaration.type_id,
-    })
+    Ok(ResolvedBuiltinType { type_id })
 }
 
 fn type_declaration(id: PathId, type_id: TypeId, span: Option<SourceSpan>) -> Declaration {

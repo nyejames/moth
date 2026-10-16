@@ -38,16 +38,20 @@ use crate::compiler_frontend::ast::expressions::parse_expression::{
 use crate::compiler_frontend::ast::expressions::parse_expression_input::{
     ExpressionParseInput, ExpressionParseResources,
 };
+use crate::compiler_frontend::ast::field_access::reference_expression_from_declaration;
 use crate::compiler_frontend::ast::generic_functions::numeric_origins::set_forward_destinations;
-use crate::compiler_frontend::ast::module_ast::scope_context::ScopeDeclarationRef;
+use crate::compiler_frontend::ast::module_ast::scope_context::{
+    RouteParameterReference, ScopeDeclarationRef,
+};
 use crate::compiler_frontend::ast::numeric_construction::{
-    DeferredCallArgument, DeferredCallArgumentShape, deferred_numeric_expression,
+    DeferredCall, DeferredCallArgument, DeferredCallArgumentShape, deferred_numeric_expression,
 };
 use crate::compiler_frontend::ast::numeric_known_shape::{
     fragment_shape, register_shape_witness, union_shape_classes,
 };
 use crate::compiler_frontend::ast::statements::functions::ParameterContract;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
+use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticToken,
     InvalidBuiltinCallReason, InvalidCallShapeReason, InvalidExpressionReason,
@@ -271,6 +275,11 @@ impl CallArgumentReceivingContext {
         self.numeric_retention = numeric_retention;
         self
     }
+
+    pub(crate) fn with_naming_policy(mut self, naming_policy: CallArgumentNamingPolicy) -> Self {
+        self.naming_policy = naming_policy;
+        self
+    }
 }
 
 /// One retained-capable call-argument list: fully complete, or holding retained arguments.
@@ -377,6 +386,39 @@ pub(crate) fn parse_call_arguments_typed_with_numeric_retention(
         CallArgumentSyntaxContext::Ordinary,
         CallArgumentReceivingContext::existing_call(argument_syntax)
             .with_numeric_retention(CallArgumentNumericRetention::Retain),
+        Some(expectations),
+        path_fork,
+    )
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "route capture parsing reuses the shared list owner while selecting its positional-prefix naming policy"
+)]
+pub(crate) fn parse_route_capture_arguments(
+    token_stream: &mut AstCursor,
+    context: &ScopeContext,
+    type_interner: &mut AstTypeInterner<'_>,
+    expression_builder: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+    string_table: &mut StringTable,
+    expectations: &[ParameterExpectation],
+    callee_name: CallDiagnosticName<'static>,
+    path_fork: &mut PathInternerFork,
+) -> Result<ParsedCallArguments<OwnedExpr>, ExpressionParseError> {
+    parse_call_arguments_inner(
+        token_stream,
+        context,
+        type_interner,
+        expression_builder,
+        const_values,
+        string_table,
+        CallArgumentSyntaxContext::Ordinary,
+        CallArgumentReceivingContext::existing_call(CallArgumentSyntax::Constructor {
+            callee_name,
+        })
+        .with_naming_policy(CallArgumentNamingPolicy::PositionalOnly)
+        .with_numeric_retention(CallArgumentNumericRetention::Retain),
         Some(expectations),
         path_fork,
     )
@@ -805,16 +847,41 @@ fn parse_call_arguments_inner(
         let parameter_expectation = parameter_slot
             .and_then(|slot| routed_expectations.and_then(|items| items.get(slot.index())));
 
-        if parameter_expectation.is_some_and(|expectation| {
-            matches!(expectation.contract, ParameterContract::Route { .. })
-        }) {
-            return Err(CompilerDiagnostic::invalid_call_shape(
-                InvalidCallShapeReason::RouteArgumentsUnsupported,
-                None,
-                current_span(token_stream),
-            )
-            .into());
-        }
+        let route_argument_context = match parameter_expectation {
+            Some(expectation) => match expectation.contract {
+                ParameterContract::Route { input } => {
+                    let output_type = match expectation.expected_type {
+                        ExpectedParameterType::Known(type_id)
+                        | ExpectedParameterType::GenericParameter(type_id) => type_id,
+                        ExpectedParameterType::ConstructionShape(_)
+                        | ExpectedParameterType::UnknownExternal => {
+                            return Err(CompilerDiagnostic::invalid_call_shape(
+                                InvalidCallShapeReason::RouteArgumentNotDirect,
+                                None,
+                                current_span(token_stream),
+                            )
+                            .into());
+                        }
+                    };
+                    if access_mode == CallAccessMode::Mutable
+                        || token_stream.current_tag() != TokenTag::SYMBOL
+                    {
+                        return Err(CompilerDiagnostic::invalid_call_shape(
+                            InvalidCallShapeReason::RouteArgumentNotDirect,
+                            None,
+                            current_span(token_stream),
+                        )
+                        .into());
+                    }
+                    Some(crate::compiler_frontend::ast::expressions::parse_expression_input::RouteArgumentContext {
+                        output_type,
+                        input_type: input,
+                    })
+                }
+                ParameterContract::Value | ParameterContract::Wire => None,
+            },
+            None => None,
+        };
         if parameter_expectation
             .is_some_and(|expectation| expectation.contract == ParameterContract::Wire)
             && access_mode == CallAccessMode::Mutable
@@ -888,44 +955,145 @@ fn parse_call_arguments_inner(
         // against it instead.
         let argument_source_span = token_stream.current_span();
         let argument_is_bare_symbol = token_stream.current_tag() == TokenTag::SYMBOL;
+        let route_forwarding_value = if route_argument_context.is_some() && argument_is_bare_symbol
+        {
+            let name = token_stream
+                .current_string_id_in(string_table)?
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "route argument symbol token had no string payload",
+                    )
+                })?;
+            let route_reference: Option<RouteParameterReference<'_>> =
+                context.get_route_argument_reference(&name);
+            match route_reference {
+                Some(route_reference) => {
+                    let route_context = route_argument_context.ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "Route parameter lookup escaped its route argument context",
+                        )
+                    })?;
+                    let declaration = route_reference.declaration();
+                    if declaration.type_id != route_context.output_type
+                        || route_reference.input_type() != route_context.input_type
+                    {
+                        return Err(CompilerDiagnostic::invalid_call_shape(
+                            InvalidCallShapeReason::RouteForwardingContractMismatch,
+                            None,
+                            Some(argument_source_span),
+                        )
+                        .into());
+                    }
+
+                    token_stream.advance();
+                    token_stream.skip_newlines();
+                    if !matches!(
+                        token_stream.current_tag(),
+                        TokenTag::COMMA | TokenTag::CLOSE_PARENTHESIS
+                    ) {
+                        return Err(CompilerDiagnostic::invalid_call_shape(
+                            InvalidCallShapeReason::RouteArgumentNotDirect,
+                            None,
+                            Some(argument_source_span),
+                        )
+                        .into());
+                    }
+
+                    Some(reference_expression_from_declaration(
+                        declaration,
+                        context,
+                        type_interner,
+                        expression_builder,
+                        const_values,
+                        string_table,
+                        Some(argument_source_span),
+                    )?)
+                }
+                None => {
+                    match context.get_reference(&name) {
+                        Some(ScopeDeclarationRef::PendingNumeric { .. }) => {
+                            return Err(CompilerDiagnostic::invalid_call_shape(
+                                InvalidCallShapeReason::RouteArgumentNotDirect,
+                                None,
+                                Some(argument_source_span),
+                            )
+                            .into());
+                        }
+                        Some(ScopeDeclarationRef::Local { .. })
+                        | Some(ScopeDeclarationRef::Shared(_))
+                        | Some(ScopeDeclarationRef::RouteParameter(_))
+                        | None => {}
+                    }
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        let is_route_forwarding_argument = route_forwarding_value.is_some();
         // Only an argument list that can retain a deferral treats its arguments as owners of their
         // own complete fragment. Every other surface keeps raising non-owning deferrals, so a
         // nested parse that swallowed enclosing structure can never be consumed as a whole
         // argument by an outer retention site.
-        let mut input = ExpressionParseInput::call_argument(
-            ExpressionParseResources {
-                token_stream,
-                scope_context: context,
-                type_interner,
-                expression_builder,
-                const_values,
-                expected_type: &mut inferred,
-                cast_target_context: &mut cast_target_context,
-                value_mode: &ValueMode::ImmutableOwned,
-                string_table,
-                path_fork,
-            },
-            matches!(
-                receiving_context.numeric_retention,
-                CallArgumentNumericRetention::Retain
-            ),
-        );
-        if construction_shape.is_some() || retains_known_aggregate || generic_slot {
-            input = input.with_retained_pending_numeric_fragment();
-        }
-
-        if matches!(
-            receiving_context.naming_policy,
-            CallArgumentNamingPolicy::NamedOnly
-        ) {
-            input.stop_at_named_entry = true;
-        }
-
-        // Forward producers this argument registers belong to its own position alone, so only they
-        // may take the parameter receiver below.
         let producer_start = context.numeric_state().forward_producer_checkpoint();
-        let argument = match create_expression_with_trailing_newline_policy(input) {
+        let argument_result = if let Some(value) = route_forwarding_value {
+            Ok(value)
+        } else {
+            let mut input = ExpressionParseInput::call_argument(
+                ExpressionParseResources {
+                    token_stream,
+                    scope_context: context,
+                    type_interner,
+                    expression_builder,
+                    const_values,
+                    expected_type: &mut inferred,
+                    cast_target_context: &mut cast_target_context,
+                    value_mode: &ValueMode::ImmutableOwned,
+                    string_table,
+                    path_fork,
+                },
+                matches!(
+                    receiving_context.numeric_retention,
+                    CallArgumentNumericRetention::Retain
+                ),
+            );
+            if let Some(route_argument_context) = route_argument_context {
+                input = input.with_route_argument_context(route_argument_context);
+            }
+            if construction_shape.is_some() || retains_known_aggregate || generic_slot {
+                input = input.with_retained_pending_numeric_fragment();
+            }
+
+            if matches!(
+                receiving_context.naming_policy,
+                CallArgumentNamingPolicy::NamedOnly
+            ) {
+                input.stop_at_named_entry = true;
+            }
+
+            create_expression_with_trailing_newline_policy(input)
+        };
+        let argument = match argument_result {
             Ok(value) => {
+                if route_argument_context.is_some() {
+                    let argument_view = expression_builder.view_owned(value)?;
+                    let direct_route_root = match argument_view.operation() {
+                        ExpressionOperationView::RouteConstruct { .. } => true,
+                        ExpressionOperationView::Reference(_) => {
+                            is_route_forwarding_argument
+                                && argument_view.span() == Some(argument_source_span)
+                        }
+                        _ => false,
+                    };
+                    if !direct_route_root {
+                        return Err(CompilerDiagnostic::invalid_call_shape(
+                            InvalidCallShapeReason::RouteArgumentNotDirect,
+                            None,
+                            argument_view.span(),
+                        )
+                        .into());
+                    }
+                }
                 if parameter_expectation
                     .is_some_and(|expectation| expectation.contract == ParameterContract::Wire)
                 {
@@ -996,6 +1164,16 @@ fn parse_call_arguments_inner(
                 // Only the argument's own complete fragment may be retained: a nested parse that
                 // swallowed enclosing argument structure would otherwise lose that structure.
                 let deferral = error.take_numeric_deferral("a call argument")?;
+                if route_argument_context.is_some()
+                    && !retained_route_argument_is_constructor_root(&deferral.items)
+                {
+                    return Err(CompilerDiagnostic::invalid_call_shape(
+                        InvalidCallShapeReason::RouteArgumentNotDirect,
+                        None,
+                        deferral.span,
+                    )
+                    .into());
+                }
                 // Deferred expressions have no completed operation view; only one pending
                 // authored binding can still be the direct Wire source.
                 if parameter_expectation
@@ -1247,6 +1425,18 @@ fn with_following_separator_span<E>(
     }
 }
 
+/// Preserve the direct-constructor obligation when a route constructor waits for numeric completion.
+fn retained_route_argument_is_constructor_root(items: &[ExpressionRpnItem]) -> bool {
+    matches!(
+        items,
+        [ExpressionRpnItem::PendingNumericCall { call, .. }]
+            if matches!(
+                call.as_ref(),
+                DeferredCall::Choice(choice) if choice.is_route
+            )
+    )
+}
+
 /// Whether one parsed `Wire` argument names an eligible authored binding.
 ///
 /// WHAT: accepts exactly one authored symbol whose parsed value is a single `Reference` naming
@@ -1302,9 +1492,9 @@ fn wire_argument_origin_is_eligible(
                         )
                         && !context.is_explicit_compile_time_constant(&declaration)
                 }
-                ScopeDeclarationRef::Shared(_) | ScopeDeclarationRef::PendingNumeric { .. } => {
-                    false
-                }
+                ScopeDeclarationRef::Shared(_)
+                | ScopeDeclarationRef::PendingNumeric { .. }
+                | ScopeDeclarationRef::RouteParameter(_) => false,
             })
     })
 }
@@ -1357,13 +1547,17 @@ fn validate_argument_value_policy(
 
     let is_placeholder_reference =
         if let ExpressionOperationView::Reference(path) = value.operation() {
-            path_fork.component(path).is_some_and(|name| {
-                context.get_reference(&name).is_some_and(|reference| {
-                    reference.ready_declaration().is_some_and(|declaration| {
-                        context.is_unresolved_constant_placeholder(declaration)
-                    })
+            path_fork
+                .component(path)
+                .map(|name| context.get_value_reference(&name, value.span()))
+                .transpose()?
+                .flatten()
+                .and_then(|reference| {
+                    reference
+                        .ready_declaration()
+                        .map(|declaration| context.is_unresolved_constant_placeholder(declaration))
                 })
-            })
+                .unwrap_or(false)
         } else {
             false
         };

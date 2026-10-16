@@ -19,6 +19,7 @@ use super::parse_expression_dispatch::{
     ExpressionOperandInput, push_expression_operand, push_expression_operand_with_span,
     push_pending_numeric_binding, stream_is_boundary_leading,
 };
+use super::parse_expression_input::RouteArgumentContext;
 use super::source_function_calls::{SourceCallableMemberInput, parse_source_callable_member};
 use super::struct_instance::{StructConstructorParseInput, parse_struct_constructor_expression};
 use crate::compiler_frontend::ast::ast_nodes::{DeclarationShell, DeclarationValue};
@@ -35,7 +36,7 @@ use crate::compiler_frontend::builtins::casts::traits::is_core_cast_trait_name;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, InvalidAssignmentTargetReason,
-    InvalidTemplateSlotReason, NameNamespace,
+    InvalidCallShapeReason, InvalidTemplateSlotReason, NameNamespace,
 };
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
@@ -55,6 +56,7 @@ pub(super) fn parse_identifier_or_call(
     expression: &mut Vec<ExpressionRpnItem>,
     allow_boundary_catch: bool,
     expected_result_evidence_allowed: bool,
+    route_argument_context: Option<RouteArgumentContext>,
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
@@ -94,16 +96,34 @@ pub(super) fn parse_identifier_or_call(
         )
         .into());
     }
+    if route_argument_context.is_some() && context.get_reference(&identifier).is_none() {
+        return Err(CompilerDiagnostic::invalid_call_shape(
+            InvalidCallShapeReason::RouteArgumentNotDirect,
+            None,
+            Some(token_stream.current_span()),
+        )
+        .into());
+    }
 
     // ------------------------------------------------------------
     //  Local binding: reference, constructor, or function call
     // ------------------------------------------------------------
-    if let Some(binding) = context.get_reference(&identifier) {
+    if let Some(binding) =
+        context.get_value_reference(&identifier, Some(token_stream.current_span()))?
+    {
         // An eligible body-local numeric binding has no declaration, `TypeId` or default until
         // the body root selects its single static type. Retain the authored reference as a
         // construction-only operand item so the expression entry raises the body-root deferral
         // for the whole fragment instead of fabricating a value or reporting an absent name.
         if let Some(pending_binding) = binding.pending_binding() {
+            if route_argument_context.is_some() {
+                return Err(CompilerDiagnostic::invalid_call_shape(
+                    InvalidCallShapeReason::RouteArgumentNotDirect,
+                    None,
+                    Some(token_stream.current_span()),
+                )
+                .into());
+            }
             // A pending numeric binding is a runtime body-local value, and constants fold at
             // their declaration boundary, so a constant context can never consume it.
             if context.kind.is_constant_context() {
@@ -147,6 +167,22 @@ pub(super) fn parse_identifier_or_call(
             )
             .into());
         };
+        if let Some(route_context) = route_argument_context
+            && (token_stream.peek_next_tag() != Some(TokenTag::DOUBLE_COLON)
+                || declaration.type_id != route_context.output_type
+                || !context.is_source_choice_declaration(
+                    declaration,
+                    expression_builder,
+                    const_values,
+                )?)
+        {
+            return Err(CompilerDiagnostic::invalid_call_shape(
+                InvalidCallShapeReason::RouteArgumentNotDirect,
+                None,
+                Some(token_stream.current_span()),
+            )
+            .into());
+        }
 
         // Template slot inserts are only legal inside template bodies, constant
         // initializers, or constant headers.
@@ -261,6 +297,7 @@ pub(super) fn parse_identifier_or_call(
                     const_values,
                     path_fork,
                     string_table,
+                    route_argument_context,
                 )? {
                     ParsedConstructorExpression::Value(choice_value) => {
                         push_expression_operand(
@@ -627,7 +664,6 @@ fn parse_this_reference(
     let receiver_declaration = receiver_declaration.ready_declaration().ok_or_else(|| {
         CompilerError::compiler_error("`this` resolved to a pending numeric binding")
     })?;
-
     let reference_span = Some(token_stream.current_span());
     let reference_expression = reference_expression_from_declaration(
         receiver_declaration,

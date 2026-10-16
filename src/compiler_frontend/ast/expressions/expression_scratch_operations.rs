@@ -72,6 +72,11 @@ impl<E: Copy> CompletedOperation<E> {
                     visit(field.value);
                 }
             }
+            Self::RouteConstruct { fields, .. } => {
+                for field in fields {
+                    visit(field.value);
+                }
+            }
             _ => (),
         }
     }
@@ -287,6 +292,15 @@ impl<E: Copy> CompletedOperation<E> {
                 tag,
                 fields: fields(v, &mut map),
             },
+            Self::RouteConstruct {
+                tag,
+                fields: v,
+                future_input,
+            } => O::RouteConstruct {
+                tag,
+                fields: fields(v, &mut map),
+                future_input,
+            },
             Self::ValueBlock(v) => O::ValueBlock(v),
             Self::RuntimeTemplate(v) => O::RuntimeTemplate(v),
             Self::RuntimeSlotApplication(v) => O::RuntimeSlotApplication(v),
@@ -463,6 +477,15 @@ impl CompletedOperation<OwnedExpr> {
                 tag,
                 fields: builder.append_constructor_fields(fields, span)?,
             },
+            Self::RouteConstruct {
+                tag,
+                fields,
+                future_input,
+            } => O::RouteConstruct {
+                tag,
+                fields: builder.append_constructor_fields(fields, span)?,
+                future_input,
+            },
             Self::ValueBlock(v) => O::ValueBlock(builder.append_value_block(v, span)?),
             Self::RuntimeTemplate(v) => {
                 O::RuntimeTemplate(builder.append_runtime_template(v, span)?)
@@ -610,6 +633,9 @@ impl SideCounts {
                 add!(map_entries, v.len());
             }
             CompletedOperation::Struct { fields } | CompletedOperation::Choice { fields, .. } => {
+                add!(constructor_fields, fields.len());
+            }
+            CompletedOperation::RouteConstruct { fields, .. } => {
                 add!(constructor_fields, fields.len());
             }
             CompletedOperation::ValueBlock(_) => {

@@ -359,7 +359,8 @@ impl HirValidator<'_> {
                         .rev()
                         .copied(),
                 ),
-                HirExpressionKind::VariantConstruct { fields, .. } => {
+                HirExpressionKind::VariantConstruct { fields, .. }
+                | HirExpressionKind::RouteConstruct { fields, .. } => {
                     reads.pending.extend(
                         self.module
                             .expressions

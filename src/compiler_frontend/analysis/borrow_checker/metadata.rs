@@ -1436,7 +1436,8 @@ fn collect_expression_loaded_locals(
                 pending.push(*end);
                 pending.push(*start);
             }
-            HirExpressionKind::VariantConstruct { fields, .. } => {
+            HirExpressionKind::VariantConstruct { fields, .. }
+            | HirExpressionKind::RouteConstruct { fields, .. } => {
                 for field in expressions.variant_fields(*fields).iter().rev() {
                     pending.push(field.value);
                 }

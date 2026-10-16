@@ -1,13 +1,11 @@
 entry = "."
 
 [backends.html]
-mode = "failure"
+mode = "success"
 warnings = "forbid"
-diagnostic_codes = ["MOTH-RULE-0054"]
+rendered_output_exact = "routes unit=unit input=input rename=rename delete=delete named=named forward=editor capture=captured effect=\"x\" order=ordered order_effect=beforecapture-1capture-2after borrow=borrowed source=after"
 
-[[backends.html.diagnostic_assertions]]
-code = "MOTH-RULE-0054"
-reason = "invalid_call_shape.route_arguments_unsupported"
-path = "input/@page.moth"
-line = 9
-column = 19
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = ["{ tag: 0, \"id\": "]

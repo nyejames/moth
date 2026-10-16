@@ -485,7 +485,9 @@ fn expand_expression<'a>(
                 push_expression(entry.value().id(), context, out);
             }
         }
-        Operation::Struct { fields } | Operation::Choice { fields, .. } => {
+        Operation::Struct { fields }
+        | Operation::Choice { fields, .. }
+        | Operation::RouteConstruct { fields, .. } => {
             for field in fields.iter() {
                 push_expression(field.value().id(), context, out);
             }

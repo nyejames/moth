@@ -360,13 +360,17 @@ fn finish_struct_instance(
             let is_placeholder_reference = {
                 let view = expression_builder.view_owned(value)?;
                 if let ExpressionOperationView::Reference(path) = view.operation() {
-                    path_fork.component(path).is_some_and(|name| {
-                        context.get_reference(&name).is_some_and(|reference| {
-                            reference.ready_declaration().is_some_and(|declaration| {
+                    path_fork
+                        .component(path)
+                        .map(|name| context.get_value_reference(&name, view.span()))
+                        .transpose()?
+                        .flatten()
+                        .and_then(|reference| {
+                            reference.ready_declaration().map(|declaration| {
                                 context.is_unresolved_constant_placeholder(declaration)
                             })
                         })
-                    })
+                        .unwrap_or(false)
                 } else {
                     false
                 }

@@ -67,6 +67,15 @@ pub(crate) struct ChoiceConstructInput<F> {
     pub(crate) value_mode: ValueMode,
 }
 
+pub(crate) struct RouteConstructInput<F> {
+    pub(crate) tag: usize,
+    pub(crate) fields: F,
+    pub(crate) type_id: TypeId,
+    pub(crate) span: Option<SourceSpan>,
+    pub(crate) value_mode: ValueMode,
+    pub(crate) future_input: bool,
+}
+
 impl From<ConstValueStoreError> for ExpressionConstructionFailure {
     fn from(error: ConstValueStoreError) -> Self {
         match error {
@@ -789,6 +798,33 @@ impl AstExpressionBuilder {
         let fields = self.append_constructor_fields(input.fields, input.span)?;
         self.append_expression(
             ExpressionOp::Choice { tag, fields },
+            input.span,
+            input.type_id,
+            input.value_mode,
+        )
+    }
+
+    pub(crate) fn route_construct<'a>(
+        &mut self,
+        input: RouteConstructInput<
+            impl Into<ExpressionInputs<'a, ConstructorField, ConstructorField<OwnedExpr>>>,
+        >,
+    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
+        let tag = u32::try_from(input.tag).map_err(|_| {
+            ExpressionConstructionFailure::Diagnostic(
+                CompilerDiagnostic::compiler_capacity_exceeded(
+                    AstCapacityResource::ChoiceTags,
+                    input.span,
+                ),
+            )
+        })?;
+        let fields = self.append_constructor_fields(input.fields, input.span)?;
+        self.append_expression(
+            ExpressionOp::RouteConstruct {
+                tag,
+                fields,
+                future_input: input.future_input,
+            },
             input.span,
             input.type_id,
             input.value_mode,

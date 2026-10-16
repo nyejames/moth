@@ -171,7 +171,7 @@ pub fn try_parse_value_block_at_receiver_with_target(
             .into()));
         }
         Ok(None) => {}
-        Err(error) => return Some(Err(error.into())),
+        Err(error) => return Some(Err(error)),
     }
 
     match classification.shape {

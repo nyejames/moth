@@ -873,6 +873,10 @@ impl ConstValueStore {
                 );
                 Ok(None)
             }
+            ExpressionOperationView::RouteConstruct { .. } => Err(CompilerError::compiler_error(
+                "Constructor routes are runtime-only and cannot enter the constant store.",
+            )
+            .into()),
             ExpressionOperationView::Range { start, end, .. } => {
                 queue_children(
                     work,

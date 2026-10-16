@@ -18,75 +18,118 @@ use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::builtins::error_type::is_reserved_parameter_contract_symbol;
 use crate::compiler_frontend::compiler_messages::{
-    InvalidAssignmentTargetReason, InvalidThisUsageReason, NameNamespace, ReservedNameOwner,
+    InvalidAssignmentTargetReason, InvalidCallShapeReason, InvalidThisUsageReason, NameNamespace,
+    ReservedNameOwner,
 };
 use crate::compiler_frontend::headers::binding_environment::SourceFunctionTarget;
 use crate::compiler_frontend::semantic_identity::GeneratedDeclarationIdentity;
 use crate::compiler_frontend::value_mode::ValueMode;
 
-/// Resolved declaration reference returned by `ScopeContext::get_reference`.
-///
-/// WHAT: abstracts over declarations that live in the local scope-frame arena (owned as
-///       `Rc<Declaration>`) and declarations that live in the immutable module lookup
-///       tables (borrowed as `&Declaration`).
-/// WHY: local declarations are stored as `Rc<Declaration>` so lookup can hand out a
-///      cheap owned handle without exposing a `RefCell` borrow guard. Shared declarations
-///      can still be returned by reference because the lookup tables outlive the query.
+/// Raw declaration lookup distinguishes ordinary values, pending numeric bindings and Route
+/// parameters. Value consumers use `get_value_reference`; only Route argument roots use the
+/// dedicated forwarding accessor.
 pub(crate) enum ScopeDeclarationRef<'a> {
     Local {
         declaration: Rc<Declaration>,
         binding_span: Option<SourceSpan>,
     },
     Shared(&'a Declaration),
-    /// An eligible body-local numeric binding whose single static type is not selected yet.
-    ///
-    /// WHAT: exposes the construction-owned binding ID plus the authored binding span.
-    /// WHY: a pending binding must be visible to lookup — never treated as an unknown name —
-    ///      while no `Declaration`, `TypeId` or default value exists for it. Callers that need
-    ///      a ready declaration use `ready_declaration()` and must handle the pending case
-    ///      explicitly; there is no implicit deref and no placeholder type.
+    PendingNumeric {
+        binding: crate::compiler_frontend::ast::numeric_construction::NumericBindingId,
+        binding_span: Option<SourceSpan>,
+    },
+    RouteParameter(RouteParameterReference<'a>),
+}
+
+/// A Route parameter visible only to the direct forwarding argument path.
+pub(crate) struct RouteParameterReference<'a> {
+    declaration: RouteParameterDeclaration<'a>,
+    input_type: Option<TypeId>,
+}
+
+enum RouteParameterDeclaration<'a> {
+    Local {
+        declaration: Rc<Declaration>,
+        binding_span: Option<SourceSpan>,
+    },
+    Shared(&'a Declaration),
+}
+
+impl RouteParameterReference<'_> {
+    pub(crate) fn declaration(&self) -> &Declaration {
+        match &self.declaration {
+            RouteParameterDeclaration::Local { declaration, .. } => declaration,
+            RouteParameterDeclaration::Shared(declaration) => declaration,
+        }
+    }
+
+    pub(crate) fn input_type(&self) -> Option<TypeId> {
+        self.input_type
+    }
+}
+
+/// A declaration reference that is legal for ordinary value consumers.
+///
+/// WHAT: excludes Route parameters at the lookup boundary and preserves unresolved numeric
+///       bindings without manufacturing a declaration.
+/// WHY: Route parameters are capabilities, not ordinary values; all normal reads receive this
+///      restricted type, while direct route forwarding uses `RouteParameterReference`.
+pub(crate) enum ValueDeclarationRef<'a> {
+    Local {
+        declaration: Rc<Declaration>,
+        binding_span: Option<SourceSpan>,
+    },
+    Shared(&'a Declaration),
     PendingNumeric {
         binding: crate::compiler_frontend::ast::numeric_construction::NumericBindingId,
         binding_span: Option<SourceSpan>,
     },
 }
 
-impl<'a> ScopeDeclarationRef<'a> {
-    /// Return a borrowed view of the underlying ready declaration.
-    ///
-    /// `None` for `PendingNumeric`: an unresolved numeric binding has no declaration yet.
+impl ValueDeclarationRef<'_> {
+    /// Return a borrowed view of a declaration that already has a selected type.
     pub(crate) fn ready_declaration(&self) -> Option<&Declaration> {
         match self {
-            ScopeDeclarationRef::Local { declaration, .. } => Some(declaration.as_ref()),
-            ScopeDeclarationRef::Shared(declaration) => Some(declaration),
-            ScopeDeclarationRef::PendingNumeric { .. } => None,
+            ValueDeclarationRef::Local { declaration, .. } => Some(declaration.as_ref()),
+            ValueDeclarationRef::Shared(declaration) => Some(declaration),
+            ValueDeclarationRef::PendingNumeric { .. } => None,
         }
     }
 
-    /// The construction-owned pending binding ID, if this reference is unresolved.
     pub(crate) fn pending_binding(
         &self,
     ) -> Option<crate::compiler_frontend::ast::numeric_construction::NumericBindingId> {
         match self {
-            ScopeDeclarationRef::PendingNumeric { binding, .. } => Some(*binding),
+            ValueDeclarationRef::PendingNumeric { binding, .. } => Some(*binding),
             _ => None,
         }
     }
 
-    /// Return the authored binding-name span for a local declaration, or None
-    /// for shared (module-level) declarations.
     pub(crate) fn binding_span(&self) -> Option<SourceSpan> {
         match self {
-            ScopeDeclarationRef::Local { binding_span, .. } => *binding_span,
-            ScopeDeclarationRef::PendingNumeric { binding_span, .. } => *binding_span,
-            ScopeDeclarationRef::Shared(_) => None,
+            ValueDeclarationRef::Local { binding_span, .. }
+            | ValueDeclarationRef::PendingNumeric { binding_span, .. } => *binding_span,
+            ValueDeclarationRef::Shared(_) => None,
         }
     }
 }
 
-// NOTE: there is intentionally no `Deref<Target = Declaration>` for
-// `ScopeDeclarationRef`. A `PendingNumeric` reference has no declaration, so callers that
-// need one must go through `ready_declaration()` and handle the pending case explicitly.
+impl ScopeDeclarationRef<'_> {
+    pub(crate) fn binding_span(&self) -> Option<SourceSpan> {
+        match self {
+            ScopeDeclarationRef::Local { binding_span, .. }
+            | ScopeDeclarationRef::PendingNumeric { binding_span, .. } => *binding_span,
+            ScopeDeclarationRef::Shared(_) => None,
+            ScopeDeclarationRef::RouteParameter(reference) => match &reference.declaration {
+                RouteParameterDeclaration::Local { binding_span, .. } => *binding_span,
+                RouteParameterDeclaration::Shared(_) => None,
+            },
+        }
+    }
+}
+
+// Route parameter declarations are intentionally not exposed through `ready_declaration`.
+// Ordinary consumers must use `ValueDeclarationRef`, which cannot represent a Route parameter.
 
 /// Resolved struct constructor metadata for identifier-led expression dispatch.
 ///
@@ -111,10 +154,22 @@ impl ScopeContext {
         {
             match slot {
                 LocalDeclarationSlot::Ready(declaration) => {
-                    return Some(ScopeDeclarationRef::Local {
-                        declaration,
-                        binding_span,
-                    });
+                    let reference = match self.route_input_type(&declaration) {
+                        Some(input_type) => {
+                            ScopeDeclarationRef::RouteParameter(RouteParameterReference {
+                                declaration: RouteParameterDeclaration::Local {
+                                    declaration,
+                                    binding_span,
+                                },
+                                input_type,
+                            })
+                        }
+                        None => ScopeDeclarationRef::Local {
+                            declaration,
+                            binding_span,
+                        },
+                    };
+                    return Some(reference);
                 }
                 LocalDeclarationSlot::Pending { binding, domain } => {
                     // A pending binding from another independent body root is not visible here:
@@ -146,19 +201,88 @@ impl ScopeContext {
                     .get_by_path(canonical_path)
                 && !declaration.is_receiver_function()
             {
-                return Some(ScopeDeclarationRef::Shared(declaration));
+                return Some(match self.route_input_type(declaration) {
+                    Some(input_type) => {
+                        ScopeDeclarationRef::RouteParameter(RouteParameterReference {
+                            declaration: RouteParameterDeclaration::Shared(declaration),
+                            input_type,
+                        })
+                    }
+                    None => ScopeDeclarationRef::Shared(declaration),
+                });
             }
             // file_visibility is set but name not found — do not fall back.
             // This ensures dependency aliases hide the original name.
             return None;
         }
-
-        // 3. Fallback for contexts that do not set file_visibility
-        // (e.g. synthetic evaluation contexts and some unit-test helpers).
         self.shared
             .top_level_declarations
             .get_visible_non_receiver_by_name(*name, self.visible_declaration_ids.as_deref())
-            .map(ScopeDeclarationRef::Shared)
+            .map(|declaration| match self.route_input_type(declaration) {
+                Some(input_type) => ScopeDeclarationRef::RouteParameter(RouteParameterReference {
+                    declaration: RouteParameterDeclaration::Shared(declaration),
+                    input_type,
+                }),
+                None => ScopeDeclarationRef::Shared(declaration),
+            })
+    }
+    /// The outer `None` means this is not a Route parameter; the inner `None` means zero input.
+    fn route_input_type(&self, declaration: &Declaration) -> Option<Option<TypeId>> {
+        self.enclosing_callable
+            .as_deref()
+            .and_then(|callable| callable.parameter_contract(declaration.id))
+            .and_then(|contract| match contract {
+                ParameterContract::Route { input } => Some(input),
+                ParameterContract::Value | ParameterContract::Wire => None,
+            })
+    }
+
+    /// Resolve a Route parameter only for the direct call-argument forwarding path.
+    pub(crate) fn get_route_argument_reference(
+        &self,
+        name: &StringId,
+    ) -> Option<RouteParameterReference<'_>> {
+        match self.get_reference(name)? {
+            ScopeDeclarationRef::RouteParameter(reference) => Some(reference),
+            ScopeDeclarationRef::Local { .. }
+            | ScopeDeclarationRef::Shared(_)
+            | ScopeDeclarationRef::PendingNumeric { .. } => None,
+        }
+    }
+
+    /// Resolve an ordinary value name, rejecting Route parameters at the shared lookup boundary.
+    pub(crate) fn get_value_reference<'a>(
+        &'a self,
+        name: &StringId,
+        span: Option<SourceSpan>,
+    ) -> Result<Option<ValueDeclarationRef<'a>>, CompilerDiagnostic> {
+        match self.get_reference(name) {
+            Some(ScopeDeclarationRef::Local {
+                declaration,
+                binding_span,
+            }) => Ok(Some(ValueDeclarationRef::Local {
+                declaration,
+                binding_span,
+            })),
+            Some(ScopeDeclarationRef::Shared(declaration)) => {
+                Ok(Some(ValueDeclarationRef::Shared(declaration)))
+            }
+            Some(ScopeDeclarationRef::PendingNumeric {
+                binding,
+                binding_span,
+            }) => Ok(Some(ValueDeclarationRef::PendingNumeric {
+                binding,
+                binding_span,
+            })),
+            Some(ScopeDeclarationRef::RouteParameter(_)) => {
+                Err(CompilerDiagnostic::invalid_call_shape(
+                    InvalidCallShapeReason::RouteParameterRead,
+                    None,
+                    span,
+                ))
+            }
+            None => Ok(None),
+        }
     }
 
     /// Reject body bindings that would hide a bound or compiler-owned name.
@@ -212,7 +336,7 @@ impl ScopeContext {
         &self,
         this_id: StringId,
         span: SourceSpan,
-    ) -> Result<ScopeDeclarationRef<'_>, CompilerDiagnostic> {
+    ) -> Result<ValueDeclarationRef<'_>, CompilerDiagnostic> {
         if self.is_assignment_target_unavailable(this_id) {
             return Err(CompilerDiagnostic::invalid_assignment_target(
                 InvalidAssignmentTargetReason::UnavailableInCatchRecovery,
@@ -225,12 +349,13 @@ impl ScopeContext {
             ));
         }
 
-        self.get_reference(&this_id).ok_or_else(|| {
-            CompilerDiagnostic::invalid_this_usage(
-                InvalidThisUsageReason::NotInReceiverMethod,
-                Some(span),
-            )
-        })
+        self.get_value_reference(&this_id, Some(span))?
+            .ok_or_else(|| {
+                CompilerDiagnostic::invalid_this_usage(
+                    InvalidThisUsageReason::NotInReceiverMethod,
+                    Some(span),
+                )
+            })
     }
 
     /// Resolve a source-visible value name for a place root, preserving namespace diagnostics.
@@ -238,8 +363,8 @@ impl ScopeContext {
         &self,
         name: StringId,
         span: SourceSpan,
-    ) -> Result<ScopeDeclarationRef<'_>, CompilerDiagnostic> {
-        self.get_reference(&name).ok_or_else(|| {
+    ) -> Result<ValueDeclarationRef<'_>, CompilerDiagnostic> {
+        self.get_value_reference(&name, Some(span))?.ok_or_else(|| {
             if self.is_visible_type_alias_name(name) {
                 CompilerDiagnostic::namespace_misuse(
                     name,
