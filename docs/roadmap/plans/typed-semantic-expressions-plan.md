@@ -3,10 +3,10 @@
 ## Status
 
 ```text
-STATUS: PAUSED after Phase 4 squash-merged into main
-CURRENT_SLICE: Phase 4, R1, R2.0–R2.4 and P2 isolation complete. Phase 5 pending.
-BLOCKERS: P5 to P8 remain unstarted and require explicit reactivation. Fresh Windows proof remains pending.
-NEXT_ACTION: Await explicit reactivation of Phase 5. Do not continue automatically.
+STATUS: ACTIVE on expression-refactor (Phase 5 reactivated by the user)
+CURRENT_SLICE: Phase 5. P5a call-site descriptor consolidation and shared generated registry accepted.
+BLOCKERS: Fresh Windows proof remains pending.
+NEXT_ACTION: P5b direct type resolution, removal of display-only type trees and range-domain reuse.
 ```
 
 The main squash checkpoint retains expression-refactor source `534aea1a5`,

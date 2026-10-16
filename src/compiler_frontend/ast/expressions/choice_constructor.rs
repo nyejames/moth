@@ -7,6 +7,8 @@
 //! WHY: choice construction has distinct rules from function calls and struct constructors;
 //!      unit variants use value syntax while payload variants use constructor-call syntax.
 
+use std::borrow::Cow;
+
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
 use crate::compiler_frontend::ast::const_values::binding::resolve_const_expression_content;
@@ -18,7 +20,8 @@ use crate::compiler_frontend::ast::expressions::call_arguments::{
     CallArgumentSyntax, ParsedCallArguments, parse_call_arguments_typed_with_numeric_retention,
 };
 use crate::compiler_frontend::ast::expressions::call_validation::{
-    CallArgumentResolutionContext, CallDiagnosticContext, expectations_from_constructor_fields,
+    CallArgumentResolutionContext, CallDiagnosticContext, CallDiagnosticName, ParameterExpectation,
+    expectations_from_constructor_fields, expectations_from_constructor_fields_with_substitution,
     resolve_call_arguments,
 };
 use crate::compiler_frontend::ast::expressions::constructor_views::{
@@ -100,16 +103,29 @@ pub(super) fn parse_choice_construct(
         .into());
     };
     let nominal_path = nominal_path.to_owned();
+    let generic_declaration_kind = context
+        .generic_declarations_by_path
+        .as_ref()
+        .and_then(|declarations| declarations.get(&nominal_path))
+        .filter(|kind| matches!(kind, GenericDeclarationKind::Choice));
 
-    let variant_definitions =
-        resolve_choice_variant_definitions(&nominal_path, type_id, context, type_interner);
-    let choice_name_str = choice_display_name(&nominal_path, path_fork, string_table);
+    let mut variant_definitions = Some(resolve_choice_variant_definitions(
+        &nominal_path,
+        type_id,
+        context,
+        type_interner,
+    ));
+    let choice_diagnostic_name = CallDiagnosticName::PathComponent {
+        component: path_fork.component(nominal_path),
+        fallback: "<choice>",
+    };
 
     token_stream.advance();
     if token_stream.current_tag() != TokenTag::DOUBLE_COLON {
+        let choice_name = choice_diagnostic_name.rendered_callee_name(string_table);
         return Err(CompilerError::compiler_error(format!(
             "Choice construct parser expected '::' after choice name '{}'.",
-            choice_name_str
+            choice_name
         ))
         .into());
     }
@@ -164,10 +180,17 @@ pub(super) fn parse_choice_construct(
     };
 
     let Some(variant_index) = variant_definitions
+        .as_deref()
+        .unwrap_or(&[])
         .iter()
         .position(|variant| variant.name == variant_name)
     else {
-        let available_variant_ids: Vec<_> = variant_definitions.iter().map(|v| v.name).collect();
+        let available_variant_ids: Vec<_> = variant_definitions
+            .as_deref()
+            .unwrap_or(&[])
+            .iter()
+            .map(|variant| variant.name)
+            .collect();
 
         return Err(CompilerDiagnostic::invalid_choice_variant(
             InvalidChoiceVariantReason::UnknownVariant,
@@ -179,22 +202,39 @@ pub(super) fn parse_choice_construct(
         .into());
     };
 
-    let variant = &variant_definitions[variant_index];
+    // `variant_index` came from a position search over this same immutable variant slice.
+    let variant = variant_definitions.as_deref().unwrap_or(&[])[variant_index].clone();
+    let mut constructor_span = variant_span;
     let has_parens = token_stream.peek_next_tag() == Some(TokenTag::OPEN_PARENTHESIS);
     let mut parsed_payload_arguments = None;
-    let mut constructor_span = variant_span;
-    let generic_declaration_kind = context
-        .generic_declarations_by_path
-        .as_ref()
-        .and_then(|declarations| declarations.get(&nominal_path))
-        .filter(|kind| matches!(kind, GenericDeclarationKind::Choice));
-    let mut generic_constructor_context = GenericNominalConstructorContext {
-        nominal_path: &nominal_path,
-        display_name: &choice_name_str,
-        template: GenericNominalTemplate::ChoiceVariants(&variant_definitions),
-        span: constructor_span,
-    };
+    let mut parsed_payload_expectations = None;
     let mut generic_constructor_seed = None;
+    // Unit variants and payloads without parentheses still need contextual bindings before
+    // generic inference. Seed here so the variant-table borrow ends before inference mutates types.
+    if generic_declaration_kind.is_some()
+        && !(matches!(
+            &variant.payload,
+            ChoiceVariantPayloadDefinition::Record { .. }
+        ) && has_parens)
+    {
+        generic_constructor_seed = Some(seed_generic_nominal_constructor(
+            GenericNominalConstructorContext {
+                nominal_path: &nominal_path,
+                diagnostic_name: choice_diagnostic_name,
+                template: GenericNominalTemplate::ChoiceVariants(
+                    variant_definitions.as_deref().unwrap_or(&[]),
+                ),
+                span: constructor_span,
+            },
+            context,
+            type_interner.environment(),
+            string_table,
+        )?);
+        drop(variant_definitions.take());
+    } else if generic_declaration_kind.is_none() {
+        // Non-generic construction keeps only the selected variant, not this complete table.
+        drop(variant_definitions.take());
+    }
 
     // Contextual substitutions make bound generic payload fields immediate literal receivers.
     // Unbound parameter fields keep the parser's inference expectation, so their numeric origins
@@ -204,7 +244,6 @@ pub(super) fn parse_choice_construct(
     {
         token_stream.advance(); // past variant name to '('
         constructor_span = Some(token_stream.current_span());
-        generic_constructor_context.span = constructor_span;
 
         let payload_field_views = ConstructorField::from_choice_payload_fields(fields);
         let mut field_expectations =
@@ -212,11 +251,21 @@ pub(super) fn parse_choice_construct(
 
         if generic_declaration_kind.is_some() {
             let seed = seed_generic_nominal_constructor(
-                generic_constructor_context,
+                GenericNominalConstructorContext {
+                    nominal_path: &nominal_path,
+                    diagnostic_name: choice_diagnostic_name,
+                    template: GenericNominalTemplate::ChoiceVariants(
+                        variant_definitions.as_deref().unwrap_or(&[]),
+                    ),
+                    span: constructor_span,
+                },
                 context,
                 type_interner.environment(),
                 string_table,
             )?;
+            // The seed owns contextual evidence, so release the borrowed table before substitution
+            // mutates the type environment.
+            drop(variant_definitions.take());
             seed.bind_parse_expectations(
                 &mut field_expectations,
                 type_interner.environment_mut_for_derived_types(),
@@ -227,7 +276,10 @@ pub(super) fn parse_choice_construct(
         // A payload field whose type is still a generic parameter has no numeric type yet, so its
         // numeric argument stays pending. A concrete payload field retains the same way, because
         // its type is already resolved and the constructor suspends as one operand.
-        let callee_name = choice_variant_callee_name(&choice_name_str, variant_name, string_table);
+        let callee_name = CallDiagnosticName::ChoiceVariant {
+            choice_name: path_fork.component(nominal_path),
+            variant_name,
+        };
         match parse_call_arguments_typed_with_numeric_retention(
             token_stream,
             context,
@@ -236,9 +288,7 @@ pub(super) fn parse_choice_construct(
             const_values,
             string_table,
             &field_expectations,
-            CallArgumentSyntax::Constructor {
-                callee_name: Some(callee_name),
-            },
+            CallArgumentSyntax::Constructor { callee_name },
             path_fork,
         )? {
             ParsedCallArguments::Ready(arguments) => match generic_constructor_seed.take() {
@@ -247,15 +297,17 @@ pub(super) fn parse_choice_construct(
                 Some(seed) => {
                     let completion = GenericChoiceCompletion {
                         nominal_path: &nominal_path,
-                        display_name: &choice_name_str,
-                        variants: &variant_definitions,
+                        diagnostic_name: choice_diagnostic_name,
+                        // The seed holds expected-result evidence; inference needs only this payload.
+                        template_fields: fields,
+                        payload_field_views: &payload_field_views,
                         variant_index,
                         variant_name,
                         constructor_span,
                         variant_span,
                         enforce_constant_context: context.kind.allows_const_record_coercion(),
                         seed,
-                        arguments: &arguments,
+                        arguments,
                     };
                     let expression = complete_generic_choice_instance(
                         completion,
@@ -268,7 +320,10 @@ pub(super) fn parse_choice_construct(
                     )?;
                     return Ok(ParsedConstructorExpression::Value(expression));
                 }
-                None => parsed_payload_arguments = Some(arguments),
+                None => {
+                    parsed_payload_expectations = Some(field_expectations);
+                    parsed_payload_arguments = Some(arguments);
+                }
             },
             ParsedCallArguments::Retained(arguments) => {
                 let operand = match generic_constructor_seed.take() {
@@ -276,7 +331,7 @@ pub(super) fn parse_choice_construct(
                         let result_shape =
                             link_generic_nominal_result_shape(GenericNominalShapeInput {
                                 nominal_path: &nominal_path,
-                                display_name: &choice_name_str,
+                                diagnostic_name: choice_diagnostic_name,
                                 declared_fields: &payload_field_views,
                                 arguments: &arguments,
                                 seeded_bindings: seed.bindings(),
@@ -288,15 +343,15 @@ pub(super) fn parse_choice_construct(
                             })?;
                         DeferredGenericNominalCall {
                             nominal_path,
-                            display_name: choice_name_str,
+                            diagnostic_name: choice_diagnostic_name,
                             seed,
                             arguments,
                             result_shape,
                             call_span: constructor_span,
                             constructor: GenericNominalConstructor::Choice {
-                                variants: variant_definitions,
+                                variant,
+                                payload_field_views,
                                 variant_index,
-                                variant_name,
                                 variant_span,
                                 enforce_constant_context: context
                                     .kind
@@ -311,6 +366,7 @@ pub(super) fn parse_choice_construct(
                             choice_type_id: type_id,
                             variant_index,
                             variant_name,
+                            expectations: field_expectations,
                             arguments,
                             call_span: constructor_span,
                             variant_span,
@@ -322,17 +378,6 @@ pub(super) fn parse_choice_construct(
                 return Ok(ParsedConstructorExpression::RetainedOperand(operand));
             }
         }
-    }
-
-    // Unit variants and malformed record syntax have no argument parse to seed from, but
-    // still use contextual inference before the selected variant is instantiated.
-    if generic_declaration_kind.is_some() && generic_constructor_seed.is_none() {
-        generic_constructor_seed = Some(seed_generic_nominal_constructor(
-            generic_constructor_context,
-            context,
-            type_interner.environment(),
-            string_table,
-        )?);
     }
 
     // ---------------------------
@@ -349,10 +394,15 @@ pub(super) fn parse_choice_construct(
         };
         let inference = infer_generic_nominal_constructor(
             GenericNominalConstructorInput {
-                context: generic_constructor_context,
+                // Context-derived bindings were captured by the seed before this inference step.
+                context: GenericNominalConstructorContext {
+                    nominal_path: &nominal_path,
+                    diagnostic_name: choice_diagnostic_name,
+                    template: GenericNominalTemplate::ChoiceVariants(&[]),
+                    span: constructor_span,
+                },
                 constructor_fields: constructor_fields.as_deref(),
                 raw_args: None,
-                path_fork,
                 expression_builder,
             },
             seed,
@@ -421,17 +471,25 @@ pub(super) fn parse_choice_construct(
 
             // This should always be Some because record variants with parentheses
             // are pre-parsed above. A missing value indicates an internal invariant.
-            let Some(raw_args) = parsed_payload_arguments.as_ref() else {
+            let Some(raw_args) = parsed_payload_arguments.take() else {
                 return Err(CompilerError::compiler_error(
                     "Payload choice constructor reached validation without parsed arguments.",
                 )
                 .into());
             };
-
+            let Some(expectations) = parsed_payload_expectations.take() else {
+                return Err(CompilerError::compiler_error(
+                    "Payload choice constructor reached validation without parsed expectations.",
+                )
+                .into());
+            };
             let choice_expr = finish_choice_payload_construct(
                 ChoicePayloadConstructInput {
-                    choice_name_display: &choice_name_str,
-                    variant_name,
+                    diagnostic_name: CallDiagnosticName::ChoiceVariant {
+                        choice_name: path_fork.component(nominal_path),
+                        variant_name,
+                    },
+                    expectations: &expectations,
                     variant_index,
                     choice_type_id,
                     fields,
@@ -459,54 +517,32 @@ pub(super) fn parse_choice_construct(
 ///       declarations when the environment has not been populated yet.
 /// WHY: one resolution rule serves both the direct constructor and its retained completion, so a
 ///      suspended constructor re-derives the same variant list instead of keeping a second copy.
-fn resolve_choice_variant_definitions(
+fn resolve_choice_variant_definitions<'a>(
     nominal_path: &PathId,
     type_id: TypeId,
     context: &ScopeContext,
-    type_interner: &AstTypeInterner<'_>,
-) -> Vec<ChoiceVariantDefinition> {
-    type_interner
+    type_interner: &'a AstTypeInterner<'_>,
+) -> Cow<'a, [ChoiceVariantDefinition]> {
+    if let Some(definitions) = type_interner
         .environment()
         .variants_for(type_id)
-        .filter(|defs| !defs.is_empty())
-        .map(|defs| defs.to_vec())
-        .or_else(|| {
-            context
-                .choice_variant_shells_by_path
-                .as_ref()
-                .and_then(|shells| shells.get(nominal_path))
-                .map(|shells| choice_variant_shells_to_definitions(shells))
-        })
-        .unwrap_or_default()
-}
+        .filter(|definitions| !definitions.is_empty())
+    {
+        return Cow::Borrowed(definitions);
+    }
 
-/// Visible display name of one choice type, used by constructor diagnostics.
-fn choice_display_name(
-    nominal_path: &PathId,
-    path_fork: &PathInternerFork,
-    string_table: &StringTable,
-) -> String {
-    path_fork
-        .component(*nominal_path)
-        .map(|name| string_table.resolve(name))
-        .unwrap_or("<choice>")
-        .to_owned()
-}
-
-/// The diagnostic callee name of one payload constructor (`Choice::Variant`).
-fn choice_variant_callee_name(
-    choice_name_display: &str,
-    variant_name: StringId,
-    string_table: &mut StringTable,
-) -> StringId {
-    let variant_name_str = string_table.resolve(variant_name).to_owned();
-    string_table.intern(&format!("{choice_name_display}::{variant_name_str}"))
+    context
+        .choice_variant_shells_by_path
+        .as_ref()
+        .and_then(|shells| shells.get(nominal_path))
+        .map(|shells| Cow::Owned(choice_variant_shells_to_definitions(shells)))
+        .unwrap_or(Cow::Borrowed(&[]))
 }
 
 /// Resolved payload-constructor facts shared by the direct and retained completion paths.
 struct ChoicePayloadConstructInput<'a> {
-    choice_name_display: &'a str,
-    variant_name: StringId,
+    diagnostic_name: CallDiagnosticName<'static>,
+    expectations: &'a [ParameterExpectation],
     variant_index: usize,
     choice_type_id: TypeId,
     fields: &'a [FieldDefinition],
@@ -523,11 +559,11 @@ struct ChoicePayloadConstructInput<'a> {
 ///      two lanes share one finisher instead of a second validator that could drift.
 #[allow(
     clippy::too_many_arguments,
-    reason = "choice payload finishing keeps the input, raw arguments, scope, type interner, expression builder, const store, path fork, and string table as separate borrows"
+    reason = "choice payload finishing keeps the input, owned arguments, scope, type interner, expression builder, const store, path fork, and string table as separate inputs"
 )]
 fn finish_choice_payload_construct(
     input: ChoicePayloadConstructInput<'_>,
-    raw_args: &[CallArgument<OwnedExpr>],
+    raw_args: Vec<CallArgument<OwnedExpr>>,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     expression_builder: &mut AstExpressionBuilder,
@@ -536,8 +572,8 @@ fn finish_choice_payload_construct(
     string_table: &mut StringTable,
 ) -> Result<OwnedExpr, ExpressionParseError> {
     let ChoicePayloadConstructInput {
-        choice_name_display,
-        variant_name,
+        diagnostic_name,
+        expectations,
         variant_index,
         choice_type_id,
         fields,
@@ -545,18 +581,11 @@ fn finish_choice_payload_construct(
         variant_span,
         enforce_constant_context,
     } = input;
-
-    let constructor_fields = ConstructorField::from_choice_payload_fields(fields);
-    let expectations = expectations_from_constructor_fields(&constructor_fields, path_fork);
     let type_check_context = type_interner.type_check_context();
     let resolved_args = resolve_call_arguments(
-        CallDiagnosticContext::choice_constructor(&format!(
-            "{}::{}",
-            choice_name_display,
-            string_table.resolve(variant_name)
-        )),
+        CallDiagnosticContext::choice_constructor(diagnostic_name),
         raw_args,
-        &expectations,
+        expectations,
         constructor_span,
         CallArgumentResolutionContext {
             string_table,
@@ -661,18 +690,20 @@ fn finish_choice_payload_construct(
 
 /// One concrete choice payload constructor retained until its numeric-dependent arguments resolve.
 ///
-/// WHAT: the resolved choice identity and canonical result type, the selected variant, the ordered
-///       argument list with its authored routing, the real spans, and the const-context policy.
+/// WHAT: the resolved choice identity and canonical result type, the selected variant, the intake
+///       expectations, the ordered argument list with its authored routing, the real spans, and the
+///       const-context policy.
 /// WHY: the payload field types are already concrete, so argument compatibility cannot run before
-///      the arguments' numeric origins are selected. The variant list and payload fields are
-///      re-derived from the canonical environment at completion through the same resolution rule
-///      the direct path uses, so no second copy of them is retained.
+///      the arguments' numeric origins are selected. Completion reuses the intake expectations
+///      rather than rebuilding them, while the variant list and payload fields stay with the
+///      canonical environment and are not copied into this record.
 #[derive(Debug, Clone)]
 pub(crate) struct DeferredChoiceCall {
     pub(crate) nominal_path: PathId,
     pub(crate) choice_type_id: TypeId,
     pub(crate) variant_index: usize,
     pub(crate) variant_name: StringId,
+    pub(crate) expectations: Vec<ParameterExpectation>,
     pub(crate) arguments: Vec<DeferredCallArgument>,
     pub(crate) call_span: Option<SourceSpan>,
     pub(crate) variant_span: Option<SourceSpan>,
@@ -699,6 +730,7 @@ pub(crate) fn complete_deferred_choice_call<
         choice_type_id,
         variant_index,
         variant_name,
+        expectations,
         arguments,
         call_span,
         variant_span,
@@ -724,12 +756,13 @@ pub(crate) fn complete_deferred_choice_call<
     // populated before its body is emitted; the shared resolution rule still handles shells.
     let variant_definitions =
         resolve_choice_variant_definitions(&nominal_path, choice_type_id, context, type_interner);
-    let Some(selected_variant) = variant_definitions.get(variant_index) else {
+    let Some(selected_variant) = variant_definitions.get(variant_index).cloned() else {
         return Err(CompilerError::compiler_error(
             "a retained choice constructor's variant was missing from its resolved variant list",
         )
         .into());
     };
+    drop(variant_definitions);
     let ChoiceVariantPayloadDefinition::Record { fields } = &selected_variant.payload else {
         return Err(CompilerError::compiler_error(
             "a retained choice constructor's selected variant was not a payload variant",
@@ -737,11 +770,13 @@ pub(crate) fn complete_deferred_choice_call<
         .into());
     };
 
-    let choice_name_str = choice_display_name(&nominal_path, path_fork, string_table);
     finish_choice_payload_construct(
         ChoicePayloadConstructInput {
-            choice_name_display: &choice_name_str,
-            variant_name,
+            diagnostic_name: CallDiagnosticName::ChoiceVariant {
+                choice_name: path_fork.component(nominal_path),
+                variant_name,
+            },
+            expectations: &expectations,
             variant_index,
             choice_type_id,
             fields,
@@ -749,7 +784,7 @@ pub(crate) fn complete_deferred_choice_call<
             variant_span,
             enforce_constant_context,
         },
-        &completed_arguments,
+        completed_arguments,
         context,
         type_interner,
         expression_builder,
@@ -759,31 +794,30 @@ pub(crate) fn complete_deferred_choice_call<
     )
 }
 
-/// Generic choice payload constructor facts shared by the immediate and retained completion paths.
+/// Facts shared by immediate and retained generic choice-payload completion.
 ///
-/// WHAT: the nominal identity, the declared variant templates, the selected variant, the contextual
-///       seed, and the completed payload arguments.
-/// WHY: a generic choice instance is inferred from completed payload types, so both lanes reach the
-///      same inference and finisher with the same facts.
+/// WHAT: the selected payload's declared fields and constructor views, its variant identity, the
+///       contextual seed, and the owned argument list.
+/// WHY: retaining these views across numeric completion avoids rebuilding the call's field
+///       projection after the parser already used it for routing and inference.
 pub(crate) struct GenericChoiceCompletion<'a> {
     pub(crate) nominal_path: &'a PathId,
-    pub(crate) display_name: &'a str,
-    pub(crate) variants: &'a [ChoiceVariantDefinition],
+    pub(crate) diagnostic_name: CallDiagnosticName<'static>,
+    pub(crate) template_fields: &'a [FieldDefinition],
+    pub(crate) payload_field_views: &'a [ConstructorField],
     pub(crate) variant_index: usize,
     pub(crate) variant_name: StringId,
     pub(crate) constructor_span: Option<SourceSpan>,
     pub(crate) variant_span: Option<SourceSpan>,
     pub(crate) enforce_constant_context: bool,
     pub(crate) seed: GenericNominalConstructorSeed,
-    pub(crate) arguments: &'a [CallArgument<OwnedExpr>],
+    pub(crate) arguments: Vec<CallArgument<OwnedExpr>>,
 }
 
 /// Infer one generic choice payload instance from completed arguments and build its value.
 ///
-/// WHAT: infers the instance from the seed, the selected variant's payload views and the argument
-///       types, substitutes the selected declared payload, then runs the shared payload finisher.
-/// WHY: the instance is selected only after every payload argument is concrete, so the immediate
-///      and retained lanes both end at this one completion.
+/// WHY: the selected instance is known only after argument completion, but the parser's field views
+///       remain valid for both inference and final validation without another projection.
 pub(crate) fn complete_generic_choice_instance(
     completion: GenericChoiceCompletion<'_>,
     context: &ScopeContext,
@@ -795,8 +829,9 @@ pub(crate) fn complete_generic_choice_instance(
 ) -> Result<OwnedExpr, ExpressionParseError> {
     let GenericChoiceCompletion {
         nominal_path,
-        display_name,
-        variants,
+        diagnostic_name,
+        template_fields,
+        payload_field_views,
         variant_index,
         variant_name,
         constructor_span,
@@ -806,34 +841,17 @@ pub(crate) fn complete_generic_choice_instance(
         arguments,
     } = completion;
 
-    let Some(template_variant) = variants.get(variant_index) else {
-        return Err(CompilerError::compiler_error(
-            "a retained generic choice constructor's variant was missing from its template",
-        )
-        .into());
-    };
-    let ChoiceVariantPayloadDefinition::Record {
-        fields: template_fields,
-    } = &template_variant.payload
-    else {
-        return Err(CompilerError::compiler_error(
-            "a retained generic choice constructor's selected variant was not a payload variant",
-        )
-        .into());
-    };
-    let payload_field_views = ConstructorField::from_choice_payload_fields(template_fields);
-
     let inference = infer_generic_nominal_constructor(
         GenericNominalConstructorInput {
             context: GenericNominalConstructorContext {
                 nominal_path,
-                display_name,
-                template: GenericNominalTemplate::ChoiceVariants(variants),
+                diagnostic_name,
+                // Expected-result evidence is already captured in the seed.
+                template: GenericNominalTemplate::ChoiceVariants(&[]),
                 span: constructor_span,
             },
-            constructor_fields: Some(&payload_field_views),
-            raw_args: Some(arguments),
-            path_fork,
+            constructor_fields: Some(payload_field_views),
+            raw_args: Some(&arguments),
             expression_builder,
         },
         seed,
@@ -842,26 +860,22 @@ pub(crate) fn complete_generic_choice_instance(
         string_table,
     )?;
 
-    // Substitute the declared payload with the inferred arguments. The instance's cached view is not
-    // read: an early header-stage completion can run before the base nominal's views are populated.
-    let selected_fields: Vec<FieldDefinition> = template_fields
-        .iter()
-        .map(|field| FieldDefinition {
-            name: field.name,
-            type_id: type_interner
-                .environment_mut_for_derived_types()
-                .substitute_type_id(field.type_id, inference.bindings.replacement_map()),
-            span: field.span,
-        })
-        .collect();
-
+    let resolved_expectations = expectations_from_constructor_fields_with_substitution(
+        payload_field_views,
+        path_fork,
+        type_interner.environment_mut_for_derived_types(),
+        inference.bindings.replacement_map(),
+    );
     finish_choice_payload_construct(
         ChoicePayloadConstructInput {
-            choice_name_display: display_name,
-            variant_name,
+            diagnostic_name: CallDiagnosticName::ChoiceVariant {
+                choice_name: path_fork.component(*nominal_path),
+                variant_name,
+            },
+            expectations: &resolved_expectations,
             variant_index,
             choice_type_id: inference.instance_type_id,
-            fields: selected_fields.as_slice(),
+            fields: template_fields,
             constructor_span,
             variant_span,
             enforce_constant_context,

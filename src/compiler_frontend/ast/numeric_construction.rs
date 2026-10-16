@@ -26,6 +26,7 @@ use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::call_argument::{
     CallAccessMode, CallArgument, ParameterSlot,
 };
+use crate::compiler_frontend::ast::expressions::call_validation::ParameterExpectation;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
 use crate::compiler_frontend::ast::expressions::expression_rpn::{
@@ -46,7 +47,6 @@ use crate::compiler_frontend::ast::numeric_known_shape::{
     numeric_classes_join_refused, register_ordered_shape_witness, register_shape_witness,
     union_shape_classes,
 };
-use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::statements::match_patterns::{
     MatchPattern, RelationalPatternOp,
 };
@@ -600,14 +600,18 @@ pub(crate) enum DeferredCallHandling {
 
 /// A non-generic source function call retained until its numeric arguments resolve.
 ///
-/// WHAT: stable callee identity, clone of the resolved signature and the ordered argument list,
-///       each argument completed or retained.
-/// WHY: argument compatibility cannot run before the argument types are selected, and the plan
-///      requires retaining argument-slot routing instead of parsing arguments again.
+/// WHAT: stable callee identity, the ordered success result types and optional error type, the
+///       expectations used at argument intake, and the ordered arguments, each completed or
+///       retained.
+/// WHY: compatibility cannot run before argument types are selected; retaining the unchanged
+///      expectations and only the result facts completion reads avoids rebuilding parameter views
+///      or cloning the complete signature when the call resumes.
 #[derive(Debug, Clone)]
 pub(crate) struct DeferredSourceCall {
     pub(crate) function_path: PathId,
-    pub(crate) signature: FunctionSignature,
+    pub(crate) success_result_type_ids: Vec<TypeId>,
+    pub(crate) error_return_type_id: Option<TypeId>,
+    pub(crate) expectations: Vec<ParameterExpectation>,
     pub(crate) arguments: Vec<DeferredCallArgument>,
     pub(crate) call_span: Option<SourceSpan>,
     /// The authored handling consumed at the call's receiving site.
@@ -625,6 +629,9 @@ pub(crate) struct DeferredSourceCall {
 #[derive(Debug, Clone)]
 pub(crate) struct DeferredGenericCall {
     pub(crate) template: GenericFunctionTemplate,
+    /// Intake expectations stay valid through numeric completion; retaining them avoids projecting
+    /// the same template parameter view again before inference.
+    pub(crate) parameter_expectations: Vec<ParameterExpectation>,
     pub(crate) arguments: Vec<DeferredCallArgument>,
     pub(crate) call_span: Option<SourceSpan>,
     /// The authored handling consumed at the call's receiving site.
@@ -701,7 +708,7 @@ impl DeferredCall {
     ///      the external lane supplies its own host-signature projection.
     pub(crate) fn success_return_type_ids(&self) -> Option<Vec<TypeId>> {
         Some(match self {
-            DeferredCall::Source(deferred) => deferred.signature.success_return_type_ids(),
+            DeferredCall::Source(deferred) => deferred.success_result_type_ids.clone(),
             DeferredCall::Receiver(deferred) => {
                 deferred.concrete_signature()?.success_return_type_ids()
             }
@@ -720,7 +727,7 @@ impl DeferredCall {
     ///      call declares one before its numeric origins resolve.
     pub(crate) fn declared_success_slot_count(&self) -> usize {
         match self {
-            DeferredCall::Source(deferred) => deferred.signature.success_return_slot_count(),
+            DeferredCall::Source(deferred) => deferred.success_result_type_ids.len(),
             DeferredCall::Receiver(deferred) => {
                 deferred.declared_signature().success_return_slot_count()
             }
@@ -760,7 +767,10 @@ impl DeferredCall {
     ///      multi-slot results into a fabricated type.
     pub(crate) fn single_success_return_type_id(&self) -> Option<TypeId> {
         match self {
-            DeferredCall::Source(deferred) => deferred.signature.single_success_return_type_id(),
+            DeferredCall::Source(deferred) => match deferred.success_result_type_ids.as_slice() {
+                [type_id] => Some(*type_id),
+                _ => None,
+            },
             DeferredCall::Receiver(deferred) => deferred.single_success_return_type_id(),
             DeferredCall::External(deferred) => match deferred.result_type_ids.as_slice() {
                 [type_id] => Some(*type_id),
@@ -812,8 +822,7 @@ impl DeferredCall {
     pub(crate) fn error_return(&self) -> Option<GenericErrorReturn> {
         match self {
             DeferredCall::Source(deferred) => deferred
-                .signature
-                .error_return_type_id()
+                .error_return_type_id
                 .map(GenericErrorReturn::Concrete),
             DeferredCall::Receiver(deferred) => deferred.error_return(),
             DeferredCall::External(deferred) => deferred

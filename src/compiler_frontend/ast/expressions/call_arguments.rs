@@ -23,7 +23,7 @@ use crate::compiler_frontend::ast::expressions::call_argument::{
     CallAccessMode, CallArgument, ParameterSlot,
 };
 use crate::compiler_frontend::ast::expressions::call_validation::{
-    ExpectedParameterType, ParameterExpectation,
+    CallDiagnosticName, ExpectedParameterType, ParameterExpectation,
 };
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_store::{
@@ -136,7 +136,7 @@ pub(crate) enum CallArgumentSyntax {
         callee_name: Option<StringId>,
     },
     Constructor {
-        callee_name: Option<StringId>,
+        callee_name: CallDiagnosticName<'static>,
     },
     Assertion {
         callee_name: Option<StringId>,
@@ -161,7 +161,7 @@ pub(crate) enum CallArgumentSyntax {
 #[derive(Clone, Copy)]
 pub(crate) struct CallArgumentDiagnosticContext {
     pub(crate) syntax: CallArgumentSyntax,
-    pub(crate) const_operation: Option<StringId>,
+    pub(crate) const_operation: Option<CallDiagnosticName<'static>>,
     /// Opening-delimiter span retained for receiving-boundary diagnostics.
     ///
     /// WHAT: preserves the authored `(` span independently from each entry span.
@@ -174,10 +174,14 @@ impl CallArgumentDiagnosticContext {
     pub(crate) fn from_syntax(syntax: CallArgumentSyntax) -> Self {
         let const_operation = match syntax {
             CallArgumentSyntax::Supported { callee_name }
-            | CallArgumentSyntax::Constructor { callee_name }
             | CallArgumentSyntax::Assertion { callee_name }
-            | CallArgumentSyntax::UnsupportedCall { callee_name } => callee_name,
-            CallArgumentSyntax::UnsupportedBuiltinMember { member_name, .. } => member_name,
+            | CallArgumentSyntax::UnsupportedCall { callee_name } => {
+                callee_name.map(CallDiagnosticName::Interned)
+            }
+            CallArgumentSyntax::Constructor { callee_name } => Some(callee_name),
+            CallArgumentSyntax::UnsupportedBuiltinMember { member_name, .. } => {
+                member_name.map(CallDiagnosticName::Interned)
+            }
             CallArgumentSyntax::AnonymousConstRecord => None,
         };
 
@@ -758,7 +762,8 @@ fn parse_call_arguments_inner(
             return Err(diagnostic.into());
         }
 
-        let parameter_slot = slot_router.route(named_target.as_ref(), argument_span)?;
+        let parameter_slot =
+            slot_router.route(named_target.as_ref(), argument_span, string_table)?;
 
         let (access_mode, marker_span) = if token_stream.current_tag() == TokenTag::MUTABLE {
             let marker_span = current_span(token_stream);
@@ -892,6 +897,7 @@ fn parse_call_arguments_inner(
             Ok(value) => {
                 validate_argument_value_policy(
                     const_values,
+                    string_table,
                     expression_builder,
                     expression_builder.view_owned(value)?,
                     context,
@@ -1198,6 +1204,7 @@ fn argument_is_bare_none(token_stream: &AstCursor) -> bool {
 /// this check only decides whether the completed value satisfies the receiving boundary.
 fn validate_argument_value_policy(
     const_values: &ConstValueStore,
+    string_table: &mut StringTable,
     expression_builder: &AstExpressionBuilder,
     value: ExpressionView<'_>,
     context: &ScopeContext,
@@ -1250,7 +1257,10 @@ fn validate_argument_value_policy(
 
     Err(CompilerDiagnostic::compile_time_evaluation_error(
         CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable,
-        receiving_context.diagnostics.const_operation,
+        receiving_context
+            .diagnostics
+            .const_operation
+            .and_then(|operation| operation.diagnostic_callee_name(string_table)),
         value.span(),
     )
     .into())
@@ -1301,6 +1311,7 @@ impl<'a> ParameterSlotRouter<'a> {
         &mut self,
         named_target: Option<&(StringId, Option<SourceSpan>)>,
         argument_span: Option<SourceSpan>,
+        string_table: &mut StringTable,
     ) -> Result<Option<ParameterSlot>, ExpressionParseError> {
         if let Some(named_target_spans) = self.named_target_spans.as_mut()
             && let Some((target_name, target_span)) = named_target
@@ -1344,7 +1355,7 @@ impl<'a> ParameterSlotRouter<'a> {
                 | CallArgumentSyntax::Assertion { .. } => {
                     return Err(CompilerDiagnostic::invalid_call_shape(
                         InvalidCallShapeReason::NamedArgumentsNotSupported,
-                        self.callee_name(),
+                        self.callee_name(string_table),
                         *target_span,
                     )
                     .into());
@@ -1374,7 +1385,6 @@ impl<'a> ParameterSlotRouter<'a> {
                     )
                     .into());
                 }
-
                 CallArgumentSyntax::UnsupportedBuiltinMember { member_name, .. } => {
                     return Err(CompilerDiagnostic::invalid_builtin_call(
                         InvalidBuiltinCallReason::NamedArgumentsNotSupported,
@@ -1383,26 +1393,24 @@ impl<'a> ParameterSlotRouter<'a> {
                     )
                     .into());
                 }
-
-                CallArgumentSyntax::Supported { callee_name }
-                | CallArgumentSyntax::Constructor { callee_name }
-                | CallArgumentSyntax::Assertion { callee_name } => {
+                CallArgumentSyntax::Supported { .. }
+                | CallArgumentSyntax::Constructor { .. }
+                | CallArgumentSyntax::Assertion { .. } => {
                     let Some(slot) = self.parameter_name_to_slot.get(target_name).copied() else {
                         return Err(CompilerDiagnostic::invalid_call_shape(
                             InvalidCallShapeReason::NamedArgumentNotFound {
                                 name: *target_name,
                                 known_parameters: known_parameter_names(expectations),
                             },
-                            callee_name,
+                            self.callee_name(string_table),
                             *target_span,
                         )
                         .into());
                     };
 
-                    self.mark_slot_occupied(slot, *target_span)?;
+                    self.mark_slot_occupied(slot, *target_span, string_table)?;
                     return Ok(Some(ParameterSlot::new(slot)));
                 }
-
                 CallArgumentSyntax::AnonymousConstRecord => return Ok(None),
             }
         }
@@ -1410,38 +1418,35 @@ impl<'a> ParameterSlotRouter<'a> {
         if self.saw_named_argument {
             return Err(CompilerDiagnostic::invalid_call_shape(
                 InvalidCallShapeReason::PositionalAfterNamed,
-                self.callee_name(),
+                self.callee_name(string_table),
                 argument_span,
             )
             .into());
         }
 
-        let callee_name = self.callee_name();
-        let Some(occupied_slots) = &mut self.occupied_parameter_slots else {
+        let Some(slot_count) = self.declared_slot_count() else {
             let slot = self.positional_cursor;
             self.positional_cursor += 1;
             return Ok(Some(ParameterSlot::new(slot)));
         };
 
-        while self.positional_cursor < occupied_slots.len()
-            && occupied_slots[self.positional_cursor]
-        {
+        while self.positional_cursor < slot_count && self.slot_is_occupied(self.positional_cursor) {
             self.positional_cursor += 1;
         }
 
-        if self.positional_cursor >= occupied_slots.len() {
+        if self.positional_cursor >= slot_count {
             return Err(CompilerDiagnostic::invalid_call_shape(
                 InvalidCallShapeReason::ExtraPositionalArgument {
                     expected_count: expectations.len(),
                 },
-                callee_name,
+                self.callee_name(string_table),
                 argument_span,
             )
             .into());
         }
 
         let slot = self.positional_cursor;
-        occupied_slots[slot] = true;
+        self.occupy_slot(slot);
         self.positional_cursor += 1;
         Ok(Some(ParameterSlot::new(slot)))
     }
@@ -1450,38 +1455,59 @@ impl<'a> ParameterSlotRouter<'a> {
         &mut self,
         slot: usize,
         span: Option<SourceSpan>,
+        string_table: &mut StringTable,
     ) -> Result<(), ExpressionParseError> {
         let parameter_name = self
             .expectations
             .and_then(|items| items.get(slot))
             .and_then(|expectation| expectation.name);
-        let callee_name = self.callee_name();
-        let Some(occupied_slots) = &mut self.occupied_parameter_slots else {
-            return Ok(());
-        };
 
-        if occupied_slots[slot] {
+        if self.slot_is_occupied(slot) {
             let diagnostic = CompilerDiagnostic::invalid_call_shape(
                 InvalidCallShapeReason::DuplicateArgument {
                     parameter_name,
                     parameter_index: slot,
                 },
-                callee_name,
+                self.callee_name(string_table),
                 span,
             );
             return Err(diagnostic.into());
         }
 
-        occupied_slots[slot] = true;
+        self.occupy_slot(slot);
         Ok(())
     }
 
-    fn callee_name(&self) -> Option<StringId> {
+    /// The parameter slots this list routes, when the receiving surface declares them.
+    ///
+    /// WHAT: `None` marks a surface with no declaration-order slots, whose positional arguments
+    ///       carry no routing decision.
+    fn declared_slot_count(&self) -> Option<usize> {
+        self.occupied_parameter_slots.as_ref().map(Vec::len)
+    }
+
+    /// Whether a declared slot already holds an argument.
+    fn slot_is_occupied(&self, slot: usize) -> bool {
+        self.occupied_parameter_slots
+            .as_ref()
+            .is_some_and(|occupied_slots| occupied_slots[slot])
+    }
+
+    /// Marks a declared slot occupied after this list accepted an argument for it.
+    fn occupy_slot(&mut self, slot: usize) {
+        if let Some(occupied_slots) = self.occupied_parameter_slots.as_mut() {
+            occupied_slots[slot] = true;
+        }
+    }
+
+    fn callee_name(&self, string_table: &mut StringTable) -> Option<StringId> {
         match self.receiving_context.diagnostics.syntax {
             CallArgumentSyntax::Supported { callee_name }
-            | CallArgumentSyntax::Constructor { callee_name }
             | CallArgumentSyntax::Assertion { callee_name }
             | CallArgumentSyntax::UnsupportedCall { callee_name } => callee_name,
+            CallArgumentSyntax::Constructor { callee_name } => {
+                callee_name.diagnostic_callee_name(string_table)
+            }
             CallArgumentSyntax::UnsupportedBuiltinMember { .. }
             | CallArgumentSyntax::AnonymousConstRecord => None,
         }

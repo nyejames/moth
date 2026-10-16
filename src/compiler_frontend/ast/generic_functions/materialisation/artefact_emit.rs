@@ -346,7 +346,7 @@ impl GenericTemplateArtefact {
             Arc::clone(&materialised_body.resolution_facts),
         );
         let build_context = AstBuildContext {
-            external_package_registry: Arc::new(external_package_registry.clone()),
+            external_package_registry: Arc::clone(external_package_registry),
             style_directives,
             string_table,
             path_fork,

@@ -9,7 +9,7 @@
 use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValueStore};
 use crate::compiler_frontend::ast::expressions::call_argument::{
     CallAccessMode, CallArgument, CallPassingMode, ParameterSlot,
-    order_call_arguments_by_retained_slot,
+    order_owned_call_arguments_by_retained_slot,
 };
 use crate::compiler_frontend::ast::expressions::constructor_views::{
     ConstructorField, ConstructorFieldAccessMode,
@@ -19,13 +19,15 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
     ExpressionView, OwnedExpr,
 };
 use crate::compiler_frontend::ast::numeric_known_shape::KnownShapeId;
+use rustc_hash::FxHashMap;
+
 use crate::compiler_frontend::ast::statements::functions::FunctionParameter;
 use crate::compiler_frontend::compiler_errors::{CompilerError, InfrastructureErrors};
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidCallShapeReason, TypeMismatchContext, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
 use crate::compiler_frontend::source::SourceSpan;
 
 use crate::compiler_frontend::external_packages::{
@@ -83,60 +85,143 @@ pub(crate) enum CallSurfaceKind {
     Assertion,
 }
 
+/// The callee spelling one call surface reports in its diagnostics.
+///
+/// WHAT: retains the source components of a callable's diagnostic name until a diagnostic needs
+///       them: an interned declaration name, a path component whose absence has an established
+///       spelling, a borrowed spelling, or a choice variant's two parts.
+/// WHY: successful calls never render a callee name, so formatting a composite name and interning
+///      it must happen on the error path only. Each surface's fallback spelling travels with the
+///      descriptor instead of being resolved eagerly at the call site.
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum CallDiagnosticName<'a> {
+    /// A name the source already interned: a declaration name or an existing path component.
+    Interned(StringId),
+    /// A path component that may be absent, with this surface's fallback spelling.
+    PathComponent {
+        component: Option<StringId>,
+        fallback: &'static str,
+    },
+    /// A name owned by a borrowed spelling in this compilation.
+    Borrowed(&'a str),
+    /// `Choice::Variant`, formatted only when a diagnostic renders it.
+    ChoiceVariant {
+        choice_name: Option<StringId>,
+        variant_name: StringId,
+    },
+}
+
+impl<'a> CallDiagnosticName<'a> {
+    pub(crate) fn diagnostic_callee_name(self, string_table: &mut StringTable) -> Option<StringId> {
+        match self {
+            Self::Interned(name) => Some(name),
+            Self::PathComponent {
+                component,
+                fallback,
+            } => Some(component.unwrap_or_else(|| string_table.intern(fallback))),
+            Self::Borrowed(name) => Some(string_table.intern(name)),
+            Self::ChoiceVariant {
+                choice_name,
+                variant_name,
+            } => {
+                let choice_name = choice_name
+                    .map(|name| string_table.resolve(name))
+                    .unwrap_or("<choice>");
+                let variant_name = string_table.resolve(variant_name);
+                let rendered_name = format!("{choice_name}::{variant_name}");
+                Some(string_table.intern(&rendered_name))
+            }
+        }
+    }
+
+    pub(crate) fn rendered_callee_name(self, string_table: &StringTable) -> String {
+        match self {
+            Self::Interned(name) => string_table.resolve(name).to_owned(),
+            Self::PathComponent {
+                component: Some(name),
+                ..
+            } => string_table.resolve(name).to_owned(),
+            Self::PathComponent {
+                component: None,
+                fallback,
+            } => String::from(fallback),
+            Self::Borrowed(name) => String::from(name),
+            Self::ChoiceVariant {
+                choice_name,
+                variant_name,
+            } => {
+                let choice_name = choice_name
+                    .map(|name| string_table.resolve(name))
+                    .unwrap_or("<choice>");
+                let variant_name = string_table.resolve(variant_name);
+                format!("{choice_name}::{variant_name}")
+            }
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(crate) struct CallDiagnosticContext<'a> {
     pub kind: CallSurfaceKind,
-    pub callee_name: &'a str,
+    callee_name: CallDiagnosticName<'a>,
 }
 
 impl<'a> CallDiagnosticContext<'a> {
-    pub(crate) fn function(callee_name: &'a str) -> Self {
+    pub(crate) fn function(callee_name: CallDiagnosticName<'a>) -> Self {
         Self {
             kind: CallSurfaceKind::Function,
             callee_name,
         }
     }
 
-    pub(crate) fn struct_constructor(callee_name: &'a str) -> Self {
+    pub(crate) fn struct_constructor(callee_name: CallDiagnosticName<'a>) -> Self {
         Self {
             kind: CallSurfaceKind::StructConstructor,
             callee_name,
         }
     }
 
-    pub(crate) fn choice_constructor(callee_name: &'a str) -> Self {
+    pub(crate) fn choice_constructor(callee_name: CallDiagnosticName<'a>) -> Self {
         Self {
             kind: CallSurfaceKind::ChoiceConstructor,
             callee_name,
         }
     }
 
-    pub(crate) fn receiver_method(callee_name: &'a str) -> Self {
+    pub(crate) fn receiver_method(callee_name: CallDiagnosticName<'a>) -> Self {
         Self {
             kind: CallSurfaceKind::ReceiverMethod,
             callee_name,
         }
     }
 
-    pub(crate) fn builtin_member(callee_name: &'a str) -> Self {
+    pub(crate) fn builtin_member(callee_name: CallDiagnosticName<'a>) -> Self {
         Self {
             kind: CallSurfaceKind::BuiltinMember,
             callee_name,
         }
     }
 
-    pub(crate) fn host_function(callee_name: &'a str) -> Self {
+    pub(crate) fn host_function(callee_name: CallDiagnosticName<'a>) -> Self {
         Self {
             kind: CallSurfaceKind::HostFunction,
             callee_name,
         }
     }
 
-    pub(crate) fn assertion(callee_name: &'a str) -> Self {
+    pub(crate) fn assertion(callee_name: CallDiagnosticName<'a>) -> Self {
         Self {
             kind: CallSurfaceKind::Assertion,
             callee_name,
         }
+    }
+
+    pub(crate) fn diagnostic_callee_name(self, string_table: &mut StringTable) -> Option<StringId> {
+        self.callee_name.diagnostic_callee_name(string_table)
+    }
+
+    pub(crate) fn rendered_callee_name(self, string_table: &StringTable) -> String {
+        self.callee_name.rendered_callee_name(string_table)
     }
 
     fn callable_title(self) -> &'static str {
@@ -165,8 +250,8 @@ pub(crate) enum ExpectedParameterType {
     /// WHY: its canonical TypeId is decided at body-root completion, so it is materialised to
     /// `Known` before any validation. It never reaches a completed call, signature, or HIR.
     ConstructionShape(KnownShapeId),
-    /// Generic template parameter whose concrete type inference chooses later. Only parse-side
-    /// retention reads it; completed calls validate the instantiated signature.
+    /// Generic template parameter consumed by both numeric retention and call inference.
+    /// Completed compatibility checks use the instantiated parameter's concrete type.
     GenericParameter(TypeId),
     UnknownExternal,
 }
@@ -305,22 +390,48 @@ pub(crate) fn expectations_from_constructor_fields(
 ) -> Vec<ParameterExpectation> {
     fields
         .iter()
-        .map(|field| ParameterExpectation {
-            name: path_fork.component(field.name),
-            expected_type: ExpectedParameterType::Known(field.type_id),
-            access_mode: match field.access_mode {
-                ConstructorFieldAccessMode::Shared => ExpectedAccessMode::Shared,
-                ConstructorFieldAccessMode::Mutable => ExpectedAccessMode::Mutable,
-            },
-            default_value: {
-                #[cfg(feature = "benchmark_counters")]
-                if field.default_value.is_some() {
-                    increment_frontend_counter(FrontendCounter::CensusParameterDefaultViewClones);
-                }
-                field.default_value
-            },
+        .map(|field| parameter_expectation_from_constructor_field(field, path_fork, field.type_id))
+        .collect()
+}
+
+/// Builds post-inference expectations directly from declared constructor views.
+///
+/// WHY: only the expected TypeIds change after generic inference; names, access and defaults still
+/// belong to the original field descriptors and need no substituted field-vector copy.
+pub(crate) fn expectations_from_constructor_fields_with_substitution(
+    fields: &[ConstructorField],
+    path_fork: &PathInternerFork,
+    type_environment: &mut TypeEnvironment,
+    replacements: &FxHashMap<GenericParameterId, TypeId>,
+) -> Vec<ParameterExpectation> {
+    fields
+        .iter()
+        .map(|field| {
+            let type_id = type_environment.substitute_type_id(field.type_id, replacements);
+            parameter_expectation_from_constructor_field(field, path_fork, type_id)
         })
         .collect()
+}
+
+fn parameter_expectation_from_constructor_field(
+    field: &ConstructorField,
+    path_fork: &PathInternerFork,
+    type_id: TypeId,
+) -> ParameterExpectation {
+    #[cfg(feature = "benchmark_counters")]
+    if field.default_value.is_some() {
+        increment_frontend_counter(FrontendCounter::CensusParameterDefaultViewClones);
+    }
+
+    ParameterExpectation {
+        name: path_fork.component(field.name),
+        expected_type: ExpectedParameterType::Known(type_id),
+        access_mode: match field.access_mode {
+            ConstructorFieldAccessMode::Shared => ExpectedAccessMode::Shared,
+            ConstructorFieldAccessMode::Mutable => ExpectedAccessMode::Mutable,
+        },
+        default_value: field.default_value,
+    }
 }
 
 pub(crate) fn expectations_from_receiver_method_signature(
@@ -334,17 +445,18 @@ pub(crate) fn expectations_from_receiver_method_signature(
 ///
 /// WHAT: this is the normalization boundary for defaults, type compatibility and access policy
 ///      after `call_arguments` has selected each argument's declaration-order slot.
-/// WHY: once one caller changes final argument policy, every other call-shaped consumer inherits
+/// WHY: one owned vector lets every call surface share this final policy while moving arguments
+///      into parameter order instead of cloning them.
 pub(crate) fn resolve_call_arguments(
     diagnostics: CallDiagnosticContext<'_>,
-    args: &[CallArgument<OwnedExpr>],
+    arguments: Vec<CallArgument<OwnedExpr>>,
     expectations: &[ParameterExpectation],
     span: Option<SourceSpan>,
     context: CallArgumentResolutionContext<'_>,
 ) -> Result<Vec<CallArgument<OwnedExpr>>, CallValidationError> {
     resolve_call_arguments_with_type_policy(
         diagnostics,
-        args,
+        arguments,
         expectations,
         span,
         CallArgumentPolicyContext {
@@ -357,6 +469,7 @@ pub(crate) fn resolve_call_arguments(
         },
     )
 }
+
 /// Resolves call arguments through shared shape/default/access rules without
 /// running the ordinary final type-compatibility check.
 ///
@@ -369,11 +482,11 @@ pub(crate) fn resolve_call_arguments(
 /// its own type evidence.
 #[allow(
     clippy::too_many_arguments,
-    reason = "call shape validation keeps diagnostics, arguments, expectations, span, expression builder, const store, string table, type environment, and path fork as separate borrows"
+    reason = "call shape validation keeps diagnostics, owned arguments, expectations, span, expression builder, const store, string table, type environment, and path fork as separate inputs"
 )]
 pub(crate) fn resolve_call_arguments_shape_and_access(
     diagnostics: CallDiagnosticContext<'_>,
-    args: &[CallArgument<OwnedExpr>],
+    arguments: Vec<CallArgument<OwnedExpr>>,
     expectations: &[ParameterExpectation],
     span: Option<SourceSpan>,
     expression_builder: &mut AstExpressionBuilder,
@@ -384,7 +497,7 @@ pub(crate) fn resolve_call_arguments_shape_and_access(
 ) -> Result<Vec<CallArgument<OwnedExpr>>, CallValidationError> {
     resolve_call_arguments_with_type_policy(
         diagnostics,
-        args,
+        arguments,
         expectations,
         span,
         CallArgumentPolicyContext {
@@ -410,7 +523,7 @@ fn call_value_receiver(kind: CallSurfaceKind) -> ValueReceiverContext {
 
 fn resolve_call_arguments_with_type_policy(
     diagnostics: CallDiagnosticContext<'_>,
-    args: &[CallArgument<OwnedExpr>],
+    args: Vec<CallArgument<OwnedExpr>>,
     expectations: &[ParameterExpectation],
     span: Option<SourceSpan>,
     context: CallArgumentPolicyContext<'_>,
@@ -439,7 +552,7 @@ fn resolve_call_arguments_with_type_policy(
     // 2) fill defaults and detect missing required parameters,
     // 3) classify access/passing mode, which feeds compatibility checks,
     // 4) validate and coerce known types while retaining opaque external values.
-    let mut resolved = order_call_arguments_by_retained_slot(args, expectations.len())?;
+    let mut resolved = order_owned_call_arguments_by_retained_slot(args, expectations.len())?;
 
     // ------------------------
     //  Fill default values
@@ -506,7 +619,7 @@ fn resolve_call_arguments_with_type_policy(
                         parameter_name: expectation.name,
                         parameter_index: slot,
                     },
-                    Some(string_table.intern(diagnostics.callee_name)),
+                    diagnostics.diagnostic_callee_name(string_table),
                     span,
                 )
                 .into());
@@ -524,7 +637,7 @@ fn resolve_call_arguments_with_type_policy(
                 "Call argument resolution left required slot {} empty for {} '{}'",
                 slot + 1,
                 diagnostics.callable_title(),
-                diagnostics.callee_name
+                diagnostics.rendered_callee_name(string_table)
             );
             return Err(CompilerError::compiler_error(message).into());
         };
@@ -555,8 +668,8 @@ fn resolve_call_arguments_with_type_policy(
                 .into());
             }
             ExpectedParameterType::GenericParameter(_) => {
-                // WHY: a generic template expectation only drives parse-side retention; completed
-                // calls validate against the instantiated signature, never the template parameter.
+                // WHY: generic inference and parse-side retention consume template expectations;
+                // completed calls validate against the instantiated signature, never the template.
                 return Err(CompilerError::compiler_error(
                     "Generic parameter expectation reached completed call validation.",
                 )
@@ -619,7 +732,6 @@ fn classify_call_passing_mode(
     string_table: &mut StringTable,
     path_fork: &PathInternerFork,
 ) -> Result<CallPassingMode, CallValidationError> {
-    let callee_name = Some(string_table.intern(diagnostics.callee_name));
     let source_state =
         classify_argument_source_state(expression_builder.view_owned(argument.value)?, path_fork);
     match (argument.access_mode, &expectation.access_mode) {
@@ -640,7 +752,7 @@ fn classify_call_passing_mode(
                         parameter_index: slot_index,
                         binding_name,
                     },
-                    callee_name,
+                    diagnostics.diagnostic_callee_name(string_table),
                     argument.span,
                 )
                 .into())
@@ -651,7 +763,7 @@ fn classify_call_passing_mode(
                     parameter_name: expectation.name,
                     parameter_index: slot_index,
                 },
-                callee_name,
+                diagnostics.diagnostic_callee_name(string_table),
                 argument.span,
             )
             .into()),
@@ -664,7 +776,7 @@ fn classify_call_passing_mode(
                     parameter_name: expectation.name,
                     parameter_index: slot_index,
                 },
-                callee_name,
+                diagnostics.diagnostic_callee_name(string_table),
                 authored_marker_span(argument),
             )
             .into())
@@ -680,7 +792,7 @@ fn classify_call_passing_mode(
                     parameter_name: expectation.name,
                     parameter_index: slot_index,
                 },
-                callee_name,
+                diagnostics.diagnostic_callee_name(string_table),
                 authored_marker_span(argument),
             )
             .into()),
@@ -693,7 +805,7 @@ fn classify_call_passing_mode(
                         parameter_index: slot_index,
                         binding_name,
                     },
-                    callee_name,
+                    diagnostics.diagnostic_callee_name(string_table),
                     authored_marker_span(argument),
                 )
                 .into())

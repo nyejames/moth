@@ -15,9 +15,9 @@ use crate::compiler_frontend::ast::expressions::call_arguments::{
     ParsedCallArguments, parse_generic_call_arguments_typed,
 };
 use crate::compiler_frontend::ast::expressions::call_validation::{
-    CallArgumentResolutionContext, CallDiagnosticContext, ExpectedParameterType,
-    ParameterExpectation, expectations_from_user_parameters, generic_template_expectations,
-    resolve_call_arguments, resolve_call_arguments_shape_and_access,
+    CallArgumentResolutionContext, CallDiagnosticContext, CallDiagnosticName,
+    ExpectedParameterType, ParameterExpectation, expectations_from_user_parameters,
+    generic_template_expectations, resolve_call_arguments, resolve_call_arguments_shape_and_access,
 };
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_store::{
@@ -155,13 +155,23 @@ fn parse_generic_call_in_lane(
     let raw_arguments = match parsed_arguments {
         ParsedCallArguments::Ready(raw_arguments) => raw_arguments,
         ParsedCallArguments::Retained(arguments) => {
-            return retain_generic_call(input, arguments, owned_producers, lane);
+            return retain_generic_call(
+                input,
+                parameter_expectations,
+                arguments,
+                owned_producers,
+                lane,
+            );
         }
     };
 
     let expression = match lane {
-        GenericCallLane::Instance => parse_ready_instance_call(input, raw_arguments)?,
-        GenericCallLane::TemplateValidation => validate_ready_template_call(input, raw_arguments)?,
+        GenericCallLane::Instance => {
+            parse_ready_instance_call(input, raw_arguments, &parameter_expectations)?
+        }
+        GenericCallLane::TemplateValidation => {
+            validate_ready_template_call(input, raw_arguments, &parameter_expectations)?
+        }
     };
     Ok(ParsedFunctionCallExpression::Value(expression))
 }
@@ -169,12 +179,13 @@ fn parse_generic_call_in_lane(
 /// Retains one generic call whose argument values still depend on pending numeric resolution.
 ///
 /// WHAT: links the callee's numeric origins into result shapes and an error slot, settles the
-///       authored `!` against that error slot, reserves the instantiation ticket in the instance
-///       lane, and stores the call as a pending operand for body completion.
-/// WHY: the call's source position and request ticket must be fixed here, so the deferred
-///      instantiation publishes in parse order once its numeric arguments resolve.
+///       authored `!` against that error slot, reserves the instance ticket and stores the
+///       template expectations and arguments for body completion.
+/// WHY: the call's source position and ticket must be fixed here, while its unchanged template
+///      expectations can be reused for inference after numeric completion.
 fn retain_generic_call(
     input: GenericFunctionCallParseInput<'_, '_, '_>,
+    parameter_expectations: Vec<ParameterExpectation>,
     arguments: Vec<DeferredCallArgument>,
     owned_producers: std::ops::Range<usize>,
     lane: GenericCallLane,
@@ -238,6 +249,7 @@ fn retain_generic_call(
     };
     let call = DeferredCall::Generic(Box::new(DeferredGenericCall {
         template: template.clone(),
+        parameter_expectations,
         arguments,
         call_span,
         authored_handling,
@@ -252,6 +264,7 @@ fn retain_generic_call(
 fn parse_ready_instance_call(
     input: GenericFunctionCallParseInput<'_, '_, '_>,
     raw_arguments: Vec<CallArgument<OwnedExpr>>,
+    parameter_expectations: &[ParameterExpectation],
 ) -> Result<OwnedExpr, ExpressionParseError> {
     let GenericFunctionCallParseInput {
         token_stream,
@@ -269,18 +282,21 @@ fn parse_ready_instance_call(
         path_fork,
     } = input;
 
-    let inference = infer_generic_function_call(GenericFunctionInferenceInput {
-        template,
-        raw_arguments: &raw_arguments,
-        expression_builder,
-        expected_context,
-        call_span,
-        known_receiver_type_id: None,
-        known_receiver_span: None,
-        type_environment: type_interner.environment_mut_for_derived_types(),
-        string_table,
-        path_fork,
-    })?;
+    let inference = infer_generic_function_call_with_expectations(
+        GenericFunctionInferenceInput {
+            template,
+            raw_arguments: &raw_arguments,
+            expression_builder,
+            expected_context,
+            call_span,
+            known_receiver_type_id: None,
+            known_receiver_span: None,
+            type_environment: type_interner.environment_mut_for_derived_types(),
+            string_table,
+            path_fork,
+        },
+        parameter_expectations,
+    )?;
     let selected_evidence = validate_generic_function_bound_evidence(
         template,
         inference.key.type_arguments.as_ref(),
@@ -297,16 +313,16 @@ fn parse_ready_instance_call(
         )
         .into());
     }
-    let callee_name = path_fork
-        .component(template.function_path)
-        .map(|name| string_table.resolve(name).to_owned())
-        .unwrap_or_else(|| String::from("<generic function>"));
+    let callee_name = CallDiagnosticName::PathComponent {
+        component: path_fork.component(template.function_path),
+        fallback: "<generic function>",
+    };
     let expectations =
         expectations_from_user_parameters(&inference.signature.parameters, path_fork);
     let type_check_context = type_interner.type_check_context();
     let arguments = resolve_call_arguments(
-        CallDiagnosticContext::function(&callee_name),
-        &raw_arguments,
+        CallDiagnosticContext::function(callee_name),
+        raw_arguments,
         &expectations,
         call_span,
         CallArgumentResolutionContext {
@@ -357,6 +373,7 @@ fn parse_ready_instance_call(
 fn validate_ready_template_call(
     input: GenericFunctionCallParseInput<'_, '_, '_>,
     raw_arguments: Vec<CallArgument<OwnedExpr>>,
+    parameter_expectations: &[ParameterExpectation],
 ) -> Result<OwnedExpr, ExpressionParseError> {
     let GenericFunctionCallParseInput {
         token_stream,
@@ -374,18 +391,21 @@ fn validate_ready_template_call(
         path_fork,
     } = input;
 
-    let inference = infer_generic_function_call(GenericFunctionInferenceInput {
-        template,
-        raw_arguments: &raw_arguments,
-        expression_builder,
-        expected_context,
-        call_span,
-        known_receiver_type_id: None,
-        known_receiver_span: None,
-        type_environment: type_interner.environment_mut_for_derived_types(),
-        string_table,
-        path_fork,
-    })?;
+    let inference = infer_generic_function_call_with_expectations(
+        GenericFunctionInferenceInput {
+            template,
+            raw_arguments: &raw_arguments,
+            expression_builder,
+            expected_context,
+            call_span,
+            known_receiver_type_id: None,
+            known_receiver_span: None,
+            type_environment: type_interner.environment_mut_for_derived_types(),
+            string_table,
+            path_fork,
+        },
+        parameter_expectations,
+    )?;
     validate_generic_function_bound_evidence(
         template,
         inference.key.type_arguments.as_ref(),
@@ -395,15 +415,15 @@ fn validate_ready_template_call(
         call_span,
     )?;
 
-    let callee_name = path_fork
-        .component(template.function_path)
-        .map(|name| string_table.resolve(name).to_owned())
-        .unwrap_or_else(|| String::from("<generic function>"));
+    let callee_name = CallDiagnosticName::PathComponent {
+        component: path_fork.component(template.function_path),
+        fallback: "<generic function>",
+    };
     let expectations =
         expectations_from_user_parameters(&inference.signature.parameters, path_fork);
     let arguments = resolve_call_arguments_shape_and_access(
-        CallDiagnosticContext::function(&callee_name),
-        &raw_arguments,
+        CallDiagnosticContext::function(callee_name),
+        raw_arguments,
         &expectations,
         call_span,
         expression_builder,
@@ -536,6 +556,7 @@ fn complete_reserved_generic_call<'env, S: DeferredExpressionCompletion<'env> + 
 ) -> Result<OwnedExpr, ExpressionParseError> {
     let DeferredGenericCall {
         template,
+        parameter_expectations,
         arguments,
         call_span,
         authored_handling,
@@ -563,18 +584,21 @@ fn complete_reserved_generic_call<'env, S: DeferredExpressionCompletion<'env> + 
         Some(type_ids) => GenericCallExpectedContext::ImmediateResult(type_ids),
         None => GenericCallExpectedContext::None,
     };
-    let inference = infer_generic_function_call(GenericFunctionInferenceInput {
-        template: &template,
-        raw_arguments: &raw_arguments,
-        expression_builder,
-        expected_context,
-        call_span,
-        known_receiver_type_id: None,
-        known_receiver_span: None,
-        type_environment: type_interner.environment_mut_for_derived_types(),
-        string_table,
-        path_fork,
-    })?;
+    let inference = infer_generic_function_call_with_expectations(
+        GenericFunctionInferenceInput {
+            template: &template,
+            raw_arguments: &raw_arguments,
+            expression_builder,
+            expected_context,
+            call_span,
+            known_receiver_type_id: None,
+            known_receiver_span: None,
+            type_environment: type_interner.environment_mut_for_derived_types(),
+            string_table,
+            path_fork,
+        },
+        &parameter_expectations,
+    )?;
     verify_completed_error_return(
         error_return,
         inference.signature.error_return_type_id(),
@@ -598,10 +622,10 @@ fn complete_reserved_generic_call<'env, S: DeferredExpressionCompletion<'env> + 
         call_span,
     )?;
 
-    let callee_name = path_fork
-        .component(template.function_path)
-        .map(|name| string_table.resolve(name).to_owned())
-        .unwrap_or_else(|| String::from("<generic function>"));
+    let callee_name = CallDiagnosticName::PathComponent {
+        component: path_fork.component(template.function_path),
+        fallback: "<generic function>",
+    };
     let expectations =
         expectations_from_user_parameters(&inference.signature.parameters, path_fork);
     // A reserved ticket marks the instance lane; template-validation calls reserve none.
@@ -616,8 +640,8 @@ fn complete_reserved_generic_call<'env, S: DeferredExpressionCompletion<'env> + 
             }
             let type_check_context = type_interner.type_check_context();
             let resolved = resolve_call_arguments(
-                CallDiagnosticContext::function(&callee_name),
-                &raw_arguments,
+                CallDiagnosticContext::function(callee_name),
+                raw_arguments,
                 &expectations,
                 call_span,
                 CallArgumentResolutionContext {
@@ -634,8 +658,8 @@ fn complete_reserved_generic_call<'env, S: DeferredExpressionCompletion<'env> + 
         }
         None => {
             let resolved = resolve_call_arguments_shape_and_access(
-                CallDiagnosticContext::function(&callee_name),
-                &raw_arguments,
+                CallDiagnosticContext::function(callee_name),
+                raw_arguments,
                 &expectations,
                 call_span,
                 expression_builder,
@@ -966,6 +990,18 @@ impl GenericBindingEvidenceLocations {
 pub(crate) fn infer_generic_function_call(
     input: GenericFunctionInferenceInput<'_>,
 ) -> Result<GenericFunctionInference, ExpressionParseError> {
+    let expectations = generic_template_expectations(
+        &input.template.signature.parameters,
+        input.path_fork,
+        input.type_environment,
+    );
+    infer_generic_function_call_with_expectations(input, &expectations)
+}
+
+fn infer_generic_function_call_with_expectations(
+    input: GenericFunctionInferenceInput<'_>,
+    expectations: &[ParameterExpectation],
+) -> Result<GenericFunctionInference, ExpressionParseError> {
     let GenericFunctionInferenceInput {
         template,
         raw_arguments,
@@ -978,8 +1014,6 @@ pub(crate) fn infer_generic_function_call(
         string_table,
         path_fork,
     } = input;
-
-    let expectations = expectations_from_user_parameters(&template.signature.parameters, path_fork);
     let receiver_slot_offset = if known_receiver_type_id.is_some() {
         1
     } else {
@@ -995,7 +1029,7 @@ pub(crate) fn infer_generic_function_call(
     collect_call_argument_bindings(
         template,
         &routed_arguments,
-        &expectations,
+        expectations,
         known_receiver_type_id,
         known_receiver_span,
         &mut bindings,
@@ -1010,7 +1044,7 @@ pub(crate) fn infer_generic_function_call(
         bindings.concrete_arguments_for(template.generic_parameter_list_id, type_environment);
     if type_arguments.is_none()
         && let Some(expected_result_type_ids) = expected_context
-            .matching_success_results(template.signature.success_return_type_ids().len())
+            .matching_success_results(template.signature.success_return_slot_count())
     {
         collect_expected_result_bindings(
             template,
@@ -1218,9 +1252,13 @@ fn collect_call_argument_bindings(
             ),
             _ => continue,
         };
-        let ExpectedParameterType::Known(template_type_id) = expectations[slot].expected_type
-        else {
-            continue;
+        let template_type_id = match expectations[slot].expected_type {
+            ExpectedParameterType::Known(type_id)
+            | ExpectedParameterType::GenericParameter(type_id) => type_id,
+            ExpectedParameterType::ConstructionShape(_)
+            | ExpectedParameterType::UnknownExternal => {
+                continue;
+            }
         };
 
         collect_binding_evidence(
@@ -1259,13 +1297,12 @@ fn collect_expected_result_bindings(
 
     for (template_return_type, expected_type) in template
         .signature
-        .success_return_type_ids()
-        .iter()
+        .success_return_type_ids_iter()
         .zip(expected_result_type_ids.iter())
     {
         collect_binding_evidence(
             &mut evidence_context,
-            *template_return_type,
+            template_return_type,
             *expected_type,
             span,
         )?;

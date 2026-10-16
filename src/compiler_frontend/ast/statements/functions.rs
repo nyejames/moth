@@ -179,6 +179,14 @@ impl FunctionSignature {
             .filter_map(|slot| slot.type_id)
             .collect()
     }
+    /// Iterates over resolved success-channel types without materialising a temporary vector.
+    pub(crate) fn success_return_type_ids_iter(&self) -> impl Iterator<Item = TypeId> + '_ {
+        self.returns
+            .iter()
+            .filter(|slot| slot.channel == ReturnChannel::Success)
+            .filter_map(|slot| slot.type_id)
+    }
+
     /// Canonical TypeId for exactly one success-channel return slot, if it is resolved.
     ///
     /// WHAT: projects one slot directly from the borrowed signature without allocating a result

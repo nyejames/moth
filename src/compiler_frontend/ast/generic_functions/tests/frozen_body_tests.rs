@@ -1882,10 +1882,7 @@ fn published_siblings_materialise_independently_and_leave_the_retained_context_f
                     identity,
                     requester_context: &fixture.preparation,
                     requester_call_span: None,
-                    external_package_registry: fixture
-                        .preparation
-                        .external_package_registry
-                        .as_ref(),
+                    external_package_registry: &fixture.preparation.external_package_registry,
                     string_table: &mut live_strings,
                     path_fork: &mut path_fork,
                     style_directives: &fixture.preparation.style_directives,
@@ -2456,7 +2453,7 @@ fn frozen_resource_parameter_default_materialises_into_a_sidecar_local_table() {
                 identity: &fixture.identity,
                 requester_context: &fixture.preparation,
                 requester_call_span: None,
-                external_package_registry: fixture.preparation.external_package_registry.as_ref(),
+                external_package_registry: &fixture.preparation.external_package_registry,
                 string_table: &mut live_strings,
                 path_fork: &mut path_fork,
                 style_directives: &fixture.preparation.style_directives,
@@ -2811,7 +2808,7 @@ fn frozen_resource_body_materialises_into_a_sidecar_local_table() {
                 identity: &fixture.identity,
                 requester_context: &fixture.preparation,
                 requester_call_span: None,
-                external_package_registry: fixture.preparation.external_package_registry.as_ref(),
+                external_package_registry: &fixture.preparation.external_package_registry,
                 string_table: &mut live_strings,
                 path_fork: &mut path_fork,
                 style_directives: &fixture.preparation.style_directives,
@@ -2902,10 +2899,7 @@ fn repeated_frozen_resource_body_materialisations_preserve_stable_origin() {
                     identity: &fixture.identity,
                     requester_context: &fixture.preparation,
                     requester_call_span: None,
-                    external_package_registry: fixture
-                        .preparation
-                        .external_package_registry
-                        .as_ref(),
+                    external_package_registry: &fixture.preparation.external_package_registry,
                     string_table: &mut live_strings,
                     path_fork: &mut path_fork,
                     style_directives: &fixture.preparation.style_directives,
@@ -3075,10 +3069,7 @@ fn repeated_frozen_resource_default_materialisations_preserve_stable_origin_acro
                     identity: &fixture.identity,
                     requester_context: &fixture.preparation,
                     requester_call_span: None,
-                    external_package_registry: fixture
-                        .preparation
-                        .external_package_registry
-                        .as_ref(),
+                    external_package_registry: &fixture.preparation.external_package_registry,
                     string_table: &mut live_strings,
                     path_fork: &mut path_fork,
                     style_directives: &fixture.preparation.style_directives,

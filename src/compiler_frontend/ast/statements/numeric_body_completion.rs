@@ -313,6 +313,7 @@ impl Completion<'_, '_> {
 
         for intake in intakes {
             if let Some(slot) = intake.position.range_operand_slot() {
+                // Range slots are registered with their containing header and group.
                 let (header, group) = intake.range_header.expect("retained range operand handle");
                 let value = self.complete_items_with_suffix(
                     intake.items,
@@ -2421,15 +2422,24 @@ impl Completion<'_, '_> {
         &mut self,
         deferred: DeferredSourceCall,
     ) -> Result<OwnedExpr, ExpressionParseError> {
-        let mut arguments = Vec::with_capacity(deferred.arguments.len());
-        for argument in deferred.arguments {
-            arguments.push(self.complete_call_argument(argument)?);
+        let DeferredSourceCall {
+            function_path,
+            success_result_type_ids,
+            error_return_type_id,
+            expectations,
+            arguments,
+            call_span,
+            authored_handling,
+        } = deferred;
+        let mut completed_arguments = Vec::with_capacity(arguments.len());
+        for argument in arguments {
+            completed_arguments.push(self.complete_call_argument(argument)?);
         }
         let args = crate::compiler_frontend::ast::expressions::function_calls::resolve_user_function_call_arguments(
-            &deferred.function_path,
-            &arguments,
-            &deferred.signature.parameters,
-            deferred.call_span,
+            &function_path,
+            completed_arguments,
+            &expectations,
+            call_span,
             self.string_table,
             self.type_interner,
             self.expression_builder,
@@ -2437,21 +2447,19 @@ impl Completion<'_, '_> {
             self.path_fork,
         )?;
         let call = HandledFallibleCall {
-            name: deferred.function_path,
-            result_type_ids: deferred.signature.success_return_type_ids(),
+            name: function_path,
+            result_type_ids: success_result_type_ids,
             args,
-            call_span: deferred.call_span,
+            call_span,
         };
-        match deferred.authored_handling {
-            DeferredCallHandling::Unhandled => {
-                self.finish_handled_call(call, deferred.signature.error_return_type_id())
-            }
+        match authored_handling {
+            DeferredCallHandling::Unhandled => self.finish_handled_call(call, error_return_type_id),
             DeferredCallHandling::Propagate { span } => {
                 // Replay the authored `!` through the same constructor the completed call path
                 // uses; the retention site already validated the callee's error slot and the
                 // authored value requirement, so no second decision exists here.
-                let propagation_span = span.or(deferred.call_span);
-                let error_type = deferred.signature.error_return_type_id().ok_or_else(|| {
+                let propagation_span = span.or(call_span);
+                let error_type = error_return_type_id.ok_or_else(|| {
                     CompilerError::compiler_error(
                         "retained propagated call lost its declared error slot",
                     )

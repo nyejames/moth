@@ -10,7 +10,7 @@ use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
 use crate::compiler_frontend::ast::expressions::call_validation::{
-    CallArgumentResolutionContext, CallDiagnosticContext, ExpectedAccessMode,
+    CallArgumentResolutionContext, CallDiagnosticContext, CallDiagnosticName, ExpectedAccessMode,
     ExpectedParameterType, ParameterExpectation, resolve_call_arguments,
 };
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
@@ -150,6 +150,22 @@ pub(super) fn builtin_argument_slots(
         .collect()
 }
 
+/// Whether any builtin expectation still needs materialising before validation.
+///
+/// WHAT: reports whether the list holds an open numeric/collection slot or an unbound generic
+///       parameter, which the materialiser must resolve or reject before validation runs.
+/// WHY: a concrete expectation list is already the canonical validation form, so materialising it
+///      again would rebuild identical slots and expectations for every builtin call.
+fn has_open_builtin_slots(expectations: &[ParameterExpectation]) -> bool {
+    expectations.iter().any(|expectation| {
+        matches!(
+            &expectation.expected_type,
+            ExpectedParameterType::ConstructionShape(_)
+                | ExpectedParameterType::GenericParameter(_)
+        )
+    })
+}
+
 /// Materialises every construction-only builtin slot before argument validation.
 ///
 /// WHAT: a numeric or collection slot becomes its canonical type through the same materialiser the
@@ -206,11 +222,11 @@ pub(super) struct BuiltinCallSite<'a> {
 ///      resumes the exact same owner once its arguments resolve, so no validation lane is skipped.
 #[allow(
     clippy::too_many_arguments,
-    reason = "builtin argument resolution keeps the call site, arguments, expectations, scope, type interner, expression builder, const store, string table, and path fork as separate borrows"
+    reason = "builtin argument resolution keeps the call site, argument input, expectations, scope, type interner, expression builder, const store, string table, and path fork as separate inputs"
 )]
 pub(super) fn resolve_builtin_member_arguments(
     call_site: BuiltinCallSite<'_>,
-    arguments: &[CallArgument<OwnedExpr>],
+    arguments: Vec<CallArgument<OwnedExpr>>,
     expectations: &[ParameterExpectation],
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
@@ -219,13 +235,20 @@ pub(super) fn resolve_builtin_member_arguments(
     string_table: &mut StringTable,
     path_fork: &PathInternerFork,
 ) -> Result<Vec<CallArgument<OwnedExpr>>, ExpressionParseError> {
-    let expectations = materialised_builtin_expectations(context, type_interner, expectations)?;
+    let materialised_expectations;
+    let expectations = if has_open_builtin_slots(expectations) {
+        materialised_expectations =
+            materialised_builtin_expectations(context, type_interner, expectations)?;
+        materialised_expectations.as_slice()
+    } else {
+        expectations
+    };
     let type_check_context = type_interner.type_check_context();
 
     Ok(resolve_call_arguments(
-        CallDiagnosticContext::builtin_member(call_site.member_name),
+        CallDiagnosticContext::builtin_member(CallDiagnosticName::Borrowed(call_site.member_name)),
         arguments,
-        &expectations,
+        expectations,
         call_site.member_span,
         CallArgumentResolutionContext {
             expression_builder,

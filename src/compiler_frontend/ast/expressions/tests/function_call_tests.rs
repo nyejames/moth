@@ -12,7 +12,7 @@ use crate::compiler_frontend::ast::expressions::call_argument::{
     CallAccessMode, CallArgument, CallPassingMode,
 };
 use crate::compiler_frontend::ast::expressions::call_validation::{
-    CallArgumentResolutionContext, CallDiagnosticContext, ExpectedAccessMode,
+    CallArgumentResolutionContext, CallDiagnosticContext, CallDiagnosticName, ExpectedAccessMode,
     ExpectedParameterType, ParameterDefault, ParameterExpectation, resolve_call_arguments,
 };
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
@@ -617,8 +617,8 @@ fn final_validation_consumes_retained_slots_for_defaults_and_access_policy() {
     let span = arguments[0].span;
     let type_check_context = type_interner.type_check_context();
     let resolved = resolve_call_arguments(
-        CallDiagnosticContext::function("call"),
-        &arguments,
+        CallDiagnosticContext::function(CallDiagnosticName::Borrowed("call")),
+        arguments,
         &expectations,
         span,
         CallArgumentResolutionContext {

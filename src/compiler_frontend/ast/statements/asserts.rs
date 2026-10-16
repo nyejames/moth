@@ -27,7 +27,7 @@ use crate::compiler_frontend::ast::expressions::call_arguments::{
     CallArgumentSyntax, ParsedCallArguments, parse_call_arguments_typed_with_numeric_retention,
 };
 use crate::compiler_frontend::ast::expressions::call_validation::{
-    CallArgumentResolutionContext, CallDiagnosticContext, ExpectedAccessMode,
+    CallArgumentResolutionContext, CallDiagnosticContext, CallDiagnosticName, ExpectedAccessMode,
     ExpectedParameterType, ParameterDefault, ParameterExpectation, resolve_call_arguments,
 };
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
@@ -127,8 +127,8 @@ pub(crate) fn finish_assert_statement(
     let resolved_arguments = {
         let type_check_context = type_interner.type_check_context();
         resolve_call_arguments(
-            CallDiagnosticContext::assertion("assert"),
-            &arguments,
+            CallDiagnosticContext::assertion(CallDiagnosticName::Borrowed("assert")),
+            arguments,
             expectations,
             span,
             CallArgumentResolutionContext {

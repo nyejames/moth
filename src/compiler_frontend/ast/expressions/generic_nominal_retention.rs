@@ -7,6 +7,7 @@
 //! WHY: a generic field's numeric type is known only from later evidence. Defaulting a literal to
 //! I32 during argument parsing would reject values that the generic instance can represent.
 
+use crate::compiler_frontend::ast::expressions::call_validation::CallDiagnosticName;
 use crate::compiler_frontend::ast::expressions::choice_constructor::{
     GenericChoiceCompletion, complete_generic_choice_instance,
 };
@@ -32,16 +33,15 @@ use crate::compiler_frontend::datatypes::definitions::{
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
-use crate::compiler_frontend::symbols::string_interning::StringId;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
 
 /// The constructor-specific facts a retained generic nominal call finishes with.
 ///
-/// WHAT: a struct keeps its declared field views and value policy; a choice keeps its declared
-///       variants and the selected variant identity.
-/// WHY: the declared templates are owned by the suspended call, so completion infers the instance
-///      from the same templates the parse saw without re-reading the declaration.
+/// WHAT: structs retain declared field views; choices retain their selected variant and payload
+///       views with the construction tag and const policy.
+/// WHY: body-root completion consumes the same per-call views the parser used rather than building
+///      a second view list from the nominal declaration.
 #[derive(Debug, Clone)]
 pub(crate) enum GenericNominalConstructor {
     Struct {
@@ -50,9 +50,9 @@ pub(crate) enum GenericNominalConstructor {
         enforce_const_record: bool,
     },
     Choice {
-        variants: Vec<ChoiceVariantDefinition>,
+        variant: ChoiceVariantDefinition,
+        payload_field_views: Vec<ConstructorField>,
         variant_index: usize,
-        variant_name: StringId,
         variant_span: Option<SourceSpan>,
         enforce_constant_context: bool,
     },
@@ -68,7 +68,7 @@ pub(crate) enum GenericNominalConstructor {
 #[derive(Debug, Clone)]
 pub(crate) struct DeferredGenericNominalCall {
     pub(crate) nominal_path: PathId,
-    pub(crate) display_name: String,
+    pub(crate) diagnostic_name: CallDiagnosticName<'static>,
     pub(crate) seed: GenericNominalConstructorSeed,
     pub(crate) arguments: Vec<DeferredCallArgument>,
     pub(crate) result_shape: KnownShapeId,
@@ -103,7 +103,7 @@ pub(crate) fn complete_deferred_generic_nominal_call<
 ) -> Result<OwnedExpr, ExpressionParseError> {
     let DeferredGenericNominalCall {
         nominal_path,
-        display_name,
+        diagnostic_name,
         mut seed,
         arguments,
         result_shape,
@@ -140,13 +140,13 @@ pub(crate) fn complete_deferred_generic_nominal_call<
         } => complete_generic_struct_instance(
             GenericStructCompletion {
                 nominal_path: &nominal_path,
-                display_name: &display_name,
+                diagnostic_name,
                 template_fields: &fields,
                 struct_value_mode: &struct_value_mode,
                 enforce_const_record,
                 constructor_span: call_span,
                 seed,
-                arguments: &completed_arguments,
+                arguments: completed_arguments,
             },
             context,
             type_interner,
@@ -156,31 +156,40 @@ pub(crate) fn complete_deferred_generic_nominal_call<
             string_table,
         ),
         GenericNominalConstructor::Choice {
-            variants,
+            variant,
+            payload_field_views,
             variant_index,
-            variant_name,
             variant_span,
             enforce_constant_context,
-        } => complete_generic_choice_instance(
-            GenericChoiceCompletion {
-                nominal_path: &nominal_path,
-                display_name: &display_name,
-                variants: &variants,
-                variant_index,
-                variant_name,
-                constructor_span: call_span,
-                variant_span,
-                enforce_constant_context,
-                seed,
-                arguments: &completed_arguments,
-            },
-            context,
-            type_interner,
-            expression_builder,
-            const_values,
-            path_fork,
-            string_table,
-        ),
+        } => {
+            let ChoiceVariantPayloadDefinition::Record { fields } = &variant.payload else {
+                return Err(CompilerError::compiler_error(
+                    "a retained generic choice constructor's selected variant was not a payload variant",
+                )
+                .into());
+            };
+            complete_generic_choice_instance(
+                GenericChoiceCompletion {
+                    nominal_path: &nominal_path,
+                    diagnostic_name,
+                    template_fields: fields,
+                    payload_field_views: &payload_field_views,
+                    variant_index,
+                    variant_name: variant.name,
+                    constructor_span: call_span,
+                    variant_span,
+                    enforce_constant_context,
+                    seed,
+                    arguments: completed_arguments,
+                },
+                context,
+                type_interner,
+                expression_builder,
+                const_values,
+                path_fork,
+                string_table,
+            )
+        }
     }
 }
 
@@ -196,15 +205,9 @@ fn declared_slot_type(constructor: &GenericNominalConstructor, slot: usize) -> O
             fields.get(slot).map(|field| field.type_id)
         }
         GenericNominalConstructor::Choice {
-            variants,
-            variant_index,
+            payload_field_views,
             ..
-        } => match variants.get(*variant_index).map(|variant| &variant.payload) {
-            Some(ChoiceVariantPayloadDefinition::Record { fields }) => {
-                fields.get(slot).map(|field| field.type_id)
-            }
-            Some(ChoiceVariantPayloadDefinition::Unit) | None => None,
-        },
+        } => payload_field_views.get(slot).map(|field| field.type_id),
     }
 }
 

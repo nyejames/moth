@@ -13,6 +13,7 @@
 
 use crate::compiler_frontend::ast::expressions::call_argument::ParameterSlot;
 use crate::compiler_frontend::ast::expressions::call_arguments::expected_type_for_resolved_parameter;
+use crate::compiler_frontend::ast::expressions::call_validation::CallDiagnosticName;
 use crate::compiler_frontend::ast::expressions::constructor_views::ConstructorField;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
@@ -210,7 +211,7 @@ pub(crate) fn link_generic_numeric_signature(
 ///      the nominal's own parameters and field views rather than building a second template.
 pub(crate) struct GenericNominalShapeInput<'a, 'b> {
     pub(crate) nominal_path: &'a PathId,
-    pub(crate) display_name: &'a str,
+    pub(crate) diagnostic_name: CallDiagnosticName<'static>,
     pub(crate) declared_fields: &'a [ConstructorField],
     pub(crate) arguments: &'a [DeferredCallArgument],
     pub(crate) seeded_bindings: &'a GenericTypeBindings,
@@ -234,7 +235,7 @@ pub(crate) fn link_generic_nominal_result_shape(
 ) -> Result<KnownShapeId, ExpressionParseError> {
     let GenericNominalShapeInput {
         nominal_path,
-        display_name,
+        diagnostic_name,
         declared_fields,
         arguments,
         seeded_bindings,
@@ -250,7 +251,8 @@ pub(crate) fn link_generic_nominal_result_shape(
         .canonical_parameters_for_nominal(nominal_path)
     else {
         return Err(CompilerError::compiler_error(format!(
-            "Generic nominal '{display_name}' has no canonical parameter list after registration"
+            "Generic nominal '{}' has no canonical parameter list after registration",
+            diagnostic_name.rendered_callee_name(string_table)
         ))
         .into());
     };
@@ -328,7 +330,7 @@ pub(crate) fn link_generic_nominal_result_shape(
     let missing = linker.unbound_parameter_names();
     if !missing.is_empty() {
         return Err(CompilerDiagnostic::invalid_generic_instantiation(
-            Some(string_table.intern(display_name)),
+            diagnostic_name.diagnostic_callee_name(string_table),
             InvalidGenericInstantiationReason::CannotInferArguments {
                 missing_parameters: missing,
             },
