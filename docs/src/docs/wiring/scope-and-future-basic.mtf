@@ -40,7 +40,6 @@ design, not implemented channel support; it does not define async execution,
 buffering, cancellation or sending. Omitting `= Channel()` has no accepted
 zero-value initialisation rule.
 
-Wire/Route source contracts are unsupported until Phase 6. Channels and async
-implementation remain separately deferred beyond that foundation. See the
-@../progress (Progress matrix) and the detailed Wiring reference for the exact
-status and boundary.
+Channels and async implementation remain deferred beyond the Wiring foundation.
+See the @../progress (Progress matrix) and the detailed Wiring reference for the
+exact status and boundary.

@@ -11,7 +11,7 @@ binding. No special marker is written on the declaration or argument.
     ;
 
     replace_name |value ~String, replacement String|:
-        value = replacement
+        value = copy replacement
     ;
 
     current_name ~= "Priya"
@@ -44,5 +44,4 @@ stored in a named constant is compile-time data, not a runtime type declaration:
 ]
 
 Read the ordinary value contract in @../constants/#const-records (Const records)
-and the full binding-identity rules in the detailed Wiring reference. The Wire
-examples describe accepted future design and are unsupported until Phase 6.
+and the full binding-identity rules in the detailed Wiring reference.

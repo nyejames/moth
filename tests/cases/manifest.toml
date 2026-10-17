@@ -16801,6 +16801,13 @@ contract = "language.wiring.constructor_route_arguments_runtime"
 role = "primary"
 
 [[case]]
+id = "wiring_route_capture_error_runtime"
+path = "wiring_route_capture_error_runtime"
+tags = ["integration", "wiring", "routes", "runtime", "errors"]
+contract = "language.wiring.route_captures_propagate_errors"
+role = "primary"
+
+[[case]]
 id = "wiring_generic_wire_runtime"
 path = "wiring_generic_wire_runtime"
 tags = ["integration", "wiring", "generics", "runtime"]

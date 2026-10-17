@@ -3,10 +3,10 @@
 ## Status
 
 ```text
-STATUS: ACTIVE on expression-refactor (Phase 6 next)
-CURRENT_SLICE: Phase 5 complete: descriptors, direct type resolution, constant handles and ownership-only clones accepted with matched evidence.
+STATUS: ACTIVE on expression-refactor (Phase 7 next)
+CURRENT_SLICE: Phase 6 complete: head-directed Wire/Route parameter contracts, Wire arguments, contextual route formation, generic/imported routes and the JS/Wasm target matrix accepted with audits.
 BLOCKERS: Fresh Windows proof remains pending.
-NEXT_ACTION: Phase 6 Wiring foundation: slice the parameter-contract parse, Wire formation and Route formation work.
+NEXT_ACTION: Phase 7 trusted Core constant evaluation: slice registration metadata/validation, the shared evaluator path and the five Text operations.
 ```
 
 The main squash checkpoint retains expression-refactor source `534aea1a5`,
@@ -588,20 +588,20 @@ chain remains in the migrated paths.
 public projection contracts, plus the permanent Wiring language reference.
 **Produces:** the bounded foundation, implemented directly on final stores.
 
-- [ ] Parse `of` once through its existing retained syntax owner. Dispatch by
+- [x] Parse `of` once through its existing retained syntax owner. Dispatch by
   the resolved head. Ordinary generic application stays type substitution,
   `Wire of T` and `Route of T` become parameter contracts beside ordinary types.
   Reject unknown heads, malformed/nested forms and invalid contract positions
   with typed diagnostics. Do not create universal type wrappers.
-- [ ] Support a Wire from an eligible named mutable or immutable local binding.
+- [x] Support a Wire from an eligible named mutable or immutable local binding.
   It carries binding-instance identity and permits reading where an ordinary
   value is expected or unchanged forwarding to another Wire parameter. Keep
   mutability/exclusivity authority unchanged.
-- [ ] Keep static ExprId/BindingId distinct from a runtime binding instance.
+- [x] Keep static ExprId/BindingId distinct from a runtime binding instance.
   Reassignment preserves the same binding's identity, separate loop/function
   activations create separate instances. Reject temporaries, literals, fields
   and unsupported storage/return positions according to the canonical contract.
-- [ ] Support `Route of Output` and `Route of Input -> Output` only from a
+- [x] Support `Route of Output` and `Route of Input -> Output` only from a
   direct choice constructor in the immediate route-parameter context, or from
   an unchanged matching Route parameter. Bare `Route` is not a source contract.
   Zero-input forms retain the constructor identity and all payload values for
@@ -609,23 +609,23 @@ public projection contracts, plus the permanent Wiring language reference.
   unsupplied. Partial routes accept only a contiguous leading capture prefix,
   without holes, named omissions or reordering. Fully supplied zero-input
   routes retain legal ordinary complete-constructor named argument routing.
-- [ ] Evaluate leading capture expressions once at route formation. Preserve
+- [x] Evaluate leading capture expressions once at route formation. Preserve
   their effects, error/control flow, aliases, lifetimes and provenance through
   ordinary semantic owners. Do not re-evaluate capture expressions at later use.
-- [ ] Give the shared argument owner the selected parameter contract before
+- [x] Give the shared argument owner the selected parameter contract before
   constructor completeness checking. Validate ordinary constructors normally
   outside that context. No failed ordinary parse followed by a route retry.
-- [ ] Preserve contracts in local/imported/exported signatures, generics,
+- [x] Preserve contracts in local/imported/exported signatures, generics,
   fingerprints, frozen/public semantic projections and HIR. Add only metadata
   consumed by supported formation/reading/forwarding, with no observer scaffolding.
-- [ ] Implement faithful minimal synchronous lowering in supported backends.
+- [x] Implement faithful minimal synchronous lowering in supported backends.
   Reject unsupported reachable execution at target validation, without changing
   frontend legality. Test the actual supported-target matrix explicitly.
-- [ ] Complete declaration/read/forward, wrong origin/context/type/arity,
+- [x] Complete declaration/read/forward, wrong origin/context/type/arity,
   capture-once, per-activation identity, import/generic and borrow/provenance
   coverage. Revisit the Phase 1 teaching examples and status rows now that this
   checkpoint exists.
-- [ ] Cover a Route between ordinary parameters, its arrow versus the enclosing
+- [x] Cover a Route between ordinary parameters, its arrow versus the enclosing
   return arrow after `|`, repeated/malformed arrows and missing output. Test
   ordinary underlying-type aliases and reject capability aliases, defaults,
   storage and returns. Preserve the compiler-owned head collision policy. Wire

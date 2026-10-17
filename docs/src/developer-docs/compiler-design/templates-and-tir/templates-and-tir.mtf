@@ -141,7 +141,7 @@ TIR ownership must stay distinct from AST finalisation and HIR validation. Post-
 ## Roadmap and current status
 
 - **Accepted design:** TIR remains AST-local and hands off folded strings or neutral runtime data.
-- **Current implementation:** template support is tracked in the progress matrix; Wire and Route implementation remains deferred until Phase 6.
+- **Current implementation:** template support is tracked in the progress matrix; templates carry no Wire or Route capability.
 - **Queued work:** `post-tir-template-parser-optimization-plan.md` for performance discussion, labelled queued or deferred as appropriate.
 - **Deferred or outside scope:** a general macro system or public TIR.
 

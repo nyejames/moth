@@ -48,8 +48,8 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
     integration target results, ten feature lanes and all 14 scaling series.
     Grouped-not dev HIR fits n^0.88 under n^1.25 in that evidence.
     Fresh Windows Canvas/frontend proof remains pending.
-    Phase 5 type/folding reductions are complete on `expression-refactor`. Phases 6–8
-    follow in order.
+    Phase 5 type/folding reductions and the Phase 6 Wiring foundation are complete on
+    `expression-refactor`. Phases 7–8 follow in order.
 
     Use this together with `tests/cases/manifest.toml` when changing language features.
 
@@ -455,10 +455,10 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
 
         [data:
             [: Wiring parameter contracts]
-            [: Deferred]
-            [: None]
-            [: JS / HTML after Phase 6]
-            [$md: Wire and Route are accepted parameter contracts, but the current Alpha compiler does not support their source syntax. Phase 6 owns implementation; this does not include route application or composition, subscriptions, event delivery, channels or async. See @../wiring (Wiring) for the canonical contract.]
+            [: Supported]
+            [: Broad integration coverage for contract parsing and positions, Wire origins and forwarding, route formation, captures, forwarding, generic and imported routes, borrow interactions and target gates.]
+            [: JS / HTML; HTML-Wasm for Wire only]
+            [$md: `Wire of T`, `Route of Output` and `Route of Input -> Output` are function-parameter contracts. Wires accept named locals or unchanged Wire parameters of the exact type and read as immutable values. Routes accept a direct choice constructor with a captured leading payload, or an unchanged matching Route parameter. HTML-Wasm rejects reachable route formation with a target diagnostic. Route application or composition, subscriptions, event delivery, channels and async remain outside this foundation. See @../wiring (Wiring) for the canonical contract.]
         ]
 
         [data:
