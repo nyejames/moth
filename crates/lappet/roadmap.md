@@ -89,25 +89,30 @@ of returned storage and every allocation/cleanup failure path actually added.
 
 ## 3. Establish Wasmtime execution independently
 
-**Checkpoint.** Select a Wasmtime version and minimal Cargo features. Review
-Winch/Cranelift feature compatibility, supported hosts, debugging limitations,
-resource accounting and fault disposition. Establish when a trap or adapter
-fault makes an instance unusable. Decide memory/stack/execution limits and how
-native blocking calls fit the server's cancellation policy. Choose a simple
-public configuration rather than expose every Wasmtime option.
+**Checkpoint.** Select a Wasmtime version and minimal Cranelift-only Cargo
+features. Validate supported Wasm proposals, hosts, debugging requirements,
+resource accounting and fault disposition. Compare `OptLevel::None` and
+`OptLevel::Speed` using representative game and server workloads before
+confirming the defaults. Retain the default backtracking register allocator
+and disabled inlining unless a separate investigation justifies changing them.
+Determine when a trap or adapter fault invalidates an instance. Set
+memory/stack/execution limits and a policy for blocking native calls. Keep
+the public runtime configuration small.
 
-**Delivery.** Development defaults to Winch and release to Cranelift, with
-explicit builder override. Share immutable compiled code where valid, but keep
-mutable stores, contexts and resource tables instance-owned. Calls are
-synchronous and scheduling stays in the builder. Persistent AOT caching and
-additional Wasm engines remain excluded.
+**Delivery.** Cranelift is V1's sole native compiler. Development defaults
+to `OptLevel::None` and release to `OptLevel::Speed`, independent of the
+Moth output profile. These defaults remain subject to checkpoint evidence.
+Reuse immutable compiled modules where valid and keep mutable stores, host
+contexts and resources instance-owned. Execution remains synchronous and
+builder-scheduled. No persistent AOT cache or other Wasm engine is included.
 
-**Evidence.** Run the same small core Wasm fixtures under both strategies on
-candidate Linux x86-64/AArch64, macOS x86-64/AArch64 and Windows x86-64 hosts.
-Publish only combinations actually verified. Measure clean Rust build cost,
-linked size, cold engine compilation, instantiation, execution, host-call cost
-and resident memory separately. Test limits, traps, teardown and prohibited
-re-entry. Fixtures demonstrate runtime mechanics, not completed Moth lowering.
+**Evidence.** Run identical core Wasm fixtures under both Cranelift
+optimisation levels on candidate Linux x86-64/AArch64, macOS x86-64/AArch64
+and Windows x86-64 hosts. Publish only verified combinations. Measure clean
+Rust build cost, binary size, cold engine/module compilation, instantiation,
+execution, host-call cost and resident memory separately. Test limits,
+traps, teardown and prohibited re-entry. These fixtures do not prove a
+Moth compiler ABI.
 
 **Documentation.** Add `docs/wasmtime-integration.md` using the pinned
 Wasmtime release and upstream source references. Document a minimal runnable
@@ -253,6 +258,9 @@ Lead packages for policy review rather than a depth-only registry ban.
   and runtime contracts exist. No implicit V1 scheduler is reserved for them.
 - Foreign WIT components, first through a separately reviewed value-only profile.
   Resources, callbacks and retained state need their own ownership design.
+- Winch as a potential future baseline compiler, only after upstream production
+  readiness, proposal/CPU support, limit semantics and benchmarks justify the
+  extra dependency and test matrix.
 - Other execution engines or smaller target environments, with explicit platform
   and semantic support rather than a speculative multi-engine abstraction.
 - Managed Builder-dependent packages and versioned provider compatibility.

@@ -27,16 +27,18 @@ implemented. The native strategy controls how Wasm is translated to machine
 code. None changes exact numeric types, required access validation or observable
 error behaviour.
 
-Lappet V1 uses Wasmtime. Development defaults to Winch and release defaults to
-Cranelift. Builders can choose either strategy independently of the Moth
-profile. Lappet configures the engine through its supported API and performs no
-additional Wasm optimisation pass.
+Lappet V1 uses Wasmtime with Cranelift only. Development defaults to
+`OptLevel::None` to favour native compilation time and release defaults
+to `OptLevel::Speed` for execution performance, subject to benchmarks.
+Moth's output profile remains independent of the native optimisation
+level. Lappet configures the engine without post-emission Wasm passes.
 
-Winch supplies a fast baseline for repeated compilation. It is not a literal
-Wasm instruction counter or a promise of identical machine code across hosts.
-Cranelift is the release path for optimising native code generation. Precise
-proposal support, optimisation settings and debugging features are verified
-against the selected engine version at Lappet's runtime checkpoint.
+Keep Cranelift's default backtracking allocator and no function inlining
+until independently justified. Wasmtime 49.0.3 describes its faster
+single-pass allocator as not production-ready. Winch is deferred until
+compatibility, stability and measured benefits justify another backend.
+Exact proposals, debugger support and runtime policy are checked at
+Lappet's own engine milestone.
 
 ## Preserve required compiler work
 
@@ -145,6 +147,18 @@ heuristics in the native backend. Native optimisers can also simplify scalar
 expressions and control flow where the emitted representation exposes those
 relationships.
 
+Keep `wasm-encoder` as the binary writer. Structured Wasm LIR, explicit
+target-feature validation and faithful encoding of validated physical
+memory plans are the relevant improvements. Replace the existing dispatcher
+loop through the accepted Wasm backend plan rather than adding a pass to
+recover natural control flow.
+
+The Wasm roadmap now owns three tooling slices: `wasmparser` validation with
+target-specific features, real function/local names through
+`wasm_encoder::NameSection` and optional `wasmprinter` inspection of
+the emitted binary. The printer belongs to development/tests rather than
+the runtime. Review aligned wasm-tools versions at that checkpoint.
+
 A Rust host call can hide an implementation from the Wasm-to-machine-code
 compiler. Prefer a direct Wasm instruction or existing trusted Wasm helper for
 a small operation when it preserves the complete contract. Use Rust bindings
@@ -176,11 +190,13 @@ must be verified rather than assumed. Neither blanket Moth inlining nor blanket
 delegation is the policy. Investigate selected call sites with a code-size and
 compile-time budget.
 
-Loop transformations, vectorisation, general bounds-check elimination and
-post-emission tools follow the same rule. Their presence in another compiler
-is not evidence that Moth needs another implementation. Browser output may
-benefit differently from Lappet output, so record the consuming targets rather
-than generalising one engine measurement to all Wasm environments.
+Loop transformations, vectorisation, general bounds-check elimination
+and post-emission tools follow the same rule. A future offline `wasm-opt`
+experiment can compare binary size, optimisation time, cold Cranelift
+compilation and runtime performance against direct structured emission.
+Adopt no mandatory Binaryen pipeline without evidence beyond existing
+lowering and native optimisation. Verify observable Moth semantics and
+browser performance before broadening the policy.
 
 ## Preserve evidence across transformations
 
@@ -209,16 +225,16 @@ dispatch, conversion and the host operation itself.
 For a representative program, compare four configurations:
 
 [codeblock, $code("text"):
-    Moth development output + Winch
-    Moth development output + Cranelift
-    Moth release output     + Winch
-    Moth release output     + Cranelift
+    Moth development output + Cranelift None
+    Moth development output + Cranelift Speed
+    Moth release output     + Cranelift None
+    Moth release output     + Cranelift Speed
 ]
 
-The Winch comparisons help expose changes in emitted Wasm without depending on
-an optimising native strategy to remove them. Cranelift comparisons establish
-whether the same changes help the release path. Neither comparison proves
-performance on every runtime or CPU.
+This separates Moth's optimisation and physical planning from native
+optimisation. Measure code size and compilation time as well as steady-state
+speed. `SpeedAndSize`, future Winch and browser runtimes are separate
+experiments. Neither native setting proves performance on every CPU.
 
 Lappet V1 has no persistent AOT cache. A cold compilation benchmark creates the
 required fresh engine/module state and records any process or operating-system

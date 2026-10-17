@@ -56,8 +56,9 @@ execution, Rust host adapters and package acquisition/admission. The builder
 owns capabilities, application lifecycle, scheduling and trusted host libraries.
 The roadmap tracks delivery and gates, not alternative semantics.
 
-- V1 executes core Wasm with Wasmtime. Winch is the development default and
-  Cranelift the release default, with an explicit builder override.
+- V1 executes core Wasm through Wasmtime Cranelift only. Development defaults
+  to `OptLevel::None` and release to `OptLevel::Speed`, independently of
+  Moth's compilation profile. Winch and other engines are deferred.
 - Execution is synchronous and builder-scheduled. No implicit guest callbacks,
   general re-entry, async runtime or persistent AOT cache.
 - Rust is the only V1 native host-binding language. Trusted C libraries are
@@ -86,9 +87,9 @@ tests and existing utilities before adding a wrapper, registry, type or helper.
 Avoid unsafe memory access and speculative runtime abstractions. Keep the
 game-engine and native-server embedding cases in view.
 
-Start runtime tests with small core Wasm fixtures where useful. Exercise both
-Winch and Cranelift, malformed imports, bounds, traps, cleanup, stale handles
-and lifecycle isolation. Fixtures establish runtime mechanics, not Moth compiler
+Start runtime tests with small core Wasm fixtures where useful. Exercise
+Cranelift's development and release optimisation levels, malformed imports,
+bounds, traps, cleanup, stale handles and lifecycle isolation. Fixtures establish runtime mechanics, not Moth compiler
 ABI correctness. Add real Moth integration coverage only once the required
 compiler lowerings are delivered. Test package graph and admission decisions
 without pulling in Wasmtime.
