@@ -1388,6 +1388,7 @@ fn multi_return_fallible_external_retains_unknown_alias_summary() {
             error_return_type: Some(ExternalSignatureType::Abi(RegistryAbiType::Fixed(
                 FixedScalar::I32,
             ))),
+            const_eval: None,
             lowerings: ExternalFunctionLowerings::default(),
         })
         .expect("fallible external fixture registration should succeed");

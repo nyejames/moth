@@ -1316,6 +1316,7 @@ fn implicit_failure_lanes_and_builtin_catch_preserve_float_integrity_guards() {
                 ExternalAbiType::Fixed(FixedScalar::F64),
             ))],
             error_return_type: None,
+            const_eval: None,
             lowerings: ExternalFunctionLowerings::default(),
         })
         .expect("float host signature must register");
@@ -4689,6 +4690,7 @@ fn implicit_failure_zero_success_host_catch_lowers_pending_numeric_argument() {
             }],
             returns: vec![],
             error_return_type: Some(ExternalSignatureType::BuiltinError),
+            const_eval: None,
             lowerings: ExternalFunctionLowerings::default(),
         })
         .expect("fallible host test signature must register");
@@ -4764,6 +4766,7 @@ fn implicit_failure_catches_keep_external_float_checks_on_function_boundary() {
                 ExternalAbiType::Fixed(FixedScalar::F64),
             ))],
             error_return_type: None,
+            const_eval: None,
             lowerings: ExternalFunctionLowerings::default(),
         })
         .expect("float host signature must register");
@@ -4799,6 +4802,7 @@ fn implicit_failure_catches_keep_external_float_checks_on_function_boundary() {
                 ExternalAbiType::Fixed(FixedScalar::F64),
             ))],
             error_return_type: None,
+            const_eval: None,
             lowerings: ExternalFunctionLowerings::default(),
         })
         .expect("float host signature must register");

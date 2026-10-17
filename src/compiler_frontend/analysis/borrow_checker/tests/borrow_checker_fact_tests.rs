@@ -2652,6 +2652,7 @@ fn retained_unknown_result_borrows_possible_final_use_argument() {
                 ExternalReturnSlot::fresh(ExternalAbiType::Utf8Str),
             ],
             error_return_type: Some(ExternalSignatureType::Abi(ExternalAbiType::Utf8Str)),
+            const_eval: None,
             lowerings: ExternalFunctionLowerings::default(),
         })
         .expect("unknown external fixture registration should succeed");

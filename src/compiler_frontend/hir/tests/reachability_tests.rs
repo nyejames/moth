@@ -61,6 +61,7 @@ fn direct_external_calls_retains_lowered_call_and_invoke_sites_in_order() {
             parameters: vec![],
             returns: vec![],
             error_return_type: None,
+            const_eval: None,
             lowerings: ExternalFunctionLowerings::default(),
         })
         .expect("infallible external fixture must register");
@@ -70,6 +71,7 @@ fn direct_external_calls_retains_lowered_call_and_invoke_sites_in_order() {
             parameters: vec![],
             returns: vec![],
             error_return_type: Some(ExternalSignatureType::BuiltinError),
+            const_eval: None,
             lowerings: ExternalFunctionLowerings::default(),
         })
         .expect("fallible external fixture must register");

@@ -200,6 +200,7 @@ pub fn register_core_math_package(registry: &mut ExternalPackageRegistry) {
                         ExternalReturnAlias::Fresh,
                     ),
                     error_return_type: None,
+                    const_eval: None,
                     lowerings: ExternalFunctionLowerings {
                         js: Some(ExternalJsLowering::InlineExpression(
                             function.js_lowering.to_owned(),

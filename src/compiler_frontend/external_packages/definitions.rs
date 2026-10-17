@@ -36,6 +36,44 @@ pub enum ExternalWasmLowering {
     HostFunction(&'static str),
 }
 
+/// Compiler-owned Rust evaluation selected by trusted registration; it is not a source
+/// annotation, callback, name lookup, or lowering.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExternalConstEvalOp {
+    TextLength,
+    TextIsEmpty,
+    TextContains,
+    TextStartsWith,
+    TextEndsWith,
+}
+
+impl ExternalConstEvalOp {
+    /// Reports whether the parameter and success-slot types exactly match this operation.
+    pub fn matches_signature(
+        self,
+        parameters: &[ExternalParameter],
+        success_slots: &[ExternalReturnSlot],
+    ) -> bool {
+        let (parameter_count, return_type) = match self {
+            Self::TextLength => (
+                1,
+                ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::I32)),
+            ),
+            Self::TextIsEmpty => (1, ExternalSignatureType::Abi(ExternalAbiType::Bool)),
+            Self::TextContains | Self::TextStartsWith | Self::TextEndsWith => {
+                (2, ExternalSignatureType::Abi(ExternalAbiType::Bool))
+            }
+        };
+
+        parameters.len() == parameter_count
+            && parameters.iter().all(|parameter| {
+                parameter.language_type == ExternalSignatureType::Abi(ExternalAbiType::Utf8Str)
+            })
+            && success_slots.len() == 1
+            && success_slots[0].value_type == return_type
+    }
+}
+
 /// Full definition of a single external function.
 #[derive(Debug)]
 pub struct ExternalFunctionDef {
@@ -56,6 +94,8 @@ pub struct ExternalFunctionDef {
     pub returns: Vec<ExternalReturnSlot>,
     /// Optional final error slot. This maps to `T!` on source functions.
     pub error_return_type: Option<ExternalSignatureType>,
+    /// Optional compiler-owned constant-evaluation operation.
+    pub const_eval: Option<ExternalConstEvalOp>,
     /// Backend-specific lowering metadata.
     pub lowerings: ExternalFunctionLowerings,
 }
@@ -68,6 +108,7 @@ impl Clone for ExternalFunctionDef {
             parameters: self.parameters.clone(),
             returns: self.returns.clone(),
             error_return_type: self.error_return_type.clone(),
+            const_eval: self.const_eval,
             lowerings: self.lowerings.clone(),
         }
     }
@@ -342,6 +383,8 @@ pub struct ExternalFunctionSpec {
     pub parameters: Vec<ExternalParameter>,
     pub returns: Vec<ExternalReturnSlot>,
     pub error_return_type: Option<ExternalSignatureType>,
+    /// Optional compiler-owned constant-evaluation operation.
+    pub const_eval: Option<ExternalConstEvalOp>,
     pub lowerings: ExternalFunctionLowerings,
 }
 
@@ -352,6 +395,7 @@ impl From<ExternalFunctionSpec> for ExternalFunctionDef {
             parameters: spec.parameters,
             returns: spec.returns,
             error_return_type: spec.error_return_type,
+            const_eval: spec.const_eval,
             lowerings: spec.lowerings,
         }
     }

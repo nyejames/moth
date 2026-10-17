@@ -97,6 +97,7 @@ impl RawFixedF64Function {
             error_return_type: self
                 .declares_error_slot
                 .then_some(ExternalSignatureType::BuiltinError),
+            const_eval: None,
             lowerings: ExternalFunctionLowerings {
                 js: Some(ExternalJsLowering::RuntimeFunction(
                     self.js_helper.to_owned(),

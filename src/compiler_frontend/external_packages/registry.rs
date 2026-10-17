@@ -7,6 +7,7 @@
 //! the ID-indexed maps, and the prelude.
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 
+use super::abi::{ExternalAccessKind, ExternalReturnAlias};
 use super::definitions::{
     ExternalConstantDef, ExternalFunctionDef, ExternalFunctionSpec, ExternalPackage,
     ExternalTypeDef, ExternalTypeSpec,
@@ -207,18 +208,37 @@ impl ExternalPackageRegistry {
         id: ExternalFunctionId,
         mut function: ExternalFunctionDef,
     ) -> Result<(), CompilerError> {
-        let package_path_str = self
-            .packages
-            .get(&package_id)
-            .ok_or_else(|| {
-                CompilerError::compiler_error(format!(
-                    "Cannot register function '{}' in unknown package '{:?}'.",
+        let package = self.packages.get(&package_id).ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "Cannot register function '{}' in unknown package '{:?}'.",
+                path.display_text(),
+                package_id
+            ))
+        })?;
+        let package_path_str = package.path.clone();
+
+        if let Some(op) = function.const_eval {
+            let valid_registration = package.metadata.origin
+                == crate::builder_surface::PackageOrigin::Core
+                && function
+                    .parameters
+                    .iter()
+                    .all(|parameter| parameter.access_kind == ExternalAccessKind::Shared)
+                && function
+                    .returns
+                    .iter()
+                    .all(|slot| matches!(&slot.alias, ExternalReturnAlias::Fresh))
+                && function.error_return_type.is_none()
+                && op.matches_signature(&function.parameters, &function.returns);
+            if !valid_registration {
+                return Err(CompilerError::compiler_error(format!(
+                    "Invalid trusted external constant-evaluation registration for '{}' in package '{}': {:?} does not match its Core signature (compiler bug).",
                     path.display_text(),
-                    package_id
-                ))
-            })?
-            .path
-            .clone();
+                    package_path_str,
+                    op
+                )));
+            }
+        }
 
         function.name = path.leaf().to_owned();
 
@@ -1218,6 +1238,7 @@ pub(crate) mod test_support {
                 .collect(),
             returns: external_success_returns(return_type, return_alias.into()),
             error_return_type: None,
+            const_eval: None,
             lowerings: ExternalFunctionLowerings::default(),
         })
     }

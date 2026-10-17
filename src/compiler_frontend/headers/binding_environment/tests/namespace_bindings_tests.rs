@@ -82,6 +82,7 @@ fn empty_void_function(name: &str) -> ExternalFunctionDef {
         parameters: Vec::new(),
         returns: external_success_returns(ExternalAbiType::Void, ExternalReturnAlias::Fresh),
         error_return_type: None,
+        const_eval: None,
         lowerings: ExternalFunctionLowerings::default(),
     }
 }
