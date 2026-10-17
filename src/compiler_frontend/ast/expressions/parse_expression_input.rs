@@ -6,12 +6,13 @@
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::const_values::ConstValueStore;
+use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
-use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-
-use crate::compiler_frontend::ast::cursor::AstCursor;
+use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
+use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::type_coercion::parse_context::{CastTargetContext, ExpectedType};
 use crate::compiler_frontend::value_mode::ValueMode;
@@ -20,6 +21,56 @@ use crate::compiler_frontend::value_mode::ValueMode;
 pub(crate) struct RouteArgumentContext {
     pub(crate) output_type: TypeId,
     pub(crate) input_type: Option<TypeId>,
+}
+
+impl RouteArgumentContext {
+    pub(crate) fn matches_output_type(
+        self,
+        actual_output_type: TypeId,
+        type_environment: &TypeEnvironment,
+    ) -> bool {
+        self.output_type == actual_output_type
+            || type_environment.contains_generic_parameter(self.output_type)
+            || type_environment.contains_generic_parameter(actual_output_type)
+            || matches!(
+                (
+                    type_environment.get(actual_output_type),
+                    type_environment.get(self.output_type),
+                ),
+                (
+                    Some(TypeDefinition::Choice(actual_choice)),
+                    Some(TypeDefinition::GenericInstance(expected_instance)),
+                ) if actual_choice.generic_parameters.is_some()
+                    && type_environment.nominal_path_by_id(expected_instance.base)
+                        == Some(&actual_choice.path)
+            )
+    }
+
+    pub(crate) fn matches_input_type(
+        self,
+        actual_input_type: Option<TypeId>,
+        type_environment: &TypeEnvironment,
+    ) -> bool {
+        match (self.input_type, actual_input_type) {
+            (None, None) => true,
+            (Some(expected), Some(actual)) => {
+                expected == actual
+                    || type_environment.contains_generic_parameter(expected)
+                    || type_environment.contains_generic_parameter(actual)
+            }
+            (None, Some(_)) | (Some(_), None) => false,
+        }
+    }
+
+    pub(crate) fn matches_contract(
+        self,
+        actual_output_type: TypeId,
+        actual_input_type: Option<TypeId>,
+        type_environment: &TypeEnvironment,
+    ) -> bool {
+        self.matches_output_type(actual_output_type, type_environment)
+            && self.matches_input_type(actual_input_type, type_environment)
+    }
 }
 
 /// Policy that controls how the expression parser handles trailing tokens

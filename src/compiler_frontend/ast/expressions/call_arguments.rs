@@ -31,6 +31,7 @@ use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnIte
 use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExprId, ExpressionOperationView, ExpressionView, OwnedExpr,
 };
+use crate::compiler_frontend::ast::expressions::generic_nominal_retention::GenericNominalConstructor;
 use crate::compiler_frontend::ast::expressions::parse_expression::{
     create_expression_with_trailing_newline_policy, fragment_typed_error_summary,
     register_direct_receiver_witness,
@@ -955,6 +956,7 @@ fn parse_call_arguments_inner(
         // against it instead.
         let argument_source_span = token_stream.current_span();
         let argument_is_bare_symbol = token_stream.current_tag() == TokenTag::SYMBOL;
+        let mut route_future_input_type = None;
         let route_forwarding_value = if route_argument_context.is_some() && argument_is_bare_symbol
         {
             let name = token_stream
@@ -974,9 +976,12 @@ fn parse_call_arguments_inner(
                         )
                     })?;
                     let declaration = route_reference.declaration();
-                    if declaration.type_id != route_context.output_type
-                        || route_reference.input_type() != route_context.input_type
-                    {
+                    let route_input_type = route_reference.input_type();
+                    if !route_context.matches_contract(
+                        declaration.type_id,
+                        route_input_type,
+                        type_interner.environment(),
+                    ) {
                         return Err(CompilerDiagnostic::invalid_call_shape(
                             InvalidCallShapeReason::RouteForwardingContractMismatch,
                             None,
@@ -984,6 +989,7 @@ fn parse_call_arguments_inner(
                         )
                         .into());
                     }
+                    route_future_input_type = route_input_type;
 
                     token_stream.advance();
                     token_stream.skip_newlines();
@@ -1130,6 +1136,10 @@ fn parse_call_arguments_inner(
                     CallArgument::named(value, name, access_mode, value_span, target_span)
                 } else {
                     CallArgument::positional(value, access_mode, value_span)
+                };
+                let argument = match route_future_input_type {
+                    Some(input_type) => argument.with_route_future_input_type(input_type),
+                    None => argument,
                 };
                 let argument = argument.with_marker_span(marker_span);
                 let argument = if let Some(parameter_slot) = parameter_slot {
@@ -1430,10 +1440,17 @@ fn retained_route_argument_is_constructor_root(items: &[ExpressionRpnItem]) -> b
     matches!(
         items,
         [ExpressionRpnItem::PendingNumericCall { call, .. }]
-            if matches!(
-                call.as_ref(),
-                DeferredCall::Choice(choice) if choice.is_route
-            )
+            if match call.as_ref() {
+                DeferredCall::Choice(choice) => choice.is_route,
+                DeferredCall::GenericNominal(nominal) => matches!(
+                    &nominal.constructor,
+                    GenericNominalConstructor::Choice {
+                        route_future_input: Some(_),
+                        ..
+                    }
+                ),
+                _ => false,
+            }
     )
 }
 

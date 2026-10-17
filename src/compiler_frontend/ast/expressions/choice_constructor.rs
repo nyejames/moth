@@ -45,6 +45,7 @@ use crate::compiler_frontend::ast::expressions::generic_nominal_inference::{
 use crate::compiler_frontend::ast::expressions::generic_nominal_retention::{
     DeferredGenericNominalCall, GenericNominalConstructor,
 };
+use crate::compiler_frontend::ast::expressions::parse_expression_input::RouteArgumentContext;
 use crate::compiler_frontend::ast::generic_functions::numeric_origins::{
     GenericNominalShapeInput, link_generic_nominal_result_shape,
 };
@@ -57,7 +58,7 @@ use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
     reserved_trait_keyword_error, reserved_trait_keyword_or_dispatch_mismatch_for_tag,
 };
 use crate::compiler_frontend::compiler_messages::{
-    CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticToken,
+    CompileTimeEvaluationErrorReason, CompilerDiagnostic, DiagnosticToken, InvalidCallShapeReason,
     InvalidChoiceVariantReason,
 };
 use crate::compiler_frontend::datatypes::definitions::{
@@ -94,9 +95,7 @@ pub(super) fn parse_choice_construct(
     const_values: &mut ConstValueStore,
     path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
-    route_argument_context: Option<
-        crate::compiler_frontend::ast::expressions::parse_expression_input::RouteArgumentContext,
-    >,
+    route_argument_context: Option<RouteArgumentContext>,
 ) -> Result<ParsedConstructorExpression, ExpressionParseError> {
     let type_id = choice_declaration.type_id;
 
@@ -214,14 +213,35 @@ pub(super) fn parse_choice_construct(
     let has_parens = token_stream.peek_next_tag() == Some(TokenTag::OPEN_PARENTHESIS);
     let mut parsed_payload_arguments = None;
     if let Some(route_context) = route_argument_context {
-        if generic_declaration_kind.is_some() {
-            return Err(CompilerDiagnostic::invalid_call_shape(
-                crate::compiler_frontend::compiler_messages::InvalidCallShapeReason::RouteArgumentNotDirect,
-                None,
-                variant_span,
-            )
-            .into());
-        }
+        let generic_constructor_seed = if generic_declaration_kind.is_some() {
+            let route_input_evidence = match (&variant.payload, route_context.input_type) {
+                (ChoiceVariantPayloadDefinition::Record { fields }, Some(input_type))
+                    if !type_interner
+                        .environment()
+                        .contains_generic_parameter(input_type) =>
+                {
+                    fields.last().map(|field| (field.type_id, input_type))
+                }
+                _ => None,
+            };
+            let route_seed_context = context.new_child_expression(vec![route_context.output_type]);
+            Some(seed_generic_nominal_constructor(
+                GenericNominalConstructorContext {
+                    nominal_path: &nominal_path,
+                    diagnostic_name: choice_diagnostic_name,
+                    template: GenericNominalTemplate::ChoiceVariants(
+                        variant_definitions.as_deref().unwrap_or(&[]),
+                    ),
+                    span: constructor_span,
+                    route_input_evidence,
+                },
+                &route_seed_context,
+                type_interner.environment(),
+                string_table,
+            )?)
+        } else {
+            None
+        };
         drop(variant_definitions.take());
         return parse_route_choice_construct(
             token_stream,
@@ -233,6 +253,7 @@ pub(super) fn parse_choice_construct(
             variant_name,
             variant_span,
             has_parens,
+            generic_constructor_seed,
             context,
             type_interner,
             expression_builder,
@@ -259,6 +280,7 @@ pub(super) fn parse_choice_construct(
                     variant_definitions.as_deref().unwrap_or(&[]),
                 ),
                 span: constructor_span,
+                route_input_evidence: None,
             },
             context,
             type_interner.environment(),
@@ -292,6 +314,7 @@ pub(super) fn parse_choice_construct(
                         variant_definitions.as_deref().unwrap_or(&[]),
                     ),
                     span: constructor_span,
+                    route_input_evidence: None,
                 },
                 context,
                 type_interner.environment(),
@@ -340,6 +363,7 @@ pub(super) fn parse_choice_construct(
                         constructor_span,
                         variant_span,
                         enforce_constant_context: context.kind.allows_const_record_coercion(),
+                        route_future_input: None,
                         seed,
                         arguments,
                     };
@@ -390,6 +414,7 @@ pub(super) fn parse_choice_construct(
                                 enforce_constant_context: context
                                     .kind
                                     .allows_const_record_coercion(),
+                                route_future_input: None,
                             },
                         }
                         .into_pending_operand()
@@ -406,7 +431,7 @@ pub(super) fn parse_choice_construct(
                             variant_span,
                             enforce_constant_context: context.kind.allows_const_record_coercion(),
                             is_route: false,
-                            future_input_type: None,
+                            future_input: false,
                         }))),
                         span: constructor_span,
                     },
@@ -436,6 +461,7 @@ pub(super) fn parse_choice_construct(
                     diagnostic_name: choice_diagnostic_name,
                     template: GenericNominalTemplate::ChoiceVariants(&[]),
                     span: constructor_span,
+                    route_input_evidence: None,
                 },
                 constructor_fields: constructor_fields.as_deref(),
                 raw_args: None,
@@ -558,10 +584,11 @@ fn parse_route_choice_construct(
     nominal_path: PathId,
     variant: &ChoiceVariantDefinition,
     variant_index: usize,
-    route_context: crate::compiler_frontend::ast::expressions::parse_expression_input::RouteArgumentContext,
+    route_context: RouteArgumentContext,
     variant_name: StringId,
     variant_span: Option<SourceSpan>,
     has_parens: bool,
+    generic_constructor_seed: Option<GenericNominalConstructorSeed>,
     context: &ScopeContext,
     type_interner: &mut AstTypeInterner<'_>,
     expression_builder: &mut AstExpressionBuilder,
@@ -569,9 +596,11 @@ fn parse_route_choice_construct(
     path_fork: &mut PathInternerFork,
     string_table: &mut StringTable,
 ) -> Result<ParsedConstructorExpression, ExpressionParseError> {
-    if choice_declaration.type_id != route_context.output_type {
+    // Generic templates are provisional while this constructor seeds their instance; the
+    // substituted call signature owns the final exact contract check.
+    if !route_context.matches_output_type(choice_declaration.type_id, type_interner.environment()) {
         return Err(CompilerDiagnostic::invalid_call_shape(
-            crate::compiler_frontend::compiler_messages::InvalidCallShapeReason::RouteArgumentNotDirect,
+            InvalidCallShapeReason::RouteArgumentNotDirect,
             None,
             variant_span,
         )
@@ -604,16 +633,39 @@ fn parse_route_choice_construct(
             }
             if route_context.input_type.is_some() {
                 return Err(CompilerDiagnostic::invalid_call_shape(
-                    crate::compiler_frontend::compiler_messages::InvalidCallShapeReason::RouteInputFieldMismatch,
+                    InvalidCallShapeReason::RouteInputFieldMismatch,
                     None,
                     variant_span,
                 )
                 .into());
             }
+            let choice_type_id = if let Some(seed) = generic_constructor_seed {
+                infer_generic_nominal_constructor(
+                    GenericNominalConstructorInput {
+                        context: GenericNominalConstructorContext {
+                            nominal_path: &nominal_path,
+                            diagnostic_name,
+                            template: GenericNominalTemplate::ChoiceVariants(&[]),
+                            span: variant_span,
+                            route_input_evidence: None,
+                        },
+                        constructor_fields: None,
+                        raw_args: None,
+                        expression_builder,
+                    },
+                    seed,
+                    context,
+                    type_interner,
+                    string_table,
+                )?
+                .instance_type_id
+            } else {
+                choice_declaration.type_id
+            };
             let expression = expression_builder.route_construct(RouteConstructInput {
                 tag: variant_index,
                 fields: Vec::<CompletedConstructorField<OwnedExpr>>::new(),
-                type_id: choice_declaration.type_id,
+                type_id: choice_type_id,
                 span: variant_span,
                 value_mode: ValueMode::ImmutableOwned,
                 future_input: false,
@@ -622,20 +674,40 @@ fn parse_route_choice_construct(
         }
         ChoiceVariantPayloadDefinition::Record { fields } => {
             let field_views = ConstructorField::from_choice_payload_fields(fields);
-            let field_expectations = expectations_from_constructor_fields(&field_views, path_fork);
+            let mut field_expectations =
+                expectations_from_constructor_fields(&field_views, path_fork);
+            if let Some(seed) = &generic_constructor_seed {
+                seed.bind_parse_expectations(
+                    &mut field_expectations,
+                    type_interner.environment_mut_for_derived_types(),
+                );
+            }
+
             let future_input = route_context.input_type.is_some();
-            let capture_count = if let Some(input_type) = route_context.input_type {
+            let capture_count = if route_context.input_type.is_some() {
                 let Some(trailing_field) = fields.last() else {
                     return Err(CompilerDiagnostic::invalid_call_shape(
-                        crate::compiler_frontend::compiler_messages::InvalidCallShapeReason::RouteInputFieldMismatch,
+                        InvalidCallShapeReason::RouteInputFieldMismatch,
                         None,
                         variant_span,
                     )
                     .into());
                 };
-                if trailing_field.type_id != input_type {
+                let trailing_field_type = if let Some(seed) = &generic_constructor_seed {
+                    type_interner
+                        .environment_mut_for_derived_types()
+                        .substitute_type_id(
+                            trailing_field.type_id,
+                            seed.bindings().replacement_map(),
+                        )
+                } else {
+                    trailing_field.type_id
+                };
+                if !route_context
+                    .matches_input_type(Some(trailing_field_type), type_interner.environment())
+                {
                     return Err(CompilerDiagnostic::invalid_call_shape(
-                        crate::compiler_frontend::compiler_messages::InvalidCallShapeReason::RouteInputFieldMismatch,
+                        InvalidCallShapeReason::RouteInputFieldMismatch,
                         None,
                         variant_span,
                     )
@@ -648,7 +720,7 @@ fn parse_route_choice_construct(
 
             if future_input && capture_count == 0 && has_parens {
                 return Err(CompilerDiagnostic::invalid_call_shape(
-                    crate::compiler_frontend::compiler_messages::InvalidCallShapeReason::RouteArgumentNotDirect,
+                    InvalidCallShapeReason::RouteArgumentNotDirect,
                     None,
                     variant_span,
                 )
@@ -657,14 +729,41 @@ fn parse_route_choice_construct(
             if !has_parens {
                 token_stream.advance();
                 if future_input && capture_count == 0 {
-                    let expression = expression_builder.route_construct(RouteConstructInput {
-                        tag: variant_index,
-                        fields: Vec::<CompletedConstructorField<OwnedExpr>>::new(),
-                        type_id: choice_declaration.type_id,
-                        span: variant_span,
-                        value_mode: ValueMode::MutableOwned,
-                        future_input: true,
-                    })?;
+                    let expression = if let Some(seed) = generic_constructor_seed {
+                        complete_generic_choice_instance(
+                            GenericChoiceCompletion {
+                                nominal_path: &nominal_path,
+                                diagnostic_name,
+                                template_fields: &fields[..capture_count],
+                                payload_field_views: &field_views[..capture_count],
+                                variant_index,
+                                variant_name,
+                                constructor_span: variant_span,
+                                variant_span,
+                                enforce_constant_context: context
+                                    .kind
+                                    .allows_const_record_coercion(),
+                                route_future_input: Some(future_input),
+                                seed,
+                                arguments: Vec::new(),
+                            },
+                            context,
+                            type_interner,
+                            expression_builder,
+                            const_values,
+                            path_fork,
+                            string_table,
+                        )?
+                    } else {
+                        expression_builder.route_construct(RouteConstructInput {
+                            tag: variant_index,
+                            fields: Vec::<CompletedConstructorField<OwnedExpr>>::new(),
+                            type_id: choice_declaration.type_id,
+                            span: variant_span,
+                            value_mode: ValueMode::MutableOwned,
+                            future_input: true,
+                        })?
+                    };
                     return Ok(ParsedConstructorExpression::Value(expression));
                 }
                 return Err(CompilerDiagnostic::invalid_choice_variant(
@@ -710,48 +809,111 @@ fn parse_route_choice_construct(
 
             match parsed_arguments {
                 ParsedCallArguments::Ready(arguments) => {
-                    let expression = finish_choice_payload_construct(
-                        ChoicePayloadConstructInput {
-                            diagnostic_name,
-                            expectations,
-                            variant_index,
-                            choice_type_id: choice_declaration.type_id,
-                            fields: &fields[..capture_count],
-                            constructor_span,
-                            variant_span,
-                            enforce_constant_context: context.kind.allows_const_record_coercion(),
-                            route_future_input: Some(future_input),
-                        },
-                        arguments,
-                        context,
-                        type_interner,
-                        expression_builder,
-                        const_values,
-                        path_fork,
-                        string_table,
-                    )?;
+                    let expression = if let Some(seed) = generic_constructor_seed {
+                        complete_generic_choice_instance(
+                            GenericChoiceCompletion {
+                                nominal_path: &nominal_path,
+                                diagnostic_name,
+                                template_fields: &fields[..capture_count],
+                                payload_field_views: &field_views[..capture_count],
+                                variant_index,
+                                variant_name,
+                                constructor_span,
+                                variant_span,
+                                enforce_constant_context: context
+                                    .kind
+                                    .allows_const_record_coercion(),
+                                route_future_input: Some(future_input),
+                                seed,
+                                arguments,
+                            },
+                            context,
+                            type_interner,
+                            expression_builder,
+                            const_values,
+                            path_fork,
+                            string_table,
+                        )?
+                    } else {
+                        finish_choice_payload_construct(
+                            ChoicePayloadConstructInput {
+                                diagnostic_name,
+                                expectations,
+                                variant_index,
+                                choice_type_id: choice_declaration.type_id,
+                                fields: &fields[..capture_count],
+                                constructor_span,
+                                variant_span,
+                                enforce_constant_context: context
+                                    .kind
+                                    .allows_const_record_coercion(),
+                                route_future_input: Some(future_input),
+                            },
+                            arguments,
+                            context,
+                            type_interner,
+                            expression_builder,
+                            const_values,
+                            path_fork,
+                            string_table,
+                        )?
+                    };
                     Ok(ParsedConstructorExpression::Value(expression))
                 }
                 ParsedCallArguments::Retained(arguments) => {
-                    let call = DeferredCall::Choice(Box::new(DeferredChoiceCall {
-                        nominal_path,
-                        choice_type_id: choice_declaration.type_id,
-                        variant_index,
-                        variant_name,
-                        expectations: expectations.to_vec(),
-                        arguments,
-                        call_span: constructor_span,
-                        variant_span,
-                        enforce_constant_context: context.kind.allows_const_record_coercion(),
-                        is_route: true,
-                        future_input_type: route_context.input_type,
-                    }));
-                    Ok(ParsedConstructorExpression::RetainedOperand(
+                    let operand = if let Some(seed) = generic_constructor_seed {
+                        let result_shape =
+                            link_generic_nominal_result_shape(GenericNominalShapeInput {
+                                nominal_path: &nominal_path,
+                                diagnostic_name,
+                                declared_fields: &field_views,
+                                arguments: &arguments,
+                                seeded_bindings: seed.bindings(),
+                                context,
+                                type_interner,
+                                expression_builder,
+                                string_table,
+                                call_span: constructor_span,
+                            })?;
+                        DeferredGenericNominalCall {
+                            nominal_path,
+                            diagnostic_name,
+                            seed,
+                            arguments,
+                            result_shape,
+                            call_span: constructor_span,
+                            constructor: GenericNominalConstructor::Choice {
+                                variant: variant.clone(),
+                                payload_field_views: field_views,
+                                variant_index,
+                                variant_span,
+                                enforce_constant_context: context
+                                    .kind
+                                    .allows_const_record_coercion(),
+                                route_future_input: Some(future_input),
+                            },
+                        }
+                        .into_pending_operand()
+                    } else {
+                        let call = DeferredCall::Choice(Box::new(DeferredChoiceCall {
+                            nominal_path,
+                            choice_type_id: choice_declaration.type_id,
+                            variant_index,
+                            variant_name,
+                            expectations: expectations.to_vec(),
+                            arguments,
+                            call_span: constructor_span,
+                            variant_span,
+                            enforce_constant_context: context.kind.allows_const_record_coercion(),
+                            is_route: true,
+                            future_input,
+                        }));
                         ExpressionRpnItem::PendingNumericCall {
                             call: Box::new(call),
                             span: constructor_span,
-                        },
-                    ))
+                        }
+                    };
+                    Ok(ParsedConstructorExpression::RetainedOperand(operand))
                 }
             }
         }
@@ -973,7 +1135,7 @@ pub(crate) struct DeferredChoiceCall {
     pub(crate) variant_span: Option<SourceSpan>,
     pub(crate) enforce_constant_context: bool,
     pub(crate) is_route: bool,
-    pub(crate) future_input_type: Option<TypeId>,
+    pub(crate) future_input: bool,
 }
 
 /// Resume one retained concrete choice payload constructor after its arguments resolve.
@@ -1002,7 +1164,7 @@ pub(crate) fn complete_deferred_choice_call<
         variant_span,
         enforce_constant_context,
         is_route,
-        future_input_type,
+        future_input,
     } = deferred;
 
     // Arguments complete before the session services are borrowed: both take the session mutably.
@@ -1037,23 +1199,15 @@ pub(crate) fn complete_deferred_choice_call<
         )
         .into());
     };
-    let captured_fields = if let Some(input_type) = future_input_type {
-        let Some(trailing_field) = fields.last() else {
-            return Err(CompilerError::compiler_error(
-                "a retained route constructor lost its future-input payload field",
-            )
-            .into());
-        };
-        if trailing_field.type_id != input_type || expectations.len() >= fields.len() {
-            return Err(CompilerError::compiler_error(
-                "a retained route constructor has an invalid future-input boundary",
-            )
-            .into());
-        }
-        &fields[..expectations.len()]
-    } else {
-        fields
-    };
+    let capture_field_count = expectations.len();
+    let payload_field_count = capture_field_count + usize::from(future_input);
+    if fields.len() != payload_field_count {
+        return Err(CompilerError::compiler_error(
+            "a retained choice constructor's payload field count changed before completion",
+        )
+        .into());
+    }
+    let captured_fields = &fields[..capture_field_count];
 
     finish_choice_payload_construct(
         ChoicePayloadConstructInput {
@@ -1068,7 +1222,7 @@ pub(crate) fn complete_deferred_choice_call<
             constructor_span: call_span,
             variant_span,
             enforce_constant_context,
-            route_future_input: is_route.then_some(future_input_type.is_some()),
+            route_future_input: is_route.then_some(future_input),
         },
         completed_arguments,
         context,
@@ -1096,6 +1250,7 @@ pub(crate) struct GenericChoiceCompletion<'a> {
     pub(crate) constructor_span: Option<SourceSpan>,
     pub(crate) variant_span: Option<SourceSpan>,
     pub(crate) enforce_constant_context: bool,
+    pub(crate) route_future_input: Option<bool>,
     pub(crate) seed: GenericNominalConstructorSeed,
     pub(crate) arguments: Vec<CallArgument<OwnedExpr>>,
 }
@@ -1123,6 +1278,7 @@ pub(crate) fn complete_generic_choice_instance(
         constructor_span,
         variant_span,
         enforce_constant_context,
+        route_future_input,
         seed,
         arguments,
     } = completion;
@@ -1135,6 +1291,7 @@ pub(crate) fn complete_generic_choice_instance(
                 // Expected-result evidence is already captured in the seed.
                 template: GenericNominalTemplate::ChoiceVariants(&[]),
                 span: constructor_span,
+                route_input_evidence: None,
             },
             constructor_fields: Some(payload_field_views),
             raw_args: Some(&arguments),
@@ -1165,7 +1322,7 @@ pub(crate) fn complete_generic_choice_instance(
             constructor_span,
             variant_span,
             enforce_constant_context,
-            route_future_input: None,
+            route_future_input,
         },
         arguments,
         context,

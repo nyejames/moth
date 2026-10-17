@@ -55,6 +55,7 @@ pub(crate) enum GenericNominalConstructor {
         variant_index: usize,
         variant_span: Option<SourceSpan>,
         enforce_constant_context: bool,
+        route_future_input: Option<bool>,
     },
 }
 
@@ -161,6 +162,7 @@ pub(crate) fn complete_deferred_generic_nominal_call<
             variant_index,
             variant_span,
             enforce_constant_context,
+            route_future_input,
         } => {
             let ChoiceVariantPayloadDefinition::Record { fields } = &variant.payload else {
                 return Err(CompilerError::compiler_error(
@@ -168,17 +170,31 @@ pub(crate) fn complete_deferred_generic_nominal_call<
                 )
                 .into());
             };
+            if payload_field_views.len() != fields.len() {
+                return Err(CompilerError::compiler_error(
+                    "a retained generic choice constructor's payload views changed before completion",
+                )
+                .into());
+            }
+            if route_future_input == Some(true) && fields.is_empty() {
+                return Err(CompilerError::compiler_error(
+                    "a retained generic route constructor lost its future-input payload field",
+                )
+                .into());
+            }
+            let capture_field_count = fields.len() - usize::from(route_future_input == Some(true));
             complete_generic_choice_instance(
                 GenericChoiceCompletion {
                     nominal_path: &nominal_path,
                     diagnostic_name,
-                    template_fields: fields,
-                    payload_field_views: &payload_field_views,
+                    template_fields: &fields[..capture_field_count],
+                    payload_field_views: &payload_field_views[..capture_field_count],
                     variant_index,
                     variant_name: variant.name,
                     constructor_span: call_span,
                     variant_span,
                     enforce_constant_context,
+                    route_future_input,
                     seed,
                     arguments: completed_arguments,
                 },

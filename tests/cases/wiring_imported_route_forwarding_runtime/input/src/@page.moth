@@ -1,0 +1,9 @@
+@helper AppMessage, EditorMessage, receive_editor, forward_editor, accept_input, accept_output, build_route
+
+direct = receive_editor(AppMessage::Editor(1))
+forwarded = forward_editor(AppMessage::Editor(2))
+inferred_input = accept_input(AppMessage::Editor(3))
+inferred_output = accept_output(EditorMessage::Changed)
+generated = build_route(4)
+
+[:imported direct=[direct] forwarded=[forwarded] input=[inferred_input] output=[inferred_output] generated=[generated]]

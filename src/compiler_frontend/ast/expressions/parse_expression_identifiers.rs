@@ -96,14 +96,6 @@ pub(super) fn parse_identifier_or_call(
         )
         .into());
     }
-    if route_argument_context.is_some() && context.get_reference(&identifier).is_none() {
-        return Err(CompilerDiagnostic::invalid_call_shape(
-            InvalidCallShapeReason::RouteArgumentNotDirect,
-            None,
-            Some(token_stream.current_span()),
-        )
-        .into());
-    }
 
     // ------------------------------------------------------------
     //  Local binding: reference, constructor, or function call
@@ -169,7 +161,8 @@ pub(super) fn parse_identifier_or_call(
         };
         if let Some(route_context) = route_argument_context
             && (token_stream.peek_next_tag() != Some(TokenTag::DOUBLE_COLON)
-                || declaration.type_id != route_context.output_type
+                || !route_context
+                    .matches_output_type(declaration.type_id, type_interner.environment())
                 || !context.is_source_choice_declaration(
                     declaration,
                     expression_builder,

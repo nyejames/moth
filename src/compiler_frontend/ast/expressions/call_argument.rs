@@ -6,6 +6,7 @@
 
 use crate::compiler_frontend::ast::expressions::expression_store::ExprId;
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringId;
 
@@ -87,6 +88,14 @@ pub(crate) struct CallArgument<E = ExprId> {
     /// WHAT: retains the parser's named/positional routing decision through AST validation.
     /// WHY: final validation must not reconstruct call syntax or produce a second routing policy.
     pub(crate) parameter_slot: Option<ParameterSlot>,
+
+    /// Future input carried by a forwarded Route argument for immediate generic inference.
+    ///
+    /// WHAT: retains the input side of a Route reference, whose ordinary expression type only
+    ///       carries the output choice.
+    /// WHY: a nested generic call can infer its route input from the enclosing Route contract
+    ///      without inspecting either callable body.
+    pub(crate) route_future_input_type: Option<TypeId>,
 }
 
 impl<E> CallArgument<E> {
@@ -114,6 +123,7 @@ impl<E> CallArgument<E> {
             marker_span: None,
             following_separator_span: None,
             parameter_slot: None,
+            route_future_input_type: None,
         }
     }
     /// Build a named call argument with the default passing mode derived from `access_mode`.
@@ -134,6 +144,7 @@ impl<E> CallArgument<E> {
             marker_span: None,
             following_separator_span: None,
             parameter_slot: None,
+            route_future_input_type: None,
         }
     }
 
@@ -167,6 +178,15 @@ impl<E> CallArgument<E> {
         self
     }
 
+    /// Retain the future input selected by Route forwarding.
+    ///
+    /// WHY: the expression's ordinary type carries only the output choice, so generic inference
+    ///      needs this parse-time contract fact to recover the forwarded input.
+    pub(crate) fn with_route_future_input_type(mut self, input_type: TypeId) -> Self {
+        self.route_future_input_type = Some(input_type);
+        self
+    }
+
     /// Change only the expression edge when entering or leaving construction.
     pub(crate) fn map_value<T>(self, map: impl FnOnce(E) -> T) -> CallArgument<T> {
         CallArgument {
@@ -179,6 +199,7 @@ impl<E> CallArgument<E> {
             marker_span: self.marker_span,
             following_separator_span: self.following_separator_span,
             parameter_slot: self.parameter_slot,
+            route_future_input_type: self.route_future_input_type,
         }
     }
 }

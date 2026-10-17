@@ -1,0 +1,23 @@
+Envelope type T ::
+    Wrapped | id I32, value T |,
+    Empty,
+;
+
+StringEnvelope as Envelope of String
+
+receive type M |event Route of String -> M| -> String:
+    return "generic choice"
+;
+
+receive_complete |event Route of StringEnvelope| -> String:
+    return "complete"
+;
+
+receive_unit |event Route of StringEnvelope| -> String:
+    return "unit"
+;
+
+result = receive(Envelope::Wrapped(7))
+complete = receive_complete(Envelope::Wrapped(value = "named", id = 8))
+unit = receive_unit(Envelope::Empty)
+[:entry: <p>[result]</p><p>[complete]</p><p>[unit]</p>]

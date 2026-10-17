@@ -17317,3 +17317,143 @@ path = "wiring_contract_nested_bare_head_rejected"
 tags = ["integration", "wiring", "diagnostics"]
 contract = "language.wiring.invalid_contract_syntax"
 role = "boundary"
+
+[[case]]
+id = "wiring_generic_route_output_runtime"
+path = "wiring_generic_route_output_runtime"
+tags = ["integration", "wiring", "generics", "routes", "runtime"]
+contract = "language.wiring.generic_route_output_inferred_immediately"
+role = "primary"
+
+[[case]]
+id = "wiring_generic_route_input_runtime"
+path = "wiring_generic_route_input_runtime"
+tags = ["integration", "wiring", "generics", "routes", "runtime"]
+contract = "language.wiring.generic_route_input_inferred_from_trailing_field"
+role = "primary"
+
+[[case]]
+id = "wiring_generic_choice_route_output_runtime"
+path = "wiring_generic_choice_route_output_runtime"
+tags = ["integration", "wiring", "generics", "routes", "runtime"]
+contract = "language.wiring.generic_choice_route_output_inferred"
+role = "primary"
+
+
+[[case]]
+id = "wiring_imported_route_forwarding_runtime"
+path = "wiring_imported_route_forwarding_runtime"
+tags = ["integration", "wiring", "generics", "routes", "dependencies", "runtime"]
+contract = "language.wiring.imported_route_forwarding_and_child_lifting"
+role = "primary"
+
+[[case]]
+id = "wiring_generic_route_cannot_infer_rejected"
+path = "wiring_generic_route_cannot_infer_rejected"
+tags = ["integration", "wiring", "generics", "routes", "diagnostics"]
+contract = "language.wiring.generic_route_requires_call_site_evidence"
+role = "primary"
+
+[[case]]
+id = "wiring_wire_mutable_alias_conflict_rejected"
+path = "wiring_wire_mutable_alias_conflict_rejected"
+tags = ["integration", "wiring", "borrows", "diagnostics"]
+contract = "language.wiring.wire_and_mutable_alias_conflict"
+role = "primary"
+
+[[case]]
+id = "wiring_imported_generic_wire_runtime"
+path = "wiring_imported_generic_wire_runtime"
+tags = ["integration", "wiring", "generics", "dependencies", "borrows", "runtime"]
+contract = "language.wiring.imported_generic_wire_identity"
+role = "primary"
+
+[[case]]
+id = "wiring_route_wasm_generated_rejected"
+path = "wiring_route_wasm_generated_rejected"
+tags = ["integration", "wiring", "generics", "routes", "dependencies", "html-wasm"]
+contract = "language.wiring.route_wasm_rejects_generated_reachable_construction"
+role = "primary"
+
+[[case]]
+id = "wiring_generic_choice_route_input_mismatch_rejected"
+path = "wiring_generic_choice_route_input_mismatch_rejected"
+tags = ["integration", "wiring", "generics", "routes", "diagnostics"]
+contract = "language.wiring.generic_choice_route_input_exact"
+role = "primary"
+
+[[case]]
+id = "wiring_generic_route_retained_capture_runtime"
+path = "wiring_generic_route_retained_capture_runtime"
+tags = ["integration", "wiring", "generics", "routes", "runtime"]
+contract = "language.wiring.retained_generic_route_input_and_capture"
+role = "primary"
+
+[[case]]
+id = "wiring_route_retained_input_runtime"
+path = "wiring_route_retained_input_runtime"
+tags = ["integration", "wiring", "generics", "routes", "runtime"]
+contract = "language.wiring.retained_route_input_inference"
+role = "primary"
+
+[[case]]
+id = "wiring_route_retained_capture_input_runtime"
+path = "wiring_route_retained_capture_input_runtime"
+tags = ["integration", "wiring", "generics", "routes", "runtime"]
+contract = "language.wiring.retained_capture_supplies_route_input_evidence"
+role = "primary"
+
+[[case]]
+id = "wiring_route_forward_retained_runtime"
+path = "wiring_route_forward_retained_runtime"
+tags = ["integration", "wiring", "generics", "routes", "runtime"]
+contract = "language.wiring.retained_forwarded_route_input_inference"
+role = "primary"
+
+[[case]]
+id = "wiring_route_forwarded_generic_input_runtime"
+path = "wiring_route_forwarded_generic_input_runtime"
+tags = ["integration", "wiring", "generics", "routes", "runtime"]
+contract = "language.wiring.forwarded_route_infers_generic_input"
+role = "primary"
+
+[[case]]
+id = "wiring_route_generic_input_structural_mismatch_rejected"
+path = "wiring_route_generic_input_structural_mismatch_rejected"
+tags = ["integration", "wiring", "generics", "routes", "diagnostics"]
+contract = "language.wiring.generic_route_input_requires_exact_structure"
+role = "primary"
+
+[[case]]
+id = "wiring_route_generic_input_optional_mismatch_rejected"
+path = "wiring_route_generic_input_optional_mismatch_rejected"
+tags = ["integration", "wiring", "generics", "routes", "diagnostics"]
+contract = "language.wiring.generic_route_input_requires_exact_optional"
+role = "primary"
+
+[[case]]
+id = "wiring_route_forwarded_generic_input_structural_mismatch_rejected"
+path = "wiring_route_forwarded_generic_input_structural_mismatch_rejected"
+tags = ["integration", "wiring", "generics", "routes", "diagnostics"]
+contract = "language.wiring.forwarded_generic_route_input_requires_exact_structure"
+role = "primary"
+
+[[case]]
+id = "wiring_route_forwarded_generic_input_optional_mismatch_rejected"
+path = "wiring_route_forwarded_generic_input_optional_mismatch_rejected"
+tags = ["integration", "wiring", "generics", "routes", "diagnostics"]
+contract = "language.wiring.forwarded_generic_route_input_requires_exact_optional"
+role = "primary"
+[[case]]
+id = "wiring_generic_choice_route_retained_sample_runtime"
+path = "wiring_generic_choice_route_retained_sample_runtime"
+tags = ["integration", "wiring", "generics", "routes", "runtime"]
+contract = "language.wiring.retained_generic_choice_route_input_sample_inference"
+role = "primary"
+
+[[case]]
+id = "wiring_generic_choice_route_retained_expected_runtime"
+path = "wiring_generic_choice_route_retained_expected_runtime"
+tags = ["integration", "wiring", "generics", "routes", "runtime"]
+contract = "language.wiring.retained_generic_choice_route_input_expected_inference"
+role = "primary"

@@ -24,8 +24,8 @@ use crate::compiler_frontend::ast::generic_bounds::{
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
-    CompilerDiagnostic, GenericInferenceSubject, InvalidGenericInstantiationReason,
-    ValueReceiverContext,
+    CompilerDiagnostic, GenericInferenceSubject, InvalidCallShapeReason,
+    InvalidGenericInstantiationReason, ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::definitions::{
     ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, TypeDefinition,
@@ -57,6 +57,7 @@ pub(crate) struct GenericNominalConstructorContext<'a> {
     pub diagnostic_name: CallDiagnosticName<'static>,
     pub template: GenericNominalTemplate<'a>,
     pub span: Option<SourceSpan>,
+    pub route_input_evidence: Option<(TypeId, TypeId)>,
 }
 
 /// Contextual bindings and source evidence collected before argument parsing.
@@ -149,6 +150,23 @@ pub(crate) fn seed_generic_nominal_constructor(
         &mut evidence_locations,
         string_table,
     )?;
+
+    if let Some((template_type_id, concrete_type_id)) = constructor_context.route_input_evidence {
+        let mut evidence_context = NominalBindingEvidenceContext {
+            nominal_path: constructor_context.nominal_path,
+            diagnostic_name: constructor_context.diagnostic_name,
+            bindings: &mut bindings,
+            evidence_locations: &mut evidence_locations,
+            type_environment,
+            string_table,
+        };
+        collect_route_input_binding_evidence(
+            &mut evidence_context,
+            template_type_id,
+            concrete_type_id,
+            constructor_context.span,
+        )?;
+    }
 
     Ok(GenericNominalConstructorSeed {
         bindings,
@@ -557,6 +575,54 @@ fn collect_nominal_binding_evidence(
             )
             .into())
         }
+    }
+}
+
+/// Collect concrete Route input evidence for a generic choice's trailing field.
+///
+/// WHAT: unifies the selected payload field with the concrete input and records bindings only
+///      when the complete structural walk matches.
+/// WHY: Route contracts require exact semantic types, so structural mismatches and repeated
+///      generic conflicts are input mismatches rather than ordinary missing inference evidence.
+fn collect_route_input_binding_evidence(
+    context: &mut NominalBindingEvidenceContext<'_>,
+    template_type_id: TypeId,
+    concrete_type_id: TypeId,
+    span: Option<SourceSpan>,
+) -> Result<(), CallValidationError> {
+    let canonical_parameters = context
+        .type_environment
+        .canonical_parameters_for_nominal(context.nominal_path)
+        .ok_or_else(|| {
+            CompilerError::compiler_error(format!(
+                "Generic nominal '{}' has no canonical parameter list after registration",
+                context
+                    .diagnostic_name
+                    .rendered_callee_name(context.string_table)
+            ))
+        })?;
+
+    match context
+        .type_environment
+        .try_collect_type_parameter_bindings_typeid(
+            template_type_id,
+            concrete_type_id,
+            &mut *context.bindings,
+        ) {
+        Ok(true) => {
+            context.evidence_locations.record_first_bindings(
+                canonical_parameters,
+                &*context.bindings,
+                span,
+            );
+            Ok(())
+        }
+        Ok(false) | Err(_) => Err(CompilerDiagnostic::invalid_call_shape(
+            InvalidCallShapeReason::RouteInputFieldMismatch,
+            None,
+            span,
+        )
+        .into()),
     }
 }
 

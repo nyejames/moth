@@ -21,7 +21,7 @@ use crate::compiler_frontend::ast::expressions::call_validation::{
 };
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_store::{
-    AstExpressionBuilder, OwnedExpr,
+    AstExpressionBuilder, ExpressionOperationView, OwnedExpr,
 };
 use crate::compiler_frontend::ast::expressions::expression_types::FallibleExpressionHandling;
 use crate::compiler_frontend::ast::expressions::function_calls::{
@@ -37,7 +37,8 @@ use crate::compiler_frontend::ast::generic_functions::diagnostics::{
     missing_generic_function_trait_evidence, recursive_generic_function_instantiation,
 };
 use crate::compiler_frontend::ast::generic_functions::numeric_origins::{
-    GenericErrorReturn, GenericNumericSignatureInput, link_generic_numeric_signature,
+    GenericErrorReturn, GenericNumericSignatureInput, RouteArgumentInputEvidence,
+    RouteFutureInputEvidence, link_generic_numeric_signature, route_argument_future_input_evidence,
 };
 use crate::compiler_frontend::ast::generic_functions::{
     GenericFunctionInstanceKey, GenericFunctionInstantiationRequest, GenericFunctionTemplate,
@@ -56,7 +57,9 @@ use crate::compiler_frontend::ast::statements::fallible_handling::{
 use crate::compiler_frontend::ast::statements::functions::{FunctionSignature, ParameterContract};
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, ValueReceiverContext};
+use crate::compiler_frontend::compiler_messages::{
+    CompilerDiagnostic, InvalidCallShapeReason, ValueReceiverContext,
+};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_bindings::{BindingConflict, GenericTypeBindings};
 use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId};
@@ -1095,6 +1098,13 @@ fn infer_generic_function_call_with_expectations(
             )
         })?;
     let signature = substitute_function_signature(&template.signature, &mapping, type_environment);
+
+    validate_substituted_route_contracts(
+        &signature,
+        &routed_arguments,
+        expression_builder,
+        type_environment,
+    )?;
     let instance_path = generic_function_instance_path(
         template.function_path,
         type_arguments.as_ref(),
@@ -1213,6 +1223,68 @@ pub(crate) fn validate_generic_function_bound_evidence(
     Ok(selected_evidence.into_boxed_slice())
 }
 
+fn validate_substituted_route_contracts(
+    signature: &FunctionSignature,
+    routed_arguments: &[Option<&CallArgument<OwnedExpr>>],
+    expression_builder: &AstExpressionBuilder,
+    type_environment: &mut TypeEnvironment,
+) -> Result<(), ExpressionParseError> {
+    for (slot, argument) in routed_arguments.iter().enumerate() {
+        let Some(argument) = argument else {
+            continue;
+        };
+        let Some(parameter) = signature.parameters.get(slot) else {
+            return Err(CompilerError::compiler_error(
+                "a routed generic argument exceeded its substituted signature",
+            )
+            .into());
+        };
+        let ParameterContract::Route { input } = parameter.contract else {
+            continue;
+        };
+
+        let argument_view = expression_builder.view_owned(argument.value)?;
+        let actual_output_type =
+            argument_view.require_single(ValueReceiverContext::FunctionArgument)?;
+        let is_forwarded = matches!(
+            argument_view.operation(),
+            ExpressionOperationView::Reference(_)
+        );
+        if actual_output_type != parameter.type_id {
+            let reason = if is_forwarded {
+                InvalidCallShapeReason::RouteForwardingContractMismatch
+            } else {
+                InvalidCallShapeReason::RouteArgumentNotDirect
+            };
+            return Err(CompilerDiagnostic::invalid_call_shape(reason, None, argument.span).into());
+        }
+
+        if let Some(expected_input_type) = input
+            && !matches!(
+                route_argument_future_input_evidence(
+                    RouteArgumentInputEvidence::Ready {
+                        forwarded_input_type: argument.route_future_input_type,
+                        value_type_id: actual_output_type,
+                        operation: argument_view.operation(),
+                    },
+                    type_environment,
+                )?,
+                Some(RouteFutureInputEvidence::Type(actual_input_type))
+                    if actual_input_type == expected_input_type
+            )
+        {
+            let reason = if is_forwarded {
+                InvalidCallShapeReason::RouteForwardingContractMismatch
+            } else {
+                InvalidCallShapeReason::RouteInputFieldMismatch
+            };
+            return Err(CompilerDiagnostic::invalid_call_shape(reason, None, argument.span).into());
+        }
+    }
+
+    Ok(())
+}
+
 impl<'a> GenericCallExpectedContext<'a> {
     fn matching_success_results(self, success_return_count: usize) -> Option<&'a [TypeId]> {
         match self {
@@ -1242,30 +1314,27 @@ fn collect_call_argument_bindings(
     bindings: &mut GenericTypeBindings,
     evidence_locations: &mut GenericBindingEvidenceLocations,
     expression_builder: &AstExpressionBuilder,
-    type_environment: &TypeEnvironment,
+    type_environment: &mut TypeEnvironment,
     string_table: &mut StringTable,
     path_fork: &PathInternerFork,
 ) -> Result<(), ExpressionParseError> {
-    let mut evidence_context = GenericBindingEvidenceContext {
-        template,
-        bindings,
-        evidence_locations,
-        type_environment,
-        string_table,
-        path_fork,
-    };
-
     for (slot, argument) in routed_arguments.iter().enumerate() {
-        let (argument_type_id, argument_span) = match (slot, known_receiver_type_id, argument) {
-            (0, Some(receiver_type_id), _) => (receiver_type_id, known_receiver_span),
-            (_, _, Some(argument)) => (
-                expression_builder
-                    .view_owned(argument.value)?
-                    .require_single(ValueReceiverContext::FunctionArgument)?,
-                argument.span,
-            ),
-            _ => continue,
-        };
+        let routed_argument = *argument;
+        let (argument_type_id, argument_span, argument_operation) =
+            match (slot, known_receiver_type_id, routed_argument) {
+                (0, Some(receiver_type_id), _) => (receiver_type_id, known_receiver_span, None),
+                (_, _, Some(argument)) => {
+                    let argument_view = expression_builder.view_owned(argument.value)?;
+                    let argument_type_id =
+                        argument_view.require_single(ValueReceiverContext::FunctionArgument)?;
+                    (
+                        argument_type_id,
+                        argument.span,
+                        Some(argument_view.operation()),
+                    )
+                }
+                _ => continue,
+            };
         let template_type_id = match expectations[slot].expected_type {
             ExpectedParameterType::Known(type_id)
             | ExpectedParameterType::GenericParameter(type_id) => type_id,
@@ -1275,12 +1344,62 @@ fn collect_call_argument_bindings(
             }
         };
 
-        collect_binding_evidence(
-            &mut evidence_context,
-            template_type_id,
-            argument_type_id,
-            argument_span,
-        )?;
+        {
+            let mut evidence_context = GenericBindingEvidenceContext {
+                template,
+                bindings: &mut *bindings,
+                evidence_locations: &mut *evidence_locations,
+                type_environment: &*type_environment,
+                string_table: &mut *string_table,
+                path_fork,
+            };
+            collect_binding_evidence(
+                &mut evidence_context,
+                template_type_id,
+                argument_type_id,
+                argument_span,
+            )?;
+        }
+
+        let (
+            Some(argument),
+            Some(operation),
+            ParameterContract::Route {
+                input: Some(input_type),
+            },
+        ) = (
+            routed_argument,
+            argument_operation,
+            expectations[slot].contract,
+        )
+        else {
+            continue;
+        };
+        if let Some(RouteFutureInputEvidence::Type(actual_input_type)) =
+            route_argument_future_input_evidence(
+                RouteArgumentInputEvidence::Ready {
+                    forwarded_input_type: argument.route_future_input_type,
+                    value_type_id: argument_type_id,
+                    operation,
+                },
+                type_environment,
+            )?
+        {
+            let mut evidence_context = GenericBindingEvidenceContext {
+                template,
+                bindings: &mut *bindings,
+                evidence_locations: &mut *evidence_locations,
+                type_environment: &*type_environment,
+                string_table: &mut *string_table,
+                path_fork,
+            };
+            collect_binding_evidence(
+                &mut evidence_context,
+                input_type,
+                actual_input_type,
+                argument.span,
+            )?;
+        }
     }
 
     Ok(())
