@@ -3,10 +3,10 @@
 ## Status
 
 ```text
-STATUS: ACTIVE on expression-refactor (Phase 7 next)
-CURRENT_SLICE: Phase 6 complete: head-directed Wire/Route parameter contracts, Wire arguments, contextual route formation, generic/imported routes and the JS/Wasm target matrix accepted with audits.
+STATUS: ACTIVE on expression-refactor (Phase 8 next)
+CURRENT_SLICE: Phase 7 complete: Core-only const-eval registration, one shared fold dispatch with typed requirement/refusal, the five Text evaluators and zero/one/multiple/optional slot plumbing accepted with audits.
 BLOCKERS: Fresh Windows proof remains pending.
-NEXT_ACTION: Phase 7 trusted Core constant evaluation: slice registration metadata/validation, the shared evaluator path and the five Text operations.
+NEXT_ACTION: Phase 8 hardening: re-audit owners and delete obsolete code, verify store release, re-run measurements, update architecture/progress docs, final review and validate-full.
 ```
 
 The main squash checkpoint retains expression-refactor source `534aea1a5`,
@@ -646,56 +646,56 @@ one head-directed argument path and no legacy reactivity or result transport.
 projection and the canonical external/Core Text contracts.
 **Produces:** trusted operation registration and one shared evaluator path.
 
-- [ ] Add optional `ExternalConstEvalOp` metadata beside existing external
+- [x] Add optional `ExternalConstEvalOp` metadata beside existing external
   lowering metadata through the definition/registration/clone owners. Use a
   closed typed vocabulary with only live operation variants. It is not a
   source annotation, callback, name lookup or backend lowering.
-- [ ] Validate registration before partial installation: trusted Core origin,
+- [x] Validate registration before partial installation: trusted Core origin,
   shared parameters, accepted Fresh classification for every success slot,
   no error slot, supported concrete types/optional wrappers and a complete
   signature matching the operation. Builder/Dependency/provider JS stay ineligible.
   No spelling of `@core` can manufacture trusted origin.
-- [ ] Dispatch by the resolved external identity through a borrowed definition
+- [x] Dispatch by the resolved external identity through a borrowed definition
   and its small operation token. One AST-owned path resolves/folds arguments,
   evaluates and checks every result slot, then materialises ordinary constants
   through the same receiver as runtime producers. No `ExternalConstValue` graph.
-- [ ] Use the shared path for operator operands, its single-operand fast path,
+- [x] Use the shared path for operator operands, its single-operand fast path,
   constant substitution, required initialisers, supported defaults, templates
   and static-if finalisation. Keep pure RPN reduction separate from operation
   dispatch and make `ConstValueResolver` reuse that dispatch.
-- [ ] Preserve normal visibility, argument/access/arity/coercion and handling
+- [x] Preserve normal visibility, argument/access/arity/coercion and handling
   validation before replacement. A foldable callee does not become an external
   constant or legalise restricted config imports, forward references, runtime
   bindings or arbitrary source-function interpretation.
-- [ ] Use a typed required/opportunistic requirement and typed refusal outcome.
+- [x] Use a typed required/opportunistic requirement and typed refusal outcome.
   Refusal for no operation, a runtime argument, unavailable concrete structural
   text or a deterministic bound preserves the call opportunistically and gives
   the owned diagnostic when required. Keep already-folded arguments and effects.
   Existing checked-value failures keep their established policy. Broken trusted
   signatures/output invariants are compiler bugs, not refusals.
-- [ ] Reuse concrete-text resolution and the shared deterministic work/output
+- [x] Reuse concrete-text resolution and the shared deterministic work/output
   bound owner. Define missing units/bounds once if needed, with checked lengths
   and tests. No wall-clock budget framework, guessed resource URL, locale,
   normalisation, host-time/randomness/IO or fallible host-call evaluation.
-- [ ] Enable only existing `@core/text` `length`, `is_empty`, `contains`,
+- [x] Enable only existing `@core/text` `length`, `is_empty`, `contains`,
   `starts_with` and `ends_with`. Read their current exact signatures. Cover
   empty strings/patterns, non-ASCII/non-BMP and combining sequences against the
   canonical contract. A UTF-8 byte count cannot replace its length semantics.
-- [ ] Test optional presence/absence and multiple success slots through the
+- [x] Test optional presence/absence and multiple success slots through the
   real normal materialisation/receiver and resulting HIR/backend boundary,
   including each permitted optional layer and per-slot type through constant
   storage, export/import and lowering. The five single-result Text
   operations cannot prove multi-result transport. Use a focused internal
   fixture at that boundary, not an invented public Core API, unused production
   enum variant or second test-only evaluator.
-- [ ] Publish imported constants as completed values with stable identities.
+- [x] Publish imported constants as completed values with stable identities.
   Consumers do not rerun provider evaluation. Preserve input/config provenance
   conservatively across results and normal graph-active resource validation.
-- [ ] Test aliases, namespaces and re-exports plus independently built external
+- [x] Test aliases, namespaces and re-exports plus independently built external
   registries, proving canonical identity resolves in the consumer without name
   dispatch or a donor-local index. Runtime parity cases must demonstrably retain
   a call. Mixed folded/runtime cases keep exactly the helpers they still need.
-- [ ] A fully folded call leaves no external HIR call, runtime helper or JS asset
+- [x] A fully folded call leaves no external HIR call, runtime helper or JS asset
   dependency for that call. Refresh existing reachability/link facts. Preserve
   semantic visibility and build/cache dependencies used to compute the value.
   Test a visible operation on a target without runtime lowering: folded succeeds,

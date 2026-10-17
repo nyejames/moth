@@ -48,8 +48,8 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
     integration target results, ten feature lanes and all 14 scaling series.
     Grouped-not dev HIR fits n^0.88 under n^1.25 in that evidence.
     Fresh Windows Canvas/frontend proof remains pending.
-    Phase 5 type/folding reductions and the Phase 6 Wiring foundation are complete on
-    `expression-refactor`. Phases 7–8 follow in order.
+    Phase 5 type/folding reductions, the Phase 6 Wiring foundation and Phase 7 trusted
+    Core constant evaluation are complete on `expression-refactor`. Phase 8 hardening follows.
 
     Use this together with `tests/cases/manifest.toml` when changing language features.
 

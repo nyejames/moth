@@ -71,9 +71,25 @@ A string of N `Char` values reports `text.length` of N. Surrogate pairs in the r
 
 HTML-JS implements this contract with scalar-value iteration, so BMP and
 non-BMP characters each contribute one count. The return type is `I32`
-and the package stays infallible. HTML-Wasm still lacks a lowering for this
-package; see @../../../progress (progress matrix) for current target
+and the package stays infallible. HTML-Wasm still lacks a runtime lowering
+for this package; see @../../../progress (progress matrix) for current target
 availability.
+
+### Compile-time evaluation
+
+All five functions evaluate at compile time when every argument is a compile-time `String` with known content. The compiler evaluates them with the same contract as the runtime helpers, including the scalar-value length unit.
+
+[codeblock, $code("moth"):
+    @core/text
+
+    greeting #= "Hello, Priya"
+    greeting_length #= text.length(greeting)
+    formal #= text.starts_with(greeting, "Hello")
+]
+
+Folding applies wherever a constant value is accepted or available: `#` constants, operator operands, parameter defaults, static `if` conditions and template interpolation. A call with a runtime argument stays a runtime call. It is rejected where a constant is required, such as a `#` constant initialiser.
+
+A fully folded call needs no runtime helper, so it also builds on HTML-Wasm. A call that remains at runtime still needs the target lowering. Exported constants publish their computed values, and importing modules use those values directly.
 
 ### Unsupported source forms
 
