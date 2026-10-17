@@ -536,6 +536,7 @@ impl Template {
                     control_flow_validation,
                     TemplateControlFlowValidationMode::RuntimeCapable
                 ),
+                Some(context.external_package_registry.as_ref()),
             )?;
 
             if composed_root != original_root {

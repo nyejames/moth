@@ -147,6 +147,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             &mut self.context.expression_builder,
             &mut self.context.const_values,
             string_table,
+            Some(self.context.external_package_registry.as_ref()),
             self.context.template_const_loop_iteration_limit,
             Rc::clone(&self.context.template_ir_store),
         )
@@ -207,6 +208,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             Rc::clone(&self.context.template_ir_store),
             string_table,
             &self.environment.type_environment,
+            Some(self.context.external_package_registry.as_ref()),
         )
         .map_err(|error| {
             self.template_normalization_error_messages(error, &emitted.warnings, string_table)
@@ -290,6 +292,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             Rc::clone(&self.context.template_ir_store),
             string_table,
             &self.environment.type_environment,
+            Some(self.context.external_package_registry.as_ref()),
         )
         .map_err(|error| {
             self.template_normalization_error_messages(error, &emitted.warnings, string_table)
@@ -350,6 +353,7 @@ impl<'context, 'services> AstFinalizer<'context, 'services> {
             &mut self.context.expression_builder,
             Rc::clone(&self.context.template_ir_store),
             &self.environment.type_environment,
+            Some(self.context.external_package_registry.as_ref()),
         )
         .collect(&emitted.ast, start_function_path.as_ref())
         .map_err(|error| {

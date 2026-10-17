@@ -1742,11 +1742,11 @@ pub enum CompileTimeEvaluationErrorReason {
     SameFileForwardConstantReference,
     ConstantInitializerNotFoldable,
     ExternalNonScalarConstantInConstantContext,
-    ExternalFunctionCallInConstantContext,
     NonCompileTimeFieldInConstantContext,
     NoneLiteralRequiresOptionalTypeContext,
     ExternalTypeConstructionNotSupported,
     StructFieldDefaultNotFoldable,
+    EvaluationOutputBoundExceeded,
     StructuralStringRequiresFinalText,
 }
 

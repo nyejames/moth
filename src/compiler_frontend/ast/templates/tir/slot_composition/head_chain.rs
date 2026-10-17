@@ -15,6 +15,7 @@ use crate::compiler_frontend::ast::templates::tir::slot_layout::{
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrNode, TemplateIrNodeId, TemplateIrNodeKind, TemplateIrStore,
 };
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 
 #[cfg(test)]
 use crate::compiler_frontend::ast::templates::tir::TemplateIrId;
@@ -32,6 +33,7 @@ pub(super) struct HeadChainResolutionInputs<'a> {
     pub(super) string_table: &'a StringTable,
     pub(super) expressions: &'a AstExpressionBuilder,
     pub(super) const_values: &'a ConstValueStore,
+    pub(super) external_package_registry: Option<&'a ExternalPackageRegistry>,
     pub(super) allow_runtime_plans: bool,
 }
 
@@ -97,6 +99,7 @@ pub(crate) fn compose_tir_head_chain(
         root_node_id,
         string_table,
         allow_runtime_plans,
+        None,
     )
 }
 
@@ -117,11 +120,13 @@ pub(crate) fn compose_tir_head_chain_from_root(
     root_node_id: TemplateIrNodeId,
     string_table: &StringTable,
     allow_runtime_plans: bool,
+    external_package_registry: Option<&ExternalPackageRegistry>,
 ) -> HeadChainResult<TemplateIrNodeId> {
     let inputs = HeadChainResolutionInputs {
         string_table,
         expressions,
         const_values,
+        external_package_registry,
         allow_runtime_plans,
     };
     compose_tir_head_chain_from_root_into(store, root_node_id, &inputs)

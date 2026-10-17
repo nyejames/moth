@@ -34,6 +34,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, DependencyClauseKind, DiagnosticCategory,
     DiagnosticPayload, InvalidAssignmentTargetReason, InvalidCompileTimePathReason,
     InvalidConfigReason, InvalidDependencyClauseReason, InvalidOutputFolderReason, PathKind,
+    ValueReceiverContext,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;

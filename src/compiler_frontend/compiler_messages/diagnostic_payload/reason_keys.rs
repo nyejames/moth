@@ -1437,12 +1437,12 @@ define_stable_reason_keys! {
     &CompileTimeEvaluationErrorReason::SameFileForwardConstantReference => "compile_time_evaluation_error.same_file_forward_constant_reference",
     &CompileTimeEvaluationErrorReason::ConstantInitializerNotFoldable => "compile_time_evaluation_error.constant_initializer_not_foldable",
     &CompileTimeEvaluationErrorReason::ExternalNonScalarConstantInConstantContext => "compile_time_evaluation_error.external_non_scalar_constant_in_constant_context",
-    &CompileTimeEvaluationErrorReason::ExternalFunctionCallInConstantContext => "compile_time_evaluation_error.external_function_call_in_constant_context",
     &CompileTimeEvaluationErrorReason::NonCompileTimeFieldInConstantContext => "compile_time_evaluation_error.non_compile_time_field_in_constant_context",
     &CompileTimeEvaluationErrorReason::NoneLiteralRequiresOptionalTypeContext => "compile_time_evaluation_error.none_literal_requires_optional_type_context",
     &CompileTimeEvaluationErrorReason::ExternalTypeConstructionNotSupported => "compile_time_evaluation_error.external_type_construction_not_supported",
     &CompileTimeEvaluationErrorReason::StructFieldDefaultNotFoldable => "compile_time_evaluation_error.struct_field_default_not_foldable",
     &CompileTimeEvaluationErrorReason::StructuralStringRequiresFinalText => "compile_time_evaluation_error.structural_string_requires_final_text",
+    &CompileTimeEvaluationErrorReason::EvaluationOutputBoundExceeded => "compile_time_evaluation_error.evaluation_output_bound_exceeded",
     },
 
 

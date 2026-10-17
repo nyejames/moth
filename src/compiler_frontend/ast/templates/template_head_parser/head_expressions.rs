@@ -273,6 +273,7 @@ pub(super) fn push_template_head_expression(
                 &target.context.template_ir_store,
                 target.expression_builder,
                 target.const_values,
+                Some(target.context.external_package_registry.as_ref()),
             )
         })?
         .is_compile_time_value();

@@ -6,6 +6,7 @@
 
 use std::collections::HashSet;
 
+use crate::compiler_frontend::ast::const_eval::registered_external_const_eval_op;
 use crate::compiler_frontend::ast::const_values::store::{ConstValuePayload, ConstValueStore};
 use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExpressionOperationView, ExpressionView,
@@ -27,6 +28,7 @@ use crate::compiler_frontend::ast::templates::tir::refs::TemplateTirReference;
 use crate::compiler_frontend::ast::templates::tir::store::TemplateIrStore;
 use crate::compiler_frontend::ast::templates::tir::view::TirView;
 use crate::compiler_frontend::compiler_errors::CompilerError;
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
@@ -127,6 +129,7 @@ pub(crate) fn effective_loop_header_for_view(
 pub(crate) fn classify_expression_const_evaluable_with_nested_template(
     expression: ExpressionView<'_>,
     loop_binding_paths: &[PathId],
+    external_package_registry: Option<&ExternalPackageRegistry>,
     nested_template: &mut impl FnMut(TemplateTirReference, &[PathId]) -> Result<bool, TemplateError>,
 ) -> Result<bool, TemplateError> {
     use ExpressionOperationView as V;
@@ -151,6 +154,29 @@ pub(crate) fn classify_expression_const_evaluable_with_nested_template(
                     match classify_expression_const_evaluable_with_nested_template(
                         child,
                         loop_binding_paths,
+                        external_package_registry,
+                        nested_template,
+                    ) {
+                        Ok(value) => evaluable &= value,
+                        Err(error) => result = Err(error),
+                    }
+                }
+            });
+            result?;
+            Ok(evaluable)
+        }
+        V::Call(_)
+            if registered_external_const_eval_op(expression, external_package_registry)
+                .is_some() =>
+        {
+            let mut evaluable = true;
+            let mut result = Ok(());
+            expression.visit_children(|child| {
+                if result.is_ok() {
+                    match classify_expression_const_evaluable_with_nested_template(
+                        child,
+                        loop_binding_paths,
+                        external_package_registry,
                         nested_template,
                     ) {
                         Ok(value) => evaluable &= value,
@@ -171,11 +197,13 @@ pub(crate) fn tir_node_is_const_evaluable_value(
     const_values: &ConstValueStore,
     node_id: TemplateIrNodeId,
     _string_table: &StringTable,
+    external_package_registry: Option<&ExternalPackageRegistry>,
 ) -> Result<bool, TemplateError> {
     let mut query = StructuralConstness {
         store,
         expressions,
         const_values,
+        external_package_registry,
         visiting_templates: HashSet::new(),
     };
     query.tree(node_id, &[], true)
@@ -187,6 +215,7 @@ struct StructuralConstness<'a> {
     store: &'a TemplateIrStore,
     expressions: &'a AstExpressionBuilder,
     const_values: &'a ConstValueStore,
+    external_package_registry: Option<&'a ExternalPackageRegistry>,
     visiting_templates: HashSet<TemplateIrId>,
 }
 
@@ -304,6 +333,7 @@ impl StructuralConstness<'_> {
         classify_expression_const_evaluable_with_nested_template(
             expression,
             bindings,
+            self.external_package_registry,
             &mut |reference, nested_bindings| {
                 if reference.context != TemplateViewContext::default() {
                     return Ok(false);

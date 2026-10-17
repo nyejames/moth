@@ -3,7 +3,7 @@ entry = "."
 [backends.html]
 mode = "success"
 warnings = "forbid"
-rendered_output_exact = "core_text_helper_reachability length=3"
+rendered_output_exact = "core_text_helper_reachability length=3 folded_sibling=true"
 
 [[backends.html.artifact_assertions]]
 path = "index.html"

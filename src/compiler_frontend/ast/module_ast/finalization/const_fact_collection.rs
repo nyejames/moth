@@ -25,6 +25,7 @@ use crate::compiler_frontend::ast::expressions::expression_types::FallibleHandli
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::ast::templates::tir::TemplateIrStore;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::instrumentation::{
     AstCounter, add_ast_counter, increment_ast_counter,
 };
@@ -55,6 +56,7 @@ impl<'a> ConstFactCollector<'a> {
         expression_builder: &'a mut AstExpressionBuilder,
         template_ir_store: Rc<RefCell<TemplateIrStore>>,
         type_environment: &'a TypeEnvironment,
+        external_package_registry: Option<&'a ExternalPackageRegistry>,
     ) -> Self {
         Self {
             resolver: ConstValueResolver::new(
@@ -63,6 +65,7 @@ impl<'a> ConstFactCollector<'a> {
                 expression_builder,
                 template_ir_store,
                 type_environment,
+                external_package_registry,
             ),
             facts: AstConstFacts::default(),
             module_explicit_env: ConstValueEnvironment::default(),

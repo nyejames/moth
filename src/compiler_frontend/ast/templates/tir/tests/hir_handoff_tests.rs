@@ -1217,6 +1217,7 @@ fn prepared_handoff_preserves_structural_and_nested_value_contexts_after_tir_rel
             &expressions,
             &const_values,
             TemplatePreparationMode::Value,
+            None,
         )
         .expect("both structural and nested contexts prepare");
         assert_eq!(prepared.identity, view.identity());
@@ -1262,6 +1263,7 @@ fn prepared_handoff_preserves_structural_and_nested_value_contexts_after_tir_rel
             &expressions,
             &const_values,
             TemplatePreparationMode::Value,
+            None,
         )
         .expect("nested exact view prepares");
         assert!(matches!(

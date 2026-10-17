@@ -83,6 +83,7 @@ fn build_test_fold_context<'a>(
             crate::compiler_frontend::module_compilation::DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         bindings: vec![],
         source_scope: None,
+        external_package_registry: None,
     }
 }
 
@@ -263,6 +264,7 @@ fn fold_final_view_fixture(
         expressions,
         const_values,
         TemplatePreparationMode::Value,
+        None,
     )?;
     if !matches!(prepared.outcome, TemplatePreparationOutcome::Foldable) {
         return Err(TemplateError::Infrastructure(
@@ -295,6 +297,7 @@ fn project_pattern_for_template(
         expressions,
         const_values,
         TemplatePreparationMode::ConstRequired,
+        None,
     )?;
     let mut fold_context = build_test_fold_context(string_table, expressions, const_values);
     Ok(fold_prepared_const_template_pattern(prepared, view, &mut fold_context)?.pieces)
@@ -363,6 +366,7 @@ fn const_template_fold_keeps_resource_as_text_run_boundary() -> Result<(), Templ
         &expressions,
         &const_values,
         TemplatePreparationMode::ConstRequired,
+        None,
     )?;
     assert!(matches!(
         prepared.outcome,
@@ -447,6 +451,7 @@ fn const_template_projection_preserves_structured_slot_order() -> Result<(), Tem
         &expressions,
         &const_values,
         TemplatePreparationMode::ConstRequired,
+        None,
     )?;
     let mut fold_context =
         build_test_fold_context(&mut string_table, &mut expressions, &mut const_values);
@@ -1188,6 +1193,7 @@ fn final_view_fold_loop_binding_and_body_provenance_reach_exact_result() {
         &fixture.expressions,
         &fixture.const_values,
         TemplatePreparationMode::Value,
+        None,
     )
     .expect("range loop view should prepare");
     assert!(matches!(
@@ -1292,6 +1298,7 @@ fn final_view_fold_loop_preserves_visited_no_output_selector_provenance() {
             &fixture.expressions,
             &fixture.const_values,
             TemplatePreparationMode::Value,
+            None,
         )
         .expect("range loop view should prepare");
         assert!(matches!(
@@ -2034,6 +2041,7 @@ fn final_view_aggregate_output_outside_wrapper_classifies_as_runtime() {
         &fixture.expressions,
         &fixture.const_values,
         TemplatePreparationMode::Value,
+        None,
     )
     .expect("preparation should classify AggregateOutput outside a wrapper");
     assert!(
@@ -2182,6 +2190,7 @@ fn final_view_runtime_slot_application_requires_handoff() {
         &fixture.expressions,
         &fixture.const_values,
         TemplatePreparationMode::Value,
+        None,
     )
     .expect("runtime slot application should prepare as runtime");
     assert!(matches!(
@@ -2194,6 +2203,7 @@ fn final_view_runtime_slot_application_requires_handoff() {
         &fixture.expressions,
         &fixture.const_values,
         TemplatePreparationMode::Value,
+        None,
     )
     .expect("runtime slot application should remain a runtime result");
     assert!(matches!(

@@ -1,5 +1,4 @@
 use super::*;
-use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression_store::{
     ExprId, ExpressionOperationView,
@@ -513,6 +512,7 @@ fn prepare_const_required_view_directly(
         expressions,
         const_values,
         TemplatePreparationMode::ConstRequired,
+        None,
     )
 }
 

@@ -18,7 +18,7 @@ use crate::compiler_frontend::ast::templates::template::TemplateConstValueKind;
 use crate::compiler_frontend::ast::templates::template_folding::TemplateEmission;
 use crate::compiler_frontend::ast::templates::tir::{
     TemplatePreparationMode, TemplatePreparationOutcome, TemplateTirPhase, TirView,
-    fold_prepared_template, prepare_tir_view,
+    fold_prepared_template, prepare_tir_view_with_source_scope,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::build_config::{
@@ -733,11 +733,12 @@ fn primitive_value_from_template(
             reference.context,
         )
         .map_err(ExpressionParseError::from)?;
-        prepare_tir_view(
+        prepare_tir_view_with_source_scope(
             &view,
             expression_builder,
             const_values,
             TemplatePreparationMode::Value,
+            scope_context,
         )
         .map_err(ExpressionParseError::from)?
     };
@@ -760,8 +761,12 @@ fn primitive_value_from_template(
         reference.context,
     )
     .map_err(ExpressionParseError::from)?;
-    let fold_result = fold_prepared_template(&preparation, view, &mut fold_context)
+    let mut fold_result = fold_prepared_template(&preparation, view, &mut fold_context)
         .map_err(ExpressionParseError::from)?;
+    if let Some(diagnostic) = fold_result.take_required_diagnostic() {
+        // A grouped-project config field must resolve to concrete build-time text.
+        return Err(ExpressionParseError::Diagnostic(diagnostic));
+    }
     match fold_result.emission {
         TemplateEmission::NoOutput => Ok(Some(PrimitiveBuildValue::String(String::new()))),
         TemplateEmission::Output(value) => {

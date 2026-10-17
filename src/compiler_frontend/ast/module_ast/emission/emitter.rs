@@ -1368,14 +1368,20 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         );
         // Top-level const fragments are builder-facing rendered text metadata; no semantic or
         // fingerprint consumer owns provenance at this boundary in the current milestone.
-        let TemplateFoldResult { emission, .. } =
-            match fold_prepared_template(&prepared, view, &mut fold_context) {
-                Ok(result) => result,
-                Err(error) => {
-                    drop(fold_context);
-                    return Err(self.template_error_messages(error, string_table));
-                }
-            };
+        let mut result = match fold_prepared_template(&prepared, view, &mut fold_context) {
+            Ok(result) => result,
+            Err(error) => {
+                drop(fold_context);
+                return Err(self.template_error_messages(error, string_table));
+            }
+        };
+        if let Some(diagnostic) = result.take_required_diagnostic() {
+            // A top-level const fragment is rendered text metadata: structural text anchored to a
+            // resource or site root has no characters at this boundary.
+            drop(fold_context);
+            return Err(self.diagnostic_messages(diagnostic, string_table));
+        }
+        let TemplateFoldResult { emission, .. } = result;
         let value = match emission {
             TemplateEmission::Output(value) => value,
             TemplateEmission::NoOutput => {

@@ -73,6 +73,7 @@ fn fold_context<'a>(
         const_values,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         source_scope: None,
+        external_package_registry: None,
         bindings: vec![],
     }
 }
@@ -797,6 +798,7 @@ fn prepared_fold_fixture_result(
         expressions,
         const_values,
         TemplatePreparationMode::Value,
+        None,
     )?;
     if let TemplatePreparationOutcome::Runtime(reason) = preparation.outcome {
         return Err(CompilerError::compiler_error(format!(
@@ -1278,6 +1280,7 @@ fn preparation_classifies_outer_override_by_const_vs_runtime_expression() {
             &expressions,
             &const_values,
             TemplatePreparationMode::Value,
+            None,
         )
         .expect("outer runtime wrapper override should be a valid runtime result")
     };
@@ -1375,6 +1378,7 @@ fn preparation_ignores_runtime_referenced_wrapper_expression_overlay() {
             &expressions,
             &const_values,
             TemplatePreparationMode::Value,
+            None,
         )
         .expect("referenced wrapper expression should be ignored by the structural transition")
     };
@@ -1474,6 +1478,7 @@ fn preparation_falls_back_for_runtime_non_injected_slot_source() {
             &expressions,
             &const_values,
             TemplatePreparationMode::Value,
+            None,
         )
         .expect("runtime slot source should be an eligible runtime result")
     };
@@ -1592,6 +1597,7 @@ fn prepared_fold_rejects_slot_insert_from_wrapper_context_set() {
         &expressions,
         &const_values,
         TemplatePreparationMode::Value,
+        None,
     )
     .expect("slot insert helper should prepare without folding");
     assert!(!matches!(
@@ -1643,6 +1649,7 @@ fn prepared_fold_rejects_slot_insert_from_effective_slot_source() {
         &expressions,
         &const_values,
         TemplatePreparationMode::Value,
+        None,
     )
     .expect("slot insert source should prepare without folding");
     assert!(!matches!(
@@ -1762,6 +1769,7 @@ fn preparation_terminates_for_cyclic_nested_wrapper_contexts() {
         &expressions,
         &const_values,
         TemplatePreparationMode::Value,
+        None,
     ) {
         Err(error) => error,
         Ok(prepared) => panic!("cyclic wrapper contexts must be CompilerError, got {prepared:?}"),

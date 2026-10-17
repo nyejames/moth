@@ -14,7 +14,7 @@ use crate::compiler_frontend::external_packages::{
     ExternalJsLowering, ExternalPackageRegistry, ExternalParameter, ExternalReturnAlias,
     ExternalReturnSlot, ExternalSignatureType, ExternalSymbolCategory, ExternalSymbolId,
     ExternalSymbolPath, ExternalTypeDef, ExternalTypeId, IO_INPUT_EXTERNAL_TYPE_ID,
-    external_success_returns,
+    TextConstEvalOp, external_success_returns,
 };
 use crate::compiler_frontend::semantic_identity::StablePackageIdentity;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -249,7 +249,7 @@ fn const_eval_registration_requires_trusted_core_origin_and_exact_signature() {
             ],
             returns: vec![ExternalReturnSlot::fresh(ExternalAbiType::Bool)],
             error_return_type: None,
-            const_eval: Some(ExternalConstEvalOp::TextContains),
+            const_eval: Some(ExternalConstEvalOp::Text(TextConstEvalOp::Contains)),
             lowerings: ExternalFunctionLowerings::default(),
         };
 

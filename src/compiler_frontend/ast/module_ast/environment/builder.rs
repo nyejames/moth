@@ -13,9 +13,9 @@ use crate::compiler_frontend::ast::generic_functions::GenericFunctionTemplate;
 use crate::compiler_frontend::ast::module_ast::build_context::AstPhaseContext;
 use crate::compiler_frontend::ast::module_ast::environment::{
     AstEnvironmentInput, AstModuleEnvironment, AstModuleLookups, BuildResolvedPublicTypeRootsInput,
-    DeclarationId, DeclarationSemanticTable, ResolvedConstantSet, ResolvedPublicTraitRoot,
-    ResolvedPublicTypeRootKind, ResolvedPublicTypeRootTable, TopLevelDeclarationTable,
-    build_resolved_public_trait_roots, build_resolved_public_type_roots,
+    DeclarationId, DeclarationSemanticInputs, DeclarationSemanticTable, ResolvedConstantSet,
+    ResolvedPublicTraitRoot, ResolvedPublicTypeRootKind, ResolvedPublicTypeRootTable,
+    TopLevelDeclarationTable, build_resolved_public_trait_roots, build_resolved_public_type_roots,
 };
 use crate::compiler_frontend::ast::module_ast::scope_context::ReceiverMethodCatalog;
 use crate::compiler_frontend::ast::module_ast::scope_context::{ContextKind, ScopeContext};
@@ -714,12 +714,15 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             .collect();
         let declaration_semantics = DeclarationSemanticTable::from_environment(
             self.declaration_table.as_ref(),
-            &self.resolved_function_signatures_by_path,
-            &self.nominal_type_ids_by_path,
-            &self.type_environment,
-            &self.context.template_ir_store,
-            &self.context.expression_builder,
-            &self.context.const_values,
+            DeclarationSemanticInputs {
+                resolved_function_signatures_by_path: &self.resolved_function_signatures_by_path,
+                nominal_type_ids_by_path: &self.nominal_type_ids_by_path,
+                type_environment: &self.type_environment,
+                template_ir_store: &self.context.template_ir_store,
+                expression_builder: &self.context.expression_builder,
+                const_values: &self.context.const_values,
+                external_package_registry: Some(self.context.external_package_registry.as_ref()),
+            },
         )
         .map_err(|error| match error {
             TemplateError::Diagnostic(diagnostic) => {

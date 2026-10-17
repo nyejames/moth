@@ -97,6 +97,7 @@ fn collect_and_strip_comment_templates_for_tests_with_store(
         expression_builder,
         const_values,
         string_table,
+        None,
         DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         template_ir_store,
     )

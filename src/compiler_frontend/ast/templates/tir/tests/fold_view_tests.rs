@@ -103,6 +103,7 @@ fn fold_context<'a>(
         const_values,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         source_scope: None,
+        external_package_registry: None,
         bindings: vec![],
     }
 }
@@ -154,6 +155,7 @@ fn fold_prepared_view(
         context.expression_builder,
         context.const_values,
         TemplatePreparationMode::Value,
+        None,
     )?;
     assert!(matches!(
         prepared.outcome,
@@ -263,6 +265,7 @@ fn fold_view_is_deterministic_with_and_without_active_bindings() {
         const_values: &mut const_values,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         source_scope: None,
+        external_package_registry: None,
         bindings: vec![TemplateFoldBinding {
             path,
             value: active_value,
@@ -311,6 +314,7 @@ fn prepared_view_rejects_identity_mismatch() {
         &expressions,
         &const_values,
         TemplatePreparationMode::Value,
+        None,
     )
     .expect("preparation should succeed");
     assert!(matches!(
@@ -343,6 +347,7 @@ fn foldable_preparation_accepts_simple_text() {
         &expressions,
         &const_values,
         TemplatePreparationMode::Value,
+        None,
     )
     .expect("simple text should have a valid preparation");
     assert!(
@@ -672,6 +677,7 @@ fn fold_view_restores_option_and_loop_bindings_after_const_loop_limit_error() {
         &expressions,
         &const_values,
         TemplatePreparationMode::Value,
+        None,
     )
     .expect("nested const-control-flow view should prepare");
     assert!(matches!(
@@ -1109,6 +1115,7 @@ fn repeated_prepared_fold_reuses_effective_expression_provenance() {
         &expressions,
         &const_values,
         TemplatePreparationMode::Value,
+        None,
     )
     .expect("view should prepare");
     assert!(matches!(
@@ -1234,6 +1241,7 @@ fn prepared_runtime_plan_validates_plan_authority_before_handoff() {
         &expressions,
         &const_values,
         TemplatePreparationMode::Value,
+        None,
     )
     .expect_err("preparation must validate its required runtime slot plan");
     assert!(

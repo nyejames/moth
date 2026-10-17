@@ -40,11 +40,17 @@ pub enum ExternalWasmLowering {
 /// annotation, callback, name lookup, or lowering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExternalConstEvalOp {
-    TextLength,
-    TextIsEmpty,
-    TextContains,
-    TextStartsWith,
-    TextEndsWith,
+    Text(TextConstEvalOp),
+}
+
+/// Trusted compiler-owned operations for Core Text functions.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TextConstEvalOp {
+    Length,
+    IsEmpty,
+    Contains,
+    StartsWith,
+    EndsWith,
 }
 
 impl ExternalConstEvalOp {
@@ -54,13 +60,14 @@ impl ExternalConstEvalOp {
         parameters: &[ExternalParameter],
         success_slots: &[ExternalReturnSlot],
     ) -> bool {
-        let (parameter_count, return_type) = match self {
-            Self::TextLength => (
+        let ExternalConstEvalOp::Text(operation) = self;
+        let (parameter_count, return_type) = match operation {
+            TextConstEvalOp::Length => (
                 1,
                 ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::I32)),
             ),
-            Self::TextIsEmpty => (1, ExternalSignatureType::Abi(ExternalAbiType::Bool)),
-            Self::TextContains | Self::TextStartsWith | Self::TextEndsWith => {
+            TextConstEvalOp::IsEmpty => (1, ExternalSignatureType::Abi(ExternalAbiType::Bool)),
+            TextConstEvalOp::Contains | TextConstEvalOp::StartsWith | TextConstEvalOp::EndsWith => {
                 (2, ExternalSignatureType::Abi(ExternalAbiType::Bool))
             }
         };

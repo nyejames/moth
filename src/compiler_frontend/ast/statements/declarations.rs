@@ -131,6 +131,7 @@ fn initializer_is_compile_time_constant(
                 &context.template_ir_store,
                 expression_builder,
                 const_values,
+                Some(context.external_package_registry.as_ref()),
             )
         })
         .map(|kind| kind.is_compile_time_value())

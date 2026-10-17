@@ -135,6 +135,7 @@ impl ScopeContext {
             template_const_loop_iteration_limit: self.shared.template_const_loop_iteration_limit,
             bindings: Vec::new(),
             source_scope: Some(self),
+            external_package_registry: Some(self.shared.external_package_registry.as_ref()),
         }
     }
 }

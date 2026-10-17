@@ -45,6 +45,7 @@ fn context<'a>(
         const_values: constants,
         template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
         source_scope: None,
+        external_package_registry: None,
         bindings,
     }
 }
@@ -83,7 +84,9 @@ fn bool_condition_with_no_bindings_reuses_root() {
         .id();
     let mut context = context(&mut strings, &mut expressions, &mut constants, vec![]);
     assert_eq!(
-        resolve_fold_bindings_in_expression(root, &mut context).expect("resolution"),
+        resolve_fold_bindings_in_expression(root, &mut context)
+            .expect("resolution")
+            .expression,
         root
     );
 }
@@ -100,7 +103,9 @@ fn string_slice_with_no_bindings_reuses_root() {
         .id();
     let mut context = context(&mut strings, &mut expressions, &mut constants, vec![]);
     assert_eq!(
-        resolve_fold_bindings_in_expression(root, &mut context).expect("resolution"),
+        resolve_fold_bindings_in_expression(root, &mut context)
+            .expect("resolution")
+            .expression,
         root
     );
 }
@@ -126,7 +131,9 @@ fn bool_condition_binding_substitution_reuses_binding() {
         }],
     );
     assert_eq!(
-        resolve_fold_bindings_in_expression(root, &mut context).expect("resolution"),
+        resolve_fold_bindings_in_expression(root, &mut context)
+            .expect("resolution")
+            .expression,
         value
     );
     assert!(matches!(
@@ -165,7 +172,9 @@ fn option_present_capture_substitution_preserves_wrapper() {
         }],
     );
     assert_eq!(
-        resolve_fold_bindings_in_expression(root, &mut context).expect("resolution"),
+        resolve_fold_bindings_in_expression(root, &mut context)
+            .expect("resolution")
+            .expression,
         value
     );
 }
@@ -308,7 +317,9 @@ fn coerced_expression_with_no_bindings_reuses_root() {
         .id();
     let mut context = context(&mut strings, &mut expressions, &mut constants, vec![]);
     assert_eq!(
-        resolve_fold_bindings_in_expression(root, &mut context).expect("resolution"),
+        resolve_fold_bindings_in_expression(root, &mut context)
+            .expect("resolution")
+            .expression,
         root
     );
 }
@@ -347,7 +358,9 @@ fn coerced_template_with_no_bindings_returns_exact_inner_template() {
         .id();
     let mut context = context(&mut strings, &mut expressions, &mut constants, vec![]);
     assert_eq!(
-        resolve_fold_bindings_in_expression(root, &mut context).expect("resolution"),
+        resolve_fold_bindings_in_expression(root, &mut context)
+            .expect("resolution")
+            .expression,
         inner
     );
     let ExpressionOperationView::Template(template) = context
@@ -414,7 +427,9 @@ fn numeric_operation_with_no_substitutions_reuses_root() {
     let root = numeric_root(&mut expressions, &mut constants, left);
     let mut context = context(&mut strings, &mut expressions, &mut constants, vec![]);
     assert_eq!(
-        resolve_fold_bindings_in_expression(root, &mut context).expect("resolution"),
+        resolve_fold_bindings_in_expression(root, &mut context)
+            .expect("resolution")
+            .expression,
         root
     );
 }
@@ -450,6 +465,7 @@ fn numeric_operation_with_bound_reference_folds_replacement() {
         }],
     );
     let folded = resolve_fold_bindings_in_expression(root, &mut context).expect("resolution");
+    let folded = folded.expression;
     assert_ne!(folded, root);
     let ExpressionOperationView::Constant(value) = context
         .expression_builder

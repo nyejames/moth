@@ -358,6 +358,7 @@ pub(super) fn parse_identifier_or_call(
                             &context.template_ir_store,
                             expression_builder,
                             const_values,
+                            Some(context.external_package_registry.as_ref()),
                         )
                     })?
                     .is_compile_time_value(),
@@ -516,14 +517,6 @@ pub(super) fn parse_identifier_or_call(
     if let Some((function_id, host_function_definition)) =
         context.lookup_visible_external_function(identifier)
     {
-        if context.kind.is_constant_context() {
-            return Err(CompilerDiagnostic::compile_time_evaluation_error(
-                CompileTimeEvaluationErrorReason::ExternalFunctionCallInConstantContext,
-                Some(identifier),
-                Some(token_stream.current_span()),
-            )
-            .into());
-        }
         let call_span = Some(token_stream.current_span());
         // Host-call argument parsing starts at the opening parenthesis; lookup leaves the cursor
         // on the identifier itself.

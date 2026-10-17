@@ -130,6 +130,7 @@ fn slot_wrappers_remain_compile_time_templates_until_filled() {
                 &context.template_ir_store,
                 &expression_builder,
                 &const_values,
+                None,
             )
         })
         .expect("const classification should succeed")
@@ -313,6 +314,7 @@ fn wrapper_templates_with_runtime_references_are_not_compile_time_constants() {
                     &context.template_ir_store,
                     &expression_builder,
                     &const_values,
+                    None,
                 )
             })
             .expect("const classification should succeed")
@@ -550,6 +552,7 @@ fn assert_slot_is_tir_only_and_const(source: &str, slot_name: &str) {
                 &context.template_ir_store,
                 &expression_builder,
                 &const_values,
+                None,
             )
         })
         .expect("const classification should succeed")

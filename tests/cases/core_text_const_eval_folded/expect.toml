@@ -1,0 +1,16 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "core_text_const_eval_folded const_length=2 const_empty=true const_contains=true const_starts=true const_ends=true empty_contains=true empty_starts=true empty_ends=true emoji_length=1 combining_length=2 runtime_length=2 runtime_empty=true runtime_contains=true runtime_starts=true runtime_ends=true operand_use=3"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_not_contain = ["__moth_text_"]
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "core_text_const_eval_folded const_length=2 const_empty=true const_contains=true const_starts=true const_ends=true empty_contains=true empty_starts=true empty_ends=true emoji_length=1 combining_length=2 runtime_length=2 runtime_empty=true runtime_contains=true runtime_starts=true runtime_ends=true operand_use=3"

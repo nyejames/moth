@@ -28,6 +28,7 @@ use crate::compiler_frontend::ast::templates::tir::overlays::{
     TemplateViewContext, TirSlotResolutionKind,
 };
 use crate::compiler_frontend::ast::templates::tir::refs::TemplateTirReference;
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 
 use crate::compiler_frontend::ast::templates::tir::view::{
     TemplateTirPhase, TirView, TirViewIdentity,
@@ -113,6 +114,7 @@ struct PreparationWalk<'scope> {
     mode: TemplatePreparationMode,
     const_diagnostic: Option<CompilerDiagnostic>,
     source_scope: Option<&'scope ScopeContext>,
+    external_package_registry: Option<&'scope ExternalPackageRegistry>,
     expressions: &'scope AstExpressionBuilder,
     const_values: &'scope ConstValueStore,
 }
@@ -180,6 +182,7 @@ impl<'scope> PreparationWalk<'scope> {
     fn new(
         mode: TemplatePreparationMode,
         source_scope: Option<&'scope ScopeContext>,
+        external_package_registry: Option<&'scope ExternalPackageRegistry>,
         expressions: &'scope AstExpressionBuilder,
         const_values: &'scope ConstValueStore,
     ) -> Self {
@@ -191,6 +194,7 @@ impl<'scope> PreparationWalk<'scope> {
             mode,
             const_diagnostic: None,
             source_scope,
+            external_package_registry,
             expressions,
             const_values,
         }
@@ -222,13 +226,25 @@ impl<'scope> PreparationWalk<'scope> {
     }
 }
 
+/// Prepares one exact TIR view into its exclusive preparation facts.
+///
+/// The registry is the package owner consulted for registered external constant calls, so
+/// classification and folding agree on which calls are compile-time evaluable.
 pub(crate) fn prepare_tir_view(
     view: &TirView<'_>,
     expressions: &AstExpressionBuilder,
     const_values: &ConstValueStore,
     mode: TemplatePreparationMode,
+    external_package_registry: Option<&ExternalPackageRegistry>,
 ) -> Result<TemplatePreparation, TemplateError> {
-    prepare_tir_view_in_scope(view, expressions, const_values, mode, None)
+    prepare_tir_view_in_scope(
+        view,
+        expressions,
+        const_values,
+        mode,
+        None,
+        external_package_registry,
+    )
 }
 
 /// Prepares a parser-owned view with access to the scope's visible resolved constants.
@@ -239,7 +255,14 @@ pub(crate) fn prepare_tir_view_with_source_scope(
     mode: TemplatePreparationMode,
     source_scope: &ScopeContext,
 ) -> Result<TemplatePreparation, TemplateError> {
-    prepare_tir_view_in_scope(view, expressions, const_values, mode, Some(source_scope))
+    prepare_tir_view_in_scope(
+        view,
+        expressions,
+        const_values,
+        mode,
+        Some(source_scope),
+        Some(&source_scope.external_package_registry),
+    )
 }
 
 fn prepare_tir_view_in_scope(
@@ -248,6 +271,7 @@ fn prepare_tir_view_in_scope(
     const_values: &ConstValueStore,
     mode: TemplatePreparationMode,
     source_scope: Option<&ScopeContext>,
+    external_package_registry: Option<&ExternalPackageRegistry>,
 ) -> Result<TemplatePreparation, TemplateError> {
     if !view.phase().is_at_least(TemplateTirPhase::Composed) {
         return Err(CompilerError::compiler_error(format!(
@@ -259,7 +283,13 @@ fn prepare_tir_view_in_scope(
     }
 
     increment_ast_counter(AstCounter::TirPreparationAttempts);
-    let mut walk = PreparationWalk::new(mode, source_scope, expressions, const_values);
+    let mut walk = PreparationWalk::new(
+        mode,
+        source_scope,
+        external_package_registry,
+        expressions,
+        const_values,
+    );
     let facts = walk.walk_template(
         view.root_ref(),
         view,
@@ -962,6 +992,7 @@ impl PreparationWalk<'_> {
         role: &PreparationTraversalRole,
     ) -> Result<PreparationFacts, TemplateError> {
         let expression = self.expressions.view(expression)?;
+        let external_package_registry = self.external_package_registry;
         let mut nested_facts = PreparationFacts::const_value();
         let mut visit_nested_template =
             |reference: TemplateTirReference, _nested_binding_paths: &[PathId]| {
@@ -980,6 +1011,7 @@ impl PreparationWalk<'_> {
         let expression_const = classify_expression_const_evaluable_with_nested_template(
             expression,
             const_binding_paths,
+            external_package_registry,
             &mut visit_nested_template,
         )?;
         nested_facts.const_evaluable &= expression_const;

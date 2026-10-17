@@ -16,6 +16,7 @@ use crate::compiler_frontend::ast::type_resolution::ResolvedFunctionSignature;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 // PathId is the build-lifetime key used by every resolved AST environment table.
 use rustc_hash::FxHashMap;
@@ -30,6 +31,23 @@ pub(crate) enum DeclarationSemanticKind {
     Choice,
     Constant,
     Value,
+}
+
+/// Borrowed inputs one declaration classification pass reads.
+///
+/// WHAT: keeps the resolved signature/type maps beside the phase owners that resolve one
+///       initializer's template and constant content.
+/// WHY: classification reads the same seven inputs for every declaration, so one bundle keeps
+///      the entry points small without inventing per-declaration state.
+pub(crate) struct DeclarationSemanticInputs<'a> {
+    pub(crate) resolved_function_signatures_by_path:
+        &'a FxHashMap<PathId, ResolvedFunctionSignature>,
+    pub(crate) nominal_type_ids_by_path: &'a FxHashMap<PathId, TypeId>,
+    pub(crate) type_environment: &'a TypeEnvironment,
+    pub(crate) template_ir_store: &'a Rc<RefCell<TemplateIrStore>>,
+    pub(crate) expression_builder: &'a AstExpressionBuilder,
+    pub(crate) const_values: &'a ConstValueStore,
+    pub(crate) external_package_registry: Option<&'a ExternalPackageRegistry>,
 }
 
 /// Immutable path-indexed classification table shared by body emission contexts.
@@ -51,25 +69,12 @@ impl DeclarationSemanticTable {
     ///      store, phase, and overlay identity remain authoritative.
     pub(crate) fn from_environment(
         declaration_table: &TopLevelDeclarationTable,
-        resolved_function_signatures_by_path: &FxHashMap<PathId, ResolvedFunctionSignature>,
-        nominal_type_ids_by_path: &FxHashMap<PathId, TypeId>,
-        type_environment: &TypeEnvironment,
-        template_ir_store: &Rc<RefCell<TemplateIrStore>>,
-        expression_builder: &AstExpressionBuilder,
-        const_values: &ConstValueStore,
+        inputs: DeclarationSemanticInputs<'_>,
     ) -> Result<Self, TemplateError> {
         let mut by_path = FxHashMap::default();
 
         for declaration in declaration_table.iter() {
-            let kind = classify_declaration(
-                declaration,
-                resolved_function_signatures_by_path,
-                nominal_type_ids_by_path,
-                type_environment,
-                template_ir_store,
-                expression_builder,
-                const_values,
-            )?;
+            let kind = classify_declaration(declaration, &inputs)?;
             by_path.insert(declaration.id, kind);
         }
 
@@ -101,13 +106,17 @@ impl DeclarationSemanticTable {
 
 fn classify_declaration(
     declaration: &Declaration,
-    resolved_function_signatures_by_path: &FxHashMap<PathId, ResolvedFunctionSignature>,
-    nominal_type_ids_by_path: &FxHashMap<PathId, TypeId>,
-    type_environment: &TypeEnvironment,
-    template_ir_store: &Rc<RefCell<TemplateIrStore>>,
-    expression_builder: &AstExpressionBuilder,
-    const_values: &ConstValueStore,
+    inputs: &DeclarationSemanticInputs<'_>,
 ) -> Result<DeclarationSemanticKind, TemplateError> {
+    let DeclarationSemanticInputs {
+        resolved_function_signatures_by_path,
+        nominal_type_ids_by_path,
+        type_environment,
+        template_ir_store,
+        expression_builder,
+        const_values,
+        external_package_registry,
+    } = *inputs;
     match &declaration.value {
         DeclarationValue::Shell(shell) => {
             return Ok(match shell {
@@ -148,6 +157,7 @@ fn classify_declaration(
                 template_ir_store,
                 expression_builder,
                 const_values,
+                external_package_registry,
             )
         })?
         .is_compile_time_value();

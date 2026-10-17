@@ -65,14 +65,20 @@ fn folding_handled_expressions_preserves_zero_and_multiple_success_shapes() {
             )
             .expect("test handled result should construct")
             .id();
-        let folded = fold_compile_time_expression(
+        let folded = match fold_compile_time_expression(
             handled,
             &mut f.builder,
             &mut f.constants,
-            &mut f.strings,
-            false,
+            FoldServices::new(&mut f.strings, None, None),
+            FoldRequirement::Opportunistic,
         )
-        .expect("ordinary handling folds without scalarizing its result");
+        .expect("ordinary handling folds without scalarizing its result")
+        {
+            ConstantFoldOutcome::Folded(root) | ConstantFoldOutcome::NotConstant(root) => root,
+            ConstantFoldOutcome::Refused { .. } => {
+                panic!("ordinary handling must not refuse constant folding")
+            }
+        };
 
         let view = f
             .builder
@@ -385,8 +391,8 @@ impl FoldFixture {
             root,
             &mut self.builder,
             &mut self.constants,
-            &mut self.strings,
-            None,
+            FoldServices::new(&mut self.strings, None, None),
+            FoldRequirement::Opportunistic,
         )
     }
 
@@ -507,13 +513,18 @@ impl FoldFixture {
     }
 
     fn fold_compile_time(&mut self, root: ExprId) -> Result<ExprId, ConstantFoldError> {
-        fold_compile_time_expression(
+        match fold_compile_time_expression(
             root,
             &mut self.builder,
             &mut self.constants,
-            &mut self.strings,
-            true,
-        )
+            FoldServices::new(&mut self.strings, None, None),
+            FoldRequirement::Required,
+        )? {
+            ConstantFoldOutcome::Folded(root) | ConstantFoldOutcome::NotConstant(root) => Ok(root),
+            ConstantFoldOutcome::Refused { reason, .. } => {
+                Err(ConstantFoldError::Diagnostic(reason.into_diagnostic()))
+            }
+        }
     }
 }
 
@@ -523,8 +534,8 @@ fn expect_folded(outcome: ConstantFoldOutcome) -> ExprId {
         ConstantFoldOutcome::NotConstant(_) => {
             panic!("expected a folded constant, found a runtime expression")
         }
-        ConstantFoldOutcome::TextUnavailable { .. } => {
-            panic!("expected a folded constant, found unavailable text")
+        ConstantFoldOutcome::Refused { .. } => {
+            panic!("expected a folded constant, found a refused fold")
         }
     }
 }
@@ -535,8 +546,8 @@ fn expect_not_constant(outcome: ConstantFoldOutcome) -> ExprId {
         ConstantFoldOutcome::Folded(_) => {
             panic!("expected a runtime expression, found a folded constant")
         }
-        ConstantFoldOutcome::TextUnavailable { .. } => {
-            panic!("expected a runtime expression, found unavailable text")
+        ConstantFoldOutcome::Refused { .. } => {
+            panic!("expected a runtime expression, found a refused fold")
         }
     }
 }
@@ -822,9 +833,10 @@ fn structural_string_equality_reports_text_unavailable_outcome() {
         .fold(root)
         .expect("structural equality should be a typed fold refusal");
 
-    let ConstantFoldOutcome::TextUnavailable { diagnostic, .. } = outcome else {
+    let ConstantFoldOutcome::Refused { reason, .. } = outcome else {
         panic!("expected structural equality to report unavailable text");
     };
+    let diagnostic = reason.into_diagnostic();
     assert_eq!(
         diagnostic.identity().reason_key,
         Some("compile_time_evaluation_error.structural_string_requires_final_text")
@@ -856,9 +868,10 @@ fn constant_fold_propagates_structural_string_text_unavailable_outcome() {
     let outcome = f
         .fold(root)
         .expect("structural equality should return a typed fold outcome");
-    let ConstantFoldOutcome::TextUnavailable { diagnostic, .. } = outcome else {
+    let ConstantFoldOutcome::Refused { reason, .. } = outcome else {
         panic!("expected constant folding to preserve text-unavailable outcome");
     };
+    let diagnostic = reason.into_diagnostic();
     assert_eq!(
         diagnostic.identity().reason_key,
         Some("compile_time_evaluation_error.structural_string_requires_final_text")
@@ -900,7 +913,7 @@ fn text_unavailable_refusal_keeps_the_items_that_follow_it() {
         },
     ]);
 
-    let ConstantFoldOutcome::TextUnavailable {
+    let ConstantFoldOutcome::Refused {
         root: preserved, ..
     } = f.fold(root).expect("text refusal is a typed fold outcome")
     else {
@@ -2863,5 +2876,48 @@ fn evaluate_operator_folds_u64_at_full_bounds_and_rejects_overflow() {
         CompileTimeEvaluationErrorReason::IntegerOverflow,
         Some("*"),
         &f.strings,
+    );
+}
+
+#[test]
+fn speculative_substitution_reports_the_refusal_it_recorded() {
+    // The TIR fold reads this refusal from the substitution instead of folding the same
+    // expression a second time to recover an outcome the walk already discarded.
+    let mut f = FoldFixture::new();
+    let slot_path = f
+        .path_fork
+        .try_intern_portable_path("slot", &mut f.strings)
+        .expect("test path fits");
+    let slot = f.reference_path(
+        slot_path,
+        builtin_type_ids::STRING,
+        None,
+        ValueMode::ImmutableReference,
+    );
+    let plain = f.string_literal("plain");
+    let root = f.binary(slot, plain, Operator::Equality, None);
+    let structural = f.structural_string(vec![ConstStringPiece::SiteRoot]);
+
+    let result = fold_expression_with_bindings(
+        root,
+        &mut f.builder,
+        &mut f.constants,
+        &mut f.strings,
+        BindingFold::speculative(None, None),
+        |path| (path == slot_path).then_some(structural),
+    )
+    .expect("a refused comparison must not fail the substitution");
+
+    let view = f.builder.view(result.expression).expect("view");
+    assert!(
+        matches!(view.operation(), ExpressionOperationView::Compare { .. }),
+        "a refused comparison stays unfolded for runtime evaluation"
+    );
+    let reason = result
+        .refusal
+        .expect("the substitution reports the refusal it recorded");
+    assert_eq!(
+        reason.into_diagnostic().identity().reason_key,
+        Some("compile_time_evaluation_error.structural_string_requires_final_text")
     );
 }

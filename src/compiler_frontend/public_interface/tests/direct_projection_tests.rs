@@ -23,6 +23,9 @@ use super::test_support::{
     this_type, trait_binding, trait_origin, trait_origins_map, trait_root,
 };
 use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
+use crate::compiler_frontend::ast::const_eval::{
+    ConstantFoldOutcome, FoldRequirement, FoldServices,
+};
 
 use crate::compiler_frontend::analysis::borrow_checker::BorrowAnalysis;
 use crate::compiler_frontend::ast::ast_nodes::Declaration;
@@ -222,11 +225,25 @@ impl FixtureConstants {
                 root.id(),
                 &mut self.builder,
                 &mut self.constants,
-                &mut crate::compiler_frontend::symbols::string_interning::StringTable::new(),
+                FoldServices::new(
+                    &mut crate::compiler_frontend::symbols::string_interning::StringTable::new(),
+                    None,
+                    None,
+                ),
                 &crate::compiler_frontend::datatypes::environment::TypeEnvironment::new(),
+                FoldRequirement::Opportunistic,
                 |_| None,
             )
             .expect("fixture default folds as content");
+            let folded = match folded {
+                ConstantFoldOutcome::Folded(root) => root,
+                ConstantFoldOutcome::NotConstant(_) => {
+                    panic!("fixture default should fold into a constant")
+                }
+                ConstantFoldOutcome::Refused { reason, .. } => {
+                    panic!("fixture default refused constant folding: {reason:?}")
+                }
+            };
             let crate::compiler_frontend::ast::expressions::expression_store::ExpressionOperationView::Constant(id) =
                 self.builder.view(folded).expect("folded default belongs to builder").operation()
             else {

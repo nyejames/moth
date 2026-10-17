@@ -9961,6 +9961,104 @@ contract = "backend.html.core_text_helper_reachability"
 role = "backend"
 
 [[case]]
+id = "core_text_const_eval_folded"
+path = "core_text_const_eval_folded"
+tags = ["integration", "language", "external-packages", "core-packages", "js", "wasm", "reachability"]
+contract = "language.dependencies.core_text_constant_evaluation_folded"
+role = "primary"
+
+[[case]]
+id = "core_text_const_eval_required_rejected"
+path = "core_text_const_eval_required_rejected"
+tags = ["integration", "language", "external-packages", "core-packages", "diagnostics"]
+contract = "language.dependencies.core_text_constant_evaluation_required"
+role = "boundary"
+
+[[case]]
+id = "core_text_const_eval_core_math_rejected"
+path = "core_text_const_eval_core_math_rejected"
+tags = ["integration", "language", "external-packages", "core-packages", "diagnostics"]
+contract = "language.dependencies.core_constant_call_without_evaluator_rejected"
+role = "boundary"
+
+[[case]]
+id = "core_text_const_eval_resource_runtime_retained"
+path = "core_text_const_eval_resource_runtime_retained"
+tags = ["integration", "language", "external-packages", "core-packages", "js", "reachability"]
+contract = "backend.html.core_text_resource_text_runtime_retained"
+role = "backend"
+
+[[case]]
+id = "core_text_const_eval_resource_required_rejected"
+path = "core_text_const_eval_resource_required_rejected"
+tags = ["integration", "language", "external-packages", "core-packages", "diagnostics"]
+contract = "language.dependencies.core_text_resource_constant_evaluation_refused"
+role = "boundary"
+
+[[case]]
+id = "core_text_const_eval_resource_condition_runtime_retained"
+path = "core_text_const_eval_resource_condition_runtime_retained"
+tags = ["integration", "language", "external-packages", "core-packages", "js", "reachability"]
+contract = "backend.html.core_text_resource_condition_runtime_retained"
+role = "backend"
+
+[[case]]
+id = "core_text_const_eval_resource_condition_required_rejected"
+path = "core_text_const_eval_resource_condition_required_rejected"
+tags = ["integration", "language", "external-packages", "core-packages", "diagnostics"]
+contract = "language.templates.resource_condition_requires_final_text"
+role = "boundary"
+
+[[case]]
+id = "core_text_const_eval_resource_range_runtime_retained"
+path = "core_text_const_eval_resource_range_runtime_retained"
+tags = ["integration", "language", "external-packages", "core-packages", "js", "reachability"]
+contract = "backend.html.core_text_resource_range_bound_runtime_retained"
+role = "backend"
+
+[[case]]
+id = "core_text_const_eval_resource_range_required_rejected"
+path = "core_text_const_eval_resource_range_required_rejected"
+tags = ["integration", "language", "external-packages", "core-packages", "diagnostics"]
+contract = "language.templates.resource_range_bound_requires_final_text"
+role = "boundary"
+
+[[case]]
+id = "core_text_const_eval_template_loop"
+path = "core_text_const_eval_template_loop"
+tags = ["integration", "language", "external-packages", "core-packages", "js", "reachability"]
+contract = "language.templates.constant_loop_folds_registered_text_calls"
+role = "primary"
+
+[[case]]
+id = "core_text_const_eval_resource_template_runtime_retained"
+path = "core_text_const_eval_resource_template_runtime_retained"
+tags = ["integration", "language", "external-packages", "core-packages", "js", "reachability"]
+contract = "backend.html.core_text_resource_template_runtime_retained"
+role = "backend"
+
+[[case]]
+id = "core_text_const_eval_resource_template_loop_runtime_retained"
+path = "core_text_const_eval_resource_template_loop_runtime_retained"
+tags = ["integration", "language", "external-packages", "core-packages", "js", "reachability"]
+contract = "backend.html.core_text_resource_loop_runtime_retained"
+role = "backend"
+
+[[case]]
+id = "core_text_const_eval_resource_template_required_rejected"
+path = "core_text_const_eval_resource_template_required_rejected"
+tags = ["integration", "language", "external-packages", "core-packages", "diagnostics"]
+contract = "language.templates.const_template_resource_call_rejected"
+role = "boundary"
+
+[[case]]
+id = "core_text_const_eval_template_header_registry"
+path = "core_text_const_eval_template_header_registry"
+tags = ["integration", "language", "external-packages", "core-packages", "js", "reachability"]
+contract = "language.templates.const_wrapper_registry_classification"
+role = "primary"
+
+[[case]]
 id = "prelude_name_declaration_rejected"
 path = "prelude_name_declaration_rejected"
 tags = ["integration", "language", "diagnostics"]

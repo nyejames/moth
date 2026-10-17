@@ -387,6 +387,7 @@ fn finish_struct_instance(
                             &context.template_ir_store,
                             expression_builder,
                             const_values,
+                            Some(context.external_package_registry.as_ref()),
                         )
                     })?
                     .is_compile_time_value()

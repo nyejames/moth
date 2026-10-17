@@ -90,11 +90,6 @@ pub(crate) fn compile_time_evaluation_error_message(
                 "External constant {operation_text} is not a scalar value and cannot be used in a constant context."
             )
         }
-        CompileTimeEvaluationErrorReason::ExternalFunctionCallInConstantContext => {
-            format!(
-                "Constants cannot call external functions. {operation_text} is a runtime external call."
-            )
-        }
         CompileTimeEvaluationErrorReason::NonCompileTimeFieldInConstantContext => {
             format!(
                 "Const coercion requires compile-time field values. {operation_text} is not compile-time constant."
@@ -114,6 +109,11 @@ pub(crate) fn compile_time_evaluation_error_message(
         CompileTimeEvaluationErrorReason::StructuralStringRequiresFinalText => {
             format!(
                 "Cannot use a resource-bearing or site-root string for {operation_text}. Those pieces have no final text until the build assigns URL contexts. Keep the operation at runtime or use plain text without structural pieces."
+            )
+        }
+        CompileTimeEvaluationErrorReason::EvaluationOutputBoundExceeded => {
+            format!(
+                "Compile-time evaluation of {operation_text} exceeds its supported output bound."
             )
         }
     }
@@ -154,9 +154,6 @@ pub(crate) fn compile_time_evaluation_error_suggestion(
         CompileTimeEvaluationErrorReason::ExternalNonScalarConstantInConstantContext => {
             "Only scalar external constants (integers, binary floats and Bool) are supported in constant declarations and const templates"
         }
-        CompileTimeEvaluationErrorReason::ExternalFunctionCallInConstantContext => {
-            "Use only compile-time constant values inside constants and const templates"
-        }
         CompileTimeEvaluationErrorReason::NonCompileTimeFieldInConstantContext => {
             "Use only compile-time values when constructing records or choices for top-level compile-time constants"
         }
@@ -171,6 +168,9 @@ pub(crate) fn compile_time_evaluation_error_suggestion(
         }
         CompileTimeEvaluationErrorReason::StructuralStringRequiresFinalText => {
             "Use a plain text string for compile-time character operations, or perform the operation at runtime"
+        }
+        CompileTimeEvaluationErrorReason::EvaluationOutputBoundExceeded => {
+            "Use an input whose compile-time result fits the operation's supported range"
         }
     }
 }

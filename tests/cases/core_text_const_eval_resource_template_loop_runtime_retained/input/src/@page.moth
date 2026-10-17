@@ -1,0 +1,3 @@
+@core/text
+
+[:core_text_const_eval_resource_template_loop_runtime_retained loop=[loop {@assets/value.txt} |item|:[text.length(item)];]]

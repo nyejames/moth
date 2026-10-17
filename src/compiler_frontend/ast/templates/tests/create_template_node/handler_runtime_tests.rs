@@ -1,5 +1,6 @@
 use super::*;
 use crate::compiler_frontend::ast::ast_nodes::DeclarationValue;
+use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::expression_store::ConstructorField;
 use crate::compiler_frontend::numeric_text::token::NumericLiteralToken;
@@ -538,7 +539,8 @@ fn const_required_template_range_loop_folds_iteration_bindings() {
                 &template,
                 &context.template_ir_store,
                 &expression_builder,
-                &const_values
+                &const_values,
+                None,
             )
             .expect("const classification should succeed"),
             TemplateConstValueKind::RenderableString
@@ -574,7 +576,8 @@ fn const_required_template_range_loop_folds_expressions_with_iteration_bindings(
                 &template,
                 &context.template_ir_store,
                 &expression_builder,
-                &const_values
+                &const_values,
+                None,
             )
             .expect("const classification should succeed"),
             TemplateConstValueKind::RenderableString
@@ -612,7 +615,8 @@ fn const_required_template_loop_allows_nested_if_to_use_iteration_binding() {
                 &template,
                 &context.template_ir_store,
                 &expression_builder,
-                &const_values
+                &const_values,
+                None,
             )
             .expect("const classification should succeed"),
             TemplateConstValueKind::RenderableString
@@ -650,7 +654,8 @@ fn const_required_template_loop_allows_nested_if_condition_to_use_iteration_bind
                 &template,
                 &context.template_ir_store,
                 &expression_builder,
-                &const_values
+                &const_values,
+                None,
             )
             .expect("const classification should succeed"),
             TemplateConstValueKind::RenderableString

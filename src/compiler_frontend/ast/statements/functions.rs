@@ -6,7 +6,7 @@
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{Declaration, DeclarationValue};
 use crate::compiler_frontend::ast::const_eval::{
-    ConstantFoldError, ConstantFoldOutcome, fold_constant_content,
+    ConstantFoldError, ConstantFoldOutcome, FoldServices, fold_constant_content,
 };
 use crate::compiler_frontend::ast::const_values::binding::resolve_const_expression_content;
 use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
@@ -551,8 +551,11 @@ fn fold_signature_default(
         expression.id(),
         expression_builder,
         const_values,
-        string_table,
-        Some(scope),
+        FoldServices::new(
+            string_table,
+            Some(scope),
+            Some(scope.external_package_registry.as_ref()),
+        ),
         type_interner.environment(),
     )
     .map_err(|error| match error {
@@ -561,7 +564,9 @@ fn fold_signature_default(
     })?;
     let expression = match folded {
         ConstantFoldOutcome::Folded(root) | ConstantFoldOutcome::NotConstant(root) => root,
-        ConstantFoldOutcome::TextUnavailable { diagnostic, .. } => return Err(diagnostic.into()),
+        ConstantFoldOutcome::Refused { reason, .. } => {
+            return Err(reason.into_diagnostic().into());
+        }
     };
     fn validate_default(
         expression: ExpressionView<'_>,
@@ -589,6 +594,7 @@ fn fold_signature_default(
                         &scope.template_ir_store,
                         expressions,
                         constants,
+                        Some(scope.external_package_registry.as_ref()),
                     )
                     .map_err(|error| match error {
                         TemplateError::Diagnostic(diagnostic) => {

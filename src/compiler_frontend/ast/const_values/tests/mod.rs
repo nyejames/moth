@@ -52,6 +52,7 @@ impl Fixture {
             &mut self.builder,
             Rc::new(RefCell::new(TemplateIrStore::new())),
             &self.type_environment,
+            None,
         )
     }
     fn path(&mut self, name: &str) -> PathId {

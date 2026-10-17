@@ -16,7 +16,7 @@ use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template::{CommentDirectiveKind, TemplateType};
 use crate::compiler_frontend::ast::templates::template_folding::{
-    TemplateEmission, TemplateFoldResult, TirFoldContext,
+    TemplateEmission, TirFoldContext,
 };
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrStore, TemplatePreparationMode, TemplatePreparationOutcome, TemplateTirPhase,
@@ -29,6 +29,7 @@ use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, CompilerDiagnostic, InvalidTemplateStructureReason,
 };
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use std::cell::RefCell;
@@ -43,6 +44,7 @@ pub(in crate::compiler_frontend::ast::templates) fn collect_and_strip_comment_te
     expression_builder: &mut AstExpressionBuilder,
     const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
+    external_package_registry: Option<&ExternalPackageRegistry>,
     template_const_loop_iteration_limit: usize,
     template_ir_store: Rc<RefCell<TemplateIrStore>>,
 ) -> Result<Vec<AstDocFragment>, TemplateError> {
@@ -51,6 +53,7 @@ pub(in crate::compiler_frontend::ast::templates) fn collect_and_strip_comment_te
         expression_builder,
         const_values,
         string_table,
+        external_package_registry,
         template_const_loop_iteration_limit,
         template_ir_store,
     };
@@ -100,6 +103,7 @@ struct DocFragmentCollectionContext<'strings> {
     expression_builder: &'strings mut AstExpressionBuilder,
     const_values: &'strings mut ConstValueStore,
     string_table: &'strings mut StringTable,
+    external_package_registry: Option<&'strings ExternalPackageRegistry>,
     template_const_loop_iteration_limit: usize,
     template_ir_store: Rc<RefCell<TemplateIrStore>>,
 }
@@ -147,6 +151,7 @@ fn collect_doc_fragments(
             template_const_loop_iteration_limit: context.template_const_loop_iteration_limit,
             bindings: Vec::new(),
             source_scope: None,
+            external_package_registry: context.external_package_registry,
         };
         let reference = template.tir_reference;
         let store = context.template_ir_store.borrow();
@@ -162,6 +167,7 @@ fn collect_doc_fragments(
             fold_context.expression_builder,
             fold_context.const_values,
             TemplatePreparationMode::ConstRequired,
+            fold_context.external_package_registry,
         )?;
         let prepared = match preparation {
             preparation if matches!(preparation.outcome, TemplatePreparationOutcome::Foldable) => {
@@ -178,9 +184,11 @@ fn collect_doc_fragments(
         // Documentation is rendered text metadata. Site-root anchors keep their authored `@/`
         // spelling. Resource pieces still need a builder URL context, so they stay a concrete-text
         // diagnostic rather than an internal Phase 4 error.
-        let TemplateFoldResult { emission, .. } =
-            fold_prepared_template(&prepared, view, &mut fold_context)?;
-        let rendered = match emission {
+        let mut result = fold_prepared_template(&prepared, view, &mut fold_context)?;
+        if let Some(diagnostic) = result.take_required_diagnostic() {
+            return Err(diagnostic.into());
+        }
+        let rendered = match result.emission {
             TemplateEmission::Output(ConstStringValue::Text(value)) => value,
             TemplateEmission::Output(ConstStringValue::Pieces(pieces)) => {
                 flatten_documentation_string(pieces, fold_context.string_table, template.span)?

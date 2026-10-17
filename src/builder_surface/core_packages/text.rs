@@ -10,7 +10,7 @@ use crate::compiler_frontend::external_packages::{
 };
 use crate::compiler_frontend::external_packages::{
     ExternalConstEvalOp, ExternalFunctionLowerings, ExternalFunctionSpec, ExternalJsLowering,
-    ExternalParameter, external_success_returns,
+    ExternalParameter, TextConstEvalOp, external_success_returns,
 };
 use moth_lexical::numeric::fixed_scalar::FixedScalar;
 
@@ -29,42 +29,42 @@ pub fn register_core_text_package(registry: &mut ExternalPackageRegistry) {
         &'static str,
         Vec<ExternalParameter>,
         ExternalSignatureType,
-        ExternalConstEvalOp,
+        TextConstEvalOp,
     )] = &[
         (
             "length",
             "__moth_text_length",
             vec![text_param.clone()],
             ExternalSignatureType::Abi(ExternalAbiType::Fixed(FixedScalar::I32)),
-            ExternalConstEvalOp::TextLength,
+            TextConstEvalOp::Length,
         ),
         (
             "is_empty",
             "__moth_text_is_empty",
             vec![text_param.clone()],
             ExternalSignatureType::Abi(ExternalAbiType::Bool),
-            ExternalConstEvalOp::TextIsEmpty,
+            TextConstEvalOp::IsEmpty,
         ),
         (
             "contains",
             "__moth_text_contains",
             vec![text_param.clone(), text_param.clone()],
             ExternalSignatureType::Abi(ExternalAbiType::Bool),
-            ExternalConstEvalOp::TextContains,
+            TextConstEvalOp::Contains,
         ),
         (
             "starts_with",
             "__moth_text_starts_with",
             vec![text_param.clone(), text_param.clone()],
             ExternalSignatureType::Abi(ExternalAbiType::Bool),
-            ExternalConstEvalOp::TextStartsWith,
+            TextConstEvalOp::StartsWith,
         ),
         (
             "ends_with",
             "__moth_text_ends_with",
             vec![text_param.clone(), text_param],
             ExternalSignatureType::Abi(ExternalAbiType::Bool),
-            ExternalConstEvalOp::TextEndsWith,
+            TextConstEvalOp::EndsWith,
         ),
     ];
 
@@ -80,7 +80,7 @@ pub fn register_core_text_package(registry: &mut ExternalPackageRegistry) {
                         ExternalReturnAlias::Fresh,
                     ),
                     error_return_type: None,
-                    const_eval: Some(*const_eval_op),
+                    const_eval: Some(ExternalConstEvalOp::Text(*const_eval_op)),
                     lowerings: ExternalFunctionLowerings {
                         js: Some(ExternalJsLowering::RuntimeFunction((*js_name).to_owned())),
                         wasm: None,

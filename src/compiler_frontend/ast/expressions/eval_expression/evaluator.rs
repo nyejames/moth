@@ -7,7 +7,7 @@
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::const_eval::{
-    ConstantFoldOutcome, constant_fold, fold_compile_time_expression,
+    ConstantFoldOutcome, FoldRequirement, FoldServices, constant_fold, fold_compile_time_expression,
 };
 use crate::compiler_frontend::ast::const_values::store::{ConstValuePayload, ConstValueStore};
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
@@ -87,13 +87,32 @@ pub fn evaluate_expression(
             .into());
         };
 
-        let only_expression = fold_compile_time_expression(
+        let requirement = if context.kind.is_constant_context() {
+            FoldRequirement::Required
+        } else {
+            FoldRequirement::Opportunistic
+        };
+        let only_expression = match fold_compile_time_expression(
             *expression,
             expressions,
             const_values,
-            string_table,
-            context.kind.is_constant_context(),
-        )?;
+            FoldServices::new(
+                string_table,
+                None,
+                Some(context.external_package_registry.as_ref()),
+            ),
+            requirement,
+        )? {
+            ConstantFoldOutcome::Folded(root) | ConstantFoldOutcome::NotConstant(root) => root,
+            ConstantFoldOutcome::Refused { root, .. }
+                if requirement == FoldRequirement::Opportunistic =>
+            {
+                root
+            }
+            ConstantFoldOutcome::Refused { reason, .. } => {
+                return Err(reason.into_diagnostic().into());
+            }
+        };
         // A standalone producer retains its slots for multi-bind, return and handling owners.
         // Only scalar results participate in natural expected-type inference here.
         let Some(value_type_id) = expressions.view(only_expression)?.success_shape().single()
@@ -179,12 +198,21 @@ pub fn evaluate_expression(
         root
     };
     increment_frontend_counter(FrontendCounter::ConstantFoldAttemptCount);
+    let requirement = if context.kind.is_constant_context() {
+        FoldRequirement::Required
+    } else {
+        FoldRequirement::Opportunistic
+    };
     let outcome = constant_fold(
         root.id(),
         expressions,
         const_values,
-        string_table,
-        Some(context),
+        FoldServices::new(
+            string_table,
+            Some(context),
+            Some(context.external_package_registry.as_ref()),
+        ),
+        requirement,
     )?;
     let folded = match outcome {
         ConstantFoldOutcome::Folded(root) => {
@@ -192,12 +220,14 @@ pub fn evaluate_expression(
             root
         }
         ConstantFoldOutcome::NotConstant(root) => root,
-        ConstantFoldOutcome::TextUnavailable { diagnostic, .. }
-            if context.kind.is_constant_context() =>
+        ConstantFoldOutcome::Refused { root, .. }
+            if requirement == FoldRequirement::Opportunistic =>
         {
-            return Err(diagnostic.into());
+            root
         }
-        ConstantFoldOutcome::TextUnavailable { root, .. } => root,
+        ConstantFoldOutcome::Refused { reason, .. } => {
+            return Err(reason.into_diagnostic().into());
+        }
     };
 
     // Surviving operation rows own their contributors. The outer occurrence adds only the
@@ -530,10 +560,10 @@ pub(crate) fn expression_from_resolved_items(
     Ok(expressions.own(*root))
 }
 
-/// Fold one completed node in place; a runtime or text-unavailable outcome keeps the node.
+/// Fold one completed node in place; an opportunistic refusal keeps the node.
 ///
-/// WHAT: `constant_fold` is the single folding owner. A text-unavailable node stays runtime
-/// here; the root pass reports its diagnostic for constant contexts.
+/// WHAT: `constant_fold` is the single folding owner. A refusal preserves the runtime expression
+/// here; a required receiver reports the refusal's owned diagnostic.
 fn fold_completed_node(
     node: ExprId,
     expressions: &mut AstExpressionBuilder,
@@ -541,13 +571,30 @@ fn fold_completed_node(
     string_table: &mut StringTable,
     scope: Option<&ScopeContext>,
 ) -> Result<ExprId, ExpressionTypingError> {
-    Ok(
-        match constant_fold(node, expressions, const_values, string_table, scope)? {
-            ConstantFoldOutcome::Folded(folded) => folded,
-            ConstantFoldOutcome::NotConstant(id)
-            | ConstantFoldOutcome::TextUnavailable { root: id, .. } => id,
-        },
-    )
+    let registry = scope.map(|scope| scope.external_package_registry.as_ref());
+    let requirement = if scope.is_some_and(|scope| scope.kind.is_constant_context()) {
+        FoldRequirement::Required
+    } else {
+        FoldRequirement::Opportunistic
+    };
+    let outcome = constant_fold(
+        node,
+        expressions,
+        const_values,
+        FoldServices::new(string_table, scope, registry),
+        requirement,
+    )?;
+    match outcome {
+        ConstantFoldOutcome::Folded(folded) | ConstantFoldOutcome::NotConstant(folded) => {
+            Ok(folded)
+        }
+        ConstantFoldOutcome::Refused { root, .. }
+            if requirement == FoldRequirement::Opportunistic =>
+        {
+            Ok(root)
+        }
+        ConstantFoldOutcome::Refused { reason, .. } => Err(reason.into_diagnostic().into()),
+    }
 }
 
 /// Whether a completed node is already a folded `Constant`.

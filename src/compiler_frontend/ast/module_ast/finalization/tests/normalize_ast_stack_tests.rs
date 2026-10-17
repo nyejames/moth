@@ -29,6 +29,7 @@ fn check_deep_chain(discard: bool) {
                 const_values: &mut values,
                 string_table: &mut strings,
                 template_ir_store: Rc::new(RefCell::new(TemplateIrStore::new())),
+                external_package_registry: None,
                 module_resources: None,
                 expression_pending: Vec::new(),
                 expression_results: Vec::new(),

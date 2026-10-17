@@ -27,6 +27,7 @@ use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::queries::TypeKind;
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use moth_lexical::numeric::grammar::NumericLiteralKind;
 
 use crate::compiler_frontend::compiler_messages::trait_keyword_diagnostics::{
@@ -106,6 +107,7 @@ fn expression_is_compile_time_constant(
     template_ir_store: &Rc<RefCell<TemplateIrStore>>,
     expression_builder: &AstExpressionBuilder,
     const_values: &ConstValueStore,
+    external_package_registry: Option<&ExternalPackageRegistry>,
 ) -> Result<bool, ExpressionParseError> {
     Ok(expression
         .const_value_kind_with_template_classifier(const_values, &mut |template| {
@@ -114,6 +116,7 @@ fn expression_is_compile_time_constant(
                 template_ir_store,
                 expression_builder,
                 const_values,
+                external_package_registry,
             )
         })?
         .is_compile_time_value())
@@ -298,6 +301,7 @@ fn inline_projected_field(
     template_ir_store: &Rc<RefCell<TemplateIrStore>>,
     expression_builder: &mut AstExpressionBuilder,
     const_values: &ConstValueStore,
+    external_package_registry: Option<&ExternalPackageRegistry>,
 ) -> Result<Option<ExprId>, ExpressionParseError> {
     let is_constant = match field {
         ProjectedField::Expression(id) => expression_is_compile_time_constant(
@@ -305,6 +309,7 @@ fn inline_projected_field(
             template_ir_store,
             expression_builder,
             const_values,
+            external_package_registry,
         )?,
         ProjectedField::Constant(id) => const_values
             .metadata(id)
@@ -491,9 +496,13 @@ fn resolve_field_member(
             )
         });
         match candidate {
-            Some(field) => {
-                inline_projected_field(field, template_ir_store, expression_builder, const_values)?
-            }
+            Some(field) => inline_projected_field(
+                field,
+                template_ir_store,
+                expression_builder,
+                const_values,
+                scope_context.map(|scope| scope.external_package_registry.as_ref()),
+            )?,
             None => None,
         }
     } else {

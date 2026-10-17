@@ -478,6 +478,7 @@ impl ScopeContext {
                             &self.template_ir_store,
                             expression_builder,
                             const_values,
+                            Some(self.external_package_registry.as_ref()),
                         )
                     })?
                     .is_compile_time_value();

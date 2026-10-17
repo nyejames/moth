@@ -15,6 +15,7 @@ use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::Style;
+use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 
 use crate::compiler_frontend::ast::templates::tir::formatter_view::{
     TirFormatterResult, format_tir_body_node_root, format_tir_template,
@@ -303,6 +304,7 @@ pub(in crate::compiler_frontend::ast::templates) fn prepare_loop_aggregate_wrapp
     template_ir_store: &mut TemplateIrStore,
     expression_builder: &AstExpressionBuilder,
     const_values: &ConstValueStore,
+    external_package_registry: Option<&ExternalPackageRegistry>,
 ) -> Result<TemplateIrNodeId, TemplateError> {
     // Derive the head-prefix TIR nodes from the owning template's parser-emitted
     // root children. Reusing those exact nodes preserves parser identity and
@@ -321,6 +323,7 @@ pub(in crate::compiler_frontend::ast::templates) fn prepare_loop_aggregate_wrapp
         aggregate_root,
         string_table,
         true,
+        external_package_registry,
     )?;
     Ok(composed_root)
 }

@@ -3,6 +3,8 @@
 //! Operations execute their retained resolved domains against borrowed constant content.
 //! Fold output stays producer-local until the complete root is accepted; refusal retains
 //! the original root and never publishes an intermediate constant or expression row.
+mod external_calls;
+
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::const_values::store::{
     ConstStringPiece, ConstStringValue, ConstValueCandidate, ConstValueField, ConstValueId,
@@ -28,12 +30,14 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidCastReason,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::number::{NumberArithmeticError, NumberValue};
 use crate::compiler_frontend::datatypes::numeric_operators::{
     NumericComparisonDomain, NumericOperator,
 };
 use crate::compiler_frontend::datatypes::numeric_power;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
+use crate::compiler_frontend::external_packages::{ExternalConstEvalOp, ExternalPackageRegistry};
 #[cfg(feature = "benchmark_counters")]
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::source::SourceSpan;
@@ -54,10 +58,52 @@ pub(crate) enum ConstantFoldError {
 pub(crate) enum ConstantFoldOutcome {
     Folded(ExprId),
     NotConstant(ExprId),
-    TextUnavailable {
+    Refused {
         root: ExprId,
-        diagnostic: CompilerDiagnostic,
+        reason: ConstantFoldRefusalReason,
     },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) enum ConstantFoldRefusalReason {
+    StructuralTextUnavailable(CompilerDiagnostic),
+    EvaluationOutputBoundExceeded(CompilerDiagnostic),
+}
+
+impl ConstantFoldRefusalReason {
+    pub(crate) fn into_diagnostic(self) -> CompilerDiagnostic {
+        match self {
+            Self::StructuralTextUnavailable(diagnostic)
+            | Self::EvaluationOutputBoundExceeded(diagnostic) => diagnostic,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FoldRequirement {
+    Required,
+    Opportunistic,
+}
+
+/// Shared borrowed services supplied to every expression-folding entry point.
+pub(crate) struct FoldServices<'a> {
+    pub(crate) string_table: &'a mut StringTable,
+    pub(crate) scope: Option<&'a ScopeContext>,
+    pub(crate) registry: Option<&'a ExternalPackageRegistry>,
+}
+
+impl<'a> FoldServices<'a> {
+    pub(crate) fn new(
+        string_table: &'a mut StringTable,
+        scope: Option<&'a ScopeContext>,
+        registry: Option<&'a ExternalPackageRegistry>,
+    ) -> Self {
+        Self {
+            string_table,
+            scope,
+            registry,
+        }
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ConstStringRequirement {
@@ -65,7 +111,9 @@ pub(crate) enum ConstStringRequirement {
     CastOrParse,
     CompileTimeMapKey,
     DuplicateKeyValidation,
+    ExternalCall,
 }
+
 impl ConstStringRequirement {
     fn operation_name(self) -> &'static str {
         match self {
@@ -73,8 +121,29 @@ impl ConstStringRequirement {
             Self::CastOrParse => "string cast or parse",
             Self::CompileTimeMapKey => "compile-time map key",
             Self::DuplicateKeyValidation => "duplicate map-key validation",
+            Self::ExternalCall => "Core Text operation",
         }
     }
+}
+
+/// Returns an evaluator only for a registered, single-slot infallible host call.
+pub(crate) fn registered_external_const_eval_op(
+    expression: ExpressionView<'_>,
+    registry: Option<&ExternalPackageRegistry>,
+) -> Option<ExternalConstEvalOp> {
+    let ExpressionOperationView::Call(call) = expression.operation() else {
+        return None;
+    };
+    if call.handling().is_some() || call.metadata().error_type.is_some() {
+        return None;
+    }
+    if !matches!(expression.success_shape(), SuccessShape::One(_)) {
+        return None;
+    }
+    let ResolvedCallableTarget::Host(function_id) = call.metadata().target else {
+        return None;
+    };
+    registry?.get_function_by_id(function_id)?.const_eval
 }
 
 impl From<CompilerDiagnostic> for ConstantFoldError {
@@ -135,15 +204,18 @@ pub(crate) fn require_concrete_text(
     };
     concrete_payload_text(payload, value.span(), requirement, strings)
 }
-fn concrete_payload_text(
+pub(super) fn concrete_payload_text(
     payload: &ConstValuePayload,
     span: Option<SourceSpan>,
     requirement: ConstStringRequirement,
     strings: &mut StringTable,
 ) -> Result<Option<StringId>, CompilerDiagnostic> {
-    match payload {
-        ConstValuePayload::String(ConstStringValue::Text(text)) => Ok(Some(*text)),
-        ConstValuePayload::String(ConstStringValue::Pieces(pieces)) => {
+    let ConstValuePayload::String(value) = payload else {
+        return Ok(None);
+    };
+    match value {
+        ConstStringValue::Text(text) => Ok(Some(*text)),
+        ConstStringValue::Pieces(pieces) => {
             let mut text = String::new();
             for piece in pieces {
                 match piece {
@@ -160,38 +232,38 @@ fn concrete_payload_text(
             }
             Ok(Some(strings.get_or_intern(text)))
         }
-        _ => Ok(None),
     }
 }
 
 use crate::compiler_frontend::ast::expressions::expression_rewrite::rewrite_expression_children;
-/// Which constant boundary one fold serves; it decides how far composite constructors fold.
+/// Whether the consumer needs a complete constant or may retain a runtime expression.
 #[derive(Clone, Copy)]
 enum FoldBoundary<'a> {
-    /// A runtime expression folds scalar operators, casts and fallible recovery only. Aggregate and
-    /// coercion constructors stay structural, so the runtime expression keeps its shape.
-    Runtime { constant_context: bool },
-    /// A constant boundary (declaration or signature default) materialises every foldable constructor
-    /// into the value store, using `types` for option and choice identity.
-    Content { types: &'a TypeEnvironment },
+    Runtime {
+        requirement: FoldRequirement,
+    },
+    Content {
+        types: &'a TypeEnvironment,
+        requirement: FoldRequirement,
+    },
 }
+
 impl<'a> FoldBoundary<'a> {
-    fn constant_context(self) -> bool {
-        matches!(
-            self,
-            FoldBoundary::Runtime {
-                constant_context: true
-            }
-        )
+    fn requirement(self) -> FoldRequirement {
+        match self {
+            Self::Runtime { requirement } | Self::Content { requirement, .. } => requirement,
+        }
     }
+
     fn folds_composites(self) -> bool {
-        matches!(self, FoldBoundary::Content { .. })
+        matches!(self, Self::Content { .. })
     }
+
     /// The type environment that composite folds consult; only constant content boundaries carry one.
     fn types(self) -> Result<&'a TypeEnvironment, CompilerError> {
         match self {
-            FoldBoundary::Content { types } => Ok(types),
-            FoldBoundary::Runtime { .. } => Err(CompilerError::compiler_error(
+            Self::Content { types, .. } => Ok(types),
+            Self::Runtime { .. } => Err(CompilerError::compiler_error(
                 "Composite constant folding requires a constant content boundary.",
             )),
         }
@@ -205,9 +277,10 @@ struct FoldContext<'a, 'prefix, F> {
     lookup: F,
     boundary: FoldBoundary<'a>,
     scope: Option<&'a ScopeContext>,
+    registry: Option<&'a ExternalPackageRegistry>,
     /// Expression rows the walk reads. The fold never mutates them.
     expressions: &'a AstExpressionBuilder,
-    text_unavailable: Option<CompilerDiagnostic>,
+    refusal: Option<ConstantFoldRefusalReason>,
 }
 
 /// One step of the explicit fold walk. Frames hold ids and a result base, so depth costs heap
@@ -256,8 +329,12 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
         expression: ExpressionView<'_>,
         payload: ConstValuePayload,
         kind: ConstValueKind,
+        inherited_provenance: Option<&SyntheticInterfaceProvenance>,
     ) -> Result<Option<ConstValueId>, ConstantFoldError> {
-        let metadata = ConstValueStore::metadata_from_view(expression, kind)?;
+        let mut metadata = ConstValueStore::metadata_from_view(expression, kind)?;
+        if let Some(provenance) = inherited_provenance {
+            metadata.synthetic_interface_provenance.merge(provenance);
+        }
         Ok(Some(self.values.insert_value(metadata, payload)?))
     }
 
@@ -390,6 +467,21 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
                     [left.id(), right.id()],
                 );
             }
+            Operation::Call(call)
+                if matches!(call.metadata().target, ResolvedCallableTarget::Host(_))
+                    && call.handling().is_none()
+                    && call.metadata().error_type.is_none() =>
+            {
+                walk.defer(
+                    FoldStep::Complete {
+                        expression: expression.id(),
+                        base,
+                    },
+                    call.arguments()
+                        .iter()
+                        .map(|argument| argument.value().id()),
+                );
+            }
             Operation::Range { start, end, .. } if self.boundary.folds_composites() => {
                 walk.defer(
                     FoldStep::Complete {
@@ -510,7 +602,7 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
                 Ok(Some(policy))
             }
             ref evidence => {
-                if !self.boundary.constant_context() {
+                if self.boundary.requirement() == FoldRequirement::Opportunistic {
                     return Ok(None);
                 }
                 let reason = match evidence {
@@ -581,7 +673,9 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
                     Ok(PayloadFoldOutcome::Folded(payload)) => payload,
                     Ok(PayloadFoldOutcome::NotConstant) => return Ok(None),
                     Ok(PayloadFoldOutcome::TextUnavailable(diagnostic)) => {
-                        self.text_unavailable.get_or_insert(diagnostic);
+                        self.refusal.get_or_insert(
+                            ConstantFoldRefusalReason::StructuralTextUnavailable(diagnostic),
+                        );
                         return Ok(None);
                     }
                     Err(error) if matches!(facts.kind, ResolvedOperationKind::Numeric(_)) => {
@@ -605,6 +699,59 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
                     LogicalOperator::Or => *left || *right,
                 })
             }
+            Operation::Call(call) => {
+                let Some(ExternalConstEvalOp::Text(operation)) =
+                    registered_external_const_eval_op(expression, self.registry)
+                else {
+                    return Ok(None);
+                };
+                if children.len() != call.arguments().len() {
+                    return Err(CompilerError::compiler_error(
+                        "External call completion lost an argument result slot.",
+                    )
+                    .into());
+                }
+                if children.iter().any(Option::is_none) {
+                    return Ok(None);
+                }
+                match external_calls::evaluate_external_call(
+                    operation,
+                    children,
+                    self.values,
+                    self.strings,
+                    expression.span(),
+                )? {
+                    external_calls::ExternalCallEvaluation::Refused(reason) => {
+                        self.refusal.get_or_insert(reason);
+                        return Ok(None);
+                    }
+                    external_calls::ExternalCallEvaluation::Folded(payload) => {
+                        let SuccessShape::One(result_type) = expression.success_shape() else {
+                            return Err(CompilerError::compiler_error(
+                                "Trusted Core Text evaluator lost its one-slot signature.",
+                            )
+                            .into());
+                        };
+                        validate_external_call_payload_type(&payload, result_type)?;
+                        let mut provenance = SyntheticInterfaceProvenance::empty();
+                        for argument in children.iter().flatten() {
+                            let argument_metadata =
+                                self.values.metadata(*argument).ok_or_else(|| {
+                                    CompilerError::compiler_error(
+                                        "Settled external-call argument lost its metadata.",
+                                    )
+                                })?;
+                            provenance.merge(&argument_metadata.synthetic_interface_provenance);
+                        }
+                        return self.insert(
+                            expression,
+                            payload,
+                            ConstValueKind::Literal,
+                            Some(&provenance),
+                        );
+                    }
+                }
+            }
             Operation::Range { .. } if self.boundary.folds_composites() => {
                 let [start, end] = child_slots::<2>(children)?;
                 let (Some(start), Some(end)) = (start, end) else {
@@ -614,6 +761,7 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
                     expression,
                     ConstValuePayload::Range { start, end },
                     ConstValueKind::Composite,
+                    None,
                 );
             }
             Operation::Coerce {
@@ -631,7 +779,7 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
                 } else {
                     ConstValuePayload::Coerced(value)
                 };
-                return self.insert(expression, payload, ConstValueKind::Composite);
+                return self.insert(expression, payload, ConstValueKind::Composite, None);
             }
             Operation::Collection(_) if self.boundary.folds_composites() => {
                 let Some(values) = children.iter().copied().collect::<Option<Vec<_>>>() else {
@@ -641,6 +789,7 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
                     expression,
                     ConstValuePayload::Collection(values),
                     ConstValueKind::Composite,
+                    None,
                 );
             }
             Operation::Struct { fields } if self.boundary.folds_composites() => {
@@ -651,6 +800,7 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
                     expression,
                     ConstValuePayload::Record(fields),
                     ConstValueKind::Composite,
+                    None,
                 );
             }
             Operation::Choice { tag, fields } if self.boundary.folds_composites() => {
@@ -674,11 +824,11 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
                     tag: tag as usize,
                     fields,
                 };
-                return self.insert(expression, payload, ConstValueKind::Composite);
+                return self.insert(expression, payload, ConstValueKind::Composite, None);
             }
             _ => return Ok(None),
         };
-        self.insert(expression, payload, ConstValueKind::Literal)
+        self.insert(expression, payload, ConstValueKind::Literal, None)
     }
 
     /// Completes a cast once its source has folded to the single child slot.
@@ -729,11 +879,10 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
                     BuiltinCastLiteral::String(self.strings.resolve(value).to_owned())
                 }
                 Ok(None) => return Ok(None),
-                Err(diagnostic) if self.boundary.constant_context() => {
-                    return Err(diagnostic.into());
-                }
                 Err(diagnostic) => {
-                    self.text_unavailable.get_or_insert(diagnostic);
+                    self.refusal.get_or_insert(
+                        ConstantFoldRefusalReason::StructuralTextUnavailable(diagnostic),
+                    );
                     return Ok(None);
                 }
             },
@@ -780,6 +929,26 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
             Ok(Some(value))
         }
     }
+}
+fn validate_external_call_payload_type(
+    payload: &ConstValuePayload,
+    result_type: TypeId,
+) -> Result<(), CompilerError> {
+    let payload_type = match payload {
+        ConstValuePayload::Bool(_) => builtin_type_ids::BOOL,
+        ConstValuePayload::FixedScalar(value) => builtin_type_ids::fixed_scalar(value.scalar()),
+        _ => {
+            return Err(CompilerError::compiler_error(
+                "Trusted Core evaluator returned an unsupported constant payload.",
+            ));
+        }
+    };
+    if payload_type != result_type {
+        return Err(CompilerError::compiler_error(
+            "Trusted Core evaluator payload disagrees with the call's success type.",
+        ));
+    }
+    Ok(())
 }
 
 /// Reads the settled child slots of a node with a fixed child count. A mismatch means the walk
@@ -983,8 +1152,8 @@ pub(crate) fn constant_fold(
     root: ExprId,
     builder: &mut AstExpressionBuilder,
     constants: &mut ConstValueStore,
-    strings: &mut StringTable,
-    scope: Option<&ScopeContext>,
+    services: FoldServices<'_>,
+    requirement: FoldRequirement,
 ) -> Result<ConstantFoldOutcome, ConstantFoldError> {
     #[cfg(feature = "benchmark_counters")]
     increment_frontend_counter(FrontendCounter::CensusConstantFoldEntries);
@@ -992,11 +1161,8 @@ pub(crate) fn constant_fold(
         root,
         builder,
         constants,
-        strings,
-        FoldBoundary::Runtime {
-            constant_context: false,
-        },
-        scope,
+        services,
+        FoldBoundary::Runtime { requirement },
         |_| None,
     )?;
     #[cfg(feature = "benchmark_counters")]
@@ -1007,7 +1173,7 @@ pub(crate) fn constant_fold(
         ConstantFoldOutcome::NotConstant(_) => {
             increment_frontend_counter(FrontendCounter::CensusFoldOutcomeRuntime)
         }
-        ConstantFoldOutcome::TextUnavailable { .. } => {
+        ConstantFoldOutcome::Refused { .. } => {
             increment_frontend_counter(FrontendCounter::CensusFoldOutcomeTextUnavailable)
         }
     }
@@ -1018,67 +1184,71 @@ pub(crate) fn fold_compile_time_expression(
     root: ExprId,
     builder: &mut AstExpressionBuilder,
     constants: &mut ConstValueStore,
-    strings: &mut StringTable,
-    constant_context: bool,
-) -> Result<ExprId, ConstantFoldError> {
+    services: FoldServices<'_>,
+    requirement: FoldRequirement,
+) -> Result<ConstantFoldOutcome, ConstantFoldError> {
     #[cfg(feature = "benchmark_counters")]
     increment_frontend_counter(FrontendCounter::CensusFoldCompileTimeExpressionEntries);
-    Ok(outcome_root(fold_root(
+    fold_root(
         root,
         builder,
         constants,
-        strings,
-        FoldBoundary::Runtime { constant_context },
-        None,
+        services,
+        FoldBoundary::Runtime { requirement },
         |_| None,
-    )?))
+    )
 }
 
-/// Scope and failure policy for one loop-binding substitution.
+/// Scope, registry and failure policy for one loop-binding substitution.
 #[derive(Clone, Copy)]
 pub(crate) struct BindingFold<'a> {
     scope: Option<&'a ScopeContext>,
+    registry: Option<&'a ExternalPackageRegistry>,
+    requirement: FoldRequirement,
     speculative: bool,
 }
 
 impl<'a> BindingFold<'a> {
     /// A rewritten operator whose fold fails with a diagnostic stays unfolded, so runtime
     /// lowering evaluates it. Baseline template folding treated such failures as speculative.
-    pub(crate) fn speculative(scope: Option<&'a ScopeContext>) -> Self {
+    pub(crate) fn speculative(
+        scope: Option<&'a ScopeContext>,
+        registry: Option<&'a ExternalPackageRegistry>,
+    ) -> Self {
         Self {
             scope,
+            registry,
+            requirement: FoldRequirement::Opportunistic,
             speculative: true,
         }
     }
 
-    /// A fold failure is returned to the caller.
-    pub(crate) fn strict(scope: Option<&'a ScopeContext>) -> Self {
+    /// A fold refusal is reported to the constant-required receiver.
+    pub(crate) fn strict(
+        scope: Option<&'a ScopeContext>,
+        registry: Option<&'a ExternalPackageRegistry>,
+    ) -> Self {
         Self {
             scope,
+            registry,
+            requirement: FoldRequirement::Required,
             speculative: false,
         }
     }
 }
 
-/// Substitute loop bindings without erasing coercion, template or runtime structure.
-pub(crate) fn fold_expression_with_bindings(
-    root: ExprId,
-    builder: &mut AstExpressionBuilder,
-    constants: &mut ConstValueStore,
-    strings: &mut StringTable,
-    folding: BindingFold<'_>,
-    mut lookup: impl FnMut(PathId) -> Option<ExprId>,
-) -> Result<ExprId, ConstantFoldError> {
-    substitute_bindings(
-        root,
-        builder,
-        constants,
-        strings,
-        folding,
-        &mut lookup,
-        &mut rustc_hash::FxHashMap::default(),
-    )
+/// One binding substitution walk: the rewritten root and the refusal it recorded.
+///
+/// WHAT: a speculative walk keeps the first refusal beside the expression it left unfolded.
+/// WHY: the caller reads that refusal directly instead of re-evaluating the same expression to
+///      recover an outcome the walk already discarded. A strict walk reports its refusal as an
+///      error, so its result never carries one.
+#[derive(Debug)]
+pub(crate) struct BindingFoldResult {
+    pub(crate) expression: ExprId,
+    pub(crate) refusal: Option<ConstantFoldRefusalReason>,
 }
+
 /// One step of the binding substitution walk. Frames hold ids and a result base only.
 #[derive(Clone, Copy)]
 enum SubstituteStep {
@@ -1100,20 +1270,24 @@ struct SubstituteWalk {
     steps: Vec<SubstituteStep>,
     results: Vec<(ExprId, ExprId)>,
     children: Vec<ExprId>,
+    /// The refusal a speculative fold reported, which the returned root stays unfolded for.
+    refusal: Option<ConstantFoldRefusalReason>,
 }
 
+/// Substitute loop bindings without erasing coercion, template or runtime structure.
+///
 /// Rewrites bindings under `root` and speculatively folds rewritten constant parents. The walk is
 /// iterative, so nesting depth grows the heap work stack rather than the Rust stack. Children are
 /// visited in authored order and memoised when their substitution result settles.
-fn substitute_bindings(
+pub(crate) fn fold_expression_with_bindings(
     root: ExprId,
     builder: &mut AstExpressionBuilder,
     constants: &mut ConstValueStore,
     strings: &mut StringTable,
     folding: BindingFold<'_>,
-    lookup: &mut impl FnMut(PathId) -> Option<ExprId>,
-    rewritten: &mut rustc_hash::FxHashMap<ExprId, ExprId>,
-) -> Result<ExprId, ConstantFoldError> {
+    mut lookup: impl FnMut(PathId) -> Option<ExprId>,
+) -> Result<BindingFoldResult, ConstantFoldError> {
+    let mut rewritten = rustc_hash::FxHashMap::default();
     let mut walk = SubstituteWalk::default();
     walk.steps.push(SubstituteStep::Enter(root));
     while let Some(step) = walk.steps.pop() {
@@ -1131,15 +1305,18 @@ fn substitute_bindings(
                     walk.results.push((expression, result));
                     continue;
                 }
-                let can_fold = matches!(
-                    view.operation(),
+                let can_fold = match view.operation() {
+                    ExpressionOperationView::Call(_) => {
+                        registered_external_const_eval_op(view, folding.registry).is_some()
+                    }
                     ExpressionOperationView::NumericUnary { .. }
-                        | ExpressionOperationView::NumericBinary { .. }
-                        | ExpressionOperationView::LogicalNot { .. }
-                        | ExpressionOperationView::LogicalBinary { .. }
-                        | ExpressionOperationView::Compare { .. }
-                        | ExpressionOperationView::Range { .. }
-                );
+                    | ExpressionOperationView::NumericBinary { .. }
+                    | ExpressionOperationView::LogicalNot { .. }
+                    | ExpressionOperationView::LogicalBinary { .. }
+                    | ExpressionOperationView::Compare { .. }
+                    | ExpressionOperationView::Range { .. } => true,
+                    _ => false,
+                };
                 let base = walk.results.len();
                 view.visit_children(|child| walk.children.push(child.id()));
                 walk.steps.push(SubstituteStep::Complete {
@@ -1159,8 +1336,22 @@ fn substitute_bindings(
                 let replacements = builder.own_slice(&walk.results[base..]);
                 let result = rewrite_expression_children(builder, root, replacements)?.id();
                 let result = if result != expression && can_fold {
-                    // A refused speculative fold leaves the operator for runtime lowering.
-                    match constant_fold(result, builder, constants, strings, folding.scope) {
+                    // A refused speculative fold leaves the operator for runtime lowering, and the
+                    // walk keeps the reason so its caller never folds the same row twice.
+                    match constant_fold(
+                        result,
+                        builder,
+                        constants,
+                        FoldServices::new(&mut *strings, folding.scope, folding.registry),
+                        folding.requirement,
+                    ) {
+                        Ok(ConstantFoldOutcome::Refused { reason, .. }) if !folding.speculative => {
+                            return Err(reason.into_diagnostic().into());
+                        }
+                        Ok(ConstantFoldOutcome::Refused { reason, root }) => {
+                            walk.refusal.get_or_insert(reason);
+                            root
+                        }
                         Ok(outcome) => outcome_root(outcome),
                         // Capacity exhaustion is never a speculative refusal: it must reach the module build.
                         Err(ConstantFoldError::Diagnostic(diagnostic))
@@ -1181,7 +1372,10 @@ fn substitute_bindings(
         }
     }
     match walk.results.pop() {
-        Some((_, result)) => Ok(result),
+        Some((_, expression)) => Ok(BindingFoldResult {
+            expression,
+            refusal: walk.refusal,
+        }),
         None => Err(CompilerError::compiler_error(
             "Binding substitution finished without a root result.",
         )
@@ -1193,19 +1387,19 @@ pub(crate) fn fold_expression_with_constants(
     root: ExprId,
     builder: &mut AstExpressionBuilder,
     constants: &mut ConstValueStore,
-    strings: &mut StringTable,
+    services: FoldServices<'_>,
     types: &TypeEnvironment,
+    requirement: FoldRequirement,
     lookup: impl FnMut(PathId) -> Option<ConstValueId>,
-) -> Result<ExprId, ConstantFoldError> {
-    Ok(outcome_root(fold_root(
+) -> Result<ConstantFoldOutcome, ConstantFoldError> {
+    fold_root(
         root,
         builder,
         constants,
-        strings,
-        FoldBoundary::Content { types },
-        None,
+        services,
+        FoldBoundary::Content { types, requirement },
         lookup,
-    )?))
+    )
 }
 /// Fold one constant-boundary expression (a declaration or signature default).
 ///
@@ -1215,17 +1409,18 @@ pub(crate) fn fold_constant_content(
     root: ExprId,
     builder: &mut AstExpressionBuilder,
     constants: &mut ConstValueStore,
-    strings: &mut StringTable,
-    scope: Option<&ScopeContext>,
+    services: FoldServices<'_>,
     types: &TypeEnvironment,
 ) -> Result<ConstantFoldOutcome, ConstantFoldError> {
     fold_root(
         root,
         builder,
         constants,
-        strings,
-        FoldBoundary::Content { types },
-        scope,
+        services,
+        FoldBoundary::Content {
+            types,
+            requirement: FoldRequirement::Required,
+        },
         |_| None,
     )
 }
@@ -1233,18 +1428,23 @@ fn outcome_root(outcome: ConstantFoldOutcome) -> ExprId {
     match outcome {
         ConstantFoldOutcome::Folded(root)
         | ConstantFoldOutcome::NotConstant(root)
-        | ConstantFoldOutcome::TextUnavailable { root, .. } => root,
+        | ConstantFoldOutcome::Refused { root, .. } => root,
     }
 }
+
 fn fold_root(
     root: ExprId,
     builder: &mut AstExpressionBuilder,
     constants: &mut ConstValueStore,
-    strings: &mut StringTable,
+    services: FoldServices<'_>,
     boundary: FoldBoundary<'_>,
-    scope: Option<&ScopeContext>,
     lookup: impl FnMut(PathId) -> Option<ConstValueId>,
 ) -> Result<ConstantFoldOutcome, ConstantFoldError> {
+    let FoldServices {
+        string_table: strings,
+        scope,
+        registry,
+    } = services;
     let (existing_constant, success, span, value_mode, classification, occurrence) = {
         let view = builder.view(root)?;
         let existing = match view.operation() {
@@ -1278,7 +1478,7 @@ fn fold_root(
         ExpressionOperationView::Cast { .. }
             | ExpressionOperationView::ValueBlock(ValueBlock::Catch(_))
     );
-    let mut text_unavailable = None;
+    let mut refusal = None;
     let value = constants.stage_values(|values| {
         let mut context = FoldContext {
             values,
@@ -1286,19 +1486,16 @@ fn fold_root(
             lookup,
             boundary,
             scope,
+            registry,
             expressions: &*builder,
-            text_unavailable: None,
+            refusal: None,
         };
         let value = context.fold_walk(view.id())?;
-        text_unavailable = context.text_unavailable;
-        Ok::<_, ConstantFoldError>(if text_unavailable.is_some() {
-            None
-        } else {
-            value
-        })
+        refusal = context.refusal;
+        Ok::<_, ConstantFoldError>(if refusal.is_some() { None } else { value })
     })?;
-    if let Some(diagnostic) = text_unavailable {
-        return Ok(ConstantFoldOutcome::TextUnavailable { root, diagnostic });
+    if let Some(reason) = refusal {
+        return Ok(ConstantFoldOutcome::Refused { root, reason });
     }
     let Some(value) = value else {
         return Ok(ConstantFoldOutcome::NotConstant(root));
