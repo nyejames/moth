@@ -904,15 +904,19 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                                 string_table,
                             )
                         })?;
-                    let scope_context = self
-                        .environment_header_scope(header, string_table)
-                        .with_file_visibility(Arc::clone(&visibility))
-                        .with_resolved_module_constants(Rc::clone(&self.resolved_module_constants))
-                        .with_choice_variant_shells_by_path(Rc::clone(
-                            &self.choice_variant_shells_by_path,
-                        ));
-
                     let resolved_fields = {
+                        // The scope holds shared handles to the shell tables.
+                        // It must end before the write below, or Rc::make_mut
+                        // clones the whole table once per nominal.
+                        let scope_context = self
+                            .environment_header_scope(header, string_table)
+                            .with_file_visibility(Arc::clone(&visibility))
+                            .with_resolved_module_constants(Rc::clone(
+                                &self.resolved_module_constants,
+                            ))
+                            .with_choice_variant_shells_by_path(Rc::clone(
+                                &self.choice_variant_shells_by_path,
+                            ));
                         let path_fork = self.path_fork as *const PathInternerFork;
                         let mut type_resolution_context = self
                             .type_resolution_context_for_with_traits(
@@ -981,15 +985,19 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                                 string_table,
                             )
                         })?;
-                    let scope_context = self
-                        .environment_header_scope(header, string_table)
-                        .with_file_visibility(Arc::clone(&visibility))
-                        .with_resolved_module_constants(Rc::clone(&self.resolved_module_constants))
-                        .with_choice_variant_shells_by_path(Rc::clone(
-                            &self.choice_variant_shells_by_path,
-                        ));
-
                     let resolved_variants = {
+                        // The scope holds shared handles to the shell tables.
+                        // It must end before the write below, or Rc::make_mut
+                        // clones the whole table once per nominal.
+                        let scope_context = self
+                            .environment_header_scope(header, string_table)
+                            .with_file_visibility(Arc::clone(&visibility))
+                            .with_resolved_module_constants(Rc::clone(
+                                &self.resolved_module_constants,
+                            ))
+                            .with_choice_variant_shells_by_path(Rc::clone(
+                                &self.choice_variant_shells_by_path,
+                            ));
                         let mut type_resolution_context = self
                             .type_resolution_context_for_with_traits(
                                 &visibility,

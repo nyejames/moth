@@ -394,20 +394,24 @@ impl StringTable {
         }
     }
 
+    /// Return the ID of an already interned string without interning it.
+    #[inline]
+    pub(crate) fn existing(&self, s: &str) -> Option<StringId> {
+        if let Some(base) = &self.base
+            && let Some(&existing_id) = base.string_to_id.get(s)
+        {
+            return Some(existing_id);
+        }
+        self.string_to_id.get(s).copied()
+    }
+
     /// Intern a string slice, returning its unique ID.
     /// If the string already exists, returns the existing ID.
     /// If the string is new, stores it and returns a new ID.
     #[inline]
     pub fn intern(&mut self, s: &str) -> StringId {
-        if let Some(base) = &self.base
-            && let Some(&existing_id) = base.string_to_id.get(s)
-        {
-            return existing_id;
-        }
-
-        // Fast path: check if the local suffix already has this string. This is a single hash
-        // lookup with no allocations.
-        if let Some(&existing_id) = self.string_to_id.get(s) {
+        // Fast path: base or local lookup, with no allocation.
+        if let Some(existing_id) = self.existing(s) {
             return existing_id;
         }
 

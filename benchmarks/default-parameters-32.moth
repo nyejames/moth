@@ -1,0 +1,165 @@
+-- default-parameters-32.moth
+-- Signature default stress test:
+-- - 32 functions, each with an arithmetic I32 default and a String default
+-- - Every call omits both arguments, so each call site fills two defaults
+
+default_00 |count I32 = (0 + 1) * 2, label String = "item-00"| -> String:
+    return [: [label]:[count]]
+;
+
+default_01 |count I32 = (1 + 1) * 2, label String = "item-01"| -> String:
+    return [: [label]:[count]]
+;
+
+default_02 |count I32 = (2 + 1) * 2, label String = "item-02"| -> String:
+    return [: [label]:[count]]
+;
+
+default_03 |count I32 = (3 + 1) * 2, label String = "item-03"| -> String:
+    return [: [label]:[count]]
+;
+
+default_04 |count I32 = (4 + 1) * 2, label String = "item-04"| -> String:
+    return [: [label]:[count]]
+;
+
+default_05 |count I32 = (5 + 1) * 2, label String = "item-05"| -> String:
+    return [: [label]:[count]]
+;
+
+default_06 |count I32 = (6 + 1) * 2, label String = "item-06"| -> String:
+    return [: [label]:[count]]
+;
+
+default_07 |count I32 = (7 + 1) * 2, label String = "item-07"| -> String:
+    return [: [label]:[count]]
+;
+
+default_08 |count I32 = (8 + 1) * 2, label String = "item-08"| -> String:
+    return [: [label]:[count]]
+;
+
+default_09 |count I32 = (9 + 1) * 2, label String = "item-09"| -> String:
+    return [: [label]:[count]]
+;
+
+default_10 |count I32 = (10 + 1) * 2, label String = "item-10"| -> String:
+    return [: [label]:[count]]
+;
+
+default_11 |count I32 = (11 + 1) * 2, label String = "item-11"| -> String:
+    return [: [label]:[count]]
+;
+
+default_12 |count I32 = (12 + 1) * 2, label String = "item-12"| -> String:
+    return [: [label]:[count]]
+;
+
+default_13 |count I32 = (13 + 1) * 2, label String = "item-13"| -> String:
+    return [: [label]:[count]]
+;
+
+default_14 |count I32 = (14 + 1) * 2, label String = "item-14"| -> String:
+    return [: [label]:[count]]
+;
+
+default_15 |count I32 = (15 + 1) * 2, label String = "item-15"| -> String:
+    return [: [label]:[count]]
+;
+
+default_16 |count I32 = (16 + 1) * 2, label String = "item-16"| -> String:
+    return [: [label]:[count]]
+;
+
+default_17 |count I32 = (17 + 1) * 2, label String = "item-17"| -> String:
+    return [: [label]:[count]]
+;
+
+default_18 |count I32 = (18 + 1) * 2, label String = "item-18"| -> String:
+    return [: [label]:[count]]
+;
+
+default_19 |count I32 = (19 + 1) * 2, label String = "item-19"| -> String:
+    return [: [label]:[count]]
+;
+
+default_20 |count I32 = (20 + 1) * 2, label String = "item-20"| -> String:
+    return [: [label]:[count]]
+;
+
+default_21 |count I32 = (21 + 1) * 2, label String = "item-21"| -> String:
+    return [: [label]:[count]]
+;
+
+default_22 |count I32 = (22 + 1) * 2, label String = "item-22"| -> String:
+    return [: [label]:[count]]
+;
+
+default_23 |count I32 = (23 + 1) * 2, label String = "item-23"| -> String:
+    return [: [label]:[count]]
+;
+
+default_24 |count I32 = (24 + 1) * 2, label String = "item-24"| -> String:
+    return [: [label]:[count]]
+;
+
+default_25 |count I32 = (25 + 1) * 2, label String = "item-25"| -> String:
+    return [: [label]:[count]]
+;
+
+default_26 |count I32 = (26 + 1) * 2, label String = "item-26"| -> String:
+    return [: [label]:[count]]
+;
+
+default_27 |count I32 = (27 + 1) * 2, label String = "item-27"| -> String:
+    return [: [label]:[count]]
+;
+
+default_28 |count I32 = (28 + 1) * 2, label String = "item-28"| -> String:
+    return [: [label]:[count]]
+;
+
+default_29 |count I32 = (29 + 1) * 2, label String = "item-29"| -> String:
+    return [: [label]:[count]]
+;
+
+default_30 |count I32 = (30 + 1) * 2, label String = "item-30"| -> String:
+    return [: [label]:[count]]
+;
+
+default_31 |count I32 = (31 + 1) * 2, label String = "item-31"| -> String:
+    return [: [label]:[count]]
+;
+
+io.line(default_00())
+io.line(default_01())
+io.line(default_02())
+io.line(default_03())
+io.line(default_04())
+io.line(default_05())
+io.line(default_06())
+io.line(default_07())
+io.line(default_08())
+io.line(default_09())
+io.line(default_10())
+io.line(default_11())
+io.line(default_12())
+io.line(default_13())
+io.line(default_14())
+io.line(default_15())
+io.line(default_16())
+io.line(default_17())
+io.line(default_18())
+io.line(default_19())
+io.line(default_20())
+io.line(default_21())
+io.line(default_22())
+io.line(default_23())
+io.line(default_24())
+io.line(default_25())
+io.line(default_26())
+io.line(default_27())
+io.line(default_28())
+io.line(default_29())
+io.line(default_30())
+io.line(default_31())

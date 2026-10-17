@@ -101,9 +101,16 @@ impl VisibleNameRegistry {
         });
     }
 
-    pub(crate) fn reserve_parameter_contract_names(&mut self, string_table: &mut StringTable) {
+    /// Reserve the parameter-contract heads (`Wire`, `Route`) against imports and aliases.
+    ///
+    /// WHY: tokenization interns every authored spelling before the binding environment is
+    /// built, so a head that was never interned cannot collide with any binding here. Skipping
+    /// it keeps an unused spelling out of every retained string table.
+    pub(crate) fn reserve_parameter_contract_names(&mut self, string_table: &StringTable) {
         for kind in ParameterContractKind::ALL {
-            let name_id = string_table.intern(kind.spelling());
+            let Some(name_id) = string_table.existing(kind.spelling()) else {
+                continue;
+            };
             self.names.insert(
                 name_id,
                 VisibleNameEntry {

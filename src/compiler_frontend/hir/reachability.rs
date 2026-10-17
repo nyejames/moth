@@ -1085,6 +1085,13 @@ impl<'index, 'hir> HirReachabilityContext<'index, 'hir> {
     }
 }
 
+/// One expression still to record, with the span it inherits when it has none of its own.
+#[derive(Clone, Copy)]
+struct PendingExpression {
+    expression_id: HirValueId,
+    fallback_span: Option<SourceSpan>,
+}
+
 struct RuntimeFeatureUseCollector<'hir> {
     hir: &'hir HirModule,
     owner_function: FunctionId,
@@ -1098,14 +1105,38 @@ impl<'hir> RuntimeFeatureUseCollector<'hir> {
         }
     }
 
+    /// Records the runtime facts of `expression_id` and of every expression it evaluates.
+    ///
+    /// WHY: nested expressions are walked from an explicit work list instead of native recursion,
+    /// so expression depth cannot consume the compiler's main-thread stack.
     fn collect(
         &self,
         direct_facts: &mut HirBlockRuntimeFacts,
         expression_id: HirValueId,
         fallback_span: Option<SourceSpan>,
     ) {
-        let expression = self.hir.expressions.expression(expression_id);
-        let expression_span = expression.span.or(fallback_span);
+        let mut pending = Vec::new();
+        let mut next = Some(PendingExpression {
+            expression_id,
+            fallback_span,
+        });
+        while let Some(entry) = next.take().or_else(|| pending.pop()) {
+            next = self.collect_expression(direct_facts, entry, &mut pending);
+        }
+    }
+
+    /// Records the facts owned by one expression row and returns its first child to visit next.
+    ///
+    /// WHY: the other children are queued last-first so `pop` visits them in source order after
+    /// the first child's subtree. A chain of single-operand expressions never touches the queue.
+    fn collect_expression(
+        &self,
+        direct_facts: &mut HirBlockRuntimeFacts,
+        entry: PendingExpression,
+        pending: &mut Vec<PendingExpression>,
+    ) -> Option<PendingExpression> {
+        let expression = self.hir.expressions.expression(entry.expression_id);
+        let expression_span = expression.span.or(entry.fallback_span);
 
         match &expression.kind {
             HirExpressionKind::MapLiteral(_) => {
@@ -1165,9 +1196,18 @@ impl<'hir> RuntimeFeatureUseCollector<'hir> {
             | HirExpressionKind::VariantPayloadGet { .. } => {}
         }
 
-        for child in self.hir.expressions.child_values(expression_id) {
-            self.collect(direct_facts, child, expression_span);
-        }
+        let mut children = self.hir.expressions.child_values(entry.expression_id);
+        let first = children.next()?;
+        let start = pending.len();
+        pending.extend(children.map(|child| PendingExpression {
+            expression_id: child,
+            fallback_span: expression_span,
+        }));
+        pending[start..].reverse();
+        Some(PendingExpression {
+            expression_id: first,
+            fallback_span: expression_span,
+        })
     }
 
     /// Visits the index expressions a place evaluates.

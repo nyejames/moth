@@ -1483,20 +1483,32 @@ fn first_unsupported_expression_occurrence<IsUnsupported>(
 where
     IsUnsupported: FnMut(TypeId) -> bool,
 {
-    let expression = module.expressions.expression(expression_id);
-    if search.reject_constructor_routes
-        && matches!(expression.kind, HirExpressionKind::RouteConstruct { .. })
-    {
-        return search.record(expression.span);
-    }
-    if let Some(occurrence) = search.check(expression.ty, expression.span) {
-        return Some(occurrence);
-    }
+    // WHAT: scans in source pre-order with an explicit work list of pending siblings.
+    // WHY: a single-child chain (for example `not not ...`) must not add a native frame per level.
+    let mut pending = Vec::new();
+    let mut next = Some(expression_id);
+    while let Some(current) = next.take().or_else(|| pending.pop()) {
+        let expression = module.expressions.expression(current);
+        if search.reject_constructor_routes
+            && matches!(expression.kind, HirExpressionKind::RouteConstruct { .. })
+        {
+            // Spanless routes yield no occurrence: skip their children, keep scanning siblings.
+            if let Some(occurrence) = search.record(expression.span) {
+                return Some(occurrence);
+            }
+            continue;
+        }
+        if let Some(occurrence) = search.check(expression.ty, expression.span) {
+            return Some(occurrence);
+        }
 
-    module
-        .expressions
-        .child_values(expression_id)
-        .find_map(|child| first_unsupported_expression_occurrence(child, module, search))
+        let start = pending.len();
+        let mut children = module.expressions.child_values(current);
+        next = children.next();
+        pending.extend(children);
+        pending[start..].reverse();
+    }
+    None
 }
 
 // -----------------------------------------------------------------------------

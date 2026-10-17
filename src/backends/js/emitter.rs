@@ -548,18 +548,26 @@ impl<'hir> JsEmitter<'hir> {
     }
 
     fn expression_uses_maps(&self, expression_id: HirValueId) -> bool {
-        let expression = self.hir.expressions.expression(expression_id);
-        // A map literal is itself the map use, so its entries are never scanned separately.
-        if self.type_environment.is_map_type(expression.ty)
-            || matches!(expression.kind, HirExpressionKind::MapLiteral(_))
-        {
-            return true;
-        }
+        // WHAT: scans in source pre-order with an explicit work list of pending siblings.
+        // WHY: a single-child chain must not add a native frame per expression level.
+        let mut pending = Vec::new();
+        let mut next = Some(expression_id);
+        while let Some(current) = next.take().or_else(|| pending.pop()) {
+            let expression = self.hir.expressions.expression(current);
+            // A map literal is itself the map use, so its entries are never scanned separately.
+            if self.type_environment.is_map_type(expression.ty)
+                || matches!(expression.kind, HirExpressionKind::MapLiteral(_))
+            {
+                return true;
+            }
 
-        self.hir
-            .expressions
-            .child_values(expression_id)
-            .any(|child| self.expression_uses_maps(child))
+            let start = pending.len();
+            let mut children = self.hir.expressions.child_values(current);
+            next = children.next();
+            pending.extend(children);
+            pending[start..].reverse();
+        }
+        false
     }
 
     fn place_uses_maps(&self, place: HirPlace) -> bool {
@@ -708,12 +716,20 @@ fn collect_expression_cast_policies(
     expression_id: HirValueId,
     policies: &mut HashSet<BuiltinCastPolicyId>,
 ) {
-    let expression = hir.expressions.expression(expression_id);
-    if let HirExpressionKind::Cast { policy, .. } = &expression.kind {
-        policies.insert(*policy);
-    }
-    for child in hir.expressions.child_values(expression_id) {
-        collect_expression_cast_policies(hir, child, policies);
+    // WHAT: scans in source pre-order with an explicit work list of pending siblings.
+    // WHY: a single-child chain must not add a native frame per expression level.
+    let mut pending = Vec::new();
+    let mut next = Some(expression_id);
+    while let Some(current) = next.take().or_else(|| pending.pop()) {
+        if let HirExpressionKind::Cast { policy, .. } = &hir.expressions.expression(current).kind {
+            policies.insert(*policy);
+        }
+
+        let start = pending.len();
+        let mut children = hir.expressions.child_values(current);
+        next = children.next();
+        pending.extend(children);
+        pending[start..].reverse();
     }
 }
 
