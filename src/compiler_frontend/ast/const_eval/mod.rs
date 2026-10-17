@@ -20,6 +20,7 @@ use crate::compiler_frontend::ast::expressions::expression_types::{
     FallibleHandling, ResolvedCastEvidence,
 };
 use crate::compiler_frontend::ast::expressions::failure_facts::ExpressionFailureFacts;
+use crate::compiler_frontend::ast::statements::value_production::expression_build::commit_constant_result_block;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
@@ -30,14 +31,15 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidCastReason,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::number::{NumberArithmeticError, NumberValue};
 use crate::compiler_frontend::datatypes::numeric_operators::{
     NumericComparisonDomain, NumericOperator,
 };
 use crate::compiler_frontend::datatypes::numeric_power;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
-use crate::compiler_frontend::external_packages::{ExternalConstEvalOp, ExternalPackageRegistry};
+use crate::compiler_frontend::external_packages::{
+    ExternalConstEvalOp, ExternalPackageRegistry, TextConstEvalOp,
+};
 #[cfg(feature = "benchmark_counters")]
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::source::SourceSpan;
@@ -126,7 +128,8 @@ impl ConstStringRequirement {
     }
 }
 
-/// Returns an evaluator only for a registered, single-slot infallible host call.
+/// Returns the operation for a registered infallible host call. The operation's slot table
+/// owns the result arity; materialisation checks it against the call's success types.
 pub(crate) fn registered_external_const_eval_op(
     expression: ExpressionView<'_>,
     registry: Option<&ExternalPackageRegistry>,
@@ -135,9 +138,6 @@ pub(crate) fn registered_external_const_eval_op(
         return None;
     };
     if call.handling().is_some() || call.metadata().error_type.is_some() {
-        return None;
-    }
-    if !matches!(expression.success_shape(), SuccessShape::One(_)) {
         return None;
     }
     let ResolvedCallableTarget::Host(function_id) = call.metadata().target else {
@@ -270,6 +270,15 @@ impl<'a> FoldBoundary<'a> {
     }
 }
 
+/// Buffers one fold reuses for every trusted call it settles, so a call allocates no argument,
+/// payload or slot vector of its own.
+#[derive(Default)]
+struct ExternalCallScratch {
+    arguments: Vec<Option<ConstValueId>>,
+    payloads: Vec<Option<ConstValuePayload>>,
+    slots: Vec<ConstValueId>,
+}
+
 /// Executes against an immutable expression prefix and a discardable constant candidate.
 struct FoldContext<'a, 'prefix, F> {
     values: &'a mut ConstValueCandidate<'prefix>,
@@ -281,6 +290,7 @@ struct FoldContext<'a, 'prefix, F> {
     /// Expression rows the walk reads. The fold never mutates them.
     expressions: &'a AstExpressionBuilder,
     refusal: Option<ConstantFoldRefusalReason>,
+    external_calls: ExternalCallScratch,
 }
 
 /// One step of the explicit fold walk. Frames hold ids and a result base, so depth costs heap
@@ -407,6 +417,77 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
             )
             .into()),
         }
+    }
+
+    /// Settles one trusted call whose argument results are known. A refusal records its reason and
+    /// returns `false`. A folded call leaves its slot ids in `external_calls.slots`.
+    fn settle_external_call(
+        &mut self,
+        operation: TextConstEvalOp,
+        call: ExpressionView<'_>,
+        arguments: &[Option<ConstValueId>],
+    ) -> Result<bool, ConstantFoldError> {
+        let evaluation = external_calls::evaluate_external_call(
+            operation,
+            arguments,
+            self.values,
+            self.strings,
+            call.span(),
+            &mut self.external_calls.payloads,
+        )?;
+        match evaluation {
+            external_calls::ExternalCallEvaluation::Refused(reason) => {
+                self.refusal.get_or_insert(reason);
+                Ok(false)
+            }
+            external_calls::ExternalCallEvaluation::Folded => {
+                let mut provenance = SyntheticInterfaceProvenance::empty();
+                for argument in arguments.iter().flatten() {
+                    let argument_metadata = self.values.metadata(*argument).ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "Settled external-call argument lost its metadata.",
+                        )
+                    })?;
+                    provenance.merge(&argument_metadata.synthetic_interface_provenance);
+                }
+                external_calls::materialise_success_slots(
+                    operation.success_slot_types(),
+                    call.success_types(),
+                    self.external_calls.payloads.drain(..),
+                    call,
+                    &provenance,
+                    self.values,
+                    &mut self.external_calls.slots,
+                )?;
+                Ok(true)
+            }
+        }
+    }
+
+    /// Folds the arguments of a root Host call with zero or several result slots, then settles the
+    /// call. Its slot ids are returned only when every argument and the operation settle.
+    fn fold_host_result_slots(
+        &mut self,
+        operation: TextConstEvalOp,
+        call: ExpressionView<'_>,
+    ) -> Result<Option<Vec<ConstValueId>>, ConstantFoldError> {
+        let ExpressionOperationView::Call(record) = call.operation() else {
+            return Err(CompilerError::compiler_error(
+                "Host result folding was given a row that is not a call.",
+            )
+            .into());
+        };
+        // The argument buffer leaves `self` for the duration of the walks, because each walk
+        // borrows `self` mutably.
+        let mut arguments = std::mem::take(&mut self.external_calls.arguments);
+        arguments.clear();
+        for argument in record.arguments().iter() {
+            arguments.push(self.fold_walk(argument.value().id())?);
+        }
+        let settled = arguments.iter().all(Option::is_some)
+            && self.settle_external_call(operation, call, &arguments)?;
+        self.external_calls.arguments = arguments;
+        Ok(settled.then(|| std::mem::take(&mut self.external_calls.slots)))
     }
 
     /// Settles one expression, or parks it beneath the children that its completion combines.
@@ -714,43 +795,16 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
                 if children.iter().any(Option::is_none) {
                     return Ok(None);
                 }
-                match external_calls::evaluate_external_call(
-                    operation,
-                    children,
-                    self.values,
-                    self.strings,
-                    expression.span(),
-                )? {
-                    external_calls::ExternalCallEvaluation::Refused(reason) => {
-                        self.refusal.get_or_insert(reason);
-                        return Ok(None);
-                    }
-                    external_calls::ExternalCallEvaluation::Folded(payload) => {
-                        let SuccessShape::One(result_type) = expression.success_shape() else {
-                            return Err(CompilerError::compiler_error(
-                                "Trusted Core Text evaluator lost its one-slot signature.",
-                            )
-                            .into());
-                        };
-                        validate_external_call_payload_type(&payload, result_type)?;
-                        let mut provenance = SyntheticInterfaceProvenance::empty();
-                        for argument in children.iter().flatten() {
-                            let argument_metadata =
-                                self.values.metadata(*argument).ok_or_else(|| {
-                                    CompilerError::compiler_error(
-                                        "Settled external-call argument lost its metadata.",
-                                    )
-                                })?;
-                            provenance.merge(&argument_metadata.synthetic_interface_provenance);
-                        }
-                        return self.insert(
-                            expression,
-                            payload,
-                            ConstValueKind::Literal,
-                            Some(&provenance),
-                        );
-                    }
+                if !self.settle_external_call(operation, expression, children)? {
+                    return Ok(None);
                 }
+                let &[value] = self.external_calls.slots.as_slice() else {
+                    return Err(CompilerError::compiler_error(
+                        "Trusted Core Text call did not materialise its one success slot.",
+                    )
+                    .into());
+                };
+                return Ok(Some(value));
             }
             Operation::Range { .. } if self.boundary.folds_composites() => {
                 let [start, end] = child_slots::<2>(children)?;
@@ -929,26 +983,6 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
             Ok(Some(value))
         }
     }
-}
-fn validate_external_call_payload_type(
-    payload: &ConstValuePayload,
-    result_type: TypeId,
-) -> Result<(), CompilerError> {
-    let payload_type = match payload {
-        ConstValuePayload::Bool(_) => builtin_type_ids::BOOL,
-        ConstValuePayload::FixedScalar(value) => builtin_type_ids::fixed_scalar(value.scalar()),
-        _ => {
-            return Err(CompilerError::compiler_error(
-                "Trusted Core evaluator returned an unsupported constant payload.",
-            ));
-        }
-    };
-    if payload_type != result_type {
-        return Err(CompilerError::compiler_error(
-            "Trusted Core evaluator payload disagrees with the call's success type.",
-        ));
-    }
-    Ok(())
 }
 
 /// Reads the settled child slots of a node with a fixed child count. A mismatch means the walk
@@ -1432,6 +1466,23 @@ fn outcome_root(outcome: ConstantFoldOutcome) -> ExprId {
     }
 }
 
+/// Returns the trusted operation for a Runtime Host call with zero or several result slots.
+/// One-slot calls keep the scalar path, which folds them to one `Constant`.
+fn multi_result_host_op(
+    boundary: FoldBoundary<'_>,
+    expression: ExpressionView<'_>,
+    registry: Option<&ExternalPackageRegistry>,
+) -> Option<TextConstEvalOp> {
+    if !matches!(boundary, FoldBoundary::Runtime { .. })
+        || matches!(expression.success_shape(), SuccessShape::One(_))
+    {
+        return None;
+    }
+    match registered_external_const_eval_op(expression, registry)? {
+        ExternalConstEvalOp::Text(operation) => Some(operation),
+    }
+}
+
 fn fold_root(
     root: ExprId,
     builder: &mut AstExpressionBuilder,
@@ -1479,6 +1530,40 @@ fn fold_root(
             | ExpressionOperationView::ValueBlock(ValueBlock::Catch(_))
     );
     let mut refusal = None;
+    if let Some(operation) = multi_result_host_op(boundary, view, registry) {
+        // A Host call with zero or several results folds into one constant result block. Its slot
+        // rows commit as one unit; a refused or unsettled call leaves the authored call intact.
+        let block_scope = scope.map(|context| context.scope);
+        let slots = constants.stage_values(|values| {
+            let mut context = FoldContext {
+                values,
+                strings,
+                lookup,
+                boundary,
+                scope,
+                registry,
+                expressions: &*builder,
+                refusal: None,
+                external_calls: ExternalCallScratch::default(),
+            };
+            let slots = context.fold_host_result_slots(operation, view)?;
+            refusal = context.refusal;
+            Ok::<_, ConstantFoldError>(if refusal.is_some() || block_scope.is_none() {
+                None
+            } else {
+                slots
+            })
+        })?;
+        if let Some(reason) = refusal {
+            return Ok(ConstantFoldOutcome::Refused { root, reason });
+        }
+        let (Some(slots), Some(block_scope)) = (slots, block_scope) else {
+            return Ok(ConstantFoldOutcome::NotConstant(root));
+        };
+        return Ok(ConstantFoldOutcome::Folded(
+            commit_constant_result_block(builder, root, &slots, block_scope, eligibility)?.id(),
+        ));
+    }
     let value = constants.stage_values(|values| {
         let mut context = FoldContext {
             values,
@@ -1489,6 +1574,7 @@ fn fold_root(
             registry,
             expressions: &*builder,
             refusal: None,
+            external_calls: ExternalCallScratch::default(),
         };
         let value = context.fold_walk(view.id())?;
         refusal = context.refusal;
@@ -2022,3 +2108,7 @@ fn fold_numeric_comparison(
 #[cfg(test)]
 #[path = "tests/constant_folding_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests/folded_transport_tests.rs"]
+mod folded_transport_tests;

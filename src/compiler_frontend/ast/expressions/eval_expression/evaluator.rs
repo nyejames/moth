@@ -98,7 +98,7 @@ pub fn evaluate_expression(
             const_values,
             FoldServices::new(
                 string_table,
-                None,
+                Some(context),
                 Some(context.external_package_registry.as_ref()),
             ),
             requirement,

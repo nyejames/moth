@@ -146,6 +146,11 @@ fn const_eval_registration_requires_trusted_core_origin_and_exact_signature() {
         ErrorSlot,
         WrongReturnType,
         WrongParameterCount,
+        OptionalParameter,
+        OptionalReturn,
+        NestedOptionalReturn,
+        ExtraReturnSlot,
+        MissingReturnSlot,
     }
 
     struct Scenario {
@@ -221,6 +226,41 @@ fn const_eval_registration_requires_trusted_core_origin_and_exact_signature() {
             accepted: false,
         },
         Scenario {
+            name: "optional parameter",
+            package_path: "@test/constant-eval",
+            origin: PackageOrigin::Core,
+            signature_change: SignatureChange::OptionalParameter,
+            accepted: false,
+        },
+        Scenario {
+            name: "optional return",
+            package_path: "@test/constant-eval",
+            origin: PackageOrigin::Core,
+            signature_change: SignatureChange::OptionalReturn,
+            accepted: false,
+        },
+        Scenario {
+            name: "nested optional return",
+            package_path: "@test/constant-eval",
+            origin: PackageOrigin::Core,
+            signature_change: SignatureChange::NestedOptionalReturn,
+            accepted: false,
+        },
+        Scenario {
+            name: "extra return slot",
+            package_path: "@test/constant-eval",
+            origin: PackageOrigin::Core,
+            signature_change: SignatureChange::ExtraReturnSlot,
+            accepted: false,
+        },
+        Scenario {
+            name: "missing return slot",
+            package_path: "@test/constant-eval",
+            origin: PackageOrigin::Core,
+            signature_change: SignatureChange::MissingReturnSlot,
+            accepted: false,
+        },
+        Scenario {
             name: "valid Core registration",
             package_path: "@test/constant-eval",
             origin: PackageOrigin::Core,
@@ -272,6 +312,32 @@ fn const_eval_registration_requires_trusted_core_origin_and_exact_signature() {
             }
             SignatureChange::WrongParameterCount => {
                 function.parameters.truncate(1);
+            }
+            SignatureChange::OptionalParameter => {
+                function.parameters[0].language_type = ExternalSignatureType::Optional(Box::new(
+                    ExternalSignatureType::Abi(ExternalAbiType::Utf8Str),
+                ));
+            }
+            SignatureChange::OptionalReturn => {
+                function.returns =
+                    vec![ExternalReturnSlot::fresh(ExternalSignatureType::Optional(
+                        Box::new(ExternalSignatureType::Abi(ExternalAbiType::Bool)),
+                    ))];
+            }
+            SignatureChange::NestedOptionalReturn => {
+                function.returns = vec![ExternalReturnSlot::fresh(
+                    ExternalSignatureType::Optional(Box::new(ExternalSignatureType::Optional(
+                        Box::new(ExternalSignatureType::Abi(ExternalAbiType::Bool)),
+                    ))),
+                )];
+            }
+            SignatureChange::ExtraReturnSlot => {
+                function
+                    .returns
+                    .push(ExternalReturnSlot::fresh(ExternalAbiType::Bool));
+            }
+            SignatureChange::MissingReturnSlot => {
+                function.returns.clear();
             }
         }
 
