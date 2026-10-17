@@ -353,7 +353,6 @@ impl<'a> HirDisplayContext<'a> {
                 out
             }
             HirStatementKind::Expr(expr) => self.render_expression(expressions, *expr),
-            HirStatementKind::Drop(local) => format!("drop {}", self.local_label(*local)),
             HirStatementKind::PushRuntimeFragment { vec_local, value } => {
                 format!(
                     "push_fragment {} <- {}",

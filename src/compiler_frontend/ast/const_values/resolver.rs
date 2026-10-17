@@ -13,7 +13,6 @@ use crate::compiler_frontend::ast::const_eval::{
     ConstantFoldError, ConstantFoldOutcome, FoldRequirement, FoldServices,
     fold_expression_with_constants,
 };
-use crate::compiler_frontend::ast::const_values::facts::ConstFactValueKind;
 use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValueStore};
 use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExprId, ExpressionOperationView, ExpressionView,
@@ -21,13 +20,9 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::templates::template::Template;
 use crate::compiler_frontend::ast::templates::template::TemplateConstValueKind;
-#[cfg(test)]
-use crate::compiler_frontend::ast::templates::tir::TemplatePreparationFacts;
 use crate::compiler_frontend::ast::templates::tir::{
     TemplateIrStore, TemplatePreparationMode, TemplateTirPhase, TirView, prepare_tir_view,
 };
-#[cfg(test)]
-use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::symbols::path_interner::PathId;
@@ -137,7 +132,6 @@ impl Eq for ConstResolutionError {}
 #[derive(Debug)]
 pub(crate) struct ResolvedConstDeclaration {
     pub(crate) value: ConstValueId,
-    pub(crate) value_kind: ConstFactValueKind,
 }
 
 pub(crate) struct ConstValueResolver<'a> {
@@ -181,7 +175,9 @@ impl<'a> ConstValueResolver<'a> {
         self.const_values
     }
 
-    pub(crate) fn resolve_private_top_level_declaration(
+    /// Top-level and body-local constants resolve identically: reject mutable bindings, then
+    /// resolve the initializer. Callers record the declaration's scope themselves.
+    pub(crate) fn resolve_declaration(
         &mut self,
         declaration: &Declaration,
         environment: &ConstValueEnvironment,
@@ -194,22 +190,7 @@ impl<'a> ConstValueResolver<'a> {
             .initializer()
             .ok_or(ConstResolutionError::NonConstExpression)?;
         let value = self.resolve_expression(initializer, environment)?;
-        let metadata = self
-            .const_values
-            .metadata(value)
-            .ok_or(ConstResolutionError::NonConstExpression)?;
-        Ok(ResolvedConstDeclaration {
-            value,
-            value_kind: ConstFactValueKind::from_const_value_kind(metadata.value_kind),
-        })
-    }
-
-    pub(crate) fn resolve_body_local_declaration(
-        &mut self,
-        declaration: &Declaration,
-        environment: &ConstValueEnvironment,
-    ) -> Result<ResolvedConstDeclaration, ConstResolutionError> {
-        self.resolve_private_top_level_declaration(declaration, environment)
+        Ok(ResolvedConstDeclaration { value })
     }
 
     pub(crate) fn resolve_expression(
@@ -364,39 +345,4 @@ pub(crate) fn classify_template_from_effective_tir(
         external_package_registry,
     )?;
     Ok(preparation.facts.final_value_kind)
-}
-
-#[cfg(test)]
-pub(crate) fn prepare_template_tir_facts(
-    template: &Template,
-    store: &Rc<RefCell<TemplateIrStore>>,
-    expression_builder: &AstExpressionBuilder,
-    const_values: &ConstValueStore,
-) -> Result<TemplatePreparationFacts, TemplateError> {
-    let reference = &template.tir_reference;
-
-    if !reference.phase.is_at_least(TemplateTirPhase::Composed) {
-        return Err(CompilerError::compiler_error(format!(
-            "AST const template preparation requires Composed TIR, but root {} is at phase {}.",
-            reference.root, reference.phase
-        ))
-        .into());
-    }
-
-    let store = store.borrow();
-    let view = TirView::with_minimum_phase(
-        &store,
-        reference.root,
-        reference.phase,
-        TemplateTirPhase::Composed,
-        reference.context,
-    )?;
-    Ok(prepare_tir_view(
-        &view,
-        expression_builder,
-        const_values,
-        TemplatePreparationMode::Value,
-        None,
-    )?
-    .facts)
 }

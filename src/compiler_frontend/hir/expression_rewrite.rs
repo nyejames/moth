@@ -133,11 +133,10 @@ pub(crate) fn rewrite_expression_bottom_up(
         return Ok(replacement);
     }
     if changed {
-        // Replacements keep the occurrence's reversible source mapping under their new ID.
+        // The replacement row keeps the occurrence's span; only its AST mapping is re-keyed.
         let ast_span = side_table.value_ast_span(expression).or(row.span);
-        let source_span = side_table.value_source_span(expression).or(row.span);
         let replacement = store.append_expression(row)?;
-        side_table.map_value(ast_span, replacement, source_span);
+        side_table.map_value(ast_span, replacement);
         Ok(replacement)
     } else {
         Ok(expression)

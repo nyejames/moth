@@ -19,13 +19,13 @@ pub struct HirConstField {
 #[derive(Debug, Clone)]
 pub enum HirConstValue {
     /// One materialised fixed-width scalar or `Byte` value with exact-bit identity.
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Production matches the variant only; the payload is not read there.
     FixedScalar(FixedScalarValue),
     /// One exact arbitrary-precision decimal coefficient and its canonical scale.
     Number(NumberValue),
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Production matches the variant only; the payload is not read there.
     Bool(bool),
-    #[allow(dead_code)]
+    #[allow(dead_code)] // Production matches the variant only; the payload is not read there.
     Char(char),
     String(String),
 

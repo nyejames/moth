@@ -183,7 +183,7 @@ fn collect_doc_fragments(
         };
         // Documentation is rendered text metadata. Site-root anchors keep their authored `@/`
         // spelling. Resource pieces still need a builder URL context, so they stay a concrete-text
-        // diagnostic rather than an internal Phase 4 error.
+        // diagnostic rather than an internal error.
         let mut result = fold_prepared_template(&prepared, view, &mut fold_context)?;
         if let Some(diagnostic) = result.take_required_diagnostic() {
             return Err(diagnostic.into());

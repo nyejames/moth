@@ -6,7 +6,6 @@
 
 use crate::compiler_frontend::ast::const_values::facts::{
     AstConstDeclarationFact, AstConstFacts, ConstBindingScope, ConstBindingSource,
-    ConstFactValueKind,
 };
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
@@ -59,7 +58,6 @@ fn projects_ast_const_facts_into_hir_metadata() {
             declaration_path: explicit_path,
             scope: ConstBindingScope::ExplicitTopLevel,
             source: ConstBindingSource::ExplicitHash,
-            value_kind: ConstFactValueKind::Literal,
             span: None,
         },
     );
@@ -70,7 +68,6 @@ fn projects_ast_const_facts_into_hir_metadata() {
             declaration_path: private_path,
             scope: ConstBindingScope::PrivateTopLevel,
             source: ConstBindingSource::InferredImmutable,
-            value_kind: ConstFactValueKind::Literal,
             span: Some(private_span),
         },
     );
@@ -93,7 +90,6 @@ fn projects_ast_const_facts_into_hir_metadata() {
     assert_eq!(explicit.declaration_path, explicit_path);
     assert_eq!(explicit.scope, ConstBindingScope::ExplicitTopLevel);
     assert_eq!(explicit.source, ConstBindingSource::ExplicitHash);
-    assert_eq!(explicit.value_kind, ConstFactValueKind::Literal);
     assert_eq!(explicit.span, None);
 
     let private = module
@@ -104,7 +100,6 @@ fn projects_ast_const_facts_into_hir_metadata() {
     assert_eq!(private.declaration_path, private_path);
     assert_eq!(private.scope, ConstBindingScope::PrivateTopLevel);
     assert_eq!(private.source, ConstBindingSource::InferredImmutable);
-    assert_eq!(private.value_kind, ConstFactValueKind::Literal);
     assert_eq!(private.span, Some(private_span));
 }
 
@@ -159,7 +154,6 @@ fn remaps_const_fact_keys_and_payload_paths() {
             declaration_path: original_path,
             scope: ConstBindingScope::ExplicitTopLevel,
             source: ConstBindingSource::ExplicitHash,
-            value_kind: ConstFactValueKind::Literal,
             span: None,
         },
     );

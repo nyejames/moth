@@ -25,7 +25,6 @@ use crate::compiler_frontend::datatypes::ids::{BuiltinTypeKey, TypeId};
 use crate::compiler_frontend::datatypes::numeric_operators::NumericOperator;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::hir::blocks::HirLocal;
-use crate::compiler_frontend::hir::expression_store::HirProjection;
 use crate::compiler_frontend::hir::expressions::{HirExpressionKind, ValueKind};
 use crate::compiler_frontend::hir::hir_side_table::HirLocation;
 use crate::compiler_frontend::hir::ids::{BlockId, HirValueId, LocalId};
@@ -1359,7 +1358,6 @@ where
 
             None
         }
-        HirStatementKind::Drop(_) => None,
     }
 }
 
@@ -1454,18 +1452,9 @@ fn first_unsupported_pattern_occurrence<IsUnsupported>(
 where
     IsUnsupported: FnMut(TypeId) -> bool,
 {
-    match pattern {
-        HirPattern::Literal(value)
-        | HirPattern::OptionValue { value }
-        | HirPattern::OptionRelational { value, .. }
-        | HirPattern::Relational { value, .. } => {
-            first_unsupported_expression_occurrence(*value, module, search)
-        }
-        HirPattern::OptionNone
-        | HirPattern::OptionPresent
-        | HirPattern::Wildcard
-        | HirPattern::ChoiceVariant { .. } => None,
-    }
+    pattern
+        .value()
+        .and_then(|value| first_unsupported_expression_occurrence(value, module, search))
 }
 
 /// Finds an unsupported index expression inside a place projection.
@@ -1480,14 +1469,10 @@ fn first_unsupported_place_occurrence<IsUnsupported>(
 where
     IsUnsupported: FnMut(TypeId) -> bool,
 {
-    for projection in module.expressions.projections(place.projections) {
-        if let HirProjection::Index(index) = *projection
-            && let Some(occurrence) = first_unsupported_expression_occurrence(index, module, search)
-        {
-            return Some(occurrence);
-        }
-    }
-    None
+    module
+        .expressions
+        .place_index_values(place)
+        .find_map(|index| first_unsupported_expression_occurrence(index, module, search))
 }
 
 fn first_unsupported_expression_occurrence<IsUnsupported>(
@@ -1508,57 +1493,10 @@ where
         return Some(occurrence);
     }
 
-    match &expression.kind {
-        HirExpressionKind::BinOp { left, right, .. } => {
-            first_unsupported_expression_occurrence(*left, module, search)
-                .or_else(|| first_unsupported_expression_occurrence(*right, module, search))
-        }
-        HirExpressionKind::UnaryOp { operand, .. }
-        | HirExpressionKind::Cast {
-            source: operand, ..
-        }
-        | HirExpressionKind::VariantPayloadGet {
-            source: operand, ..
-        } => first_unsupported_expression_occurrence(*operand, module, search),
-        HirExpressionKind::Load(place) | HirExpressionKind::Copy(place) => {
-            first_unsupported_place_occurrence(*place, module, search)
-        }
-        HirExpressionKind::StructConstruct { fields, .. } => module
-            .expressions
-            .struct_fields(*fields)
-            .iter()
-            .find_map(|(_, value)| first_unsupported_expression_occurrence(*value, module, search)),
-        HirExpressionKind::Collection(items) => module
-            .expressions
-            .values(*items)
-            .iter()
-            .find_map(|item| first_unsupported_expression_occurrence(*item, module, search)),
-        HirExpressionKind::MapLiteral(entries) => module
-            .expressions
-            .map_entries(*entries)
-            .iter()
-            .find_map(|entry| {
-                first_unsupported_expression_occurrence(entry.key, module, search).or_else(|| {
-                    first_unsupported_expression_occurrence(entry.value, module, search)
-                })
-            }),
-        HirExpressionKind::Range { start, end } => {
-            first_unsupported_expression_occurrence(*start, module, search)
-                .or_else(|| first_unsupported_expression_occurrence(*end, module, search))
-        }
-        HirExpressionKind::VariantConstruct { fields, .. }
-        | HirExpressionKind::RouteConstruct { fields, .. } => module
-            .expressions
-            .variant_fields(*fields)
-            .iter()
-            .find_map(|field| first_unsupported_expression_occurrence(field.value, module, search)),
-        HirExpressionKind::Number(_)
-        | HirExpressionKind::FixedScalar(_)
-        | HirExpressionKind::Bool(_)
-        | HirExpressionKind::Char(_)
-        | HirExpressionKind::StringLiteral(_)
-        | HirExpressionKind::StructuralString { .. } => None,
-    }
+    module
+        .expressions
+        .child_values(expression_id)
+        .find_map(|child| first_unsupported_expression_occurrence(child, module, search))
 }
 
 // -----------------------------------------------------------------------------

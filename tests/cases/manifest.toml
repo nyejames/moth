@@ -3653,6 +3653,13 @@ contract = "backend.html.resource_root_folder"
 role = "primary"
 
 [[case]]
+id = "html_resource_match_guard_reachable"
+path = "html_resource_match_guard_reachable"
+tags = ["integration", "html", "reachability"]
+contract = "backend.html.resource_match_guard_reachable"
+role = "primary"
+
+[[case]]
 id = "html_resource_unreferenced_not_emitted"
 path = "html_resource_unreferenced_not_emitted"
 tags = ["integration", "html"]

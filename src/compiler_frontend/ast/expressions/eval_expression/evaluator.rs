@@ -7,7 +7,7 @@
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::const_eval::{
-    ConstantFoldOutcome, FoldRequirement, FoldServices, constant_fold, fold_compile_time_expression,
+    ConstantFoldOutcome, FoldRequirement, FoldServices, constant_fold,
 };
 use crate::compiler_frontend::ast::const_values::store::{ConstValuePayload, ConstValueStore};
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
@@ -92,7 +92,7 @@ pub fn evaluate_expression(
         } else {
             FoldRequirement::Opportunistic
         };
-        let only_expression = match fold_compile_time_expression(
+        let only_expression = match constant_fold(
             *expression,
             expressions,
             const_values,

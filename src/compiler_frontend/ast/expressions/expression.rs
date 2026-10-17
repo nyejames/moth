@@ -1034,25 +1034,6 @@ impl AstExpressionBuilder {
         self.commit_replacement(input)
     }
 
-    #[cfg(test)]
-    pub(crate) fn with_regular_division_provenance(
-        &mut self,
-        id: OwnedExpr,
-        contains: bool,
-    ) -> Result<OwnedExpr, ExpressionConstructionFailure> {
-        if self
-            .view_owned(id)?
-            .classification()
-            .contains_regular_division
-            == contains
-        {
-            return Ok(id);
-        }
-        let mut input = self.snapshot(id)?;
-        input.classification.contains_regular_division = contains;
-        self.commit_replacement(input)
-    }
-
     pub(crate) fn with_synthetic_interface_provenance(
         &mut self,
         id: OwnedExpr,

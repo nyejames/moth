@@ -39,8 +39,8 @@ BLOCKERS: none for the documentation slice; implementation phases require delive
 
 ## Compiler foundation handoff
 
-The typed semantic expression and dense compiler foundation work consumes delivered exact numeric
-identities and bounded body-local numeric construction. It owns the representation cutover: compact
+The compact typed-expression and dense compiler foundation work consumes delivered exact numeric
+identities and bounded body-local numeric construction. It owns the representation change: compact
 typed expression IDs, dense HIR values and places, native zero/one/multiple success slots with a
 separate error channel, mechanical analysis consumers and removal of Reactivity V1. This memory
 plan consumes those merged capabilities. It does not recreate owned expression trees, tuple-based

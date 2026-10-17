@@ -17,13 +17,10 @@
 pub(crate) mod child_wrappers;
 pub(crate) mod contributions;
 mod head_chain;
-mod helpers;
+pub(crate) mod helpers;
 pub(crate) mod schema;
 
 pub(crate) use head_chain::compose_tir_head_chain_from_root;
-
-#[cfg(test)]
-pub(crate) use head_chain::compose_tir_head_chain;
 
 pub(crate) use contributions::TirSlotContributions;
 pub(crate) use helpers::stored_insert_contribution_templates;

@@ -309,6 +309,21 @@ impl<'a> HirValidator<'a> {
         result
     }
 
+    /// Validates each direct child value in the store's listing order.
+    ///
+    /// WHY: the store listing owns which fields are children, so validation keeps no second
+    /// per-kind child list. Callers check any range the listing reads before calling this.
+    fn validate_child_values(
+        &self,
+        expression_id: HirValueId,
+        anchor: Option<HirLocation>,
+    ) -> Result<(), CompilerError> {
+        for child in self.module.expressions.child_values(expression_id) {
+            self.validate_expression(child, anchor)?;
+        }
+        Ok(())
+    }
+
     /// Returns a logical-not operand to visit iteratively after this row's local checks.
     fn validate_expression_contents(
         &self,
@@ -316,37 +331,22 @@ impl<'a> HirValidator<'a> {
         expression: &HirExpression,
         anchor: Option<HirLocation>,
     ) -> Result<Option<HirValueId>, CompilerError> {
+        // A value's source span lives on its row; the side table maps only AST spans.
         let value_location = HirLocation::Value(expression_id);
-        if expression.span.is_some() {
-            if self
+        if expression.span.is_some()
+            && self
                 .module
                 .side_table
                 .ast_span_for_hir(value_location)
                 .is_none()
-            {
-                return Err(self.error_with_hir(
-                    format!(
-                        "Value {} is missing AST->HIR side-table mapping",
-                        expression_id
-                    ),
-                    anchor,
-                ));
-            }
-
-            if self
-                .module
-                .side_table
-                .hir_source_span_for_hir(value_location)
-                .is_none()
-            {
-                return Err(self.error_with_hir(
-                    format!(
-                        "Value {} is missing HIR source side-table mapping",
-                        expression_id
-                    ),
-                    anchor,
-                ));
-            }
+        {
+            return Err(self.error_with_hir(
+                format!(
+                    "Value {} is missing AST->HIR side-table mapping",
+                    expression_id
+                ),
+                anchor,
+            ));
         }
 
         self.require_type_id(expression.ty, anchor)?;
@@ -483,9 +483,7 @@ impl<'a> HirValidator<'a> {
                     }
                 }
                 // Validate sub-expressions for every field after carrier-specific checks pass.
-                for field in fields {
-                    self.validate_expression(field.value, anchor)?;
-                }
+                self.validate_child_values(expression_id, anchor)?;
             }
 
             HirExpressionKind::RouteConstruct {
@@ -543,8 +541,8 @@ impl<'a> HirValidator<'a> {
                             anchor,
                         ));
                     }
-                    self.validate_expression(actual.value, anchor)?;
                 }
+                self.validate_child_values(expression_id, anchor)?;
             }
             HirExpressionKind::Load(place) => {
                 let place_type = self.validate_place(place, anchor)?;
@@ -629,8 +627,7 @@ impl<'a> HirValidator<'a> {
                     }
                 }
 
-                self.validate_expression(*left, anchor)?;
-                self.validate_expression(*right, anchor)?;
+                self.validate_child_values(expression_id, anchor)?;
             }
 
             HirExpressionKind::UnaryOp { op, operand } => {
@@ -647,12 +644,12 @@ impl<'a> HirValidator<'a> {
                 struct_id,
                 fields: field_range,
             } => {
-                // Validate struct existence, field ownership, and field sub-expressions.
+                // Validate struct existence and field ownership, then field sub-expressions.
                 self.require_struct_id(*struct_id, anchor)?;
-                for (field_id, field_expression) in self.struct_fields(*field_range, anchor)? {
+                for (field_id, _) in self.struct_fields(*field_range, anchor)? {
                     self.require_field_owned_by(*field_id, *struct_id, anchor)?;
-                    self.validate_expression(*field_expression, anchor)?;
                 }
+                self.validate_child_values(expression_id, anchor)?;
             }
 
             // Collection literals: validate type is a collection and validate each element.
@@ -667,9 +664,9 @@ impl<'a> HirValidator<'a> {
                         anchor,
                     ));
                 }
-                for element in self.value_ids(*element_range, anchor)? {
-                    self.validate_expression(*element, anchor)?;
-                }
+                // The checked range read reports a malformed range before the listing reads it.
+                self.value_ids(*element_range, anchor)?;
+                self.validate_child_values(expression_id, anchor)?;
             }
 
             // Map literals: validate type is a map and validate key/value sub-expressions.
@@ -680,25 +677,23 @@ impl<'a> HirValidator<'a> {
                         anchor,
                     ));
                 }
-                for entry in self.map_entries(*entry_range, anchor)? {
-                    self.validate_expression(entry.key, anchor)?;
-                    self.validate_expression(entry.value, anchor)?;
-                }
+                // The checked range read reports a malformed range before the listing reads it.
+                self.map_entries(*entry_range, anchor)?;
+                self.validate_child_values(expression_id, anchor)?;
             }
 
-            HirExpressionKind::Range { start, end } => {
-                self.validate_expression(*start, anchor)?;
-                self.validate_expression(*end, anchor)?;
+            HirExpressionKind::Range { .. } => {
+                self.validate_child_values(expression_id, anchor)?;
             }
 
             // Variant payload extraction: validate source expression and carrier-specific bounds.
             HirExpressionKind::VariantPayloadGet {
                 carrier,
-                source,
                 variant_index,
                 field_index,
+                ..
             } => {
-                self.validate_expression(*source, anchor)?;
+                self.validate_child_values(expression_id, anchor)?;
                 match carrier {
                     HirVariantCarrier::Choice { choice_id } => {
                         let Some(choice) = self.module.choices.get(choice_id.0 as usize) else {
@@ -750,7 +745,7 @@ impl<'a> HirValidator<'a> {
             }
 
             HirExpressionKind::Cast { source, policy } => {
-                self.validate_expression(*source, anchor)?;
+                self.validate_child_values(expression_id, anchor)?;
                 if let Some(policy_target_type) =
                     self.validate_numeric_cast_source_type(*policy, *source, anchor)?
                     && expression.ty != policy_target_type

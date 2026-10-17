@@ -847,7 +847,7 @@ fn expression_rewrites_reuse_unchanged_rows_and_allocate_changed_parents() {
     let old_parent = store
         .append_expression(parent_row)
         .expect("changed parent row should fit");
-    side_table.map_value(Some(ast_span), old_parent, Some(source_span));
+    side_table.map_value(Some(ast_span), old_parent);
 
     let before_unchanged_rewrite = store.measurements();
     let unchanged_parent =
@@ -877,7 +877,7 @@ fn expression_rewrites_reuse_unchanged_rows_and_allocate_changed_parents() {
 
     for value in [old_parent, rewritten_parent] {
         assert_eq!(side_table.value_ast_span(value), Some(ast_span));
-        assert_eq!(side_table.value_source_span(value), Some(source_span));
+        assert_eq!(store.expression(value).span, Some(source_span));
         assert!(
             side_table
                 .hir_locations_for_ast(ast_span)

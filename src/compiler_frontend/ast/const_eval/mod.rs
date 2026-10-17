@@ -693,7 +693,7 @@ impl<F: FnMut(PathId) -> Option<ConstValueId>> FoldContext<'_, '_, F> {
                     ResolvedCastEvidence::UserDefined { .. } => {
                         InvalidCastReason::UserDefinedEvidenceNotConstFoldable
                     }
-                    ResolvedCastEvidence::GenericBound { .. } => {
+                    ResolvedCastEvidence::GenericBound => {
                         InvalidCastReason::GenericBoundEvidenceNotConstFoldable
                     }
                 };
@@ -1212,25 +1212,6 @@ pub(crate) fn constant_fold(
         }
     }
     Ok(outcome)
-}
-
-pub(crate) fn fold_compile_time_expression(
-    root: ExprId,
-    builder: &mut AstExpressionBuilder,
-    constants: &mut ConstValueStore,
-    services: FoldServices<'_>,
-    requirement: FoldRequirement,
-) -> Result<ConstantFoldOutcome, ConstantFoldError> {
-    #[cfg(feature = "benchmark_counters")]
-    increment_frontend_counter(FrontendCounter::CensusFoldCompileTimeExpressionEntries);
-    fold_root(
-        root,
-        builder,
-        constants,
-        services,
-        FoldBoundary::Runtime { requirement },
-        |_| None,
-    )
 }
 
 /// Scope, registry and failure policy for one loop-binding substitution.

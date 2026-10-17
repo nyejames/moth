@@ -274,7 +274,7 @@ fn inject_collection_expression_statement(
     };
 
     module.side_table.map_statement(span, &statement);
-    module.side_table.map_value(span, value_id, span);
+    module.side_table.map_value(span, value_id);
     module.blocks[entry_block_index].statements.push(statement);
 }
 
@@ -303,7 +303,7 @@ fn int_expression(
         region,
         ValueKind::RValue,
     );
-    module.side_table.map_value(*span, expression_id, *span);
+    module.side_table.map_value(*span, expression_id);
     expression_id
 }
 
@@ -321,7 +321,7 @@ fn float_expression(
         region,
         ValueKind::RValue,
     );
-    module.side_table.map_value(*span, expression_id, *span);
+    module.side_table.map_value(*span, expression_id);
     expression_id
 }
 
@@ -373,7 +373,7 @@ fn append_place_load_for_validation(
         region,
         ValueKind::Place,
     );
-    module.side_table.map_value(span, value, span);
+    module.side_table.map_value(span, value);
 
     let statement = HirStatement {
         id: HirNodeId(9000),
@@ -905,7 +905,7 @@ fn validate_numeric_op_for_test_with_types(
             entry_region,
             ValueKind::RValue,
         );
-        module.side_table.map_value(span, value_id, span);
+        module.side_table.map_value(span, value_id);
         operands.push(value_id);
     }
 
@@ -1026,7 +1026,7 @@ fn install_cast_invoke_for_test(
         entry_region,
         ValueKind::RValue,
     );
-    module.side_table.map_value(None, source, None);
+    module.side_table.map_value(None, source);
     let success = append_failure_block(
         module,
         entry_region,
@@ -1135,9 +1135,9 @@ fn validate_comparison_for_test(
         entry_region,
         ValueKind::RValue,
     );
-    module.side_table.map_value(span, left, span);
-    module.side_table.map_value(span, right, span);
-    module.side_table.map_value(span, expression, span);
+    module.side_table.map_value(span, left);
+    module.side_table.map_value(span, right);
+    module.side_table.map_value(span, expression);
 
     let statement = HirStatement {
         id: HirNodeId(9000),
@@ -1185,8 +1185,8 @@ fn validate_number_comparison_for_test(
         entry_region,
         ValueKind::RValue,
     );
-    module.side_table.map_value(span, number, span);
-    module.side_table.map_value(span, integer, span);
+    module.side_table.map_value(span, number);
+    module.side_table.map_value(span, integer);
     let right = if explicitly_converted {
         let converted = append_hir_expression(
             &mut module,
@@ -1201,7 +1201,7 @@ fn validate_number_comparison_for_test(
             entry_region,
             ValueKind::RValue,
         );
-        module.side_table.map_value(span, converted, span);
+        module.side_table.map_value(span, converted);
         converted
     } else {
         integer
@@ -1217,7 +1217,7 @@ fn validate_number_comparison_for_test(
         entry_region,
         ValueKind::RValue,
     );
-    module.side_table.map_value(span, expression, span);
+    module.side_table.map_value(span, expression);
 
     let statement = HirStatement {
         id: HirNodeId(9000),
@@ -1712,9 +1712,7 @@ fn validator_rejects_assertion_message_evaluation_fact_mismatch() {
         ValueKind::RValue,
     );
 
-    module
-        .side_table
-        .map_value(message_span, message, message_span);
+    module.side_table.map_value(message_span, message);
     module.blocks[entry_block_index].terminator = HirTerminator::AssertFailure {
         message,
         message_evaluation: HirAssertionMessageEvaluation::Folded,
@@ -1905,7 +1903,7 @@ fn append_expression_for_validation(
         entry_region,
         ValueKind::Const,
     );
-    module.side_table.map_value(*span, left, *span);
+    module.side_table.map_value(*span, left);
 
     let right = int_expression(7, int_type, entry_region, span, module);
     let expression = append_hir_expression(
@@ -1919,7 +1917,7 @@ fn append_expression_for_validation(
         entry_region,
         ValueKind::RValue,
     );
-    module.side_table.map_value(*span, expression, *span);
+    module.side_table.map_value(*span, expression);
     expression
 }
 
@@ -2042,7 +2040,7 @@ fn validator_rejects_plain_numeric_unary_op() {
         entry_region,
         ValueKind::RValue,
     );
-    module.side_table.map_value(span, expression, span);
+    module.side_table.map_value(span, expression);
 
     let statement = HirStatement {
         id: HirNodeId(9000),
@@ -2149,7 +2147,7 @@ fn fixed_float_source(
         entry_region,
         ValueKind::RValue,
     );
-    module.side_table.map_value(*span, expression_id, *span);
+    module.side_table.map_value(*span, expression_id);
     expression_id
 }
 
@@ -2281,7 +2279,7 @@ fn validator_rejects_validate_float_with_non_float_source() {
         entry_region,
         ValueKind::RValue,
     );
-    module.side_table.map_value(span, source, span);
+    module.side_table.map_value(span, source);
 
     inject_float_statement_with_source(
         &mut module,
@@ -3224,12 +3222,8 @@ fn validator_rejects_non_literal_match_pattern() {
         region,
         ValueKind::Place,
     );
-    module
-        .side_table
-        .map_value(value_span, scrutinee, value_span);
-    module
-        .side_table
-        .map_value(value_span, pattern_value, value_span);
+    module.side_table.map_value(value_span, scrutinee);
+    module.side_table.map_value(value_span, pattern_value);
 
     module.blocks[entry_block_id.0 as usize].terminator = HirTerminator::Match {
         scrutinee,
@@ -3273,9 +3267,7 @@ fn validator_rechecks_shared_expression_in_match_pattern_context() {
             span: Some(value_span),
         })
         .expect("shared literal expression should fit");
-    module
-        .side_table
-        .map_value(Some(value_span), shared_value, Some(value_span));
+    module.side_table.map_value(Some(value_span), shared_value);
 
     let statement = HirStatement {
         id: HirNodeId(9000),
@@ -3298,7 +3290,7 @@ fn validator_rechecks_shared_expression_in_match_pattern_context() {
         entry_region,
         ValueKind::Const,
     );
-    module.side_table.map_value(None, scrutinee, None);
+    module.side_table.map_value(None, scrutinee);
     module.blocks[entry_block_index].terminator = HirTerminator::Match {
         scrutinee,
         arms: vec![HirMatchArm {
@@ -3367,8 +3359,8 @@ fn inject_fixed_scalar_match_pattern(
         region,
         ValueKind::Const,
     );
-    module.side_table.map_value(None, scrutinee, None);
-    module.side_table.map_value(None, pattern_value, None);
+    module.side_table.map_value(None, scrutinee);
+    module.side_table.map_value(None, pattern_value);
 
     module.blocks[entry_block_index].terminator = HirTerminator::Match {
         scrutinee,
@@ -3854,7 +3846,7 @@ fn validator_rejects_expression_type_containing_generic_parameter() {
     };
 
     module.side_table.map_statement(span, &statement);
-    module.side_table.map_value(span, value_id, span);
+    module.side_table.map_value(span, value_id);
     module.blocks[entry_block_index].statements.push(statement);
 
     let error = validate_module_for_tests(
@@ -3905,7 +3897,7 @@ fn validator_rejects_anonymous_const_record_marker_on_expression() {
     };
 
     module.side_table.map_statement(span, &statement);
-    module.side_table.map_value(span, value_id, span);
+    module.side_table.map_value(span, value_id);
     module.blocks[entry_block_index].statements.push(statement);
 
     let error = validate_module_for_tests(
@@ -4145,7 +4137,7 @@ fn validator_rejects_cycle_in_expression_id_graph() {
         kind: HirStatementKind::Expr(cycle_id),
         span: None,
     };
-    module.side_table.map_value(None, cycle_id, None);
+    module.side_table.map_value(None, cycle_id);
     module.side_table.map_statement(None, &statement);
     module.blocks[entry_block_index].statements.push(statement);
 
@@ -4229,7 +4221,7 @@ fn validator_rejects_dangling_expression_child_id() {
         kind: HirStatementKind::Expr(expression_id),
         span: None,
     };
-    module.side_table.map_value(None, expression_id, None);
+    module.side_table.map_value(None, expression_id);
     module.side_table.map_statement(None, &statement);
     module.blocks[entry_block_index].statements.push(statement);
 
@@ -4308,7 +4300,7 @@ fn validator_rejects_dangling_index_expression_id() {
         kind: HirStatementKind::Expr(expression_id),
         span: None,
     };
-    module.side_table.map_value(None, expression_id, None);
+    module.side_table.map_value(None, expression_id);
     module.side_table.map_statement(None, &statement);
     module.blocks[entry_block_index].statements.push(statement);
 
@@ -4563,7 +4555,7 @@ fn hir_variant_construct_option_invalid_index_rejected() {
     };
 
     module.side_table.map_statement(span, &statement);
-    module.side_table.map_value(span, expr_id, span);
+    module.side_table.map_value(span, expr_id);
     module.blocks[entry_block_index].statements.push(statement);
 
     let error = validate_module_for_tests(
@@ -4702,8 +4694,8 @@ fn hir_variant_construct_choice_wrong_field_name_rejected() {
     };
 
     module.side_table.map_statement(span, &statement);
-    module.side_table.map_value(span, expr_id, span);
-    module.side_table.map_value(span, value_id, span);
+    module.side_table.map_value(span, expr_id);
+    module.side_table.map_value(span, value_id);
     module.blocks[entry_block_index].statements.push(statement);
 
     let error = validate_module_for_tests(
@@ -4843,8 +4835,8 @@ fn hir_variant_construct_choice_wrong_field_type_rejected() {
     };
 
     module.side_table.map_statement(span, &statement);
-    module.side_table.map_value(span, expr_id, span);
-    module.side_table.map_value(span, value_id, span);
+    module.side_table.map_value(span, expr_id);
+    module.side_table.map_value(span, value_id);
     module.blocks[entry_block_index].statements.push(statement);
 
     let error = validate_module_for_tests(
@@ -4966,7 +4958,7 @@ fn hir_route_construct_with_input_missing_leading_capture_rejected() {
         span,
     };
     module.side_table.map_statement(span, &statement);
-    module.side_table.map_value(span, expr_id, span);
+    module.side_table.map_value(span, expr_id);
     module.blocks[entry_block_index].statements.push(statement);
 
     let error = validate_module_for_tests(
@@ -5061,7 +5053,7 @@ fn validator_rejects_number_literal_scale_that_mismatches_hir_type() {
         span,
     };
 
-    module.side_table.map_value(span, value_id, span);
+    module.side_table.map_value(span, value_id);
     module.side_table.map_statement(span, &statement);
     module.blocks[entry_block_index].statements.push(statement);
 
@@ -5090,9 +5082,7 @@ fn validator_rejects_number_literal_scale_that_mismatches_hir_type() {
         .last_mut()
         .expect("injected Dec expression statement should remain in the HIR block");
     statement.kind = HirStatementKind::Expr(mismatched_expression);
-    module
-        .side_table
-        .map_value(span, mismatched_expression, span);
+    module.side_table.map_value(span, mismatched_expression);
 
     let error = validate_module_for_tests(
         &module,

@@ -26,7 +26,7 @@ This plan runs after runtime anonymous records and immediately before the HTML m
 
 The order is deliberate. The Wasm implementation must consume a settled HIR function return contract and terminating Never call. It must not invent Never semantics from missing results or backend `unreachable` instructions.
 
-The earlier typed semantic expression work delivers ordinary zero/one/multiple success slots and a
+The earlier compact typed-expression foundation delivers ordinary zero/one/multiple success slots and a
 separate error channel, retires Reactivity V1 and separates expression values from callable
 contracts. This plan consumes those foundations and adds explicit Never and consolidated
 terminality. It does not rebuild the old unit/tuple/fallible-carrier representation or move Never

@@ -23,13 +23,14 @@ use crate::compiler_frontend::hir::module::HirModule;
 use crate::compiler_frontend::hir::numeric::{
     HirNumericOp, HirNumericOperands, NumericFailureMode,
 };
-use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern};
+use crate::compiler_frontend::hir::patterns::{HirMatchArm, HirPattern, HirRelationalPatternOp};
+use crate::compiler_frontend::hir::places::HirPlace;
 use crate::compiler_frontend::hir::reachability::{
     HirReachability, ReachableFloatStatementKind, ReachableMapUseKind, ReachableNumericDelivery,
     collect_module_function_link_facts, collect_reachability_from_function_link_facts,
 };
 use crate::compiler_frontend::hir::statements::{
-    HirLocalDestination, HirStatement, HirStatementKind,
+    HirLocalDestination, HirStatement, HirStatementKind, HirWriteTarget,
 };
 use crate::compiler_frontend::hir::terminators::{
     HirAssertionMessageEvaluation, HirFallibleOperation, HirTerminator,
@@ -1446,6 +1447,184 @@ fn reachability_records_reachable_runtime_casts_only() {
         reachability.reachable_runtime_casts.len(),
         1,
         "only casts in reachable blocks should be reported"
+    );
+}
+
+/// A place whose index is the runtime cast at `cast_expression(0)`.
+///
+/// WHY: the cast is reachable only through the place's projection, which is the edge the
+/// reachability collector must follow for every place-reading or place-writing statement.
+fn cast_indexed_place(expressions: &mut HirExpressionStore) -> HirPlace {
+    HirPlace::local(LocalId(0))
+        .with_index(cast_expression(0), expressions, None)
+        .expect("index projection should append")
+}
+
+#[test]
+fn reachability_collects_runtime_casts_in_place_index_reads() {
+    let mut expressions = test_expression_store();
+    let place = cast_indexed_place(&mut expressions);
+    let load = expressions
+        .append_expression(HirExpression {
+            kind: HirExpressionKind::Load(place),
+            ty: builtin_type_ids::STRING,
+            value_kind: ValueKind::Place,
+            region: RegionId(0),
+            span: None,
+        })
+        .expect("load should append");
+    let copy = expressions
+        .append_expression(HirExpression {
+            kind: HirExpressionKind::Copy(place),
+            ty: builtin_type_ids::STRING,
+            value_kind: ValueKind::RValue,
+            region: RegionId(0),
+            span: None,
+        })
+        .expect("copy should append");
+    let module = hir_module_with_expressions(
+        FunctionId(0),
+        vec![function(FunctionId(0), BlockId(0))],
+        vec![block(
+            BlockId(0),
+            vec![
+                HirStatement {
+                    id: HirNodeId(10),
+                    kind: HirStatementKind::Expr(load),
+                    span: None,
+                },
+                HirStatement {
+                    id: HirNodeId(11),
+                    kind: HirStatementKind::Expr(copy),
+                    span: None,
+                },
+            ],
+            HirTerminator::Return(HirValueRange::empty()),
+        )],
+        expressions,
+    );
+
+    let reachability = collect_test_reachability(&module, &[FunctionId(0)])
+        .expect("reachability should collect place index casts");
+
+    assert_eq!(
+        reachability.reachable_runtime_casts.len(),
+        2,
+        "casts in Load and Copy place indexes should be reachable"
+    );
+}
+
+#[test]
+fn reachability_collects_runtime_casts_in_assignment_place_indexes() {
+    let mut expressions = test_expression_store();
+    let place = cast_indexed_place(&mut expressions);
+    let module = hir_module_with_expressions(
+        FunctionId(0),
+        vec![function(FunctionId(0), BlockId(0))],
+        vec![block(
+            BlockId(0),
+            vec![HirStatement {
+                id: HirNodeId(10),
+                kind: HirStatementKind::Write {
+                    target: HirWriteTarget::AssignPlace(place),
+                    value: bool_expression(10),
+                },
+                span: None,
+            }],
+            HirTerminator::Return(HirValueRange::empty()),
+        )],
+        expressions,
+    );
+
+    let reachability = collect_test_reachability(&module, &[FunctionId(0)])
+        .expect("reachability should collect assignment index casts");
+
+    assert_eq!(
+        reachability.reachable_runtime_casts.len(),
+        1,
+        "casts in an assignment target's index should be reachable"
+    );
+}
+
+#[test]
+fn reachability_collects_runtime_casts_in_match_guards() {
+    let module = hir_module(
+        FunctionId(0),
+        vec![function(FunctionId(0), BlockId(0))],
+        vec![
+            block(
+                BlockId(0),
+                vec![],
+                HirTerminator::Match {
+                    scrutinee: bool_expression(10),
+                    arms: vec![HirMatchArm {
+                        pattern: HirPattern::Wildcard,
+                        guard: Some(cast_expression(10)),
+                        body: BlockId(1),
+                    }],
+                },
+            ),
+            block(
+                BlockId(1),
+                vec![],
+                HirTerminator::Return(HirValueRange::empty()),
+            ),
+        ],
+    );
+
+    let reachability = collect_test_reachability(&module, &[FunctionId(0)])
+        .expect("reachability should collect guard casts");
+
+    assert_eq!(
+        reachability.reachable_runtime_casts.len(),
+        1,
+        "casts in a match guard should be reachable"
+    );
+}
+
+#[test]
+fn reachability_collects_runtime_casts_in_match_pattern_values() {
+    let module = hir_module(
+        FunctionId(0),
+        vec![function(FunctionId(0), BlockId(0))],
+        vec![
+            block(
+                BlockId(0),
+                vec![],
+                HirTerminator::Match {
+                    scrutinee: bool_expression(10),
+                    arms: vec![
+                        HirMatchArm {
+                            pattern: HirPattern::Literal(cast_expression(10)),
+                            guard: None,
+                            body: BlockId(1),
+                        },
+                        HirMatchArm {
+                            pattern: HirPattern::Relational {
+                                op: HirRelationalPatternOp::GreaterThan,
+                                value: cast_expression(10),
+                            },
+                            guard: None,
+                            body: BlockId(1),
+                        },
+                    ],
+                },
+            ),
+            block(
+                BlockId(1),
+                vec![],
+                HirTerminator::Return(HirValueRange::empty()),
+            ),
+        ],
+    );
+
+    let reachability = collect_test_reachability(&module, &[FunctionId(0)])
+        .expect("reachability should collect pattern value casts");
+
+    assert_eq!(
+        reachability.reachable_runtime_casts.len(),
+        2,
+        "casts in literal and relational pattern values should be reachable"
     );
 }
 

@@ -35,7 +35,7 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 - [Compiler diagnostic recovery and budgets](./plans/compiler-diagnostic-recovery-and-budgets-plan.md) - Queued after compact diagnostic layout: measured ordinary concrete-body recovery, configurable per-module error allowances, a soft project scheduling cutoff and lightweight stop metadata. Preserve parallel preparation and future incremental compatibility without adding a scheduler or cache.
 
-- [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md) - Paused until diagnostic layout and bounded diagnostic recovery complete. Consume delivered exact numeric conflict/default-range, narrow-operation and authored safety-catch diagnostics. Native result arity and narrow propagation-context work remain with the earlier typed-expression cutover. Resume with a fresh inventory and only the remaining catch-recovery presentation work, without rebuilding transferred fixes.
+- [Compiler diagnostics improvements](./plans/compiler-diagnostics-improvement-plan.md) - Paused until diagnostic layout and bounded diagnostic recovery complete. Consume delivered exact numeric conflict/default-range, narrow-operation and authored safety-catch diagnostics. Native result arity and narrow propagation-context work are delivered with the compact typed-expression foundation. Resume with a fresh inventory and only the remaining catch-recovery presentation work, without rebuilding transferred fixes.
 
 - [HTML builder string churn reduction](./plans/html-builder-string-churn-reduction-plan.md) - Queued, blocked on frozen path identities and five-run benchmark evidence; investigation before narrow success-path fix
 

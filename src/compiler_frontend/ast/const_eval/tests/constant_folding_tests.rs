@@ -34,7 +34,7 @@ use crate::compiler_frontend::compiler_messages::{
     CompileTimeEvaluationErrorReason, DiagnosticPayload, InvalidCastReason,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
-use crate::compiler_frontend::datatypes::ids::{GenericParameterId, TypeId, builtin_type_ids};
+use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};
 use crate::compiler_frontend::datatypes::number::NumberValue;
 use crate::compiler_frontend::datatypes::numeric_scalar::NumericScalar;
 use crate::compiler_frontend::external_packages::{
@@ -46,7 +46,7 @@ use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::synthetic_interface_provenance::{
     SyntheticInterfaceClass, SyntheticInterfaceMemberIdentity, SyntheticInterfaceProvenance,
 };
-use crate::compiler_frontend::traits::ids::{TraitEvidenceId, TraitId};
+use crate::compiler_frontend::traits::ids::TraitEvidenceId;
 use crate::compiler_frontend::value_mode::ValueMode;
 use moth_lexical::numeric::decimal::NumberScale;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarClass, FixedScalarValue};
@@ -74,7 +74,7 @@ fn folding_handled_expressions_preserves_zero_and_multiple_success_shapes() {
             )
             .expect("test handled result should construct")
             .id();
-        let folded = match fold_compile_time_expression(
+        let folded = match constant_fold(
             handled,
             &mut f.builder,
             &mut f.constants,
@@ -522,7 +522,7 @@ impl FoldFixture {
     }
 
     fn fold_compile_time(&mut self, root: ExprId) -> Result<ExprId, ConstantFoldError> {
-        match fold_compile_time_expression(
+        match constant_fold(
             root,
             &mut self.builder,
             &mut self.constants,
@@ -2598,10 +2598,7 @@ fn fold_cast_generic_bound_evidence_rejected_in_const_context() {
     let target_type_id = f.types.builtins().string;
     let cast = f.cast_expr(
         source,
-        ResolvedCastEvidence::GenericBound {
-            trait_id: TraitId(0),
-            parameter_id: GenericParameterId(0),
-        },
+        ResolvedCastEvidence::GenericBound,
         target_type_id,
         BuiltinCastFallibility::Infallible,
         CastHandling::Implicit,

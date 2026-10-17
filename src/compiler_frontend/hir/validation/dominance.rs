@@ -161,7 +161,6 @@ impl HirValidator<'_> {
                 expression(*value)?;
                 self.require_defined_local(*vec_local, defined, anchor)?;
             }
-            HirStatementKind::Drop(local) => self.require_defined_local(*local, defined, anchor)?,
             HirStatementKind::MapOp {
                 receiver,
                 args,
@@ -440,9 +439,6 @@ fn transfer_statement_definitions(statement: &HirStatementKind, defined: &mut De
         } => {
             defined.insert(candidate_result.local());
             defined.insert(in_range_result.local());
-        }
-        HirStatementKind::Drop(local) => {
-            defined.remove(local);
         }
         HirStatementKind::Write {
             target: HirWriteTarget::AssignPlace(_),

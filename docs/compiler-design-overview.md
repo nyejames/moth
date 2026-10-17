@@ -512,7 +512,7 @@ Separate these responsibilities at their real owners:
 | Declarations and symbols | Declaration identity, visibility, binding mode, receiver identity and links to any real initialiser. A declaration without an initialiser does not manufacture a `NoValue` expression. |
 | Callable and constructor contracts | Resolved parameter types, access/capability requirements, defaults, receiver information and success/error signature. Parsing, inference and validation borrow the same contract and retain one argument-slot mapping. |
 | Semantic expression store | Resolved value-producing operations, compact graph edges and authoritative result shapes. Zero results remain a real shape, distinct from a missing default. |
-| Constant owner | Immutable value content and its resolved classification, including exact numeric values and structural strings. Repeated uses refer to content without expanding it into owned expression subtrees. |
+| Constant owner | Immutable value content and its resolved classification, including exact numeric values and structural strings. Repeated uses refer to content without expanding it into owned expression subtrees. `ConstValueStore` is the one module-local folded-value authority, and each dense `ConstValueId` names one node in its graph. |
 | Occurrence and cold facts | Authored locations, diagnostic evidence, failure contributors, catch eligibility, const-record classification and synthetic-interface provenance where required. Shared constant content does not absorb occurrence-specific evidence. |
 | TIR | Template structure and exact-view authority during AST semantics, under `Templates and TIR`. |
 
@@ -527,6 +527,8 @@ Store domains follow actual lifetimes. TIR-referenced expressions stay available
 Generic-body validation roots remain available through finalizer specialisation, terminality, failure-boundary and any TIR readers, then leave completed AST roots. The immutable generic template retains canonical syntax and context separately, from which a concrete body gets a distinct local graph. Candidate specialisations share unchanged immutable data without leaking replacements between candidates.
 
 Module compilation, generated materialisation, config and direct-template services consume the same semantic builders and fold owners through their defined entry points. Each service releases its scratch and expression stores after producing the owned values, executable data and diagnostic context needed by its outcome. Public interfaces contain canonical value/type facts, never expression IDs. HIR receives a deliberate projection and retains no AST/TIR authority.
+
+Rejected representations include pointer tagging, a generic allocator framework, a lifetime-heavy arena library, node-level `Arc`s, global hash-consing and per-field maps. Also rejected are a recursive compatibility tree, a second constant-value language, an evaluator callback framework, a global semantic registry and unused future-only variants. Existing shared owners remain where their lifetime and semantics justify them. New indirection must remove work, establish an invariant or own a real lifetime.
 
 #### Result slots and receiving boundaries
 
@@ -706,6 +708,8 @@ Folding requires `Composed` or later. AST-to-HIR handoff requires `Finalized`.
 
 An exact `TirView` is the structural read authority after parser emission. Its `TirViewIdentity` contains the module-local root, phase and complete value context. The context contains only the optional expression, slot-resolution and wrapper-context overlay IDs, whose payloads remain owned by the module store. This identity determines effective reads, preparation and fold-cache keys and cycle detection. Consumers do not carry parallel authority tokens, store identities, context tables or overlay stacks outside the view.
 
+Template folding keeps borrowed fold inputs and un-normalised fold keys, and the TIR fold cache keeps its current width. An owned-folder signature copied inputs and slowed matched timings, and key normalisation cost more than the low cache reuse saved. Reopen these choices only with a new causal hypothesis and complete lifetime and invalidation evidence.
+
 Recursive consumers use two explicit view transitions:
 
 - Structural child and wrapper transitions preserve the current complete expression overlay. Parsed references ignore their referenced slot-resolution and wrapper-context overlays. Composed or later references supply those two structural dimensions. Resolved slot sources and structural helpers retain the complete current context.
@@ -782,7 +786,7 @@ Direct content constants use retained local ordering edges. Actual content-depen
 
 A structural string is an ordinary `String` whose ordered pieces include Text, Resource or SiteRoot. The anchor pieces preserve identity until the builder supplies final characters. Such strings remain legal mutable values, parameters, returns, optionals, collection elements and exported constants. Their presence alone causes no rejection.
 
-One module-local folded-value owner supports the plain-text fast path and structural pieces. Its postorder visitor uses an explicit heap stack as the sole conversion route into public values, HIR constants and direct-template results. Public values retain independently owned outputs. Consumers never reconstruct the string from AST expressions or TIR.
+One module-local folded-value owner supports the plain-text fast path and structural pieces. Its postorder visitor uses an explicit heap stack as the sole conversion route into public values, HIR constants and direct-template results. Public values retain independently owned outputs. Projection uses no memoisation, which preserves authored field order, provenance and independently owned repeated-child outputs. Consumers never reconstruct the string from AST expressions or TIR.
 
 Composition preserves pieces through assignment, copying, storage, interpolation, concatenation, slots/wrappers, export/re-export and calls/returns. Observation needs concrete characters: equality, length, search/prefix/suffix tests, parsing, String casts, hashing, compile-time map keys/duplicate checks and character-inspecting formatters or host operations.
 

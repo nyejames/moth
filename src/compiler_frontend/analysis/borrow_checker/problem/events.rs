@@ -197,7 +197,7 @@ pub(crate) struct CallEffect {
     pub(crate) results: Box<[CallResult]>,
 }
 
-/// A stable call-summary handle. The label is opaque to Phase 2 and deterministic in fixtures.
+/// A stable call-summary handle. The label is opaque to the problem and deterministic in fixtures.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Call {
     pub(crate) id: CallId,

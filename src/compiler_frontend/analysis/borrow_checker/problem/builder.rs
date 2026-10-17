@@ -499,7 +499,6 @@ impl<'a> FunctionProblemBuilder<'a> {
                 let args = self.module.expressions.values(*args).to_vec();
                 self.lower_map_call(*op, *receiver, &args, *result, &source, event_ids)?;
             }
-            HirStatementKind::Drop(_) => {}
             HirStatementKind::FormatFloat {
                 source: value,
                 result,
@@ -2432,12 +2431,7 @@ impl<'a> FunctionProblemBuilder<'a> {
         let expression = self.module.expressions.expression(expression_id);
         EventSource {
             hir_node: None,
-            span: self
-                .module
-                .side_table
-                .value_source_span(expression_id)
-                .or(expression.span)
-                .or(fallback.span),
+            span: expression.span.or(fallback.span),
         }
     }
 

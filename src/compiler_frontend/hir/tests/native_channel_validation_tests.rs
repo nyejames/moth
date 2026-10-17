@@ -53,7 +53,7 @@ impl InvokeFixture {
             ValueKind::RValue,
             &mut self.module.expressions,
         );
-        self.module.side_table.map_value(None, value, None);
+        self.module.side_table.map_value(None, value);
         let id = HirNodeId(self.next_node_id);
         self.next_node_id += 1;
         self.module.blocks[block.0 as usize]
@@ -82,7 +82,7 @@ fn format_float_invoke() -> InvokeFixture {
         ValueKind::Const,
         &mut module.expressions,
     );
-    module.side_table.map_value(None, source, None);
+    module.side_table.map_value(None, source);
     let success_local = LocalId(9000);
     let error_local = LocalId(9001);
     let success = BlockId(module.blocks.len() as u32);
@@ -262,7 +262,7 @@ fn module_with_ordered_returns() -> (
         &mut module.expressions,
     );
     for value in [integer, boolean] {
-        module.side_table.map_value(None, value, None);
+        module.side_table.map_value(None, value);
     }
     (strings, module, types, entry, vec![integer, boolean])
 }

@@ -329,10 +329,6 @@ pub(crate) fn transfer_statement(
             )?;
         }
 
-        HirStatementKind::Drop(_local) => {
-            // Ownership/drop semantics are handled by later analyses.
-        }
-
         HirStatementKind::PushRuntimeFragment { value, .. } => {
             let location = context.diagnostics.statement_error_span(statement);
             let mut read_env = SharedReadEnv {

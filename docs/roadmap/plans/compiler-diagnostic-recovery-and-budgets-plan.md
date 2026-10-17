@@ -19,7 +19,7 @@
 
 The main roadmap places this work after compiler source/token/diagnostic data layout and before diagnostic presentation improvements. The later general-directives/configuration cutover is not a prerequisite. Deliver the two settings using the configuration system present at activation, then preserve them through that later cutover.
 
-The repository inspection used for authoring found expression Phase 4 merged, later expression phases paused and diagnostic-layout Phase 4 onward still gated. This is navigation context, not current implementation evidence when this plan activates. Record the actual starting revision and toolchain in working notes. Do not pin a future implementation baseline in this status block or reactivate another plan implicitly.
+The repository inspection used for authoring found the compact typed-expression foundation merged, its later reductions awaiting merge and the source-token and diagnostic-layout migration still gated. This is navigation context, not current implementation evidence when this plan activates. Record the actual starting revision and toolchain in working notes. Do not pin a future implementation baseline in this status block or reactivate another plan implicitly.
 
 ## Required reading
 
@@ -138,7 +138,7 @@ These are inspected navigation anchors, not fixed APIs for the post-layout imple
 |---|---|
 | Module AST sequence | `src/compiler_frontend/ast/mod.rs` runs environment construction, emission and finalisation. |
 | Body boundary | `ast/module_ast/emission/emitter.rs` propagates errors out of `emit()` and returns rich boundary messages from `emit_function()`. Each header already owns bounded syntax. |
-| Expression and constant lifetime | `ast/module_ast/build_context.rs`, `ast/module_ast/finalization/` and `ast/mod.rs`. The merged expression cutover gives `AstPhaseContext` shared expression and constant stores beside TIR. |
+| Expression and constant lifetime | `ast/module_ast/build_context.rs`, `ast/module_ast/finalization/` and `ast/mod.rs`. The merged compact typed-expression foundation gives `AstPhaseContext` shared expression and constant stores beside TIR. |
 | Shared body services | `ast/module_ast/scope_context.rs`, its `builders.rs` and `lookup.rs`, `ast/type_interner.rs`, `ast/statements/body_dispatch.rs` and numeric completion owners. Inspect generic tickets and completed-body infallibility facts. |
 | Diagnostic storage | `src/compiler_frontend/compiler_messages/` and the data-layout authority. Reuse the delivered replacement for predecessor bags, reports and render contexts. |
 | Module transaction | `src/compiler_frontend/module_compilation/{options,service,outcome,stages}.rs` and generated completion. |

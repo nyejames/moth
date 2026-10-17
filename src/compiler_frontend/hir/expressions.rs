@@ -126,8 +126,7 @@ pub enum HirExpressionKind {
     // -------------------------
     /// One materialised fixed-width scalar or `Byte` value with exact-bit identity.
     ///
-    /// WHY: HTML-JS lowers the value through `JsNumericCarrier::fixed_literal`, while HTML-Wasm
-    ///      rejects reachable fixed values until Phase 5.
+    /// WHY: HTML-JS lowers the value through `JsNumericCarrier::fixed_literal`.
     FixedScalar(FixedScalarValue),
     /// One exact arbitrary-precision decimal literal with its canonical scale.
     Number(NumberValue),

@@ -321,9 +321,15 @@ impl<'a> HirValidator<'a> {
     }
 
     pub(super) fn hir_error_span(&self, location: HirLocation) -> Option<SourceSpan> {
-        self.module
-            .side_table
-            .hir_source_span_for_hir(location)
-            .or_else(|| self.module.side_table.ast_span_for_hir(location))
+        let source_span = match location {
+            // A value's source span is its row's span; the side table keeps only AST mappings.
+            HirLocation::Value(value_id) => self
+                .module
+                .expressions
+                .get_expression(value_id)
+                .and_then(|expression| expression.span),
+            _ => self.module.side_table.hir_source_span_for_hir(location),
+        };
+        source_span.or_else(|| self.module.side_table.ast_span_for_hir(location))
     }
 }

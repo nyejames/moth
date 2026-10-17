@@ -1,4 +1,4 @@
-//! Focused tests for checked numeric HIR lowering (Phase 6b).
+//! Focused tests for checked numeric HIR lowering.
 //!
 //! Verifies numeric domains, operand conversions and native failure delivery. Recoverable
 //! operations define success and error locals on Invoke edges; discharged and trapping operations

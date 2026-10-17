@@ -301,8 +301,8 @@ fn resolve_source_constant_references(
 
 /// WHAT: gates source-constant folding to operator trees whose leaves are all
 /// numeric constants or resolvable module-constant references.
-/// WHY: the old recursive initializer fold only accepted numeric recipes; a
-/// shared gate here keeps that refusal shape without rebuilding dead RPN.
+/// WHY: the gate inspects the operator tree in place, so refusing a tree needs no
+/// RPN rebuild.
 fn source_constant_tree_is_numeric(
     expression: ExprId,
     fold_context: &TirFoldContext<'_>,

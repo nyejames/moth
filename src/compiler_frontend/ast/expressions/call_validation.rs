@@ -11,9 +11,7 @@ use crate::compiler_frontend::ast::expressions::call_argument::{
     CallAccessMode, CallArgument, CallPassingMode, ParameterSlot,
     order_owned_call_arguments_by_retained_slot,
 };
-use crate::compiler_frontend::ast::expressions::constructor_views::{
-    ConstructorField, ConstructorFieldAccessMode,
-};
+use crate::compiler_frontend::ast::expressions::constructor_views::ConstructorField;
 use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExprId, ExpressionConstructionFailure, ExpressionOperationView,
     ExpressionView, OwnedExpr,
@@ -398,7 +396,7 @@ pub(crate) fn expectations_from_constructor_fields(
 
 /// Builds post-inference expectations directly from declared constructor views.
 ///
-/// WHY: only the expected TypeIds change after generic inference; names, access and defaults still
+/// WHY: only the expected TypeIds change after generic inference; names and defaults still
 /// belong to the original field descriptors and need no substituted field-vector copy.
 pub(crate) fn expectations_from_constructor_fields_with_substitution(
     fields: &[ConstructorField],
@@ -428,10 +426,7 @@ fn parameter_expectation_from_constructor_field(
     ParameterExpectation {
         name: path_fork.component(field.name),
         expected_type: ExpectedParameterType::Known(type_id),
-        access_mode: match field.access_mode {
-            ConstructorFieldAccessMode::Shared => ExpectedAccessMode::Shared,
-            ConstructorFieldAccessMode::Mutable => ExpectedAccessMode::Mutable,
-        },
+        access_mode: ExpectedAccessMode::Shared,
         default_value: field.default_value,
         contract: ParameterContract::Value,
     }

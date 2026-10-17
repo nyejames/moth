@@ -1,17 +1,17 @@
 //! HIR advisory const fact metadata.
 //!
 //! WHAT: projects AST const facts into a smaller HIR-safe summary that carries
-//!       declaration path, scope, source, value kind, and exact source span.
+//!       declaration path, scope, source, and exact source span.
 //! WHY: borrow checking and backend lowering may use these facts for optimization
 //!      in the future, but they are strictly advisory and must not affect semantic
 //!      lowering decisions today.
 //!
-//! HIR facts deliberately omit the full AST `Expression` payload. They are metadata
-//! for future optimization passes, not semantic inputs to HIR lowering or borrow
-//! validation.
+//! HIR facts carry metadata only. The resolved constant stays owned by the const value
+//! store, and these facts feed future optimization passes. They are not semantic inputs
+//! to HIR lowering or borrow validation.
 
 use crate::compiler_frontend::ast::const_values::facts::{
-    AstConstFacts, ConstBindingScope, ConstBindingSource, ConstFactValueKind,
+    AstConstFacts, ConstBindingScope, ConstBindingSource,
 };
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathIdRemap};
@@ -26,8 +26,8 @@ pub struct HirConstFacts {
 
 /// A single projected const fact in HIR.
 ///
-/// WHAT: records the scope, source, value classification, and exact source span of a
-///       compile-time declaration without storing the full AST expression.
+/// WHAT: records the scope, source, and exact source span of a compile-time declaration
+///       without storing the resolved constant value.
 /// WHY: keeps HIR lightweight while preserving the metadata needed by later
 ///      optimization passes.
 #[derive(Clone, Debug)]
@@ -41,10 +41,6 @@ pub struct HirConstDeclarationFact {
     /// NOTE: currently advisory; only read in tests until optimization passes consume it.
     #[allow(dead_code)]
     pub source: ConstBindingSource,
-
-    /// NOTE: currently advisory; only read in tests until optimization passes consume it.
-    #[allow(dead_code)]
-    pub value_kind: ConstFactValueKind,
 
     /// Span carried by the resolved expression; explicit facts and spanless
     /// expressions use `None`.
@@ -81,7 +77,6 @@ impl From<&AstConstFacts> for HirConstFacts {
                 declaration_path: fact.declaration_path,
                 scope: fact.scope,
                 source: fact.source,
-                value_kind: fact.value_kind,
                 span: fact.span,
             };
             declarations.insert(*path, hir_fact);

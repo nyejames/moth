@@ -596,15 +596,6 @@ macro_rules! storage {
                 $(self.$field.shrink_to_fit();)*
                 Ok(self)
             }
-            #[cfg(test)]
-            pub(crate) fn into_builder(mut self) -> Result<AstExpressionBuilder, CompilerError> {
-                self.owner = OwnerToken::mint()?;
-                Ok(AstExpressionBuilder {
-                    storage: self,
-                    candidate_serial: 0,
-                    limit: u32::MAX,
-                })
-            }
             #[cfg(any(test, feature = "benchmark_counters"))]
             pub(crate) fn storage_statistics(&self) -> ExpressionStorageStatistics {
                 let mut stats = ExpressionStorageStatistics::default();
@@ -1519,6 +1510,9 @@ pub(crate) use scratch::*;
 #[cfg(test)]
 #[path = "tests/owner_boundary_tests.rs"]
 mod owner_boundary_tests;
+#[cfg(test)]
+#[path = "expression_store_test_support.rs"]
+pub(crate) mod test_support;
 #[cfg(test)]
 #[path = "tests/expression_store_tests.rs"]
 mod tests;

@@ -1,7 +1,5 @@
 use super::*;
-use crate::compiler_frontend::ast::const_values::resolver::{
-    classify_template_from_effective_tir, prepare_template_tir_facts,
-};
+use crate::compiler_frontend::ast::const_values::resolver::classify_template_from_effective_tir;
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
@@ -11,6 +9,11 @@ use crate::compiler_frontend::ast::expressions::expression_store::{
 use crate::compiler_frontend::ast::expressions::parse_expression::create_expression_with_trailing_newline_policy;
 use crate::compiler_frontend::ast::expressions::parse_expression_input::{
     ExpressionParseInput, ExpressionParseResources,
+};
+use crate::compiler_frontend::ast::templates::error::TemplateError;
+use crate::compiler_frontend::ast::templates::tir::{
+    TemplateIrStore, TemplatePreparationFacts, TemplatePreparationMode, TemplateTirPhase, TirView,
+    prepare_tir_view,
 };
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::ast::{ContextKind, ScopeContext, TopLevelDeclarationTable};
@@ -22,8 +25,38 @@ use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCac
 use crate::compiler_frontend::type_coercion::parse_context::CastTargetContext;
 use crate::compiler_frontend::type_coercion::parse_context::ExpectedType;
 use crate::compiler_frontend::value_mode::ValueMode;
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
+
+/// Prepares facts from the template's effective TIR view.
+///
+/// WHY: builds the same view that const classification uses, then runs the
+/// shared preparation entry point, so the assertions read production facts.
+fn prepare_effective_template_facts(
+    template: &Template,
+    store: &Rc<RefCell<TemplateIrStore>>,
+    expression_builder: &AstExpressionBuilder,
+    const_values: &ConstValueStore,
+) -> Result<TemplatePreparationFacts, TemplateError> {
+    let reference = &template.tir_reference;
+    let store = store.borrow();
+    let view = TirView::with_minimum_phase(
+        &store,
+        reference.root,
+        reference.phase,
+        TemplateTirPhase::Composed,
+        reference.context,
+    )?;
+    Ok(prepare_tir_view(
+        &view,
+        expression_builder,
+        const_values,
+        TemplatePreparationMode::Value,
+        None,
+    )?
+    .facts)
+}
 
 #[allow(
     clippy::too_many_arguments,
@@ -106,7 +139,7 @@ fn slot_wrappers_remain_compile_time_templates_until_filled() {
         TemplateType::String
     ));
     assert!(
-        prepare_template_tir_facts(
+        prepare_effective_template_facts(
             &template,
             &context.template_ir_store,
             &expression_builder,
@@ -289,7 +322,7 @@ fn wrapper_templates_with_runtime_references_are_not_compile_time_constants() {
         TemplateType::StringFunction
     ));
     assert!(
-        prepare_template_tir_facts(
+        prepare_effective_template_facts(
             &template,
             &context.template_ir_store,
             &expression_builder,
@@ -527,7 +560,7 @@ fn assert_slot_is_tir_only_and_const(source: &str, slot_name: &str) {
     .expect("template with slot should parse");
 
     assert!(
-        prepare_template_tir_facts(
+        prepare_effective_template_facts(
             &template,
             &context.template_ir_store,
             &expression_builder,

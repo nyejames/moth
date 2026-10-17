@@ -169,7 +169,7 @@ fn finalization_normalizes_dynamic_expression_payloads_into_expression_overlay()
     };
     assert!(
         structural_expression_is_unchanged,
-        "Phase 10 dynamic-expression normalization should layer the normalized payload through an overlay"
+        "dynamic-expression normalization should layer the normalized payload through an overlay"
     );
 }
 
@@ -621,7 +621,7 @@ fn finalization_normalizes_conditional_selector_payloads_into_expression_overlay
     };
     assert!(
         structural_selector_is_unchanged,
-        "Phase 10 conditional-selector normalization should layer the normalized payload through an overlay"
+        "conditional-selector normalization should layer the normalized payload through an overlay"
     );
 }
 
@@ -754,7 +754,7 @@ fn finalization_normalizes_loop_header_payloads_into_expression_overlay() {
     };
     assert!(
         structural_header_is_unchanged,
-        "Phase 10 loop-header normalization should layer the normalized payload through an overlay"
+        "loop-header normalization should layer the normalized payload through an overlay"
     );
 }
 

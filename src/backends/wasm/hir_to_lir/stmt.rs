@@ -180,23 +180,6 @@ pub(crate) fn lower_statement(
             let _ = lower_expression(context, *expression, statements)?;
             Ok(())
         }
-        HirStatementKind::Drop(local_id) => {
-            // Keep explicit source-level drops in LIR when the value is handle-like.
-            let mapped_local = context.local_map.get(local_id).copied().ok_or_else(|| {
-                lir_transformation_error(format!(
-                    "Wasm lowering could not resolve drop local {local_id:?}"
-                ))
-            })?;
-
-            if context.is_handle_local(mapped_local) {
-                statements.push(WasmLirStmt::DropIfOwned {
-                    value: mapped_local,
-                });
-            }
-
-            Ok(())
-        }
-
         HirStatementKind::PushRuntimeFragment { vec_local, value } => {
             // WHAT: lower a runtime fragment push into a Wasm vec-push sequence.
             // WHY: entry start() accumulates runtime fragments via PushRuntimeFragment;

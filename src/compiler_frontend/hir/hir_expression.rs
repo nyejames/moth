@@ -446,12 +446,9 @@ impl<'a> HirBuilder<'a> {
             ExpressionOperationView::RuntimeTemplate(handoff) => self
                 .lower_runtime_template_expression_from_owned_handoff(handoff, expr, &expr.span()),
 
-            ExpressionOperationView::RuntimeSlotApplication(handoff) => self
-                .lower_runtime_slot_application_expression_from_owned_handoff(
-                    handoff,
-                    expr,
-                    &expr.span(),
-                ),
+            ExpressionOperationView::RuntimeSlotApplication(handoff) => {
+                self.lower_runtime_slot_application_template_expression(handoff, expr, &expr.span())
+            }
 
             // Lower the inner value and override the HIR type with the declared
             // coercion target. Option coercions materialize `some(value)` here so
@@ -1068,7 +1065,7 @@ impl<'a> HirBuilder<'a> {
             },
             ResolvedCastEvidence::UserDefined { method_path, .. } => self
                 .lower_user_defined_cast_expression(source, cast, method_path, expr_type_id, span),
-            ResolvedCastEvidence::GenericBound { .. } => Err(CompilerError::new(
+            ResolvedCastEvidence::GenericBound => Err(CompilerError::new(
                 "Generic-bound cast evidence reached HIR lowering",
                 self.hir_error_location(span),
                 crate::compiler_frontend::compiler_errors::ErrorType::HirTransformation,
@@ -1547,13 +1544,13 @@ impl<'a> HirBuilder<'a> {
             region,
             span: *span,
         })?;
-        self.side_table.map_value(*span, id, *span);
+        self.side_table.map_value(*span, id);
         Ok(id)
     }
 
     // WHAT: returns an expression root with selected scalar metadata updated.
     // WHY: HIR rows are immutable because multiple edges may share an ID; changed metadata must
-    //      receive a new row while keeping its source mapping attached to the new identity.
+    //      receive a new row; the row's span and AST mapping then belong to the new identity.
     pub(crate) fn replace_expression_metadata(
         &mut self,
         id: HirValueId,
@@ -1579,16 +1576,12 @@ impl<'a> HirBuilder<'a> {
             .expressions
             .copy_expression_with_metadata(id, *span, ty, region)?;
         if replacement != id {
-            let (ast_span, source_span) = if previous_span == *span {
-                (
-                    self.side_table.value_ast_span(id).or(previous_span),
-                    self.side_table.value_source_span(id).or(previous_span),
-                )
+            let ast_span = if previous_span == *span {
+                self.side_table.value_ast_span(id).or(previous_span)
             } else {
-                (*span, *span)
+                *span
             };
-            self.side_table
-                .map_value(ast_span, replacement, source_span);
+            self.side_table.map_value(ast_span, replacement);
         }
         Ok(replacement)
     }

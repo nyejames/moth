@@ -97,8 +97,9 @@ impl<'a> BorrowDiagnostics<'a> {
         fallback: Option<SourceSpan>,
     ) -> Option<SourceSpan> {
         self.module
-            .side_table
-            .value_source_span(value_id)
+            .expressions
+            .get_expression(value_id)
+            .and_then(|expression| expression.span)
             .or_else(|| self.module.side_table.value_ast_span(value_id))
             .or(fallback)
     }

@@ -17,8 +17,6 @@ use crate::compiler_frontend::ast::templates::tir::{
 };
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 
-#[cfg(test)]
-use crate::compiler_frontend::ast::templates::tir::TemplateIrId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 
 use super::helpers::{
@@ -71,36 +69,6 @@ enum TirChainItem {
         /// location when building the resolved `ChildTemplate` node.
         original_node_id: TemplateIrNodeId,
     },
-}
-
-/// Composes a template's head-chain from a template ID.
-///
-/// Test convenience wrapper: production callers use `compose_tir_head_chain_from_root`
-/// directly to avoid pushing scratch templates for node-root composition.
-#[cfg(test)]
-pub(crate) fn compose_tir_head_chain(
-    store: &mut TemplateIrStore,
-    expressions: &AstExpressionBuilder,
-    const_values: &ConstValueStore,
-    template_id: TemplateIrId,
-    string_table: &StringTable,
-    allow_runtime_plans: bool,
-) -> HeadChainResult<TemplateIrNodeId> {
-    let template = store.get_template(template_id).ok_or_else(|| {
-        internal_compiler_error(
-            "TIR head-chain composition: template ID was not present in the store.",
-        )
-    })?;
-    let root_node_id = template.root;
-    compose_tir_head_chain_from_root(
-        store,
-        expressions,
-        const_values,
-        root_node_id,
-        string_table,
-        allow_runtime_plans,
-        None,
-    )
 }
 
 /// Composes a head-chain directly from a root node, without requiring a

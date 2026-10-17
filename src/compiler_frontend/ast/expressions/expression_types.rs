@@ -7,10 +7,9 @@
 
 use crate::compiler_frontend::ast::ast_nodes::AstNode;
 use crate::compiler_frontend::builtins::casts::targets::BuiltinCastPolicyId;
-use crate::compiler_frontend::datatypes::ids::GenericParameterId;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 
-use crate::compiler_frontend::traits::ids::{TraitEvidenceId, TraitId};
+use crate::compiler_frontend::traits::ids::TraitEvidenceId;
 
 /// Value-level classification for const-record semantics.
 ///
@@ -68,7 +67,6 @@ impl ConstValueKind {
 
 /// The evidence selected for a cast.
 #[derive(Clone, Debug)]
-#[allow(dead_code)]
 pub(crate) enum ResolvedCastEvidence {
     /// Compiler-owned builtin policy identified by its stable policy id.
     Builtin { policy: BuiltinCastPolicyId },
@@ -89,10 +87,7 @@ pub(crate) enum ResolvedCastEvidence {
     ///      and selects real builtin or user-defined evidence; this marker is
     ///      discarded with the validation-only AST nodes and must never reach
     ///      HIR or backend lowering.
-    GenericBound {
-        trait_id: TraitId,
-        parameter_id: GenericParameterId,
-    },
+    GenericBound,
 }
 
 /// Delivery context for a resolved cast; pair fallibility is selected independently.

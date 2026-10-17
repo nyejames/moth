@@ -23,7 +23,7 @@ Implement the HTML project builder mixed JavaScript and Wasm backend strategy, f
 These are capability gates, not a requirement to wait for every later optimisation in the compiler
 foundation work. Confirm the required checkpoints have merged and refresh actual target support at
 activation. This plan retains ownership of full mixed-target, aggregate, memory and structured Wasm
-lowering. A completed expression/result cutover does not claim those capabilities are delivered.
+lowering. The completed compact typed-expression and native result-channel foundation does not claim those capabilities are delivered.
 
 ## Required authority documents
 

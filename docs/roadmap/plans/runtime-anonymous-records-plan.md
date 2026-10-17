@@ -14,7 +14,7 @@ Enable named-only parenthesised MON construction in runtime receiving contexts. 
 Reuse the shared argument parser, type environment, struct construction, field access, copy, borrow and lifetime owners. This work introduces no structural typing, anonymous-specific runtime IR or MON serialisation implementation.
 
 Consume delivered shared MON syntax, exact numeric identities and bounded construction-time
-numeric-leaf resolution. Run after the required typed semantic expression and ordinary struct
+numeric-leaf resolution. Run after the required compact typed-expression and ordinary struct
 construction capabilities, before the HTML mixed JavaScript/Wasm backend work that consumes this
 capability. The main roadmap owns ordering. Establish the revision, worktree status and baseline at
 activation in local working notes, not in this queued plan.

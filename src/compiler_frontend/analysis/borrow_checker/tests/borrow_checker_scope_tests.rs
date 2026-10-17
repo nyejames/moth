@@ -543,11 +543,8 @@ fn dead_local_access_reports_borrow_error() {
         .insert(0, synthetic_statement.clone());
     hir.side_table
         .map_statement(synthetic_statement.span, &synthetic_statement);
-    hir.side_table.map_value(
-        synthetic_statement.span,
-        synthetic_value,
-        synthetic_statement.span,
-    );
+    hir.side_table
+        .map_value(synthetic_statement.span, synthetic_value);
 
     let error = run_borrow_checker(&hir, &external_package_registry, &path_fork, &string_table)
         .expect_err("dead local access should fail");
