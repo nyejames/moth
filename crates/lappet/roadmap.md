@@ -22,8 +22,8 @@ than turning example API names into obligations.
 
 ## Working rules
 
-Read the worktree's `AGENTS.md`, current permanent authorities and validation
-routes. Use current `index.md` locations instead of restoring an obsolete owner.
+Read the worktree's root `AGENTS.md`, `crates/lappet/AGENTS.md`, current
+permanent authorities and validation routes. Use current `index.md` locations instead of restoring an obsolete owner.
 Name prerequisite capabilities rather than depending on temporary plan files.
 
 A checkpoint blocks its own implementation, not unrelated investigation. Small
@@ -75,6 +75,12 @@ implementation selection. Implement only approved adapters, with no guessed
 Rust layout, second type registry or general serialisation framework. Attribute
 errors to both the Moth call and the registered host binding where available.
 
+**Documentation.** Once the concrete V1 host ABI is accepted, add
+`docs/host-abi.md` for approved Rust/Moth type mappings, physical call and
+result forms, allocation, cleanup and error paths. Keep compiler memory
+semantics in their canonical authority and link each executable adapter example
+to tests. This reference must exist before implementing the approved adapters.
+
 **Evidence.** Cover exact integer ranges, finite floats, Byte versus U8, invalid
 Unicode/lengths, optional absence versus failure, ordered results and exactly-once
 calls. Reject mismatched imports, undeclared exports, missing contexts, stale or
@@ -102,6 +108,13 @@ Publish only combinations actually verified. Measure clean Rust build cost,
 linked size, cold engine compilation, instantiation, execution, host-call cost
 and resident memory separately. Test limits, traps, teardown and prohibited
 re-entry. Fixtures demonstrate runtime mechanics, not completed Moth lowering.
+
+**Documentation.** Add `docs/wasmtime-integration.md` using the pinned
+Wasmtime release and upstream source references. Document a minimal runnable
+Rust embedding example, backed by a tested `examples/` program or integration
+test. It should show engine setup, a host import, core Wasm instantiation, a
+typed exported call and failure/cleanup handling. A hand-authored Wasm fixture
+is acceptable until Moth's backend can produce the equivalent program.
 
 ## 4. Establish official Core conformance
 
@@ -143,6 +156,10 @@ Cover source-to-host-to-source values, errors, lifecycle cleanup, isolated host
 state and capability rejection. Benchmark all four combinations of Moth
 output profile and native strategy under the shared optimisation authority.
 Never mutate published compiler results to make runtime binding succeed.
+
+**Documentation.** Extend the embedding example to use a real Moth program
+when the compiler and runtime handoffs support it. Keep the example checked
+against the public embedding API rather than documenting hypothetical calls.
 
 ## 6. Deliver package declaration and local catalog foundations
 
