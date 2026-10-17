@@ -1,0 +1,17 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "parity_probe len_nonbmp=3/3 len_combining=2/2 empty_true=true/true empty_false=false/false contains_nonbmp=true/true contains_empty=true/true starts_combining=true/true ends_combining=true/true nfc_contains=false/false nfc_starts=false/false"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = [
+    "function __moth_text_length(",
+    "function __moth_text_is_empty(",
+    "function __moth_text_contains(",
+    "function __moth_text_starts_with(",
+    "function __moth_text_ends_with(",
+]

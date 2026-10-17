@@ -1,0 +1,17 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "namespace_alias folded_len=3 folded_empty=true runtime_len=3 prefix=true suffix=true"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = ["function __moth_text_length("]
+must_not_contain = [
+    "__moth_text_is_empty",
+    "__moth_text_starts_with",
+    "__moth_text_ends_with",
+    "__moth_text_contains",
+]

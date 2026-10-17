@@ -10059,6 +10059,69 @@ contract = "language.templates.const_wrapper_registry_classification"
 role = "primary"
 
 [[case]]
+id = "core_text_runtime_parity"
+path = "core_text_runtime_parity"
+tags = ["integration", "language", "external-packages", "core-packages", "js"]
+contract = "language.dependencies.core_text_runtime_folded_parity"
+role = "primary"
+
+[[case]]
+id = "core_text_helper_retention_mixed"
+path = "core_text_helper_retention_mixed"
+tags = ["integration", "language", "external-packages", "core-packages", "js", "wasm", "reachability", "diagnostics"]
+contract = "backend.html_wasm.core_text_mixed_helper_retention"
+role = "backend"
+
+[[case]]
+id = "core_text_reexport_namespace_alias"
+path = "core_text_reexport_namespace_alias"
+tags = ["integration", "language", "external-packages", "core-packages", "js", "dependencies", "facade"]
+contract = "language.dependencies.core_text_reexport_namespace_identity"
+role = "primary"
+
+[[case]]
+id = "core_text_imported_constant_chain"
+path = "core_text_imported_constant_chain"
+tags = ["integration", "language", "external-packages", "core-packages", "js", "dependencies"]
+contract = "language.dependencies.core_text_imported_constant_completed"
+role = "primary"
+
+[[case]]
+id = "core_text_config_origin_result_overflow_rejected"
+path = "core_text_config_origin_result_overflow_rejected"
+tags = ["integration", "language", "external-packages", "core-packages", "numeric", "config", "diagnostics", "dependencies"]
+contract = "language.dependencies.core_text_config_provenance_result"
+role = "primary"
+
+[[case]]
+id = "core_text_const_eval_defaults_static_if"
+path = "core_text_const_eval_defaults_static_if"
+tags = ["integration", "language", "external-packages", "core-packages", "js", "wasm", "reachability"]
+contract = "language.dependencies.core_text_defaults_static_if_folded"
+role = "primary"
+
+[[case]]
+id = "core_text_const_eval_template_interpolation"
+path = "core_text_const_eval_template_interpolation"
+tags = ["integration", "language", "external-packages", "core-packages", "js", "wasm", "reachability"]
+contract = "language.templates.core_text_interpolation_folded"
+role = "primary"
+
+[[case]]
+id = "core_text_const_eval_unary_operand"
+path = "core_text_const_eval_unary_operand"
+tags = ["integration", "language", "external-packages", "core-packages", "js"]
+contract = "language.dependencies.core_text_unary_operand_folded"
+role = "primary"
+
+[[case]]
+id = "core_text_const_eval_folded_argument_runtime_call"
+path = "core_text_const_eval_folded_argument_runtime_call"
+tags = ["integration", "language", "external-packages", "core-packages", "js", "wasm"]
+contract = "language.dependencies.core_text_folded_argument_kept_in_runtime_call"
+role = "primary"
+
+[[case]]
 id = "prelude_name_declaration_rejected"
 path = "prelude_name_declaration_rejected"
 tags = ["integration", "language", "diagnostics"]
