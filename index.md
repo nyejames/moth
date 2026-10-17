@@ -271,7 +271,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 - [compiler design overview](docs/compiler-design-overview.md)
 - [build system design overview](docs/build-system-design.md)
 - [language semantics reference index](docs/src/developer-docs/language/overview.mtf)
-- [Wiring](docs/src/docs/wiring/@page.moth), Basic lessons and the sole canonical reference [wiring.mtf](docs/src/docs/wiring/wiring.mtf): accepted parameter contracts; Wire and Route source syntax remains unsupported until Phase 6, as recorded in the progress matrix.
+- [Wiring](docs/src/docs/wiring/@page.moth), Basic lessons and the sole canonical reference [wiring.mtf](docs/src/docs/wiring/wiring.mtf): accepted parameter contracts and the bounded Wire/Route foundation; current support status lives in the progress matrix.
 - [general directives](docs/src/docs/directives/directives.mtf); [directive contributor routing](docs/src/docs/directives/overview.mtf)
 - [entry metadata and page directives](docs/src/docs/project-structure/entry-config.mtf)
 - [memory management design](docs/src/developer-docs/memory-management/overview.mtf)

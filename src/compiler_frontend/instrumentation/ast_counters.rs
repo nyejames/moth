@@ -116,8 +116,7 @@ pub(crate) enum AstCounter {
 
     // Exact-view finalization attribution counters.
     //
-    // WHAT: fine-grained attribution for module-store view folds and fold-cache
-    // behavior.
+    // WHAT: fine-grained attribution for module-store view folds.
     // WHY: broad TIR materialization counters cannot identify which finalization
     // paths drove view-fold volume.
     /// Finalization view fold attempt that passed reference and store

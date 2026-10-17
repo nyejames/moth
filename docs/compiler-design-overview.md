@@ -706,9 +706,9 @@ Parsed -> Composed -> Formatted -> Finalized
 
 Folding requires `Composed` or later. AST-to-HIR handoff requires `Finalized`.
 
-An exact `TirView` is the structural read authority after parser emission. Its `TirViewIdentity` contains the module-local root, phase and complete value context. The context contains only the optional expression, slot-resolution and wrapper-context overlay IDs, whose payloads remain owned by the module store. This identity determines effective reads, preparation and fold-cache keys and cycle detection. Consumers do not carry parallel authority tokens, store identities, context tables or overlay stacks outside the view.
+An exact `TirView` is the structural read authority after parser emission. Its `TirViewIdentity` contains the module-local root, phase and complete value context. The context contains only the optional expression, slot-resolution and wrapper-context overlay IDs, whose payloads remain owned by the module store. This identity determines effective reads, preparation and cycle detection. Consumers do not carry parallel authority tokens, store identities, context tables or overlay stacks outside the view.
 
-Template folding keeps borrowed fold inputs and un-normalised fold keys, and the TIR fold cache keeps its current width. An owned-folder signature copied inputs and slowed matched timings, and key normalisation cost more than the low cache reuse saved. Reopen these choices only with a new causal hypothesis and complete lifetime and invalidation evidence.
+Template folding keeps borrowed fold inputs and has no fold cache: each prepared view folds once where it is consumed. An owned-folder signature copied inputs and slowed matched timings, and fold-key normalisation cost more than the low reuse a cache would see. Reopen these choices only with a new causal hypothesis and complete lifetime and invalidation evidence.
 
 Recursive consumers use two explicit view transitions:
 
