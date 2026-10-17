@@ -37,33 +37,32 @@ Primary references: [Config](https://docs.rs/wasmtime/49.0.3/wasmtime/struct.Con
 [crate features](https://github.com/bytecodealliance/wasmtime/blob/v49.0.3/crates/wasmtime/Cargo.toml#L125-L175)
 and [config source](https://github.com/bytecodealliance/wasmtime/blob/v49.0.3/crates/wasmtime/src/config.rs).
 
-- Build a `Config`, choose `Strategy::Winch` for development or
-  `Strategy::Cranelift` for release and pass it to `Engine::new`.
-  Configuration errors may surface during engine creation. The default
-  `Strategy::Auto` currently uses Cranelift and is not Lappet's policy.
-- The likely narrow Cargo feature set is `std`, `runtime`, `winch`
-  and `cranelift` with `default-features = false`. **This is a candidate
-  to test**, not a locked manifest. Wasmtime defaults enable many unrelated
-  facilities. Inspect `cargo tree -e features`, clean build cost and
-  linked size before adding a feature.
-- The 49.0.3 manifest still calls Winch under active development and says
-  it should not be used in production. In addition,
-  [Winch's manifest](https://github.com/bytecodealliance/wasmtime/blob/v49.0.3/crates/winch/Cargo.toml#L19-L20)
-  depends on Cranelift-related crates internally. Disabling the public
-  `cranelift` strategy does not eliminate those build dependencies.
-  Treat Winch production readiness as a test gate, not a settled fact.
-- `Config::cranelift_opt_level` controls Cranelift native code generation.
-  Lappet does not run a Wasm post-optimiser or duplicate Moth's semantic
-  passes. See the [shared optimisation authority](../../../docs/src/developer-docs/wasm-optimisation/wasm-optimisation.mtf).
-- Configure/validate the generated Wasm proposal set deliberately.
-  Multi-value is enabled by default. **Memory64 is disabled by default**
-  in v49.0.3. Cranelift support does not imply Winch support for GC,
-  typed function references or relaxed SIMD. These are not Lappet V1
-  requirements merely because Wasmtime can implement them.
-- `Config::wasm_simd` documents an **AVX baseline for Winch on x86_64**
-  versus SSE2 for Cranelift. CPU support matters even if both backends
-  accept a module. Disable unneeded proposals or explicitly validate them.
-  Never silently choose another strategy on an unsupported target.
+- Build a `Config`, select `Strategy::Cranelift` and pass it to
+  `Engine::new`. Use `Config::cranelift_opt_level(OptLevel::None)` for
+  development and `OptLevel::Speed` for release, pending benchmarks.
+  Inconsistent options can fail during engine creation. `Strategy::Auto`
+  currently selects Cranelift but is not an explicit V1 strategy policy.
+- Candidate minimal Cargo features are `std`, `runtime` and `cranelift`,
+  with `default-features = false`. **This is not a locked manifest.**
+  Defaults include unrelated features. Measure `cargo tree -e features`,
+  clean Rust build cost and linked size before adding a feature.
+- In v49.0.3 `OptLevel::None` disables most optimisation to favour
+  compilation time. `OptLevel::Speed` is the optimising default.
+  Keep `RegallocAlgorithm::Backtracking`. The upstream
+  `SinglePass` allocator is not production-ready and lacks normal
+  security-advisory coverage. `compiler_inlining` defaults to
+  `Inlining::No`. Consider `SpeedAndSize` and parallel compilation
+  only after independent measurements. Read the
+  [configuration source](https://github.com/bytecodealliance/wasmtime/blob/v49.0.3/crates/wasmtime/src/config.rs#L1538-L1587)
+  and [single-pass warning](https://github.com/bytecodealliance/wasmtime/blob/v49.0.3/crates/wasmtime/src/config.rs#L3699-L3725).
+- Lappet does not run a Wasm post-optimiser or duplicate Moth's semantic
+  passes. The [shared optimisation authority](../../../docs/src/developer-docs/wasm-optimisation/wasm-optimisation.mtf)
+  owns that boundary.
+- Validate the compiler's Wasm proposal requirements against Cranelift
+  and the actual host CPU. Multi-value is enabled by default and Memory64
+  is disabled by default in v49.0.3. Do not enable GC, threads or relaxed
+  SIMD merely because Wasmtime can implement them. No fallback compiler.
+
 - Use the live
   [compiler feature matrix](https://docs.wasmtime.dev/stability-tiers.html#compiler-support)
   and [platform tiers](https://docs.wasmtime.dev/stability-tiers.html#current-tier-status)
@@ -121,7 +120,7 @@ struct HostState {
 
 fn invoke(wasm_bytes: &[u8]) -> wasmtime::Result<i32> {
     let mut config = Config::new();
-    config.strategy(Strategy::Winch);
+    config.strategy(Strategy::Cranelift);
     let engine = Engine::new(&config)?;
     let module = Module::new(&engine, wasm_bytes)?;
 
@@ -203,15 +202,14 @@ and [Trap](https://docs.rs/wasmtime/49.0.3/wasmtime/enum.Trap.html).
   consistent with Moth's selected memory/allocation contract.
 - `max_wasm_stack` bounds the Wasm stack, not native host recursion
   or the Rust thread stack.
-- `consume_fuel` instruments guest work for deterministic fuel exhaustion.
-  A store starts with **zero fuel** when enabled and must be supplied
-  fuel through `Store::set_fuel` before execution. Its interaction with
-  both native strategies and its cost require testing.
-- **Important Winch limitation:** In v49.0.3, it is
-  `Config::epoch_interruption`, **not** `Config::consume_fuel`,
-  whose documentation explicitly says it is incompatible with Winch.
-  Do not build a common Winch/Cranelift deadline policy around epochs.
-  Recheck this on a future Wasmtime release.
+- `consume_fuel` instruments guest work for deterministic fuel
+  exhaustion. A store starts with zero fuel when enabled and needs a value
+  supplied with `Store::set_fuel`. Benchmark the instrumentation under
+  both Cranelift optimisation levels.
+- `Config::epoch_interruption` provides lower-overhead external
+  deadline checks with Cranelift in v49.0.3. Configure store deadlines and
+  increment the engine epoch explicitly. Neither mechanism is a Lappet
+  default until its resource-policy checkpoint decides semantics and cost.
 - Neither epochs nor fuel interrupts a blocking Rust/C host call.
   Epoch checks have bulk-memory-operation granularity limitations.
   The game and server builders need explicit host IO and timeout policy,
@@ -230,7 +228,7 @@ and [Trap](https://docs.rs/wasmtime/49.0.3/wasmtime/enum.Trap.html).
 | `wasmtime-wasi` | No ambient OS services. Builders explicitly register trusted Rust imports |
 | `async`, stack switching, Wasm threads | V1 is synchronous and builder-scheduled. Channels need a separate future design |
 | Persistent cache, AOT and `Module::serialize/deserialize` | Deferred for predictable cold compilation benchmarks. In-memory module reuse is allowed |
-| Pulley, other engines or custom interpreter layer | V1 uses Wasmtime Winch/Cranelift only |
+| Winch, Pulley, other engines or custom interpreter layer | V1 uses Wasmtime Cranelift only. Revisit Winch after stability and performance evidence |
 | GC integration and relaxed SIMD | Not part of the accepted V1 common feature profile |
 | DWARF/native debugger machinery, profiler, `call-hook` | Only add on a demonstrated debugging/profiling requirement |
 | Pooling-allocator/MPK tuning, raw Cranelift flags | Performance/security knobs require independent evidence |
@@ -245,8 +243,9 @@ runtime**, not a requirement to make Wasmtime work on that device.
 ## Before implementing or broadening this reference
 
 At the engine checkpoint, choose a concrete release and feature graph.
-Confirm Winch/Cranelift proposal overlap, actual supported OS/CPU targets,
-resource limits, trap disposition and host-call policies.
+Confirm Cranelift proposal and OS/CPU support, compare development/release
+native optimisation settings and establish resource limits, trap disposition
+and host-call policies.
 
 Prove `Engine::new` validation, import rejection, start-function traps,
 typed exports, missing memory, invalid buffer spans, guest growth failures,

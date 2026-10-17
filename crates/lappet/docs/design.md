@@ -69,21 +69,25 @@ make a custom builder an official Moth environment.
 
 ## Runtime strategy
 
-V1 uses Wasmtime alone. Development defaults to Winch and release defaults to
-Cranelift. The builder can explicitly choose either strategy independently of
-Moth's compilation profile. Use Wasmtime's supported configuration APIs rather
-than a custom machine-code backend or a patched engine.
+V1 uses Wasmtime with Cranelift as its only native compiler. Development
+defaults to `OptLevel::None` for faster native compilation and release to
+`OptLevel::Speed` for optimised native code. Confirm both settings with
+benchmarks. Moth's compilation profile is independent of the native
+optimisation level. Use supported configuration APIs, not a custom native
+backend or patched engine. V1 does not expose a Winch strategy selector or
+arbitrary Cranelift tuning.
 
 Lappet performs no Wasm post-processing optimisation. The shared optimisation
-authority owns what Moth should simplify before Wasm emission and what should
-be delegated to native code generation. Changing strategy never changes source
-types, required safety validation, error contracts or memory-model legality.
+authority owns work done before Wasm emission and work delegated to native
+code generation. Native optimisation settings cannot change source types,
+safety validation, error contracts or memory-model legality.
 
-Winch is a low-optimisation compilation baseline, not a promise of instruction-
-for-instruction execution or full source-level debugging. Verify debugger
-requirements against the selected Wasmtime version before advertising them.
-Select Cargo features explicitly and inspect the resolved feature graph and
-linked size. A strategy name alone does not establish dependency footprint.
+Retain Cranelift's default backtracking register allocator. Wasmtime 49.0.3
+marks its faster single-pass allocator not production-ready and outside normal
+security-advisory support. Keep inlining disabled by default. Benchmark
+`SpeedAndSize` and parallel module compilation before enabling either.
+Verify debugger requirements against the selected Wasmtime release. Select
+Cargo features explicitly and inspect their actual linked size.
 
 V1 defers persistent compiled-code caches, AOT cache reuse and compiler-free
 deployments. Reusing an already compiled module inside a running application is
@@ -93,9 +97,10 @@ record exactly which state is reused.
 Publish support only for tested host and Wasm-feature combinations. The first
 platform review evaluates Linux x86-64 and AArch64, macOS x86-64 and AArch64 and
 Windows x86-64. These are validation candidates, not an implementation claim.
-Use a compatible feature profile for Winch and Cranelift on each advertised
-platform. Reject unsupported requirements rather than silently changing
-strategy or adding another engine. Other engines and targets are later work.
+Validate Cranelift's Wasm feature support and host CPU on each advertised
+platform. Reject unsupported requirements rather than selecting another
+compiler. Winch can be reconsidered after upstream stability, compatibility
+and measured performance justify it. Other engines and targets are later work.
 
 ## Rust bindings
 
