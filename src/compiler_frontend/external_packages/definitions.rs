@@ -10,7 +10,7 @@ use super::abi::{ExternalAbiType, ExternalParameter, ExternalReturnAlias, Extern
 use super::ids::{ExternalConstantId, ExternalFunctionId, ExternalPackageId, ExternalTypeId};
 use super::symbol_path::ExternalSymbolPath;
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 /// Backend-specific lowering metadata for an external function.
 #[derive(Debug, Clone, Default)]
@@ -404,11 +404,11 @@ pub struct ExternalPackage {
     /// WHAT: maps the full symbol path inside this package to its stable function ID.
     /// WHY: this is the canonical package surface; full definitions live in the registry's
     /// `functions_by_id` map so the package does not store duplicate clones.
-    pub function_ids: HashMap<ExternalSymbolPath, ExternalFunctionId>,
+    pub function_ids: FxHashMap<ExternalSymbolPath, ExternalFunctionId>,
     /// Path-to-ID surface map for registered types.
-    pub type_ids: HashMap<ExternalSymbolPath, ExternalTypeId>,
+    pub type_ids: FxHashMap<ExternalSymbolPath, ExternalTypeId>,
     /// Path-to-ID surface map for registered constants.
-    pub constant_ids: HashMap<ExternalSymbolPath, ExternalConstantId>,
+    pub constant_ids: FxHashMap<ExternalSymbolPath, ExternalConstantId>,
 }
 
 impl Clone for ExternalPackage {
@@ -435,9 +435,9 @@ impl ExternalPackage {
             id,
             path: path.into(),
             metadata,
-            function_ids: HashMap::new(),
-            type_ids: HashMap::new(),
-            constant_ids: HashMap::new(),
+            function_ids: FxHashMap::default(),
+            type_ids: FxHashMap::default(),
+            constant_ids: FxHashMap::default(),
         }
     }
 

@@ -6481,3 +6481,29 @@ An A/A run of the base binary against a byte-identical copy gave 0.998 for the
 materialise stage. Exit codes, stdout and output files match across the 74 CLI
 cases. The stage still grows about as n^1.4: rebuilding every requester binding
 per request is the remaining quadratic term.
+
+## Typed-expression follow-ups: external package registry indexes
+
+The external package registry kept three registry-wide maps keyed by a cloned
+`(package, symbol path)` pair. They duplicated each package's own function,
+type and constant maps, so every registration and lookup cloned a path key and
+hashed it with SipHash. Lookups now index `packages[package_id]` directly, the
+duplicate maps and their key type are gone, and the remaining maps use
+`FxHashMap`. Three same-kind duplicate checks are deleted because
+`reject_duplicate_path` already rejects every collision before them.
+
+Paired interleaved rounds against the shared borrow root words tree, 25 rounds,
+median of per-round wall ratios with bootstrap CI95:
+
+| Case | Ratio | CI95 |
+|---|---:|---|
+| type stress | 0.958 | 0.943-0.982 |
+| fold stress | 0.983 | 0.970-1.012 |
+| docs | 0.991 | 0.982-1.005 |
+| speed test | 0.987 | 0.978-1.005 |
+| narrow chains 512 (control) | 1.005 | 0.980-1.026 |
+
+Type stress reproduced at 0.961 in an earlier session. Exit codes, stdout and
+output files match across the 74 CLI cases. Package IDs still come from
+registration counters, and namespace records built from these maps now intern
+in a fixed order rather than a per-run random one.
