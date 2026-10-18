@@ -235,19 +235,37 @@ impl BorrowState {
     /// older allocation, the older roots replace the slot's own allocation root. A SLOT | ALIAS
     /// join remains conservative because either binding representation may have reached the join.
     pub(super) fn effective_roots(&self, local_index: usize) -> RootSet {
+        let (includes_self, includes_value_roots) = self.effective_root_sources(local_index);
+        let mut roots = RootSet::empty(self.locals.len());
+        if includes_self {
+            roots.insert(local_index);
+        }
+        if includes_value_roots {
+            roots.union_with(&self.locals[local_index].value_roots);
+        }
+        roots
+    }
+
+    /// Whether `root_index` is in `effective_roots(local_index)`, without building that set.
+    /// WHY: alias conflict scans ask this for every local on every access; building the set
+    /// allocates once per call.
+    pub(super) fn effective_root_contains(&self, local_index: usize, root_index: usize) -> bool {
+        let (includes_self, includes_value_roots) = self.effective_root_sources(local_index);
+        (includes_self && root_index == local_index)
+            || (includes_value_roots && self.locals[local_index].value_roots.contains(root_index))
+    }
+
+    /// Which sources of `effective_roots` apply to a local: its own allocation root, and its
+    /// value roots. The set builder and the membership test both read this one rule.
+    fn effective_root_sources(&self, local_index: usize) -> (bool, bool) {
         let state = &self.locals[local_index];
         let has_slot_binding = state.mode.contains(LocalMode::SLOT);
         let has_alias_binding = state.mode.contains(LocalMode::ALIAS);
         let has_value_roots = !state.value_roots.is_empty();
-
-        let mut roots = RootSet::empty(self.locals.len());
-        if has_slot_binding && (has_alias_binding || !has_value_roots) {
-            roots.insert(local_index);
-        }
-        if has_alias_binding || (has_slot_binding && has_value_roots) {
-            roots.union_with(&state.value_roots);
-        }
-        roots
+        (
+            has_slot_binding && (has_alias_binding || !has_value_roots),
+            has_alias_binding || (has_slot_binding && has_value_roots),
+        )
     }
 
     pub(super) fn update_local_state(&mut self, local_index: usize, new_state: LocalState) {
@@ -445,6 +463,20 @@ impl RootSet {
         for (left, right) in self.words.iter_mut().zip(other.words.iter()) {
             *left &= *right;
         }
+    }
+
+    /// Whether the two sets share a root, without building their intersection.
+    ///
+    /// WHY: `intersect_with` on a clone allocates just to answer emptiness, and this runs per
+    /// argument pair on every call. Both sets are built over the same local count, so pairwise
+    /// word ANDs cover every bit; the debug assertion guards that precondition, since a length
+    /// mismatch would silently compare only the shared prefix in release builds.
+    pub(super) fn intersects(&self, other: &Self) -> bool {
+        debug_assert_eq!(self.bit_len, other.bit_len);
+        self.words
+            .iter()
+            .zip(other.words.iter())
+            .any(|(left, right)| (*left & *right) != 0)
     }
 
     pub(super) fn clear(&mut self) {

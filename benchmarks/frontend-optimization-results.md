@@ -6360,3 +6360,33 @@ control that only grows `SignatureMemberSyntax` to its current 136 B with a
 zero-initialised pad, and boxing the contract (88 B) or constructing members in
 place did not beat this change, so the residual is retained as size and layout
 cost of the contract field.
+
+## Typed-expression follow-ups: borrow root membership
+
+Profile (xctrace, aggregate forwarding 512): `active_alias_count_for_root` built
+a full `RootSet` per local through `effective_roots` only to test one bit, and
+`roots_overlap` cloned a set per argument pair; allocator leaves were 109.6 of
+201.6 borrow-checker samples per run.
+
+- `effective_root_sources` is the one rule behind the `effective_roots` builder
+  and the new non-allocating `effective_root_contains` used by the three alias
+  scans.
+- `RootSet::intersects` replaces clone, intersect and emptiness test.
+- `active_mutable_alias_for_root` tests pure state predicates before the origin
+  lookup.
+
+Paired interleaved rounds against `dca16305f` with the signature member fix, 25
+rounds, median of per-round ratios:
+
+| Case | Wall | `borrow.initial` | `borrow.converge` |
+|---|---:|---:|---:|
+| aggregate forwarding 512 | 0.650 | 0.585 | 0.881 |
+| aggregate forwarding 128 | 0.883 | 0.395 | 0.968 |
+| origin fanout 512 | 0.717 | 0.356 | 0.361 |
+| mutable cycles 512 | 0.985 | 0.674 | 0.985 |
+| generic failure chain 512 | 0.989 | 0.920 | 0.985 |
+
+Across all 74 CLI cases (5 rounds, worst 14 re-run at 25) no case regresses
+beyond noise, and exit codes, stdout and stderr match. Borrow-checker samples
+fall from 201.6 to 78.4 per run on aggregate forwarding 512. The remaining
+per-call `RootSet` construction is 2-4% of that stage and was left alone.

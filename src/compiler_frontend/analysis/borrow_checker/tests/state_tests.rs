@@ -1,6 +1,7 @@
 //! Borrow-checker state invariant tests.
 //!
-//! WHAT: protects slot-backed alias rebinding, join growth reporting and visibility narrowing.
+//! WHAT: protects slot-backed alias rebinding, join growth reporting, visibility narrowing and
+//!       the membership shortcut that alias conflict scans use in place of the set builder.
 //! WHY: these facts live in transfer state and cannot be inspected from rendered output.
 
 use super::super::state::{BorrowState, LocalState, RootSet};
@@ -158,4 +159,95 @@ fn joining_states_narrowed_to_one_mask_stays_narrowed() {
     renarrowed.kill_invisible(&visible);
 
     assert_eq!(renarrowed, left);
+}
+
+/// `effective_root_contains` must answer exactly what `effective_roots(..).contains` answers, for
+/// every mode and value shape. Alias conflict scans use the shortcut in place of the set builder,
+/// so any disagreement would change which conflicts are reported.
+#[test]
+fn effective_root_contains_matches_effective_roots_membership() {
+    // Two words, so the check covers bits on both sides of the word boundary.
+    let local_count = 70;
+    let modes = [
+        LocalMode::UNINIT,
+        LocalMode::SLOT,
+        LocalMode::ALIAS,
+        LocalMode::UNINIT.union(LocalMode::SLOT),
+        LocalMode::UNINIT.union(LocalMode::ALIAS),
+        LocalMode::SLOT.union(LocalMode::ALIAS),
+        LocalMode::UNINIT
+            .union(LocalMode::SLOT)
+            .union(LocalMode::ALIAS),
+    ];
+    let all_roots: Vec<usize> = (0..local_count).collect();
+
+    for local_index in 0..local_count {
+        let value_shapes = [
+            roots(local_count, &[]),
+            roots(local_count, &[local_index]),
+            roots(local_count, &[0]),
+            roots(local_count, &[local_count - 1]),
+            roots(local_count, &[local_index, local_count - 1]),
+            roots(local_count, &all_roots),
+        ];
+
+        for mode in modes {
+            for value_roots in &value_shapes {
+                let mut state = BorrowState::new_uninitialized(local_count);
+                state.update_local_state(
+                    local_index,
+                    LocalState {
+                        mode,
+                        value_roots: value_roots.clone(),
+                        direct_alias_roots: RootSet::empty(local_count),
+                    },
+                );
+
+                let expected = state.effective_roots(local_index);
+                // One past the last index: both sides must reject an index outside the set.
+                for root_index in 0..=local_count {
+                    assert_eq!(
+                        state.effective_root_contains(local_index, root_index),
+                        expected.contains(root_index),
+                        "local {local_index}, root {root_index}, mode {mode:?}, value roots {:?}",
+                        members(value_roots),
+                    );
+                }
+            }
+        }
+    }
+}
+
+/// `intersects` must answer exactly what intersecting a clone answers, including pairs whose only
+/// shared bit sits on either side of the word boundary. Conflict scans use it instead of building
+/// the intersection, so a disagreement would change which call arguments count as aliasing.
+#[test]
+fn intersects_matches_intersection_emptiness() {
+    // Two words, so bit 63 and bit 64 exercise both the last bit of word 0 and the first of word 1.
+    let local_count = 70;
+    let all_roots: Vec<usize> = (0..local_count).collect();
+    let shapes = [
+        roots(local_count, &[]),
+        roots(local_count, &[0]),
+        roots(local_count, &[63]),
+        roots(local_count, &[64]),
+        roots(local_count, &[local_count - 1]),
+        roots(local_count, &[63, 64]),
+        roots(local_count, &[0, 63, 64, local_count - 1]),
+        roots(local_count, &all_roots),
+    ];
+
+    for left in &shapes {
+        for right in &shapes {
+            let mut intersection = left.clone();
+            intersection.intersect_with(right);
+            assert_eq!(
+                left.intersects(right),
+                !intersection.is_empty(),
+                "left {:?}, right {:?}",
+                members(left),
+                members(right),
+            );
+        }
+    }
 }
