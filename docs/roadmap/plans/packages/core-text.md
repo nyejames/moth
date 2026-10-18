@@ -16,10 +16,10 @@ functions until a separate language decision changes binding-backed receiver met
 ### Current-state capsule
 
 ```text
-STATUS: v1 designed and queued; pre-checkpoint hardening of the existing five functions delivered; their compile-time evaluation is complete on expression-refactor (merge pending)
-CURRENT_SLICE: none - the v1 expansion waits for its compiler prerequisite
-BLOCKERS: the v1 expansion still waits for the compiler-owned Core const-eval prerequisite to merge to main; native result slots are merged
-NEXT_ACTION: after the prerequisite lands, audit its final Text evaluator owner and run this plan's Phase 0 from current main
+STATUS: v1 designed and queued; pre-checkpoint hardening of the existing five functions delivered; their compile-time evaluation is delivered
+CURRENT_SLICE: none - the v1 expansion starts from a main containing its delivered compiler prerequisite
+BLOCKERS: none from the compiler; Core const-eval and native result slots are delivered
+NEXT_ACTION: from a main containing the prerequisite, audit its final Text evaluator owner and run this plan's Phase 0
 ```
 
 The package-foundation baseline this plan waited on is merged. This expansion waits for trusted
@@ -480,7 +480,7 @@ transformation with lean JS output and Rust const-eval parity where eligible.
 ## Compile-time evaluation evidence
 
 The five functions `length`, `is_empty`, `contains`, `starts_with` and `ends_with` are registered as
-trusted Core constant evaluators on `expression-refactor`, merge pending. A fully folded call
+trusted Core constant evaluators. A fully folded call
 leaves no external HIR call, runtime helper or JS asset dependency. A visible call on a target
 without Text runtime lowering folds, while the equivalent runtime call keeps the existing target
 diagnostic. Imported constants are published as completed values. Multi-result transport is proven

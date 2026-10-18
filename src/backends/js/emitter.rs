@@ -561,11 +561,11 @@ impl<'hir> JsEmitter<'hir> {
                 return true;
             }
 
-            let start = pending.len();
-            let mut children = self.hir.expressions.child_values(current);
-            next = children.next();
-            pending.extend(children);
-            pending[start..].reverse();
+            next = self.hir.expressions.push_child_values_in_source_order(
+                current,
+                &mut pending,
+                |child| child,
+            );
         }
         false
     }
@@ -725,11 +725,9 @@ fn collect_expression_cast_policies(
             policies.insert(*policy);
         }
 
-        let start = pending.len();
-        let mut children = hir.expressions.child_values(current);
-        next = children.next();
-        pending.extend(children);
-        pending[start..].reverse();
+        next = hir
+            .expressions
+            .push_child_values_in_source_order(current, &mut pending, |child| child);
     }
 }
 

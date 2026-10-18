@@ -1196,18 +1196,14 @@ impl<'hir> RuntimeFeatureUseCollector<'hir> {
             | HirExpressionKind::VariantPayloadGet { .. } => {}
         }
 
-        let mut children = self.hir.expressions.child_values(entry.expression_id);
-        let first = children.next()?;
-        let start = pending.len();
-        pending.extend(children.map(|child| PendingExpression {
-            expression_id: child,
-            fallback_span: expression_span,
-        }));
-        pending[start..].reverse();
-        Some(PendingExpression {
-            expression_id: first,
-            fallback_span: expression_span,
-        })
+        self.hir.expressions.push_child_values_in_source_order(
+            entry.expression_id,
+            pending,
+            |child| PendingExpression {
+                expression_id: child,
+                fallback_span: expression_span,
+            },
+        )
     }
 
     /// Visits the index expressions a place evaluates.

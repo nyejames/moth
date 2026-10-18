@@ -10129,6 +10129,13 @@ contract = "language.dependencies.core_text_folded_argument_kept_in_runtime_call
 role = "primary"
 
 [[case]]
+id = "core_text_const_eval_module_constant_argument"
+path = "core_text_const_eval_module_constant_argument"
+tags = ["integration", "language", "external-packages", "core-packages", "js", "wasm"]
+contract = "language.dependencies.core_text_module_constant_argument_folded"
+role = "primary"
+
+[[case]]
 id = "prelude_name_declaration_rejected"
 path = "prelude_name_declaration_rejected"
 tags = ["integration", "language", "diagnostics"]

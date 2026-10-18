@@ -29,8 +29,6 @@ Use the [Packages and Builders Progress Matrix](docs/src/docs/progress/packages-
 
 ## Sequenced work
 
-- [Typed semantic expressions and dense compiler foundations](./plans/typed-semantic-expressions-plan.md) - **ACTIVE on `expression-refactor` from Phase 8.** Phases 0–4 are merged, including accepted R1, R2.0–R2.4 and P2 isolation from source `534aea1a5`. Phase 5 type/folding reductions, the Phase 6 Wiring foundation and Phase 7 trusted Core constant evaluation are complete on the branch, then final hardening. Fresh Windows Canvas/frontend proof remains pending. Package work consumes only merged prerequisites.
-
 - [Compiler source, token and diagnostic data layout](./plans/compiler-source-token-and-diagnostic-data-layout-plan.md) - Resume Phase 4 onward on `diagnostic-data-layout-changes` only after explicit reactivation. Consume merged exact numeric and MON capabilities, compact typed expressions, dense HIR/native result channels, V1 retirement, the bounded Wiring foundation and Core constant evaluation. Run the fresh owner/lifetime inventory, verify transferred diagnostic capabilities and preserve the locked packed-span and diagnostic decisions. The plan's reactivation gate remains authoritative.
 
 - [Compiler diagnostic recovery and budgets](./plans/compiler-diagnostic-recovery-and-budgets-plan.md) - Queued after compact diagnostic layout: measured ordinary concrete-body recovery, configurable per-module error allowances, a soft project scheduling cutoff and lightweight stop metadata. Preserve parallel preparation and future incremental compatibility without adding a scheduler or cache.

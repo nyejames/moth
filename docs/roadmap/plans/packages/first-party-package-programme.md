@@ -36,8 +36,8 @@ own Phase 2 (`@core/text` v1) has not started, and its capability prerequisites 
 The main roadmap makes this programme active in parallel. That scheduling state
 supersedes the earlier programme-wide pause recorded during MON and data-layout
 integration. MON syntax, Rust tooling v1 and the exact numeric implementation
-are delivered. The compact typed-expression foundation is merged through native result channels. Its later
-reductions and trusted Core constant evaluation are complete on `expression-refactor` and await merge. Package
+are delivered. The compact typed-expression foundation, its native result channels, its later type and
+folding reductions and trusted Core constant evaluation are delivered. Package
 slices consume exact numeric, dense HIR, native result, bounded Wire/Route and Core constant-evaluation
 capabilities where required and merged, without obsolete numeric sequencing or assumed capability merges.
 
@@ -97,8 +97,8 @@ implementation companion for sorting and do not reconstruct its contract from th
 
 The compiler-owned native result-slot and Core constant-evaluation checkpoints are hard prerequisites
 before the first Text implementation phase. Native result slots are merged. Core constant evaluation
-is complete on `expression-refactor` and awaits merge. Package work consumes the merged
-compiler capability and its canonical documentation rather than preserving
+is delivered. Package work consumes that compiler capability
+and its canonical documentation rather than preserving
 transient shapes from a short-lived plan file.
 
 ## Scope

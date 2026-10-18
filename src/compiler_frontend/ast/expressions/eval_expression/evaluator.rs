@@ -7,14 +7,14 @@
 
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::const_eval::{
-    ConstantFoldOutcome, FoldRequirement, FoldServices, constant_fold,
+    ConstantFoldOutcome, ExplicitConstantPayload, FoldRequirement, FoldServices, constant_fold,
+    explicit_constant_operand,
 };
-use crate::compiler_frontend::ast::const_values::store::{ConstValuePayload, ConstValueStore};
+use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExprId, ExpressionOp, OwnedExpr,
 };
-use crate::compiler_frontend::ast::field_access::project_explicit_const_record_field;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, TypeMismatchContext};
@@ -245,18 +245,6 @@ pub fn evaluate_expression(
     Ok(expressions.with_failure_facts(expressions.own(folded), failure)?)
 }
 
-fn is_matching_materialized_numeric_value(
-    expression: OwnedExpr,
-    expected_type_id: TypeId,
-    expressions: &AstExpressionBuilder,
-    const_values: &ConstValueStore,
-) -> Result<bool, CompilerError> {
-    let view = expressions.view_owned(expression)?;
-    Ok(view.success_shape().single() == Some(expected_type_id)
-        && matches!(view.operation_id(), ExpressionOp::Constant(id)
-            if matches!(const_values.payload(id), Some(ConstValuePayload::FixedScalar(_) | ConstValuePayload::Number(_)))))
-}
-
 fn substitute_explicit_numeric_constants(
     nodes: &mut [ExpressionRpnItem],
     context: &ScopeContext,
@@ -269,68 +257,19 @@ fn substitute_explicit_numeric_constants(
         let ExpressionRpnItem::Operand(expression) = item else {
             continue;
         };
-        let view = expressions.view(*expression)?;
-        let type_id = view.value_type_id()?;
+        let type_id = expressions.view(*expression)?.value_type_id()?;
         if NumericScalar::from_type_id(type_id, type_environment).is_none() {
             continue;
         }
-        let span = view.span();
-        let mode = view.value_mode();
-        let replacement = match view.operation_id() {
-            ExpressionOp::Reference(path) => context
-                .explicit_constant_value(&path, path_fork, const_values)
-                .filter(|&value| {
-                    const_values
-                        .metadata(value)
-                        .is_some_and(|metadata| metadata.type_id == type_id)
-                        && matches!(
-                            const_values.payload(value),
-                            Some(ConstValuePayload::FixedScalar(_) | ConstValuePayload::Number(_))
-                        )
-                })
-                .map(|value| expressions.constant(value, type_id, span, mode))
-                .transpose()?,
-            ExpressionOp::Copy(place) if expressions.place(place)?.projections().len() == 0 => {
-                let path = expressions.place(place)?.metadata().root;
-                context
-                    .explicit_constant_value(&path, path_fork, const_values)
-                    .filter(|&value| {
-                        const_values
-                            .metadata(value)
-                            .is_some_and(|metadata| metadata.type_id == type_id)
-                            && matches!(
-                                const_values.payload(value),
-                                Some(
-                                    ConstValuePayload::FixedScalar(_)
-                                        | ConstValuePayload::Number(_)
-                                )
-                            )
-                    })
-                    .map(|value| expressions.constant(value, type_id, span, mode))
-                    .transpose()?
-            }
-            ExpressionOp::FieldAccess { .. } | ExpressionOp::Copy(_) => {
-                project_explicit_const_record_field(
-                    expressions.own(*expression),
-                    context,
-                    path_fork,
-                    expressions,
-                    const_values,
-                )?
-            }
-            _ => None,
-        };
-        if let Some(replacement) = replacement
-            && is_matching_materialized_numeric_value(
-                replacement,
-                type_id,
-                expressions,
-                const_values,
-            )?
-        {
-            *expression = expressions
-                .preserve_authored_metadata(replacement, expressions.own(*expression))?
-                .id();
+        if let Some(replacement) = explicit_constant_operand(
+            expressions.own(*expression),
+            ExplicitConstantPayload::Numeric,
+            context,
+            path_fork,
+            expressions,
+            const_values,
+        )? {
+            *expression = replacement.id();
         }
     }
     Ok(())

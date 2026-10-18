@@ -430,6 +430,28 @@ impl HirExpressionStore {
         }
     }
 
+    /// Defers the later children of `id` onto `stack`, reversed so that popping visits them in
+    /// source order, and returns the first child mapped through `to_step` for the caller to visit
+    /// next. Returns `None` for a childless row and leaves `stack` untouched.
+    ///
+    /// WHY: a walker that keeps the returned step as its next item touches `stack` only for rows
+    /// with siblings, so single-child chains and leaves never push. A walker whose stack is its
+    /// only frontier pushes the returned step last, so it pops before the deferred children.
+    pub fn push_child_values_in_source_order<T>(
+        &self,
+        id: HirValueId,
+        stack: &mut Vec<T>,
+        mut to_step: impl FnMut(HirValueId) -> T,
+    ) -> Option<T> {
+        let mut children = self.child_values(id);
+        let first = children.next()?;
+        let first_step = to_step(first);
+        let start = stack.len();
+        stack.extend(children.map(&mut to_step));
+        stack[start..].reverse();
+        Some(first_step)
+    }
+
     pub(crate) fn append_expression(
         &mut self,
         row: HirExpression,
@@ -1218,7 +1240,10 @@ impl Iterator for ExpressionChildren<'_> {
     }
 }
 
-/// Pull-based index-value cursor over one place's projection range.
+/// Pull-based index-value cursor over one place's projection range, readable from either end.
+///
+/// WHY: walkers that push index operands onto a LIFO stack read them from the back, so the first
+/// index is pushed last and pops first.
 pub struct PlaceIndexValues<'a> {
     projections: std::slice::Iter<'a, HirProjection>,
 }
@@ -1227,10 +1252,20 @@ impl Iterator for PlaceIndexValues<'_> {
     type Item = HirValueId;
 
     fn next(&mut self) -> Option<HirValueId> {
-        self.projections.find_map(|projection| match projection {
-            HirProjection::Index(index) => Some(*index),
-            HirProjection::Field(_) => None,
-        })
+        self.projections.find_map(index_value)
+    }
+}
+
+impl DoubleEndedIterator for PlaceIndexValues<'_> {
+    fn next_back(&mut self) -> Option<HirValueId> {
+        self.projections.by_ref().rev().find_map(index_value)
+    }
+}
+
+fn index_value(projection: &HirProjection) -> Option<HirValueId> {
+    match projection {
+        HirProjection::Index(index) => Some(*index),
+        HirProjection::Field(_) => None,
     }
 }
 

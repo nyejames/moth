@@ -1487,8 +1487,9 @@ where
     // WHY: a single-child chain (for example `not not ...`) must not add a native frame per level.
     let mut pending = Vec::new();
     let mut next = Some(expression_id);
+    let expressions = &module.expressions;
     while let Some(current) = next.take().or_else(|| pending.pop()) {
-        let expression = module.expressions.expression(current);
+        let expression = expressions.expression(current);
         if search.reject_constructor_routes
             && matches!(expression.kind, HirExpressionKind::RouteConstruct { .. })
         {
@@ -1502,11 +1503,7 @@ where
             return Some(occurrence);
         }
 
-        let start = pending.len();
-        let mut children = module.expressions.child_values(current);
-        next = children.next();
-        pending.extend(children);
-        pending[start..].reverse();
+        next = expressions.push_child_values_in_source_order(current, &mut pending, |child| child);
     }
     None
 }

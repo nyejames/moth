@@ -20,6 +20,7 @@ use crate::compiler_frontend::ast::expressions::expression_types::{
     FallibleHandling, ResolvedCastEvidence,
 };
 use crate::compiler_frontend::ast::expressions::failure_facts::ExpressionFailureFacts;
+use crate::compiler_frontend::ast::field_access::project_explicit_const_record_field;
 use crate::compiler_frontend::ast::statements::value_production::expression_build::commit_constant_result_block;
 use crate::compiler_frontend::ast::statements::value_production::types::ValueBlock;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
@@ -31,6 +32,7 @@ use crate::compiler_frontend::compiler_messages::{
     DiagnosticPayload, InvalidCastReason,
 };
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
+use crate::compiler_frontend::datatypes::ids::TypeId;
 use crate::compiler_frontend::datatypes::number::{NumberArithmeticError, NumberValue};
 use crate::compiler_frontend::datatypes::numeric_operators::{
     NumericComparisonDomain, NumericOperator,
@@ -43,7 +45,7 @@ use crate::compiler_frontend::external_packages::{
 #[cfg(feature = "benchmark_counters")]
 use crate::compiler_frontend::instrumentation::{FrontendCounter, increment_frontend_counter};
 use crate::compiler_frontend::source::SourceSpan;
-use crate::compiler_frontend::symbols::path_interner::PathId;
+use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::synthetic_interface_provenance::SyntheticInterfaceProvenance;
 use moth_lexical::numeric::decimal::NumberScale;
@@ -1180,6 +1182,107 @@ fn binary_payload(
         Some(value) => PayloadFoldOutcome::Folded(ConstValuePayload::Bool(value)),
         None => PayloadFoldOutcome::NotConstant,
     })
+}
+
+/// Payload families an explicit `#` constant may take when it replaces an operand.
+///
+/// WHY: numeric operators fold scalar payloads and trusted text calls fold `String` payloads.
+/// One replacement rule serves both, so an explicit constant reaches the fold engine the same way
+/// whichever consumer reads it.
+#[derive(Clone, Copy)]
+pub(crate) enum ExplicitConstantPayload {
+    Numeric,
+    Text,
+}
+
+impl ExplicitConstantPayload {
+    fn accepts(self, payload: &ConstValuePayload) -> bool {
+        match self {
+            Self::Numeric => matches!(
+                payload,
+                ConstValuePayload::FixedScalar(_) | ConstValuePayload::Number(_)
+            ),
+            Self::Text => matches!(payload, ConstValuePayload::String(_)),
+        }
+    }
+}
+
+/// Replace an operand that names an explicit `#` constant with that constant's value.
+///
+/// WHAT: a reference, a zero-projection copy, or a field of an explicit record constant becomes a
+/// constant occurrence that keeps the operand's span and value mode. Returns `None` when no
+/// explicit constant of the operand's type and an accepted payload backs the operand.
+/// WHY: an explicit constant has one value wherever it is named, so operators and trusted host
+/// calls must read the same value.
+pub(crate) fn explicit_constant_operand(
+    operand: OwnedExpr,
+    payloads: ExplicitConstantPayload,
+    context: &ScopeContext,
+    path_fork: &PathInternerFork,
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+) -> Result<Option<OwnedExpr>, ExpressionConstructionFailure> {
+    let view = expressions.view_owned(operand)?;
+    let type_id = view.value_type_id()?;
+    let span = view.span();
+    let mode = view.value_mode();
+    let replacement = match view.operation_id() {
+        ExpressionOp::Reference(path) => context
+            .explicit_constant_value(&path, path_fork, const_values)
+            .filter(|&value| admits_constant(value, type_id, payloads, const_values))
+            .map(|value| expressions.constant(value, type_id, span, mode))
+            .transpose()?,
+        ExpressionOp::Copy(place) if expressions.place(place)?.projections().len() == 0 => {
+            let path = expressions.place(place)?.metadata().root;
+            context
+                .explicit_constant_value(&path, path_fork, const_values)
+                .filter(|&value| admits_constant(value, type_id, payloads, const_values))
+                .map(|value| expressions.constant(value, type_id, span, mode))
+                .transpose()?
+        }
+        ExpressionOp::FieldAccess { .. } | ExpressionOp::Copy(_) => {
+            project_explicit_const_record_field(
+                operand,
+                context,
+                path_fork,
+                expressions,
+                const_values,
+            )?
+        }
+        _ => None,
+    };
+    let Some(replacement) = replacement else {
+        return Ok(None);
+    };
+    let replacement_view = expressions.view_owned(replacement)?;
+    let admitted = match replacement_view.operation_id() {
+        ExpressionOp::Constant(value) => {
+            replacement_view.success_shape().single() == Some(type_id)
+                && admits_constant(value, type_id, payloads, const_values)
+        }
+        _ => false,
+    };
+    if !admitted {
+        return Ok(None);
+    }
+    Ok(Some(
+        expressions.preserve_authored_metadata(replacement, operand)?,
+    ))
+}
+
+fn admits_constant(
+    value: ConstValueId,
+    type_id: TypeId,
+    payloads: ExplicitConstantPayload,
+    const_values: &ConstValueStore,
+) -> bool {
+    let Some(metadata) = const_values.metadata(value) else {
+        return false;
+    };
+    let Some(payload) = const_values.payload(value) else {
+        return false;
+    };
+    metadata.type_id == type_id && payloads.accepts(payload)
 }
 
 pub(crate) fn constant_fold(

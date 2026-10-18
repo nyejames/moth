@@ -733,14 +733,16 @@ fn record_shared_reads_in_place_indices(
     location: Option<SourceSpan>,
     roots: &mut RootSet,
 ) -> Result<(), BorrowCheckError> {
+    let expressions = env.context.expressions;
     let mut steps = Vec::new();
-    push_children_in_source_order(
-        &mut steps,
-        env.context.expressions.place_index_values(*place),
-        |index| SharedReadStep::Visit {
-            expression_id: index,
-            location,
-        },
+    steps.extend(
+        expressions
+            .place_index_values(*place)
+            .rev()
+            .map(|index| SharedReadStep::Visit {
+                expression_id: index,
+                location,
+            }),
     );
     run_shared_read_steps(env, &mut steps, roots)
 }
@@ -756,19 +758,6 @@ fn record_shared_reads_in_expression(
         location,
     }];
     run_shared_read_steps(env, &mut steps, roots)
-}
-
-/// WHAT: pushes `children` onto a work stack so they pop in source order.
-/// WHY: the stack pops the last pushed item first, so the run this call just pushed is reversed in
-/// place. Reversing in place keeps source order without collecting the children into a `Vec`.
-fn push_children_in_source_order<T>(
-    pending: &mut Vec<T>,
-    children: impl Iterator<Item = HirValueId>,
-    mut to_step: impl FnMut(HirValueId) -> T,
-) {
-    let start = pending.len();
-    pending.extend(children.map(&mut to_step));
-    pending[start..].reverse();
 }
 
 /// WHAT: drains the shared-read stack, visiting children in source order.
@@ -807,14 +796,15 @@ fn run_shared_read_steps(
                             expression_id,
                             value_span,
                         });
-                        push_children_in_source_order(
+                        let first = expressions.push_child_values_in_source_order(
+                            expression_id,
                             steps,
-                            expressions.child_values(expression_id),
                             |child| SharedReadStep::Visit {
                                 expression_id: child,
                                 location: value_span,
                             },
                         );
+                        steps.extend(first);
                     }
 
                     // WHY: the store lists the children of every other compound expression in source
@@ -824,14 +814,15 @@ fn run_shared_read_steps(
                             expression_id,
                             value_span: None,
                         });
-                        push_children_in_source_order(
+                        let first = expressions.push_child_values_in_source_order(
+                            expression_id,
                             steps,
-                            expressions.child_values(expression_id),
                             |child| SharedReadStep::Visit {
                                 expression_id: child,
                                 location,
                             },
                         );
+                        steps.extend(first);
                     }
                 }
             }
@@ -953,14 +944,15 @@ fn collect_expression_roots(
             )?;
             out.union_with(&roots);
         }
-        push_children_in_source_order(
+        let first = expressions.push_child_values_in_source_order(
+            step.expression_id,
             &mut pending,
-            expressions.child_values(step.expression_id),
             |child| RootCollectStep {
                 expression_id: child,
                 span: expressions.expression(child).span,
             },
         );
+        pending.extend(first);
     }
 
     Ok(())
@@ -1014,21 +1006,23 @@ pub(super) fn transfer_aggregate_expression_ownership(
                     HirExpressionKind::Load(_) | HirExpressionKind::Copy(_) => {}
 
                     HirExpressionKind::MapLiteral(_) | HirExpressionKind::Collection(_) => {
-                        push_children_in_source_order(
+                        let first = expressions.push_child_values_in_source_order(
+                            expression_id,
                             &mut pending,
-                            expressions.child_values(expression_id),
                             AggregateOwnershipStep::AggregateChild,
                         );
+                        pending.extend(first);
                     }
 
                     // WHY: only map and collection children can receive optional transfer advice;
                     // other children are walked as plain expressions.
                     _ => {
-                        push_children_in_source_order(
+                        let first = expressions.push_child_values_in_source_order(
+                            expression_id,
                             &mut pending,
-                            expressions.child_values(expression_id),
                             AggregateOwnershipStep::Visit,
                         );
+                        pending.extend(first);
                     }
                 }
             }

@@ -690,6 +690,15 @@ fn repository_manifest_has_complete_ordered_authority() {
             generated_roots: &[],
         },
         ExpectedWorkload {
+            id: "default_parameters_32",
+            entry: "benchmarks/default-parameters-32.moth",
+            entry_kind: BenchmarkEntryKind::File,
+            fingerprint_mode: BenchmarkFingerprintMode::FullTree,
+            roots: &["benchmarks/default-parameters-32.moth"],
+            excludes: &[],
+            generated_roots: &[],
+        },
+        ExpectedWorkload {
             id: "pattern_stress",
             entry: "benchmarks/pattern-stress.moth",
             entry_kind: BenchmarkEntryKind::File,
@@ -1441,6 +1450,13 @@ fn repository_manifest_has_complete_ordered_authority() {
             runner: CHECK,
         },
         ExpectedCase {
+            id: "default_parameters_32_check",
+            workload_id: "default_parameters_32",
+            group: "stress",
+            quick: false,
+            runner: CHECK,
+        },
+        ExpectedCase {
             id: "pattern_stress_check",
             workload_id: "pattern_stress",
             group: "stress",
@@ -1697,6 +1713,13 @@ fn repository_manifest_has_complete_ordered_authority() {
             workload_id: "fold_stress",
             group: "stress",
             quick: true,
+            runner: FRONTEND,
+        },
+        ExpectedCase {
+            id: "default_parameters_32_frontend",
+            workload_id: "default_parameters_32",
+            group: "stress",
+            quick: false,
             runner: FRONTEND,
         },
         ExpectedCase {

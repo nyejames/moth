@@ -4266,7 +4266,7 @@ with no errors or warnings, and all three scaling series within budget.
 
 ## Phase 0 evidence: typed semantic expressions baseline (2026-10-07)
 
-Phase 0 of `docs/roadmap/plans/typed-semantic-expressions-plan.md` stops at
+Phase 0 of the retired typed semantic expressions plan stops at
 activation, contracts and baseline. Measurements use the dirty Phase 0
 candidate worktree over `ab706091376373451afb32081c21476b56b5752a`, not that
 pristine revision. Raw records retain `git_dirty=true` and before/after

@@ -48,9 +48,8 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
     integration target results, ten feature lanes and all 14 scaling series.
     Grouped-not dev HIR fits n^0.88 under n^1.25 in that evidence.
     Fresh Windows Canvas/frontend proof remains pending.
-    Type and folding reductions, the bounded Wiring foundation and trusted Core constant
-    evaluation are complete on `expression-refactor`. Hardening and documentation of the
-    expression foundation follow.
+    Type and folding reductions, the bounded Wiring foundation, trusted Core constant
+    evaluation, owner hardening and the permanent-documentation handoff are complete.
 
     Use this together with `tests/cases/manifest.toml` when changing language features.
 

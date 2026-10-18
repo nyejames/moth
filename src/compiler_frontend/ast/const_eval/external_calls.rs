@@ -66,17 +66,11 @@ pub(super) fn evaluate_external_call(
         None
     };
 
-    if operation == TextConstEvalOp::Length {
-        let length = strings.resolve(first_text).chars().count();
-        return checked_text_length_evaluation(length, span, strings, payloads);
-    }
     let first = strings.resolve(first_text);
     let payload = match operation {
         TextConstEvalOp::Length => {
-            return Err(CompilerError::compiler_error(
-                "Text length evaluation was handled before string comparisons.",
-            )
-            .into());
+            let length = first.chars().count();
+            return checked_text_length_evaluation(length, span, strings, payloads);
         }
         TextConstEvalOp::IsEmpty => ConstValuePayload::Bool(first.is_empty()),
         TextConstEvalOp::Contains => {

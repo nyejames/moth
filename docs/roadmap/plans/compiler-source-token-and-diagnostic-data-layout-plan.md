@@ -36,9 +36,9 @@ red describe the pre-config state and must not be read as current blocking behav
 
 After the Phase 3 closeout, this plan remains paused. MON syntax, nested const records, MON Rust
 tooling, exact numeric identities and bounded body-local numeric construction are delivered.
-Remaining prerequisites cover compact typed expressions, native success slots with separate error
-channels, Wiring foundations and the bounded Core evaluator checkpoint. Phase 4 then requires
-explicit reactivation and a fresh inventory of those delivered owners.
+Compact typed expressions, dense HIR, native success slots with separate error channels, the
+bounded Wiring foundation and trusted Core constant evaluation are delivered. Phase 4 then requires
+a main containing them, explicit reactivation and a fresh inventory of those delivered owners.
 
 ## Purpose
 
@@ -123,9 +123,9 @@ ACTIVE_PLAN:
   live/peak bytes for clean, warning, diagnosed, generic-heavy and early-malformed smokes.
 - Closeout status: R3 diagnostic projection, R4 preparation ownership and R5 evidence disposition
   are complete; deferred large-error carriers remain owned by later diagnostic-layout phases.
-- NEXT_SUBSTEP: remain paused until the compact typed-expression, dense-HIR, native result-channel,
-  Wiring foundation and bounded Core evaluator capabilities are delivered, then explicitly
-  reactivate Phase 4 with a fresh diagnostic and lifetime inventory.
+- NEXT_SUBSTEP: remain paused until explicit reactivation on a main containing the delivered Wiring
+  foundation and Core constant evaluation, then rebase and reactivate Phase 4 with a fresh
+  diagnostic and lifetime inventory.
 - Checkpoints: `b5e1b8fa3`, `1e39f7678`, `a80fa63d6`, `77c0c6fc8`, `8fc783a9d`, `f60def921`,
   `aed38042f`, `72f30dcfb`, `e7d9a7ab5`, `c17672bb5`, `98040fbd0`, `fbbe0119a`, `6309adf6d`,
   `4cfd9d492`.

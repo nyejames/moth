@@ -32,7 +32,6 @@ use crate::compiler_frontend::ast::numeric_known_shape::{
     KnownShape, KnownShapeBinding, KnownShapeBindingRange, KnownShapeId, declared_projection,
     register_shape_witness, union_shape_classes,
 };
-use crate::compiler_frontend::ast::statements::functions::ParameterContract;
 use crate::compiler_frontend::ast::type_interner::AstTypeInterner;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::compiler_messages::{
@@ -1366,10 +1365,7 @@ fn declared_route_input_type(
         .ok_or_else(|| {
             infrastructure("generic call argument routed outside the template signature")
         })?;
-    Ok(match parameter.contract {
-        ParameterContract::Route { input } => input,
-        ParameterContract::Value | ParameterContract::Wire => None,
-    })
+    Ok(parameter.contract.extra_type_id())
 }
 
 fn infrastructure(message: &str) -> ExpressionParseError {

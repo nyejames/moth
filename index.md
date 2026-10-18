@@ -280,4 +280,3 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 - [docs website source](docs/src/docs/); [developer docs source](docs/src/developer-docs/); [generated output](docs/release/)
 - [language support progress matrix](docs/src/docs/progress/@page.moth)
 - [planned work and implementation plans](docs/roadmap/)
-- [typed semantic expression and dense compiler foundation plan](docs/roadmap/plans/typed-semantic-expressions-plan.md): exact-numeric representation, lifetime, native result, Wiring and Core evaluation work.

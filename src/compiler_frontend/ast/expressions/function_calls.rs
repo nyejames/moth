@@ -12,6 +12,9 @@
 //! cursor. A `catch` is never consumed by a retained call: it protects the whole selected
 //! expression, so the enclosing fragment owner retains it with the pending operand in place.
 use crate::compiler_frontend::ast::ScopeContext;
+use crate::compiler_frontend::ast::const_eval::{
+    ExplicitConstantPayload, explicit_constant_operand,
+};
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
 use crate::compiler_frontend::ast::cursor::AstCursor;
 use crate::compiler_frontend::ast::expressions::call_argument::CallArgument;
@@ -693,7 +696,7 @@ pub(crate) fn parse_external_function_call_expression(
     //  Resolve and validate arguments
     // ------------------------
     let type_check_context = type_interner.type_check_context();
-    let args = resolve_call_arguments(
+    let mut args = resolve_call_arguments(
         CallDiagnosticContext::host_function(CallDiagnosticName::Interned(callee_name)),
         arguments,
         &expectations,
@@ -708,6 +711,23 @@ pub(crate) fn parse_external_function_call_expression(
         },
     )
     .map_err(ExpressionParseError::from)?;
+
+    // A compile-time text call folds only over values, so an explicit `#` operand is read as
+    // its constant rather than kept as a runtime read of the module binding.
+    if external_function.const_eval.is_some() {
+        for argument in &mut args {
+            if let Some(value) = explicit_constant_operand(
+                argument.value,
+                ExplicitConstantPayload::Text,
+                context,
+                path_fork,
+                expression_builder,
+                const_values,
+            )? {
+                argument.value = value;
+            }
+        }
+    }
 
     // ------------------------
     //  Validate signature and returns

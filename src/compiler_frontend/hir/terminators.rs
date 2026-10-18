@@ -208,7 +208,6 @@ pub(crate) fn classify_assertion_message_evaluation(
         {
             HirAssertionMessageEvaluation::Folded
         }
-        HirExpressionKind::RouteConstruct { .. } => HirAssertionMessageEvaluation::Runtime,
         _ => HirAssertionMessageEvaluation::Runtime,
     }
 }
