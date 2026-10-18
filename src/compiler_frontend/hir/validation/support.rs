@@ -184,11 +184,25 @@ impl<'a> HirValidator<'a> {
         anchor: Option<HirLocation>,
         visited: &mut FxHashSet<TypeId>,
     ) -> Result<(), CompilerError> {
-        if !visited.insert(type_id) {
+        let definition = self.type_environment.get(type_id);
+
+        // WHY: only composite definitions recurse, so only they need the cycle guard. Leaves
+        //      return before touching `visited`, so scalar and nominal checks allocate nothing.
+        //      Composites are still marked before their children are visited, so cycle
+        //      detection is unchanged. Error arms need no guard: their `Err` ends the whole walk.
+        if matches!(
+            definition,
+            Some(
+                TypeDefinition::Constructed(_)
+                    | TypeDefinition::Function(_)
+                    | TypeDefinition::GenericInstance(_)
+            )
+        ) && !visited.insert(type_id)
+        {
             return Ok(());
         }
 
-        match self.type_environment.get(type_id) {
+        match definition {
             Some(TypeDefinition::GenericParameter(parameter)) => Err(self.error_with_hir(
                 format!(
                     "Unresolved generic parameter TypeId {type_id:?} ({:?}) reached HIR validation",

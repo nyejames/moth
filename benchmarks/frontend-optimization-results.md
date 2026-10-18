@@ -6569,3 +6569,28 @@ and output files match across the 74 CLI cases. The converge exponent from 128
 to 512 locals falls from 2.13 to 1.90 for mutable cycles; the remaining cost is
 copying one state entry per local per visit, which needs a state
 representation change rather than a local fix.
+
+## Typed-expression follow-ups: HIR concrete type checks without a set
+
+`require_concrete_type_id` guards its walk over constructed, function and
+generic-instance types with a visited set, and inserted every type it reached,
+so each check of a builtin, struct, choice or external type allocated a set
+table for one entry. Only the three recursive arms can cycle, so only they now
+mark the set before recursing; leaf types return without inserting, and an
+error still ends the walk at its first occurrence. Traversal order, cycle
+detection and error choice are unchanged.
+
+Paired interleaved rounds against `9b0929229`, 60 rounds, median of per-round
+ratios with bootstrap CI95, beside a null run of the base binary against itself:
+
+| Case · `frontend.hir` | Ratio | CI95 | Null CI95 |
+|---|---:|---|---|
+| generic scaling 160 | 0.967 | 0.946-0.981 | 0.992-1.030 |
+| speed test | 0.945 | 0.927-0.954 | 0.989-1.008 |
+| narrow chains 512 | 0.909 | 0.897-0.920 | 0.996-1.020 |
+| docs | 0.959 | 0.940-1.006 | 0.958-0.997 |
+
+The saving is 0.05-0.22 ms per case, so no wall time change is measurable.
+Exit codes, stdout and output files match across the 74 CLI cases. The change
+removes an avoidable allocation from the common path rather than chasing a
+wall-time target.
