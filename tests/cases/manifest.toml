@@ -1168,6 +1168,13 @@ contract = "language.generics.function_body_validation"
 role = "boundary"
 
 [[case]]
+id = "generic_fn_imported_generic_body_call_success"
+path = "generic_fn_imported_generic_body_call_success"
+tags = ["integration","generics","functions","dependencies"]
+contract = "language.generics.imported_generic_body_call"
+role = "primary"
+
+[[case]]
 id = "generic_function_local_annotations_success"
 path = "generic_function_local_annotations_success"
 tags = ["integration","generics","functions","collections","choices"]

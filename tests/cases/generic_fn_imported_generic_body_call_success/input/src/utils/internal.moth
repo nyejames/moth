@@ -1,0 +1,7 @@
+identity type T |value T| -> T:
+    return value
+;
+
+wrap type T |value T| -> T:
+    return identity(value)
+;

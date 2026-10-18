@@ -836,15 +836,14 @@ impl GenericTemplateArtefact {
                     .collect::<Result<Vec<_>, CompilerError>>()?;
                 resolved_bounds_by_local.insert(TypeParameterId(slot as u32), bounds);
             }
-            let (generic_parameter_list_id, generic_parameter_type_ids) = if let Some(
-                nominal_origin,
-            ) = nested
+            // Public receiver methods and public free functions share the parameter identities
+            // their declaration already interned in this environment. The materialised contract
+            // keeps this template's own names and bounds in a separate list over those parameters.
+            let shared_parameter_owner = if let Some(nominal_origin) = nested
                 .generic_parameter_owner
                 .as_ref()
                 .and_then(GenericDeclarationOrigin::nominal_type_origin)
             {
-                // Public methods share the nominal's exported parameter identities, but each
-                // callable retains its own names and bounds in a separate contract list.
                 let nominal_identity = CanonicalTypeIdentity::SourceNominal(nominal_origin.clone());
                 let nominal_type_id = intern_generated_canonical_type(
                     &nominal_identity,
@@ -854,7 +853,7 @@ impl GenericTemplateArtefact {
                     string_table,
                     path_fork,
                 )?;
-                let generic_parameter_list_id =
+                let nominal_parameter_list_id =
                     match environment.type_environment.get(nominal_type_id) {
                         Some(TypeDefinition::Struct(definition)) => definition.generic_parameters,
                         Some(TypeDefinition::Choice(definition)) => definition.generic_parameters,
@@ -870,50 +869,66 @@ impl GenericTemplateArtefact {
                             "Generic receiver template owner has no generic parameter list",
                         )
                     })?;
-                let generic_parameter_type_ids = environment
-                    .type_environment
-                    .generic_parameters(generic_parameter_list_id)
-                    .ok_or_else(|| {
-                        CompilerError::compiler_error(
-                            "Generic receiver template owner has a missing parameter list",
-                        )
-                    })?
-                    .parameters
-                    .iter()
-                    .map(|parameter| {
-                        environment
+                Some(nominal_parameter_list_id)
+            } else {
+                // WHY: the import projection registers a public free function's parameter list and
+                // exported identities before the closure reinstalls its body. A fresh list here
+                // would give those canonical identities a second TypeId in this environment.
+                environment
+                    .lookups
+                    .generic_function_templates_by_path
+                    .get(&nested_path)
+                    .filter(|template| {
+                        template.declaration_identity.as_ref() == Some(&nested.declaration_identity)
+                    })
+                    .map(|template| template.generic_parameter_list_id)
+            };
+            let (generic_parameter_list_id, generic_parameter_type_ids) =
+                if let Some(owner_list_id) = shared_parameter_owner {
+                    let generic_parameter_type_ids = environment
+                        .type_environment
+                        .generic_parameters(owner_list_id)
+                        .ok_or_else(|| {
+                            CompilerError::compiler_error(
+                                "Shared generic parameter owner has a missing parameter list",
+                            )
+                        })?
+                        .parameters
+                        .iter()
+                        .map(|parameter| {
+                            environment
                             .type_environment
                             .type_id_for_generic_parameter(parameter.id)
                             .ok_or_else(|| {
                                 CompilerError::compiler_error(
-                                    "Generic receiver template owner parameter has no type handle",
+                                    "Shared generic parameter owner parameter has no type handle",
                                 )
                             })
-                    })
-                    .collect::<Result<Vec<_>, CompilerError>>()?;
-                if generic_parameter_type_ids.len() != nested.generic_parameters.len() {
-                    return Err(CompilerError::compiler_error(
-                        "Generic receiver template parameter count disagrees with its nominal owner",
-                    ).into());
-                }
-                for (parameter, type_id) in nested
-                    .generic_parameters
-                    .iter()
-                    .zip(&generic_parameter_type_ids)
-                {
-                    if let Some(exported_identity) = parameter.exported_identity.as_ref() {
-                        let expected_identity =
-                            CanonicalTypeIdentity::GenericParameter(exported_identity.clone());
-                        environment
-                            .type_environment
-                            .register_canonical_identity(expected_identity, *type_id)?;
+                        })
+                        .collect::<Result<Vec<_>, CompilerError>>()?;
+                    if generic_parameter_type_ids.len() != nested.generic_parameters.len() {
+                        return Err(CompilerError::compiler_error(
+                            "Generic template parameter count disagrees with its shared owner",
+                        )
+                        .into());
                     }
-                }
-                let registration =
-                    environment
+                    for (parameter, type_id) in nested
+                        .generic_parameters
+                        .iter()
+                        .zip(&generic_parameter_type_ids)
+                    {
+                        if let Some(exported_identity) = parameter.exported_identity.as_ref() {
+                            let expected_identity =
+                                CanonicalTypeIdentity::GenericParameter(exported_identity.clone());
+                            environment
+                                .type_environment
+                                .register_canonical_identity(expected_identity, *type_id)?;
+                        }
+                    }
+                    let registration = environment
                         .type_environment
                         .register_generic_parameter_contract(
-                            generic_parameter_list_id,
+                            owner_list_id,
                             nested.generic_parameters.iter().enumerate().map(
                                 |(slot, parameter)| {
                                     (
@@ -926,16 +941,15 @@ impl GenericTemplateArtefact {
                         )
                         .ok_or_else(|| {
                             CompilerError::compiler_error(
-                                "Materialised receiver contract disagrees with its parameter owner",
+                                "Materialised generic contract disagrees with its parameter owner",
                             )
                         })?;
-                (registration.list_id, generic_parameter_type_ids)
-            } else {
-                // Private methods retain their own declaration-local parameters, even when
-                // their receiver aligns with a nominal's slots. Reusing the nominal list would
-                // lose method parameter names and overwrite another declaration's bounds.
-                let registration =
-                    environment
+                    (registration.list_id, generic_parameter_type_ids)
+                } else {
+                    // Declarations without a shared owner keep their own declaration-local parameters,
+                    // even when a receiver aligns with a nominal's slots. Reusing the nominal list would
+                    // lose method parameter names and overwrite another declaration's bounds.
+                    let registration = environment
                         .type_environment
                         .register_generic_parameter_list(
                             nested.generic_parameters.iter().enumerate().map(
@@ -948,18 +962,18 @@ impl GenericTemplateArtefact {
                             ),
                             &resolved_bounds_by_local,
                         );
-                let generic_parameter_type_ids = (0..nested.generic_parameters.len())
-                    .map(|slot| {
-                        let parameter_id = registration
-                            .canonical_by_local
-                            .get(&TypeParameterId(slot as u32))
-                            .copied()
-                            .ok_or_else(|| {
-                                CompilerError::compiler_error(
-                                    "Materialised generic template omitted a parameter slot",
-                                )
-                            })?;
-                        environment
+                    let generic_parameter_type_ids = (0..nested.generic_parameters.len())
+                        .map(|slot| {
+                            let parameter_id = registration
+                                .canonical_by_local
+                                .get(&TypeParameterId(slot as u32))
+                                .copied()
+                                .ok_or_else(|| {
+                                    CompilerError::compiler_error(
+                                        "Materialised generic template omitted a parameter slot",
+                                    )
+                                })?;
+                            environment
                             .type_environment
                             .type_id_for_generic_parameter(parameter_id)
                             .ok_or_else(|| {
@@ -967,36 +981,36 @@ impl GenericTemplateArtefact {
                                     "Materialised generic template parameter has no type handle",
                                 )
                             })
-                    })
-                    .collect::<Result<Vec<_>, CompilerError>>()?;
-                for (slot, parameter) in nested.generic_parameters.iter().enumerate() {
-                    let local_id = TypeParameterId(slot as u32);
-                    let parameter_id = registration
-                        .canonical_by_local
-                        .get(&local_id)
-                        .copied()
-                        .ok_or_else(|| {
-                            CompilerError::compiler_error(
-                                "Materialised generic template omitted a stable parameter slot",
-                            )
-                        })?;
-                    let parameter_type_id = environment
-                        .type_environment
-                        .type_id_for_generic_parameter(parameter_id)
-                        .ok_or_else(|| {
-                            CompilerError::compiler_error(
-                                "Materialised generic template parameter has no type identity",
-                            )
-                        })?;
-                    if let Some(exported_identity) = &parameter.exported_identity {
-                        environment.type_environment.register_canonical_identity(
-                            CanonicalTypeIdentity::GenericParameter(exported_identity.clone()),
-                            parameter_type_id,
-                        )?;
+                        })
+                        .collect::<Result<Vec<_>, CompilerError>>()?;
+                    for (slot, parameter) in nested.generic_parameters.iter().enumerate() {
+                        let local_id = TypeParameterId(slot as u32);
+                        let parameter_id = registration
+                            .canonical_by_local
+                            .get(&local_id)
+                            .copied()
+                            .ok_or_else(|| {
+                                CompilerError::compiler_error(
+                                    "Materialised generic template omitted a stable parameter slot",
+                                )
+                            })?;
+                        let parameter_type_id = environment
+                            .type_environment
+                            .type_id_for_generic_parameter(parameter_id)
+                            .ok_or_else(|| {
+                                CompilerError::compiler_error(
+                                    "Materialised generic template parameter has no type identity",
+                                )
+                            })?;
+                        if let Some(exported_identity) = &parameter.exported_identity {
+                            environment.type_environment.register_canonical_identity(
+                                CanonicalTypeIdentity::GenericParameter(exported_identity.clone()),
+                                parameter_type_id,
+                            )?;
+                        }
                     }
-                }
-                (registration.list_id, generic_parameter_type_ids)
-            };
+                    (registration.list_id, generic_parameter_type_ids)
+                };
             let MaterialisedFunctionSignature {
                 signature,
                 function_type_id,

@@ -539,9 +539,9 @@ impl TypeEnvironment {
 
     /// Registers declaration-specific bounds over already-owned generic parameter identities.
     ///
-    /// Public receiver methods share exported nominal TypeIds, not their callable contracts.
-    /// Keep each method's names and bounds in a separate list without allocating parameters or
-    /// changing the parameter owner's bounds used by generic-type queries.
+    /// Public receiver methods and public generic functions share the owner's exported TypeIds,
+    /// not their callable contracts. Keep each declaration's names and bounds in a separate list
+    /// without allocating parameters or changing the owner's bounds used by generic-type queries.
     pub(crate) fn register_generic_parameter_contract(
         &mut self,
         parameter_owner: GenericParameterListId,
