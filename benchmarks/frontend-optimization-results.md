@@ -6331,3 +6331,32 @@ fold. `default_parameters_32` fills 64 function defaults on both trees.
 
 This local Darwin run supplies no fresh Windows Canvas or in-process frontend
 result.
+
+## Typed-expression follow-ups: signature member contract merge
+
+Nominal `boundary.inventory` regression from `bb292b44d` (above), re-measured with
+fresh binaries; older bisect binaries embedded deleted worktree paths and failed
+`check`, so the earlier contract-head exclusion was re-run and still holds.
+
+- Profile (xctrace, 15 rotated runs, 10,000-member fixture): self time in
+  `parse_signature_member_syntax` rises from 0.07 to 2.27 samples per run, on the
+  `(type_annotation, contract)` tuple merged from an `if` expression and the
+  struct-field call result. Disassembly shows overlapping stack copies at those
+  lines; the stall mechanism is inferred, not counter-confirmed.
+- Change: assign `type_annotation` and `contract` per branch. Output matches
+  apart from timing lines.
+- Paired per-round medians, `check`, `MOTH_TIMERS=bench RAYON_NUM_THREADS=1`,
+  interleaved, 100 rounds at 320 members and 30 at 3,200:
+
+| Pair (`boundary.inventory`) | 320 members | 3,200 members |
+|---|---:|---:|
+| before − base `0c1a55395` | +0.169 ms | +1.817 ms |
+| after − base | +0.067 ms | +0.867 ms |
+| before − after | +0.104 ms (≈43 ns/member) | +0.977 ms (≈41 ns/member) |
+| 136 B size control − base | +0.042 ms | +0.871 ms |
+
+Same-source rebuilds agree within 0.01 ms at 320. The residual matches a
+control that only grows `SignatureMemberSyntax` to its current 136 B with a
+zero-initialised pad, and boxing the contract (88 B) or constructing members in
+place did not beat this change, so the residual is retained as size and layout
+cost of the contract field.

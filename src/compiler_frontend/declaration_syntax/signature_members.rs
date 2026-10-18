@@ -617,26 +617,29 @@ fn parse_signature_member_syntax(
     }
 
     let parameter_name = path_fork.component(full_name);
-    let (type_annotation, contract) = if matches!(
+    // WHY: assigned per branch instead of merging a `(ParsedTypeRef, contract)` tuple from an
+    //      `if` expression. The tuple merge measured about 40 ns per member in header inventory
+    //      (benchmarks/frontend-optimization-results.md, "signature member contract merge").
+    let type_annotation;
+    let contract;
+    if matches!(
         member_context,
         SignatureMemberContext::FunctionParameter | SignatureMemberContext::TraitRequirement
     ) {
-        parse_parameter_contract_or_type_annotation_cursor(
+        (type_annotation, contract) = parse_parameter_contract_or_type_annotation_cursor(
             token_stream,
             parameter_name,
             type_annotation_context_for_member(member_context),
             string_table,
-        )?
+        )?;
     } else {
-        (
-            parse_type_annotation_cursor(
-                token_stream,
-                type_annotation_context_for_member(member_context),
-                string_table,
-            )?,
-            ParsedParameterContractSyntax::Value,
-        )
-    };
+        type_annotation = parse_type_annotation_cursor(
+            token_stream,
+            type_annotation_context_for_member(member_context),
+            string_table,
+        )?;
+        contract = ParsedParameterContractSyntax::Value;
+    }
     if let Some(contract_kind) = contract.kind()
         && value_mode == ValueMode::MutableOwned
     {
