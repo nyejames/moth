@@ -6219,3 +6219,115 @@ counters are unchanged.
   pre-scan duplicating the specialisation walker for about 0.06 ms; a counted
   handoff-injection move and a moved copy cursor that added invariants or
   changed error-path state without measured cost.
+
+## Typed-expression final qualification
+
+This section qualifies the final tree, `aad5eb2aa` on `expression-refactor`,
+against baseline `a24230c87`. It supersedes an earlier round on `2525e99b7`
+that failed nominal scaling, stack depth and retained-string checks; the
+corrections are listed below. The protocol follows Phase 5: macOS arm64,
+Rust 1.99.0, `--locked` release `detailed_timers` builds from a clean candidate
+worktree, and the Phase 5 baseline binaries with unchanged digests. All 68
+timed CLI `check` cases run five alternating pairs with `RAYON_NUM_THREADS=1`,
+`MOTH_TIMERS=bench` and counters off, and both sides read the candidate
+worktree's inputs. Stdout and stderr match on every case. Rows a five-pair
+screen marks as slower rerun at 15 pairs. Another workload held load averages
+between 3 and 8, so single sub-millisecond rows are noise. Raw logs stay under
+`tmp/p8/aad/`.
+
+### Stage timing medians (ms)
+
+| Case | check total | AST environment | AST emit | HIR | generated materialise |
+|---|---:|---:|---:|---:|---:|
+| docs | 210.31 → 208.30 | 91.38 → 90.19 | 35.52 → 35.24 | 2.08 → 2.11 | — |
+| type stress | 6.09 → 6.18 | 0.29 → 0.28 | 0.72 → 0.71 | 0.44 → 0.45 | — |
+| fold stress | 5.21 → 5.34 | 1.41 → 1.40 | 0.28 → 0.28 | 0.22 → 0.23 | — |
+| template stress | 7.50 → 7.53 | 0.83 → 0.81 | 0.57 → 0.56 | 0.41 → 0.41 | — |
+| generic scaling 20 | 23.31 → 16.75 | 0.20 → 0.19 | 1.24 → 1.22 | 0.77 → 0.74 | 12.85 → 6.45 |
+| generic scaling 160 | 318.46 → 260.85 | 0.61 → 0.58 | 7.51 → 7.28 | 5.50 → 5.28 | 177.96 → 121.67 |
+| nominal scaling 320 | 11.29 → 10.96 | 3.86 → 3.49 | 0.20 → 0.19 | 0.63 → 0.57 | — |
+| default parameters 32 | 4.75 → 4.65 | 0.37 → 0.37 | 0.47 → 0.47 | 0.36 → 0.35 | — |
+| aggregate forwarding 512 | 525.10 → 518.22 | 0.10 → 0.10 | 10.97 → 9.87 | 4.12 → 4.16 | 0.49 → 0.31 |
+
+Generic scaling is 18–28% faster at every size. Fifteen-pair reruns place
+every rescreened total within 2.3% of baseline in either direction: narrow
+chains 512 1039.64 → 1021.95, grouped `not` 512 2.97 → 2.91, fold stress
+5.36 → 5.38, `root_single_file` 2.43 → 2.46, docs 206.08 → 206.23, and nominal
+40/80/160/320 at 0.977–0.998.
+
+### Scaling, stack and memory
+
+`just bench-scaling` passes all 14 series on both trees. Nominal members fit
+`n^0.93` (baseline `n^0.92`). Generic instantiation fits `n^1.47` (baseline
+`n^1.36`) while running faster at every size. Its materialise savings of
+6.4, 12.6, 25.3 and 56.3 ms at n = 20, 40, 80 and 160 remove a linear term,
+which leaves the unchanged superlinear term to dominate the fit. Main-thread
+stack floors match baseline: 120 KB for `check` on grouped `not` 2048, and
+168 KB for the entry-project build on both JS and HTML-Wasm.
+
+The requested-byte probe shows lower live bytes in every fixture,
+identical after-drop bytes, and unchanged retained fields except donor
+identity strings: 12,992 → 12,932 B (generic trait churn) and 16,786 → 16,730 B
+(kitchen sink). Requested peaks move between −1.8% and +2.3%. The largest
+rises are transient: generic trait churn +27.5 KB and environment stress
++18.2 KB.
+
+| Case | max RSS (MiB) | peak footprint (MiB) |
+|---|---:|---:|
+| docs | 63.39 → 62.62 | 53.08 → 52.34 |
+| generic scaling 160 | 385.25 → 385.34 | 371.80 → 371.92 |
+| nominal scaling 320 | 19.97 → 19.91 | 10.41 → 10.44 |
+| grouped `not` 2048 | 14.83 → 14.84 | 5.56 → 5.59 |
+| default parameters 32 | 14.52 → 14.94 | 4.67 → 5.03 |
+
+Small cases show a 0.1–0.4 MiB peak-footprint offset whose requested bytes
+move by about 1 KB. Across the phase-checkpoint binaries the offset rises and
+falls non-monotonically, and two builds of the same source measure identically,
+so it follows build-specific page residency rather than retained compiler data.
+
+### Counters
+
+| Counter | docs | type stress | generic scaling 160 | nominal scaling 320 |
+|---|---:|---:|---:|---:|
+| constant fold entries (incl. retired compile-time-expression entries) | 2,796 → 2,796 | 228 → 228 | 7,373 → 7,373 | 4 → 4 |
+| external package registry clones | 3 → 3 | 1 → 1 | 801 → 1 | unchanged |
+| external function definition clones | 624 → 624 | 208 → 208 | 166,608 → 208 | unchanged |
+| scope contexts | 5,031 → 5,033 | 391 → 391 | 4,835 → 4,835 | 1,693 → 2,093 |
+
+The baseline split fold entries between `constant_fold` and the retired
+`fold_compile_time_expression` counter; the candidate records both under one
+entry point and now classifies every outcome. Nominal scope contexts include the
+retained constructor-shell scope that lets bare-constant collection capacities
+fold. `default_parameters_32` fills 64 function defaults on both trees.
+
+### Harness results
+
+`just bench-validate` passes all 152 cases. `just bench-frontend-check` and
+`just bench-check` exit 0 with `git_dirty: false`, but they print
+`No local baseline found`, so they give no comparison verdict.
+
+### Corrected regressions and attributed deltas
+
+- Nominal scaling: `939c7d6b6` held each constructor shell's scope context
+  across `Rc::make_mut` shell-table writes, so every write copied the table.
+  Dropping the scope first restores the fit, and the 320-member check moves
+  from 37.41 ms to 10.96 ms.
+- Stack: recursive HIR walkers from `529e3a6fe` raised the `check` floor from
+  119 KB to 375 KB. Explicit work lists in reachability, backend feature
+  validation and the JS emitter restore it.
+- Retained strings: unconditional `Wire`/`Route` interning added 41 B per
+  table. They are now reserved only when tokenisation already interned them.
+- Docs `frontend.ast.finalise.module_constant` reads 4.50 → 5.02 ms from
+  `529e3a6fe` to the qualification binary over 40 rotated rounds. A rebuild of
+  the same source from another worktree measures 4.59 ms in those rounds, so the
+  step is code layout, not source behaviour; the docs total doesn't move.
+- Nominal `boundary.inventory` rises 0.09–0.16 ms (+4.7–6.5%) at 160/320
+  members, where it includes header preparation. Phase-commit bisection places
+  the whole step at `bb292b44d`, which added `Wire`/`Route` parameter-contract
+  parsing. Removing the per-type contract-head check or boxing the `Route`
+  payload leaves it unchanged, so the line-level cause remains open. Across all
+  68 cases the inventory median moves +1.2%, and every nominal check total stays
+  below baseline.
+
+This local Darwin run supplies no fresh Windows Canvas or in-process frontend
+result.
