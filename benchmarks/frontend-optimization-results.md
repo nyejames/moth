@@ -6594,3 +6594,31 @@ The saving is 0.05-0.22 ms per case, so no wall time change is measurable.
 Exit codes, stdout and output files match across the 74 CLI cases. The change
 removes an avoidable allocation from the common path rather than chasing a
 wall-time target.
+
+## Typed-expression follow-ups: template summary paths and whitespace cursors
+
+Docs `frontend.ast.emit.const_template_parse` was about 20 ms, 11% of docs
+wall time. A third of it was the TIR summary walk, where hashing its active-path
+set was 20% of the stage, and 15% was template whitespace normalisation, which
+collected strings into `Vec<char>` buffers to dedent and trim them.
+
+- The summary's active node path is a `Vec` stack. It holds only the nested
+  body nodes above the current node, because construction flattens body
+  sequences and nested templates start a fresh path, so a linear check is
+  cheaper than a hash probe. The cycle error and traversal order are unchanged.
+- The whitespace helpers work on the string directly with character-aware
+  cursors. Whitespace classification and character-counted dedent widths are
+  unchanged; a new test pins multibyte horizontal whitespace.
+
+Paired interleaved rounds against `9b0929229`, 25 rounds, median of per-round
+ratios with bootstrap CI95:
+
+| Case · metric | Path stack | Whitespace | Both |
+|---|---:|---:|---:|
+| docs · template parse | 0.827 | 0.920 | 0.720 (0.716-0.740) |
+| docs · AST total | 0.919 | 0.953 | 0.855 (0.851-0.864) |
+| docs · wall | 0.949 | 0.974 | 0.915 (0.898-0.920) |
+| speed test · wall (control) | 0.998 | 0.997 | 0.985 (0.970-1.007) |
+
+Exit codes, stdout and output files match across the 74 CLI cases for each
+variant.
