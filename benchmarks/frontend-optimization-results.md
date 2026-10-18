@@ -6449,3 +6449,35 @@ regresses beyond noise after 25-round re-runs, and exit codes, stdout and stderr
 match. The one stage cost is aggregate forwarding 128 `borrow.initial`, +5.5%
 of a 5.6 ms stage over the previous tree; it stays at 0.42x of the tree before
 borrow root membership, and its wall time does not move.
+
+## Typed-expression follow-ups: generated nominal registration
+
+Generic scaling 160 spends about 56% of its wall time in
+`frontend.generated.materialise`. Every generated request rebuilds its
+requester's nominal bindings, and each generated nominal registered its
+canonical identity twice: once for the shell inside
+`intern_materialisation_nominal`, so recursive references resolve to it, and
+again in the epilogue of `intern_generated_canonical_type`.
+`register_canonical_identity` was 19.7% of the stage inclusive.
+
+- The nominal arm returns the shell's TypeId directly, so the identical second
+  insert and its conflict check are gone; nothing between the two writes can
+  register a conflicting pair.
+- The repeated lookup at the top of `intern_materialisation_nominal` is gone;
+  its only caller has just performed it.
+- Blueprints are borrowed from the immutable nominal source instead of cloned.
+
+TypeIds are allocated in the same order. Paired interleaved rounds against the
+shared borrow root words tree, 25 rounds, median of per-round ratios with
+bootstrap CI95:
+
+| Case · metric | Ratio | CI95 |
+|---|---:|---|
+| generic scaling 160 · materialise | 0.814 | 0.811-0.818 |
+| generic scaling 160 · wall | 0.892 | 0.886-0.905 |
+| docs · wall | 0.994 | 0.989-1.005 |
+
+An A/A run of the base binary against a byte-identical copy gave 0.998 for the
+materialise stage. Exit codes, stdout and output files match across the 74 CLI
+cases. The stage still grows about as n^1.4: rebuilding every requester binding
+per request is the remaining quadratic term.

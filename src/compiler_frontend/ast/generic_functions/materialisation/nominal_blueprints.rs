@@ -829,15 +829,20 @@ pub(super) fn intern_generated_canonical_type(
             )?;
             type_environment.intern_map(key, value)
         }
+        // Nominal shells register their identity inside `intern_materialisation_nominal`
+        // before fields are materialised, so recursive references resolve to the shell.
+        // The epilogue registration below would only repeat that write, so return early.
         CanonicalTypeIdentity::SourceNominal(_)
-        | CanonicalTypeIdentity::ModulePrivateNominal(_) => intern_materialisation_nominal(
-            identity,
-            nominal_source,
-            type_environment,
-            external_registry,
-            string_table,
-            path_fork,
-        )?,
+        | CanonicalTypeIdentity::ModulePrivateNominal(_) => {
+            return intern_materialisation_nominal(
+                identity,
+                nominal_source,
+                type_environment,
+                external_registry,
+                string_table,
+                path_fork,
+            );
+        }
         CanonicalTypeIdentity::ExternalOpaque(external) => {
             let (external_type_id, _) = external_registry
                 .resolve_canonical_package_type_by_path(external.package(), external.symbol_path())
@@ -1136,18 +1141,14 @@ fn intern_materialisation_nominal<N: MaterialisationNominalSource>(
     string_table: &mut StringTable,
     path_fork: &mut PathInternerFork,
 ) -> Result<TypeId, CompilerError> {
-    if let Some(type_id) = type_environment.type_id_for_canonical_identity(identity) {
-        return Ok(type_id);
-    }
-    let blueprint = nominal_source
-        .nominal_blueprint(identity)
-        .cloned()
-        .ok_or_else(|| {
-            CompilerError::compiler_error(format!(
-                "Generated request nominal {identity:?} is absent from {}",
-                N::SOURCE_LABEL
-            ))
-        })?;
+    // Only `intern_generated_canonical_type` calls this, and it has already checked that
+    // the identity is unregistered; the registration below relies on that absence.
+    let blueprint = nominal_source.nominal_blueprint(identity).ok_or_else(|| {
+        CompilerError::compiler_error(format!(
+            "Generated request nominal {identity:?} is absent from {}",
+            N::SOURCE_LABEL
+        ))
+    })?;
 
     // Bounds remain exact stable facts on the immutable blueprint. Reconstructing a concrete
     // nominal for field/variant substitution does not re-run declaration-site evidence solving.
