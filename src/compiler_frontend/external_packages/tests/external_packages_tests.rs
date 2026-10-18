@@ -628,7 +628,7 @@ fn virtual_package_detection_uses_symbol_suffixes() {
 }
 
 // ------------------------------------------------------------------
-// Phase 1.1 path-aware external package surface tests
+// Path-aware external package surface tests
 // ------------------------------------------------------------------
 
 fn empty_void_function(name: &str) -> ExternalFunctionDef {
@@ -1506,8 +1506,8 @@ fn core_io_console_functions_return_void() {
 /// Verifies that every Core IO V1 function is JS-backed and intentionally unsupported on Wasm.
 /// WHAT: backend validation only needs lowering metadata; unsupported targets are represented by
 ///       an absent lowering entry rather than a hand-written IO special case.
-/// WHY: Phase 5 depends on this metadata shape so reachable HTML-Wasm IO calls fail before
-///      lowering while HTML-JS continues to emit runtime helpers.
+/// WHY: external-package support validation depends on this metadata shape so reachable
+///      HTML-Wasm IO calls fail before lowering while HTML-JS continues to emit runtime helpers.
 #[test]
 fn core_io_functions_have_js_lowerings_and_no_wasm_lowerings() {
     let registry = ExternalPackageRegistry::new();

@@ -1062,7 +1062,7 @@ fn synthetic_identity_fixture(dependency_order: &[&str]) -> Vec<SyntheticPrepare
 }
 
 /// Discover modules and return the populated project module graph plus the shared source database
-/// and string table so focused Phase 5b invariant tests can inspect inserted edges and retained
+/// and string table so focused invariant tests can inspect inserted edges and retained
 /// source locations.
 fn discover_modules_and_graph_for_test(
     config: &Config,

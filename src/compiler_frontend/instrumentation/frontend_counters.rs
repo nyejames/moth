@@ -178,7 +178,7 @@ pub(crate) enum FrontendCounter {
     StringTableDeltaNonIdentityRemaps,
     #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
     StringTableDeltaNonIdentityEntries,
-    // Path-table fork/merge volume (Phase 2 Slice 2B). Node count totals interned nodes
+    // Path-table fork/merge volume. Node count totals interned nodes
     // including ROOT; max depth is a gauge updated on intern via fetch_max.
     PathNodeCount,
     #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
@@ -202,7 +202,7 @@ pub(crate) enum FrontendCounter {
     #[cfg_attr(not(feature = "benchmark_counters"), allow(dead_code))]
     FilePrepareNonIdentityPayloadRemaps,
 
-    // Arena capacity-estimate counters (Phase 1).
+    // Arena capacity-estimate counters.
     EstimatedScopeFrames,
     ActualScopeFrames,
     ScopeArenaCapacity,
@@ -216,7 +216,7 @@ pub(crate) enum FrontendCounter {
     ScopeFrameOverEstimateCount,
     CappedCapacityEstimates,
 
-    // External package metadata clone-pressure counters (Phase 3).
+    // External package metadata clone-pressure counters.
     ExternalPackageRegistryCloneCount,
     ExternalPackageDefinitionCloneCount,
     ExternalFunctionDefinitionCloneCount,

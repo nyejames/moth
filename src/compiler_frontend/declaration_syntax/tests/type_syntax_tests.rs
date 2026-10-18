@@ -1750,7 +1750,7 @@ fn rejects_collection_type_missing_close_curly_with_expected_token() {
 }
 
 // -------------------------------------------------------------
-//  Map type syntax parsing tests (Phase 3)
+//  Map type syntax parsing tests
 // -------------------------------------------------------------
 
 #[test]
