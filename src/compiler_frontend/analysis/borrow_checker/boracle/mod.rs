@@ -71,11 +71,11 @@ pub(crate) use relations::{
 pub(crate) use report::{BoracleReport, BoracleSolver};
 #[cfg(test)]
 pub(crate) use service::solve_hir_module;
+pub use service::{BoracleDump, BoracleExperiment, BoracleReferenceRuleSet, BoracleRuleSelection};
 #[allow(unused_imports)]
 pub(crate) use service::{
-    BoracleDump, BoracleExperiment, BoracleExperimentMetadata, BoracleFunctionReport,
-    BoracleModuleReport, BoracleReferencePromotionStatus, BoracleReferenceRuleSet,
-    BoracleRuleSelection, BoracleServiceOptions, run_hir_module,
+    BoracleExperimentMetadata, BoracleFunctionReport, BoracleModuleReport,
+    BoracleReferencePromotionStatus, BoracleServiceOptions, run_hir_module,
 };
 
 #[cfg(test)]

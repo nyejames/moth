@@ -7,7 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::projects::html_project::new_html_project::prompt::Prompt;
+use crate::scaffold::prompt::Prompt;
 
 /// Fully resolved project placement after all user interaction.
 #[derive(Debug)]

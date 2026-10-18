@@ -1,10 +1,12 @@
 # Moth codebase index for quick navigation
 
-Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compiler_frontend](src/compiler_frontend/) → tokenizer → headers → module_dependencies → ast → hir → borrow_checker → backends/projects.
+Flow: [CLI](crates/moth-cli/src/) → [projects](src/projects/) → [build_system](src/build_system/) → [compiler_frontend](src/compiler_frontend/) → tokenizer → headers → module_dependencies → ast → hir → borrow_checker → backends/projects.
 
 ## Root
 
-- [moth CLI entry](src/main.rs)
+- [moth CLI package](crates/moth-cli/Cargo.toml) and [entry](crates/moth-cli/src/main.rs): owns the `moth` executable and depends on the compiler library and Lappet.
+    - [command dispatch](crates/moth-cli/src/cli.rs), [status presentation](crates/moth-cli/src/command_status.rs) and [HTML scaffolding](crates/moth-cli/src/scaffold/).
+    - [parser tests](crates/moth-cli/src/tests/cli_tests.rs) and [subprocess contracts](crates/moth-cli/tests/cli_exit_status.rs).
 - [crate module surface](src/lib.rs), including the public convenience re-export `moth::mon` for the standalone [moth-mon crate](crates/moth-mon/) (owned values, prepared schemas, literal-only encode/decode)
 - [timing facade](src/timing.rs), [typed timing schema](src/timing/enabled/schema.rs), [collector](src/timing/enabled/collector.rs), and [summary](src/timing/enabled/summary.rs): compile-erasing timing/counter entry points, schema-v1 metric ownership, immutable process configuration, command/raw session channels, aggregate snapshots and inactive fast-path policy.
 - [Moth source packages](packages/): compiler-shipped source-backed packages.
@@ -36,12 +38,11 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
 
 ## Project/build shell
 
-- [user commands and project modes](src/projects/): kw — cli, check, build, dev, new, routing.
-    - [cli.rs](src/projects/cli.rs): dispatches commands.
+- [compiler-backed project services](src/projects/): kw — check, build, dev, routing.
+    - [build_command.rs](src/projects/build_command.rs): owns build execution, output planning/writing and timing around the CLI's completed-outcome presentation.
     - [check.rs](src/projects/check.rs): frontend-only diagnostics.
     - [routing.rs](src/projects/routing.rs): path/origin rules.
     - [settings.rs](src/projects/settings.rs): Config/defaults/known paths.
-    - [repl.rs](src/projects/repl.rs): template-focused REPL placeholder.
     - [dev_server](src/projects/dev_server/): HTTP/SSE/watch rebuild loop, injected dev client and bounded runtime entry-error reports kept separate from build state. kw: serve, hot reload, runtime report.
         - [runtime_report_tests.rs](src/projects/dev_server/tests/runtime_report_tests.rs), [dev_client_tests.rs](src/projects/dev_server/tests/dev_client_tests.rs): socket-level runtime-report validation and served dev-client observable behaviour.
     - [html_project](src/projects/html_project/): HTML builder and HTML-Wasm integration. kw: shell, assets, wasm.
@@ -248,7 +249,7 @@ Flow: [projects](src/projects/) → [build_system](src/build_system/) → [compi
         - [@web/canvas](src/projects/html_project/binding_packages/web/canvas/): Canvas 2D asset (`canvas.js`). Used by the `@html` canvas helpers.
         - [@web/graphics](src/projects/html_project/binding_packages/web/graphics/): WebGL2 package, registered with no public symbols yet.
 - [moth_template](src/projects/html_project/moth_template/): direct .mtf request normalization, content-source discovery and output packaging around the compiler's [Moth template service](src/compiler_frontend/single_source_compilation/moth_template.rs), retaining per-document source contexts with warnings.
-- [new_html_project](src/projects/html_project/new_html_project/): scaffold command.
+- [HTML scaffold](crates/moth-cli/src/scaffold/): CLI-owned project creation and terminal prompts.
 
 ## Tests/tooling
 

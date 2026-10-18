@@ -173,7 +173,7 @@ fn resolve_dev_runtime_paths_use_configured_dev_folder_for_directory_projects() 
     )
     .expect("should write config");
 
-    let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
+    let builder = ProjectBuilder::new(HtmlProjectBuilder::new());
     let resolved = resolve_dev_runtime_paths(&builder, &root, &[], &BuildConfigInputSet::new())
         .expect("directory output dir should resolve");
 
@@ -216,7 +216,7 @@ fn resolve_dev_runtime_paths_rejects_symlinked_output_roots() {
         )
         .expect("should write config");
 
-        let builder = ProjectBuilder::new(Box::new(NoopBuilder));
+        let builder = ProjectBuilder::new(NoopBuilder);
         let messages = resolve_dev_runtime_paths(&builder, &root, &[], &BuildConfigInputSet::new())
             .expect_err("dev startup must reject symlinked output roots");
         assert!(messages.error_diagnostics().any(|diagnostic| {
@@ -247,7 +247,7 @@ fn resolve_dev_runtime_paths_rejects_empty_dev_folder() {
     )
     .expect("should write config");
 
-    let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
+    let builder = ProjectBuilder::new(HtmlProjectBuilder::new());
     let result = resolve_dev_runtime_paths(&builder, &root, &[], &BuildConfigInputSet::new());
 
     assert!(
@@ -263,7 +263,7 @@ fn resolve_dev_runtime_paths_return_config_load_failures() {
 
     fs::write(root.join(CONFIG_FILE_NAME), "@core/math sin\n").expect("should write bad config");
 
-    let builder = ProjectBuilder::new(Box::new(NoopBuilder));
+    let builder = ProjectBuilder::new(NoopBuilder);
     let messages = resolve_dev_runtime_paths(&builder, &root, &[], &BuildConfigInputSet::new())
         .expect_err("bad config should fail directory bootstrap");
 
@@ -287,7 +287,7 @@ fn resolve_dev_runtime_paths_return_style_directive_merge_failures() {
     let _temp = tempfile::tempdir().expect("should create temp dir");
     let root = _temp.path().to_path_buf();
 
-    let builder = ProjectBuilder::new(Box::new(ConflictingDirectiveBuilder));
+    let builder = ProjectBuilder::new(ConflictingDirectiveBuilder);
     let messages = resolve_dev_runtime_paths(&builder, &root, &[], &BuildConfigInputSet::new())
         .expect_err("conflicting directives should fail bootstrap");
 

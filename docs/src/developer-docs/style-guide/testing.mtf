@@ -717,13 +717,20 @@ default configuration, and `--features benchmark_counters` on a workspace comman
 `timers` plus counters. Only `cargo test -p moth` with an explicit feature list configures the
 crate the way a lane claims.
 
+Each compiler lane also has a matching `moth-cli` lane, named `cli-` followed
+by the compiler lane name, with the same feature selection. Those lanes execute
+command parsing, scaffolding and subprocess
+contracts against the CLI's forwarded configuration. They do not replace
+compiler unit tests. The CLI's Boracle and campaign lanes remain opt-in through
+the same named recipes as their compiler counterparts.
+
 Feature coverage is checked mechanically, without running a lane:
 
 [codeblock, $code("bash"):
     just feature-lane-check
 ]
 
-`just feature-lane-check` checks the compiler, lexical, MON and `xtask`
+`just feature-lane-check` checks the compiler, CLI, lexical, MON and `xtask`
 manifests against `cfg` references in their source and test directories. It
 fails on uncovered or unknown features and missing roots. Its report at
 `target/test-reports/feature_lane_coverage.json` maps features to lanes and

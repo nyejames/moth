@@ -2,10 +2,10 @@
 name = "moth"
 version = "0.1.12"
 edition = "2024"
-default-run = "moth"
 
 [workspace]
-members = [".", "crates/lappet", "crates/moth-lexical", "crates/moth-mon", "xtask"]
+members = [".", "crates/lappet", "crates/moth-cli", "crates/moth-lexical", "crates/moth-mon", "xtask"]
+default-members = ["crates/moth-cli"]
 resolver = "2"
 
 # Direct Cargo and just use the same warning policy, without recipe-only -D flags.
@@ -40,11 +40,6 @@ boracle = []
 boracle_campaign = ["boracle"]
 checked_blocks = []
 async_blocks = []
-
-[[bin]]
-name = "moth"
-path = "src/main.rs"
-
 
 [[bin]]
 name = "data_layout_memory_probe"

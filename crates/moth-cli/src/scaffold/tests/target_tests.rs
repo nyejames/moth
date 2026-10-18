@@ -7,10 +7,8 @@
 //! branches. Same-family cases share one labelled owner instead of repeating
 //! near-identical fixtures.
 
-use crate::projects::html_project::new_html_project::prompt_tests::ScriptedPrompt;
-use crate::projects::html_project::new_html_project::target::{
-    HomeEnv, expand_tilde, normalize_path, resolve_project_target,
-};
+use crate::scaffold::prompt_tests::ScriptedPrompt;
+use crate::scaffold::target::{HomeEnv, expand_tilde, normalize_path, resolve_project_target};
 use std::fs;
 use std::path::PathBuf;
 

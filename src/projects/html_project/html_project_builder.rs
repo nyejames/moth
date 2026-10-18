@@ -87,7 +87,7 @@ fn attach_module_source_identity(
 
 const HTML_SOURCE_PACKAGE_PREFIX: &str = "html";
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct HtmlProjectBuilder {
     include_test_packages: bool,
 }
@@ -105,7 +105,7 @@ impl HtmlProjectBuilder {
     /// Constructs an HTML builder for an integration case.
     ///
     /// WHAT: enables the integration-test packages for the case build.
-    pub fn for_integration_tests() -> Self {
+    pub(crate) fn for_integration_tests() -> Self {
         Self {
             include_test_packages: true,
         }

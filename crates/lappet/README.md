@@ -20,6 +20,7 @@ Develop Lappet in its own isolated worktree. Its roadmap runs independently of
 Moth's serial compiler roadmap. Integration consumes delivered compiler
 capabilities and never resumes a paused compiler plan implicitly.
 
-The first code-bearing milestone separates the CLI package from the compiler
-library. Runtime and package-manager work starts only after its own design
-gates have been reviewed.
+The CLI separation milestone is delivered in `crates/moth-cli`, which owns the
+`moth` executable and is the workspace default. The root `moth` package remains
+the compiler library. Runtime and package-manager implementation still waits
+for its own design gates.

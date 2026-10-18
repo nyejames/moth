@@ -5,7 +5,7 @@
 //! response consumption and exhaustion across `ask` and `confirm`, prompt
 //! message capture, yes/y/no normalisation, and the two empty-response defaults.
 
-use crate::projects::html_project::new_html_project::prompt::Prompt;
+use crate::scaffold::prompt::Prompt;
 
 /// Test-only prompt that replays scripted responses.
 #[cfg(test)]

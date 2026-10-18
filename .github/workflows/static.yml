@@ -139,7 +139,7 @@ jobs:
 
       - name: Build documentation release
         timeout-minutes: 20
-        run: cargo run --quiet -- build docs --release
+        run: cargo run --quiet -p moth-cli --bin moth -- build docs --release
 
       - name: Setup Pages
         uses: actions/configure-pages@v4

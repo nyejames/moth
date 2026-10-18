@@ -47,8 +47,8 @@ A custom builder may use the compiler without Lappet. A small device can execute
 Moth output with its own interpreter and selected runtime services. This does
 not require the Moth compiler to run on the device or become `no_std`.
 
-Separate the current root executable into a CLI Cargo package before introducing
-a dependency cycle between the compiler library and Lappet:
+The repository-root `moth` Cargo package owns the compiler library.
+`crates/moth-cli` owns the CLI package and its `moth` executable:
 
 ```text
 moth-cli -> moth compiler library
@@ -56,11 +56,21 @@ moth-cli -> moth compiler library
 lappet   -> public compiler/builder contracts where needed
 ```
 
-The executable remains `moth`. Preserve command behaviour, scaffolds, tests,
-benchmark executable discovery and release packaging during the split. Keep
-Wasmtime out of the compiler library's dependencies. Confirm the physical
-package arrangement at the first roadmap checkpoint rather than adding
-forwarding libraries or changing established public facades incidentally.
+The workspace defaults to `moth-cli` for root Cargo commands. Its features
+forward to the compiler's matching features. Explicit compiler and workspace
+validation retains library coverage independently of those defaults.
+
+The CLI owns argument parsing, terminal presentation and scaffolding. Compiler
+and build services retain compilation, output planning and writing, diagnostic
+contexts and compiler instrumentation. High-level service handoffs keep raw
+frontend stages and output internals private. Developer execution services such
+as Boracle and the integration runner retain their compiler-owned implementation.
+Builder selection passes a concrete builder value into one constructor. Its
+stored backend and internal trait module remain private.
+
+Keep Wasmtime out of the compiler library's dependencies. Preserve established
+public facades without forwarding libraries, and keep executable discovery,
+installation and release packaging attached to the CLI package.
 
 The package-management library must be usable without Wasmtime. Prefer narrow
 feature isolation in this crate. Extract another crate only when a real

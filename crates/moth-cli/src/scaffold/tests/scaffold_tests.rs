@@ -6,16 +6,14 @@
 //! end-to-end `create_html_project_template_with_prompt` orchestration that
 //! protects the no-write and force command boundaries.
 
-use crate::projects::html_project::new_html_project::prompt_tests::ScriptedPrompt;
-use crate::projects::html_project::new_html_project::scaffold::{
+use crate::scaffold::files::{
     SCAFFOLD_DIRECTORIES, existing_contains_dev_block, find_scaffold_conflicts,
     run_preflight_checks, write_scaffold,
 };
-use crate::projects::html_project::new_html_project::start_page_scaffolding;
-use crate::projects::html_project::new_html_project::target::ResolvedProjectTarget;
-use crate::projects::html_project::new_html_project::{
-    NewHtmlProjectOptions, create_html_project_template_with_prompt,
-};
+use crate::scaffold::prompt_tests::ScriptedPrompt;
+use crate::scaffold::start_page_scaffolding;
+use crate::scaffold::target::ResolvedProjectTarget;
+use crate::scaffold::{NewHtmlProjectOptions, create_html_project_template_with_prompt};
 use std::fs;
 use std::path::PathBuf;
 

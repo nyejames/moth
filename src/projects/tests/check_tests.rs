@@ -1,8 +1,10 @@
 //! Tests for the frontend-only `check` command flow.
 
+use super::execute_check;
 #[cfg(feature = "timers")]
 use super::run_check_for_tests;
-use super::{execute_check, format_terse_summary_line};
+#[cfg(feature = "timers")]
+use super::{CheckCommandReport, CheckOutcome, run_check_command};
 use crate::build_system::build::{ProjectBuilder, build_project};
 use crate::compiler_frontend::build_config::BuildConfigInputSet;
 #[cfg(feature = "timers")]
@@ -24,11 +26,12 @@ use std::fs;
 use std::path::PathBuf;
 #[cfg(feature = "timers")]
 use std::sync::atomic::{AtomicUsize, Ordering};
+#[cfg(feature = "timers")]
 use std::time::Duration;
 
 /// The builder every check test compiles under.
 fn test_project_builder() -> ProjectBuilder {
-    ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()))
+    ProjectBuilder::new(HtmlProjectBuilder::new())
 }
 
 #[test]
@@ -489,7 +492,7 @@ fn diagnostic_identity_sequence_frozen<'a>(
 
 #[test]
 fn check_and_build_frontends_produce_identical_diagnostics_and_check_writes_no_artifacts() {
-    let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
+    let builder = ProjectBuilder::new(HtmlProjectBuilder::new());
 
     // --------------------------------------------
     //  Warning parity: success with frontend warnings
@@ -660,12 +663,6 @@ increment(count)
     fs::remove_dir_all(&error_root).expect("should remove error project dir");
 }
 
-#[test]
-fn terse_summary_line_matches_clean_success_contract() {
-    let summary = format_terse_summary_line(Duration::from_millis(5), 0, 0);
-    assert_eq!(summary, "Done in 5ms. No errors or warnings.");
-}
-
 /// Baseline test: run_check records command.check.total with exactly one sample.
 #[cfg(feature = "timers")]
 #[test]
@@ -678,18 +675,19 @@ fn run_check_records_command_check_total() {
     fs::write(&entry_file, "value = 1\n").expect("should write source file");
 
     let timing_session = start_benchmark_collection(true).expect("timing session should start");
-    let status = super::run_check(
+    let completion = run_check_command(
         entry_file
             .to_str()
             .expect("temporary path should be valid UTF-8"),
-        super::CheckOptions::default(),
+        &BuildConfigInputSet::new(),
         &test_project_builder(),
+        |_| {},
     );
     let snapshot = timing_session.finish();
 
     assert_eq!(
-        status,
-        crate::projects::command_status::CommandStatus::Success
+        completion.status,
+        crate::projects::ProjectCommandStatus::Success
     );
     let command_total = snapshot
         .timings
@@ -711,36 +709,32 @@ fn run_check_records_command_check_total() {
 fn check_command_total_excludes_renderer_work() {
     let _test_guard = crate::timing::lock_instrumentation_tests();
 
-    let outcome = super::CheckOutcome {
+    let outcome = CheckOutcome {
         messages: CompilerMessages::empty(StringTable::new()),
-        status: crate::projects::command_status::CommandStatus::Success,
+        status: crate::projects::ProjectCommandStatus::Success,
     };
     let scripted_duration = Duration::from_millis(37);
     let renderer_calls = AtomicUsize::new(0);
 
     let timing_session = start_benchmark_collection(true).expect("timing session should start");
-    let (status, _) = run_check_for_tests(
-        outcome,
-        super::CheckOptions::default(),
-        scripted_duration,
-        |outcome, duration| {
+    let completion =
+        run_check_for_tests(outcome, scripted_duration, |report: &CheckCommandReport| {
             // The renderer receiving the captured duration is the ordering evidence: capture
             // already happened. Sleeping here would add wall-clock time to the test without
             // strengthening that, because the recorded total is the scripted value, not a
             // measurement of this callback.
-            assert_eq!(duration, scripted_duration);
+            assert_eq!(report.duration, scripted_duration);
             assert!(
-                !outcome.messages.has_errors(),
+                !report.messages.has_errors(),
                 "renderer receives an outcome whose classification is already decided"
             );
             renderer_calls.fetch_add(1, Ordering::SeqCst);
-        },
-    );
+        });
     let snapshot = timing_session.finish();
 
     assert_eq!(
-        status,
-        crate::projects::command_status::CommandStatus::Success
+        completion.status,
+        crate::projects::ProjectCommandStatus::Success
     );
     assert_eq!(
         renderer_calls.load(Ordering::SeqCst),

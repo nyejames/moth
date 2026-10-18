@@ -1513,12 +1513,14 @@ pub trait BackendBuilder {
 /// WHAT: stores the backend strategy object used by `build_project`.
 /// WHY: callers can swap backends while keeping one orchestration surface.
 pub struct ProjectBuilder {
-    pub backend: Box<dyn BackendBuilder + Send>,
+    pub(crate) backend: Box<dyn BackendBuilder + Send>,
 }
 
 impl ProjectBuilder {
-    pub fn new(backend: Box<dyn BackendBuilder + Send>) -> Self {
-        Self { backend }
+    pub fn new(backend: impl BackendBuilder + Send + 'static) -> Self {
+        Self {
+            backend: Box::new(backend),
+        }
     }
 }
 

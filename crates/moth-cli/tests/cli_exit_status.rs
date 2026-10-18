@@ -63,6 +63,21 @@ fn write_directory_html_project(root: &Path, page_source: &str) {
     fs::write(src.join("@page.moth"), page_source).expect("page source should be written");
 }
 
+fn write_directory_html_config_input_project(root: &Path) {
+    let src = root.join("src");
+    fs::create_dir_all(&src).expect("src should be created");
+    fs::write(
+        root.join("config.moth"),
+        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= (\n    dev_output = \"preview\",\n    release_output = \"release\",\n)\n",
+    )
+    .expect("config should be written");
+    fs::write(
+        src.join("@page.moth"),
+        "enabled #Config of Bool\nresult ~= 0\nif enabled:\n    result = 1\n;\n",
+    )
+    .expect("page source should be written");
+}
+
 #[test]
 fn valid_single_file_check_exits_successfully() {
     let root = tempdir().expect("temporary directory should be created");
@@ -113,6 +128,46 @@ fn valid_project_build_exits_successfully() {
     ]);
 
     assert!(output.status.success());
+}
+
+#[test]
+fn build_command_executes_with_typed_config_input() {
+    let root = tempdir().expect("temporary directory should be created");
+    write_directory_html_config_input_project(root.path());
+
+    let output = run_moth(&[
+        "build",
+        root.path().to_str().expect("project path should be UTF-8"),
+        "--input",
+        "enabled=true",
+    ]);
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(root.path().join("preview/index.html").is_file());
+}
+
+#[test]
+fn check_command_executes_with_typed_config_input() {
+    let root = tempdir().expect("temporary directory should be created");
+    write_directory_html_config_input_project(root.path());
+
+    let output = run_moth(&[
+        "check",
+        root.path().to_str().expect("project path should be UTF-8"),
+        "--input",
+        "enabled=true",
+    ]);
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!root.path().join("preview").exists());
 }
 
 #[test]

@@ -35,6 +35,12 @@ More technical details about the language, compiler and build system.
 
 See the hosted docs site for the compiled versions of these mtf files.
 
+The root `moth` package is the compiler library. `crates/moth-cli` owns the
+`moth` executable and is the default Cargo package, so `cargo run -- ...`
+continues to launch it from the repository root. Install the CLI from source
+with `cargo install --path crates/moth-cli --locked`. Use explicit package
+selectors for compiler tests and checks.
+
 ## Testing
 
 The complete testing policy is in [testing.mtf](docs/src/developer-docs/style-guide/testing.mtf).
@@ -46,6 +52,7 @@ cargo test -p xtask cache::tests
 cargo test -p moth-lexical
 cargo test -p moth-mon
 cargo test -p moth --lib mon_syntax_parity
+cargo test -p moth-cli
 cargo run --quiet -- tests --case <id>
 ```
 
@@ -76,10 +83,10 @@ of its resulting tree. The validation guide owns the exact evidence rules.
 - `cargo run --quiet -- tests --tag <tag> [--tag <tag>]` - logical AND tag selection
 - `cargo run --quiet -- tests --list [filters]` - list selected suite metadata without compiling
 - `cargo run --quiet -- tests --audit` - validate and write the complete suite inventory
-- `cargo clippy` - lint the root package with Cargo's defaults
-- `just clippy` - lint `moth`, `moth-lexical` and `moth-mon` with default features and targets
+- `cargo clippy` - lint the default CLI package and its dependencies
+- `just clippy` - lint `moth`, `moth-cli`, `moth-lexical` and `moth-mon` with default features and targets
 - `cargo fmt` - format with Cargo's default package selection
-- `just fmt` / `just fmt-check` - format or check the compiler and both extracted libraries
+- `just fmt` / `just fmt-check` - format or check the compiler, CLI and both extracted libraries
 - `just validate` - routine correctness at important feature-branch boundaries
 - `just validate-perf` - non-recording benchmark and scaling evidence when the change needs it
 - `just validate-full` - final merge preparation, every main commit and release readiness
