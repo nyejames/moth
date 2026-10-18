@@ -280,7 +280,7 @@ pub(crate) fn invalid_generic_instantiation_message(
             let trait_name = string_table.resolve(*trait_name);
             let concrete_type = diagnostic_type_name(*concrete_type_id, context);
             format!(
-                "Generic function {type_name_str} requires '{parameter}' to satisfy trait '{trait_name}', but {concrete_type} has no visible trait evidence for that bound."
+                "Generic function {type_name_str} requires '{parameter}' to satisfy trait '{trait_name}', but {concrete_type} does not conform to that trait."
             )
         }
         InvalidGenericInstantiationReason::MissingNominalTraitEvidence {
@@ -292,7 +292,7 @@ pub(crate) fn invalid_generic_instantiation_message(
             let trait_name = string_table.resolve(*trait_name);
             let concrete_type = diagnostic_type_name(*concrete_type_id, context);
             format!(
-                "Generic type {type_name_str} requires '{parameter}' to satisfy trait '{trait_name}', but {concrete_type} has no visible trait evidence for that bound."
+                "Generic type {type_name_str} requires '{parameter}' to satisfy trait '{trait_name}', but {concrete_type} does not conform to that trait."
             )
         }
         InvalidGenericInstantiationReason::RecursiveFunctionInstantiation => {

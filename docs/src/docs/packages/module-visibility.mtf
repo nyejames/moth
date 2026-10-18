@@ -79,7 +79,7 @@ Runtime top-level bindings are start-body code. They are not bindable declaratio
 
 ### Receiver method visibility
 
-Receiver methods are visible through a module's public surface when the module exports the receiver type's source surface. A type alias in the export block does not automatically re-export private implementation methods. Export the receiver type's source surface or a wrapper explicitly.
+Receiver methods are part of their receiver type's public surface. A module that exports a receiver type also exposes that type's same-file methods. Any file that holds a value of the type can call those methods, even when it does not import or bind the type's name. Naming the type in an annotation, constructor, conformance or bound still needs an import or binding. Methods of a type the module keeps private are not callable from other modules. Export the receiver type's source surface or a wrapper explicitly.
 
 ### Dependency cycles
 

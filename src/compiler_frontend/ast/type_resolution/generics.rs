@@ -126,12 +126,6 @@ fn validate_nominal_bound_evidence_for_instantiation(
         type_environment: context.type_environment,
         trait_environment: context.trait_environment,
         trait_evidence_environment: context.trait_evidence_environment,
-        generated_evidence_pairs: None,
-        visible_trait_names: context.visible_trait_names,
-        visible_source_names: context.visible_source_bindings,
-        visible_type_alias_names: context.visible_type_aliases,
-        visible_namespace_records: context.visible_namespace_records,
-        resolved_type_aliases: context.resolved_type_aliases,
     };
 
     validate_nominal_generic_bound_evidence(type_id, instance_name, span, &evidence_context)

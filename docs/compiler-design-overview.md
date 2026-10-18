@@ -670,7 +670,7 @@ Structural references were already graph-active before selection. Frontend error
 
 #### Generics
 
-The declaring module validates immutable generic templates. At a call, AST infers concrete arguments through the declared signature and eligible immediate receivers, resolves visible trait evidence and diagnoses failures at that call site. An existing numeric origin may remain linked through a signature parameter/result equality or a direct generic constructor until body-local receivers resolve it. This does not add result-only inference, callee-body inspection, trait search or outer expected-type forwarding into a nested generic call.
+The declaring module validates immutable generic templates. At a call, AST infers concrete arguments through the declared signature and eligible immediate receivers, resolves trait evidence for each concrete argument type and diagnoses failures at that call site. An existing numeric origin may remain linked through a signature parameter/result equality or a direct generic constructor until body-local receivers resolve it. This does not add result-only inference, callee-body inspection, trait search or outer expected-type forwarding into a nested generic call.
 
 `ModuleMaterialisationPreparation` is retained separately from the executable `Ast` and its expression store. Before HIR lowering consumes the `Ast` or that store is released, project the generic body to stable owned syntax and capture canonical owned callable signatures, receiver/type facts, folded defaults and module constants. The preparation contains no expression IDs, expression views or borrows into the completed expression store. Keep it through same-module generated requests and summary convergence. Freeze the stable generic context after those readers finish, then release preparation.
 
@@ -680,7 +680,7 @@ Active calls emit requests under `Generated concrete functions`. HIR and backend
 
 #### Traits, conformances and casts
 
-Headers retain trait/conformance shells. AST resolves requirement types, stable trait identity, explicit conformance, evidence visibility, bounds, bound-provided receiver calls and incompatibility diagnostics. Exported evidence uses stable identities rather than structural reconstruction.
+Headers retain trait/conformance shells. AST resolves requirement types, stable trait identity, explicit conformance, evidence lookup by concrete type, bounds, bound-provided receiver calls and incompatibility diagnostics. Exported evidence uses stable identities rather than structural reconstruction.
 
 Traits are compile-time contracts, not value types. Static bound calls become concrete executable targets before HIR. No trait object, erased dispatch or runtime evidence crosses that boundary.
 

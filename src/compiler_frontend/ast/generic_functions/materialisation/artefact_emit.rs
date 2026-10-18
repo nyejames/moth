@@ -1238,6 +1238,12 @@ pub(super) fn materialised_receiver_key(
         })
 }
 
+/// Installs a materialised receiver method so generic bodies can dispatch it by function path.
+///
+/// WHAT: the entry is indexed for name and path lookups but is not value-carried, so the
+/// consumer's value surface stays limited to its own methods and projected public methods.
+/// WHY: a materialised body may call provider-private methods. Admitting them to value-carried
+/// lookup would make those private methods callable from consumer files.
 fn register_materialised_receiver_method(
     lookups: &mut AstModuleLookups,
     function_path: PathId,
@@ -1258,6 +1264,7 @@ fn register_materialised_receiver_method(
             .parameters
             .first()
             .is_some_and(|parameter| parameter.value_mode.is_mutable()),
+        value_carried: false,
         signature,
     };
     let receiver_methods = Rc::make_mut(&mut lookups.receiver_methods);

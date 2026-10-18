@@ -639,7 +639,7 @@ Fields require explicit types. Defaults must fold. Fields without defaults are r
 
 Field writes require a mutable root and valid access. Receiver methods are top-level functions with first parameter `this T` or `this ~T`. Shared calls omit `~`. Mutable calls need `~place.method(...)` on an existing mutable place. Free-call syntax is invalid.
 
-Methods belong to same-file structs/choices, cannot collide with fields and follow their type's visibility. They cannot extend other types or be imported, aliased or re-exported separately.
+Methods belong to same-file structs/choices, cannot collide with fields and follow their type's visibility. Values carry their type's methods, so callers need not import the type's name. They cannot extend other types or be imported, aliased or re-exported separately.
 
 ### Runtime anonymous records
 
@@ -793,9 +793,9 @@ higher-kinded types, lifetime parameters or general const generics.
 
 Requirements use `This`/`~This` receivers. Other `This` parameters need names. Direct return `This` is allowed, composed `This?`, `{This}` or `Box of This` invalid. Requirements have no bodies or individual semicolons. Newlines separate them, one `;` closes the trait. Empty marker traits are valid.
 
-Conformance is explicit and bodyless, without `;`. Commas list traits. Same-file structs, choices and aligned generic constructors must match receiver mutability, parameter access/types and return types/channels exactly. Parameter names do not matter. Conformance remains reusable wherever type and trait are visible.
+Conformance is explicit and bodyless, without `;`. Commas list traits. Same-file structs, choices and aligned generic constructors must match receiver mutability, parameter access/types and return types/channels exactly. Parameter names do not matter. Conformance evidence travels with values of the type, so generic calls need not name the type or trait.
 
-Bounds use `is`, as in `type Item is DISPLAY_TEXT and NAMED`. Commas separate parameters. Concrete arguments need visible conformance. Bound calls resolve a unique required method statically. Traits cannot serve as runtime types or values.
+Bounds use `is`, as in `type Item is DISPLAY_TEXT and NAMED`. Commas separate parameters. Concrete arguments need conformance evidence for their type. Bound calls resolve a unique required method statically. Traits cannot serve as runtime types or values.
 
 `READABLE must not WRITABLE` declares symmetric incompatibility between traits. It adds neither inheritance nor negative conformance. `Type must not TRAIT` is invalid.
 

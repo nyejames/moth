@@ -621,6 +621,13 @@ impl ScopeContext {
         )
     }
 
+    /// Resolves the receiver method for `value.method_name(...)` on a value of `receiver`.
+    ///
+    /// WHAT: a file-visible binding of `method_name` wins when it names a method on this
+    /// receiver; otherwise the receiver's value-carried method is used.
+    /// WHY: a value carries its nominal's usable methods, so a file need not name the nominal
+    /// (for example a value returned from an imported function). Name-only lookup stays in
+    /// `lookup_visible_receiver_method_by_name`.
     pub(crate) fn lookup_receiver_method(
         &self,
         receiver: &ReceiverKey,
@@ -629,17 +636,18 @@ impl ScopeContext {
         // Production contexts use the header-built file visibility to determine
         // which receiver methods are visible.
         if let Some(file_visibility) = &self.file_visibility {
-            let paths = file_visibility.visible_receiver_methods.get(&method_name)?;
-            for visible_method in paths {
-                let entry = self
-                    .receiver_methods
-                    .by_function_path
-                    .get(visible_method.target.local_path())?;
-                if &entry.receiver == receiver {
-                    return Some(entry);
+            if let Some(paths) = file_visibility.visible_receiver_methods.get(&method_name) {
+                for visible_method in paths {
+                    let entry = self
+                        .receiver_methods
+                        .by_function_path
+                        .get(visible_method.target.local_path())?;
+                    if &entry.receiver == receiver {
+                        return Some(entry);
+                    }
                 }
             }
-            return None;
+            return self.value_carried_receiver_method(receiver, method_name);
         }
 
         // Unit-test contexts can omit file visibility. Production calls always use
@@ -655,6 +663,24 @@ impl ScopeContext {
             .iter()
             .find(|entry| &entry.source_file == current_source_file)
             .or_else(|| entries.first())
+    }
+
+    /// Returns the value-carried receiver method for `receiver` and `method_name`.
+    ///
+    /// WHY: the catalog also indexes provider-internal methods installed for materialised
+    /// bodies, and only `value_carried` entries form a value's surface. Receiver methods must
+    /// live in their receiver's file and same-file duplicate names are rejected, so at most one
+    /// entry matches.
+    fn value_carried_receiver_method(
+        &self,
+        receiver: &ReceiverKey,
+        method_name: StringId,
+    ) -> Option<&ReceiverMethodEntry> {
+        self.receiver_methods
+            .by_receiver_and_name
+            .get(&(receiver.to_owned(), method_name))?
+            .iter()
+            .find(|entry| entry.value_carried)
     }
 
     pub(crate) fn lookup_visible_receiver_method_by_name(

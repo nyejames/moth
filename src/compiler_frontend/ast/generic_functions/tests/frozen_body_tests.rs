@@ -26,9 +26,7 @@ use crate::compiler_frontend::ast::const_values::store::{
     ConstStringPiece, ConstStringValue, ConstValueId, ConstValuePayload, ConstValueStore,
 };
 use crate::compiler_frontend::ast::expressions::expression_store::ExpressionOperationView;
-use crate::compiler_frontend::ast::generic_bounds::{
-    evidence_for_type, generated_evidence_pair_is_selected,
-};
+use crate::compiler_frontend::ast::generic_bounds::evidence_for_type;
 use crate::compiler_frontend::ast::module_ast::environment::builder::import_projection::values::materialize_owned_folded_string;
 use crate::compiler_frontend::ast::module_ast::scope_context::{
     FrozenResolvedFileReference, FrozenResolvedFileReferenceOutcome,
@@ -93,11 +91,10 @@ use crate::compiler_frontend::tokenizer::tokens::{
     SourceTokens, TestSourceTokensBuilder, TokenIndex, TokenRange, TokenTag, TokenViewError,
     TokenizerEntryMode,
 };
-use crate::compiler_frontend::traits::ids::TraitId;
 use crate::compiler_frontend::{AstBuildRequest, CompilerFrontend, FrontendBuildProfile};
 use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
 use moth_lexical::numeric::grammar::{NumericExponentSign, NumericLiteralKind, NumericLiteralSign};
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 use std::cell::RefCell;
 use std::path::Path;
 use std::path::PathBuf;
@@ -3331,26 +3328,6 @@ fn stale_in_range_template_row_fails_declaration_identity_validation() {
         error.msg.contains("declaration identity"),
         "unexpected declaration identity error: {error:?}"
     );
-}
-
-#[test]
-fn generated_evidence_authorization_requires_the_selected_trait_pair() {
-    let type_environment = TypeEnvironment::new();
-    let selected =
-        FxHashSet::from_iter([(builtin_type_ids::fixed_scalar(FixedScalar::I32), TraitId(7))]);
-
-    assert!(generated_evidence_pair_is_selected(
-        builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        TraitId(7),
-        &type_environment,
-        &selected,
-    ));
-    assert!(!generated_evidence_pair_is_selected(
-        builtin_type_ids::fixed_scalar(FixedScalar::I32),
-        TraitId(8),
-        &type_environment,
-        &selected,
-    ));
 }
 
 #[test]

@@ -323,7 +323,6 @@ impl<'context, 'services, 'environment> AstEmitter<'context, 'services, 'environ
         .with_known_infallible_functions(Rc::clone(&self.known_infallible_functions))
         .with_receiver_methods(Rc::clone(&self.environment.lookups.receiver_methods))
         .with_lookups(Rc::clone(&self.environment.lookups))
-        .with_generated_evidence_pairs(Rc::clone(&self.environment.generated_evidence_pairs))
         .with_source_file_scope(input.source_file_scope)
         .with_declaring_file_id(input.declaring_file_id);
         if let Some(services) = &self.context.file_value_resolution {

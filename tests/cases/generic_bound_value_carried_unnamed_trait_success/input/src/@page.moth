@@ -1,0 +1,3 @@
+@provider make_label, show
+
+[:generic_bound_value_carried_unnamed_trait_success result=[show(make_label("hello"))]]

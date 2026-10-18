@@ -30,7 +30,6 @@ use crate::compiler_frontend::symbols::path_interner::PathId;
 
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
-use crate::compiler_frontend::traits::ids::TraitId;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -126,11 +125,6 @@ pub(crate) struct AstModuleLookups {
 /// that assigns every semantic TypeId.
 pub(crate) struct AstModuleEnvironment {
     pub(crate) lookups: Rc<AstModuleLookups>,
-
-    /// Exact nominal targets whose requester-selected evidence is being reconstructed for one
-    /// generated body. This transient set is consumed by bound validation and is deliberately
-    /// separate from authored file visibility.
-    pub(crate) generated_evidence_pairs: Rc<FxHashSet<(TypeId, TraitId)>>,
 
     // Frontend semantic type identity owned by this module.
     // WHY: AST nodes carry compact TypeIds; the environment carries the canonical table.

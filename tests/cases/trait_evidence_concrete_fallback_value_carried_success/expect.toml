@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "trait_evidence_concrete_fallback_value_carried_success value=fallback"

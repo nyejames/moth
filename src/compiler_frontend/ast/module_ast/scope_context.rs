@@ -90,7 +90,6 @@ use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork}
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
-use crate::compiler_frontend::traits::ids::TraitId;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::RefCell;
@@ -404,7 +403,6 @@ pub struct ScopeShared {
     pub(crate) lookups: Option<Rc<AstModuleLookups>>,
     pub(crate) top_level_declarations: Rc<TopLevelDeclarationTable>,
     pub(crate) nominal_type_ids_by_path: Rc<FxHashMap<PathId, TypeId>>,
-    pub(crate) generated_evidence_pairs: Rc<FxHashSet<(TypeId, TraitId)>>,
 
     // External package and frontend services.
     pub(crate) external_package_registry: Arc<ExternalPackageRegistry>,
@@ -886,7 +884,6 @@ impl ScopeContext {
             template_const_loop_iteration_limit: DEFAULT_TEMPLATE_CONST_LOOP_ITERATIONS,
             receiver_methods: Rc::new(ReceiverMethodCatalog::default()),
             nominal_type_ids_by_path: Rc::new(FxHashMap::default()),
-            generated_evidence_pairs: Rc::new(FxHashSet::default()),
             trait_environment,
             trait_evidence_environment,
             trait_environment_override: None,

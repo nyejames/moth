@@ -800,7 +800,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 style_directives: self.context.style_directives.clone(),
                 build_profile: self.context.build_profile,
             }),
-            generated_evidence_pairs: Rc::new(FxHashSet::default()),
             resolved_public_type_roots: resolved_public_surface_outputs.type_roots,
             resolved_public_trait_roots: resolved_public_surface_outputs.trait_roots,
 

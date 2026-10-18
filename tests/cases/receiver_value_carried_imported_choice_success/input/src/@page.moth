@@ -1,0 +1,4 @@
+@states make_ready
+
+selected = make_ready()
+[:receiver_value_carried_imported_choice_success value=[selected.label()]]

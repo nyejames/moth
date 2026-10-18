@@ -1280,10 +1280,10 @@ contract = "language.generics.trait_bound_missing_evidence_rejected"
 role = "boundary"
 
 [[case]]
-id = "imported_evidence_file_visibility_rejected"
-path = "imported_evidence_file_visibility_rejected"
-tags = ["integration", "generics", "traits", "dependencies", "diagnostics"]
-contract = "language.generics.trait_bound_missing_evidence_rejected"
+id = "imported_evidence_unnamed_target_value_carried_success"
+path = "imported_evidence_unnamed_target_value_carried_success"
+tags = ["integration", "generics", "traits", "dependencies"]
+contract = "language.generics.trait_bound_unnamed_target_acceptance"
 role = "boundary"
 
 [[case]]
@@ -1301,10 +1301,10 @@ contract = "language.generics.trait_bound_function"
 role = "boundary"
 
 [[case]]
-id = "local_generic_imported_trait_hidden_target_rejected"
-path = "local_generic_imported_trait_hidden_target_rejected"
-tags = ["integration", "generics", "traits", "dependencies", "aliases", "diagnostics"]
-contract = "language.generics.trait_bound_missing_evidence_rejected"
+id = "local_generic_unnamed_target_value_carried_success"
+path = "local_generic_unnamed_target_value_carried_success"
+tags = ["integration", "generics", "traits", "dependencies", "aliases"]
+contract = "language.generics.trait_bound_unnamed_target_acceptance"
 role = "boundary"
 
 [[case]]
@@ -1483,16 +1483,30 @@ contract = "language.traits.builtin_conformance_target_rejected"
 role = "primary"
 
 [[case]]
-id = "trait_evidence_concrete_fallback_not_imported_rejected"
-path = "trait_evidence_concrete_fallback_not_imported_rejected"
-tags = ["integration","traits","receivers","dependencies","facade","diagnostics"]
-contract = "language.traits.concrete_fallback_not_imported_rejected"
+id = "trait_evidence_concrete_fallback_value_carried_success"
+path = "trait_evidence_concrete_fallback_value_carried_success"
+tags = ["integration", "traits", "receivers", "dependencies", "facade"]
+contract = "language.traits.concrete_fallback_value_carried_acceptance"
 role = "primary"
 
 [[case]]
-id = "trait_bound_imported_private_trait_rejected"
-path = "trait_bound_imported_private_trait_rejected"
-tags = ["integration","generics","traits","functions","dependencies","diagnostics"]
+id = "trait_bound_same_module_private_trait_value_carried_success"
+path = "trait_bound_same_module_private_trait_value_carried_success"
+tags = ["integration", "generics", "traits", "functions", "dependencies"]
+contract = "language.generics.trait_bound_same_module_evidence_acceptance"
+role = "boundary"
+
+[[case]]
+id = "generic_bound_value_carried_unnamed_trait_success"
+path = "generic_bound_value_carried_unnamed_trait_success"
+tags = ["integration", "generics", "traits", "dependencies"]
+contract = "language.generics.trait_bound_unnamed_target_acceptance"
+role = "boundary"
+
+[[case]]
+id = "generic_bound_value_carried_missing_evidence_rejected"
+path = "generic_bound_value_carried_missing_evidence_rejected"
+tags = ["integration", "generics", "traits", "dependencies", "diagnostics"]
 contract = "language.generics.trait_bound_missing_evidence_rejected"
 role = "boundary"
 
@@ -8071,10 +8085,45 @@ contract = "language.choices.receiver_method_auto_imported_with_type_acceptance"
 role = "primary"
 
 [[case]]
-id = "receiver_facade_type_alias_no_private_method"
-path = "receiver_facade_type_alias_no_private_method"
-tags = ["integration", "receiver-methods", "dependencies", "facade", "diagnostics"]
-contract = "language.structs.receiver_method_facade_type_alias_private_access_rejected"
+id = "receiver_facade_type_alias_value_methods_success"
+path = "receiver_facade_type_alias_value_methods_success"
+tags = ["integration", "receiver-methods", "dependencies", "facade"]
+contract = "language.structs.receiver_method_facade_type_alias_acceptance"
+role = "primary"
+
+[[case]]
+id = "receiver_value_carried_imported_struct_success"
+path = "receiver_value_carried_imported_struct_success"
+tags = ["integration", "receiver-methods", "dependencies"]
+contract = "language.structs.receiver_method_value_carried_acceptance"
+role = "primary"
+
+[[case]]
+id = "receiver_value_carried_imported_choice_success"
+path = "receiver_value_carried_imported_choice_success"
+tags = ["integration", "receiver-methods", "choices", "dependencies"]
+contract = "language.choices.receiver_method_value_carried_acceptance"
+role = "primary"
+
+[[case]]
+id = "receiver_value_carried_same_module_sibling_success"
+path = "receiver_value_carried_same_module_sibling_success"
+tags = ["integration", "receiver-methods", "generics", "dependencies"]
+contract = "language.structs.receiver_method_same_module_value_carried_acceptance"
+role = "primary"
+
+[[case]]
+id = "receiver_value_carried_same_method_name_success"
+path = "receiver_value_carried_same_method_name_success"
+tags = ["integration", "receiver-methods", "dependencies"]
+contract = "language.structs.receiver_method_same_name_value_carried_acceptance"
+role = "primary"
+
+[[case]]
+id = "receiver_value_carried_nonlocal_method_rejected"
+path = "receiver_value_carried_nonlocal_method_rejected"
+tags = ["integration", "receiver-methods", "dependencies", "diagnostics"]
+contract = "language.structs.receiver_method_nonlocal_value_carried_rejected"
 role = "primary"
 
 [[case]]

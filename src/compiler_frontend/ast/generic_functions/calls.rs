@@ -29,8 +29,7 @@ use crate::compiler_frontend::ast::expressions::function_calls::{
     retained_pending_call_operand,
 };
 use crate::compiler_frontend::ast::generic_bounds::{
-    BoundEvidenceSelection, evidence_for_type, evidence_target_is_visible,
-    generated_evidence_pair_is_selected, generic_parameter_declares_bound,
+    BoundEvidenceSelection, evidence_for_type, generic_parameter_declares_bound,
 };
 use crate::compiler_frontend::ast::generic_functions::diagnostics::{
     cannot_infer_generic_function_arguments, conflicting_generic_function_argument,
@@ -1142,9 +1141,7 @@ pub(crate) fn validate_generic_function_bound_evidence(
     let mut selected_evidence = Vec::new();
     for (parameter, concrete_type_id) in parameter_list.parameters.iter().zip(type_arguments) {
         for trait_id in &parameter.trait_bounds {
-            let trait_is_visible = context.trait_id_is_visible(*trait_id);
             if context.generic_template_validation
-                && trait_is_visible
                 && generic_parameter_declares_bound(*concrete_type_id, *trait_id, type_environment)
             {
                 // A template can forward its own bound into a nested generic request. The
@@ -1152,50 +1149,15 @@ pub(crate) fn validate_generic_function_bound_evidence(
                 // evidence identity, so template validation must not manufacture a local row.
                 continue;
             }
-            // An exact generated pair the requester already transferred authorizes both halves of
-            // its own visibility, because a materialised body may call a provider-owned trait's
-            // evidence from a module that never named that trait. Every pair the requester did
-            // not select still needs ordinary trait and target visibility, and either way the
-            // real evidence row selected below remains mandatory.
-            let evidence_is_visible = generated_evidence_pair_is_selected(
+            // Names never gate this lookup. A conformance reaches this requester only through
+            // evidence its imports and declarations carried in, so the selected row decides.
+            if let Some(evidence_selection) = evidence_for_type(
                 *concrete_type_id,
                 *trait_id,
                 type_environment,
-                context.shared.generated_evidence_pairs.as_ref(),
-            ) || (trait_is_visible
-                && evidence_target_is_visible(
-                    *concrete_type_id,
-                    type_environment,
-                    context
-                        .shared
-                        .file_visibility
-                        .as_deref()
-                        .map(|visibility| &visibility.visible_source_names),
-                    context
-                        .shared
-                        .file_visibility
-                        .as_deref()
-                        .map(|visibility| &visibility.visible_type_alias_names),
-                    context
-                        .shared
-                        .file_visibility
-                        .as_deref()
-                        .map(|visibility| &visibility.visible_namespace_records),
-                    context.shared.resolved_type_aliases.as_deref(),
-                ));
-            let evidence_selection = evidence_is_visible
-                .then(|| {
-                    evidence_for_type(
-                        *concrete_type_id,
-                        *trait_id,
-                        type_environment,
-                        trait_environment,
-                        evidence_environment,
-                    )
-                })
-                .flatten();
-
-            if let Some(evidence_selection) = evidence_selection {
+                trait_environment,
+                evidence_environment,
+            ) {
                 selected_evidence.push(evidence_selection);
                 continue;
             }

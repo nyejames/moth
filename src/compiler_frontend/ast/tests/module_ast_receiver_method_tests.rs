@@ -47,6 +47,7 @@ fn empty_receiver_entry(
         receiver,
         source_file,
         receiver_mutable: false,
+        value_carried: true,
         signature: FunctionSignature {
             parameters: vec![],
             returns: vec![],

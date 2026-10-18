@@ -188,19 +188,6 @@ impl ScopeContext {
         self
     }
 
-    /// Register exact generated-evidence pairs for the current materialisation.
-    ///
-    /// WHAT: supplies transient nominal identities selected by the requester-side evidence map.
-    /// WHY: generated bound validation must accept that exact selection without pretending it is
-    /// an authored source binding or widening ordinary file visibility.
-    pub(crate) fn with_generated_evidence_pairs(
-        mut self,
-        pairs: Rc<FxHashSet<(TypeId, crate::compiler_frontend::traits::ids::TraitId)>>,
-    ) -> ScopeContext {
-        Rc::make_mut(&mut self.shared).generated_evidence_pairs = pairs;
-        self
-    }
-
     // --------------------------
     //  Project services and directives
     // --------------------------

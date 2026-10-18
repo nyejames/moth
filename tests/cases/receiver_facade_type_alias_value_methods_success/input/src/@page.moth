@@ -1,0 +1,4 @@
+@widget PublicCounter, make_counter
+
+value PublicCounter = make_counter()
+[:receiver_facade_type_alias_value_methods_success value=[value.tick()]]

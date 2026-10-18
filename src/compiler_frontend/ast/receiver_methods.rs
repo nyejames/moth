@@ -46,6 +46,14 @@ pub(crate) struct ReceiverMethodEntry {
     pub(crate) receiver: ReceiverKey,
     pub(crate) source_file: PathId,
     pub(crate) receiver_mutable: bool,
+    /// Whether a value of `receiver` carries this method into the owning module.
+    ///
+    /// WHAT: true for the module's own receiver methods and for public methods projected from
+    /// imported nominals. False for provider-internal methods installed only so materialised
+    /// generic bodies can dispatch them by function path.
+    /// WHY: value-carried lookup must not expose a provider-private method just because a
+    /// materialised body calls it. Name-keyed lookup still uses file visibility.
+    pub(crate) value_carried: bool,
     pub(crate) signature: FunctionSignature,
 }
 
@@ -278,6 +286,7 @@ pub(crate) fn build_receiver_method_catalog(
             receiver: receiver.to_owned(),
             source_file: method_source_file,
             receiver_mutable,
+            value_carried: true,
             signature: resolved_signature.signature.to_owned(),
         };
 

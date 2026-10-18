@@ -20,11 +20,11 @@ Generic bounds use traits to promise that a generic parameter provides certain b
 - Bounds apply to generic functions, structs and choices.
 - Bounds on a public generic (function, struct, choice or receiver method) must name a trait public at its owner: exported by the declaring module root, directly or by re-export, or supplied by a provider's public interface.
 - The publishing module need not re-export an imported trait. A trait private at its owner is rejected with `MOTH-RULE-0074`.
-- Each concrete argument requires visible reusable evidence.
+- Each concrete argument requires reusable evidence for its type.
 - Trait names are static contracts, not concrete type arguments.
 - A bound may enable a unique required receiver call inside the generic declaration.
 - Bound calls resolve statically to concrete source methods.
-- Concrete values still use ordinary visible methods.
+- Concrete values use the receiver methods carried by their type.
 - Conformance does not bind methods into scope.
 - Backends do not receive trait objects or runtime evidence tables.
 - `where` syntax is rejected.
@@ -56,9 +56,9 @@ exposed method must discharge that failure at the declared boundary. See
     ;
 ]
 
-### Evidence must be visible
+### Evidence travels with values
 
-Concrete calls and instantiations require reusable evidence. User-authored reusable evidence originates from the canonical conformance declared with the same-file target type. Callers may reuse that evidence wherever both the type and trait are visible.
+Concrete calls and instantiations require reusable evidence. User-authored reusable evidence originates from the canonical conformance declared with the same-file target type. Callers reuse that evidence wherever a value of the type reaches a file, without naming the type or the trait.
 
 Compiler-owned evidence also exists for the builtin cast table.
 

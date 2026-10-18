@@ -626,7 +626,7 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
             [: Supported]
             [: Broad same-file struct/choice receiver, aligned generic receiver, imported generic receiver, namespace receiver type, module-boundary exposure, nonlocal/builtin/external receiver rejection, duplicate, collision and mutability coverage. Mutable self calls and nested collection-field mutation execute through reserved receiver roots. Invalid mutable operands retain the offending token's exact span.]
             [: JS / HTML]
-            [: Source-authored receiver methods travel with receiver type visibility, including retained generic receiver templates across module and package boundaries. They are never selected independently, aliased or exposed as namespace-record fields.]
+            [: Source-authored receiver methods travel with values of their receiver type, including retained generic receiver templates across module and package boundaries. They are never selected independently, aliased or exposed as namespace-record fields.]
         ]
 
         [data:
@@ -812,8 +812,8 @@ green #= [$css("inline"): background-color: rgb(109, 232, 138); color: black;]
         [data:
             [: Trait bounds on generics]
             [: Partial]
-            [: Broad declaration-site bound, visible evidence, module public-surface privacy, receiver-call, nominal generic instance and negative diagnostic coverage.]
-            [: Bounds use [$html:<code>is</code>]. Concrete generic calls and nominal generic instances require visible reusable evidence. Core cast bounds derive pair-scoped evidence on demand with exact fallibility. Retained requests freeze canonical identities without mutating the frozen requester.]
+            [: Broad declaration-site bound, value-carried evidence, module public-surface privacy, receiver-call, nominal generic instance and negative diagnostic coverage.]
+            [: Bounds use [$html:<code>is</code>]. Concrete generic calls and nominal generic instances require reusable evidence. Core cast bounds derive pair-scoped evidence on demand with exact fallibility. Retained requests freeze canonical identities without mutating the frozen requester.]
         ]
 
         [data:

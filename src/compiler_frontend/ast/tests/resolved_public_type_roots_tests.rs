@@ -192,6 +192,7 @@ fn receiver_entry(
             .try_intern_portable_path("root.moth", string_table)
             .expect("test path fits"),
         receiver_mutable: false,
+        value_carried: true,
         signature,
     }
 }

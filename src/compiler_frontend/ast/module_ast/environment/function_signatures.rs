@@ -407,6 +407,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     .parameters
                     .first()
                     .is_some_and(|parameter| parameter.value_mode.is_mutable()),
+                value_carried: true,
                 signature: resolved.signature.clone(),
             };
 

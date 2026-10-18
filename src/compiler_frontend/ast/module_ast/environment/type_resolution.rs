@@ -44,7 +44,6 @@ use crate::compiler_frontend::declaration_syntax::choice::{
 use crate::compiler_frontend::declaration_syntax::signature_members::SignatureMemberSyntax;
 use std::sync::Arc;
 
-use crate::compiler_frontend::headers::binding_environment::FileVisibility;
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
@@ -73,7 +72,6 @@ enum ConstantWalkScope {
 }
 
 struct NominalBoundSurfaceValidationContext<'a> {
-    visibility: &'a FileVisibility,
     trait_environment: &'a TraitEnvironment,
     trait_evidence_environment: &'a TraitEvidenceEnvironment,
 }
@@ -717,7 +715,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
     /// WHAT: checks aliases, nominal member types, and function signatures after trait evidence
     /// has been validated.
     /// WHY: those surfaces are resolved before receiver methods and conformance evidence exist,
-    /// but each concrete `Box of T` still needs visible reusable evidence at its declaration site.
+    /// but each concrete `Box of T` still needs reusable evidence at its declaration site.
     pub(in crate::compiler_frontend::ast) fn validate_nominal_generic_bound_surfaces(
         &mut self,
         declaration_lanes: &DeclarationPassLanes,
@@ -730,9 +728,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             let header = declaration_lanes
                 .header(declaration_id, sorted_headers)
                 .map_err(|error| self.error_messages(error, string_table))?;
-            let visibility = self.header_visibility(header, string_table)?;
             let validation_context = NominalBoundSurfaceValidationContext {
-                visibility: &visibility,
                 trait_environment,
                 trait_evidence_environment,
             };
@@ -849,13 +845,11 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         validation_context: &NominalBoundSurfaceValidationContext<'_>,
         string_table: &mut StringTable,
     ) -> Result<(), CompilerMessages> {
-        let evidence_context = GenericBoundEvidenceContext::from_file_visibility(
-            &self.type_environment,
-            validation_context.trait_environment,
-            validation_context.trait_evidence_environment,
-            validation_context.visibility,
-            &self.resolved_type_aliases_by_path,
-        );
+        let evidence_context = GenericBoundEvidenceContext {
+            type_environment: &self.type_environment,
+            trait_environment: Some(validation_context.trait_environment),
+            trait_evidence_environment: Some(validation_context.trait_evidence_environment),
+        };
 
         let instance_name = self
             .type_environment

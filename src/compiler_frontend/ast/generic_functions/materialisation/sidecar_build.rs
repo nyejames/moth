@@ -388,8 +388,8 @@ where
                     "Generated evidence trait is absent from the requester context",
                 )
             })?;
-        let generated_trait_id = if let Some(generated_target_type_id) = generated_target_type_id {
-            let generated_trait_id = install_generated_requester_bound_trait(
+        let generated_trait_id = if install_row {
+            install_generated_requester_bound_trait(
                 evidence_identity.trait_identity(),
                 requester_trait_id,
                 requester_context,
@@ -398,18 +398,7 @@ where
                 &nominal_source,
                 string_table,
                 path_fork,
-            )?;
-            let generated_evidence_pairs = Rc::make_mut(&mut environment.generated_evidence_pairs);
-            generated_evidence_pairs.insert((generated_target_type_id, generated_trait_id));
-            if let Some(TypeDefinition::GenericInstance(instance)) =
-                environment.type_environment.get(generated_target_type_id)
-                && let Some(base_type_id) = environment
-                    .type_environment
-                    .type_id_for_nominal_id(instance.base)
-            {
-                generated_evidence_pairs.insert((base_type_id, generated_trait_id));
-            }
-            generated_trait_id
+            )?
         } else {
             // The first installation already registered this canonical identity's trait here.
             environment

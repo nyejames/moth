@@ -1,0 +1,12 @@
+export:
+    @circle Circle
+    @square Square
+
+    make_circle || -> Circle:
+        return Circle(2)
+    ;
+
+    make_square || -> Square:
+        return Square(3)
+    ;
+;
