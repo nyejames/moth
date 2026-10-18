@@ -6421,3 +6421,31 @@ trees match across the 74 CLI cases. Docs `frontend.ast.finalise` read 5-9%
 (about 0.4 ms) higher on this binary only, in code the change does not touch;
 the same stage moved with code layout in the final qualification above, and the
 branch qualification re-measures it.
+
+## Typed-expression follow-ups: shared borrow root words
+
+Cloning a borrow state copied every `RootSet` word vector, and converge-heavy
+functions clone states at block joins and transfers on every worklist pass.
+`RootSet` now shares its words through `Rc<[u64]>` and copies only on write;
+combinators test for a change before copying shared words, so no-op updates
+never copy.
+
+Paired interleaved rounds against the borrow root membership tree, 25 rounds,
+median of per-round ratios:
+
+| Case | Wall | `borrow.initial` | `borrow.converge` |
+|---|---:|---:|---:|
+| mutable cycles 512 | 0.102 | 0.989 | 0.089 |
+| narrow chains 512 | 0.227 | 0.976 | 0.206 |
+| generic failure chain 512 | 0.297 | 0.999 | 0.245 |
+| collection stress | 0.565 | 0.505 | 0.414 |
+| aggregate forwarding 512 | 0.923 | 0.896 | 0.985 |
+| aggregate forwarding 128 | 0.997 | 1.055 | 0.929 |
+| origin fanout 512 | 1.000 | 1.002 | 1.016 |
+
+Mutable cycles 512 borrow validation falls from 2,446 ms to 215 ms. Across the
+74 CLI cases the summed wall medians fall from 7,479 ms to 2,405 ms, no case
+regresses beyond noise after 25-round re-runs, and exit codes, stdout and stderr
+match. The one stage cost is aggregate forwarding 128 `borrow.initial`, +5.5%
+of a 5.6 ms stage over the previous tree; it stays at 0.42x of the tree before
+borrow root membership, and its wall time does not move.

@@ -251,3 +251,123 @@ fn intersects_matches_intersection_emptiness() {
         }
     }
 }
+
+/// Copy-on-write words must behave exactly like value semantics: an update shows on the receiver,
+/// never on a clone, and `union_with` reports the growth a set with unique words reports. Each
+/// update runs against a shared receiver and against both ways a receiver's words become unique:
+/// fresh construction, and dropping the last clone that shared them.
+#[test]
+fn root_set_updates_match_between_shared_and_unique_words() {
+    // Two words with a partial final word: 70 locals leave bits 64..=69 in word 1.
+    const LOCAL_COUNT: usize = 70;
+    const LAST: usize = LOCAL_COUNT - 1;
+    const MIDDLE: usize = LOCAL_COUNT / 2;
+    const START: [usize; 4] = [0, 63, 64, LAST];
+
+    // `None` where the operation reports nothing, so union's growth flag is compared exactly.
+    type Update = fn(&mut RootSet) -> Option<bool>;
+    let updates: [(&str, Update); 10] = [
+        ("insert word-boundary bit", |set| {
+            set.insert(64);
+            None
+        }),
+        ("insert past the last local", |set| {
+            set.insert(LOCAL_COUNT);
+            None
+        }),
+        ("union with a new bit", |set| {
+            Some(set.union_with(&roots(LOCAL_COUNT, &[MIDDLE])))
+        }),
+        ("union with present bits", |set| {
+            Some(set.union_with(&roots(LOCAL_COUNT, &[0, LAST])))
+        }),
+        ("union with an empty set", |set| {
+            Some(set.union_with(&roots(LOCAL_COUNT, &[])))
+        }),
+        ("intersect with boundary bits", |set| {
+            set.intersect_with(&roots(LOCAL_COUNT, &[63, 64]));
+            None
+        }),
+        ("intersect with an empty set", |set| {
+            set.intersect_with(&roots(LOCAL_COUNT, &[]));
+            None
+        }),
+        ("subtract final bits", |set| {
+            set.subtract_with(&roots(LOCAL_COUNT, &[64, LAST]));
+            None
+        }),
+        ("subtract an empty set", |set| {
+            set.subtract_with(&roots(LOCAL_COUNT, &[]));
+            None
+        }),
+        ("clear", |set| {
+            set.clear();
+            None
+        }),
+    ];
+
+    let start = roots(LOCAL_COUNT, &START);
+    for (name, update) in updates {
+        let mut shared = roots(LOCAL_COUNT, &START);
+        let sibling = shared.clone();
+        let shared_flag = update(&mut shared);
+
+        let mut unique_from_construction = roots(LOCAL_COUNT, &START);
+        let construction_flag = update(&mut unique_from_construction);
+
+        let mut unique_after_drop = roots(LOCAL_COUNT, &START);
+        let last_clone = unique_after_drop.clone();
+        drop(last_clone);
+        let dropped_flag = update(&mut unique_after_drop);
+
+        assert_eq!(
+            members(&shared),
+            members(&unique_from_construction),
+            "{name}: shared differs from words built unique"
+        );
+        assert_eq!(
+            members(&shared),
+            members(&unique_after_drop),
+            "{name}: shared differs from words made unique by dropping the last clone"
+        );
+        assert_eq!(shared_flag, construction_flag, "{name}: growth flag");
+        assert_eq!(shared_flag, dropped_flag, "{name}: growth flag");
+        assert_eq!(
+            members(&sibling),
+            members(&start),
+            "{name}: a clone's contents must not change"
+        );
+    }
+
+    // The loop above can only compare receivers; these assertions pin the expected values.
+    let mut set = roots(LOCAL_COUNT, &START);
+    assert!(set.union_with(&roots(LOCAL_COUNT, &[MIDDLE])));
+    assert_eq!(members(&set), vec![0, MIDDLE, 63, 64, LAST]);
+    assert!(!set.union_with(&roots(LOCAL_COUNT, &[MIDDLE])));
+    let union_sibling = set.clone();
+    assert!(set.union_with(&roots(LOCAL_COUNT, &[1])));
+    assert_eq!(members(&set), vec![0, 1, MIDDLE, 63, 64, LAST]);
+    assert_eq!(members(&union_sibling), vec![0, MIDDLE, 63, 64, LAST]);
+    set.intersect_with(&roots(LOCAL_COUNT, &[63, 64, LAST]));
+    assert_eq!(members(&set), vec![63, 64, LAST]);
+    set.subtract_with(&roots(LOCAL_COUNT, &[64]));
+    assert_eq!(members(&set), vec![63, LAST]);
+
+    // Empty sets: every operation keeps them empty, and clearing shared empty words is a no-op.
+    let empty = roots(LOCAL_COUNT, &[]);
+    let mut empty_receiver = empty.clone();
+    let empty_sibling = empty_receiver.clone();
+    assert!(!empty_receiver.union_with(&empty));
+    empty_receiver.insert(MIDDLE);
+    assert_eq!(members(&empty_receiver), vec![MIDDLE]);
+    assert!(empty_sibling.is_empty());
+    empty_receiver.clear();
+    assert!(empty_receiver.is_empty());
+    let mut shared_empty = empty_sibling.clone();
+    shared_empty.clear();
+    assert!(shared_empty.is_empty());
+    empty_receiver.subtract_with(&empty);
+    empty_receiver.intersect_with(&empty);
+    empty_receiver.insert(LOCAL_COUNT);
+    assert!(empty_receiver.is_empty());
+}

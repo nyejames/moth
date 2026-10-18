@@ -10,6 +10,7 @@ use crate::compiler_frontend::analysis::borrow_checker::types::{
 };
 use crate::compiler_frontend::hir::ids::{BlockId, HirNodeId, LocalId};
 use rustc_hash::FxHashMap;
+use std::rc::Rc;
 
 // WHAT: Stable intra-function position key used by move/borrow decisions.
 // WHY: Source line numbers are not precise enough when several accesses share a line.
@@ -402,15 +403,17 @@ impl LocalState {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct RootSet {
-    words: Vec<u64>,
+    // WHAT: Copy-on-write words; clones share the allocation until an update writes.
+    // WHY: borrow states clone every local's root set at block and edge joins, and most of those
+    // clones are never updated, so a shared buffer avoids copying words that no rule will change.
+    words: Rc<[u64]>,
     bit_len: usize,
 }
 
 impl RootSet {
     pub(super) fn empty(bit_len: usize) -> Self {
-        let word_len = bit_len.div_ceil(64);
         Self {
-            words: vec![0; word_len],
+            words: std::iter::repeat_n(0, bit_len.div_ceil(64)).collect(),
             bit_len,
         }
     }
@@ -425,7 +428,29 @@ impl RootSet {
                 *last = mask;
             }
         }
-        Self { words, bit_len }
+        Self {
+            words: Rc::from(words),
+            bit_len,
+        }
+    }
+
+    /// Mutable words, copying the buffer first when any clone still shares it.
+    ///
+    /// WHY: the combinators test whether an update changes any bit before calling this on shared
+    /// words, so a no-op update never copies them.
+    fn words_mut(&mut self) -> &mut [u64] {
+        if self.words_are_shared() {
+            self.words = Rc::from(&self.words[..]);
+        }
+        // Invariant: this private allocation never has weak references, so `Rc::get_mut` fails
+        // only while the strong count is above one, and the copy above leaves exactly one owner.
+        Rc::get_mut(&mut self.words).expect("root words are unshared before mutation")
+    }
+
+    /// Whether any clone still shares this set's words. Only shared words need the change tests
+    /// that keep no-op updates from copying; unshared words are written in place either way.
+    fn words_are_shared(&self) -> bool {
+        Rc::strong_count(&self.words) != 1
     }
 
     pub(super) fn insert(&mut self, bit_index: usize) {
@@ -433,9 +458,15 @@ impl RootSet {
             return;
         }
 
+        // WHY: only a shared buffer needs the bit test to avoid a copy of unchanged words; an
+        // unshared write is idempotent and costs a read anyway.
+        if self.words_are_shared() && self.contains(bit_index) {
+            return;
+        }
+
         let word_index = bit_index / 64;
         let bit_offset = bit_index % 64;
-        self.words[word_index] |= 1u64 << bit_offset;
+        self.words_mut()[word_index] |= 1u64 << bit_offset;
     }
 
     pub(super) fn contains(&self, bit_index: usize) -> bool {
@@ -450,8 +481,21 @@ impl RootSet {
 
     /// Returns whether any bit was added.
     pub(super) fn union_with(&mut self, other: &Self) -> bool {
+        // WHY: a share test keeps a no-op union from copying shared words; unshared words are
+        // written in place by the loop below, which reports the same change flag.
+        if self.words_are_shared() {
+            let adds_bits = self
+                .words
+                .iter()
+                .zip(other.words.iter())
+                .any(|(left, right)| right & !left != 0);
+            if !adds_bits {
+                return false;
+            }
+        }
+
         let mut changed = false;
-        for (left, right) in self.words.iter_mut().zip(other.words.iter()) {
+        for (left, right) in self.words_mut().iter_mut().zip(other.words.iter()) {
             let next = *left | *right;
             changed |= next != *left;
             *left = next;
@@ -460,7 +504,20 @@ impl RootSet {
     }
 
     pub(super) fn intersect_with(&mut self, other: &Self) {
-        for (left, right) in self.words.iter_mut().zip(other.words.iter()) {
+        // WHY: an unshared buffer is masked in place; only shared words need the removal test
+        // first, so that a mask that removes nothing never copies them.
+        if self.words_are_shared() {
+            let removes_bits = self
+                .words
+                .iter()
+                .zip(other.words.iter())
+                .any(|(left, right)| left & !right != 0);
+            if !removes_bits {
+                return;
+            }
+        }
+
+        for (left, right) in self.words_mut().iter_mut().zip(other.words.iter()) {
             *left &= *right;
         }
     }
@@ -480,11 +537,29 @@ impl RootSet {
     }
 
     pub(super) fn clear(&mut self) {
-        self.words.fill(0);
+        // WHY: clearing shared words that are already zero would copy them only to zero them;
+        // unshared words are zeroed in place.
+        if self.words_are_shared() && self.is_empty() {
+            return;
+        }
+        self.words_mut().fill(0);
     }
 
     pub(super) fn subtract_with(&mut self, other: &Self) {
-        for (left, right) in self.words.iter_mut().zip(other.words.iter()) {
+        // WHY: unshared words subtract in place; only shared words need the test for bits that
+        // `other` would actually remove.
+        if self.words_are_shared() {
+            let removes_bits = self
+                .words
+                .iter()
+                .zip(other.words.iter())
+                .any(|(left, right)| left & right != 0);
+            if !removes_bits {
+                return;
+            }
+        }
+
+        for (left, right) in self.words_mut().iter_mut().zip(other.words.iter()) {
             *left &= !*right;
         }
     }
