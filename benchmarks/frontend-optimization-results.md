@@ -6332,7 +6332,26 @@ fold. `default_parameters_32` fills 64 function defaults on both trees.
 This local Darwin run supplies no fresh Windows Canvas or in-process frontend
 result.
 
-## Typed-expression follow-ups: signature member contract merge
+## Typed-expression follow-ups
+
+Speed-ups from the typed-expression follow-up plan, each its own audited commit.
+Ratios are medians of per-round ratios from paired interleaved runs, new over
+old; below 1 is faster.
+
+| Section | Headline |
+|---|---|
+| Signature member contract merge | nominal `boundary.inventory` regression about 60% recovered |
+| Borrow root membership | aggregate forwarding 512 wall 0.65x |
+| TIR traversal sets | docs wall 0.85x |
+| Shared borrow root words | mutable cycles 512 borrow validation 2,446 ms to 215 ms |
+| Generated nominal registration | generic scaling 160 materialise 0.81x |
+| External package registry indexes | type stress wall 0.96x |
+| Empty borrow root sets own no words | mutable cycles 512 wall 0.67x |
+| Covering visibility masks skip the sweep | mutable cycles 512 converge a further 0.86x |
+| HIR concrete type checks without a set | `frontend.hir` 0.91-0.97x |
+| Template summary paths and whitespace cursors | docs wall 0.92x |
+
+### Signature member contract merge
 
 Nominal `boundary.inventory` regression from `bb292b44d` (above), re-measured with
 fresh binaries; older bisect binaries embedded deleted worktree paths and failed
@@ -6361,7 +6380,7 @@ zero-initialised pad, and boxing the contract (88 B) or constructing members in
 place did not beat this change, so the residual is retained as size and layout
 cost of the contract field.
 
-## Typed-expression follow-ups: borrow root membership
+### Borrow root membership
 
 Profile (xctrace, aggregate forwarding 512): `active_alias_count_for_root` built
 a full `RootSet` per local through `effective_roots` only to test one bit, and
@@ -6391,7 +6410,7 @@ beyond noise, and exit codes, stdout and stderr match. Borrow-checker samples
 fall from 201.6 to 78.4 per run on aggregate forwarding 512. The remaining
 per-call `RootSet` construction is 2-4% of that stage and was left alone.
 
-## Typed-expression follow-ups: TIR traversal sets
+### TIR traversal sets
 
 Docs `frontend.ast.environment.constant_header_resolution` (about 84 ms) was the
 largest stage in a touched area without a profile. TIR template preparation and
@@ -6405,8 +6424,8 @@ it rarely reports.
 - `validate_context` takes `impl Display`, so the label is formatted only when
   an error is built; error text is byte-identical.
 
-Paired interleaved rounds against the borrow root membership tree's
-predecessor, 15 rounds in each of two windows, median of per-round ratios:
+Paired interleaved rounds against the signature member contract merge tree, 15
+rounds in each of two windows, median of per-round ratios:
 
 | Case · metric | Ratio |
 |---|---:|
@@ -6422,7 +6441,7 @@ trees match across the 74 CLI cases. Docs `frontend.ast.finalise` read 5-9%
 the same stage moved with code layout in the final qualification above, and the
 branch qualification re-measures it.
 
-## Typed-expression follow-ups: shared borrow root words
+### Shared borrow root words
 
 Cloning a borrow state copied every `RootSet` word vector, and converge-heavy
 functions clone states at block joins and transfers on every worklist pass.
@@ -6450,7 +6469,7 @@ match. The one stage cost is aggregate forwarding 128 `borrow.initial`, +5.5%
 of a 5.6 ms stage over the previous tree; it stays at 0.42x of the tree before
 borrow root membership, and its wall time does not move.
 
-## Typed-expression follow-ups: generated nominal registration
+### Generated nominal registration
 
 Generic scaling 160 spends about 56% of its wall time in
 `frontend.generated.materialise`. Every generated request rebuilds its
@@ -6482,7 +6501,7 @@ materialise stage. Exit codes, stdout and output files match across the 74 CLI
 cases. The stage still grows about as n^1.4: rebuilding every requester binding
 per request is the remaining quadratic term.
 
-## Typed-expression follow-ups: external package registry indexes
+### External package registry indexes
 
 The external package registry kept three registry-wide maps keyed by a cloned
 `(package, symbol path)` pair. They duplicated each package's own function,
@@ -6508,7 +6527,7 @@ output files match across the 74 CLI cases. Package IDs still come from
 registration counters, and namespace records built from these maps now intern
 in a fixed order rather than a per-run random one.
 
-## Typed-expression follow-ups: empty borrow root sets own no words
+### Empty borrow root sets own no words
 
 After shared root words, `frontend.borrow.converge` was still 84% of mutable
 cycles 512 wall time. Iteration count was not the cause: each of the 1,025
@@ -6541,7 +6560,7 @@ cases. Exit codes, stdout and output files match across the 74 CLI cases. The
 gain grows with size, but converge still scales close to quadratically because
 each visit copies a state with one entry per local.
 
-## Typed-expression follow-ups: covering visibility masks skip the sweep
+### Covering visibility masks skip the sweep
 
 With empty root sets cheap, `BorrowState::kill_invisible` still walked every
 local on every visit and intersected each rooted local's sets with the
@@ -6570,7 +6589,7 @@ to 512 locals falls from 2.13 to 1.90 for mutable cycles; the remaining cost is
 copying one state entry per local per visit, which needs a state
 representation change rather than a local fix.
 
-## Typed-expression follow-ups: HIR concrete type checks without a set
+### HIR concrete type checks without a set
 
 `require_concrete_type_id` guards its walk over constructed, function and
 generic-instance types with a visited set, and inserted every type it reached,
@@ -6595,7 +6614,7 @@ Exit codes, stdout and output files match across the 74 CLI cases. The change
 removes an avoidable allocation from the common path rather than chasing a
 wall-time target.
 
-## Typed-expression follow-ups: template summary paths and whitespace cursors
+### Template summary paths and whitespace cursors
 
 Docs `frontend.ast.emit.const_template_parse` was about 20 ms, 11% of docs
 wall time. A third of it was the TIR summary walk, where hashing its active-path
