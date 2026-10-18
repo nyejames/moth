@@ -255,7 +255,8 @@ fn intersects_matches_intersection_emptiness() {
 /// Copy-on-write words must behave exactly like value semantics: an update shows on the receiver,
 /// never on a clone, and `union_with` reports the growth a set with unique words reports. Each
 /// update runs against a shared receiver and against both ways a receiver's words become unique:
-/// fresh construction, and dropping the last clone that shared them.
+/// fresh construction, and dropping the last clone that shared them. The tail covers an empty set
+/// adopting a donor's words, complete removal followed by reinsertion, and `full`.
 #[test]
 fn root_set_updates_match_between_shared_and_unique_words() {
     // Two words with a partial final word: 70 locals leave bits 64..=69 in word 1.
@@ -353,7 +354,7 @@ fn root_set_updates_match_between_shared_and_unique_words() {
     set.subtract_with(&roots(LOCAL_COUNT, &[64]));
     assert_eq!(members(&set), vec![63, LAST]);
 
-    // Empty sets: every operation keeps them empty, and clearing shared empty words is a no-op.
+    // Empty sets own no words: every operation keeps them empty, and clearing one changes nothing.
     let empty = roots(LOCAL_COUNT, &[]);
     let mut empty_receiver = empty.clone();
     let empty_sibling = empty_receiver.clone();
@@ -370,4 +371,74 @@ fn root_set_updates_match_between_shared_and_unique_words() {
     empty_receiver.intersect_with(&empty);
     empty_receiver.insert(LOCAL_COUNT);
     assert!(empty_receiver.is_empty());
+
+    // An empty receiver adopts a donor's words, so whichever side writes first must copy. The
+    // donor spans the word boundary and leaves bits 65..=LAST absent.
+    let donor_bits: Vec<usize> = (0..=64).collect();
+    let donor = roots(LOCAL_COUNT, &donor_bits);
+    let mut adopted = roots(LOCAL_COUNT, &[]);
+    assert!(adopted.union_with(&donor));
+    assert_eq!(adopted, donor);
+    assert!(!adopted.union_with(&donor));
+    adopted.insert(LAST);
+    assert_eq!(members(&donor), donor_bits);
+    let mut adopted_bits = donor_bits.clone();
+    adopted_bits.push(LAST);
+    assert_eq!(members(&adopted), adopted_bits);
+
+    // The donor writes after adoption. Bit 63 is already set, so inserting it returns before any
+    // write; LAST is absent, so the write must copy the shared words.
+    let mut donor_owner = roots(LOCAL_COUNT, &donor_bits);
+    let mut adopter = roots(LOCAL_COUNT, &[]);
+    assert!(adopter.union_with(&donor_owner));
+    donor_owner.insert(LAST);
+    assert_eq!(members(&adopter), donor_bits);
+    let mut donor_owner_bits = donor_bits.clone();
+    donor_owner_bits.push(LAST);
+    assert_eq!(members(&donor_owner), donor_owner_bits);
+
+    // Complete removal must reach the same `None` state for every receiver kind, and reinsertion
+    // must not leak into a sibling clone that still holds the original [0, 64].
+    let removals: [fn(&mut RootSet); 2] = [
+        |set| {
+            set.intersect_with(&roots(LOCAL_COUNT, &[63, 64, 65, 66, 67, 68, LAST]));
+            assert_eq!(members(set), vec![63, 64]);
+            set.subtract_with(&roots(LOCAL_COUNT, &[63, 64]));
+        },
+        |set| {
+            let all: Vec<usize> = (0..=64).collect();
+            set.subtract_with(&roots(LOCAL_COUNT, &all));
+        },
+    ];
+    for removal in removals {
+        for receiver_kind in ["fresh", "shared", "unique after drop"] {
+            let mut receiver = roots(LOCAL_COUNT, &donor_bits);
+            let sibling = match receiver_kind {
+                "shared" => Some(receiver.clone()),
+                "unique after drop" => {
+                    // A clone dropped before the update leaves the receiver's words unique again.
+                    drop(receiver.clone());
+                    None
+                }
+                _ => None,
+            };
+            removal(&mut receiver);
+            assert!(receiver.is_empty(), "{receiver_kind}");
+            assert_eq!(receiver, RootSet::empty(LOCAL_COUNT), "{receiver_kind}");
+            assert_eq!(members(&receiver), Vec::<usize>::new(), "{receiver_kind}");
+            receiver.insert(LAST);
+            assert_eq!(members(&receiver), vec![LAST], "{receiver_kind}");
+            if let Some(sibling) = sibling {
+                assert_eq!(members(&sibling), donor_bits, "{receiver_kind}");
+            }
+        }
+    }
+
+    // `full` must equal the set built bit by bit, including the zero-width universe and widths
+    // on both sides of the word boundary.
+    assert_eq!(RootSet::full(0), RootSet::empty(0));
+    for width in [1, 64, 65, LOCAL_COUNT] {
+        let all: Vec<usize> = (0..width).collect();
+        assert_eq!(RootSet::full(width), roots(width, &all), "full({width})");
+    }
 }

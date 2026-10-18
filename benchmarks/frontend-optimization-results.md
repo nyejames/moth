@@ -6507,3 +6507,36 @@ Type stress reproduced at 0.961 in an earlier session. Exit codes, stdout and
 output files match across the 74 CLI cases. Package IDs still come from
 registration counters, and namespace records built from these maps now intern
 in a fixed order rather than a per-run random one.
+
+## Typed-expression follow-ups: empty borrow root sets own no words
+
+After shared root words, `frontend.borrow.converge` was still 84% of mutable
+cycles 512 wall time. Iteration count was not the cause: each of the 1,025
+reachable blocks is visited once. Every `RootSet` held a dense `Rc<[u64]>` of
+`ceil(locals / 64)` words even when empty, so the per-visit visibility sweep
+scanned all of them through `is_empty`, and every `LocalState` clone and drop
+touched their reference counts. `is_empty` alone was 15% of the stage.
+
+`RootSet.words` is now `Option<Rc<[u64]>>`: `None` is the empty set, and `Some`
+always holds at least one non-zero word, so emptiness has one owner and costs
+one branch. Union into an empty set shares the donor's buffer, and intersection,
+subtraction and `clear` return to `None` when no bit survives.
+
+Paired interleaved rounds against `9b0929229`, 25 rounds, median of per-round
+ratios with bootstrap CI95:
+
+| Case · metric | Ratio | CI95 |
+|---|---:|---|
+| mutable cycles 512 · converge | 0.611 | 0.584-0.626 |
+| mutable cycles 512 · wall | 0.667 | 0.641-0.675 |
+| narrow chains 512 · converge | 0.629 | 0.546-0.670 |
+| narrow chains 512 · wall | 0.676 | 0.559-0.703 |
+| mutable cycles 128 · converge | 0.768 | 0.746-0.786 |
+| mutable cycles 32 · converge | 0.867 | 0.836-0.909 |
+| docs · wall | 0.972 | 0.872-1.015 |
+| module graph · wall (control) | 1.014 | 0.998-1.104 |
+
+A fresh rerun against a rebuilt base gave 0.603 and 0.649 for the two 512
+cases. Exit codes, stdout and output files match across the 74 CLI cases. The
+gain grows with size, but converge still scales close to quadratically because
+each visit copies a state with one entry per local.
