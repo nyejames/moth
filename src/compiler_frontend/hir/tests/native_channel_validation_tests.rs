@@ -1,6 +1,7 @@
 //! Native result-channel validation invariants, including edge-local definitions.
 
-use super::hir_validation_tests::{builtin_error_type_id, minimal_lowered_hir_module};
+use super::hir_validation_tests::builtin_error_type_id;
+use super::minimal_lowered_hir_module;
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{TypeId, builtin_type_ids};

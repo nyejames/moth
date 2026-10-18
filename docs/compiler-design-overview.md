@@ -77,7 +77,7 @@ The typed expression store uses safe array-of-structures rows with an operation 
 
 The rule includes retained typed semantic expressions in the AST stage. Parsing and receiving-context resolution may use short-lived scratch forms, but completed expression graphs do not retain recursive owning trees or unresolved parse states. Stage 4 defines their semantic ownership and HIR's concrete contract is in Stage 5. Source/token/diagnostic sizes and exceptions remain under the data-layout authority.
 
-Completed-expression walkers keep depth-dependent traversal state on explicit heap stacks. Constant folding, failure classification, finalisation, HIR operator lowering and borrow extraction preserve authored evaluation and diagnostic order without a native frame for each expression level.
+Completed-expression walkers keep depth-dependent traversal state on explicit heap stacks. Constant folding, failure classification, finalisation, HIR operator lowering, HIR expression validation and borrow extraction preserve authored evaluation and diagnostic order without a native frame for each expression level.
 
 Each store names its issuing owner and the consumers that determine its lifetime. An index is meaningful only with that owner, not as a global identity or a persistent key. Typed ranges address entries in their owning side store, not an assumed contiguous run of child-node IDs. Range construction checks the `u32` start, length and end before allocation or mutation; empty ranges are valid, while multiple-result ranges contain at least two entries. Shared nodes are immutable. A transformation reuses an unchanged node or produces a replacement root and isolated changed data, without mutating another candidate's view.
 
