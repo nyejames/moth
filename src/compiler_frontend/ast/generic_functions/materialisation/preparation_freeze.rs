@@ -787,18 +787,18 @@ impl ModuleMaterialisationCapture {
             &generic_parameters,
             &mut referenced_names,
         )?;
-        let selection_before_callees =
+        let selection_before_bounds =
             self.selected_visible_paths(&template.source_file, &referenced_names)?;
-        let names_before_callees = referenced_names.len();
-        self.retain_callee_bound_trait_names(
+        let names_before_bounds = referenced_names.len();
+        self.retain_selected_bound_trait_names(
             &template.source_file,
-            &selection_before_callees,
+            &selection_before_bounds,
             &mut referenced_names,
         )?;
         // Retained names only grow, so an unchanged count means the selection above still holds.
-        // Callee-bound spellings can select more paths, so only then is the selection rebuilt.
-        let selected_paths = if referenced_names.len() == names_before_callees {
-            selection_before_callees
+        // Bound spellings can select more paths, so only then is the selection rebuilt.
+        let selected_paths = if referenced_names.len() == names_before_bounds {
+            selection_before_bounds
         } else {
             self.selected_visible_paths(&template.source_file, &referenced_names)?
         };
@@ -1029,33 +1029,44 @@ impl ModuleMaterialisationCapture {
         Ok(())
     }
 
-    /// Retains the spellings that generic callees named in the body need in the caller's file.
+    /// Retains the trait spellings that generic declarations selected for the body need in the
+    /// body's file. Generic callees and generic nominal constructors are both covered.
     ///
-    /// A nested generic call checks its bounds against the file visibility of the body that makes
-    /// the call, as the original body did. The callee's header lies outside the retained body
-    /// tokens, so its bound spellings are retained here. Referenced names over-approximate the
-    /// calls: a shadowing local, or a field with the same name, can select a callee the body never
-    /// calls, and that callee's bound may be unnamed in this file. Such bounds are skipped, not
-    /// rejected, because a call the body really makes had to name its bound in the original file.
+    /// Checking a declaration's bounds needs the spellings its bounds were written with, in the
+    /// file of the body that uses it. Those spellings sit in the declaration's header, outside the
+    /// retained body tokens, so they are retained here. Referenced names over-approximate the uses:
+    /// a shadowing local, or a field with the same name, can select a declaration the body never
+    /// uses, and that declaration's bound may be unnamed in this file. Such bounds are skipped, not
+    /// rejected, because a use the body really makes had to name its bound in the original file.
     ///
-    /// `selected_paths` is the selection taken before these spellings were added. Callees that
-    /// are reachable only through the added spellings are not followed here.
-    fn retain_callee_bound_trait_names(
+    /// `selected_paths` is the selection taken before these spellings were added. Bound spellings
+    /// name traits, which carry no generic bounds of their own, so one reselection by the caller
+    /// is enough.
+    fn retain_selected_bound_trait_names(
         &self,
         source_file: &PathId,
         selected_paths: &FxHashSet<PathId>,
         referenced_names: &mut FxHashSet<String>,
     ) -> Result<(), CompilerError> {
         for path in selected_paths {
-            let Some(callee) = self.generic_function_templates_by_path.get(path) else {
+            let parameter_list_id = self
+                .generic_function_templates_by_path
+                .get(path)
+                .map(|callee| callee.generic_parameter_list_id)
+                .or_else(|| {
+                    let type_id = self.nominal_type_ids_by_path.get(path)?;
+                    self.type_environment
+                        .generic_parameter_list_id_for_type(*type_id)
+                });
+            let Some(parameter_list_id) = parameter_list_id else {
                 continue;
             };
             let parameters = self
                 .type_environment
-                .generic_parameters(callee.generic_parameter_list_id)
+                .generic_parameters(parameter_list_id)
                 .ok_or_else(|| {
                     CompilerError::compiler_error(
-                        "Retained generic callee references a missing parameter list",
+                        "Retained generic declaration references a missing parameter list",
                     )
                 })?;
             for trait_id in parameters

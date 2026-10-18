@@ -1910,6 +1910,20 @@ contract = "language.generics.imported_bounded_body_trait_evidence"
 role = "boundary"
 
 [[case]]
+id = "generic_bounded_nominal_constructor_trait_retained_success"
+path = "generic_bounded_nominal_constructor_trait_retained_success"
+tags = ["integration","generics","traits","structs","functions","dependencies"]
+contract = "language.generics.imported_bounded_body_trait_evidence"
+role = "boundary"
+
+[[case]]
+id = "generic_bounded_nominal_constructor_wrapper_only_success"
+path = "generic_bounded_nominal_constructor_wrapper_only_success"
+tags = ["integration","generics","traits","structs","functions","dependencies"]
+contract = "language.generics.imported_bounded_body_trait_evidence"
+role = "boundary"
+
+[[case]]
 id = "trait_requirement_nested_nominal_closure_success"
 path = "trait_requirement_nested_nominal_closure_success"
 tags = ["integration","generics","traits","receiver-methods","dependencies","facade"]
