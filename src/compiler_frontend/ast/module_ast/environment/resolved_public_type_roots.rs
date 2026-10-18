@@ -18,12 +18,14 @@ use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::type_resolution::{
     ResolvedFunctionSignature, ResolvedTypeAlias,
 };
+use crate::compiler_frontend::canonical_type_identity::CanonicalTraitIdentity;
 use crate::compiler_frontend::compiler_errors::CompilerError;
 use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::ids::{GenericParameterListId, TypeId};
 use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
+use crate::compiler_frontend::semantic_identity::OriginTraitId;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::string_interning::StringTable;
 use crate::compiler_frontend::traits::environment::{CoreTraitKind, TraitEnvironment};
@@ -82,20 +84,61 @@ pub(crate) struct ResolvedPublicTypeRoot {
     pub(crate) kind: ResolvedPublicTypeRootKind,
 }
 
-/// Resolved source fact for one local trait, retained transiently for bound projection.
+/// Resolved source fact for one trait, retained transiently for bound projection.
 ///
-/// WHAT: carries either the trait's source canonical declaration path or its compiler-owned
-/// core classifier. It never carries the `TraitEnvironment`, requirement bodies, evidence
-/// or a `TraitId` registry handle.
-/// WHY: generic-bound projection needs to resolve each local bound `TraitId` to a stable
-/// canonical trait identity. Retaining only these two facts keeps the transient table
-/// minimal and consumed with the rest of [`ResolvedPublicTypeRootTable`] before HIR.
+/// WHAT: carries either the trait's source canonical declaration path, the provider origin of
+/// an imported source trait, or its compiler-owned core classifier. It never carries the
+/// `TraitEnvironment`, requirement bodies, evidence or a `TraitId` registry handle.
+/// WHY: generic-bound projection needs to resolve each bound `TraitId` to a stable canonical
+/// trait identity. An imported trait's canonical path is synthesised in this module and never
+/// appears in the header-derived public origin index, so the fact carries its origin instead.
+/// Retaining only these facts keeps the transient table minimal and consumed with the rest of
+/// [`ResolvedPublicTypeRootTable`] before HIR.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum ResolvedTraitSourceFact {
     /// A compiler-owned core trait identified by its canonical kind.
     Core(CoreTraitKind),
     /// A source-defined trait identified by its canonical declaration path.
     Source(PathId),
+    /// A source trait imported from a provider, identified by the provider's stable origin.
+    Imported(OriginTraitId),
+}
+
+impl ResolvedTraitSourceFact {
+    /// Classify one trait id as the source fact that public-interface projection consumes.
+    ///
+    /// WHAT: a core trait maps to `Core(kind)`; a trait that already carries a `Source` identity
+    /// maps to `Imported(origin)`; every other trait maps to `Source(canonical_path)`, which
+    /// projection resolves through the public source-trait origin index. A `TraitId` with no
+    /// resolved definition is a `CompilerError`.
+    /// WHY: this is the one classifier for both generic-bound projection and evidence projection.
+    /// Both run on the environment that exists before public-interface freezing, where only an
+    /// imported trait carries a `Source` identity. Freezing registers local identities on a fork
+    /// that the draft never reads, so a local trait is decided by the origin index, while an
+    /// imported trait is never judged by its synthesised consumer-local path.
+    pub(crate) fn classify(
+        trait_id: TraitId,
+        trait_environment: &TraitEnvironment,
+    ) -> Result<Self, CompilerError> {
+        if let Some(kind) = trait_environment.core_trait_kind(trait_id) {
+            return Ok(Self::Core(kind));
+        }
+
+        if let Some(CanonicalTraitIdentity::Source(origin)) =
+            trait_environment.canonical_identity_for_id(trait_id)
+        {
+            return Ok(Self::Imported(origin.clone()));
+        }
+
+        let Some(definition) = trait_environment.get(trait_id) else {
+            return Err(CompilerError::compiler_error(format!(
+                "trait source classification: TraitId({}) has no resolved trait definition and is not a core trait; a missing definition is an internal invariant violation",
+                trait_id.0
+            )));
+        };
+
+        Ok(Self::Source(definition.canonical_path))
+    }
 }
 
 /// Transient AST-owned table of resolved public type roots for the module.
@@ -104,9 +147,9 @@ pub(crate) enum ResolvedTraitSourceFact {
 /// `receiver_methods` holds the receiver methods attached to directly-defined public
 /// nominal receivers, selected in a separate pass so private method headers outside
 /// `export:` are admitted by receiver ownership rather than their own export binding.
-/// `trait_source_facts` retains the resolved trait identity source facts needed by
-/// generic bounds on the exported free-function and struct/choice roots and by public
-/// trait incompatibility relations, so bound and incompatibility projection can resolve
+/// `trait_source_facts` retains the resolved trait identity source facts needed by generic
+/// bounds on the exported free-function, struct/choice roots, and receiver methods, and by
+/// public trait incompatibility relations, so bound and incompatibility projection can resolve
 /// each local `TraitId` without the `TraitEnvironment`.
 /// WHY: the semantic orchestration consumes this immediately before HIR lowering. This
 /// table is type-only: direct trait-root facts and their requirement construction live in
@@ -435,6 +478,7 @@ pub(crate) fn build_resolved_public_type_roots(
     // admitted in Pass 1/1b. Imported-provider methods cannot enter because their receiver paths
     // are not in this module's public nominal set.
     let mut receiver_method_entries = Vec::new();
+    let mut receiver_method_list_ids = Vec::new();
     for header in sorted_headers {
         if !matches!(&header.kind, HeaderKind::Function { .. }) {
             continue;
@@ -467,6 +511,11 @@ pub(crate) fn build_resolved_public_type_roots(
                 string_table,
             ));
         };
+        // A generic receiver method keeps its bounds on its own template list rather than on the
+        // nominal's list, so its bound traits must join the retained trait source facts.
+        if let Some(template) = generic_function_templates_by_path.get(path) {
+            receiver_method_list_ids.push(template.generic_parameter_list_id);
+        }
         receiver_method_entries.push(entry.clone());
     }
 
@@ -474,7 +523,12 @@ pub(crate) fn build_resolved_public_type_roots(
     // public trait incompatibilities. The `TraitEnvironment` is dropped after this table is
     // built; the projection consumes these facts to resolve each local `TraitId` to a stable
     // canonical trait identity without reconstructing the trait source.
-    let trait_source_facts = build_trait_source_facts(&roots, type_environment, trait_environment)?;
+    let trait_source_facts = build_trait_source_facts(
+        &roots,
+        &receiver_method_list_ids,
+        type_environment,
+        trait_environment,
+    )?;
 
     Ok(ResolvedPublicTypeRootTable {
         roots,
@@ -484,22 +538,27 @@ pub(crate) fn build_resolved_public_type_roots(
 }
 
 /// Build the transient resolved trait identity source facts for generic bounds on exported
-/// free-function and struct/choice roots.
+/// free-function, struct/choice roots, and receiver methods.
 ///
-/// WHAT: iterates the roots to collect every local bound `TraitId`, then resolves each
-/// through the `TraitEnvironment`: a core trait maps to `Core(CoreTraitKind)` and a source
-/// trait maps to `Source(canonical_path)`. A `TraitId` that is neither core nor source is
-/// a `CompilerError`, never a silent omission.
+/// WHAT: collects every local bound `TraitId` from the roots and from the receiver-method
+/// template lists, then classifies each through `ResolvedTraitSourceFact::classify`: a core
+/// trait maps to `Core(CoreTraitKind)`, an imported trait to `Imported(origin)`, and a local
+/// source trait to `Source(canonical_path)`. A `TraitId` without a resolved definition is a
+/// `CompilerError`, never a silent omission.
 /// WHY: the transient facts let bound projection resolve each local `TraitId` after the
 /// `TraitEnvironment` is dropped. The facts needed by exported generic bounds and by public
-/// trait incompatibility relations are retained, keeping the table minimal while giving the
-/// public-interface draft one source/core mapping owner for both paths.
+/// trait incompatibility relations are retained, keeping the table minimal while the
+/// public-interface draft classifies evidence trait identity with the same owner.
 fn build_trait_source_facts(
     roots: &[ResolvedPublicTypeRoot],
+    receiver_method_list_ids: &[GenericParameterListId],
     type_environment: &TypeEnvironment,
     trait_environment: &TraitEnvironment,
 ) -> Result<FxHashMap<TraitId, ResolvedTraitSourceFact>, CompilerError> {
     let mut trait_ids = collect_bound_trait_ids_from_roots(roots, type_environment)?;
+    for list_id in receiver_method_list_ids {
+        collect_bound_trait_ids_from_list(type_environment, *list_id, &mut trait_ids)?;
+    }
 
     // Also retain source/core classification for every trait id appearing in a public
     // incompatibility relation, so the public-interface draft can canonicalize direct
@@ -512,38 +571,8 @@ fn build_trait_source_facts(
 
     let mut facts = FxHashMap::default();
     for trait_id in trait_ids {
-        if let Some(kind) = trait_environment.core_trait_kind(trait_id) {
-            if facts
-                .insert(trait_id, ResolvedTraitSourceFact::Core(kind))
-                .is_some()
-            {
-                return Err(CompilerError::compiler_error(format!(
-                    "resolved public type-root construction: TraitId({}) has a duplicate conflicting core trait mapping",
-                    trait_id.0
-                )));
-            }
-            continue;
-        }
-
-        let Some(definition) = trait_environment.get(trait_id) else {
-            return Err(CompilerError::compiler_error(format!(
-                "resolved public type-root construction: retained TraitId({}) has no resolved trait definition and is not a core trait; a missing definition is an internal invariant violation",
-                trait_id.0
-            )));
-        };
-
-        if facts
-            .insert(
-                trait_id,
-                ResolvedTraitSourceFact::Source(definition.canonical_path),
-            )
-            .is_some()
-        {
-            return Err(CompilerError::compiler_error(format!(
-                "resolved public type-root construction: TraitId({}) has a duplicate conflicting source trait mapping (path: {:?})",
-                trait_id.0, definition.canonical_path
-            )));
-        }
+        let fact = ResolvedTraitSourceFact::classify(trait_id, trait_environment)?;
+        facts.insert(trait_id, fact);
     }
 
     Ok(facts)
@@ -555,8 +584,8 @@ fn build_trait_source_facts(
 /// WHAT: gathers `TraitId`s from the `TypeEnvironment`'s `trait_bounds` for each root's
 /// canonical generic parameter list. Function roots carry their list ID directly;
 /// struct/choice roots resolve their list ID through the `TypeEnvironment` definition.
-/// WHY: only the bounds on exported free-function and struct/choice roots need stable
-/// trait identity projection, so the transient facts are scoped to exactly those bounds.
+/// WHY: only the bounds on exported roots need stable trait identity projection; receiver-method
+/// template lists are not roots, so the caller supplies them.
 fn collect_bound_trait_ids_from_roots(
     roots: &[ResolvedPublicTypeRoot],
     type_environment: &TypeEnvironment,

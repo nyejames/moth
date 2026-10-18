@@ -1,0 +1,37 @@
+export:
+    KIND_SOURCE must:
+        kind |This| -> Kind
+    ;
+
+    KIND_LABEL must:
+        label |This| -> String
+    ;
+
+    Kind ::
+        Small,
+        Large,
+    ;
+
+    Maker = |
+        label String,
+    |
+
+    make_maker || -> Maker:
+        return Maker(label = "maker")
+    ;
+
+    show type T is KIND_LABEL |value T| -> String:
+        return value.label()
+    ;
+;
+
+label |this Kind| -> String:
+    return "choice nominal"
+;
+
+kind |this Maker| -> Kind:
+    return Kind::Large
+;
+
+Kind must KIND_LABEL
+Maker must KIND_SOURCE

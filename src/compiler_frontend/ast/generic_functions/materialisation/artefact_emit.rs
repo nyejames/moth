@@ -605,11 +605,12 @@ impl GenericTemplateArtefact {
         // Private traits are part of the declaration environment needed to resolve bounds on
         // nested retained templates. Install them after nominal shells exist, but before any
         // nested signature or bound reconstruction consumes the generated trait table.
+        // Evidence rows also install the methods they name, so calls through them resolve.
         install_private_semantic_closure(
             self,
             context,
             environment,
-            external_package_registry,
+            services,
             template_ir_store,
             string_table,
             path_fork,
@@ -623,18 +624,13 @@ impl GenericTemplateArtefact {
             {
                 continue;
             }
-            let local_path = callable.local_path;
-            let contract = callable.materialise_requester_contract(
-                local_path,
+            callable.install_requester_callable(
                 environment,
                 services,
                 self,
                 string_table,
                 path_fork,
             )?;
-            Rc::make_mut(&mut environment.lookups)
-                .imported_functions_by_local_path
-                .insert(local_path, contract);
         }
 
         for local_path_components in &self.local_declarations {
@@ -1503,5 +1499,29 @@ impl super::stable_types::StableCallableBinding {
             returns,
             error_return,
         })
+    }
+
+    /// Materialise this callable into a generated environment and register its contract as
+    /// imported. The artefact callable loop and private evidence both install through here.
+    pub(super) fn install_requester_callable<N: MaterialisationNominalSource>(
+        &self,
+        environment: &mut AstModuleEnvironment,
+        services: &mut GeneratedValueMaterialisationServices<'_>,
+        nominal_source: &N,
+        string_table: &mut StringTable,
+        path_fork: &mut crate::compiler_frontend::symbols::path_interner::PathInternerFork,
+    ) -> Result<(), Box<InfrastructureErrors>> {
+        let contract = self.materialise_requester_contract(
+            self.local_path,
+            environment,
+            services,
+            nominal_source,
+            string_table,
+            path_fork,
+        )?;
+        Rc::make_mut(&mut environment.lookups)
+            .imported_functions_by_local_path
+            .insert(self.local_path, contract);
+        Ok(())
     }
 }

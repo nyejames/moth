@@ -193,7 +193,7 @@ impl StableDeclarationBinding {
 }
 
 impl StableCallableBinding {
-    fn remap_path_ids(&mut self, remap: &PathIdRemap) {
+    pub(super) fn remap_path_ids(&mut self, remap: &PathIdRemap) {
         self.local_path = remap.get(self.local_path);
     }
 }

@@ -19,6 +19,7 @@ use crate::compiler_frontend::ast::module_ast::environment::{
 };
 use crate::compiler_frontend::ast::module_ast::scope_context::ReceiverMethodCatalog;
 use crate::compiler_frontend::ast::module_ast::scope_context::{ContextKind, ScopeContext};
+use crate::compiler_frontend::ast::statements::functions::FunctionSignature;
 use crate::compiler_frontend::ast::templates::error::TemplateError;
 use crate::compiler_frontend::ast::type_resolution::{
     GenericParameterScopeBuildInput, ResolvedFunctionSignature, ResolvedTypeAlias,
@@ -29,7 +30,7 @@ use crate::compiler_frontend::ast::{
 };
 use crate::compiler_frontend::builtins::error_type::builtin_error_type_path;
 use crate::compiler_frontend::canonical_type_identity::{
-    CanonicalBuiltinType, CanonicalTypeIdentity, intern_canonical_builtin,
+    CanonicalBuiltinType, CanonicalTypeIdentity, GenericDeclarationOrigin, intern_canonical_builtin,
 };
 use crate::compiler_frontend::compiler_errors::{
     CompilerError, CompilerMessages, InfrastructureErrors,
@@ -45,7 +46,9 @@ use crate::compiler_frontend::datatypes::environment::{
 use crate::compiler_frontend::datatypes::generic_parameters::{
     GenericParameterList, GenericParameterScope, TypeParameterId,
 };
-use crate::compiler_frontend::datatypes::ids::{GenericParameterId, NominalTypeId, TypeId};
+use crate::compiler_frontend::datatypes::ids::{
+    GenericParameterId, GenericParameterListId, NominalTypeId, TypeId,
+};
 use crate::compiler_frontend::declaration_syntax::choice::ChoiceVariant;
 use crate::compiler_frontend::folded_value::PublicFoldedValue;
 use crate::compiler_frontend::headers::binding_environment::{
@@ -62,7 +65,9 @@ use crate::compiler_frontend::public_interface::{
     PublicFunctionCategory, PublicGenericParameterSurface, PublicParameterTypeSlot,
     PublicReceiverMethodCategory, PublicReturnTypeSlot, PublicStructSemantics,
 };
-use crate::compiler_frontend::semantic_identity::{OriginDeclarationId, OriginTypeId};
+use crate::compiler_frontend::semantic_identity::{
+    GeneratedDeclarationIdentity, OriginDeclarationId, OriginTypeId,
+};
 use crate::compiler_frontend::source::SourceId;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
@@ -279,12 +284,26 @@ fn missing_declaration_id() -> CompilerError {
     )
 }
 
-/// One imported generic list registered before provider trait identities receive local handles.
+/// One imported generic list, registered before provider trait identities receive local handles.
 #[derive(Clone)]
 struct ImportedGenericParameterRegistration {
     surfaces: Vec<PublicGenericParameterSurface>,
     list_id: crate::compiler_frontend::datatypes::ids::GenericParameterListId,
     canonical_by_local: FxHashMap<TypeParameterId, GenericParameterId>,
+}
+
+/// One imported generic receiver method, whose contract registers once its bounds resolve.
+///
+/// WHY: its bounds name provider traits, which only resolve to trait ids in
+/// `resolve_dependencyed_generic_parameter_bounds`.
+struct PendingImportedGenericMethod {
+    method_path: PathId,
+    declaration_identity: GeneratedDeclarationIdentity,
+    generic_parameter_owner: GenericDeclarationOrigin,
+    signature: FunctionSignature,
+    owner_list_id: GenericParameterListId,
+    parameter_names: Vec<(TypeParameterId, StringId)>,
+    surfaces: Vec<PublicGenericParameterSurface>,
 }
 
 pub(crate) struct AstModuleEnvironmentBuilder<'context, 'services> {
@@ -344,6 +363,9 @@ pub(crate) struct AstModuleEnvironmentBuilder<'context, 'services> {
         TypeId,
     >,
     imported_generic_parameter_registrations: Vec<ImportedGenericParameterRegistration>,
+    // Imported receiver methods register their contracts in the bounds drain, where their
+    // bounds resolve to trait ids.
+    pending_imported_generic_methods: Vec<PendingImportedGenericMethod>,
     pub(super) projected_imported_functions_by_local_path:
         FxHashMap<PathId, AstImportedFunctionContract>,
     /// Every imported receiver-method path, including generic methods without a concrete
@@ -386,6 +408,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             imported_type_ids_by_origin: FxHashMap::default(),
             imported_generic_parameter_type_ids: FxHashMap::default(),
             imported_generic_parameter_registrations: Vec::new(),
+            pending_imported_generic_methods: Vec::new(),
             projected_imported_functions_by_local_path: FxHashMap::default(),
             projected_imported_receiver_methods_by_local_path: FxHashMap::default(),
             imported_receiver_method_paths_by_origin: FxHashMap::default(),

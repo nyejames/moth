@@ -1,0 +1,9 @@
+@traits IMPORTED_DISPLAY
+
+Box type T = |
+    value T,
+|
+
+render type T is IMPORTED_DISPLAY |this Box of T| -> String:
+    return this.value.display()
+;

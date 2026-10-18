@@ -2,7 +2,8 @@
 //!
 //! WHAT: verifies that malformed successful surfaces fail before provider publication when a
 //! binding lacks its declaration, declaration categories disagree, concrete free or receiver
-//! summaries are missing, or a generic declaration carries an impossible concrete summary.
+//! summaries are missing, or a generic declaration carries an impossible concrete summary. Local
+//! reusable evidence is judged before closure; evidence that joins a provider trait waits for it.
 //! WHY: consumers treat a successful provider interface as trusted compiler-owned input, so
 //! these failures belong at the publication boundary rather than in source dependency diagnostics.
 
@@ -850,6 +851,60 @@ fn rejects_duplicate_and_missing_reusable_evidence_requirements() {
         .validate_for_publication()
         .expect_err("each authored requirement needs one mapping");
     assert!(error.msg.contains("maps 1 requirement"));
+}
+
+#[test]
+fn rejects_malformed_local_evidence_before_closure() {
+    evidence_interface(&["display", "identifier"])
+        .validate_closure_input()
+        .expect("well-formed local evidence passes before closure");
+
+    let mut interface = evidence_interface(&["display", "identifier"]);
+    interface.reusable_evidence[0].requirement_mappings.pop();
+    let error = interface
+        .validate_closure_input()
+        .expect_err("local evidence joins only local declarations, so it is judged now");
+    assert!(error.msg.contains("maps 1 requirement"));
+}
+
+#[test]
+fn rejects_malformed_core_trait_evidence_before_closure() {
+    let mut interface = evidence_interface(&["display"]);
+    interface
+        .declarations
+        .retain(|declaration| !matches!(declaration.origin, OriginDeclarationId::Trait(_)));
+    interface.reusable_evidence[0].identity = CanonicalEvidenceIdentity::new(
+        CanonicalTypeIdentity::SourceNominal(struct_origin("Widget")),
+        CanonicalTraitIdentity::Core(CanonicalCoreTraitIdentity::Displayable),
+    );
+    interface.reusable_evidence[0].requirement_mappings.clear();
+
+    let error = interface
+        .validate_closure_input()
+        .expect_err("core-trait evidence has no provider declaration to wait for");
+    assert!(error.msg.contains("maps 0 requirement"));
+}
+
+#[test]
+fn defers_evidence_joining_provider_trait_until_closure_supplies_it() {
+    let mut interface = evidence_interface(&["display"]);
+    let trait_position = interface
+        .declarations
+        .iter()
+        .position(|declaration| matches!(declaration.origin, OriginDeclarationId::Trait(_)))
+        .expect("trait declaration should exist");
+    let provider_trait = interface.declarations.remove(trait_position);
+    interface.reusable_evidence[0].requirement_mappings.clear();
+
+    interface
+        .validate_closure_input()
+        .expect("evidence whose trait closure has not supplied waits for the closed pass");
+
+    interface.declarations.push(provider_trait);
+    let error = interface
+        .validate_for_publication()
+        .expect_err("closure supplies the trait, so the empty mapping is judged then");
+    assert!(error.msg.contains("maps 0 requirement"));
 }
 
 #[test]

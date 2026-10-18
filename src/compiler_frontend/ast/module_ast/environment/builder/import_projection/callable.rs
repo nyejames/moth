@@ -309,10 +309,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     },
                 );
 
-                if matches!(
-                    method.category,
-                    PublicReceiverMethodCategory::GenericTemplate
-                ) {
+                if let PublicReceiverMethodCategory::GenericTemplate(descriptor) = &method.category
+                {
                     if self
                         .projected_imported_receiver_methods_by_local_path
                         .insert(method_path, method.method_origin.clone())
@@ -330,37 +328,39 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                         method_path,
                         string_table,
                     );
-                    let generic_parameter_list_id =
-                        receiver_generic_parameter_list_id.ok_or_else(|| {
-                            CompilerMessages::from_error_ref(
-                                CompilerError::compiler_error(
-                                    "Imported generic receiver method has no receiver generic parameter list",
-                                ),
-                                string_table,
-                            )
-                        })?;
+                    let owner_list_id = receiver_generic_parameter_list_id.ok_or_else(|| {
+                        CompilerMessages::from_error_ref(
+                            CompilerError::compiler_error(
+                                "Imported generic receiver method has no receiver generic parameter list",
+                            ),
+                            string_table,
+                        )
+                    })?;
                     let generic_parameter_owner = GenericDeclarationOrigin::nominal_type(
                         receiver_origin.clone(),
                     )
                     .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
-                    self.generic_function_templates_by_path.insert(
+                    let parameter_names = descriptor
+                        .generic_parameters
+                        .iter()
+                        .enumerate()
+                        .map(|(index, parameter)| {
+                            let name = string_table.intern(parameter.identity.authored_name());
+                            (TypeParameterId(index as u32), name)
+                        })
+                        .collect();
+                    let pending_method = PendingImportedGenericMethod {
                         method_path,
-                        GenericFunctionTemplate {
-                            function_path: self
-                                .path_fork
-                                .try_intern_child(imported_type_path, method_name)
-                                .expect("imported receiver method path table exhausted"),
-                            source_file: PathId::ROOT,
-                            declaration_identity: Some(GeneratedDeclarationIdentity::Public(
-                                method.method_origin.clone(),
-                            )),
-                            generic_parameter_owner: Some(generic_parameter_owner),
-                            generic_parameter_list_id,
-                            signature: signature.clone(),
-                            body_tokens: None,
-                            declaration_span: None,
-                        },
-                    );
+                        declaration_identity: GeneratedDeclarationIdentity::Public(
+                            method.method_origin.clone(),
+                        ),
+                        generic_parameter_owner,
+                        signature,
+                        owner_list_id,
+                        parameter_names,
+                        surfaces: descriptor.generic_parameters.clone(),
+                    };
+                    self.pending_imported_generic_methods.push(pending_method);
                     continue;
                 }
 

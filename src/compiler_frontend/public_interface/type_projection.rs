@@ -91,6 +91,9 @@ pub(super) struct ProjectedReceiverMethodSignature {
     pub(super) returns: Vec<PublicReturnTypeSlot>,
     pub(super) error_return: Option<CanonicalTypeIdentity>,
     pub(super) default_provenance: SyntheticInterfaceProvenance,
+    /// The generic parameter surfaces (with bounds) of a generic-template method; empty for a
+    /// concrete-local method.
+    pub(super) generic_parameters: Vec<PublicGenericParameterSurface>,
 }
 
 // ---------------------------------------------------------------------------
@@ -634,16 +637,19 @@ fn alias_aligned_generic_parameters(
 
 /// Project one resolved trait source fact to its stable canonical trait identity.
 ///
-/// WHAT: a source trait ([`ResolvedTraitSourceFact::Source`]) resolves to
-/// `CanonicalTraitIdentity::Source` through the public source-trait origin index; a core
-/// trait ([`ResolvedTraitSourceFact::Core`]) resolves to its stable
-/// [`CanonicalCoreTraitIdentity`]. A source trait whose canonical path has no retained
+/// WHAT: a local source trait ([`ResolvedTraitSourceFact::Source`]) resolves to
+/// `CanonicalTraitIdentity::Source` through the public source-trait origin index; an imported
+/// source trait ([`ResolvedTraitSourceFact::Imported`]) resolves to the provider origin it
+/// carries; a core trait ([`ResolvedTraitSourceFact::Core`]) resolves to its stable
+/// [`CanonicalCoreTraitIdentity`]. A local source trait whose canonical path has no retained
 /// public source-trait origin is a `CompilerError`.
 /// WHY: this is the single source/core mapping owner shared by generic-bound projection,
 /// direct public trait incompatibility projection and evidence projection, so every path
 /// resolves a retained trait source fact to the same canonical identity through one
 /// implementation. Extracting it keeps the source/core classification logic in the type
-/// projection owner rather than duplicating it.
+/// projection owner rather than duplicating it. An imported trait's canonical path is
+/// synthesised in the consumer and never enters the header-derived index, so its origin is
+/// carried by the fact.
 pub(super) fn project_trait_source_fact_to_canonical_identity(
     source_fact: &ResolvedTraitSourceFact,
     public_source_trait_origins: &FxHashMap<PathId, OriginTraitId>,
@@ -656,6 +662,9 @@ pub(super) fn project_trait_source_fact_to_canonical_identity(
                     path
                 )));
             };
+            Ok(CanonicalTraitIdentity::Source(origin.clone()))
+        }
+        ResolvedTraitSourceFact::Imported(origin) => {
             Ok(CanonicalTraitIdentity::Source(origin.clone()))
         }
         ResolvedTraitSourceFact::Core(kind) => {
@@ -715,7 +724,7 @@ fn project_generic_parameter_bounds(
 
 /// Project one root's exported generic parameter surfaces (identity plus ordered bounds) in
 /// declaration-local order.
-fn project_exported_generic_parameter_surfaces(
+pub(super) fn project_exported_generic_parameter_surfaces(
     generic_parameter_list_id: Option<GenericParameterListId>,
     type_environment: &TypeEnvironment,
     generic_resolver: &dyn GenericParameterOriginResolver,

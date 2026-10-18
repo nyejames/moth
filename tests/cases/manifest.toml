@@ -1826,6 +1826,111 @@ contract = "language.generics.receiver_method"
 role = "boundary"
 
 [[case]]
+id = "generic_imported_bounded_body_evidence_success"
+path = "generic_imported_bounded_body_evidence_success"
+tags = ["integration","generics","traits","functions","receiver-methods","dependencies"]
+contract = "language.generics.imported_bounded_body_trait_evidence"
+role = "primary"
+
+[[case]]
+id = "public_generic_receiver_bound_private_trait_rejected"
+path = "public_generic_receiver_bound_private_trait_rejected"
+tags = ["integration","generics","traits","functions","receiver-methods","dependencies","diagnostics"]
+contract = "language.generics.public_receiver_bound_private_trait_rejected"
+role = "primary"
+
+[[case]]
+id = "public_generic_receiver_bound_unexported_import_rejected"
+path = "public_generic_receiver_bound_unexported_import_rejected"
+tags = ["integration","generics","traits","functions","receiver-methods","dependencies","diagnostics"]
+contract = "language.generics.public_receiver_bound_private_trait_rejected"
+role = "boundary"
+
+[[case]]
+id = "generic_imported_method_bound_stricter_than_nominal_rejected"
+path = "generic_imported_method_bound_stricter_than_nominal_rejected"
+tags = ["integration","generics","traits","receiver-methods","dependencies","diagnostics"]
+contract = "language.generics.trait_bound_missing_evidence_rejected"
+role = "boundary"
+
+[[case]]
+id = "public_generic_receiver_bound_public_trait_success"
+path = "public_generic_receiver_bound_public_trait_success"
+tags = ["integration","generics","traits","functions","receiver-methods","dependencies","facade"]
+contract = "language.generics.public_receiver_bound_public_trait"
+role = "primary"
+
+[[case]]
+id = "public_generic_bound_imported_public_trait_success"
+path = "public_generic_bound_imported_public_trait_success"
+tags = ["integration","generics","traits","functions","dependencies","facade"]
+contract = "language.generics.public_bound_public_trait"
+role = "boundary"
+
+[[case]]
+id = "generic_imported_receiver_bound_nominal_requirement_success"
+path = "generic_imported_receiver_bound_nominal_requirement_success"
+tags = ["integration","generics","traits","receiver-methods","dependencies","facade"]
+contract = "language.generics.imported_receiver_bound_nominal_requirement"
+role = "primary"
+
+[[case]]
+id = "generic_bound_support_package_trait_evidence_success"
+path = "generic_bound_support_package_trait_evidence_success"
+tags = ["integration","generics","traits","functions","dependencies","facade"]
+contract = "language.generics.imported_trait_evidence_forwarded"
+role = "primary"
+
+[[case]]
+id = "public_generic_struct_bound_imported_public_trait_success"
+path = "public_generic_struct_bound_imported_public_trait_success"
+tags = ["integration","generics","traits","structs","dependencies","facade"]
+contract = "language.generics.imported_trait_evidence_forwarded"
+role = "boundary"
+
+[[case]]
+id = "generic_imported_bounded_body_outer_generic_only_success"
+path = "generic_imported_bounded_body_outer_generic_only_success"
+tags = ["integration","generics","traits","functions","receiver-methods","dependencies"]
+contract = "language.generics.imported_bounded_body_trait_evidence"
+role = "boundary"
+
+[[case]]
+id = "generic_bounded_body_outer_only_mixed_evidence_success"
+path = "generic_bounded_body_outer_only_mixed_evidence_success"
+tags = ["integration","generics","traits","functions","receiver-methods","dependencies"]
+contract = "language.generics.imported_bounded_body_trait_evidence"
+role = "boundary"
+
+[[case]]
+id = "generic_bounded_body_private_trait_retained_for_body_success"
+path = "generic_bounded_body_private_trait_retained_for_body_success"
+tags = ["integration","generics","traits","functions","receiver-methods","dependencies"]
+contract = "language.generics.imported_bounded_body_trait_evidence"
+role = "boundary"
+
+[[case]]
+id = "trait_requirement_nested_nominal_closure_success"
+path = "trait_requirement_nested_nominal_closure_success"
+tags = ["integration","generics","traits","receiver-methods","dependencies","facade"]
+contract = "language.generics.imported_receiver_bound_nominal_requirement"
+role = "boundary"
+
+[[case]]
+id = "trait_requirement_choice_nominal_closure_success"
+path = "trait_requirement_choice_nominal_closure_success"
+tags = ["integration","generics","traits","choices","receiver-methods","dependencies"]
+contract = "language.generics.imported_receiver_bound_nominal_requirement"
+role = "boundary"
+
+[[case]]
+id = "generic_bounded_body_private_evidence_return_alias_rejected"
+path = "generic_bounded_body_private_evidence_return_alias_rejected"
+tags = ["integration","generics","traits","functions","receiver-methods","borrows","diagnostics"]
+contract = "language.generics.imported_bounded_body_trait_evidence"
+role = "boundary"
+
+[[case]]
 id = "generic_receiver_generic_evidence_nested_argument_rejected"
 path = "generic_receiver_generic_evidence_nested_argument_rejected"
 tags = ["integration","generics","dependencies","receiver-methods","traits","diagnostics"]

@@ -1,0 +1,7 @@
+LABELED must:
+    label |This| -> String
+;
+
+show type U is LABELED |value U| -> String:
+    return value.label()
+;

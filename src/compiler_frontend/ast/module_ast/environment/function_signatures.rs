@@ -31,6 +31,7 @@ use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages}
 use crate::compiler_frontend::compiler_messages::{
     CompilerDiagnostic, InvalidReceiverDeclarationReason,
 };
+use crate::compiler_frontend::datatypes::ReceiverKey;
 use crate::compiler_frontend::datatypes::definitions::TypeDefinition;
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_parameters::{
@@ -43,7 +44,7 @@ use crate::compiler_frontend::headers::parse_file_headers::{Header, HeaderKind};
 use crate::compiler_frontend::instrumentation::{AstCounter, add_ast_counter};
 use crate::compiler_frontend::symbols::path_interner::PathId;
 use crate::compiler_frontend::symbols::path_interner::PathInternerFork;
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::type_coercion::compatibility::TypeCompatibilityCache;
 
@@ -51,6 +52,27 @@ use rustc_hash::FxHashMap;
 use std::rc::Rc;
 
 impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
+    /// Names a public generic declaration by its source-path component, for bound diagnostics.
+    ///
+    /// WHY: a public generic free function and a receiver method on a public nominal both report
+    /// unnameable bounds under this name, so both must resolve it the same way.
+    fn public_generic_declaration_name(
+        &self,
+        header: &Header,
+        string_table: &StringTable,
+    ) -> Result<StringId, CompilerMessages> {
+        self.path_fork
+            .component(header.declaration_path)
+            .ok_or_else(|| {
+                self.error_messages(
+                    CompilerError::compiler_error(
+                        "Public generic declaration header had no source-path name.",
+                    ),
+                    string_table,
+                )
+            })
+    }
+
     /// Resolves function signatures after struct declarations are available.
     ///
     /// WHY: late resolution lets signatures use named struct types and receiver syntax
@@ -83,17 +105,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 string_table,
             )?;
             if header.export_mode.is_public() {
-                let function_name = self
-                    .path_fork
-                    .component(header.declaration_path)
-                    .ok_or_else(|| {
-                        self.error_messages(
-                            CompilerError::compiler_error(
-                                "Public generic function header had no source-path name.",
-                            ),
-                            string_table,
-                        )
-                    })?;
+                let function_name = self.public_generic_declaration_name(header, string_table)?;
                 self.validate_public_generic_bounds(
                     function_name,
                     generic_parameters,
@@ -212,6 +224,25 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             .map_err(|diagnostic| self.diagnostic_messages(diagnostic, string_table))?;
             // Release the scope's declaration-table `Rc` before the builder mutates it below.
             drop(signature_context);
+            // Receiver methods are never exported, so the export gate above never reaches them.
+            // Their bounds still project onto a public nominal, so a public receiver checks them
+            // here, before any projection can publish them.
+            if let Some(ReceiverKey::Struct(receiver_path) | ReceiverKey::Choice(receiver_path)) =
+                &resolved_signature.receiver
+            {
+                let public_root_file = self.header_source_path(header);
+                if self.source_path_is_public_from_root_file(receiver_path, &public_root_file) {
+                    let method_name = self.public_generic_declaration_name(header, string_table)?;
+                    self.validate_public_generic_bounds(
+                        method_name,
+                        generic_parameters,
+                        &resolved_bounds_by_local,
+                        &public_root_file,
+                        trait_environment,
+                        string_table,
+                    )?;
+                }
+            }
 
             let mut used_generic_parameters = rustc_hash::FxHashSet::default();
             if let Some(registered_generic_parameters) = registered_generic_parameters.as_ref() {

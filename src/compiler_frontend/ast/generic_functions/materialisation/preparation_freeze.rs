@@ -65,6 +65,7 @@ use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork}
 use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::traits::environment::TraitEnvironment;
 use crate::compiler_frontend::traits::evidence::TraitEvidenceEnvironment;
+use crate::compiler_frontend::traits::ids::TraitId;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::cell::OnceCell;
@@ -432,6 +433,12 @@ impl ModuleMaterialisationPreparation {
                 }
             }
         }
+        // Private evidence rows keep a copy of the callable they dispatch to, so refresh it with
+        // the other summary owners; a stale copy would hide return aliases from consumers that
+        // install the evidence.
+        stable_context
+            .semantic_closure
+            .update_callable_summary(path, summary);
     }
 }
 
@@ -529,6 +536,15 @@ impl ModuleMaterialisationCapture {
             &declaration_closure,
             &evidence,
         )?;
+        // Private evidence rows carry their method's concrete binding, so the closure reads this
+        // table. It is captured once here and reused by the callable detach below.
+        let all_callable_paths = self
+            .imported_functions_by_local_path
+            .keys()
+            .copied()
+            .collect();
+        let callable_contracts =
+            self.stable_callable_bindings(const_values, &all_callable_paths, resources, path_fork)?;
         // Empty source modules still supply requester/provider metadata below. Only the closure
         // that freeze would discard is skipped, and bodyless generic contracts keep their lane.
         let mut semantic_closure = if self.generic_function_templates_by_path.is_empty()
@@ -536,7 +552,13 @@ impl ModuleMaterialisationCapture {
         {
             StableSemanticClosure::default()
         } else {
-            self.stable_semantic_closure(const_values, &retained_local_paths, resources, path_fork)?
+            self.stable_semantic_closure(
+                const_values,
+                &retained_local_paths,
+                &callable_contracts,
+                resources,
+                path_fork,
+            )?
         };
         if let Some(context) = &self.inherited_stable_context {
             semantic_closure.inherit_original(&context.semantic_closure);
@@ -559,13 +581,6 @@ impl ModuleMaterialisationCapture {
             artefacts.extend(context.artefacts.iter().cloned());
         }
         artefacts.sort_by(|left, right| left.declaration_identity.cmp(&right.declaration_identity));
-        let all_callable_paths = self
-            .imported_functions_by_local_path
-            .keys()
-            .copied()
-            .collect();
-        let callable_contracts =
-            self.stable_callable_bindings(const_values, &all_callable_paths, resources, path_fork)?;
         let generic_callable_contracts = self
             .generic_function_templates_by_path
             .values()
@@ -772,8 +787,21 @@ impl ModuleMaterialisationCapture {
             &generic_parameters,
             &mut referenced_names,
         )?;
-        let selected_paths =
+        let selection_before_callees =
             self.selected_visible_paths(&template.source_file, &referenced_names)?;
+        let names_before_callees = referenced_names.len();
+        self.retain_callee_bound_trait_names(
+            &template.source_file,
+            &selection_before_callees,
+            &mut referenced_names,
+        )?;
+        // Retained names only grow, so an unchanged count means the selection above still holds.
+        // Callee-bound spellings can select more paths, so only then is the selection rebuilt.
+        let selected_paths = if referenced_names.len() == names_before_callees {
+            selection_before_callees
+        } else {
+            self.selected_visible_paths(&template.source_file, &referenced_names)?
+        };
         let local_declarations =
             self.stable_local_declaration_bindings(const_values, &selected_paths);
         Ok(TemplateDeclarationSelection {
@@ -976,8 +1004,6 @@ impl ModuleMaterialisationCapture {
         parameters: &[StableGenericParameter],
         referenced_names: &mut FxHashSet<String>,
     ) -> Result<(), CompilerError> {
-        let visibility = self.binding_environment.visibility_for(source_file)?;
-
         for parameter in parameters {
             for bound in &parameter.bounds {
                 if matches!(bound, CanonicalTraitIdentity::Core(_)) {
@@ -992,20 +1018,7 @@ impl ModuleMaterialisationCapture {
                             "Retained generic bound has no declaring-module trait definition",
                         )
                     })?;
-                let mut retained_visible_name = false;
-
-                for (visible_name, target) in &visibility.visible_trait_names {
-                    if self
-                        .trait_environment
-                        .has_path(trait_id, target.local_path())
-                    {
-                        referenced_names
-                            .insert(self.string_table.resolve(*visible_name).to_owned());
-                        retained_visible_name = true;
-                    }
-                }
-
-                if !retained_visible_name {
+                if !self.retain_visible_trait_spellings(source_file, trait_id, referenced_names)? {
                     return Err(CompilerError::compiler_error(
                         "Retained generic bound is not visible in its declaration file",
                     ));
@@ -1014,6 +1027,69 @@ impl ModuleMaterialisationCapture {
         }
 
         Ok(())
+    }
+
+    /// Retains the spellings that generic callees named in the body need in the caller's file.
+    ///
+    /// A nested generic call checks its bounds against the file visibility of the body that makes
+    /// the call, as the original body did. The callee's header lies outside the retained body
+    /// tokens, so its bound spellings are retained here. Referenced names over-approximate the
+    /// calls: a shadowing local, or a field with the same name, can select a callee the body never
+    /// calls, and that callee's bound may be unnamed in this file. Such bounds are skipped, not
+    /// rejected, because a call the body really makes had to name its bound in the original file.
+    ///
+    /// `selected_paths` is the selection taken before these spellings were added. Callees that
+    /// are reachable only through the added spellings are not followed here.
+    fn retain_callee_bound_trait_names(
+        &self,
+        source_file: &PathId,
+        selected_paths: &FxHashSet<PathId>,
+        referenced_names: &mut FxHashSet<String>,
+    ) -> Result<(), CompilerError> {
+        for path in selected_paths {
+            let Some(callee) = self.generic_function_templates_by_path.get(path) else {
+                continue;
+            };
+            let parameters = self
+                .type_environment
+                .generic_parameters(callee.generic_parameter_list_id)
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "Retained generic callee references a missing parameter list",
+                    )
+                })?;
+            for trait_id in parameters
+                .parameters
+                .iter()
+                .flat_map(|parameter| parameter.trait_bounds.iter())
+            {
+                // An unnamed bound is skipped on purpose; see the doc comment above.
+                self.retain_visible_trait_spellings(source_file, *trait_id, referenced_names)?;
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Inserts each spelling the declaring file gives `trait_id`. Reports whether there was one.
+    fn retain_visible_trait_spellings(
+        &self,
+        source_file: &PathId,
+        trait_id: TraitId,
+        referenced_names: &mut FxHashSet<String>,
+    ) -> Result<bool, CompilerError> {
+        let visibility = self.binding_environment.visibility_for(source_file)?;
+        let mut retained_visible_name = false;
+        for (visible_name, target) in &visibility.visible_trait_names {
+            if self
+                .trait_environment
+                .has_path(trait_id, target.local_path())
+            {
+                referenced_names.insert(self.string_table.resolve(*visible_name).to_owned());
+                retained_visible_name = true;
+            }
+        }
+        Ok(retained_visible_name)
     }
 
     fn generic_parameter_slots(
@@ -1803,7 +1879,7 @@ fn generic_template_receiver_origins(
         for method in methods {
             if matches!(
                 method.category,
-                PublicReceiverMethodCategory::GenericTemplate
+                PublicReceiverMethodCategory::GenericTemplate(_)
             ) {
                 origins.insert(&method.method_origin);
             }

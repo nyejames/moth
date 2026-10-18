@@ -16,7 +16,9 @@ use crate::compiler_frontend::value_mode::ValueMode;
 /// Source/visibility ownership for a resolved trait definition.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum TraitVisibility {
-    /// Authored source trait. `exported` means the trait is part of the module public surface.
+    /// Authored source trait. `exported` means the trait is public at its owner: declared in
+    /// its module root's export block, or imported from a provider's public interface.
+    /// Re-exported local traits are recognised through the root's export entries instead.
     Source { exported: bool },
     /// Compiler-owned core trait metadata visible without a user declaration.
     Core,

@@ -116,7 +116,9 @@ fn receiver_draft_record_with_template(
             receiver_methods: vec![PublicReceiverMethodSemantics {
                 method_origin,
                 category: if is_generic {
-                    PublicReceiverMethodCategory::GenericTemplate
+                    PublicReceiverMethodCategory::GenericTemplate(PublicGenericTemplateDescriptor {
+                        generic_parameters: vec![],
+                    })
                 } else {
                     PublicReceiverMethodCategory::ConcreteLocal
                 },
@@ -236,7 +238,7 @@ fn generic_receiver_template_has_no_base_concrete_summary() {
     };
     assert!(matches!(
         receiver.receiver_methods[0].category,
-        PublicReceiverMethodCategory::GenericTemplate
+        PublicReceiverMethodCategory::GenericTemplate(_)
     ));
     assert!(draft.concrete_call_summaries.is_empty());
 }

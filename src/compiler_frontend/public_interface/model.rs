@@ -256,17 +256,19 @@ pub(crate) enum PublicDeclarationSemantics {
     Trait(PublicTraitSemantics),
 }
 
-/// The explicit generic-template descriptor for one exported generic free function.
+/// The explicit generic-template descriptor for one exported generic free function or generic
+/// receiver method.
 ///
 /// WHAT: owns the stable generic parameter identities and their ordered canonical trait
 /// bounds — the current required-evidence shape — that a cross-module consumer needs for
-/// generic inference. It is present only on generic free-function records: a non-generic
-/// free function carries no descriptor. The enclosing [`PublicDeclarationRecord`] remains the
-/// stable declaration-origin owner and the enclosing [`PublicFunctionSemantics`] remains the
-/// canonical parameter and return contract owner, so the descriptor does not duplicate origin
-/// or signature types. No raw tokens, donor-local path, source span,
-/// `GenericParameterListId`, `GenericParameterId`, `TypeId`, `TraitId` or other local
-/// registry handle enters this descriptor.
+/// generic inference. It is present only on generic free-function and generic receiver-method
+/// records: a non-generic callable carries no descriptor. The enclosing
+/// [`PublicDeclarationRecord`] remains the stable declaration-origin owner and the enclosing
+/// callable semantics ([`PublicFunctionSemantics`] or [`PublicReceiverMethodSemantics`]) remain
+/// the canonical parameter and return contract owner, so the descriptor does not duplicate
+/// origin or signature types. No raw tokens, donor-local path, source span,
+/// `GenericParameterListId`, `GenericParameterId`, `TypeId`, `TraitId` or other local registry
+/// handle enters this descriptor.
 ///
 /// WHY: locked decision 10 separates consumer-visible generic semantic identity from the
 /// declaring module's retained template body and compilation context. This descriptor is the
@@ -311,17 +313,21 @@ pub(crate) struct PublicFunctionSemantics {
 /// The explicit callable category for one exported receiver method.
 ///
 /// WHAT: distinguishes a directly defined concrete-local receiver method, which receives exactly
-/// one concrete summary after borrow validation, from a generic-template receiver method, which is
-/// a declaration contract whose generated concrete summaries belong to sidecars. A generic
-/// receiver method carries no descriptor here because its stable generic parameter identities are
-/// owned by the enclosing nominal record's generic parameters.
+/// one concrete summary after borrow validation, from a generic-template receiver method, which
+/// is a declaration contract whose generated concrete summaries belong to sidecars. The generic
+/// variant carries the method's own generic parameter surfaces and bounds, as a generic free
+/// function's descriptor does.
+///
+/// WHY: the enclosing nominal's generic parameters carry no method bounds, so a cross-module
+/// consumer could not check the method's bounds or select its generated evidence from the
+/// nominal alone.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum PublicReceiverMethodCategory {
     /// A directly defined non-generic receiver method. Receives exactly one concrete summary
     /// after borrow validation.
     ConcreteLocal,
     /// A generic-template receiver method. Never receives a base concrete summary.
-    GenericTemplate,
+    GenericTemplate(PublicGenericTemplateDescriptor),
 }
 
 /// The semantic facts for one exported receiver method, attached to its owning struct or choice
@@ -376,6 +382,36 @@ pub(crate) struct PublicConstantSemantics {
 pub(crate) struct PublicTraitSemantics {
     pub(crate) requirements: Vec<PublicTraitRequirementSurface>,
     pub(crate) incompatibilities: Vec<CanonicalTraitIdentity>,
+}
+
+impl PublicTraitSemantics {
+    /// Every concrete canonical identity a trait requirement names, in authored order.
+    ///
+    /// WHAT: walks each requirement's parameter identities, including contract-owned ones, then
+    ///       its return identities, skipping `Self`, which names no nominal.
+    /// WHY: the interface closure retains these identities and consumer nominal projection must
+    ///      declare the nominals they name, so both read the trait surface through this one walk.
+    pub(crate) fn concrete_type_identities(
+        &self,
+    ) -> impl Iterator<Item = &CanonicalTypeIdentity> + '_ {
+        self.requirements
+            .iter()
+            .flat_map(|requirement| {
+                let parameter_identities = requirement
+                    .parameters
+                    .iter()
+                    .flat_map(|parameter| parameter.semantic_type_identities());
+                let return_identities = requirement
+                    .returns
+                    .iter()
+                    .map(|return_slot| &return_slot.type_identity);
+                parameter_identities.chain(return_identities)
+            })
+            .filter_map(|identity| match identity {
+                TraitSurfaceTypeIdentity::Concrete(identity) => Some(identity.as_ref()),
+                TraitSurfaceTypeIdentity::SelfType => None,
+            })
+    }
 }
 
 /// One declaration-centric record in the public interface draft.

@@ -742,7 +742,7 @@ fn builder_classifies_generic_receiver_from_exact_template_path_and_excludes_hir
     let method = &receiver.receiver_methods[0];
     assert!(matches!(
         method.category,
-        PublicReceiverMethodCategory::GenericTemplate
+        PublicReceiverMethodCategory::GenericTemplate(_)
     ));
     assert_eq!(method.method_origin, method_origin);
     assert_eq!(method.parameters.len(), 1);

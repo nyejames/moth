@@ -10,7 +10,8 @@ use super::*;
 use crate::compiler_frontend::ast::statements::functions::ParameterContract;
 use crate::compiler_frontend::canonical_type_identity::CanonicalTraitIdentity;
 use crate::compiler_frontend::public_interface::{
-    PublicTraitParameterContract, PublicTraitReceiverAccess, TraitSurfaceTypeIdentity,
+    PublicGenericParameterSurface, PublicTraitParameterContract, PublicTraitReceiverAccess,
+    TraitSurfaceTypeIdentity,
 };
 use crate::compiler_frontend::semantic_identity::{OriginFunctionId, OriginTraitId};
 use crate::compiler_frontend::traits::definitions::{
@@ -230,7 +231,48 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         }
     }
 
-    /// Patches imported nominal generic lists once imported and core trait IDs are available.
+    /// Resolves one imported generic list's declared bounds against the provider trait closure.
+    ///
+    /// WHAT: maps each parameter's canonical bound identities to local `TraitId`s. A bound the
+    /// provider closure does not retain, or a repeated bound on one parameter, is an invariant
+    /// failure because the provider interface is the only source of these bounds.
+    fn resolve_imported_bounds_by_local(
+        surfaces: &[PublicGenericParameterSurface],
+        trait_environment: &TraitEnvironment,
+    ) -> Result<FxHashMap<TypeParameterId, Vec<TraitId>>, CompilerError> {
+        let mut bounds_by_local = FxHashMap::default();
+
+        for (index, parameter) in surfaces.iter().enumerate() {
+            let mut bounds = Vec::with_capacity(parameter.bounds.len());
+            let mut seen = FxHashSet::default();
+            for bound in &parameter.bounds {
+                let trait_id = trait_environment
+                    .id_for_canonical_identity(bound)
+                    .ok_or_else(|| {
+                        CompilerError::compiler_error(
+                            "An imported generic bound names a trait absent from the provider closure.",
+                        )
+                    })?;
+                if !seen.insert(trait_id) {
+                    return Err(CompilerError::compiler_error(
+                        "An imported generic parameter contains a duplicate canonical trait bound.",
+                    ));
+                }
+                bounds.push(trait_id);
+            }
+            bounds_by_local.insert(TypeParameterId(index as u32), bounds);
+        }
+
+        Ok(bounds_by_local)
+    }
+
+    /// Resolves declared bounds of imported generic lists and registers imported receiver method
+    /// contracts once their bounds can name trait ids.
+    ///
+    /// WHAT: writes each resolved bound onto its imported nominal list, then registers each
+    /// pending method contract with its own resolved bounds.
+    /// WHY: lists and method contracts are registered before trait ids exist, so their bounds
+    /// are resolved here rather than at registration.
     pub(in crate::compiler_frontend::ast) fn resolve_dependencyed_generic_parameter_bounds(
         &mut self,
         trait_environment: &TraitEnvironment,
@@ -238,33 +280,42 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         let registrations = self.imported_generic_parameter_registrations.clone();
 
         for registration in registrations {
-            let mut bounds_by_local = FxHashMap::default();
-
-            for (index, parameter) in registration.surfaces.iter().enumerate() {
-                let mut bounds = Vec::with_capacity(parameter.bounds.len());
-                let mut seen = FxHashSet::default();
-                for bound in &parameter.bounds {
-                    let trait_id = trait_environment
-                        .id_for_canonical_identity(bound)
-                        .ok_or_else(|| {
-                            CompilerError::compiler_error(
-                                "An imported generic bound names a trait absent from the provider closure.",
-                            )
-                        })?;
-                    if !seen.insert(trait_id) {
-                        return Err(CompilerError::compiler_error(
-                            "An imported generic parameter contains a duplicate canonical trait bound.",
-                        ));
-                    }
-                    bounds.push(trait_id);
-                }
-                bounds_by_local.insert(TypeParameterId(index as u32), bounds);
-            }
-
+            let bounds_by_local =
+                Self::resolve_imported_bounds_by_local(&registration.surfaces, trait_environment)?;
             self.type_environment.update_generic_parameter_bounds(
                 registration.list_id,
                 &bounds_by_local,
                 &registration.canonical_by_local,
+            );
+        }
+
+        for method in std::mem::take(&mut self.pending_imported_generic_methods) {
+            let bounds_by_local =
+                Self::resolve_imported_bounds_by_local(&method.surfaces, trait_environment)?;
+            let registered = self
+                .type_environment
+                .register_generic_parameter_contract(
+                    method.owner_list_id,
+                    method.parameter_names.into_iter(),
+                    &bounds_by_local,
+                )
+                .ok_or_else(|| {
+                    CompilerError::compiler_error(
+                        "Imported method contract disagrees with its owner parameter list.",
+                    )
+                })?;
+            self.generic_function_templates_by_path.insert(
+                method.method_path,
+                GenericFunctionTemplate {
+                    function_path: method.method_path,
+                    source_file: PathId::ROOT,
+                    declaration_identity: Some(method.declaration_identity),
+                    generic_parameter_owner: Some(method.generic_parameter_owner),
+                    generic_parameter_list_id: registered.list_id,
+                    signature: method.signature,
+                    body_tokens: None,
+                    declaration_span: None,
+                },
             );
         }
 

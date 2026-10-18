@@ -46,6 +46,8 @@ fn collect_semantic_type_origins(
             collect_canonical_type_origins(&constant.type_identity, origins);
             collect_folded_type_origins(&constant.folded_value, origins);
         }
+        // Trait requirements are not walked here. `reachable_imported_type_origins` seeds them
+        // for every retained trait, because trait projection covers the whole closure.
         PublicDeclarationSemantics::Trait(_) => {}
     }
 }
@@ -312,7 +314,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         Ok(())
     }
 
-    /// Computes the nominal declaration closure required by directly imported declarations.
+    /// Computes the nominal declaration closure required by directly imported declarations and by
+    /// every retained trait's requirement signatures.
     fn reachable_imported_type_origins(&self) -> FxHashSet<OriginTypeId> {
         let mut reachable = FxHashSet::default();
         for evidence in self
@@ -343,6 +346,20 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 .get(origin)
             {
                 collect_semantic_type_origins(&record.semantics, &mut reachable);
+            }
+        }
+        // Trait projection covers every retained trait, not only the traits the consumer imports
+        // directly. The nominals their requirements name must be declared before traits resolve,
+        // otherwise trait projection cannot intern those requirement types.
+        for record in self
+            .binding_environment
+            .imported_declarations_by_origin
+            .values()
+        {
+            if let PublicDeclarationSemantics::Trait(semantics) = &record.semantics {
+                for identity in semantics.concrete_type_identities() {
+                    collect_canonical_type_origins(identity, &mut reachable);
+                }
             }
         }
 

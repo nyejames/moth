@@ -1147,7 +1147,7 @@ Module files can bind helper-file declarations. Other modules see only the root'
     ;
 ]
 
-A root allows one non-empty `export:`. Export functions, structs, choices, aliases, traits, constants or direct dependency selections, never runtime bindings, fragments, statements or whole namespaces. Public signatures cannot expose private types, traits or required evidence. Receiver types expose their methods, while aliases alone do not expose private implementation methods.
+A root allows one non-empty `export:`. Export functions, structs, choices, aliases, traits, constants or direct dependency selections, never runtime bindings, fragments, statements or whole namespaces. Public signatures cannot expose private types, traits or required evidence. A trait is public at its owner when its module root exports it, directly or by re-export, or a provider's public interface supplies it; the publishing module need not re-export an imported trait. Receiver types expose their methods, while aliases alone do not expose private implementation methods.
 
 A source-tree `+*.moth` creates a directory-named support package: `src/shared/+package.moth` gives `@shared`. It uses `export:` and forbids top-level runtime work/pages. Support packages share code between normal siblings, which cannot depend directly on one another.
 

@@ -1,0 +1,4 @@
+@utils Box
+
+boxed = Box("private")
+[:[boxed.value]]

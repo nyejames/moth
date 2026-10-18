@@ -405,9 +405,14 @@ fn source_target_resolves_to_type(
         }
     }
 
-    if type_environment
+    // WHY: an imported nominal keeps a collision-free canonical path in `nominal_path`, while
+    // its visible spelling is a registered alias for the same nominal. Compare nominal identity
+    // so the alias resolves; comparing raw paths rejects a visible name that names this type.
+    let type_nominal = type_environment
         .nominal_path(type_id)
-        .is_some_and(|path| path == target.local_path())
+        .and_then(|path| type_environment.nominal_id_for_path(path));
+    if type_nominal.is_some()
+        && type_environment.nominal_id_for_path(target.local_path()) == type_nominal
     {
         return true;
     }
