@@ -296,6 +296,11 @@ pub(crate) fn invalid_multi_bind_message(
         InvalidMultiBindReason::MutableTargetNeedsExplicitType => {
             format!("Mutable multi-bind target {target_text} requires an explicit type annotation.")
         }
+        InvalidMultiBindReason::CompileTimeMarkerOnTarget => {
+            format!(
+                "Multi-bind target {target_text} cannot use a compile-time '#' marker. Multi-bind targets are runtime bindings, so remove the '#'."
+            )
+        }
         InvalidMultiBindReason::DuplicateTarget => {
             format!("Duplicate multi-bind target {target_text} in the same target list.")
         }

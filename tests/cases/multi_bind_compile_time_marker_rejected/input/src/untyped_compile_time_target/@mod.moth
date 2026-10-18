@@ -1,0 +1,8 @@
+pair || -> String, I32:
+    return "Priya", 2
+;
+
+run ||:
+    name #, count = pair()
+    io.line([: [name] [count]])
+;

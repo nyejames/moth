@@ -4682,6 +4682,13 @@ contract = "language.functions.multi_bind_existing_target_mutable_marker_rejecte
 role = "primary"
 
 [[case]]
+id = "multi_bind_compile_time_marker_rejected"
+path = "multi_bind_compile_time_marker_rejected"
+tags = ["integration", "results", "diagnostics"]
+contract = "language.functions.multi_bind_compile_time_marker_rejected"
+role = "primary"
+
+[[case]]
 id = "multi_bind_mixed_existing_and_new_targets"
 path = "multi_bind_mixed_existing_and_new_targets"
 tags = ["integration", "results"]

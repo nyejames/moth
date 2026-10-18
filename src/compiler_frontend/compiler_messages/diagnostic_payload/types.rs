@@ -1342,6 +1342,7 @@ pub enum InvalidMultiBindReason {
     MissingRightHandExpression,
     MultipleRightHandExpressions,
     MutableTargetNeedsExplicitType,
+    CompileTimeMarkerOnTarget,
     DuplicateTarget,
     UnsupportedRhs,
     ExistingTargetMutableMarker,

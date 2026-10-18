@@ -307,7 +307,7 @@ Multiple returns remain separate values:
     name, count = pair()
 ]
 
-Receive all results through matching multi-bind, `return` or value-producing syntax. All results are computed before assigning any existing targets. A comma can continue a multi-bind onto another line, but no trailing comma precedes `=`. There are no tuple returns. Every reachable success path returns matching values or terminates.
+Receive all results through matching multi-bind, `return` or value-producing syntax. All results are computed before assigning any existing targets. A comma can continue a multi-bind onto another line, but no trailing comma precedes `=`. Multi-bind targets are runtime bindings, so a `#` marker is invalid on every target, new or existing. There are no tuple returns. Every reachable success path returns matching values or terminates.
 
 ### Never-returning calls: `-> !`
 

@@ -1,0 +1,37 @@
+[backends.html]
+mode = "failure"
+warnings = "forbid"
+diagnostic_codes = ["MOTH-SYNTAX-0030", "MOTH-RULE-0045", "MOTH-RULE-0045", "MOTH-RULE-0045"]
+
+# An ordinary `#` declaration followed by a stray comma is not a multi-bind and keeps the
+# comma syntax error.
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-SYNTAX-0030"
+occurrence = 1
+path = "input/compile_time_declaration_comma/@mod.moth"
+line = 2
+column = 17
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0045"
+occurrence = 1
+reason = "invalid_multi_bind.compile_time_marker_on_target"
+path = "input/existing_compile_time_target/@mod.moth"
+line = 7
+column = 7
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0045"
+occurrence = 2
+reason = "invalid_multi_bind.compile_time_marker_on_target"
+path = "input/typed_compile_time_target/@mod.moth"
+line = 6
+column = 10
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0045"
+occurrence = 3
+reason = "invalid_multi_bind.compile_time_marker_on_target"
+path = "input/untyped_compile_time_target/@mod.moth"
+line = 6
+column = 10

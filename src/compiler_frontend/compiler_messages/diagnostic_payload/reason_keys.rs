@@ -1267,6 +1267,7 @@ define_stable_reason_keys! {
     &InvalidMultiBindReason::MissingRightHandExpression => "invalid_multi_bind.missing_right_hand_expression",
     &InvalidMultiBindReason::MultipleRightHandExpressions => "invalid_multi_bind.multiple_right_hand_expressions",
     &InvalidMultiBindReason::MutableTargetNeedsExplicitType => "invalid_multi_bind.mutable_target_needs_explicit_type",
+    &InvalidMultiBindReason::CompileTimeMarkerOnTarget => "invalid_multi_bind.compile_time_marker_on_target",
     &InvalidMultiBindReason::DuplicateTarget => "invalid_multi_bind.duplicate_target",
     &InvalidMultiBindReason::UnsupportedRhs => "invalid_multi_bind.unsupported_rhs",
     &InvalidMultiBindReason::ExistingTargetMutableMarker => "invalid_multi_bind.existing_target_mutable_marker",

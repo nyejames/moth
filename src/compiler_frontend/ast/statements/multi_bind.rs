@@ -430,7 +430,7 @@ fn parse_target_list(
             type_annotation: target_syntax.type_annotation,
             span: target_syntax.span,
         };
-        validate_target_mutability(&target, string_table)?;
+        validate_target_mutability(&target)?;
         parsed_targets.push(target);
 
         match token_stream.current_tag() {
@@ -481,15 +481,30 @@ fn parse_target_list(
         return Ok(None);
     }
 
+    // WHY: `#` is legal on an ordinary declaration such as `name #= "hi"`, so the marker is
+    //      rejected only after the target list commits this statement to a multi-bind. Multi-bind
+    //      targets are runtime bindings and lowering would otherwise drop the marker silently.
+    if let Some(target) = parsed_targets
+        .iter()
+        .find(|target| target.binding_mode.is_compile_time())
+    {
+        return Err(CompilerDiagnostic::invalid_multi_bind(
+            InvalidMultiBindReason::CompileTimeMarkerOnTarget,
+            Some(target.name),
+            target.span,
+        )
+        .into());
+    }
+
     token_stream.advance();
     Ok(Some(parsed_targets))
 }
 
 /// Reject mutable multi-bind targets that lack an explicit type annotation.
-fn validate_target_mutability(
-    target_syntax: &ParsedMultiBindTarget,
-    _string_table: &StringTable,
-) -> MultiBindResult<()> {
+///
+/// WHY: an untyped `~` target is invalid whether or not the statement turns out to be a
+/// multi-bind, so it is rejected while the targets are scanned.
+fn validate_target_mutability(target_syntax: &ParsedMultiBindTarget) -> MultiBindResult<()> {
     if target_syntax.binding_mode.is_mutable()
         && target_syntax.type_annotation.eq(&ParsedTypeRef::Inferred)
     {
