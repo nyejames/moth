@@ -1,7 +1,8 @@
 //! Borrow-checker state invariant tests.
 //!
-//! WHAT: protects slot-backed alias rebinding, join growth reporting, visibility narrowing and
-//!       the membership shortcut that alias conflict scans use in place of the set builder.
+//! WHAT: protects slot-backed alias rebinding, join growth reporting, visibility narrowing, the
+//!       skip a covering visibility mask takes, and the membership shortcut that alias conflict
+//!       scans use in place of the set builder.
 //! WHY: these facts live in transfer state and cannot be inspected from rendered output.
 
 use super::super::state::{BorrowState, LocalState, RootSet};
@@ -159,6 +160,63 @@ fn joining_states_narrowed_to_one_mask_stays_narrowed() {
     renarrowed.kill_invisible(&visible);
 
     assert_eq!(renarrowed, left);
+}
+
+/// A sweep may only skip a mask that provably covers every local. Skipping one that misses a bit
+/// would keep a root outside the block's visibility, so this pins the cover test itself: the
+/// full mask of the same width covers, and an empty, narrower or one-bit-short mask does not.
+#[test]
+fn root_set_covers_all_only_for_a_full_mask_of_the_same_width() {
+    // A partial final word and both sides of the word boundary are covered by the widths tried.
+    const LOCAL_COUNT: usize = 70;
+    for width in [0usize, 1, 63, 64, 65, LOCAL_COUNT] {
+        let full = RootSet::full(width);
+        assert!(full.covers_all(width));
+        assert_eq!(RootSet::empty(width).covers_all(width), width == 0);
+        // A mask for a larger or smaller universe is not this universe's cover.
+        assert!(!full.covers_all(width + 1));
+        if width > 0 {
+            assert!(!full.covers_all(width - 1));
+            let mut missing = RootSet::full(width);
+            missing.subtract_with(&roots(width, &[width - 1]));
+            assert!(!missing.covers_all(width));
+        }
+    }
+}
+
+/// A covering mask hides no local and removes no root bit, so the sweep must leave the state
+/// alone; the same state swept with one visible bit removed must still lose the roots on it.
+#[test]
+fn visibility_sweep_leaves_a_state_unchanged_under_a_covering_mask() {
+    const LOCAL_COUNT: usize = 70;
+    const LAST: usize = LOCAL_COUNT - 1;
+    let local_count = LOCAL_COUNT;
+    let mut state = BorrowState::new_uninitialized(local_count);
+    state.initialize_parameter(0);
+    state.update_local_state(
+        1,
+        LocalState::alias_with_direct(roots(local_count, &[0, LAST]), roots(local_count, &[LAST])),
+    );
+    state.update_local_state(
+        2,
+        LocalState::slot_with_value_roots(roots(local_count, &[1]), roots(local_count, &[1])),
+    );
+
+    let before = state.clone();
+    state.kill_invisible(&RootSet::full(local_count));
+    assert_eq!(state, before);
+
+    // Bit 1 carries local 2's only root and local 1's direct alias, and local 1 becomes invisible.
+    let mut narrowed = RootSet::full(local_count);
+    narrowed.subtract_with(&roots(local_count, &[1]));
+    state.kill_invisible(&narrowed);
+
+    assert_eq!(state.local_state(1), &LocalState::uninit(local_count));
+    let narrowed_slot = state.local_state(2);
+    assert_eq!(narrowed_slot.mode, LocalMode::SLOT);
+    assert!(narrowed_slot.value_roots.is_empty());
+    assert!(narrowed_slot.direct_alias_roots.is_empty());
+    assert_eq!(state.local_state(0).mode, LocalMode::SLOT);
 }
 
 /// `effective_root_contains` must answer exactly what `effective_roots(..).contains` answers, for

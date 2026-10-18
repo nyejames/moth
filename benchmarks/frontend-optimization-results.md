@@ -6540,3 +6540,32 @@ A fresh rerun against a rebuilt base gave 0.603 and 0.649 for the two 512
 cases. Exit codes, stdout and output files match across the 74 CLI cases. The
 gain grows with size, but converge still scales close to quadratically because
 each visit copies a state with one entry per local.
+
+## Typed-expression follow-ups: covering visibility masks skip the sweep
+
+With empty root sets cheap, `BorrowState::kill_invisible` still walked every
+local on every visit and intersected each rooted local's sets with the
+visibility mask: 13% of mutable cycles 512 converge and 10% of narrow chains
+512. In both cases the function body is one region, so the mask covers every
+local and the whole sweep changes nothing. `RootSet::covers_all` checks the mask
+in `ceil(locals / 64)` word compares and `kill_invisible` returns early when it
+covers the layout; narrower masks take the existing sweep.
+
+Paired interleaved rounds, 25 rounds, three binaries interleaved, median of
+per-round ratios with bootstrap CI95:
+
+| Case · metric | Against empty root sets | Against `9b0929229` |
+|---|---:|---:|
+| mutable cycles 512 · converge | 0.855 (0.851-0.859) | 0.517 (0.513-0.520) |
+| mutable cycles 512 · wall | 0.890 (0.883-0.892) | 0.588 (0.583-0.590) |
+| narrow chains 512 · converge | 0.905 (0.895-0.924) | 0.591 (0.575-0.604) |
+| narrow chains 512 · wall | 0.923 (0.913-0.938) | 0.637 (0.624-0.656) |
+| mutable cycles 128 · converge | 0.941 | 0.714 |
+| docs · wall | 0.987 (0.979-1.006) | 0.994 |
+| module graph · wall (control) | 1.000 (0.974-1.036) | 0.953 |
+
+The saving matches the sweep's measured share of the stage. Exit codes, stdout
+and output files match across the 74 CLI cases. The converge exponent from 128
+to 512 locals falls from 2.13 to 1.90 for mutable cycles; the remaining cost is
+copying one state entry per local per visit, which needs a state
+representation change rather than a local fix.

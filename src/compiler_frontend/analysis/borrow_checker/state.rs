@@ -298,6 +298,13 @@ impl BorrowState {
     /// value roots, so joining two states narrowed to one mask stays narrowed. The engine relies
     /// on that to store narrowed block inputs without narrowing them again before transfer.
     pub(super) fn kill_invisible(&mut self, visible_mask: &RootSet) {
+        // WHY: the sweep is O(locals) and runs on every CFG edge. A mask that covers every local
+        // (a function whose blocks all sit in one lexical region) hides none and keeps every root,
+        // so the pass would rewrite every local without changing one.
+        if visible_mask.covers_all(self.locals.len()) {
+            return;
+        }
+
         for (local_index, local) in self.locals.iter_mut().enumerate() {
             if !visible_mask.contains(local_index) {
                 local.reset(LocalMode::UNINIT);
@@ -438,6 +445,31 @@ impl RootSet {
             words: (word_len != 0).then(|| Rc::from(words)),
             bit_len,
         }
+    }
+
+    /// Whether every index below `local_count` is a member and the set spans that universe.
+    ///
+    /// WHY: the engine narrows every CFG edge against a block's visibility mask, and that sweep is
+    /// O(locals). A mask covering every local hides none and removes no root bit, so callers can
+    /// skip the sweep instead of rewriting every local for no change.
+    pub(super) fn covers_all(&self, local_count: usize) -> bool {
+        if self.bit_len != local_count {
+            return false;
+        }
+        let word_len = local_count.div_ceil(64);
+        let words = self.word_slice();
+        // A set with no words is an empty set; it covers every index only when there are none.
+        if words.len() != word_len {
+            return false;
+        }
+        let Some((tail, leading)) = words.split_last() else {
+            return word_len == 0;
+        };
+        let tail_bits = match local_count % 64 {
+            0 => u64::MAX,
+            remainder => (1u64 << remainder) - 1,
+        };
+        *tail == tail_bits && leading.iter().all(|word| *word == u64::MAX)
     }
 
     /// The words as a slice, with the empty set viewed as having none.
