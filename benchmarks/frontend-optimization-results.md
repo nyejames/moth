@@ -6390,3 +6390,34 @@ Across all 74 CLI cases (5 rounds, worst 14 re-run at 25) no case regresses
 beyond noise, and exit codes, stdout and stderr match. Borrow-checker samples
 fall from 201.6 to 78.4 per run on aggregate forwarding 512. The remaining
 per-call `RootSet` construction is 2-4% of that stage and was left alone.
+
+## Typed-expression follow-ups: TIR traversal sets
+
+Docs `frontend.ast.environment.constant_header_resolution` (about 84 ms) was the
+largest stage in a touched area without a profile. TIR template preparation and
+summary guard their recursive walks with std `HashSet`s of typed IDs that are
+only inserted, removed and queried, so they paid std SipHash on every visit.
+`TirView::transition` also formatted an owner label on every call for an error
+it rarely reports.
+
+- The guard sets in `preparation.rs` and `summary.rs` use `FxHashSet`, following
+  `slot_layout.rs`; none is iterated, so output order cannot change.
+- `validate_context` takes `impl Display`, so the label is formatted only when
+  an error is built; error text is byte-identical.
+
+Paired interleaved rounds against the borrow root membership tree's
+predecessor, 15 rounds in each of two windows, median of per-round ratios:
+
+| Case · metric | Ratio |
+|---|---:|
+| docs · constant header resolution | 0.767-0.768 |
+| docs · wall | 0.848-0.849 |
+| speed test · constant header resolution | 0.784-0.788 |
+| speed test · finalise | 0.514-0.529 |
+| template stress · constant header resolution | 0.833-0.859 |
+
+The set change alone gives about 89% of the gain. Exit codes, stdout and output
+trees match across the 74 CLI cases. Docs `frontend.ast.finalise` read 5-9%
+(about 0.4 ms) higher on this binary only, in code the change does not touch;
+the same stage moved with code layout in the final qualification above, and the
+branch qualification re-measures it.

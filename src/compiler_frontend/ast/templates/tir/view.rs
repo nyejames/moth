@@ -363,7 +363,7 @@ impl<'a> TirView<'a> {
             )));
         }
 
-        validate_context(self.store, context, &format!("TirView::{owner}"))?;
+        validate_context(self.store, context, format_args!("TirView::{owner}"))?;
 
         Ok(TirView {
             store: self.store,
@@ -585,10 +585,12 @@ impl<'a> TirView<'a> {
     }
 }
 
+// `owner` only reaches error text. Taking it as `Display` lets the transition pass
+// `format_args!` so a successful transition does not allocate its label.
 pub(crate) fn validate_context(
     store: &TemplateIrStore,
     context: TemplateViewContext,
-    owner: &str,
+    owner: impl std::fmt::Display,
 ) -> Result<(), CompilerError> {
     if let Some(id) = context.expression_overlay
         && store.expression_overlay(id).is_none()

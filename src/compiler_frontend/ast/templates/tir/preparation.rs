@@ -41,7 +41,7 @@ use crate::compiler_frontend::instrumentation::{AstCounter, increment_ast_counte
 use crate::compiler_frontend::source::SourceSpan;
 use crate::compiler_frontend::symbols::path_interner::PathId;
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 type PreparationNodeKey = (TemplateIrNodeId, TirViewIdentity);
 type PreparationSlotPlanKey = (TemplateSlotPlanId, TirViewIdentity);
@@ -107,9 +107,11 @@ pub(crate) fn refresh_kind_from_preparation(
 
 /// Mutable state for the one exhaustive preparation traversal.
 struct PreparationWalk<'scope> {
-    visiting_templates: HashSet<TirViewIdentity>,
-    visiting_nodes: HashSet<PreparationNodeKey>,
-    visiting_slot_plans: HashSet<PreparationSlotPlanKey>,
+    // Path sets: membership-only (insert on entry, remove on exit), never iterated, probed for
+    // every node. Fx hashing keeps that per-node probe cheap; iteration order never reaches output.
+    visiting_templates: FxHashSet<TirViewIdentity>,
+    visiting_nodes: FxHashSet<PreparationNodeKey>,
+    visiting_slot_plans: FxHashSet<PreparationSlotPlanKey>,
     runtime_reason: Option<RuntimeTemplateReason>,
     mode: TemplatePreparationMode,
     const_diagnostic: Option<CompilerDiagnostic>,
@@ -187,9 +189,9 @@ impl<'scope> PreparationWalk<'scope> {
         const_values: &'scope ConstValueStore,
     ) -> Self {
         Self {
-            visiting_templates: HashSet::new(),
-            visiting_nodes: HashSet::new(),
-            visiting_slot_plans: HashSet::new(),
+            visiting_templates: FxHashSet::default(),
+            visiting_nodes: FxHashSet::default(),
+            visiting_slot_plans: FxHashSet::default(),
             runtime_reason: None,
             mode,
             const_diagnostic: None,

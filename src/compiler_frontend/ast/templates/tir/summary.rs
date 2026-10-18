@@ -8,7 +8,7 @@
 //! Unresolved structural slots (`slot_count`) are separate from runtime slot
 //! sites (`runtime_slot_site_count`). `has_slots()` is derived from `slot_count`.
 
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 use crate::compiler_frontend::ast::templates::tir::ids::{
     TemplateIrId, TemplateIrNodeId, TemplateSlotPlanId,
@@ -136,9 +136,9 @@ pub(crate) fn summarize_existing_root(
     root_node_id: TemplateIrNodeId,
 ) -> Result<TemplateIrSummary, CompilerError> {
     let mut summary = TemplateIrSummary::empty();
-    let mut visiting_nodes = HashSet::new();
-    let mut visiting_templates = HashSet::new();
-    let mut completed_templates = HashSet::new();
+    let mut visiting_nodes = FxHashSet::default();
+    let mut visiting_templates = FxHashSet::default();
+    let mut completed_templates = FxHashSet::default();
     accumulate_nodes(
         store,
         std::slice::from_ref(&root_node_id),
@@ -173,9 +173,9 @@ pub(crate) fn summarize_runtime_slot_representation(
     };
 
     let mut summary = TemplateIrSummary::empty();
-    let mut visiting_templates = HashSet::new();
-    let mut completed_templates = HashSet::new();
-    let mut visiting_nodes = HashSet::new();
+    let mut visiting_templates = FxHashSet::default();
+    let mut completed_templates = FxHashSet::default();
+    let mut visiting_nodes = FxHashSet::default();
     accumulate_nodes(
         store,
         std::slice::from_ref(&root_node_id),
@@ -187,7 +187,7 @@ pub(crate) fn summarize_runtime_slot_representation(
     )?;
 
     for plan_root in plan_roots {
-        let mut visiting_nodes = HashSet::new();
+        let mut visiting_nodes = FxHashSet::default();
         accumulate_nodes(
             store,
             std::slice::from_ref(&plan_root),
@@ -202,14 +202,17 @@ pub(crate) fn summarize_runtime_slot_representation(
     Ok(summary)
 }
 
+// `visiting_nodes` is the active DFS path (insert on entry, remove on exit), probed once per
+// node, so it uses the crate's Fx hasher. None of these sets is iterated, so hash order never
+// reaches the summary.
 fn accumulate_nodes(
     store: &TemplateIrStore,
     node_ids: &[TemplateIrNodeId],
     depth: usize,
     summary: &mut TemplateIrSummary,
-    visiting_nodes: &mut HashSet<TemplateIrNodeId>,
-    visiting_templates: &mut HashSet<TemplateIrId>,
-    completed_templates: &mut HashSet<TemplateIrId>,
+    visiting_nodes: &mut FxHashSet<TemplateIrNodeId>,
+    visiting_templates: &mut FxHashSet<TemplateIrId>,
+    completed_templates: &mut FxHashSet<TemplateIrId>,
 ) -> Result<(), CompilerError> {
     for &node_id in node_ids {
         if !visiting_nodes.insert(node_id) {
@@ -339,8 +342,8 @@ fn validate_child_template(
     store: &TemplateIrStore,
     child_template_id: TemplateIrId,
     depth: usize,
-    visiting_templates: &mut HashSet<TemplateIrId>,
-    completed_templates: &mut HashSet<TemplateIrId>,
+    visiting_templates: &mut FxHashSet<TemplateIrId>,
+    completed_templates: &mut FxHashSet<TemplateIrId>,
 ) -> Result<(), CompilerError> {
     let Some(child_template) = store.get_template(child_template_id) else {
         return Err(CompilerError::compiler_error(format!(
@@ -366,7 +369,7 @@ fn validate_child_template(
     }
 
     let child_root = child_template.root;
-    let mut child_nodes = HashSet::new();
+    let mut child_nodes = FxHashSet::default();
     accumulate_nodes(
         store,
         std::slice::from_ref(&child_root),
