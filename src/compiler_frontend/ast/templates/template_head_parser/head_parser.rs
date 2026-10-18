@@ -22,6 +22,9 @@ use super::head_expressions::{
 };
 use crate::compiler_frontend::ast::ScopeContext;
 use crate::compiler_frontend::ast::ast_nodes::{Declaration, DeclarationValue};
+use crate::compiler_frontend::ast::const_eval::{
+    ExplicitConstantPayload, explicit_constant_operand,
+};
 use crate::compiler_frontend::ast::const_values::store::{ConstValueId, ConstValueStore};
 use crate::compiler_frontend::ast::expressions::error::ExpressionParseError;
 use crate::compiler_frontend::ast::expressions::expression_store::AstExpressionBuilder;
@@ -1015,7 +1018,18 @@ fn parse_head_expression(
     )
     .with_numeric_deferral_owner();
 
-    create_expression_with_trailing_newline_policy(input)
+    let expression = create_expression_with_trailing_newline_policy(input)?;
+    // WHY: an explicit String `#` constant interpolated into a template reads as its value, like an
+    // operator operand does, so `[greeting]` folds to text instead of staying a runtime read.
+    let replacement = explicit_constant_operand(
+        expression,
+        ExplicitConstantPayload::Text,
+        context,
+        path_fork,
+        expression_builder,
+        const_values,
+    )?;
+    Ok(replacement.unwrap_or(expression))
 }
 
 /// Resolves the value mode for one template-head symbol reference.

@@ -1,0 +1,22 @@
+@labels/TOKEN TOKEN as Token
+
+flag_value |flag Bool| -> I32:
+    if flag:
+        return 1
+    ;
+    return 0
+;
+
+greeting #= "ab"
+runtime_text = "cd"
+
+same = greeting is "ab"
+not_same = greeting is not "ab"
+imported_same = Token is greeting
+runtime_same = runtime_text is greeting
+
+joined = [:x[greeting]y]
+imported = [:x[Token]y]
+mixed = [:x[greeting]y[runtime_text]z]
+
+[:same=[flag_value(same)] not_same=[flag_value(not_same)] imported_same=[flag_value(imported_same)] runtime_same=[flag_value(runtime_same)] joined=[joined] imported=[imported] mixed=[mixed]]

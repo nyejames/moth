@@ -1,0 +1,17 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "same=1 not_same=0 imported_same=1 runtime_same=0 joined=xaby imported=xaby mixed=xabycdz"
+
+[[backends.html.artifact_assertions]]
+path = "index.html"
+kind = "html"
+must_contain = ["\"xaby\""]
+must_not_contain = ["\"ab\" === \"ab\"", "\"ab\" !== \"ab\""]
+
+[backends.html_wasm]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "same=1 not_same=0 imported_same=1 runtime_same=0 joined=xaby imported=xaby mixed=xabycdz"

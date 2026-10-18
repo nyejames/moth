@@ -1186,9 +1186,9 @@ fn binary_payload(
 
 /// Payload families an explicit `#` constant may take when it replaces an operand.
 ///
-/// WHY: numeric operators fold scalar payloads and trusted text calls fold `String` payloads.
-/// One replacement rule serves both, so an explicit constant reaches the fold engine the same way
-/// whichever consumer reads it.
+/// WHY: numeric operators fold scalar payloads, while equality comparisons, template
+/// interpolation, and trusted text calls read `String` payloads. One replacement rule serves every
+/// consumer, so an explicit constant reaches the fold engine the same way whichever one reads it.
 #[derive(Clone, Copy)]
 pub(crate) enum ExplicitConstantPayload {
     Numeric,
@@ -1210,10 +1210,11 @@ impl ExplicitConstantPayload {
 /// Replace an operand that names an explicit `#` constant with that constant's value.
 ///
 /// WHAT: a reference, a zero-projection copy, or a field of an explicit record constant becomes a
-/// constant occurrence that keeps the operand's span and value mode. Returns `None` when no
-/// explicit constant of the operand's type and an accepted payload backs the operand.
-/// WHY: an explicit constant has one value wherever it is named, so operators and trusted host
-/// calls must read the same value.
+/// constant occurrence that keeps the operand's span and value mode. Returns `None` for an operand
+/// without one result, and when no explicit constant of the operand's type and an accepted payload
+/// backs the operand.
+/// WHY: an explicit constant has one value wherever it is named, so operators, template
+/// interpolation, and trusted host calls must read the same value.
 pub(crate) fn explicit_constant_operand(
     operand: OwnedExpr,
     payloads: ExplicitConstantPayload,
@@ -1223,7 +1224,12 @@ pub(crate) fn explicit_constant_operand(
     const_values: &mut ConstValueStore,
 ) -> Result<Option<OwnedExpr>, ExpressionConstructionFailure> {
     let view = expressions.view_owned(operand)?;
-    let type_id = view.value_type_id()?;
+    // WHY: only a single success value can name an explicit constant. A template head may hold a
+    // call with no or several success values; that keeps its own diagnostic instead of hitting
+    // the single-value invariant of `value_type_id`.
+    let Some(type_id) = view.success_shape().single() else {
+        return Ok(None);
+    };
     let span = view.span();
     let mode = view.value_mode();
     let replacement = match view.operation_id() {

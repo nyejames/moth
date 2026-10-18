@@ -332,6 +332,7 @@ impl FoldFixture {
             &mut self.constants,
             &mut self.strings,
             None,
+            &self.path_fork,
             ValueMode::ImmutableOwned,
         )
         .unwrap_or_else(|_| panic!("test operator sequence should construct"))
@@ -2108,6 +2109,7 @@ fn constant_fold_reports_static_failure_at_authored_operator_inside_runtime_expr
         &mut f.constants,
         &mut f.strings,
         None,
+        &f.path_fork,
         ValueMode::ImmutableOwned,
     )
     .expect_err("divide by zero inside a runtime expression should still be diagnosed");

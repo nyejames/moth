@@ -10150,6 +10150,13 @@ contract = "language.dependencies.core_text_module_constant_argument_folded"
 role = "primary"
 
 [[case]]
+id = "const_eval_explicit_string_constant_operands"
+path = "const_eval_explicit_string_constant_operands"
+tags = ["integration", "language", "js", "wasm"]
+contract = "language.dependencies.explicit_string_constant_operand_folded"
+role = "primary"
+
+[[case]]
 id = "prelude_name_declaration_rejected"
 path = "prelude_name_declaration_rejected"
 tags = ["integration", "language", "diagnostics"]

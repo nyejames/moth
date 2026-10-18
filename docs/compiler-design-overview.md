@@ -646,6 +646,8 @@ Bootstrap defaults fold within the config service. Source defaults remain self-c
 
 A module folds each ordinary constant and const template once. Exported facts are owned backend-neutral values. Consumers do not parse or fold provider templates again. Advisory private const facts change neither declaration semantics nor ordering/visibility.
 
+An explicit `#` constant read by a runtime expression folds through one owner, `explicit_constant_operand`. Numeric constants replace numeric operator operands. String constants replace `is` and `is not` operands and runtime template interpolations. Plain text then folds; resource-bearing and site-root strings stay structural until URL rendering, so their comparisons and interpolations still render the page-relative URL. String operands of other operators keep their runtime operands, and a mixed expression keeps the runtime operation for its non-constant operands.
+
 Fully folded structs and anonymous records may form const records. Anonymous const records use named-only `(name = value)` entries and permit an empty record. Fields may contain inline nested anonymous values, bound values and explicit nominal constructions. They declare no nested types and imply no conversion. Whole const records are field-access-only compile-time groups, not runtime objects that can be passed, returned, stored at runtime or used through runtime methods.
 
 #### Runtime anonymous records

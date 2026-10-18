@@ -11,6 +11,7 @@ use crate::compiler_frontend::ast::const_eval::{
     explicit_constant_operand,
 };
 use crate::compiler_frontend::ast::const_values::store::ConstValueStore;
+use crate::compiler_frontend::ast::expressions::expression_kind::Operator;
 use crate::compiler_frontend::ast::expressions::expression_rpn::ExpressionRpnItem;
 use crate::compiler_frontend::ast::expressions::expression_store::{
     AstExpressionBuilder, ExprId, ExpressionOp, OwnedExpr,
@@ -185,6 +186,7 @@ pub fn evaluate_expression(
         const_values,
         string_table,
         Some(context),
+        path_fork,
         value_mode.as_owned(),
     )?;
     // The occurrence anchors at its first operand; operator facts keep the exact operator span.
@@ -273,6 +275,57 @@ fn substitute_explicit_numeric_constants(
         }
     }
     Ok(())
+}
+
+/// Replace explicit String `#` constant operands of an equality comparison with their values.
+///
+/// WHAT: only `Equality` and `NotEqual` read String payloads at compile time, so every other
+///       operator returns its operands unchanged.
+/// WHY: `binary_payload` rejects every other operator on a String constant with a diagnostic,
+///      so substituting for them would turn valid runtime String operations, such as
+///      concatenation, into compile errors.
+fn substitute_explicit_text_equality_operands(
+    operator: &Operator,
+    left: ExprId,
+    right: Option<ExprId>,
+    scope: Option<&ScopeContext>,
+    path_fork: &PathInternerFork,
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+) -> Result<(ExprId, Option<ExprId>), ExpressionTypingError> {
+    let Some(scope) = scope else {
+        return Ok((left, right));
+    };
+    if !matches!(operator, Operator::Equality | Operator::NotEqual) {
+        return Ok((left, right));
+    }
+    let left = explicit_text_operand(left, scope, path_fork, expressions, const_values)?;
+    let right = right
+        .map(|right| explicit_text_operand(right, scope, path_fork, expressions, const_values))
+        .transpose()?;
+    Ok((left, right))
+}
+
+/// Replace one operand that names an explicit String `#` constant with that constant's value.
+///
+/// WHY: `explicit_constant_operand` is the single replacement owner; this only selects the text
+/// payload family for one operand.
+fn explicit_text_operand(
+    operand: ExprId,
+    scope: &ScopeContext,
+    path_fork: &PathInternerFork,
+    expressions: &mut AstExpressionBuilder,
+    const_values: &mut ConstValueStore,
+) -> Result<ExprId, ExpressionTypingError> {
+    let replacement = explicit_constant_operand(
+        expressions.own(operand),
+        ExplicitConstantPayload::Text,
+        scope,
+        path_fork,
+        expressions,
+        const_values,
+    )?;
+    Ok(replacement.map_or(operand, |replacement| replacement.id()))
 }
 
 /// Materialise one pending literal at its selected destination or natural value mode.
@@ -447,6 +500,7 @@ pub(crate) fn expression_from_resolved_items(
     const_values: &mut ConstValueStore,
     string_table: &mut StringTable,
     scope: Option<&ScopeContext>,
+    path_fork: &PathInternerFork,
     value_mode: ValueMode,
 ) -> Result<OwnedExpr, ExpressionTypingError> {
     let mut stack: Vec<ExprId> = Vec::with_capacity(items.len());
@@ -469,6 +523,15 @@ pub(crate) fn expression_from_resolved_items(
                 let left = stack.pop().ok_or_else(|| {
                     CompilerError::compiler_error("Resolved operation lost its left operand.")
                 })?;
+                let (left, right) = substitute_explicit_text_equality_operands(
+                    &facts.operator,
+                    left,
+                    right,
+                    scope,
+                    path_fork,
+                    expressions,
+                    const_values,
+                )?;
                 let right_constant = match right {
                     Some(right) => is_constant_node(expressions, right)?,
                     None => true,
