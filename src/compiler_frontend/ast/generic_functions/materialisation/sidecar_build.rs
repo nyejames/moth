@@ -178,18 +178,20 @@ where
         .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
         materialised_type_arguments.push(type_id);
     }
-    // Canonical reconstruction issues new definition paths. Restore the requester's existing
-    // lookup spellings from detached rows so publication retains its imported nominal aliases.
+    // Canonical reconstruction issues new definition paths, so keep the requester's own spellings
+    // for the nominals already reconstructed here: the type arguments, their members and the
+    // declaring module's installed nominals. WHY: declaring-authored names are restored by
+    // `install_closed_environment`; requester evidence and member types cross through canonical
+    // identities and the unfiltered blueprint source, so only a binding whose nominal is present
+    // here still has a spelling to restore. Interning every requester blueprint instead made each
+    // request's cost grow with the requester's blueprint count.
     for binding in &requester_context.nominal_bindings {
-        let type_id = intern_generated_canonical_type(
-            &binding.identity,
-            &mut environment.type_environment,
-            phase_context.external_package_registry.as_ref(),
-            &nominal_source,
-            string_table,
-            path_fork,
-        )
-        .map_err(|error| CompilerMessages::from_error_ref(error, string_table))?;
+        let Some(type_id) = environment
+            .type_environment
+            .type_id_for_canonical_identity(&binding.identity)
+        else {
+            continue;
+        };
         environment
             .type_environment
             .register_nominal_path_alias(binding.local_path, type_id)

@@ -6350,6 +6350,7 @@ old; below 1 is faster.
 | Covering visibility masks skip the sweep | mutable cycles 512 converge a further 0.86x |
 | HIR concrete type checks without a set | `frontend.hir` 0.91-0.97x |
 | Template summary paths and whitespace cursors | docs wall 0.92x |
+| Requester aliases for reconstructed nominals only | generic scaling 160 materialise 0.39x, now linear |
 
 ### Signature member contract merge
 
@@ -6641,3 +6642,44 @@ ratios with bootstrap CI95:
 
 Exit codes, stdout and output files match across the 74 CLI cases for each
 variant.
+
+### Requester aliases for reconstructed nominals only
+
+After generated nominal registration, materialisation still grew as about
+n^1.34 on generic scaling, and the quadratic term was 58% of the stage at 160.
+For every generated request, the sidecar interned every nominal blueprint the
+requester binds, so each request's cost grew with the requester's blueprint
+count, then registered the requester's spelling for each one.
+
+The sidecar now registers a requester spelling only for nominals it has already
+reconstructed (the type arguments, their members and the declaring module's
+installed nominals) by looking up the existing canonical identity index; it
+interns nothing in that loop. The declaring module's names come from
+`install_closed_environment`, and requester evidence and member types cross
+through canonical identities and the unfiltered blueprint source, so no other
+binding has a spelling the request can use. The sidecar holds fewer aliases and
+nominals than before, so its internal TypeIds can differ; emitted output does
+not.
+
+Paired interleaved rounds against the generated nominal registration tree, 25
+rounds, median of per-round ratios with bootstrap CI95:
+
+| Case · metric | Ratio | CI95 |
+|---|---:|---|
+| generic scaling 160 · materialise | 0.394 | 0.389-0.399 |
+| generic scaling 160 · wall | 0.616 | 0.613-0.619 |
+| docs · wall (control) | 1.003 | 0.983-1.012 |
+
+Per-request materialisation, in µs:
+
+| n | Before | After |
+|---:|---:|---:|
+| 20 | 61.95 | 50.50 |
+| 40 | 69.92 | 49.01 |
+| 80 | 88.18 | 47.91 |
+| 160 | 125.56 | 49.67 |
+
+The stage exponent falls from 1.34 to 0.99. A prototype that filtered bindings
+by a type-argument reachability set ran at the same speed (ratio 1.002,
+0.980-1.027) but allocated a set per request, so it was not kept. Exit codes,
+stdout and output files match across the 74 CLI cases.
