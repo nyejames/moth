@@ -10,8 +10,8 @@
 //!   full debug info and frame pointers for Samply symbolication/unwinding.
 //!
 //! # What this module owns
-//! - Executing `cargo build --release --features timers` for normal benchmarks
-//! - Executing `cargo build --profile profiling --features detailed_timers` with
+//! - Executing `cargo build -p moth-cli --bin moth --release --features timers` for normal benchmarks
+//! - Executing `cargo build -p moth-cli --bin moth --profile profiling --features detailed_timers` with
 //!   `RUSTFLAGS="-C force-frame-pointers=yes"`
 //! - Locating built binaries in `target/release/` and `target/profiling/`
 //! - Preparing symbol directories and macOS dSYM UUID diagnostics for profiling
@@ -87,7 +87,7 @@ impl CompilerBinary {
 /// WHY:  keeps benchmark output low-noise while still capturing all top-level
 /// pipeline-stage metrics for attribution and regression detection.
 ///
-/// Executes `cargo build --release --features timers`, then
+/// Executes `cargo build -p moth-cli --bin moth --release --features timers`, then
 /// verifies and returns the path to the built binary.
 ///
 /// # Returns
@@ -98,7 +98,16 @@ pub fn build_release_compiler_with_timers(
 ) -> Result<CompilerBinary, String> {
     let status = Command::new("cargo")
         .current_dir(repository_root)
-        .args(["build", "--release", "--features", "timers"])
+        .args([
+            "build",
+            "-p",
+            "moth-cli",
+            "--bin",
+            "moth",
+            "--release",
+            "--features",
+            "timers",
+        ])
         .status()
         .map_err(|e| format!("Failed to execute cargo build: {}", e))?;
 
@@ -126,7 +135,7 @@ pub fn build_release_compiler_with_timers(
 ///
 /// Executes:
 /// ```bash
-/// RUSTFLAGS="-C force-frame-pointers=yes" cargo build --profile profiling --features detailed_timers --bin moth
+/// RUSTFLAGS="-C force-frame-pointers=yes" cargo build -p moth-cli --bin moth --profile profiling --features detailed_timers
 /// ```
 ///
 /// The profiling profile inherits from release but includes full debug info,
@@ -144,12 +153,14 @@ pub fn build_profiling_compiler_with_timers(
         .current_dir(repository_root)
         .args([
             "build",
+            "-p",
+            "moth-cli",
+            "--bin",
+            "moth",
             "--profile",
             "profiling",
             "--features",
             "detailed_timers",
-            "--bin",
-            "moth",
         ])
         .env("RUSTFLAGS", "-C force-frame-pointers=yes")
         .status()

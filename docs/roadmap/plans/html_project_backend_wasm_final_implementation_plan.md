@@ -31,6 +31,8 @@ lowering. The completed compact typed-expression and native result-channel found
 - `docs/build-system-design.md` for HTML project builder, mixed-target planning, physical variants, runtime and memory, output ownership
 - `docs/src/developer-docs/style-guide/style-guide.mtf`, `testing.mtf` and `validation.mtf`
 - `docs/src/docs/progress/@page.moth` for current support
+- `docs/src/developer-docs/wasm-optimisation/wasm-optimisation.mtf` for
+  emission quality and compiler versus runtime optimisation ownership
 - canonical package/module references for the graph contract
 - canonical numeric and cast references for exact widths, bounded numeric inference, plain cast, Byte and Dec semantics
 
@@ -382,11 +384,69 @@ Context: the refactor is not complete while old whole-module modes, dispatcher l
 - Delete duplicated helper export types between HTML-Wasm and core Wasm.
 - Search for `DispatcherLoop`, `StringFromI64`, `moth_start`, `export_str_ptr` and old helper booleans. Review each hit. Legitimate i64 operations are required, not forbidden names.
 
-### Phase 11: Complete backend-specific integration coverage and docs
+### Phase 11: Validate and inspect emitted Wasm
+
+Context: improve tooling around the final structured LIR and emitted entry
+bundle, reusing the wasm-tools ecosystem. Today Moth uses `wasm-encoder`
+0.247.0 and `wasmparser` 0.247.0, validates optionally with default
+parser features and emits an empty custom `name` section. Recheck this
+inventory at activation. Keep `wasm-encoder` as the emitter.
+
+**Slice 11A: Target-aware `wasmparser` validation.**
+
+- Investigate `Validator::new_with_features` and map `WasmFeatures`
+  to the compiler-approved target capability profile. Use existing
+  builder target facts, not a second backend feature registry.
+- Validate the emitted entry bundle rather than retired per-module
+  binaries. Keep debug/test validation useful during earlier phases.
+  Report unsupported target proposals and malformed binary output
+  through precise backend diagnostics.
+- Test enabled and rejected features, malformed modules and
+  multi-result instructions. Binary validation cannot prove Moth's
+  ownership or semantic correctness.
+
+**Slice 11B: Real `wasm_encoder::NameSection` emission.**
+
+- Replace `src/backends/wasm/emit/names.rs`'s empty custom-section
+  placeholder with `NameSection`, `NameMap` and `IndirectNameMap`.
+  Inspect their API at the selected wasm-tools version.
+- Derive function names from accepted compiler identities and final
+  assigned Wasm indices, covering imports, user bodies, generated
+  helpers and wrappers. Emit local names only where validated
+  debug/source information exists. Reuse section/index planning.
+- Keep names optional and diagnostic-only. They cannot affect
+  binding, execution or ABI. Test name subsection contents and index
+  correspondence, deterministic emission and absence when disabled.
+  No DWARF generation is required.
+
+**Slice 11C: Readable Wasm through `wasmprinter`.**
+
+- Investigate `wasm-tools print` and `wasmprinter::print_bytes`
+  against the pinned wasm-tools version. Make emitted binary Wasm
+  inspectable as WAT through an opt-in debug/test path, including
+  the names emitted by Slice 11B.
+- Prefer a development/test utility or existing debug hook over
+  a mandatory compiler or production dependency. Bound generated
+  output size for large modules. Printer errors are inspection
+  failures, not semantic validation.
+- Add inspection fixtures showing structured flow, imports, exports,
+  exact numeric operations and names. Retain wasmparser as the
+  structural validator and Moth's tests as the semantics oracle.
+
+**Dependency checkpoint.** Investigate upgrading `wasm-encoder` and
+`wasmparser` together from 0.247.0 and selecting a matching
+`wasmprinter` version. Record compatibility, build cost and test
+results. Do not add Binaryen, `wasm-opt` or another production
+optimisation pass. Earlier phases can use the validator immediately
+without waiting for this cleanup milestone.
+
+### Phase 12: Complete backend-specific integration coverage and docs
 
 Context: documentation, tests and progress matrix must reflect the final backend shape.
 
-- Add Wasm validation and artefact assertions to canonical integration cases.
+- Add target-aware Wasm validation and artefact assertions to canonical
+  integration cases. Check optional name subsections and WAT inspection
+  without changing executable release output.
 - Reuse the numeric parity corpus with mixed-target wrappers, compact fields/collections and Error.code U32 coverage.
 - Update `docs/build-system-design.md` only if a durable mixed-target contract is confirmed missing.
 - Update `docs/compiler-design-overview.md` only if HIR view or target validation ownership moves.
@@ -426,6 +486,8 @@ Cover:
 - WIT components remain separate external bindings and `MothSource` packages are not reclassified
 - generated JavaScript companions
 - structured Wasm LIR emission
+- target-aware binary validation, accurate optional function/local names and
+  opt-in WAT inspection without a production runtime dependency
 - native zero/one/multiple results across selected-function wrappers, success/error joins and returns, with undefined success slots inaccessible on error paths
 - exactly-once calls and RHS-before-assignment order, including aliasing results
 - direct dense HIR consumption with no AST/TIR lifetime extension or owned semantic-tree reconstruction
@@ -474,6 +536,8 @@ Before marking this plan complete, verify:
 - `start` is JavaScript-owned with backwards propagation
 - no Wasm-to-JavaScript Moth call exists after propagation
 - Wasm LIR is structured, not flat basic-block with dispatcher loops
+- Wasm target validation and optional names follow final emitted indices;
+  readable WAT remains a developer-only inspection surface
 - each entry physical variant emits one Moth Wasm bundle rather than per-module Wasm modules
 - the entry Wasm bundle imports page-local runtime memory rather than owning a separate memory
 - WIT is not used as the semantic interface for Moth-source modules or packages

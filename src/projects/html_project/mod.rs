@@ -23,7 +23,6 @@ pub(crate) mod js_path;
 // so this API compiles only for its own tests until a consumer lands.
 #[cfg(test)]
 pub(crate) mod moth_template;
-pub mod new_html_project;
 pub(crate) mod output_plan;
 pub(crate) mod page_metadata;
 pub(crate) mod path_policy;

@@ -11,7 +11,7 @@ use std::path::PathBuf;
 pub(crate) const SUPPORTED_BACKEND_IDS: &[&str] = &["html", "html_wasm"];
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) struct TestRunnerOptions {
+pub struct TestRunnerOptions {
     pub show_warnings: bool,
     pub case_id: Option<String>,
     pub tag_filters: Vec<String>,
@@ -23,7 +23,7 @@ pub(crate) struct TestRunnerOptions {
 }
 
 impl TestRunnerOptions {
-    pub(crate) fn validate(
+    pub fn validate(
         &self,
     ) -> Result<(), crate::compiler_tests::integration_test_runner::errors::TestRunnerError> {
         if self.audit && (self.has_selection_filters() || self.list) {
@@ -286,13 +286,13 @@ pub(crate) struct ArtifactAssertion {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
-pub(crate) enum BackendId {
+pub enum BackendId {
     Html,
     HtmlWasm,
 }
 
 impl BackendId {
-    pub(crate) fn parse(value: &str) -> Result<Self, String> {
+    pub fn parse(value: &str) -> Result<Self, String> {
         match value {
             "html" => Ok(Self::Html),
             "html_wasm" => Ok(Self::HtmlWasm),

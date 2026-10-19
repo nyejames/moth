@@ -77,7 +77,7 @@ fn assert_config_input_overflow_build(
     )
     .expect("should write facade source");
 
-    let builder = ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
+    let builder = ProjectBuilder::new(HtmlProjectBuilder::new());
     let Err(messages) = build_project(
         &builder,
         root.to_str().expect("root path should be valid UTF-8"),

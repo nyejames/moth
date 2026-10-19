@@ -6,10 +6,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::projects::html_project::new_html_project::{
+use crate::scaffold::{
     CreateProjectReport, prompt::Prompt, start_page_scaffolding, target::ResolvedProjectTarget,
 };
-use crate::projects::settings::CONFIG_FILE_NAME;
+use moth::projects::settings::CONFIG_FILE_NAME;
 
 const PAGE_FILE: &str = "src/@page.moth";
 const GITIGNORE_FILE: &str = ".gitignore";

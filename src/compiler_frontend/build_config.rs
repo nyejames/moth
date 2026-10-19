@@ -64,12 +64,12 @@ use std::rc::Rc;
 ///       There is no untyped text fallback entry: a value enters the set only as a typed
 ///       [`PrimitiveBuildValue`].
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) struct BuildConfigInputSet {
+pub struct BuildConfigInputSet {
     entries: BTreeMap<BuildInputName, BuildConfigInputEntry>,
 }
 
 impl BuildConfigInputSet {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self::default()
     }
 
@@ -77,7 +77,7 @@ impl BuildConfigInputSet {
     ///
     /// On rejection the earlier entry keeps its place and the error carries the rejected entry
     /// back with the earlier location, so command diagnostics can underline both arguments.
-    pub(crate) fn insert(
+    pub fn insert(
         &mut self,
         entry: BuildConfigInputEntry,
     ) -> Result<(), BuildConfigInputDuplicate> {
@@ -94,13 +94,12 @@ impl BuildConfigInputSet {
         Ok(())
     }
 
-    pub(crate) fn get(&self, name: &BuildInputName) -> Option<&BuildConfigInputEntry> {
+    pub fn get(&self, name: &BuildInputName) -> Option<&BuildConfigInputEntry> {
         self.entries.get(name)
     }
 
     /// Iterate every entry in deterministic name order.
-    #[allow(dead_code)]
-    pub(crate) fn iter(&self) -> impl Iterator<Item = &BuildConfigInputEntry> {
+    pub fn iter(&self) -> impl Iterator<Item = &BuildConfigInputEntry> {
         self.entries.values()
     }
 
@@ -191,31 +190,31 @@ fn is_forbidden_builder_global_name(name: &str) -> bool {
 
 /// A rejected duplicate input name, carrying the rejected entry and the earlier location.
 #[derive(Clone, Debug)]
-pub(crate) struct BuildConfigInputDuplicate {
+pub struct BuildConfigInputDuplicate {
     rejected: BuildConfigInputEntry,
     existing_location: BuildConfigValueLocation,
 }
 
 impl BuildConfigInputDuplicate {
-    pub(crate) fn rejected(&self) -> &BuildConfigInputEntry {
+    pub fn rejected(&self) -> &BuildConfigInputEntry {
         &self.rejected
     }
 
-    pub(crate) fn existing_location(&self) -> &BuildConfigValueLocation {
+    pub fn existing_location(&self) -> &BuildConfigValueLocation {
         &self.existing_location
     }
 }
 
 /// One explicit build-config input: a supplied value plus where the caller supplied it.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct BuildConfigInputEntry {
+pub struct BuildConfigInputEntry {
     name: BuildInputName,
     value: BuildConfigInputValue,
     location: BuildConfigValueLocation,
 }
 
 impl BuildConfigInputEntry {
-    pub(crate) fn new(
+    pub fn new(
         name: BuildInputName,
         value: impl Into<BuildConfigInputValue>,
         location: BuildConfigValueLocation,
@@ -227,15 +226,15 @@ impl BuildConfigInputEntry {
         }
     }
 
-    pub(crate) fn name(&self) -> &BuildInputName {
+    pub fn name(&self) -> &BuildInputName {
         &self.name
     }
 
-    pub(crate) fn value(&self) -> &BuildConfigInputValue {
+    pub fn value(&self) -> &BuildConfigInputValue {
         &self.value
     }
 
-    pub(crate) fn location(&self) -> &BuildConfigValueLocation {
+    pub fn location(&self) -> &BuildConfigValueLocation {
         &self.location
     }
 }
@@ -248,7 +247,7 @@ impl BuildConfigInputEntry {
 ///       `4294967296` for an unsigned contract or round a decimal for a float contract, so the
 ///       literal waits until its contract is known.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum BuildConfigInputValue {
+pub enum BuildConfigInputValue {
     Typed(PrimitiveBuildValue),
     Deferred(DeferredNumericLiteral),
 }
@@ -265,7 +264,7 @@ impl From<PrimitiveBuildValue> for BuildConfigInputValue {
 ///       leading sign and the literal kind that decides which scalar families it can initialise.
 /// WHY:  materialisation reuses the shared `moth_lexical` helpers, which take exactly these parts.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) struct DeferredNumericLiteral {
+pub struct DeferredNumericLiteral {
     authored_text: String,
     normalized: String,
     negative: bool,
@@ -282,7 +281,7 @@ impl BuildConfigInputValue {
     ///       numeric-looking text, falls back to String with its exact authored text preserved.
     /// WHY:  the primitive shape of a command value is decided from the authored text alone, so no
     ///       project or source contract is consulted and no second literal grammar exists.
-    pub(crate) fn from_command_text(value: &str) -> Result<Self, BuildInputValueError> {
+    pub fn from_command_text(value: &str) -> Result<Self, BuildInputValueError> {
         if value == "true" {
             return Ok(Self::Typed(PrimitiveBuildValue::Bool(true)));
         }
@@ -404,7 +403,7 @@ impl DeferredNumericLiteral {
 ///       input resolved through project and default rules, never a value. Authored String and Char
 ///       content is preserved exactly, without backend conversion.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum PrimitiveBuildValue {
+pub enum PrimitiveBuildValue {
     String(String),
     Fixed(FixedScalarValue),
     Bool(bool),
@@ -447,7 +446,7 @@ impl PrimitiveBuildValue {
 /// WHY:  every command variant renders the same concrete rejection without a second wording
 ///       owner, and the compiler owns the inference semantics behind the message.
 #[derive(Debug)]
-pub(crate) enum BuildInputValueError {
+pub enum BuildInputValueError {
     Infrastructure(Box<CompilerError>),
     /// A single-quote-leading value is not one complete ordinary Moth Char literal.
     MalformedCharLiteral {
@@ -710,7 +709,7 @@ impl PrimitiveBuildInputType {
 
 /// Why a build-config name was rejected.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum BuildInputNameError {
+pub enum BuildInputNameError {
     /// The name is empty or not lower_snake_case under the canonical identifier policy.
     NotLowerSnakeCase,
 }
@@ -725,7 +724,7 @@ pub(crate) enum BuildInputNameError {
 ///       revalidating at every boundary. Lexicographic `Ord` gives the deterministic ordering
 ///       every map and diagnostic in this module iterates in.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) struct BuildInputName {
+pub struct BuildInputName {
     text: String,
 }
 
@@ -735,7 +734,7 @@ impl BuildInputName {
     /// A digit-leading spelling such as `2fast` is rejected because it can never match a
     /// source declaration identifier; keyword-shadow reservation is owned separately by the
     /// canonical keyword policy.
-    pub(crate) fn new(text: &str) -> Result<Self, BuildInputNameError> {
+    pub fn new(text: &str) -> Result<Self, BuildInputNameError> {
         if is_identifier(text) && is_lowercase_with_underscores_name(text) {
             Ok(Self {
                 text: text.to_owned(),
@@ -745,7 +744,7 @@ impl BuildInputName {
         }
     }
 
-    pub(crate) fn as_str(&self) -> &str {
+    pub fn as_str(&self) -> &str {
         &self.text
     }
 }
@@ -762,7 +761,7 @@ impl Borrow<str> for BuildInputName {
 /// WHY:  mismatch, duplicate and missing-input diagnostics must underline either the source
 ///       declaration or the exact command argument without a second location model.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub(crate) enum BuildConfigValueLocation {
+pub enum BuildConfigValueLocation {
     /// A retained compiler source span: a contract declaration, its default literal or a
     /// grouped-project field initializer.
     Source(SourceSpan),
@@ -778,16 +777,16 @@ pub(crate) enum BuildConfigValueLocation {
 /// WHY:  command inputs have no source span, yet duplicate and mismatch diagnostics still need
 ///       a stable per-input identity; the argument position is that identity.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub(crate) struct BuildCommandLocation {
+pub struct BuildCommandLocation {
     argument_index: usize,
 }
 
 impl BuildCommandLocation {
-    pub(crate) fn new(argument_index: usize) -> Self {
+    pub fn new(argument_index: usize) -> Self {
         Self { argument_index }
     }
 
-    pub(crate) fn argument_index(&self) -> usize {
+    pub fn argument_index(&self) -> usize {
         self.argument_index
     }
 }

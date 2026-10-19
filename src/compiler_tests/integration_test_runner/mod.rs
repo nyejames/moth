@@ -22,15 +22,16 @@ mod types;
 #[cfg(test)]
 mod tests;
 
-pub(crate) use runner::run_all_test_cases;
-pub use types::IntegrationRunSummary;
+pub use errors::{TestRunnerError, TestRunnerErrorKind};
+pub use runner::run_all_test_cases;
+pub use types::{BackendId, IntegrationRunSummary, TestRunnerOptions};
 
 pub(crate) use types::{
-    ArtifactAssertion, ArtifactKind, BackendId, CaseExecutionResult, CaseRole, DiagnosticAssertion,
+    ArtifactAssertion, ArtifactKind, CaseExecutionResult, CaseRole, DiagnosticAssertion,
     DiagnosticMatchMode, ExpectationMode, ExpectedOutcome, FailureExpectation, FailureKind,
     FailureTriageEntry, FailureTriageReport, GoldenMode, ManifestCaseSpec,
     ParsedBackendExpectation, ParsedExpectationFile, SuccessContract, SuccessExpectation,
-    SummaryCounts, TestCaseSpec, TestRunnerOptions, TestSuiteSpec, WarningExpectation,
+    SummaryCounts, TestCaseSpec, TestSuiteSpec, WarningExpectation,
 };
 
 pub(crate) use policy::{PolicyEvaluation, PolicyFinding};

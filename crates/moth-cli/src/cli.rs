@@ -3,41 +3,27 @@
 //! This module parses CLI commands and dispatches them into build, dev-server, scaffolding, and
 //! compiler test workflows.
 
-use crate::build_system::build;
-use crate::build_system::build::BuildResult;
-use crate::build_system::output::{
-    OutputPlan, SingleFileOutputPlan, WriteMode, WriteOptions, write_project_outputs,
-};
-use crate::capture_command_duration;
-use crate::command_timing_scope;
-use crate::compiler_frontend::Flag;
+use crate::command_status::{CommandStatus, emit_benchmark_status};
+use crate::scaffold::{self, NewHtmlProjectOptions};
 #[cfg(feature = "boracle")]
-use crate::compiler_frontend::analysis::borrow_checker::{
-    BoracleDump, BoracleExperiment, BoracleRuleSelection,
+use moth::projects::boracle::run_boracle;
+use moth::projects::build_command::{
+    BuildCommandOutcome, BuildCommandReport, run_build_command as run_build_service,
 };
-use crate::compiler_frontend::build_config::{
-    BuildCommandLocation, BuildConfigInputDuplicate, BuildConfigInputEntry, BuildConfigInputSet,
-    BuildConfigInputValue, BuildConfigValueLocation, BuildInputName, BuildInputValueError,
-};
-use crate::compiler_frontend::compiler_errors::{CompilerError, CompilerMessages};
-use crate::compiler_frontend::display_messages::print_compiler_messages;
-use crate::compiler_tests::integration_test_runner::{
+use moth::projects::check::{CheckCommandReport, run_check_command};
+use moth::projects::dev_server::{self, DevServerOptions};
+use moth::projects::integration_tests::{
     BackendId, IntegrationRunSummary, TestRunnerOptions, run_all_test_cases,
 };
-use crate::finish_command_timing;
 #[cfg(feature = "boracle")]
-use crate::projects::boracle::run_boracle;
-use crate::projects::check::{self, CheckOptions};
-use crate::projects::command_status::{
-    CommandStatus, benchmark_diagnostic_counts, emit_benchmark_status,
+use moth::projects::{BoracleDump, BoracleExperiment, BoracleRuleSelection};
+use moth::projects::{
+    BuildCommandLocation, BuildConfigInputDuplicate, BuildConfigInputEntry, BuildConfigInputSet,
+    BuildConfigInputValue, BuildConfigValueLocation, BuildInputName, BuildInputValueError, Flag,
+    HtmlProjectBuilder, ProjectBuilder, ProjectCommandCompletion, ProjectCommandStatus,
+    print_compiler_messages, print_terse_compiler_messages,
 };
-use crate::projects::dev_server::{self, DevServerOptions};
-use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
-use crate::projects::html_project::new_html_project::NewHtmlProjectOptions;
 use saying::say;
-use std::path::{Path, PathBuf};
-
-use std::time::{Duration, Instant};
 use std::{env, process};
 
 /// Build-profile flags accepted by both `build` and `dev`.
@@ -161,11 +147,6 @@ fn command_input_duplicate_message(duplicate: &BuildConfigInputDuplicate) -> Str
     }
 }
 
-enum BuildOutputStageError {
-    OutputPlan(CompilerError),
-    Write(CompilerMessages),
-}
-
 #[derive(Debug, PartialEq, Eq)]
 enum Command {
     NewHTMLProject(NewHtmlProjectOptions), // Creates a new HTML project template
@@ -232,9 +213,7 @@ pub fn start_cli() -> process::ExitCode {
                 }
 
                 Command::NewHTMLProject(options) => {
-                    match crate::projects::html_project::new_html_project::create_html_project_template(
-                        options,
-                    ) {
+                    match scaffold::create_html_project_template(options) {
                         Ok(_) => CommandStatus::Success,
                         Err(e) if e == "Cancelled project creation." => {
                             println!("{e}");
@@ -247,13 +226,14 @@ pub fn start_cli() -> process::ExitCode {
                     }
                 }
 
-                Command::Build { path, flags, inputs } => {
-                    let project_builder =
-                        build::ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
+                Command::Build {
+                    path,
+                    flags,
+                    inputs,
+                } => {
+                    let project_builder = ProjectBuilder::new(HtmlProjectBuilder::new());
                     match command_input_set(&inputs) {
-                        Ok(inputs) => {
-                            run_build_command(&project_builder, &path, &flags, &inputs)
-                        }
+                        Ok(inputs) => run_build_command(&project_builder, &path, &flags, &inputs),
                         Err(message) => {
                             say!(message);
                             print_help();
@@ -262,15 +242,23 @@ pub fn start_cli() -> process::ExitCode {
                     }
                 }
 
-                Command::Check { path, terse, inputs } => {
-                    let project_builder =
-                        build::ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
+                Command::Check {
+                    path,
+                    terse,
+                    inputs,
+                } => {
+                    let project_builder = ProjectBuilder::new(HtmlProjectBuilder::new());
                     match command_input_set(&inputs) {
-                        Ok(inputs) => check::run_check(
-                            &path,
-                            CheckOptions { terse, inputs },
-                            &project_builder,
-                        ),
+                        Ok(inputs) => {
+                            let completion =
+                                run_check_command(&path, &inputs, &project_builder, |report| {
+                                    render_check_outcome(report, terse)
+                                });
+                            if let Some(counts) = completion.diagnostic_counts {
+                                emit_benchmark_status(counts.errors, counts.warnings);
+                            }
+                            command_status_from_completion(completion)
+                        }
                         Err(message) => {
                             say!(message);
                             print_help();
@@ -297,16 +285,15 @@ pub fn start_cli() -> process::ExitCode {
 
                 Command::Dev {
                     path,
-                    mut options,
+                    options,
                     flags,
                     inputs,
                 } => {
-                    let project_builder =
-                        build::ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()));
+                    let project_builder = ProjectBuilder::new(HtmlProjectBuilder::new());
                     match command_input_set(&inputs) {
                         Ok(inputs) => {
                             say!("\nStarting dev server...");
-                            options.inputs = inputs;
+                            let options = options.with_inputs(inputs);
                             match dev_server::run_dev_server(
                                 project_builder,
                                 &path,
@@ -358,272 +345,82 @@ pub fn start_cli() -> process::ExitCode {
     status.into()
 }
 
-enum BuildCommandOutcome {
-    Success {
-        output_file_count: usize,
-        warning_count: usize,
-        warnings: Option<CompilerMessages>,
-    },
-    WriteError(CompilerMessages),
-    OutputPlanError {
-        messages: CompilerMessages,
-    },
-    BuildError {
-        messages: CompilerMessages,
-        diagnostic_counts: Option<(usize, usize)>,
-    },
-}
-
 fn run_build_command(
-    project_builder: &build::ProjectBuilder,
+    project_builder: &ProjectBuilder,
     path: &str,
     flags: &[Flag],
     build_config_inputs: &BuildConfigInputSet,
 ) -> CommandStatus {
-    run_build_command_with_output_plan(
+    let completion = run_build_service(
         project_builder,
         path,
         flags,
         build_config_inputs,
-        create_build_output_plan,
-    )
-}
-
-/// Run a build command with one command-total lifecycle and one output-plan decision.
-///
-/// The injected plan builder keeps the command's terminal timing point shared
-/// between ordinary output planning and focused failure-path tests. The selected builder arrives
-/// from the command arm and compiles the classified input set.
-fn run_build_command_with_output_plan(
-    project_builder: &build::ProjectBuilder,
-    path: &str,
-    flags: &[Flag],
-    build_config_inputs: &BuildConfigInputSet,
-    output_plan_builder: impl FnOnce(&mut BuildResult) -> Result<OutputPlan, CompilerError>,
-) -> CommandStatus {
-    command_timing_scope!(timing_session, crate::timing::TimingCommandKind::Build);
-    let start = Instant::now();
-    let outcome = build_command_outcome(
-        project_builder,
-        path,
-        flags,
-        build_config_inputs,
-        output_plan_builder,
+        render_build_outcome,
     );
-
-    // Capture the single command duration before any terminal rendering.
-    let duration =
-        capture_command_duration!(crate::timing::TimingMetric::CommandBuildTotal, start,);
-
-    let (status, diagnostic_counts) = render_build_outcome(outcome, duration);
-
-    finish_command_timing!(timing_session, matches!(status, CommandStatus::Success));
-    if let Some((error_count, warning_count)) = diagnostic_counts {
-        emit_benchmark_status(error_count, warning_count);
+    if let Some(counts) = completion.diagnostic_counts {
+        emit_benchmark_status(counts.errors, counts.warnings);
     }
-    status
+    command_status_from_completion(completion)
 }
 
-/// Execute and classify one build command outcome before duration capture.
-///
-/// WHAT: owns bootstrap, frontend, backend, output planning/write and outcome
-///       classification. It performs no terminal rendering.
-/// WHY:  keeps the command-total boundary explicit: all command work and
-///       classification finish before the single duration is captured.
-fn build_command_outcome(
-    project_builder: &build::ProjectBuilder,
-    path: &str,
-    flags: &[Flag],
-    build_config_inputs: &BuildConfigInputSet,
-    output_plan_builder: impl FnOnce(&mut BuildResult) -> Result<OutputPlan, CompilerError>,
-) -> BuildCommandOutcome {
-    match build::build_project(project_builder, path, flags, build_config_inputs) {
-        Ok(mut build_result) => {
-            // Output planning and filesystem emission form one build-pipeline
-            // segment. Terminal diagnostics and success rendering remain part
-            // of the command presentation, after duration capture.
-            let output_result = crate::timed_stage!(
-                crate::timing::TimingMetric::BuildOutputTotal,
-                (|| {
-                    let output_plan = output_plan_builder(&mut build_result)
-                        .map_err(BuildOutputStageError::OutputPlan)?;
-                    write_project_outputs(
-                        &mut build_result.project,
-                        &WriteOptions {
-                            output_plan,
-                            write_mode: WriteMode::AlwaysWrite,
-                        },
-                        &mut build_result.string_table,
-                    )
-                    .map_err(BuildOutputStageError::Write)
-                })()
-            );
-            match output_result {
-                Ok(write_summary) => {
-                    let output_file_count = write_summary.emitted_count();
-                    let warning_count = build_result.warnings.len();
-                    let warnings = match build_result.take_warning_messages() {
-                        Some(messages) if messages.infrastructure_errors().is_some() => {
-                            return BuildCommandOutcome::OutputPlanError { messages };
-                        }
-                        warnings => warnings,
-                    };
-                    BuildCommandOutcome::Success {
-                        output_file_count,
-                        warning_count,
-                        warnings,
-                    }
-                }
-                Err(BuildOutputStageError::Write(messages)) => {
-                    let messages = build_result.take_output_failure_messages(messages);
-                    BuildCommandOutcome::WriteError(messages)
-                }
-                Err(BuildOutputStageError::OutputPlan(error)) => {
-                    let messages = CompilerMessages::from_error(
-                        error,
-                        crate::compiler_frontend::symbols::string_interning::StringTable::new(),
-                    );
-                    let messages = build_result.take_output_failure_messages(messages);
-                    BuildCommandOutcome::OutputPlanError { messages }
-                }
-            }
-        }
-        Err(messages) => {
-            let diagnostic_counts = benchmark_diagnostic_counts(&messages);
-            BuildCommandOutcome::BuildError {
-                messages,
-                diagnostic_counts,
-            }
-        }
-    }
-}
-
-/// Render a completed build outcome after the command duration has been captured.
-///
-/// WHAT: owns all terminal presentation for build success and failure paths.
-/// WHY:  presentation must never be interleaved with command work or outcome
-///       classification, so the captured duration excludes rendering.
-fn render_build_outcome(
-    outcome: BuildCommandOutcome,
-    duration: Duration,
-) -> (CommandStatus, Option<(usize, usize)>) {
-    match outcome {
+fn render_build_outcome(report: BuildCommandReport) {
+    match report.outcome {
         BuildCommandOutcome::Success {
             output_file_count,
-            warning_count,
             warnings,
+            ..
         } => {
-            print_build_success_message(output_file_count, duration);
+            print_build_success_message(output_file_count, report.duration);
             if let Some(messages) = warnings {
                 print_compiler_messages(messages);
             }
-            (CommandStatus::Success, Some((0, warning_count)))
         }
-        BuildCommandOutcome::WriteError(messages) => {
-            print_compiler_messages(messages);
-            (CommandStatus::Failure, None)
-        }
-        BuildCommandOutcome::OutputPlanError { messages } => {
-            print_compiler_messages(messages);
-            (CommandStatus::Failure, None)
-        }
-        BuildCommandOutcome::BuildError {
-            messages,
-            diagnostic_counts,
-        } => {
-            print_compiler_messages(messages);
-            (CommandStatus::Failure, diagnostic_counts)
-        }
+        BuildCommandOutcome::Failure { messages, .. } => print_compiler_messages(messages),
     }
 }
 
-/// Test-only boundary seam for proving command work, capture and rendering order.
-///
-/// WHAT: executes and classifies a build outcome, records a scripted command
-///       duration, hands the classified outcome to an injected renderer, then
-///       renders it.
-/// WHY:  focused tests need an exact duration and an observation point after
-///       capture without introducing a general clock abstraction into
-///       production.
-#[cfg(all(test, feature = "timers"))]
-fn run_build_command_with_output_plan_for_tests(
-    project_builder: &build::ProjectBuilder,
-    path: &str,
-    flags: &[Flag],
-    build_config_inputs: &BuildConfigInputSet,
-    output_plan_builder: impl FnOnce(&mut BuildResult) -> Result<OutputPlan, CompilerError>,
-    duration: Duration,
-    renderer: impl FnOnce(&BuildCommandOutcome, Duration),
-) -> (CommandStatus, Option<(usize, usize)>) {
-    let outcome = build_command_outcome(
-        project_builder,
-        path,
-        flags,
-        build_config_inputs,
-        output_plan_builder,
-    );
-    crate::timing::record_command_total_timing(
-        crate::timing::TimingMetric::CommandBuildTotal,
-        duration,
-    );
-    renderer(&outcome, duration);
-    render_build_outcome(outcome, duration)
+fn render_check_outcome(report: CheckCommandReport, terse: bool) {
+    if terse {
+        print_terse_compiler_messages(&report.messages);
+        println!(
+            "{}",
+            format_terse_summary_line(report.duration, report.error_count, report.warning_count)
+        );
+    } else if report.error_count == 0 && report.warning_count == 0 {
+        say!(Dark White "---------------------");
+        say!(success_message(report.duration));
+        say!(Bold Green "No errors or warnings");
+    } else {
+        print_compiler_messages(report.messages);
+    }
 }
 
-/// Choose the output plan after a successful backend build.
-///
-/// Directory plans are validated during bootstrap. A single-file build needs
-/// its synthetic project directory only after backend output exists.
-fn create_build_output_plan(build_result: &mut BuildResult) -> Result<OutputPlan, CompilerError> {
-    if let Some(plan) = build_result.directory_output_plan.as_ref() {
-        return Ok(OutputPlan::Directory(plan.clone()));
+fn command_status_from_completion(completion: ProjectCommandCompletion) -> CommandStatus {
+    match completion.status {
+        ProjectCommandStatus::Success => CommandStatus::Success,
+        ProjectCommandStatus::Failure => CommandStatus::Failure,
     }
-
-    let output_root = env::current_dir().map_err(|error| {
-        CompilerError::compiler_error(format!(
-            "Could not resolve current directory for build outputs: {error}"
-        ))
-    })?;
-    let project_root = single_file_project_entry_dir(&build_result.config.entry_dir)?;
-
-    Ok(OutputPlan::SingleFile(SingleFileOutputPlan {
-        output_root,
-        project_root: Some(project_root),
-        owner: build_result.output_owner,
-        setting_span: None,
-    }))
 }
 
-/// Resolve the containing directory used by single-file output cleanup safety checks.
-///
-/// WHAT: maps a synthetic single-file entry to the directory that owns it.
-/// WHY: output-root validation compares against a directory context, not the source file path.
-fn single_file_project_entry_dir(entry_path: &Path) -> Result<PathBuf, CompilerError> {
-    let Some(parent) = entry_path.parent() else {
-        return Err(CompilerError::compiler_error(format!(
-            "Could not resolve containing directory for single-file build entry '{}'",
-            entry_path.display()
-        )));
-    };
-
-    if parent.as_os_str().is_empty() {
-        return env::current_dir().map_err(|error| {
-            CompilerError::compiler_error(format!(
-                "Could not resolve containing directory for single-file build entry '{}': {error}",
-                entry_path.display()
-            ))
-        });
+fn format_terse_summary_line(
+    duration: std::time::Duration,
+    error_count: usize,
+    warning_count: usize,
+) -> String {
+    if error_count == 0 && warning_count == 0 {
+        return format!("{}. No errors or warnings.", success_message(duration));
     }
 
-    if parent.is_dir() {
-        return Ok(parent.to_path_buf());
-    }
+    format!("errors={error_count}, warnings={warning_count}.")
+}
 
-    Err(CompilerError::compiler_error(format!(
-        "Could not resolve containing directory for single-file build entry '{}': '{}' is not a directory",
-        entry_path.display(),
-        parent.display()
-    )))
+fn format_duration(duration: std::time::Duration) -> String {
+    format!("{duration:?}")
+}
+
+fn success_message(duration: std::time::Duration) -> String {
+    format!("Done in {}", format_duration(duration))
 }
 
 fn integration_run_status(summary: IntegrationRunSummary) -> CommandStatus {
@@ -1138,29 +935,6 @@ fn print_build_success_message(output_file_count: usize, duration: std::time::Du
 
 fn compact_whitespace(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-/// Build a `CompilerMessages` container for the warnings produced during a successful build.
-///
-/// WHAT: centralises the conversion so tests can verify exactly which warnings a successful build
-/// would print without relying on stdout capture.
-/// WHY: `print_build_message` delegates to `print_compiler_messages`, which writes to the terminal.
-/// This helper is the decision boundary for whether any output is produced at all.
-#[cfg(test)]
-fn build_warnings_messages(build_result: &BuildResult) -> Option<CompilerMessages> {
-    if build_result.warnings.is_empty() {
-        return None;
-    }
-
-    let mut messages = CompilerMessages::from_diagnostics(
-        build_result.warnings.clone(),
-        build_result.string_table.clone(),
-    );
-    messages.install_source_contexts(build_result.warning_source_contexts.clone(), 0);
-    if let Some(source_database) = build_result.source_database.as_ref() {
-        messages.set_source_database(source_database.clone());
-    }
-    Some(messages)
 }
 
 #[cfg(test)]

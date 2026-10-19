@@ -6,7 +6,7 @@
 pub mod options;
 pub mod prompt;
 
-pub(crate) mod scaffold;
+pub(crate) mod files;
 pub(crate) mod start_page_scaffolding;
 pub(crate) mod target;
 
@@ -47,9 +47,9 @@ pub fn create_html_project_template_with_prompt(
 
     let resolved = target::resolve_project_target(options.raw_path, &current_dir, prompt)?;
 
-    scaffold::run_preflight_checks(&resolved, options.force, prompt)?;
+    files::run_preflight_checks(&resolved, options.force, prompt)?;
 
-    scaffold::write_scaffold(&resolved, options.force, prompt)
+    files::write_scaffold(&resolved, options.force, prompt)
 }
 
 /// Render the CLI summary for a successful scaffold.

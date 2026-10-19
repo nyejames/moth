@@ -19,7 +19,7 @@ fn fixture_workspace() -> TempDir {
         workspace.path(),
         "Cargo.toml",
         "[package]\nname = \"moth\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\
-         [workspace]\nmembers = [\"crates/*\"]\nresolver = \"3\"\n",
+         [workspace]\nmembers = [\".\", \"crates/*\", \"xtask\"]\nresolver = \"3\"\n",
     );
     write_fixture_file(workspace.path(), "src/lib.rs", "");
     write_rust_package(workspace.path(), "moth-lexical", "");
@@ -28,6 +28,14 @@ fn fixture_workspace() -> TempDir {
         "moth-mon",
         "[dependencies]\nmoth-lexical = { path = \"../moth-lexical\" }\n",
     );
+    write_rust_package(workspace.path(), "lappet", "");
+    write_rust_package(workspace.path(), "moth-cli", "");
+    write_fixture_file(
+        workspace.path(),
+        "xtask/Cargo.toml",
+        "[package]\nname = \"xtask\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    );
+    write_fixture_file(workspace.path(), "xtask/src/main.rs", "fn main() {}\n");
     workspace
 }
 
@@ -320,6 +328,8 @@ fn rust_libraries_allow_only_the_forward_workspace_direction() {
         cargo_roots,
         [
             "Cargo.toml",
+            "crates/lappet/Cargo.toml",
+            "crates/moth-cli/Cargo.toml",
             "crates/moth-lexical/Cargo.toml",
             "crates/moth-mon/Cargo.toml",
         ],
@@ -517,5 +527,61 @@ fn compiler_and_xtask_dependencies_are_forbidden_even_when_excluded_from_workspa
         assert_eq!(edge.package, "moth-mon");
         assert_eq!(edge.dependency, forbidden);
         assert_eq!(edge.kind, RustDependencyKind::Normal);
+    }
+}
+
+#[test]
+fn compiler_and_lappet_keep_their_one_way_dependency_boundaries() {
+    for (owner, dependency, section, expected_kind) in [
+        ("moth", "lappet", "dependencies", RustDependencyKind::Normal),
+        (
+            "moth",
+            "wasmtime",
+            "dev-dependencies",
+            RustDependencyKind::Dev,
+        ),
+        (
+            "lappet",
+            "moth-cli",
+            "dependencies",
+            RustDependencyKind::Normal,
+        ),
+        (
+            "lappet",
+            "xtask",
+            "build-dependencies",
+            RustDependencyKind::Build,
+        ),
+    ] {
+        let workspace = fixture_workspace();
+        let dependency_definition = if dependency == "wasmtime" {
+            "wasmtime = \"0.1\"".to_owned()
+        } else {
+            let relative_path = match (owner, dependency) {
+                ("moth", "lappet") => "crates/lappet",
+                ("lappet", "moth-cli") => "../moth-cli",
+                ("lappet", "xtask") => "../../xtask",
+                _ => unreachable!(),
+            };
+            format!("{dependency} = {{ path = \"{relative_path}\", optional = true }}")
+        };
+        let manifest = if owner == "moth" {
+            "Cargo.toml"
+        } else {
+            "crates/lappet/Cargo.toml"
+        };
+        let mut contents = fs::read_to_string(workspace.path().join(manifest))
+            .expect("fixture owner manifest should exist");
+        contents.push_str(&format!("\n[{section}]\n{dependency_definition}\n"));
+        write_fixture_file(workspace.path(), manifest, &contents);
+
+        let findings = findings_for(&workspace);
+        assert_eq!(findings.len(), 1, "{owner} -> {dependency}: {findings:?}");
+        let finding = &findings[0];
+        assert_eq!(finding.rule, FirstPartyDepsRule::RustDependencyDirection);
+        let edge = finding.rust_dependency.as_ref().expect("typed Cargo edge");
+        assert_eq!(edge.package, owner);
+        assert_eq!(edge.dependency, dependency);
+        assert_eq!(edge.kind, expected_kind);
     }
 }

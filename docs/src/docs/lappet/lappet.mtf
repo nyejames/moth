@@ -60,10 +60,11 @@ collections. Every target still validates the Moth features it can execute.
 
 ## Understand the execution policy
 
-Lappet V1 uses Wasmtime, with Winch for development and Cranelift for release by
-default. A builder can override that selection. Moth's output profile and the
-native compilation strategy remain separate choices with the same language
-semantics.
+Lappet V1 uses Wasmtime with Cranelift as its only native compiler. Development
+defaults to `OptLevel::None` and release to `OptLevel::Speed`, subject to
+benchmarks. Moth's output profile and the native optimisation level remain
+separate choices with the same language semantics. Winch is a possible future
+option.
 
 Persistent AOT caches, async scheduling, foreign Wasm components and automatic
 native dependency installation are later work. JavaScript bindings remain a

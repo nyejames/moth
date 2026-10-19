@@ -2032,9 +2032,9 @@ result = combine(Box(Label("payload")))
     }
 
     // Use the existing rendered-output owner rather than inspecting generated JS text.
-    let builder = ProjectBuilder::new(Box::new(
+    let builder = ProjectBuilder::new(
         crate::projects::html_project::html_project_builder::HtmlProjectBuilder::new(),
-    ));
+    );
     let mut built = build_project(
         &builder,
         root.to_str()
@@ -3042,7 +3042,7 @@ fn successful_source_package_warning_uses_package_snapshot_for_colliding_logical
         .expect("should write project module");
     fs::write(package_root.join("@mod.moth"), package_text).expect("should write package module");
 
-    let builder = ProjectBuilder::new(Box::new(SuccessfulPackageWarningBuilder { package_root }));
+    let builder = ProjectBuilder::new(SuccessfulPackageWarningBuilder { package_root });
     let build_result = build_project(
         &builder,
         project_root

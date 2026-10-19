@@ -20,6 +20,12 @@ const EXTRACTED_PACKAGES: &[(&str, &[&str])] =
 /// Packages no extracted library may reach, whether or not they are workspace members.
 const ALWAYS_FORBIDDEN_PACKAGES: &[&str] = &["moth", "xtask"];
 
+/// Additional package boundaries that include external dependencies as well as workspace crates.
+const FORBIDDEN_PACKAGE_DEPENDENCIES: &[(&str, &[&str])] = &[
+    ("moth", &["lappet", "wasmtime"]),
+    ("lappet", &["moth-cli", "xtask"]),
+];
+
 /// Canonical package identities and the authored alias of a forbidden Cargo edge.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct RustDependencyEdge {
@@ -133,6 +139,38 @@ pub(super) fn audit_rust_dependencies(
                 rule: FirstPartyDepsRule::RustDependencyDirection,
                 message: format!(
                     "'{package_name}' has a forbidden {kind} dependency on first-party package '{}'",
+                    dependency.name
+                ),
+                rust_dependency: Some(RustDependencyEdge {
+                    package: package.name.clone(),
+                    dependency: dependency.name.clone(),
+                    kind,
+                    rename: dependency.rename.clone(),
+                }),
+            });
+        }
+    }
+
+    for (package_name, forbidden_dependencies) in FORBIDDEN_PACKAGE_DEPENDENCIES {
+        let Some(package) = packages
+            .iter()
+            .find(|package| package.name == *package_name)
+        else {
+            continue;
+        };
+        let manifest = relative_display_path(&workspace_root, &package.manifest_path)?;
+
+        for dependency in &package.dependencies {
+            if !forbidden_dependencies.contains(&dependency.name.as_str()) {
+                continue;
+            }
+
+            let kind = dependency.kind.unwrap_or(RustDependencyKind::Normal);
+            state.findings.push(FirstPartyDepsFinding {
+                file: manifest.clone(),
+                rule: FirstPartyDepsRule::RustDependencyDirection,
+                message: format!(
+                    "'{package_name}' has a forbidden {kind} dependency on package '{}'",
                     dependency.name
                 ),
                 rust_dependency: Some(RustDependencyEdge {

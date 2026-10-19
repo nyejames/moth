@@ -667,7 +667,7 @@ fn project_build_executor_preserves_non_utf8_entry_path_as_file_failure() {
 
     let entry_file = PathBuf::from(OsString::from_vec(b"entry-\xff.moth".to_vec()));
     let mut executor = ProjectBuildExecutor::new(
-        ProjectBuilder::new(Box::new(HtmlProjectBuilder::new())),
+        ProjectBuilder::new(HtmlProjectBuilder::new()),
         BuildConfigInputSet::new(),
     );
     let messages = match executor.build(&entry_file, &[]) {
@@ -694,7 +694,7 @@ fn project_build_executor_preserves_warnings_when_output_write_fails() {
     let timing_session =
         crate::timing::start_raw_benchmark_collection(true).expect("timing session should start");
     let mut executor = ProjectBuildExecutor::new(
-        ProjectBuilder::new(Box::new(InvalidOutputWarningBuilder)),
+        ProjectBuilder::new(InvalidOutputWarningBuilder),
         BuildConfigInputSet::new(),
     );
     let mut compiled = executor
@@ -767,7 +767,7 @@ fn project_build_executor_writes_the_validated_directory_plan() {
         ))
         .expect("test command input should be unique");
     let mut executor = ProjectBuildExecutor::new(
-        ProjectBuilder::new(Box::new(HtmlProjectBuilder::new())),
+        ProjectBuilder::new(HtmlProjectBuilder::new()),
         build_config_inputs,
     );
     #[cfg(feature = "timers")]
@@ -868,7 +868,7 @@ fn dev_cycle_records_build_and_write_and_drains_one_collection_per_build() {
 
     let state = Arc::new(DevServerState::new(root.join("dev")));
     let mut executor = ProjectBuildExecutor::new(
-        ProjectBuilder::new(Box::new(HtmlProjectBuilder::new())),
+        ProjectBuilder::new(HtmlProjectBuilder::new()),
         BuildConfigInputSet::new(),
     );
 
@@ -1542,7 +1542,7 @@ fn m02_real_rebuild_write_serve_tracks_private_body_entry_outcomes_and_invalid_e
     let state = Arc::new(DevServerState::new(root.join("dev")));
     let mut executor = RecordingProjectExecutor {
         inner: ProjectBuildExecutor::new(
-            ProjectBuilder::new(Box::new(HtmlProjectBuilder::new())),
+            ProjectBuilder::new(HtmlProjectBuilder::new()),
             BuildConfigInputSet::new(),
         ),
         last_write: None,

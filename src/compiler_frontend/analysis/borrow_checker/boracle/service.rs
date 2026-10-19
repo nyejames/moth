@@ -19,7 +19,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum BoracleDump {
+pub enum BoracleDump {
     Problem,
     Origins,
     Relations,
@@ -70,7 +70,7 @@ impl FromStr for BoracleDump {
 
 /// The versioned reference rule-set selected by Boracle.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
-pub(crate) enum BoracleReferenceRuleSet {
+pub enum BoracleReferenceRuleSet {
     #[default]
     V1,
 }
@@ -100,7 +100,7 @@ pub(crate) struct BoracleExperimentMetadata {
 
 /// One composable Boracle experiment.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub(crate) enum BoracleExperiment {
+pub enum BoracleExperiment {
     DeadExclusiveLoan,
 }
 
@@ -144,9 +144,9 @@ impl FromStr for BoracleExperiment {
 
 /// Typed, composable rule selection owned by the compiler service boundary.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct BoracleRuleSelection {
-    pub(crate) reference_rule_set: BoracleReferenceRuleSet,
-    pub(crate) experiments: BTreeSet<BoracleExperiment>,
+pub struct BoracleRuleSelection {
+    pub reference_rule_set: BoracleReferenceRuleSet,
+    pub experiments: BTreeSet<BoracleExperiment>,
 }
 
 impl Default for BoracleRuleSelection {
@@ -188,7 +188,7 @@ impl BoracleRuleSelection {
     ///
     /// The pairwise hook is intentionally present even while the current experiment set has one
     /// member: adding a second experiment must not bypass compatibility validation.
-    pub(crate) fn validate(&self) -> Result<(), String> {
+    pub fn validate(&self) -> Result<(), String> {
         for experiment in &self.experiments {
             let metadata = experiment.metadata();
             for prerequisite in metadata.prerequisites {

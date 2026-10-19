@@ -1,85 +1,31 @@
-//! Tests for CLI command parsing and validation.
+//! Tests for CLI parsing, command status and terminal presentation.
 
-#[cfg(feature = "timers")]
-use super::run_build_command_with_output_plan;
-#[cfg(feature = "timers")]
-use super::run_build_command_with_output_plan_for_tests;
 use super::{
-    Command, CommandInputArgument, build_warnings_messages, command_input_set, compact_whitespace,
-    get_command, help_build_flag_entries, integration_run_status, is_standalone_version_request,
-    run_build_command,
+    Command, CommandInputArgument, CommandStatus, command_input_set, compact_whitespace,
+    format_terse_summary_line, get_command, help_build_flag_entries, integration_run_status,
+    is_standalone_version_request,
 };
-use crate::build_system::BuildProfile;
-use crate::build_system::build::{BuildResult, FileKind, OutputFile, Project, ProjectBuilder};
-use crate::build_system::create_project_modules::resource_inputs::ResourceInputRegistry;
-use crate::build_system::output::{BuilderKind, CleanupPolicy, OutputOwner};
-use crate::compiler_frontend::Flag;
+use crate::scaffold::NewHtmlProjectOptions;
+use moth::projects::dev_server::DevServerOptions;
+use moth::projects::integration_tests::{BackendId, IntegrationRunSummary, TestRunnerOptions};
 #[cfg(feature = "boracle")]
-use crate::compiler_frontend::analysis::borrow_checker::{
+use moth::projects::{
     BoracleDump, BoracleExperiment, BoracleReferenceRuleSet, BoracleRuleSelection,
 };
-use crate::compiler_frontend::build_config::{
+use moth::projects::{
     BuildCommandLocation, BuildConfigInputSet, BuildConfigInputValue, BuildConfigValueLocation,
-    BuildInputName, BuildInputType, ContractValueError, PrimitiveBuildInputType,
-    PrimitiveBuildValue,
+    BuildInputName, Flag, PrimitiveBuildValue,
 };
-#[cfg(feature = "timers")]
-use crate::compiler_frontend::compiler_errors::CompilerError;
-use crate::compiler_frontend::compiler_messages::{CompilerDiagnostic, NamingConvention};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
-use crate::compiler_tests::integration_test_runner::{
-    BackendId, IntegrationRunSummary, TestRunnerOptions,
-};
-use crate::compiler_tests::test_fs::assert_path_missing;
-use crate::projects::check::{CheckOptions, run_check};
-use crate::projects::command_status::CommandStatus;
-use crate::projects::dev_server::DevServerOptions;
-use crate::projects::html_project::html_project_builder::HtmlProjectBuilder;
-use crate::projects::html_project::new_html_project::NewHtmlProjectOptions;
-use crate::projects::settings::Config;
-#[cfg(feature = "timers")]
-use crate::timing::start_benchmark_collection;
-use moth_lexical::numeric::fixed_scalar::{FixedScalar, FixedScalarValue};
-use moth_lexical::numeric::parse::NumberLiteralErrorReason;
 #[cfg(feature = "boracle")]
 use std::collections::BTreeSet;
-use std::fs;
-use std::path::PathBuf;
-#[cfg(feature = "timers")]
-use std::sync::atomic::{AtomicUsize, Ordering};
-#[cfg(feature = "timers")]
 use std::time::Duration;
-
-/// The builder every command test compiles under.
-fn test_project_builder() -> ProjectBuilder {
-    ProjectBuilder::new(Box::new(HtmlProjectBuilder::new()))
-}
 
 fn args(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| value.to_string()).collect()
 }
 
-fn write_cli_config_input_project() -> tempfile::TempDir {
-    let temp = tempfile::tempdir().expect("should create temporary project");
-    let root = temp.path();
-    let source_root = root.join("src");
-    fs::create_dir_all(&source_root).expect("should create source root");
-    fs::write(
-        root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= (\n    dev_output = \"preview\",\n    release_output = \"release\",\n)\n",
-    )
-    .expect("should write project config");
-    fs::write(
-        source_root.join("@page.moth"),
-        "enabled #Config of Bool\nresult ~= 0\nif enabled:\n    result = 1\n;\n",
-    )
-    .expect("should write config-input source");
-    temp
-}
-
 #[test]
 fn dev_command_uses_default_options() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let command = get_command(&args(&["dev", "main.moth"])).expect("command should parse");
     assert_eq!(
         command,
@@ -94,7 +40,6 @@ fn dev_command_uses_default_options() {
 
 #[test]
 fn build_command_uses_current_directory_when_path_is_missing() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let command = get_command(&args(&["build"])).expect("build command should parse");
     assert_eq!(
         command,
@@ -107,171 +52,7 @@ fn build_command_uses_current_directory_when_path_is_missing() {
 }
 
 #[test]
-fn build_command_writes_the_validated_directory_output_plan() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
-    let root = _tmp_root.path().to_path_buf();
-    let source_root = root.join("src");
-    fs::create_dir_all(&source_root).expect("should create source root");
-    fs::write(
-        root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= (\n    dev_output = \"preview\",\n    release_output = \"release\",\n)\n",
-    )
-    .expect("should write project config");
-    fs::write(
-        source_root.join("@page.moth"),
-        "#[:<h1>CLI Directory Plan</h1>]\n",
-    )
-    .expect("should write page source");
-
-    let status = run_build_command(
-        &test_project_builder(),
-        root.to_str()
-            .expect("temporary project path should be valid UTF-8"),
-        &[],
-        &BuildConfigInputSet::new(),
-    );
-    assert_eq!(status, CommandStatus::Success);
-    assert!(root.join("preview/index.html").exists());
-    assert_path_missing(&root.join("dev/index.html"));
-}
-
-#[test]
-fn build_command_executes_with_typed_config_input() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let temp = write_cli_config_input_project();
-    let root = temp.path().to_path_buf();
-    let root_text = root
-        .to_str()
-        .expect("temporary project path should be valid UTF-8");
-    let command = get_command(&args(&["build", root_text, "--input", "enabled=true"]))
-        .expect("build command with a typed input should parse");
-    let Command::Build {
-        path,
-        flags,
-        inputs,
-    } = command
-    else {
-        panic!("build command expected");
-    };
-    let inputs = command_input_set(&inputs).expect("the parsed build input should classify");
-    let enabled = BuildInputName::new("enabled").expect("test input name should validate");
-    assert_eq!(
-        inputs
-            .get(&enabled)
-            .expect("build should retain enabled")
-            .value(),
-        &BuildConfigInputValue::Typed(PrimitiveBuildValue::Bool(true)),
-        "build should retain the typed Bool value"
-    );
-
-    let status = run_build_command(&test_project_builder(), &path, &flags, &inputs);
-
-    assert_eq!(status, CommandStatus::Success);
-    assert!(
-        root.join("preview/index.html").exists(),
-        "successful build should emit its configured output"
-    );
-}
-
-#[test]
-fn check_command_executes_with_typed_config_input() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let temp = write_cli_config_input_project();
-    let root = temp.path().to_path_buf();
-    let root_text = root
-        .to_str()
-        .expect("temporary project path should be valid UTF-8");
-    let command = get_command(&args(&["check", root_text, "--input", "enabled=true"]))
-        .expect("check command with a typed input should parse");
-    let Command::Check {
-        path,
-        terse,
-        inputs,
-    } = command
-    else {
-        panic!("check command expected");
-    };
-    let inputs = command_input_set(&inputs).expect("the parsed check input should classify");
-    let enabled = BuildInputName::new("enabled").expect("test input name should validate");
-    assert_eq!(
-        inputs
-            .get(&enabled)
-            .expect("check should retain enabled")
-            .value(),
-        &BuildConfigInputValue::Typed(PrimitiveBuildValue::Bool(true)),
-        "check should retain the typed Bool value"
-    );
-
-    let status = run_check(
-        &path,
-        CheckOptions { terse, inputs },
-        &test_project_builder(),
-    );
-
-    assert_eq!(status, CommandStatus::Success);
-    assert!(
-        !root.join("preview").exists(),
-        "check should validate the source without writing build output"
-    );
-}
-
-/// An output-plan failure still reaches the command's single timing finish.
-#[cfg(feature = "timers")]
-#[test]
-fn failed_output_plan_records_the_build_command_total() {
-    let _test_guard = crate::timing::lock_instrumentation_tests();
-    let _temp = tempfile::tempdir().expect("should create temp dir");
-    let root = _temp.path().to_path_buf();
-
-    let entry_file = root.join("main.moth");
-    fs::write(&entry_file, "value = 1\n").expect("should write source file");
-
-    // The outer raw session intentionally makes the inner command session a
-    // rejected no-op. Stage guards still record into the outer session, which
-    // lets this unit test inspect the command total without rendering it.
-    let timing_session = start_benchmark_collection(true).expect("timing session should start");
-    let status = run_build_command_with_output_plan(
-        &test_project_builder(),
-        entry_file
-            .to_str()
-            .expect("temporary path should be valid UTF-8"),
-        &[],
-        &BuildConfigInputSet::new(),
-        |_| Err(CompilerError::compiler_error("forced output-plan failure")),
-    );
-    let snapshot = timing_session.finish();
-
-    assert_eq!(status, CommandStatus::Failure);
-    assert_eq!(
-        snapshot
-            .timings
-            .iter()
-            .find(|observation| {
-                observation.metric.descriptor().stable_name == "command.build.total"
-            })
-            .expect("the command total must retain a dense row")
-            .samples,
-        1,
-        "the failed output-plan path must finish the command total before the session drains"
-    );
-    assert_eq!(
-        snapshot
-            .timings
-            .iter()
-            .find(|observation| {
-                observation.metric.descriptor().stable_name == "build.output.total"
-            })
-            .expect("the output total must retain a dense row")
-            .samples,
-        1,
-        "the failed output-plan path must finish the output segment before the session drains"
-    );
-}
-
-#[test]
 fn build_command_supports_mixed_path_and_flag_ordering() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let command =
         get_command(&args(&["build", "--release", "main.moth"])).expect("command should parse");
     assert_eq!(
@@ -286,7 +67,6 @@ fn build_command_supports_mixed_path_and_flag_ordering() {
 
 #[test]
 fn build_command_rejects_unknown_flags() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let error =
         get_command(&args(&["build", "--wat"])).expect_err("unknown build flag should fail");
     assert!(error.contains("Unknown build flag"));
@@ -296,7 +76,6 @@ fn build_command_rejects_unknown_flags() {
 
 #[test]
 fn new_html_command_uses_current_directory_when_path_is_missing() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let command = get_command(&args(&["new", "html"])).expect("new html command should parse");
     assert_eq!(
         command,
@@ -309,7 +88,6 @@ fn new_html_command_uses_current_directory_when_path_is_missing() {
 
 #[test]
 fn new_html_command_parses_project_path() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let command = get_command(&args(&["new", "html", "site"])).expect("new html should parse");
     assert_eq!(
         command,
@@ -322,7 +100,6 @@ fn new_html_command_parses_project_path() {
 
 #[test]
 fn dev_command_parses_custom_host_port_and_poll_interval() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let command = get_command(&args(&[
         "dev",
         "main.moth",
@@ -335,25 +112,25 @@ fn dev_command_parses_custom_host_port_and_poll_interval() {
     ]))
     .expect("command should parse");
 
-    assert_eq!(
-        command,
-        Command::Dev {
-            path: String::from("main.moth"),
-            options: DevServerOptions {
-                host: String::from("0.0.0.0"),
-                port: 7777,
-                poll_interval_ms: 120,
-                inputs: BuildConfigInputSet::new(),
-            },
-            flags: Vec::new(),
-            inputs: Vec::new(),
-        }
-    );
+    let Command::Dev {
+        path,
+        options,
+        flags,
+        inputs,
+    } = command
+    else {
+        panic!("dev command expected");
+    };
+    assert_eq!(path, "main.moth");
+    assert_eq!(options.host, "0.0.0.0");
+    assert_eq!(options.port, 7777);
+    assert_eq!(options.poll_interval_ms, 120);
+    assert!(flags.is_empty());
+    assert!(inputs.is_empty());
 }
 
 #[test]
 fn dev_command_rejects_invalid_port_values() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let error = get_command(&args(&["dev", "main.moth", "--port", "invalid"]))
         .expect_err("invalid port should fail");
     assert!(error.contains("Invalid --port value"));
@@ -361,7 +138,6 @@ fn dev_command_rejects_invalid_port_values() {
 
 #[test]
 fn dev_command_rejects_unknown_flags() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let error =
         get_command(&args(&["dev", "main.moth", "--wat"])).expect_err("unknown flag should fail");
     assert!(error.contains("Unknown dev flag"));
@@ -369,7 +145,6 @@ fn dev_command_rejects_unknown_flags() {
 
 #[test]
 fn dev_command_rejects_missing_flag_values() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let host_error =
         get_command(&args(&["dev", "main.moth", "--host"])).expect_err("missing host value");
     assert!(host_error.contains("Missing value for --host"));
@@ -381,7 +156,6 @@ fn dev_command_rejects_missing_flag_values() {
 
 #[test]
 fn dev_command_rejects_zero_poll_interval() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let error = get_command(&args(&["dev", "main.moth", "--poll-interval-ms", "0"]))
         .expect_err("zero interval should fail");
     assert!(error.contains("greater than zero"));
@@ -389,7 +163,6 @@ fn dev_command_rejects_zero_poll_interval() {
 
 #[test]
 fn dev_command_supports_path_and_flag_ordering() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let command = get_command(&args(&[
         "dev",
         "--host",
@@ -400,25 +173,25 @@ fn dev_command_supports_path_and_flag_ordering() {
     ]))
     .expect("command should parse with mixed ordering");
 
-    assert_eq!(
-        command,
-        Command::Dev {
-            path: String::from("main.moth"),
-            options: DevServerOptions {
-                host: String::from("localhost"),
-                port: 6342,
-                poll_interval_ms: 900,
-                inputs: BuildConfigInputSet::new(),
-            },
-            flags: Vec::new(),
-            inputs: Vec::new(),
-        }
-    );
+    let Command::Dev {
+        path,
+        options,
+        flags,
+        inputs,
+    } = command
+    else {
+        panic!("dev command expected");
+    };
+    assert_eq!(path, "main.moth");
+    assert_eq!(options.host, "localhost");
+    assert_eq!(options.port, 6342);
+    assert_eq!(options.poll_interval_ms, 900);
+    assert!(flags.is_empty());
+    assert!(inputs.is_empty());
 }
 
 #[test]
 fn new_html_command_rejects_multiple_paths() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let error = get_command(&args(&["new", "html", "a", "b"]))
         .expect_err("multiple new html paths should fail");
     assert!(error.contains("at most one path"));
@@ -426,7 +199,6 @@ fn new_html_command_rejects_multiple_paths() {
 
 #[test]
 fn new_html_command_parses_force_flag_after_path() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let command =
         get_command(&args(&["new", "html", "site", "--force"])).expect("command should parse");
     assert_eq!(
@@ -440,7 +212,6 @@ fn new_html_command_parses_force_flag_after_path() {
 
 #[test]
 fn new_html_command_parses_force_flag_before_path() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let command =
         get_command(&args(&["new", "html", "--force", "site"])).expect("command should parse");
     assert_eq!(
@@ -454,7 +225,6 @@ fn new_html_command_parses_force_flag_before_path() {
 
 #[test]
 fn new_html_command_rejects_unknown_flags() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let error =
         get_command(&args(&["new", "html", "--yes"])).expect_err("unknown flag should fail");
     assert!(error.contains("Unknown new flag"));
@@ -462,14 +232,12 @@ fn new_html_command_rejects_unknown_flags() {
 
 #[test]
 fn build_command_rejects_force_flag() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let error = get_command(&args(&["build", "--force"])).expect_err("build --force should fail");
     assert!(error.contains("Unknown build flag"));
 }
 
 #[test]
 fn tests_command_uses_default_options() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let command = get_command(&args(&["tests"])).expect("tests command should parse");
     assert_eq!(
         command,
@@ -485,7 +253,6 @@ fn tests_command_uses_default_options() {
 
 #[test]
 fn tests_command_parses_backend_filter() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let command = get_command(&args(&["tests", "--backend", "html_wasm"]))
         .expect("tests backend filter should parse");
     assert_eq!(
@@ -502,7 +269,6 @@ fn tests_command_parses_backend_filter() {
 
 #[test]
 fn tests_command_parses_audit_mode() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let command = get_command(&args(&["tests", "--audit"])).expect("audit mode should parse");
     assert_eq!(
         command,
@@ -518,7 +284,6 @@ fn tests_command_parses_audit_mode() {
 
 #[test]
 fn tests_command_parses_composable_selection_options() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let command = get_command(&args(&[
         "tests",
         "--tag",
@@ -553,7 +318,6 @@ fn tests_command_parses_composable_selection_options() {
 
 #[test]
 fn tests_command_rejects_duplicate_singleton_options() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     for duplicate in [
         vec!["--case", "one", "--case", "two"],
         vec!["--contract", "one", "--contract", "two"],
@@ -572,7 +336,6 @@ fn tests_command_rejects_duplicate_singleton_options() {
 
 #[test]
 fn tests_command_rejects_audit_filters_in_any_argument_order() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     for values in [
         vec!["tests", "--audit", "--case", "case"],
         vec!["tests", "--case", "case", "--audit"],
@@ -591,7 +354,6 @@ fn tests_command_rejects_audit_filters_in_any_argument_order() {
 
 #[test]
 fn tests_command_rejects_duplicate_audit() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let error = get_command(&args(&["tests", "--audit", "--audit"]))
         .expect_err("duplicate audit should fail");
     assert!(error.contains("--audit") && error.contains("at most once"));
@@ -599,7 +361,6 @@ fn tests_command_rejects_duplicate_audit() {
 
 #[test]
 fn tests_command_rejects_duplicate_tag_values() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let error = get_command(&args(&["tests", "--tag", "borrows", "--tag", "borrows"]))
         .expect_err("duplicate tag should fail");
     assert!(
@@ -610,7 +371,6 @@ fn tests_command_rejects_duplicate_tag_values() {
 
 #[test]
 fn tests_command_rejects_missing_selection_values() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     for option in ["--case", "--tag", "--contract", "--backend"] {
         let error = get_command(&args(&["tests", option]))
             .expect_err("missing selection value should fail");
@@ -620,7 +380,6 @@ fn tests_command_rejects_missing_selection_values() {
 
 #[test]
 fn tests_command_rejects_unknown_backend_and_positional_arguments() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let backend_error = get_command(&args(&["tests", "--backend", "wasm"]))
         .expect_err("unsupported backend should fail");
     assert!(backend_error.contains("Invalid value for --backend"));
@@ -633,7 +392,6 @@ fn tests_command_rejects_unknown_backend_and_positional_arguments() {
 
 #[test]
 fn compact_whitespace_collapses_multiline_to_one_line() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     assert_eq!(compact_whitespace("hello\nworld"), "hello world");
     assert_eq!(
         compact_whitespace("line1\n\n  line2  \nline3"),
@@ -646,7 +404,6 @@ fn compact_whitespace_collapses_multiline_to_one_line() {
 
 #[test]
 fn tests_command_rejects_unknown_flags() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let error =
         get_command(&args(&["tests", "--wat"])).expect_err("unknown tests flag should fail");
     assert!(error.contains("Unknown tests flag"));
@@ -655,7 +412,6 @@ fn tests_command_rejects_unknown_flags() {
 
 #[test]
 fn check_command_uses_default_options() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let command = get_command(&args(&["check"])).expect("check command should parse");
     assert_eq!(
         command,
@@ -669,7 +425,6 @@ fn check_command_uses_default_options() {
 
 #[test]
 fn check_command_parses_path_and_terse_flag() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let command = get_command(&args(&["check", "main.moth", "--terse"]))
         .expect("check command should parse path and terse flag");
     assert_eq!(
@@ -684,7 +439,6 @@ fn check_command_parses_path_and_terse_flag() {
 
 #[test]
 fn check_command_supports_mixed_argument_ordering() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let command = get_command(&args(&["check", "--terse", "main.moth"]))
         .expect("check command should parse mixed argument ordering");
     assert_eq!(
@@ -699,7 +453,6 @@ fn check_command_supports_mixed_argument_ordering() {
 
 #[test]
 fn check_command_rejects_multiple_paths() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let error = get_command(&args(&["check", "a.moth", "b.moth"]))
         .expect_err("multiple check paths should fail");
     assert!(error.contains("at most one path"));
@@ -707,7 +460,6 @@ fn check_command_rejects_multiple_paths() {
 #[cfg(feature = "boracle")]
 #[test]
 fn boracle_cli_parses_typed_dump_and_repeated_experiments() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let command = get_command(&args(&[
         "boracle",
         "main.moth",
@@ -735,7 +487,6 @@ fn boracle_cli_parses_typed_dump_and_repeated_experiments() {
 #[cfg(feature = "boracle")]
 #[test]
 fn boracle_cli_defaults_to_empty_experiment_set() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let command =
         get_command(&args(&["boracle", "main.moth"])).expect("boracle command should parse");
     assert_eq!(
@@ -751,7 +502,6 @@ fn boracle_cli_defaults_to_empty_experiment_set() {
 #[cfg(feature = "boracle")]
 #[test]
 fn boracle_cli_requires_source_path() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let error =
         get_command(&args(&["boracle"])).expect_err("Boracle command should require a source path");
     assert!(error.contains("requires one source path"));
@@ -760,7 +510,6 @@ fn boracle_cli_requires_source_path() {
 #[cfg(feature = "boracle")]
 #[test]
 fn boracle_cli_rejects_unknown_experiment() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let error = get_command(&args(&["boracle", "main.moth", "--experiment", "unknown"]))
         .expect_err("unknown Boracle experiment should fail");
     assert!(error.contains("Unknown Boracle experiment"));
@@ -769,7 +518,6 @@ fn boracle_cli_rejects_unknown_experiment() {
 #[cfg(feature = "boracle")]
 #[test]
 fn boracle_cli_rejects_comma_separated_experiments() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let error = get_command(&args(&[
         "boracle",
         "main.moth",
@@ -783,7 +531,6 @@ fn boracle_cli_rejects_comma_separated_experiments() {
 #[cfg(feature = "boracle")]
 #[test]
 fn boracle_cli_rejects_unknown_dump() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let error = get_command(&args(&["boracle", "main.moth", "--dump", "unknown"]))
         .expect_err("unknown Boracle dump should fail");
     assert!(error.contains("Invalid value for --dump"));
@@ -791,7 +538,6 @@ fn boracle_cli_rejects_unknown_dump() {
 
 #[test]
 fn build_command_returns_exact_flags() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let release = get_command(&args(&["build", "--release"])).expect("release flag should parse");
     assert_eq!(
         release,
@@ -826,7 +572,6 @@ fn build_command_returns_exact_flags() {
 
 #[test]
 fn dev_command_returns_exact_flags() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let release = get_command(&args(&["dev", "--release"])).expect("release flag should parse");
     assert_eq!(
         release,
@@ -852,7 +597,6 @@ fn dev_command_returns_exact_flags() {
 
 #[test]
 fn build_command_rejects_removed_warning_flags() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     for removed in &["--hide-warnings", "--hide-timers", "--show-warnings"] {
         let error = get_command(&args(&["build", removed]))
             .expect_err("removed flag should be rejected by build");
@@ -865,7 +609,6 @@ fn build_command_rejects_removed_warning_flags() {
 
 #[test]
 fn dev_command_rejects_removed_warning_flags() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     for removed in &["--hide-warnings", "--hide-timers", "--show-warnings"] {
         let error = get_command(&args(&["dev", "main.moth", removed]))
             .expect_err("removed flag should be rejected by dev");
@@ -878,7 +621,6 @@ fn dev_command_rejects_removed_warning_flags() {
 
 #[test]
 fn new_command_rejects_removed_warning_flags() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     for removed in &["--hide-warnings", "--hide-timers", "--show-warnings"] {
         let error = get_command(&args(&["new", "html", removed]))
             .expect_err("removed flag should be rejected by new");
@@ -891,7 +633,6 @@ fn new_command_rejects_removed_warning_flags() {
 
 #[test]
 fn new_html_command_rejects_build_flags() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     for flag in &["--release", "--html-wasm"] {
         let error = get_command(&args(&["new", "html", flag]))
             .expect_err("build flag should be rejected by new");
@@ -904,7 +645,6 @@ fn new_html_command_rejects_build_flags() {
 
 #[test]
 fn check_command_rejects_build_flags() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     for flag in &["--release", "--html-wasm"] {
         let error = get_command(&args(&["check", flag]))
             .expect_err("build flag should be rejected by check");
@@ -917,7 +657,6 @@ fn check_command_rejects_build_flags() {
 
 #[test]
 fn tests_command_rejects_build_flags() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     for flag in &["--release", "--html-wasm"] {
         let error = get_command(&args(&["tests", flag]))
             .expect_err("build flag should be rejected by tests");
@@ -930,7 +669,6 @@ fn tests_command_rejects_build_flags() {
 
 #[test]
 fn standalone_version_request_recognises_all_spellings() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     assert!(is_standalone_version_request(&args(&["--version"])));
     assert!(is_standalone_version_request(&args(&["-v"])));
     assert!(is_standalone_version_request(&args(&["-V"])));
@@ -938,7 +676,6 @@ fn standalone_version_request_recognises_all_spellings() {
 
 #[test]
 fn standalone_version_request_rejects_non_version_flags() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     assert!(!is_standalone_version_request(&args(&["--release"])));
     for removed in &["--hide-warnings", "--hide-timers", "--show-warnings"] {
         assert!(!is_standalone_version_request(&args(&[removed])));
@@ -953,7 +690,6 @@ fn standalone_version_request_rejects_non_version_flags() {
 
 #[test]
 fn help_advertises_accepted_flags_but_not_removed_spelling() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let entries = help_build_flag_entries();
     let joined = entries.join("\n");
 
@@ -962,11 +698,23 @@ fn help_advertises_accepted_flags_but_not_removed_spelling() {
     assert!(!joined.contains("--hide-warnings"));
     assert!(!joined.contains("--hide-timers"));
     assert!(!joined.contains("--show-warnings"));
+
+    if cfg!(feature = "boracle") || cfg!(feature = "boracle_campaign") {
+        assert!(
+            get_command(&args(&["boracle", "main.moth"])).is_ok(),
+            "the Boracle command should be available whenever a Boracle feature is enabled"
+        );
+    }
+}
+
+#[test]
+fn terse_summary_line_matches_clean_success_contract() {
+    let summary = format_terse_summary_line(Duration::from_millis(5), 0, 0);
+    assert_eq!(summary, "Done in 5ms. No errors or warnings.");
 }
 
 #[test]
 fn integration_run_status_reflects_suite_correctness() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let correct = IntegrationRunSummary {
         total_tests: 5,
         passed_tests: 3,
@@ -988,7 +736,6 @@ fn integration_run_status_reflects_suite_correctness() {
 
 #[test]
 fn tests_command_terse_flag_sets_terse_true() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let command = get_command(&args(&["tests", "--terse"])).expect("tests --terse should parse");
     assert_eq!(
         command,
@@ -1004,7 +751,6 @@ fn tests_command_terse_flag_sets_terse_true() {
 
 #[test]
 fn tests_command_terse_composes_with_filters() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     for args_slice in [
         vec!["tests", "--terse", "--case", "case_a"],
         vec!["tests", "--case", "case_a", "--terse"],
@@ -1022,7 +768,6 @@ fn tests_command_terse_composes_with_filters() {
 
 #[test]
 fn tests_command_rejects_duplicate_terse() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     let error = get_command(&args(&["tests", "--terse", "--terse"]))
         .expect_err("duplicate --terse should fail");
     assert!(error.contains("--terse") && error.contains("at most once"));
@@ -1030,7 +775,6 @@ fn tests_command_rejects_duplicate_terse() {
 
 #[test]
 fn tests_command_rejects_terse_list_in_either_order() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     for values in [
         vec!["tests", "--terse", "--list"],
         vec!["tests", "--list", "--terse"],
@@ -1045,7 +789,6 @@ fn tests_command_rejects_terse_list_in_either_order() {
 
 #[test]
 fn tests_command_rejects_terse_audit_in_either_order() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
     for values in [
         vec!["tests", "--terse", "--audit"],
         vec!["tests", "--audit", "--terse"],
@@ -1056,273 +799,6 @@ fn tests_command_rejects_terse_audit_in_either_order() {
             "unexpected error: {error}"
         );
     }
-}
-
-fn build_result_with_warnings(warnings: Vec<CompilerDiagnostic>) -> BuildResult {
-    BuildResult {
-        project: Project {
-            output_files: vec![OutputFile::new(
-                PathBuf::from("index.html"),
-                FileKind::Html(String::from("<html></html>")),
-            )],
-            entry_page_rel: Some(PathBuf::from("index.html")),
-            cleanup_policy: CleanupPolicy::html(),
-            warnings: Vec::new(),
-            deferred_resources: Vec::new(),
-            resource_inputs: ResourceInputRegistry::new(),
-        },
-        config: Config::new(PathBuf::from("main.moth")),
-        warnings,
-        string_table: StringTable::new(),
-        source_database: None,
-        warning_source_contexts: Vec::new(),
-        output_owner: OutputOwner {
-            builder: BuilderKind::Html,
-            profile: BuildProfile::Dev,
-        },
-        directory_output_plan: None,
-    }
-}
-
-#[test]
-fn successful_build_without_warnings_has_no_warning_messages() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let build_result = build_result_with_warnings(Vec::new());
-
-    assert!(
-        build_warnings_messages(&build_result).is_none(),
-        "a successful build with no warnings should not produce a CompilerMessages container"
-    );
-}
-
-#[test]
-fn successful_build_with_warnings_exposes_warning_messages() {
-    let _test_guard = crate::compiler_frontend::instrumentation::lock_counter_test();
-    let mut string_table = StringTable::new();
-    let name = string_table.intern("unused_value");
-    let warning =
-        CompilerDiagnostic::identifier_naming_convention(name, NamingConvention::CamelCase, None);
-
-    let build_result = build_result_with_warnings(vec![warning]);
-    let messages = build_warnings_messages(&build_result).expect("warnings should be wrapped");
-
-    assert_eq!(messages.warning_count(), 1);
-    assert_eq!(messages.error_count(), 0);
-    assert!(
-        !messages.has_errors(),
-        "successful-build warnings must not be treated as errors"
-    );
-}
-
-/// Baseline test: build command records command.build.total with exactly one sample.
-#[cfg(feature = "timers")]
-#[test]
-fn successful_build_records_command_build_total() {
-    let _test_guard = crate::timing::lock_instrumentation_tests();
-    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
-    let root = _tmp_root.path().to_path_buf();
-    let source_root = root.join("src");
-    fs::create_dir_all(&source_root).expect("should create temporary project root");
-    fs::write(
-        root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
-    )
-    .expect("should write config file");
-    fs::write(source_root.join("@page.moth"), "value = 1\n").expect("should write source file");
-
-    let timing_session = start_benchmark_collection(true).expect("timing session should start");
-    let status = run_build_command(
-        &test_project_builder(),
-        root.to_str().expect("temporary path should be valid UTF-8"),
-        &[],
-        &BuildConfigInputSet::new(),
-    );
-    let snapshot = timing_session.finish();
-
-    assert_eq!(status, CommandStatus::Success);
-    let command_total = snapshot
-        .timings
-        .iter()
-        .find(|observation| observation.metric.descriptor().stable_name == "command.build.total")
-        .expect("command.build.total must be recorded");
-    assert_eq!(command_total.samples, 1);
-}
-
-/// Boundary regression: a scripted build duration is recorded before rendering and
-/// renderer work cannot change the command total.
-///
-/// WHAT: proves execute/classify -> capture scripted duration -> render ordering
-///       by injecting a renderer callback that performs observable work after capture.
-/// WHY:  the original bug had presentation between two timing boundaries. This test
-///       pins the corrected boundary so renderer work stays outside the command total.
-#[cfg(feature = "timers")]
-#[test]
-fn build_command_total_excludes_renderer_work() {
-    let _test_guard = crate::timing::lock_instrumentation_tests();
-    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
-    let root = _tmp_root.path().to_path_buf();
-    let source_root = root.join("src");
-    fs::create_dir_all(&source_root).expect("should create source root");
-    fs::write(
-        root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
-    )
-    .expect("should write config");
-    fs::write(source_root.join("@page.moth"), "value = 1\n").expect("should write source");
-
-    let scripted_duration = Duration::from_millis(42);
-    let renderer_calls = AtomicUsize::new(0);
-
-    let timing_session = start_benchmark_collection(true).expect("timing session should start");
-    let (status, _) = run_build_command_with_output_plan_for_tests(
-        &test_project_builder(),
-        root.to_str().expect("temporary path should be valid UTF-8"),
-        &[],
-        &BuildConfigInputSet::new(),
-        super::create_build_output_plan,
-        scripted_duration,
-        |_outcome, duration| {
-            // The renderer receiving the captured duration is the ordering evidence: capture
-            // already happened. Sleeping here would add wall-clock time to the test without
-            // strengthening that, because the recorded total is the scripted value, not a
-            // measurement of this callback.
-            assert_eq!(duration, scripted_duration);
-            renderer_calls.fetch_add(1, Ordering::SeqCst);
-        },
-    );
-    let snapshot = timing_session.finish();
-
-    assert_eq!(status, CommandStatus::Success);
-    assert_eq!(
-        renderer_calls.load(Ordering::SeqCst),
-        1,
-        "renderer must run after capture"
-    );
-
-    let command_total = snapshot
-        .timings
-        .iter()
-        .find(|observation| observation.metric.descriptor().stable_name == "command.build.total")
-        .expect("command.build.total must be recorded");
-
-    // The structured total must equal the scripted duration exactly, proving
-    // renderer work did not enter the captured boundary.
-    assert_eq!(command_total.total, scripted_duration);
-    assert_eq!(command_total.samples, 1, "exactly one command-total sample");
-}
-
-/// A successful build reports the artifacts the writer emitted, not the artifacts the backend
-/// planned.
-///
-/// WHAT: replaces the built project's outputs with one emitted page beside one `NotBuilt` entry
-///       and asserts the rendered count is the emitted one.
-/// WHY: `NotBuilt` exists so a backend can declare an artifact it deliberately does not write.
-///      Counting the planned list would tell the user the compiler produced a file that is not
-///      on disk.
-#[cfg(feature = "timers")]
-#[test]
-fn build_success_counts_emitted_artifacts_not_planned_ones() {
-    let _test_guard = crate::timing::lock_instrumentation_tests();
-    let _tmp_root = tempfile::tempdir().expect("should create temp dir");
-    let root = _tmp_root.path().to_path_buf();
-    let source_root = root.join("src");
-    fs::create_dir_all(&source_root).expect("should create source root");
-    fs::write(
-        root.join("config.moth"),
-        "project #= (\n    name = \"docs\",\n    entry_root = \"src\",\n)\nhtml #= ()\n",
-    )
-    .expect("should write config");
-    fs::write(source_root.join("@page.moth"), "value = 1\n").expect("should write source");
-
-    let reported_count = std::cell::Cell::new(None);
-    let (status, _) = run_build_command_with_output_plan_for_tests(
-        &test_project_builder(),
-        root.to_str().expect("temporary path should be valid UTF-8"),
-        &[],
-        &BuildConfigInputSet::new(),
-        |build_result| {
-            build_result.project.output_files = vec![
-                OutputFile::new(
-                    PathBuf::from("index.html"),
-                    FileKind::Html(String::from("<html></html>")),
-                ),
-                OutputFile::new(PathBuf::from("unbuilt.js"), FileKind::NotBuilt),
-            ];
-            super::create_build_output_plan(build_result)
-        },
-        Duration::from_millis(11),
-        |outcome, _| {
-            if let super::BuildCommandOutcome::Success {
-                output_file_count, ..
-            } = outcome
-            {
-                reported_count.set(Some(*output_file_count));
-            }
-        },
-    );
-
-    assert_eq!(status, CommandStatus::Success);
-    assert_eq!(
-        reported_count.get(),
-        Some(1),
-        "the planned list holds two artifacts, but only the page was emitted"
-    );
-    assert_path_missing(&root.join("dev/unbuilt.js"));
-}
-
-/// Boundary regression: a failed output write still records one command total and
-/// one output total, and rendering happens after capture.
-#[cfg(feature = "timers")]
-#[test]
-fn failed_output_write_records_build_command_total() {
-    let _test_guard = crate::timing::lock_instrumentation_tests();
-    let _temp = tempfile::tempdir().expect("should create temp dir");
-    let root = _temp.path().to_path_buf();
-
-    let entry_file = root.join("main.moth");
-    fs::write(&entry_file, "value = 1\n").expect("should write source file");
-
-    let timing_session = start_benchmark_collection(true).expect("timing session should start");
-    let status = run_build_command_with_output_plan(
-        &test_project_builder(),
-        entry_file
-            .to_str()
-            .expect("temporary path should be valid UTF-8"),
-        &[],
-        &BuildConfigInputSet::new(),
-        |build_result| {
-            // Replace the valid output file with an escaping path so the plan
-            // succeeds but the filesystem write fails validation.
-            build_result.project.output_files = vec![OutputFile::new(
-                PathBuf::from("../escape.html"),
-                FileKind::Html(String::from("<html></html>")),
-            )];
-            super::create_build_output_plan(build_result)
-        },
-    );
-    let snapshot = timing_session.finish();
-
-    assert_eq!(status, CommandStatus::Failure);
-    assert_eq!(
-        snapshot
-            .timings
-            .iter()
-            .find(|observation| observation.metric.descriptor().stable_name == "command.build.total")
-            .expect("the command total must retain a dense row")
-            .samples,
-        1,
-        "the failed output-write path must finish the command total before rendering"
-    );
-    assert_eq!(
-        snapshot
-            .timings
-            .iter()
-            .find(|observation| observation.metric.descriptor().stable_name == "build.output.total")
-            .expect("the output total must retain a dense row")
-            .samples,
-        1,
-        "the failed output-write path must finish the output segment before the session drains"
-    );
 }
 
 // -------------------------
@@ -1360,29 +836,6 @@ fn single_input(argument: &str) -> (BuildInputName, BuildConfigInputValue) {
         BuildInputName::new(name_text).expect("test input name should validate"),
         BuildConfigInputValue::from_command_text(value_text)
             .expect("test input value should classify"),
-    )
-}
-
-fn contract_of(scalar: FixedScalar) -> BuildInputType {
-    BuildInputType::Primitive(PrimitiveBuildInputType::Fixed(scalar))
-}
-
-fn fixed_signed(scalar: FixedScalar, value: i64) -> PrimitiveBuildValue {
-    PrimitiveBuildValue::Fixed(
-        FixedScalarValue::signed(scalar, value).expect("test integer should fit its scalar"),
-    )
-}
-
-fn fixed_unsigned(scalar: FixedScalar, value: u64) -> PrimitiveBuildValue {
-    PrimitiveBuildValue::Fixed(
-        FixedScalarValue::unsigned(scalar, value).expect("test integer should fit its scalar"),
-    )
-}
-
-fn fixed_binary(scalar: FixedScalar, value: f64) -> PrimitiveBuildValue {
-    PrimitiveBuildValue::Fixed(
-        FixedScalarValue::binary_float(scalar, value)
-            .expect("test float should be exact at its scalar"),
     )
 }
 
@@ -1438,76 +891,6 @@ fn every_command_classifies_typed_values_from_one_parser() {
             assert_eq!(
                 entry.value(),
                 &BuildConfigInputValue::Typed(expected_value.clone()),
-                "{command_name} {argument}"
-            );
-            assert_eq!(
-                entry.location(),
-                &BuildConfigValueLocation::Command(BuildCommandLocation::new(2)),
-                "{command_name} {argument} should carry its --input argument position"
-            );
-        }
-    }
-}
-
-/// Numeric command text stays deferred until its receiving contract is known, so each numeric
-/// argument materialises at the exact scalar that receives it, on build, check and dev alike.
-#[test]
-fn every_command_materialises_numeric_values_at_their_receiving_contract() {
-    let cases = [
-        (
-            "retries=4",
-            FixedScalar::I32,
-            fixed_signed(FixedScalar::I32, 4),
-        ),
-        (
-            "offset=-3",
-            FixedScalar::I32,
-            fixed_signed(FixedScalar::I32, -3),
-        ),
-        (
-            "ratio=0.75",
-            FixedScalar::F64,
-            fixed_binary(FixedScalar::F64, 0.75),
-        ),
-        (
-            "scale=1e-2",
-            FixedScalar::F64,
-            fixed_binary(FixedScalar::F64, 1e-2),
-        ),
-        (
-            "whole=18446744073709551615",
-            FixedScalar::U64,
-            fixed_unsigned(FixedScalar::U64, u64::MAX),
-        ),
-        (
-            "single=1",
-            FixedScalar::F32,
-            fixed_binary(FixedScalar::F32, 1.0),
-        ),
-        (
-            "midpoint=1.00048828125",
-            FixedScalar::F16,
-            fixed_binary(FixedScalar::F16, 1.0),
-        ),
-        (
-            "above=1.0004882812500000000001",
-            FixedScalar::F16,
-            fixed_binary(FixedScalar::F16, 1.0009765625),
-        ),
-    ];
-
-    for command_name in ["build", "check", "dev"] {
-        for (argument, scalar, expected_value) in &cases {
-            let command = get_command(&args(&[command_name, ".", "--input", argument]))
-                .unwrap_or_else(|error| panic!("{command_name} should parse {argument}: {error}"));
-            let (name, _) = single_input(argument);
-            let inputs = input_set(&command);
-            let entry = inputs
-                .get(&name)
-                .unwrap_or_else(|| panic!("{command_name} should retain {argument}"));
-            assert_eq!(
-                entry.value().materialise_for(contract_of(*scalar)),
-                Ok(expected_value.clone()),
                 "{command_name} {argument}"
             );
             assert_eq!(
@@ -1661,72 +1044,7 @@ fn input_flag_requires_a_value_argument_with_name_equals_separator() {
 }
 
 #[test]
-fn command_inputs_surface_the_compiler_owned_rejections() {
-    // Numeric range and finiteness belong to the receiving contract, so these arguments classify
-    // as numbers and are rejected only when they materialise at their scalar.
-    let command = get_command(&args(&["build", ".", "--input", "retries=2147483648"]))
-        .expect("the argument shape parses; the value is range-checked by its contract");
-    assert_eq!(
-        retained_value(&command, "retries").materialise_for(contract_of(FixedScalar::I32)),
-        Err(ContractValueError::LiteralOutOfRange {
-            text: String::from("2147483648"),
-            reason: NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I32),
-        })
-    );
-
-    let command = get_command(&args(&["check", ".", "--input", "ratio=1e400"]))
-        .expect("the argument shape parses; the value is range-checked by its contract");
-    assert_eq!(
-        retained_value(&command, "ratio").materialise_for(contract_of(FixedScalar::F64)),
-        Err(ContractValueError::LiteralOutOfRange {
-            text: String::from("1e400"),
-            reason: NumberLiteralErrorReason::NonFiniteFixedFloat(FixedScalar::F64),
-        })
-    );
-
-    let decimal = get_command(&args(&["build", ".", "--input", "whole=1.0"]))
-        .expect("decimal spelling stays deferred");
-    assert_eq!(
-        retained_value(&decimal, "whole").materialise_for(contract_of(FixedScalar::I32)),
-        Err(ContractValueError::TypeMismatch {
-            provided: PrimitiveBuildInputType::Fixed(FixedScalar::F64),
-        }),
-    );
-
-    for (argument, name, scalar, text, reason) in [
-        (
-            "negative=-1",
-            "negative",
-            FixedScalar::U64,
-            "-1",
-            NumberLiteralErrorReason::NegativeUnsignedLiteral(FixedScalar::U64),
-        ),
-        (
-            "half=65520.0",
-            "half",
-            FixedScalar::F16,
-            "65520.0",
-            NumberLiteralErrorReason::NonFiniteFixedFloat(FixedScalar::F16),
-        ),
-    ] {
-        let command = get_command(&args(&["build", ".", "--input", argument]))
-            .expect("numeric text remains deferred");
-        let inputs = input_set(&command);
-        let name = BuildInputName::new(name).expect("the name is valid");
-        let entry = inputs.get(&name).expect("the input is retained");
-        assert_eq!(
-            entry.location(),
-            &BuildConfigValueLocation::Command(BuildCommandLocation::new(2)),
-        );
-        assert_eq!(
-            entry.value().materialise_for(contract_of(scalar)),
-            Err(ContractValueError::LiteralOutOfRange {
-                text: String::from(text),
-                reason,
-            }),
-        );
-    }
-
+fn command_inputs_surface_compiler_owned_literal_rejections() {
     let command = get_command(&args(&["dev", ".", "--input", "label=\"abc"]))
         .expect("the argument shape parses; the value is rejected when it classifies");
     let unterminated = command_input_set(command_inputs(&command))
@@ -1754,32 +1072,17 @@ fn command_inputs_surface_the_compiler_owned_rejections() {
     );
 }
 
-/// A classified numeric value has no width of its own: the receiving contract alone decides
-/// whether it fits, so one argument is accepted by a wide scalar and rejected by a narrow one.
 #[test]
-fn command_numeric_values_fit_only_the_scalar_that_receives_them() {
+fn every_command_keeps_numeric_inputs_deferred() {
     for command_name in ["build", "check", "dev"] {
         let command = get_command(&args(&[command_name, ".", "--input", "count=4294967296"]))
-            .expect("the argument shape parses; the value is checked by its contract");
-        let count = retained_value(&command, "count");
-
-        assert_eq!(
-            count.materialise_for(contract_of(FixedScalar::U64)),
-            Ok(fixed_unsigned(FixedScalar::U64, 4_294_967_296)),
-            "{command_name}: U64 must accept 4294967296"
-        );
-        assert_eq!(
-            count.materialise_for(contract_of(FixedScalar::I64)),
-            Ok(fixed_signed(FixedScalar::I64, 4_294_967_296)),
-            "{command_name}: I64 must accept 4294967296"
-        );
-        assert_eq!(
-            count.materialise_for(contract_of(FixedScalar::I32)),
-            Err(ContractValueError::LiteralOutOfRange {
-                text: String::from("4294967296"),
-                reason: NumberLiteralErrorReason::OutsideFixedScalarRange(FixedScalar::I32),
-            }),
-            "{command_name}: I32 must reject 4294967296"
+            .expect("numeric input should parse before its receiving contract is known");
+        assert!(
+            matches!(
+                retained_value(&command, "count"),
+                BuildConfigInputValue::Deferred(_)
+            ),
+            "{command_name} must not choose a scalar while parsing"
         );
     }
 }

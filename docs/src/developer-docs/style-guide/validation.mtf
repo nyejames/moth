@@ -156,8 +156,16 @@ configuration during timing comparisons. Changing compiler,
 features, profile settings or environment flags can require different artifacts.
 Source edits can reuse dependencies and incremental state from earlier builds.
 
-`just clippy` runs `cargo clippy -p moth -p moth-lexical -p moth-mon`.
-`just fmt` and `just fmt-check` select the same three packages with `cargo fmt`,
+The root `moth` package is the compiler library. `crates/moth-cli` owns the
+`moth` executable and is the workspace's default member, so root `cargo run`
+continues to launch the CLI. Its matching feature names forward to the compiler.
+Bare `cargo test`, `check` and `clippy` also select that default member. Use
+explicit compiler or workspace selectors when library coverage is required.
+Install the executable from source with
+`cargo install --path crates/moth-cli --locked`.
+
+`just clippy` runs `cargo clippy -p moth -p moth-cli -p moth-lexical -p moth-mon`.
+`just fmt` and `just fmt-check` select the same four packages with `cargo fmt`,
 adding `--check` for the latter. Routine recipes keep code moved into the two
 standalone libraries covered without enabling extra features or targets.
 Broader coverage remains explicit: `just clippy-features` checks the workspace
@@ -284,13 +292,13 @@ require that full run.
     [td:
         [: Formatting check]
         [: `just fmt-check`]
-        [: Formatting for `moth`, `moth-lexical` and `moth-mon`, without writing source]
+        [: Formatting for `moth`, `moth-cli`, `moth-lexical` and `moth-mon`, without writing source]
     ]
 
     [td:
         [: Clippy]
         [: `just clippy`]
-        [: Default features and targets for `moth`, `moth-lexical` and `moth-mon`]
+        [: Default features and targets for `moth`, `moth-cli`, `moth-lexical` and `moth-mon`]
     ]
 
     [td:
@@ -412,7 +420,7 @@ preview the selected files and then apply package-scoped Cargo cleaning:
     just cache-evict
 ]
 
-This evicts current dev/test artifacts for `moth`, `moth-lexical`, `moth-mon`
+This evicts current dev/test artifacts for `moth`, `moth-cli`, `moth-lexical`, `moth-mon`
 and `xtask`, so the next run pays a rebuild. It preserves unrelated dependencies
 and release builds. It is never automatically triggered by the size warning
 and may not bring all target usage under budget. Use a one-time clean for a
@@ -450,7 +458,8 @@ the single owner of what that file says. The inventory has four parts:
   because the compiler binary writes it, and its state is reported as one of absent, unusable or
   present so a missing report can never be read as a clean one.
 
-The source scan walks `src`, `crates/moth-lexical/src`, `crates/moth-mon/src`,
+The source scan walks `src`, `crates/moth-cli/src`, `crates/moth-cli/tests`,
+`crates/moth-lexical/src`, `crates/moth-mon/src`,
 `crates/moth-mon/tests` and `xtask/src`. Nested subsystem test directories are
 included recursively. Missing configured roots fail the audit. The console and
 inventory name the roots scanned by the run.
@@ -497,7 +506,8 @@ have one owner:
     just source-audit
 ]
 
-It walks `src`, `crates/moth-lexical/src`, `crates/moth-mon/src`,
+It walks `src`, `crates/moth-cli/src`, `crates/moth-cli/tests`,
+`crates/moth-lexical/src`, `crates/moth-mon/src`,
 `crates/moth-mon/tests` and `xtask/src` once, including nested subsystem tests,
 and reports typed findings with the file each was found in. The console and
 JSON report list those roots. Missing configured roots fail the audit. Only the
@@ -556,6 +566,10 @@ dependency does not change its package identity or exempt its edge. Missing
 configured packages and failed metadata queries fail closed. The console and
 report list the inspected Rust manifests alongside the JavaScript roots.
 
+The same dependency-kind and canonical-name checks keep `moth` independent of
+`lappet` and `wasmtime`, and prevent `lappet` from depending on `moth-cli` or
+`xtask`. The CLI may depend on both compiler and Lappet libraries.
+
 ### Feature lanes
 
 `just validate` runs one standard feature configuration. The standard lanes run all standard
@@ -565,18 +579,20 @@ configurations:
     just test-feature-matrix
 ]
 
-Ten package-scoped standard lanes cover the compiler's default configuration,
+Package-scoped standard lanes cover the compiler's default configuration,
 `timers`, `detailed_timers`, `benchmark_counters`, `timers` with
 `benchmark_counters` (including the retained-layout memory probe), the scoped-block
 feature lane, every `show_*` feature, `xtask` and feature-free runs of
-`moth-lexical` and `moth-mon`.
+`moth-lexical` and `moth-mon`. Matching CLI lanes execute the forwarded
+configurations independently, retaining the compiler's own unit-test lanes.
 `testing.mtf > Feature and platform lanes` owns the lane table and each lane's coverage.
 
 The `boracle` feature is an opt-in developer lane. `just boracle` owns its formatting check,
 feature-enabled Clippy and smoke test. The `boracle-campaign` lane, using `boracle_campaign`, is a
 separate opt-in developer lane owned by `just boracle-campaign`. It was measured at roughly 61
 seconds against roughly 8 seconds for the default lane, so it cannot belong in the default lane.
-Both lanes are intentionally excluded from `just validate`, `just validate-full`,
+Matching CLI opt-in lanes run through those same recipes. These lanes are
+intentionally excluded from `just validate`, `just validate-full`,
 `just test-feature-matrix` and ordinary CI gates.
 
 Lanes use `cargo test -p <package>` rather than `--workspace` because Cargo unifies features across
@@ -927,7 +943,7 @@ checks can close a branch slice without implying full merge readiness.
 ### Formatting
 
 - Run `cargo fmt` when Rust files changed, or `cargo fmt --all` for workspace changes.
-- `just validate` checks routine formatting for the compiler and both extracted libraries.
+- `just validate` checks routine formatting for the compiler, CLI and both extracted libraries.
 - `just validate-full` also checks formatting throughout the workspace.
 - Do not solve formatting failures through lint suppression.
 - Documentation-only changes do not require Rust formatting.

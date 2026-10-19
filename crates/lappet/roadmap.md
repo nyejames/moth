@@ -8,10 +8,13 @@ available.
 
 ## Current state
 
-- Status: initial dependency-free crate and design documents only.
-- Current slice: design review and workspace integration.
-- Blockers: the checkpoints below, then the relevant delivered compiler APIs.
-- Next action: review the CLI separation checkpoint before code-bearing work.
+- Status: CLI separation delivered. The runtime crate remains dependency-free
+  and contains documentation only.
+- Current checkpoint: native binding and artefact handoff.
+- Blockers: approve that handoff and the execution checkpoints below, then consume
+  the relevant delivered compiler APIs.
+- Next action: review milestone 2 before implementing native adapters. Package
+  management remains deferred.
 
 [Runtime design](docs/design.md), [package-manager design](docs/package-manager.md)
 and [Wasm optimisation](../../docs/src/developer-docs/wasm-optimisation/overview.mtf)
@@ -22,8 +25,8 @@ than turning example API names into obligations.
 
 ## Working rules
 
-Read the worktree's `AGENTS.md`, current permanent authorities and validation
-routes. Use current `index.md` locations instead of restoring an obsolete owner.
+Read the worktree's root `AGENTS.md`, `crates/lappet/AGENTS.md`, current
+permanent authorities and validation routes. Use current `index.md` locations instead of restoring an obsolete owner.
 Name prerequisite capabilities rather than depending on temporary plan files.
 
 A checkpoint blocks its own implementation, not unrelated investigation. Small
@@ -40,24 +43,52 @@ game-engine and server use cases at every public runtime/API decision.
 
 ## 1. Separate the CLI from the compiler library
 
-This is the first code-bearing milestone.
+Completed on 18 October 2026. This milestone changes package and command
+ownership without implementing a native runtime.
 
-**Checkpoint.** Fix the Cargo dependency direction and physical package layout.
-The CLI package produces `moth` and depends on the compiler and Lappet. The
-compiler library never depends on Lappet or Wasmtime. Decide which existing
-command helpers belong to the CLI and which are genuine compiler services.
-Preserve the documented public builder and host facades without forwarding
-libraries that only hide a cycle.
+**Decision.** The root `moth` package retains the compiler library.
+`crates/moth-cli` owns the `moth` executable, depends on `moth` and `lappet` and
+is the workspace default. Compiler features forward through matching CLI
+features, including their implications. The compiler has no Lappet or Wasmtime
+dependency. [The runtime design](docs/design.md#users-and-workspace-dependencies)
+records the package and service boundary.
 
-**Delivery.** Move the executable and its command ownership. Update workspace
-membership, lockfile, default command selection, installation, packaging and
-all executable-discovery callers together. Include the integration runner,
-benchmark tools, scaffolds and CI recipes. Add no runtime dependency yet.
+**Delivered.** Argument parsing, terminal presentation and scaffolding belong
+to the CLI. Compiler services retain compilation, output planning/writing,
+diagnostic contexts, instrumentation, dev execution, Boracle and the integration
+runner. The concrete builder constructor keeps its backend private. Installation,
+release packaging, benchmark/profiling discovery, feature lanes and source and
+dependency checks use the new owner. The index and validation references match.
+No runtime dependency or package-manager command was added.
 
-**Evidence.** Existing `moth` commands behave identically, the compiler remains
-usable as a library and Cargo metadata proves the acyclic dependency graph.
-Run command tests and affected packaging/benchmark-discovery checks. Update the
-index and validation command references when the package selectors change.
+**Evidence.** Local macOS AArch64 checks used Rust 1.99.0 and Node 24.21.0:
+
+- `just validate` passed after the final coverage correction: 6013 compiler unit
+  tests, 102 CLI unit tests, 19 subprocess tests, 855 xtask tests and the remaining
+  workspace tests passed. All 2787 canonical integration results were correct,
+  and docs source checking, Clippy, formatting and architecture checks passed.
+- Focused compiler project tests passed with default features and timers. CLI
+  tests passed with default features, timers/counters and Boracle. The existing
+  help test failed with campaign-only features before the implication fix and
+  passed afterwards. The restored terse-summary assertion passed.
+- Locked Cargo metadata verified package direction, default selection, binary
+  ownership and all 15 feature forwards. A separate Rust client compiled valid
+  Moth and retained a missing-input failure. Negative client probes rejected
+  access to the raw backend method, field, trait and test-only constructor.
+- `cargo install --path crates/moth-cli --locked --offline` with a local install
+  root produced `moth`. Its version/help, scaffold, check and build commands passed.
+- `just bench-validate` passed all 150 shared preflights without recording results.
+- `just timers-erasure-check` built and inspected the isolated no-timer release
+  executable successfully. The documentation release build produced 81 outputs,
+  and the generated Lappet policy states Cranelift-only V1 and future Winch.
+
+**Slice review.** Independent architecture and tooling reviews checked ownership,
+public handoffs, migrated coverage and consumers. The architecture review found
+one omitted terse-summary test, restored at its CLI owner and verified by a
+focused run and the repeated routine gate. No production correction remained.
+
+These local checks do not claim hosted platform coverage, profiling execution or
+`just validate-full` merge readiness.
 
 ## 2. Freeze the native binding and artefact handoff
 
@@ -75,6 +106,12 @@ implementation selection. Implement only approved adapters, with no guessed
 Rust layout, second type registry or general serialisation framework. Attribute
 errors to both the Moth call and the registered host binding where available.
 
+**Documentation.** Once the concrete V1 host ABI is accepted, add
+`docs/host-abi.md` for approved Rust/Moth type mappings, physical call and
+result forms, allocation, cleanup and error paths. Keep compiler memory
+semantics in their canonical authority and link each executable adapter example
+to tests. This reference must exist before implementing the approved adapters.
+
 **Evidence.** Cover exact integer ranges, finite floats, Byte versus U8, invalid
 Unicode/lengths, optional absence versus failure, ordered results and exactly-once
 calls. Reject mismatched imports, undeclared exports, missing contexts, stale or
@@ -83,25 +120,37 @@ of returned storage and every allocation/cleanup failure path actually added.
 
 ## 3. Establish Wasmtime execution independently
 
-**Checkpoint.** Select a Wasmtime version and minimal Cargo features. Review
-Winch/Cranelift feature compatibility, supported hosts, debugging limitations,
-resource accounting and fault disposition. Establish when a trap or adapter
-fault makes an instance unusable. Decide memory/stack/execution limits and how
-native blocking calls fit the server's cancellation policy. Choose a simple
-public configuration rather than expose every Wasmtime option.
+**Checkpoint.** Select a Wasmtime version and minimal Cranelift-only Cargo
+features. Validate supported Wasm proposals, hosts, debugging requirements,
+resource accounting and fault disposition. Compare `OptLevel::None` and
+`OptLevel::Speed` using representative game and server workloads before
+confirming the defaults. Retain the default backtracking register allocator
+and disabled inlining unless a separate investigation justifies changing them.
+Determine when a trap or adapter fault invalidates an instance. Set
+memory/stack/execution limits and a policy for blocking native calls. Keep
+the public runtime configuration small.
 
-**Delivery.** Development defaults to Winch and release to Cranelift, with
-explicit builder override. Share immutable compiled code where valid, but keep
-mutable stores, contexts and resource tables instance-owned. Calls are
-synchronous and scheduling stays in the builder. Persistent AOT caching and
-additional Wasm engines remain excluded.
+**Delivery.** Cranelift is V1's sole native compiler. Development defaults
+to `OptLevel::None` and release to `OptLevel::Speed`, independent of the
+Moth output profile. These defaults remain subject to checkpoint evidence.
+Reuse immutable compiled modules where valid and keep mutable stores, host
+contexts and resources instance-owned. Execution remains synchronous and
+builder-scheduled. No persistent AOT cache or other Wasm engine is included.
 
-**Evidence.** Run the same small core Wasm fixtures under both strategies on
-candidate Linux x86-64/AArch64, macOS x86-64/AArch64 and Windows x86-64 hosts.
-Publish only combinations actually verified. Measure clean Rust build cost,
-linked size, cold engine compilation, instantiation, execution, host-call cost
-and resident memory separately. Test limits, traps, teardown and prohibited
-re-entry. Fixtures demonstrate runtime mechanics, not completed Moth lowering.
+**Evidence.** Run identical core Wasm fixtures under both Cranelift
+optimisation levels on candidate Linux x86-64/AArch64, macOS x86-64/AArch64
+and Windows x86-64 hosts. Publish only verified combinations. Measure clean
+Rust build cost, binary size, cold engine/module compilation, instantiation,
+execution, host-call cost and resident memory separately. Test limits,
+traps, teardown and prohibited re-entry. These fixtures do not prove a
+Moth compiler ABI.
+
+**Documentation.** Add `docs/wasmtime-integration.md` using the pinned
+Wasmtime release and upstream source references. Document a minimal runnable
+Rust embedding example, backed by a tested `examples/` program or integration
+test. It should show engine setup, a host import, core Wasm instantiation, a
+typed exported call and failure/cleanup handling. A hand-authored Wasm fixture
+is acceptable until Moth's backend can produce the equivalent program.
 
 ## 4. Establish official Core conformance
 
@@ -143,6 +192,10 @@ Cover source-to-host-to-source values, errors, lifecycle cleanup, isolated host
 state and capability rejection. Benchmark all four combinations of Moth
 output profile and native strategy under the shared optimisation authority.
 Never mutate published compiler results to make runtime binding succeed.
+
+**Documentation.** Extend the embedding example to use a real Moth program
+when the compiler and runtime handoffs support it. Keep the example checked
+against the public embedding API rather than documenting hypothetical calls.
 
 ## 6. Deliver package declaration and local catalog foundations
 
@@ -236,6 +289,9 @@ Lead packages for policy review rather than a depth-only registry ban.
   and runtime contracts exist. No implicit V1 scheduler is reserved for them.
 - Foreign WIT components, first through a separately reviewed value-only profile.
   Resources, callbacks and retained state need their own ownership design.
+- Winch as a potential future baseline compiler, only after upstream production
+  readiness, proposal/CPU support, limit semantics and benchmarks justify the
+  extra dependency and test matrix.
 - Other execution engines or smaller target environments, with explicit platform
   and semantic support rather than a speculative multi-engine abstraction.
 - Managed Builder-dependent packages and versioned provider compatibility.

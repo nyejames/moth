@@ -40,6 +40,14 @@ pub struct DevServerOptions {
     pub(crate) inputs: BuildConfigInputSet,
 }
 
+impl DevServerOptions {
+    /// Attach the explicit build-config inputs selected by the CLI parser.
+    pub fn with_inputs(mut self, inputs: BuildConfigInputSet) -> Self {
+        self.inputs = inputs;
+        self
+    }
+}
+
 impl Default for DevServerOptions {
     fn default() -> Self {
         Self {
