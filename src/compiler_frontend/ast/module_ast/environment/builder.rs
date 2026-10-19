@@ -1178,8 +1178,8 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                     ));
                 };
 
-                // Public generic signatures are consumed through the public export surface alone,
-                // so every bound trait must be available from that same surface.
+                // WHY: consumers of a public generic must be able to satisfy its bounds, so each
+                // bound trait must be public at its owner. The trait need not be re-exported here.
                 if self.public_trait_definition_is_nameable(
                     trait_definition,
                     &public_root_file,
