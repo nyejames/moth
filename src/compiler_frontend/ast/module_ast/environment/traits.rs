@@ -409,7 +409,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
             next_requirement_id.0 += 1;
         }
 
-        if header.export_mode.is_public() {
+        if self.header_is_public_export_declaration(header) {
             self.validate_exported_trait_surface(
                 declaration.name,
                 &requirements,

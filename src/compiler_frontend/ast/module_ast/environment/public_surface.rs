@@ -55,7 +55,7 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
                 continue;
             }
 
-            if !header_is_public_export_declaration(header) {
+            if !self.header_is_public_export_declaration(header) {
                 continue;
             }
 
@@ -418,6 +418,26 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
         false
     }
 
+    /// Whether a header is a public authored declaration reachable from its module root.
+    ///
+    /// WHAT: the declaration kind must pass the shared `HeaderKind` gate, and the root that owns
+    ///       the declaring file must report the declaration as public, either directly or through
+    ///       a re-export.
+    /// WHY: a re-exported declaration is consumed through the root's public surface exactly like a
+    ///      direct export, so its private field, parameter, and requirement types must be checked
+    ///      too. Gating on the header's own file role and export mode skipped re-exports, which
+    ///      then failed later as an internal compiler error.
+    pub(in crate::compiler_frontend::ast) fn header_is_public_export_declaration(
+        &self,
+        header: &Header,
+    ) -> bool {
+        header.kind.is_authored_public_export_declaration()
+            && self.source_path_is_public_from_root_file(
+                &header.declaration_path,
+                &self.header_source_path(header),
+            )
+    }
+
     /// Validate exported `TRAIT must not TRAIT` relations in a module-root public export.
     ///
     /// WHAT: an exported incompatibility relation is part of the module root's public trait metadata,
@@ -490,20 +510,6 @@ impl<'context, 'services> AstModuleEnvironmentBuilder<'context, 'services> {
 
         Ok(())
     }
-}
-
-/// Whether a header is a public authored module-root export declaration.
-///
-/// WHAT: only declarations marked public by a strict module-root file `export:` block and
-///       admitted by the shared declaration-kind gate become public export entries. The
-///       declaration-kind gate is the shared [`HeaderKind::is_authored_public_export_declaration`]
-///       owner so the header, AST and semantic-origin public-export predicates cannot drift;
-///       this predicate keeps the stage-local file-role and export-mode policy (export-capable
-///       roots plus explicit `Public` mode).
-fn header_is_public_export_declaration(header: &Header) -> bool {
-    header.file_role.is_export_capable()
-        && header.export_mode.is_public()
-        && header.kind.is_authored_public_export_declaration()
 }
 
 fn is_public_export_trait_incompatibility_header(header: &Header) -> bool {

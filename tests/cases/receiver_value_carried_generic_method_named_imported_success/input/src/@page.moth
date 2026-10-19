@@ -1,0 +1,7 @@
+@helper make_box, Box
+
+wrap type T |value T| -> String:
+    return make_box().label()
+;
+
+[:receiver_value_carried_generic_method_named_imported_success label=[wrap(1)]]

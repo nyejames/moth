@@ -8260,6 +8260,34 @@ contract = "language.generics.receiver_method_value_carried_generic_body_accepta
 role = "boundary"
 
 [[case]]
+id = "receiver_value_carried_generic_method_named_imported_success"
+path = "receiver_value_carried_generic_method_named_imported_success"
+tags = ["integration", "receiver-methods", "generics", "dependencies"]
+contract = "language.generics.receiver_method_value_carried_generic_body_acceptance"
+role = "boundary"
+
+[[case]]
+id = "receiver_value_carried_generic_method_aliased_imported_success"
+path = "receiver_value_carried_generic_method_aliased_imported_success"
+tags = ["integration", "receiver-methods", "generics", "dependencies"]
+contract = "language.generics.receiver_method_value_carried_generic_body_acceptance"
+role = "boundary"
+
+[[case]]
+id = "receiver_value_carried_generic_method_named_bound_success"
+path = "receiver_value_carried_generic_method_named_bound_success"
+tags = ["integration", "receiver-methods", "generics", "dependencies"]
+contract = "language.generics.receiver_method_value_carried_generic_body_acceptance"
+role = "boundary"
+
+[[case]]
+id = "receiver_value_carried_generic_method_named_sibling_success"
+path = "receiver_value_carried_generic_method_named_sibling_success"
+tags = ["integration", "receiver-methods", "generics", "dependencies"]
+contract = "language.generics.receiver_method_value_carried_generic_body_acceptance"
+role = "boundary"
+
+[[case]]
 id = "receiver_same_method_name_different_receivers_success"
 path = "receiver_same_method_name_different_receivers_success"
 tags = ["integration", "receiver-methods", "dependencies"]
@@ -12305,6 +12333,34 @@ path = "facade_export_private_choice_payload_rejected"
 tags = ["integration", "diagnostics", "dependencies", "facades"]
 contract = "language.dependencies.facade_export_private_nominal_member_type_rejected"
 role = "boundary"
+
+[[case]]
+id = "facade_reexport_private_struct_field_rejected"
+path = "facade_reexport_private_struct_field_rejected"
+tags = ["integration", "diagnostics", "dependencies", "facades"]
+contract = "language.dependencies.facade_export_private_nominal_member_type_rejected"
+role = "boundary"
+
+[[case]]
+id = "facade_reexport_private_function_param_rejected"
+path = "facade_reexport_private_function_param_rejected"
+tags = ["integration", "diagnostics", "dependencies", "facades"]
+contract = "language.dependencies.facade_export_private_function_type_rejected"
+role = "boundary"
+
+[[case]]
+id = "trait_reexport_private_surface_rejected"
+path = "trait_reexport_private_surface_rejected"
+tags = ["integration", "traits", "diagnostics"]
+contract = "language.traits.export_private_surface_rejected"
+role = "boundary"
+
+[[case]]
+id = "facade_reexport_public_struct_field_success"
+path = "facade_reexport_public_struct_field_success"
+tags = ["integration", "dependencies", "facades"]
+contract = "language.dependencies.facade_export_public_nominal_member_type_accepted"
+role = "primary"
 
 [[case]]
 id = "facade_export_private_alias_target_rejected"

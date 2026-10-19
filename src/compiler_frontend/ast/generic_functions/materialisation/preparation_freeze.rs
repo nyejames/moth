@@ -481,7 +481,7 @@ impl ModuleMaterialisationCapture {
         templates.sort_by(|left, right| left.declaration_identity.cmp(&right.declaration_identity));
         let template_selections = templates
             .into_iter()
-            .map(|template| self.template_declaration_selection(const_values, template))
+            .map(|template| self.template_declaration_selection(const_values, template, path_fork))
             .collect::<Result<Vec<_>, CompilerError>>()?;
         let retained_local_paths = template_selections
             .iter()
@@ -777,6 +777,7 @@ impl ModuleMaterialisationCapture {
         &self,
         const_values: &ConstValueStore,
         template: &'template GenericFunctionTemplate,
+        path_fork: &PathInternerFork,
     ) -> Result<TemplateDeclarationSelection<'template>, CompilerError> {
         let body = template.body_tokens.as_ref().ok_or_else(|| {
             CompilerError::compiler_error("Retained generic template has no body syntax")
@@ -791,7 +792,7 @@ impl ModuleMaterialisationCapture {
             &mut referenced_names,
         )?;
         let selection_before_bounds =
-            self.selected_visible_paths(&template.source_file, &referenced_names)?;
+            self.selected_visible_paths(&template.source_file, &referenced_names, path_fork)?;
         let names_before_bounds = referenced_names.len();
         self.retain_selected_bound_trait_names(
             &template.source_file,
@@ -803,7 +804,7 @@ impl ModuleMaterialisationCapture {
         let selected_paths = if referenced_names.len() == names_before_bounds {
             selection_before_bounds
         } else {
-            self.selected_visible_paths(&template.source_file, &referenced_names)?
+            self.selected_visible_paths(&template.source_file, &referenced_names, path_fork)?
         };
         let local_declarations =
             self.stable_local_declaration_bindings(const_values, &selected_paths);

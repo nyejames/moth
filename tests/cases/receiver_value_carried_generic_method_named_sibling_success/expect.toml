@@ -1,0 +1,6 @@
+entry = "."
+
+[backends.html]
+mode = "success"
+warnings = "forbid"
+rendered_output_exact = "receiver_value_carried_generic_method_named_sibling_success label=boxed"

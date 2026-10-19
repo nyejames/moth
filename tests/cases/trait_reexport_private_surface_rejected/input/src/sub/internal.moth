@@ -1,0 +1,7 @@
+PrivateData = |
+    value String,
+|
+
+DISPLAYABLE must:
+    display |This| -> PrivateData
+;

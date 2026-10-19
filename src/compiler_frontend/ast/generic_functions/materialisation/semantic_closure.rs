@@ -887,6 +887,7 @@ impl ModuleMaterialisationCapture {
         &self,
         source_file: &PathId,
         referenced_names: &FxHashSet<String>,
+        path_fork: &PathInternerFork,
     ) -> Result<FxHashSet<PathId>, CompilerError> {
         let visibility = self.binding_environment.visibility_for(source_file)?;
         let mut selected = visibility
@@ -910,6 +911,26 @@ impl ModuleMaterialisationCapture {
                 collect_namespace_source_paths(record, &mut selected);
             }
         }
+        // WHY: an imported receiver method is projected under the authored binding path of its
+        // nominal (`child(nominal binding, method name)`). A body that reaches the method must
+        // therefore also capture that nominal binding; otherwise the restored body projects the
+        // nominal at its deterministic path and the captured method path no longer resolves.
+        let nominal_paths = selected
+            .iter()
+            .filter(|path| {
+                self.resolved_function_signatures_by_path
+                    .get(*path)
+                    .is_some_and(|resolved| resolved.receiver.is_some())
+            })
+            .filter_map(|path| path_fork.try_parent(*path))
+            .filter(|parent| {
+                self.binding_environment
+                    .imported_declarations_by_local_path
+                    .get(parent)
+                    .is_some_and(|origin| matches!(origin, OriginDeclarationId::Type(_)))
+            })
+            .collect::<Vec<_>>();
+        selected.extend(nominal_paths);
         Ok(selected)
     }
 

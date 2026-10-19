@@ -1,0 +1,7 @@
+PrivateData = |
+    value String,
+|
+
+show |data PrivateData| -> String:
+    return "x"
+;
