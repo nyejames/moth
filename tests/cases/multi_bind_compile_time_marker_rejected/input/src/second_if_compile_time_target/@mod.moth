@@ -1,0 +1,5 @@
+run ||:
+    flag = true
+    name, count #I32 = if flag then "a", 1 else "b", 2
+    io.line([: [name] [count]])
+;

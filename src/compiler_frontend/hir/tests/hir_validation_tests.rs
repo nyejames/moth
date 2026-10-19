@@ -15,7 +15,10 @@ use crate::compiler_frontend::canonical_type_identity::{
     CanonicalBuiltinType, CanonicalTypeIdentity,
 };
 use crate::compiler_frontend::compiler_errors::{CompilerError, ErrorType};
-use crate::compiler_frontend::datatypes::definitions::{FieldDefinition, StructTypeDefinition};
+use crate::compiler_frontend::datatypes::definitions::{
+    ChoiceTypeDefinition, ChoiceVariantDefinition, ChoiceVariantPayloadDefinition, FieldDefinition,
+    StructTypeDefinition,
+};
 use crate::compiler_frontend::datatypes::environment::TypeEnvironment;
 use crate::compiler_frontend::datatypes::generic_parameters::TypeParameterId;
 use crate::compiler_frontend::datatypes::ids::{
@@ -29,7 +32,8 @@ use crate::compiler_frontend::declaration_syntax::choice::{ChoiceVariant, Choice
 use crate::compiler_frontend::external_packages::ExternalPackageRegistry;
 use crate::compiler_frontend::hir::blocks::{HirBlock, HirLocal};
 use crate::compiler_frontend::hir::expressions::{
-    HirExpression, HirExpressionKind, HirVariantCarrier, HirVariantField, ValueKind,
+    HirExpression, HirExpressionKind, HirMapEntry, HirVariantCarrier, HirVariantField,
+    OPTION_SOME_VARIANT_INDEX, ValueKind,
 };
 use crate::compiler_frontend::hir::hir_builder::{
     HirTestChoiceDefinition, build_ast_with_choices, build_ast_with_registered_types, lower_ast,
@@ -58,7 +62,7 @@ use crate::compiler_frontend::hir::terminators::{
 };
 use crate::compiler_frontend::source::{LocalSpan, SourceId, SourceSpan};
 use crate::compiler_frontend::symbols::path_interner::{PathId, PathInternerFork};
-use crate::compiler_frontend::symbols::string_interning::StringTable;
+use crate::compiler_frontend::symbols::string_interning::{StringId, StringTable};
 use crate::compiler_frontend::tests::ast_fixture_support::{
     make_test_variable, param_with_type_id,
 };
@@ -4655,6 +4659,515 @@ fn validator_accepts_deep_load_index_chain_on_small_stack() {
         .expect("the bounded-stack validation thread should spawn")
         .join()
         .expect("deep Load index validation should finish on a 1 MiB stack");
+}
+
+/// Appends a `VariantConstruct` row with one named payload field.
+///
+/// WHAT: the carrier selects a choice variant or the `Option` `some` form.
+/// WHY: every link of the deep chain builds this row shape, so one constructor owns it.
+fn append_variant_row(
+    module: &mut HirModule,
+    carrier: HirVariantCarrier,
+    variant_index: usize,
+    field_name: StringId,
+    value: HirValueId,
+    type_id: TypeId,
+    region: RegionId,
+) -> HirValueId {
+    let fields = module
+        .expressions
+        .append_variant_fields(
+            &[HirVariantField {
+                name: Some(field_name),
+                value,
+            }],
+            None,
+        )
+        .expect("one variant field should fit the expression store");
+    append_hir_expression(
+        module,
+        HirExpressionKind::VariantConstruct {
+            carrier,
+            variant_index,
+            fields,
+        },
+        type_id,
+        region,
+        ValueKind::RValue,
+    )
+}
+
+/// Appends `VariantPayloadGet` field 0. Each chain link reads the row built just before it.
+fn append_payload_get_row(
+    module: &mut HirModule,
+    carrier: HirVariantCarrier,
+    source: HirValueId,
+    variant_index: usize,
+    type_id: TypeId,
+    region: RegionId,
+) -> HirValueId {
+    append_hir_expression(
+        module,
+        HirExpressionKind::VariantPayloadGet {
+            carrier,
+            source,
+            variant_index,
+            field_index: 0,
+        },
+        type_id,
+        region,
+        ValueKind::RValue,
+    )
+}
+
+#[test]
+fn validator_accepts_deep_mixed_shape_chain_on_small_stack() {
+    // Rows per cycle: numeric 2, Bool 7, Tree 9. The phases total about 25,000 rows, past the
+    // 20,000-row depth that overflowed a recursive walk on the 1 MiB child stack.
+    const NUMERIC_CYCLES: usize = 1_000;
+    const BOOL_CYCLES: usize = 2_000;
+    const TREE_CYCLES: usize = 1_000;
+    const LEAF_VARIANT: usize = 0;
+    const HOLDER_VARIANT: usize = 1;
+    const DICT_VARIANT: usize = 2;
+
+    const STACK_BUDGET_CHILD_ENV: &str = "MOTH_HIR_VALIDATION_MIXED_SHAPE_STACK_BUDGET_CHILD";
+    if std::env::var_os(STACK_BUDGET_CHILD_ENV).is_none() {
+        run_stack_budgeted_child(
+            module_path!(),
+            "validator_accepts_deep_mixed_shape_chain_on_small_stack",
+            STACK_BUDGET_CHILD_ENV,
+            "deep mixed-shape HIR validation must fit a 1 MiB stack",
+        );
+        return;
+    }
+
+    std::thread::Builder::new()
+        .stack_size(1024 * 1024)
+        .spawn(|| {
+            let (mut string_table, mut module, mut type_environment) = minimal_lowered_hir_module();
+            let mut path_fork = PathInternerFork::empty();
+            let entry_block_index = start_entry_block_index(&module);
+            let region = module.blocks[entry_block_index].region;
+
+            // Tree and Holder reference each other through Collection and Map, so each nominal is
+            // registered empty and its members are filled once every TypeId they name exists.
+            let tree_path = super::symbol("Tree", &mut path_fork, &mut string_table);
+            let holder_path = super::symbol("Holder", &mut path_fork, &mut string_table);
+            let (_, tree_type) = type_environment.register_nominal_choice(ChoiceTypeDefinition {
+                id: NominalTypeId(0),
+                path: tree_path,
+                variants: Box::new([]),
+                generic_parameters: None,
+            });
+            let (_, holder_type) = type_environment.register_nominal_struct(StructTypeDefinition {
+                id: NominalTypeId(0),
+                path: holder_path,
+                fields: Box::new([]),
+                generic_parameters: None,
+                const_record: false,
+            });
+
+            let bool_type = builtin_type_ids::BOOL;
+            let u8_type = builtin_type_ids::fixed_scalar(FixedScalar::U8);
+            let byte_type = builtin_type_ids::fixed_scalar(FixedScalar::Byte);
+            let collection_type = type_environment.intern_collection(tree_type, None);
+            let map_type = type_environment.intern_map(bool_type, tree_type);
+            let option_bool_type = type_environment.intern_option(bool_type);
+
+            let value_name = string_table.intern("value");
+            let holder_name = string_table.intern("holder");
+            let entries_name = string_table.intern("entries");
+            let items_path = super::symbol("items", &mut path_fork, &mut string_table);
+            let value_path = super::symbol("value", &mut path_fork, &mut string_table);
+            let holder_field_path = super::symbol("holder", &mut path_fork, &mut string_table);
+            let entries_path = super::symbol("entries", &mut path_fork, &mut string_table);
+            type_environment.update_struct_fields(
+                holder_type,
+                vec![FieldDefinition {
+                    name: items_path,
+                    type_id: collection_type,
+                    span: None,
+                }]
+                .into_boxed_slice(),
+            );
+            type_environment.update_choice_variants(
+                tree_type,
+                vec![
+                    ChoiceVariantDefinition {
+                        name: string_table.intern("Leaf"),
+                        tag: LEAF_VARIANT,
+                        payload: ChoiceVariantPayloadDefinition::Record {
+                            fields: vec![FieldDefinition {
+                                name: value_path,
+                                type_id: bool_type,
+                                span: None,
+                            }]
+                            .into_boxed_slice(),
+                        },
+                        span: None,
+                    },
+                    ChoiceVariantDefinition {
+                        name: string_table.intern("Holder"),
+                        tag: HOLDER_VARIANT,
+                        payload: ChoiceVariantPayloadDefinition::Record {
+                            fields: vec![FieldDefinition {
+                                name: holder_field_path,
+                                type_id: holder_type,
+                                span: None,
+                            }]
+                            .into_boxed_slice(),
+                        },
+                        span: None,
+                    },
+                    ChoiceVariantDefinition {
+                        name: string_table.intern("Dict"),
+                        tag: DICT_VARIANT,
+                        payload: ChoiceVariantPayloadDefinition::Record {
+                            fields: vec![FieldDefinition {
+                                name: entries_path,
+                                type_id: map_type,
+                                span: None,
+                            }]
+                            .into_boxed_slice(),
+                        },
+                        span: None,
+                    },
+                ]
+                .into_boxed_slice(),
+            );
+
+            let tree_choice = ChoiceId(0);
+            let holder_struct = StructId(0);
+            let items_field = FieldId(0);
+            add_validation_hir_struct(
+                &mut module,
+                holder_struct,
+                holder_type,
+                [(items_field, collection_type)],
+            );
+            module.choices.push(HirChoice {
+                id: tree_choice,
+                frontend_type_id: tree_type,
+                variants: vec![
+                    HirChoiceVariant {
+                        name: string_table.intern("Leaf"),
+                        fields: vec![HirChoiceField {
+                            name: value_name,
+                            ty: bool_type,
+                        }],
+                    },
+                    HirChoiceVariant {
+                        name: string_table.intern("Holder"),
+                        fields: vec![HirChoiceField {
+                            name: holder_name,
+                            ty: holder_type,
+                        }],
+                    },
+                    HirChoiceVariant {
+                        name: string_table.intern("Dict"),
+                        fields: vec![HirChoiceField {
+                            name: entries_name,
+                            ty: map_type,
+                        }],
+                    },
+                ],
+            });
+            let tree_carrier = || HirVariantCarrier::Choice {
+                choice_id: tree_choice,
+            };
+
+            // Shared leaves. Later links reuse them, so the validator's active-row marks see repeated
+            // visits to rows that are already finished.
+            let leaf_u8 = append_hir_expression(
+                &mut module,
+                HirExpressionKind::FixedScalar(
+                    FixedScalarValue::unsigned(FixedScalar::U8, 1).expect("1 fits in U8"),
+                ),
+                u8_type,
+                region,
+                ValueKind::Const,
+            );
+            let leaf_bool = append_hir_expression(
+                &mut module,
+                HirExpressionKind::Bool(true),
+                bool_type,
+                region,
+                ValueKind::Const,
+            );
+            let leaf_tree = append_variant_row(
+                &mut module,
+                tree_carrier(),
+                LEAF_VARIANT,
+                value_name,
+                leaf_bool,
+                tree_type,
+                region,
+            );
+
+            // Numeric phase: U8 -> Byte -> U8. Each Cast reads the row before it, so the post-children
+            // policy and source checks run on every link.
+            let mut numeric = leaf_u8;
+            for _ in 0..NUMERIC_CYCLES {
+                let byte = append_hir_expression(
+                    &mut module,
+                    HirExpressionKind::Cast {
+                        source: numeric,
+                        policy: BuiltinCastPolicyId::U8ToByte,
+                    },
+                    byte_type,
+                    region,
+                    ValueKind::RValue,
+                );
+                numeric = append_hir_expression(
+                    &mut module,
+                    HirExpressionKind::Cast {
+                        source: byte,
+                        policy: BuiltinCastPolicyId::ByteToU8,
+                    },
+                    u8_type,
+                    region,
+                    ValueKind::RValue,
+                );
+            }
+
+            // Bridge: a U8 comparison produces the first Bool row of the spine.
+            let mut flag = append_hir_expression(
+                &mut module,
+                HirExpressionKind::BinOp {
+                    left: numeric,
+                    op: HirBinOp::Eq,
+                    right: leaf_u8,
+                },
+                bool_type,
+                region,
+                ValueKind::RValue,
+            );
+
+            // Bool phase: Not, And, Eq, then Option wrap and unwrap, then Tree.Leaf wrap and unwrap.
+            for _ in 0..BOOL_CYCLES {
+                let negated = append_hir_expression(
+                    &mut module,
+                    HirExpressionKind::UnaryOp {
+                        op: HirUnaryOp::Not,
+                        operand: flag,
+                    },
+                    bool_type,
+                    region,
+                    ValueKind::RValue,
+                );
+                let conjoined = append_hir_expression(
+                    &mut module,
+                    HirExpressionKind::BinOp {
+                        left: negated,
+                        op: HirBinOp::And,
+                        right: leaf_bool,
+                    },
+                    bool_type,
+                    region,
+                    ValueKind::RValue,
+                );
+                let compared = append_hir_expression(
+                    &mut module,
+                    HirExpressionKind::BinOp {
+                        left: conjoined,
+                        op: HirBinOp::Eq,
+                        right: leaf_bool,
+                    },
+                    bool_type,
+                    region,
+                    ValueKind::RValue,
+                );
+                let some = append_variant_row(
+                    &mut module,
+                    HirVariantCarrier::Option,
+                    OPTION_SOME_VARIANT_INDEX,
+                    value_name,
+                    compared,
+                    option_bool_type,
+                    region,
+                );
+                let unwrapped = append_payload_get_row(
+                    &mut module,
+                    HirVariantCarrier::Option,
+                    some,
+                    OPTION_SOME_VARIANT_INDEX,
+                    bool_type,
+                    region,
+                );
+                let leafed = append_variant_row(
+                    &mut module,
+                    tree_carrier(),
+                    LEAF_VARIANT,
+                    value_name,
+                    unwrapped,
+                    tree_type,
+                    region,
+                );
+                flag = append_payload_get_row(
+                    &mut module,
+                    tree_carrier(),
+                    leafed,
+                    LEAF_VARIANT,
+                    bool_type,
+                    region,
+                );
+            }
+
+            // Bridge into the Tree family. The map key is the Bool spine; the map value is the shared
+            // Tree leaf.
+            let entries = module
+                .expressions
+                .append_map_entries(
+                    &[HirMapEntry {
+                        key: flag,
+                        value: leaf_tree,
+                    }],
+                    None,
+                )
+                .expect("one map entry should fit the expression store");
+            let entries_map = append_hir_expression(
+                &mut module,
+                HirExpressionKind::MapLiteral(entries),
+                map_type,
+                region,
+                ValueKind::RValue,
+            );
+            let mut tree = append_variant_row(
+                &mut module,
+                tree_carrier(),
+                DICT_VARIANT,
+                entries_name,
+                entries_map,
+                tree_type,
+                region,
+            );
+
+            // Tree phase: Collection, StructConstruct, Holder wrap and unwrap, a MapLiteral whose value
+            // child is the spine, then Dict wrap and unwrap.
+            for _ in 0..TREE_CYCLES {
+                let items = module
+                    .expressions
+                    .append_values(&[tree], None)
+                    .expect("one collection element should fit the expression store");
+                let collection = append_hir_expression(
+                    &mut module,
+                    HirExpressionKind::Collection(items),
+                    collection_type,
+                    region,
+                    ValueKind::RValue,
+                );
+                let struct_fields = module
+                    .expressions
+                    .append_struct_fields(&[(items_field, collection)], None)
+                    .expect("one struct field should fit the expression store");
+                let holder = append_hir_expression(
+                    &mut module,
+                    HirExpressionKind::StructConstruct {
+                        struct_id: holder_struct,
+                        fields: struct_fields,
+                    },
+                    holder_type,
+                    region,
+                    ValueKind::RValue,
+                );
+                let wrapped = append_variant_row(
+                    &mut module,
+                    tree_carrier(),
+                    HOLDER_VARIANT,
+                    holder_name,
+                    holder,
+                    tree_type,
+                    region,
+                );
+                let held = append_payload_get_row(
+                    &mut module,
+                    tree_carrier(),
+                    wrapped,
+                    HOLDER_VARIANT,
+                    holder_type,
+                    region,
+                );
+                let rewrapped = append_variant_row(
+                    &mut module,
+                    tree_carrier(),
+                    HOLDER_VARIANT,
+                    holder_name,
+                    held,
+                    tree_type,
+                    region,
+                );
+                let map_entries = module
+                    .expressions
+                    .append_map_entries(
+                        &[HirMapEntry {
+                            key: leaf_bool,
+                            value: rewrapped,
+                        }],
+                        None,
+                    )
+                    .expect("one map entry should fit the expression store");
+                let map = append_hir_expression(
+                    &mut module,
+                    HirExpressionKind::MapLiteral(map_entries),
+                    map_type,
+                    region,
+                    ValueKind::RValue,
+                );
+                let dict = append_variant_row(
+                    &mut module,
+                    tree_carrier(),
+                    DICT_VARIANT,
+                    entries_name,
+                    map,
+                    tree_type,
+                    region,
+                );
+                let mapped = append_payload_get_row(
+                    &mut module,
+                    tree_carrier(),
+                    dict,
+                    DICT_VARIANT,
+                    map_type,
+                    region,
+                );
+                tree = append_variant_row(
+                    &mut module,
+                    tree_carrier(),
+                    DICT_VARIANT,
+                    entries_name,
+                    mapped,
+                    tree_type,
+                    region,
+                );
+            }
+
+            // The root reuses the deepest Tree row and the shared leaf. The second visit to `tree`
+            // starts only after the first visit has finished, so it is not a cycle.
+            let elements = module
+                .expressions
+                .append_values(&[tree, leaf_tree, tree], None)
+                .expect("collection elements should fit the expression store");
+            let root = append_hir_expression(
+                &mut module,
+                HirExpressionKind::Collection(elements),
+                collection_type,
+                region,
+                ValueKind::RValue,
+            );
+            append_expression_statement(&mut module, root);
+
+            validate_module_for_tests(
+                &module,
+                &string_table,
+                &type_environment,
+                &ExternalPackageRegistry::new(),
+            )
+            .expect("the deep mixed-shape chain should validate");
+        })
+        .expect("the bounded-stack validation thread should spawn")
+        .join()
+        .expect("deep mixed-shape validation should finish on a 1 MiB stack");
 }
 
 #[test]

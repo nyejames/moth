@@ -1,7 +1,15 @@
 [backends.html]
 mode = "failure"
 warnings = "forbid"
-diagnostic_codes = ["MOTH-SYNTAX-0030", "MOTH-RULE-0045", "MOTH-RULE-0045", "MOTH-RULE-0045"]
+diagnostic_codes = [
+    "MOTH-SYNTAX-0030",
+    "MOTH-RULE-0045",
+    "MOTH-RULE-0045",
+    "MOTH-RULE-0045",
+    "MOTH-RULE-0045",
+    "MOTH-RULE-0045",
+    "MOTH-RULE-0045",
+]
 
 # An ordinary `#` declaration followed by a stray comma is not a multi-bind and keeps the
 # comma syntax error.
@@ -12,6 +20,9 @@ path = "input/compile_time_declaration_comma/@mod.moth"
 line = 2
 column = 17
 
+# The marker is rejected on the first target and on a later target. Targets are checked
+# before the right-hand side is parsed, so call, inline `if`, and block `if ... is:` values
+# all report the same reason at the marker column.
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0045"
 occurrence = 1
@@ -24,13 +35,37 @@ column = 7
 code = "MOTH-RULE-0045"
 occurrence = 2
 reason = "invalid_multi_bind.compile_time_marker_on_target"
+path = "input/second_call_compile_time_target/@mod.moth"
+line = 6
+column = 17
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0045"
+occurrence = 3
+reason = "invalid_multi_bind.compile_time_marker_on_target"
+path = "input/second_if_compile_time_target/@mod.moth"
+line = 3
+column = 17
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0045"
+occurrence = 4
+reason = "invalid_multi_bind.compile_time_marker_on_target"
+path = "input/second_match_compile_time_target/@mod.moth"
+line = 3
+column = 17
+
+[[backends.html.diagnostic_assertions]]
+code = "MOTH-RULE-0045"
+occurrence = 5
+reason = "invalid_multi_bind.compile_time_marker_on_target"
 path = "input/typed_compile_time_target/@mod.moth"
 line = 6
 column = 10
 
 [[backends.html.diagnostic_assertions]]
 code = "MOTH-RULE-0045"
-occurrence = 3
+occurrence = 6
 reason = "invalid_multi_bind.compile_time_marker_on_target"
 path = "input/untyped_compile_time_target/@mod.moth"
 line = 6

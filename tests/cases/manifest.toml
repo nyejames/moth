@@ -1476,6 +1476,20 @@ contract = "language.generics.public_bound_public_trait"
 role = "boundary"
 
 [[case]]
+id = "public_generic_struct_bound_private_trait_rejected"
+path = "public_generic_struct_bound_private_trait_rejected"
+tags = ["integration","generics","traits","structs","dependencies","facade","diagnostics"]
+contract = "language.generics.public_nominal_bound_private_trait_rejected"
+role = "primary"
+
+[[case]]
+id = "public_generic_choice_bound_private_trait_rejected"
+path = "public_generic_choice_bound_private_trait_rejected"
+tags = ["integration","generics","traits","choices","dependencies","facade","diagnostics"]
+contract = "language.generics.public_nominal_bound_private_trait_rejected"
+role = "boundary"
+
+[[case]]
 id = "trait_evidence_builtin_receiver_rejected"
 path = "trait_evidence_builtin_receiver_rejected"
 tags = ["integration","traits","receivers","scalars"]
@@ -1934,6 +1948,20 @@ role = "boundary"
 id = "generic_bounded_nominal_constructor_wrapper_only_success"
 path = "generic_bounded_nominal_constructor_wrapper_only_success"
 tags = ["integration","generics","traits","structs","functions","dependencies"]
+contract = "language.generics.imported_bounded_body_trait_evidence"
+role = "boundary"
+
+[[case]]
+id = "generic_bounded_nominal_choice_constructor_trait_retained_success"
+path = "generic_bounded_nominal_choice_constructor_trait_retained_success"
+tags = ["integration","generics","traits","choices","functions","dependencies"]
+contract = "language.generics.imported_bounded_body_trait_evidence"
+role = "boundary"
+
+[[case]]
+id = "generic_bounded_nominal_choice_constructor_wrapper_only_success"
+path = "generic_bounded_nominal_choice_constructor_wrapper_only_success"
+tags = ["integration","generics","traits","choices","functions","dependencies"]
 contract = "language.generics.imported_bounded_body_trait_evidence"
 role = "boundary"
 
@@ -3805,6 +3833,20 @@ path = "html_resource_unreferenced_not_emitted"
 tags = ["integration", "html"]
 contract = "backend.html.resource_unreferenced_not_emitted"
 role = "primary"
+
+[[case]]
+id = "html_resource_site_root_structural_equality_success"
+path = "html_resource_site_root_structural_equality_success"
+tags = ["integration", "html", "paths"]
+contract = "backend.html.resource_site_root_structural_equality"
+role = "primary"
+
+[[case]]
+id = "html_resource_structural_equality_compile_time_rejected"
+path = "html_resource_structural_equality_compile_time_rejected"
+tags = ["integration", "html", "diagnostics", "paths"]
+contract = "language.constants.structural_string_equality_requires_final_text"
+role = "boundary"
 
 [[case]]
 id = "html_wasm_basic_string"

@@ -1,0 +1,30 @@
+export:
+    DISPLAY_TEXT must:
+        display |This| -> String
+    ;
+
+    Pick type U is DISPLAY_TEXT ::
+        Some | value U |,
+        Empty,
+    ;
+
+    Label = |
+        text String,
+    |
+
+    Wrapper type T = |
+        item T,
+        name String,
+    |
+;
+
+display |this Label| -> String:
+    return this.text
+;
+
+Label must DISPLAY_TEXT
+
+caption type T |this Wrapper of T| -> String:
+    selected = Pick::Some(Label(this.name))
+    return if selected is Some(value) then value.display() else "missing"
+;

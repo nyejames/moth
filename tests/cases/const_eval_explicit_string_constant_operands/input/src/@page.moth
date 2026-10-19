@@ -12,11 +12,12 @@ runtime_text = "cd"
 
 same = greeting is "ab"
 not_same = greeting is not "ab"
-imported_same = Token is greeting
+imported_same = Token is "pq"
+imported_other = Token is greeting
 runtime_same = runtime_text is greeting
 
 joined = [:x[greeting]y]
 imported = [:x[Token]y]
 mixed = [:x[greeting]y[runtime_text]z]
 
-[:same=[flag_value(same)] not_same=[flag_value(not_same)] imported_same=[flag_value(imported_same)] runtime_same=[flag_value(runtime_same)] joined=[joined] imported=[imported] mixed=[mixed]]
+[:same=[flag_value(same)] not_same=[flag_value(not_same)] imported_same=[flag_value(imported_same)] imported_other=[flag_value(imported_other)] runtime_same=[flag_value(runtime_same)] joined=[joined] imported=[imported] mixed=[mixed]]
