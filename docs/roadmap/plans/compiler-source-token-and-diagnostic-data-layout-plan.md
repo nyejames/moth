@@ -11,8 +11,8 @@ Phase 1 is delivered on main; Phase 2 is accepted at `c17672bb5`; the Phase 3 im
 cutover is recorded at `6309adf6d`, and the R5 closeout source corrections are accepted
 at `4cfd9d492`. The canonical `SourceTokens` owner, bounded parser views, typed payload stores and
 preparation lifecycle are complete; `Token`, `TokenKind` and `FileTokens` have been deleted.
-Phase 3 is accepted with the explicitly inherited generic-scaling exception recorded below; Phase 4
-remains gated behind the roadmap sequence and explicit reactivation.
+Phase 3 is accepted with the explicitly inherited generic-scaling exception recorded below. Phase 4
+is reactivated at `719d08efe` and is the active phase; see the active context capsule.
 Validation provenance: the executable Phase 3 closeout is attached to its recorded code/evidence
 checkpoint. The manually dispatched `Validate and deploy` workflow at `7afdcc4e16` is the final
 pre-merge platform evidence and is intentionally not green: native and feature-configured Clippy
@@ -34,11 +34,10 @@ owns removing that suppression: when its diagnostic-layout phases complete, lowe
 the failures are gone at the default threshold. Historical records below that describe Clippy as
 red describe the pre-config state and must not be read as current blocking behaviour.
 
-After the Phase 3 closeout, this plan remains paused. MON syntax, nested const records, MON Rust
-tooling, exact numeric identities and bounded body-local numeric construction are delivered.
-Compact typed expressions, dense HIR, native success slots with separate error channels, the
-bounded Wiring foundation and trusted Core constant evaluation are delivered. Phase 4 then requires
-a main containing them, explicit reactivation and a fresh inventory of those delivered owners.
+MON syntax, nested const records, MON Rust tooling, exact numeric identities and bounded body-local
+numeric construction are delivered. Compact typed expressions, dense HIR, native success slots with
+separate error channels, the bounded Wiring foundation and trusted Core constant evaluation are
+delivered on the `main` that Phase 4 reactivated against.
 
 ## Purpose
 
@@ -101,37 +100,46 @@ from a compressed summary alone.
 ACTIVE_PLAN:
 - `docs/roadmap/plans/compiler-source-token-and-diagnostic-data-layout-plan.md`
 
-- Phase: Phase 3 fixed-token/source-owned implementation is accepted at checkpoint `6309adf6d` on
-  `diagnostic-data-layout-changes`; R5 source corrections are accepted at `4cfd9d492`.
-- Goal: `SourceTokens` is the canonical immutable token owner. Headers, AST and generic bodies
-  retain checked ranges and sequence IDs over that owner. The former `Token`, `TokenKind` and
-  `FileTokens` representations, compatibility cursors and copied parser windows are deleted.
-- Current code evidence: `src/compiler_frontend/tokenizer/` owns canonical `SourceTokens`, SoA
-  storage, typed cold stores and bounded `TokenCursor`/`TokenRef` views. Headers, prepared sources
-  and generic bodies retain canonical ranges or sequence IDs; `SourceTokenOwner` and
-  `StableBodyOwner` carry the required source and donor identity without cloned token vectors.
-- Validation provenance: executable R5 evidence is attached to `4cfd9d492`; the final manual
-  `Validate and deploy` workflow is recorded at `7afdcc4e16`. That workflow is intentionally red
-  only on the known `clippy::result_large_err` diagnostic-layout failures, including `Err` carriers
-  at least 128 bytes. Do not interpret the red Clippy/feature configurations as a Phase 3 token
-  ownership regression or fix them by boxing/suppression.
-- Scaling status: exact final-checkpoint constant and nominal fits are within `n^1.25`; generic
-  is `n^1.770` against the unchanged `n^1.70` budget. The generic exceedance is the explicitly
-  accepted inherited exception. No budget was raised or loosened and no no-worsening claim is made.
-- Retention status: the feature-gated owner ledger records source-token arrays, cold stores,
-  transient construction pressure, requester remaps, donor identity tables and generic owner
-  live/peak bytes for clean, warning, diagnosed, generic-heavy and early-malformed smokes.
-- Closeout status: R3 diagnostic projection, R4 preparation ownership and R5 evidence disposition
-  are complete; deferred large-error carriers remain owned by later diagnostic-layout phases.
-- NEXT_SUBSTEP: remain paused until explicit reactivation on a main containing the delivered Wiring
-  foundation and Core constant evaluation, then rebase and reactivate Phase 4 with a fresh
-  diagnostic and lifetime inventory.
-- Checkpoints: `b5e1b8fa3`, `1e39f7678`, `a80fa63d6`, `77c0c6fc8`, `8fc783a9d`, `f60def921`,
-  `aed38042f`, `72f30dcfb`, `e7d9a7ab5`, `c17672bb5`, `98040fbd0`, `fbbe0119a`, `6309adf6d`,
-  `4cfd9d492`.
-- Non-goals before reactivation: diagnostic compact-record work, package implementation and the
-  prerequisite typed-expression, dense-HIR, native result-channel, Wiring and Core evaluator
-  implementation. No prerequisite merge automatically activates Phase 4.
+- Phase: Phase 4 is reactivated on `diagnostic-data-layout-changes` at `719d08efe`, which equals
+  `main`. The reactivation gate below passed with the evidence recorded in `VALIDATION_STATE`.
+  Phases 0–3 remain accepted; their records follow.
+- Goal: replace the complete diagnostic model with one schema, one draft accumulator, one 32-byte
+  durable record, one type-display renderer and one immutable report boundary.
+- Execution order: Phase 4 runs as the steps in `PHASE_4_EXECUTION_ORDER` below. The slice
+  checklists remain the acceptance contract. Only their order and grouping changed, under the
+  architecture document's repository-discovered corrections rule.
+- NEXT_SUBSTEP: P4.1, the diagnostic vocabulary, compact storage and pilot families (4A/4B).
+- Phase 4 non-goals: `CompilationOutcome::Success`, typed failure lanes and `compiler_bug!`
+  (Phase 5), frozen tooling sessions (Phase 6) and user-facing diagnostic prose changes (paused
+  diagnostics plan).
+- Phase 0–3 checkpoints: `b5e1b8fa3`, `1e39f7678`, `a80fa63d6`, `77c0c6fc8`, `8fc783a9d`,
+  `f60def921`, `aed38042f`, `72f30dcfb`, `e7d9a7ab5`, `c17672bb5`, `98040fbd0`, `fbbe0119a`,
+  `6309adf6d`, `4cfd9d492`.
+
+PHASE_4_EXECUTION_ORDER:
+
+| Step | Slices | Content |
+|---|---|---|
+| P4.1 | 4A vocabulary, 4B | `compiler_messages/diagnostics/`: code, record, draft, facts and codecs, labels, extras, place, list ranges, store, compaction with the type-rewrite hook, capacity policy, foreign-site cold store, the `diagnostic_schema!` vocabulary, the registry, per-group declaration files and ten pilot families |
+| P4.2 | 4C | `compiler_messages/diagnostic_types/` snapshot store and builder; one shared formatter in `datatypes/display.rs` over live and snapshot views |
+| P4.3 | 4H render side | view renderers and per-diagnostic dual dispatch: migrated families convert through the private Phase 4 legacy adapter, compact with a type snapshot and render through the view renderer; pilot renderers are ported |
+| P4.4 | 4G1–4G8 family groups | per group: schema declarations, mirror constructors, durable views, reason codecs, adapter arms, a renderer port that deletes the old payload arms, and tests |
+| P4.5 | 4D, 4E, 4F, 4H boundaries | draft bags, `PreparedDiagnosticBatch`, canonical aggregation, freeze, `DiagnosticReportSet` and warning ownership; delete `CompilerMessages`, `ModuleDiagnostics`, `PremergeDiagnosticBatch` and `RenderTypeContext` |
+| P4.6 | 4G producer sweep, 4I | producers construct `DiagnosticDraft` directly and tests use typed views; delete the adapter and the old model; update docs and the index |
+| P4.7 | Phase close | audit, `just validate`, benchmark evidence and the accepted commit |
+
+PHASE_4_MIGRATION_STATE:
+- Legacy adapter from `CompilerDiagnostic` to `DiagnosticDraft`: Phase 4-internal temporary
+  conversion code, private to `compiler_messages`. P4.3 introduces it for per-diagnostic render
+  dispatch, P4.5 moves it to bag entry and P4.6 (Slice 4I) deletes it. It never crosses the
+  Phase 4 boundary.
+- Unconsumed new items: declarations added by P4.1 and P4.2 that have no production consumer until
+  P4.3 carry item-level `cfg_attr(not(test), allow(dead_code, reason = "..."))` attributes that
+  name P4.3 render dispatch as the consumer. No module-level suppression is used, and P4.3 removes
+  every one of these attributes.
+- Infrastructure errors keep their current carrier until P4.5. Any transitional infrastructure
+  lane beside `DiagnosticReportSet` must be named here, with its Phase 5 deletion slice and caller
+  list, before P4.5 lands.
 
 Phase 1 code closeout is `3c9c776a8`; Phase 2 continuation acceptance is `c17672bb5`, with
 diagnostic correction `e7d9a7ab5`; Phase 3F5/3G acceptance is `98040fbd0`, implementation
@@ -150,13 +158,12 @@ CURRENT_WORKSPACE_STATE:
 - Exact final R5 evidence records constant and nominal fits within budget and an explicitly accepted
   inherited generic `n^1.70` exception. No budget was raised or loosened and no no-worsening claim is
   made.
-- Known deferred validation: the manual workflow at `7afdcc4e16` reports `result_large_err` in
-  the Phase 3 checkpoint's `CompilerMessages` result boundaries, including `Err` variants at least
-  128 bytes. The later diagnostic-layout phases own the compact representation; no boxing or lint suppression is
-  accepted, and fresh validation is required when the next implementation checkpoint activates.
-- After Phase 3 closeout, this plan remains paused through the delivered semantic-foundation
-  capabilities named in the Phase 4 reactivation gate. Phase 4 resumes only after rebasing onto
-  those capabilities, refreshing the diagnostic inventory and explicit reactivation.
+- Clippy state at reactivation: the committed `clippy.toml` threshold keeps `just validate` green.
+  At the default 128-byte threshold, native Clippy reports 239 `result_large_err` library errors
+  and feature-configured Clippy reports 239 library plus 343 library-test errors. Every finding is
+  an `Err` carrier of at least 128 bytes, almost all of them `CompilerMessages` result boundaries.
+  Phase 4 removes the cause; no boxing or lint suppression is accepted.
+- Phase 4 is active. Its execution order and temporary migration state live in the blocks above.
 
 HISTORICAL_PHASE_3_MERGE_STATE:
 - branch: `diagnostic-data-layout-changes`
@@ -224,8 +231,15 @@ RELEVANT_CODE:
 - `src/compiler_frontend/ast/generic_functions/materialisation/frozen_syntax.rs`:
   `StableBodySyntax` owns donor/source identity, frozen identity tables and resolved file-reference
   facts; `StableBodyOwner` retains only the canonical `Arc<SourceTokens>`
-- `src/compiler_frontend/compiler_messages/`: current diagnostic kinds, descriptors, payloads, labels, bags, messages and renderers
+- `src/compiler_frontend/compiler_messages/`: current diagnostic kinds, descriptors, payloads,
+  labels, bags, messages and renderers; Phase 4 adds `diagnostics/` (schema, draft, record, store)
+  and `diagnostic_types/` (type-display snapshots) beside them
 - `src/compiler_frontend/compiler_messages/compiler_errors.rs`: current mixed error lane, table cloning and full type-context retention
+- current warning owners moved by P4.5: `module_compilation/prepared.rs::PreparedModuleInput::warnings`,
+  `module_compilation/artefact.rs::ModuleCompilerMetadata::warnings`, `build.rs::Project::warnings`
+  and `build.rs::BuildResult::warnings`
+- `src/compiler_frontend/compiler_messages/diagnostic_bag.rs::PremergeDiagnosticBatch`: current
+  module batch that `PreparedDiagnosticBatch` replaces in P4.5
 - `src/lib.rs` and `xtask/src/benchmark_execution.rs`: activation-era lint-bridge locations retained only as historical removal records; current workspace status makes no validation claim
 - `src/compiler_frontend/datatypes/display.rs`: current type renderer to preserve as one shared formatting owner
 - `src/projects/html_project/html_project_builder.rs` and `BackendBuilder`: current target/project diagnostic production over a mutable `StringTable`
@@ -261,13 +275,60 @@ DECISIONS_ALREADY_MADE:
 - decision: benchmark-selectable details may change only through the procedure in the architecture document
   - reason: optional packing is accepted only when aggregate evidence justifies its complexity
   - source/user/date: user interview, 2026-07-19
+- decision: Phase 4 executes in the P4.1–P4.7 order recorded in `PHASE_4_EXECUTION_ORDER`
+  - reason: the vocabulary, type snapshots and renderers land before the boundary cutover, so each
+    checkpoint compiles, renders every family through exactly one path and keeps output unchanged
+  - source/user/date: orchestrator reactivation review under the repository-discovered corrections
+    rule, 2026-10-19
+- decision: `DiagnosticRecord` primary spans and secondary-label spans are `Option<SourceSpan>`
+  - reason: current producers emit spanless diagnostics such as source-table capacity failures; the
+    8-byte niche keeps the 32-byte record and 12-byte label without inventing a sentinel span. P4.1
+    updates the architecture sketch
+  - source/user/date: orchestrator reactivation review, 2026-10-19
+- decision: draft facts and durable facts are distinct types. Draft `TypeId` facts occupy only
+  schema-marked slots and compaction rewrites them to `TypeDisplayId`. Common drafts allocate
+  nothing and rare drafts own one boxed extra draft
+  - reason: R10b, the 48-byte draft bound and the move-only draft contract
+  - source/user/date: orchestrator reactivation review, 2026-10-19
+- decision: foreign-domain sites live only in the rare extra draft's typed site list, and reports
+  own the resolved frozen-context rows. No identity handle widens the common draft, record or label
+  - reason: the typed cold-store contract for rare foreign-domain sites
+  - source/user/date: orchestrator reactivation review, 2026-10-19
+- decision: a fact codec that cannot represent a value returns a typed capacity error, and the
+  typed draft constructor maps it to a `CompilerCapacityExceeded` (`MOTH-SYNTAX-0037`) draft at
+  the same span. Nothing truncates or wraps. Store-level index exhaustion follows the terminal
+  capacity policy in the architecture document
+  - reason: checked narrowing without adding error plumbing to every producer; the constructor is
+    the caller that maps the typed capacity error to the capacity diagnostic lane
+  - source/user/date: orchestrator reactivation review, 2026-10-19
+- decision: each data-carrying reason splits into a unit reason code, which owns the reason key, and
+  data held in fact words, secondary labels or one typed extra. Reason keys stay optional and
+  byte-identical
+  - reason: R10a and the four-word fact budget
+  - source/user/date: orchestrator reactivation review, 2026-10-19
+- decision: internal `DiagnosticCode` values are explicit literals that follow a documented
+  category-base convention. `MOTH-INFRA-0001` is not a schema family; it becomes a constant owned by
+  the infrastructure renderer
+  - reason: codes are never derived from enum order, and infrastructure failures never travel as
+    diagnostics
+  - source/user/date: orchestrator reactivation review, 2026-10-19
+- decision: stable families with no current production producer (`MOTH-IMPORT-0002`,
+  `MOTH-BORROW-0001`, `MOTH-BORROW-0004`, `MOTH-BORROW-0005` and `MOTH-BORROW-0006`) stay declared
+  and are marked reserved in the schema. Only their generated constructors carry a documented
+  dead-code allowance. Kinds that share one payload today become separate families
+  - reason: stable codes are never removed or repurposed, and the borrow-checker branch may need
+    the reserved borrow families
+  - source/user/date: orchestrator reactivation review, 2026-10-19
 
 BLOCKERS / RISKS:
 
-- Phase 3 is accepted at implementation checkpoint `6309adf6d` with R5 closeout checkpoint
-  `4cfd9d492`; the post-Phase-3 compiler tidy-up is also accepted on main.
+- Phase 4 is reactivated at `719d08efe`; the post-Phase-3 compiler tidy-up is accepted on main.
 - Broad user-facing diagnostic improvement remains paused until this migration completes. The
-  earlier native result-channel work owns its transferred result-arity and propagation-context fixes.
+  delivered native result-channel work owns its transferred result-arity and propagation-context
+  fixes; the reactivation gate records their single owners.
+- Phase 4 rewrites roughly 300 producer files and 150 test files. P4.6 runs the sweep through
+  parallel directory workers with one integration owner, and compile-heavy workers never exceed
+  two at once.
 - release/profiling currently use aborting panics, which conflicts with thread-isolated tooling recovery.
 - compact-ID merge order must remain deterministic across file and module parallelism.
 - The first source-freeze experiment was deliberately rejected after mapping the final owner
@@ -275,39 +336,35 @@ BLOCKERS / RISKS:
   dead parallel owner and warnings. Revisit source freezing together with that terminal owner.
 VALIDATION_STATE:
 
-Executable Phase 3 closeout provenance belongs to the recorded source/evidence checkpoint
-`4cfd9d492`, not to later documentation HEAD. The manually dispatched `Validate and deploy` workflow
-at `7afdcc4e16` is the final pre-merge platform evidence for that code checkpoint. It is intentionally
-not green: the blocking native and feature-configured Clippy failures are the known
-`clippy::result_large_err` failures from the current `CompilerMessages` representation, including
-call sites where the `Err` variant is at least 128 bytes.
+Phase 4 reactivation baseline at `719d08efe`: `just validate` passed in 179.44 s. Formatting,
+Clippy at the committed threshold, feature-lane coverage, the source audit (1524 files, 0
+findings), the first-party dependency audit (24 files and 81 JavaScript sources, 0 findings), unit
+tests (`moth` library 6052 plus the remaining targets and doctests), integration (`2981/2981`) and
+the docs check all passed. Default-threshold Clippy counts are recorded under
+`CURRENT_WORKSPACE_STATE`.
 
-The workflow still exercised and recorded the successful feature coverage, source and first-party
-audits, workspace tests (`5210 + 17 + 839`), integration (`1973/1973`), docs and benchmark
-preflight/quick-sanity (`82/82`) families. Those results do not make the aggregate workflow green.
-Do not box `CompilerMessages`, add a lint allowance or suppress `result_large_err`; the later
-diagnostic-layout phases own the compact diagnostic/error-carrier migration. Fresh validation is
-required when the next implementation checkpoint activates.
+Phase 4 benchmark baseline at `719d08efe` (clean worktree, read-only checks): data layout
+`data_layout_diagnosed_frontend` median 44.77 ms and `data_layout_warning_heavy_frontend` median
+11.93 ms; frontend suite average 136.97 ms over 76 cases; CLI suite average 22.95 ms over 74
+cases. Phase 4 close compares against these medians and records the evidence in
+`benchmarks/frontend-optimization-results.md`.
 
-The exact release R5 evidence records constant `n^0.597`, nominal `n^0.919` and generic `n^1.770`;
-constant and nominal remain within budget, while the inherited generic `n^1.70` exception remains
-accepted without changing the budget or claiming no worsening. `just timers-erasure-check` passed
-separately with an `8,862,096`-byte no-timer binary. Earlier per-slice validation is Git history,
-not a current workspace claim. The plan pauses after Phase 3 through the roadmap order above; Phase
-4 reactivation remains gated.
-Gate hygiene: `just validate` diffs tracked files during its benchmark stage — edit only before it
-starts or after it exits. `cargo test -p moth --lib` misses test targets; use the featured
-all-target Clippy gate before accepting a slice.
+Executable Phase 3 closeout provenance belongs to `4cfd9d492`. The exact release R5 evidence
+records constant `n^0.597`, nominal `n^0.919` and generic `n^1.770`; constant and nominal remain
+within budget, while the inherited generic `n^1.70` exception remains accepted without changing
+the budget or claiming no worsening.
+
+Gate hygiene: `just validate` and the read-only benchmark checks require an unchanged worktree.
+Edit tracked files only before they start or after they exit. `cargo test -p moth --lib` misses
+test targets; use the featured all-target Clippy gate before accepting a slice.
 
 DOCS_IMPACT:
-- progress matrix needed: only when current diagnostic/failure/tooling behaviour changes; do not add an internal-refactor status row
-- current authorities, implementation map and style/validation records now describe the accepted
-  canonical token owner, bounded parser views, preparation lifecycle and inherited generic-budget
-  exception
-- authorised docs updates for this 3H closeout: the plan, the architecture status, the compiler
-  implementation overview and the benchmark evidence
-- next action: preserve the prerequisite typed-expression, dense-HIR, native result-channel,
-  Wiring foundation and bounded Core evaluator capabilities before Phase 4
+- progress matrix needed: only when current diagnostic, failure or tooling behaviour changes; do
+  not add an internal-refactor status row
+- authorised Phase 4 docs updates: this plan, the architecture document's diagnostic sections and
+  implementation map, the compiler implementation overview, `index.md` for moved modules, the
+  style/testing/validation guides where diagnostic construction rules change, and the benchmark
+  evidence
 - `R10a`–`R10d` remain prerequisites for their owning later phases (see the integrated list in the
   Phase 1 standing-contracts section).
 
@@ -424,7 +481,7 @@ This table is normative. Do not create a new subsystem when the listed current o
 | `display_type` | extract one shared type-display view used by both `TypeEnvironment` and `DiagnosticTypeStore` | duplicate old/new type-formatting implementations |
 | current render modules | keep terminal, terse and dev-server presentation owners over new typed views | construction-time prose and renderer-specific diagnostic storage |
 | `CompilerError` render helpers | retain only presentation helpers that accept the new typed failure/view contracts; delete helpers coupled to the old mixed payload | conversion of infrastructure failures into user diagnostics |
-| `Module::warnings` and backend `Project::warnings` | move module warnings into the sibling prepared batch and backend/project warnings into the command-owned diagnostic bag so `CompilationOutcome::Success` is the sole warning owner | warning clones, warning-specific module remapping and warnings embedded in semantic/artifact payloads |
+| `ModuleCompilerMetadata::warnings` on `Module`, `PreparedModuleInput::warnings`, backend `Project::warnings` and `BuildResult::warnings` | move module warnings into the sibling prepared batch and backend/project warnings into the command-owned diagnostic bag so `CompilationOutcome::Success` is the sole warning owner | warning clones, warning-specific module remapping and warnings embedded in semantic/artifact payloads |
 | `BackendBuilder::build_backend(..., &mut StringTable)` and project-builder diagnostics | audit every mutation, preserve lookup through a narrow build context and keep only diagnostic-owned identity extension mutable until the final command outcome | freezing identities before the last target/backend diagnostic producer or keeping an unrestricted mutable interner in lowerers |
 | `DevBuildExecutor` / `ProjectBuildExecutor` | evolve the current dev-build seam into a factory/owned-worker boundary whose mutable worker is recreated after failure | a second generic task system or reuse of a panicked executor |
 
@@ -464,9 +521,10 @@ Test Suite Hardening was delivered in `03168082d`. This plan was the active repr
 through Phase 3, with implementation checkpoint `6309adf6d` and R5 closeout checkpoint `4cfd9d492`.
 The canonical `SourceTokens` owner, bounded parser views, typed payload stores and preparation
 lifecycle are complete; Phase 3 is accepted with its explicitly recorded inherited generic-scaling
-exception before the plan pauses through the roadmap sequence toward Phase 4. Broad diagnostic
-improvement remains paused until this migration completes. The native result-channel work separately
-owns result-arity and propagation-context correctness needed before the layout migration.
+exception. After a pause through the roadmap sequence, Phase 4 was reactivated at `719d08efe` and
+the plan is again the active representation migration. Broad diagnostic improvement remains paused
+until this migration completes. The delivered native result-channel work owns result-arity and
+propagation-context correctness.
 
 ### Approved private discovery-finalization contract
 
@@ -975,23 +1033,41 @@ accepted Phase 3 and the completed post-Phase-3 tidy-up. MON syntax, nested cons
 Rust tooling, exact numeric identities and bounded numeric construction remain delivered
 prerequisites. The remaining semantic capabilities below retain their own activation gates.
 
-- [ ] rebase the implementation branch onto a main containing compact typed-expression ownership
+- [x] rebase the implementation branch onto a main containing compact typed-expression ownership
   and lifetime boundaries, dense HIR, native zero/one/multiple success slots with a separate error
   channel, retired Reactivity V1, accepted Wire/Route parameter foundations and the bounded Core
-  evaluator checkpoint
-- [ ] verify the result-arity and propagation-context diagnostics transferred into the compact
-  typed-expression and native result-channel work are delivered and retain one implementation and primary test owner
-- [ ] explicitly reactivate Phase 4 against those delivered capabilities. Their merge alone does
-  not activate this plan or claim its 32-byte record and 48-byte draft model is implemented
-- [ ] re-run the owning validation gate after the rebase
-- [ ] fresh inventory of diagnostic producers, result boundaries, warnings, type environments,
+  evaluator checkpoint. The branch equals `main` at `719d08efe`, which contains all of them.
+- [x] verify the result-arity and propagation-context diagnostics transferred into the compact
+  typed-expression and native result-channel work are delivered and retain one implementation and
+  primary test owner. Multiple-success postfix `?` has one producer,
+  `finish_option_propagation` (`MOTH-RULE-0051`). Enclosing-boundary conflicts classify once in
+  `explicit_propagation_catch_diagnostic`. Single-target and multiple-result receivers share
+  `invalid_value_receiver` (`MOTH-RULE-0087`). Each has a Rust test owner and integration cases.
+- [x] explicitly reactivate Phase 4 against those delivered capabilities. Their merge alone does
+  not activate this plan or claim its 32-byte record and 48-byte draft model is implemented. The
+  user reactivated Phase 4 on 2026-10-19.
+- [x] re-run the owning validation gate after the rebase: `just validate` passed at `719d08efe`
+  (see `VALIDATION_STATE`).
+- [x] fresh inventory of diagnostic producers, result boundaries, warnings, type environments,
   generated functions and construction-only numeric state/span lifetimes after the semantic
   capabilities merge. Include compact expression-store disposal, TIR view lifetimes, generated
   donor/requester domains, native signature/result-shape facts and numeric body/service release
-  boundaries. Do not revive removed expression or transport-type owners
-- [ ] stale name refresh: update schema inventories and slice wording for any diagnostic family,
-  result shape or owner renamed or moved by the rebase
-- [ ] every locked architecture decision in `docs/compiler-data-layout-design.md` is preserved.
+  boundaries. Do not revive removed expression or transport-type owners. Findings that steer
+  Phase 4:
+  - 142 diagnostic kinds (Syntax 39, Type 5, Rule 63, Import 24, Borrow 8, and one each for
+    Config, Infrastructure and DeferredFeature), 129 payload variants and 87 reason enums.
+  - Expression-store rows, TIR views and numeric-construction IDs never reach diagnostics.
+    Numeric conflicts carry `TypeId` pairs and spans, and native result-shape facts appear in
+    diagnostics only as bare `TypeId`s.
+  - Type-snapshot capture points are the HIR builder's diagnosed exits, AST finalisation
+    failures, the convergence failure gates and generic materialisation. P4.5 must snapshot each
+    generated sidecar's own environment before it drops.
+- [x] stale name refresh: update schema inventories and slice wording for any diagnostic family,
+  result shape or owner renamed or moved by the rebase. `CompiledModuleResult` became
+  `ModuleSemanticResult`/`CompiledModuleArtifact`; module warnings moved to
+  `ModuleCompilerMetadata::warnings` and `PreparedModuleInput::warnings`; the current module
+  batch is `PremergeDiagnosticBatch`.
+- [x] every locked architecture decision in `docs/compiler-data-layout-design.md` is preserved.
   No reactivation change may weaken a locked size, ownership or failure-lane contract
 
 ### Construction-only numeric state and source-span lifetime
@@ -1123,7 +1199,7 @@ Prepares batches over the representation 4C already defined.
 ### Slice group 4E — Consolidate file, module and command diagnostic aggregation
 
 - [ ] **4E1 — file/module domains:** let `SourcePreparationDelta` carry file-domain drafts; at file/chunk merge, merge strings then paths and schema-remap drafts into the module domain
-- [ ] **4E2 — prepared module batch:** add `PreparedDiagnosticBatch` beside `CompiledModuleResult`, never inside `Module`; capture drafts plus the small module-local type-display store before a diagnosed module drops its environment
+- [ ] **4E2 — prepared module batch:** add `PreparedDiagnosticBatch` beside the module payload in `ModuleSemanticResult` and as the `ModuleCompilationOutcome::Diagnosed` carrier, never inside `Module`; capture drafts plus the small module-local type-display store before a diagnosed module drops its environment
 - [ ] **4E3 — canonical module merge:** use existing module result sorting as the only cross-module diagnostic order; merge module strings then paths, remap drafts/labels/type records, merge batch-local `TypeDisplayId`s and append into command-owned builders without freezing early
 - [ ] **4E4 — warnings and success artifacts:** move successful warnings out of `Module` and
   backend `Project` payloads, remove warning-specific clones/remaps and preserve success-only
